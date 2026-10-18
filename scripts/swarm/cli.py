@@ -592,12 +592,23 @@ def cmd_create(store, args):
         caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
+        scaling=AUTO_SCALING,
     )
     store.create(config)
     from scripts.swarm import commands
 
     commands.bind(store, args.slug, commands.hive_id())
-    print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
+    print(
+        json.dumps(
+            {
+                "created": args.slug,
+                "repo": repo,
+                "state": "paused",
+                "template": args.template,
+                "scaling": config.scaling,
+            }
+        )
+    )
     print(ledger_link.page_line(args.slug))
 
 
