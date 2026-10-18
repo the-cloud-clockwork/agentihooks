@@ -372,3 +372,27 @@ async def test_app_shutdown_awaits_eviction_cleanup_before_closing_the_pool(monk
     async with app.router.lifespan_context(app):
         await asyncio.wait_for(started.wait(), timeout=1)
     assert finished.is_set()
+
+
+async def test_app_shutdown_closes_the_pool_when_eviction_failed(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hooks.serena_router import app as router_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
+    started = asyncio.Event()
+
+    async def evict(_pool):
+        started.set()
+        raise RuntimeError("eviction failed")
+
+    pool = Pool(BackendConfig(command=(sys.executable, str(FAKE))))
+    close = AsyncMock()
+    monkeypatch.setattr(router_app, "_evict_forever", evict)
+    monkeypatch.setattr(pool, "close", close)
+    app = router_app.build_app(pool, [])
+    with pytest.raises(ExceptionGroup) as caught:
+        async with app.router.lifespan_context(app):
+            await asyncio.wait_for(started.wait(), timeout=1)
+    close.assert_awaited_once_with()
+    assert caught.value.exceptions[0].args == ("eviction failed",)

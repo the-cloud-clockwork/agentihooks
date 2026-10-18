@@ -79,9 +79,11 @@ def build_app(pool: Pool, tools: list[Tool]) -> Starlette:
                 yield
             finally:
                 evictor.cancel()
-                with suppress(asyncio.CancelledError):
-                    await evictor
-                await pool.close()
+                try:
+                    with suppress(asyncio.CancelledError):
+                        await evictor
+                finally:
+                    await pool.close()
 
     app = Starlette(
         routes=[
