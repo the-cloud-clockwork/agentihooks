@@ -119,6 +119,40 @@ def test_remove_timer_cancels_the_cron(scheduler, systemctl):
     assert systemctl == []
 
 
+def test_remove_timer_reports_the_units_and_the_cron_together(scheduler, systemctl):
+    from hooks.lifecycle import timer
+
+    timer.install_timer("/venv/bin/python", "/opt/agentihooks")
+    _legacy_units("timer")
+    assert timer.remove_timer() == (f"{REMOVED_UNITS}\n  [OK] Lifecycle sweep removed from the agentihooks scheduler")
+
+
+def test_the_scheduler_uses_the_swarm_redis_client(monkeypatch):
+    import fakeredis
+
+    from hooks.lifecycle import timer
+
+    client = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: client)
+    assert timer._scheduler().redis is client
+
+
+def test_gc_cli_parses_the_schedule_flags(monkeypatch, capsys):
+    from scripts import gc_cli
+
+    parser = gc_cli._parser()
+    args = parser.parse_args(["gc", "--install-timer", "--remove-timer"])
+    assert args.install_timer is True and args.remove_timer is True
+    args = parser.parse_args(["gc"])
+    assert args.install_timer is False and args.remove_timer is False
+    monkeypatch.setenv("COLUMNS", "200")
+    with pytest.raises(SystemExit):
+        parser.parse_args(["gc", "--help"])
+    shown = capsys.readouterr().out
+    assert "Schedule the hourly sweep on the agentihooks scheduler" in shown
+    assert "Remove the hourly sweep from the agentihooks scheduler" in shown
+
+
 def test_scheduled_lists_only_live_gc_entries(scheduler):
     from hooks.lifecycle import timer
 
@@ -196,7 +230,7 @@ def test_the_sweep_is_time_limited_and_idle_where_the_tools_exist(monkeypatch):
 
     started = Mock()
     monkeypatch.setattr(timer.subprocess, "Popen", started)
-    monkeypatch.setattr(timer.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(timer.shutil, "which", {"timeout": "/usr/bin/timeout", "ionice": "/usr/bin/ionice"}.get)
     payload = {"python": "/venv/bin/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
     timer.sweep({"payload": json.dumps(payload)}, "delivery-1", fakeredis.FakeRedis())
     assert started.call_args.args[0] == [
