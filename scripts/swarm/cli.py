@@ -1399,6 +1399,9 @@ def cmd_pr(store, args):
     doc = ledger.state(args.slug)
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
     fields.update(_split_binding(row, args.url, args.half))
+    scoped = _pull_scope(row, args)
+    row.update(scoped)
+    fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     if row.get("pr_url") != args.url:
         lift.drop_task(args.slug, agent.task)
@@ -1425,6 +1428,22 @@ def _split_binding(row, url, half):
     if half != len(pulls) + 1:
         raise SwarmError(f"half {len(pulls) + 1} of this split task is next: record it before half {half}")
     return {"split_pulls": [*pulls, url]}
+
+
+PULL_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
+
+
+def _pull_scope(row, args):
+    scopes = row.get("pull_scopes") or {}
+    kind = "stage" if args.stage is not None else "prerequisite" if args.prerequisite is not None else ""
+    if not kind:
+        return {"pull_scopes": {url: s for url, s in scopes.items() if url != args.url}} if args.url in scopes else {}
+    scope = getattr(args, kind).strip()
+    if not scope:
+        raise SwarmError(f"--{kind} needs the scope this pull request delivers")
+    if not PULL_URL.fullmatch(args.url):
+        raise SwarmError(f"--{kind} needs a GitHub pull request URL, not {args.url}")
+    return {"pull_scopes": {**scopes, args.url: {"kind": kind, "scope": scope}}}
 
 
 def _queue_intent(store, args, agent, head):
@@ -2002,6 +2021,9 @@ def build_parser():
     pr = sub.add_parser("pr")
     pr.add_argument("url")
     pr.add_argument("--half", type=int, default=0)
+    declared = pr.add_mutually_exclusive_group()
+    declared.add_argument("--stage")
+    declared.add_argument("--prerequisite")
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
     merge.add_argument("url")
