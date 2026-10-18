@@ -1263,7 +1263,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: ./.github/actions/retry-upload
+        uses: actions/upload-artifact@v4
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
@@ -1274,6 +1274,7 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
+          overwrite: true
 
   unit-selected:
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.select.result == 'success' && needs.select.outputs.scope == 'selected' }}

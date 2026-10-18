@@ -132,17 +132,6 @@ def test_a_missing_file_stays_red_by_default_only_where_the_caller_asks():
                 "retention-days": 14,
             },
         ),
-        (
-            "unit",
-            "Upload coverage",
-            {
-                "name": "coverage-${{ matrix.python-version }}-${{ matrix.shard }}",
-                "path": ".coverage\njs-coverage/\ndep-inputs/\nreused-coverage/\n",
-                "include-hidden-files": True,
-                "if-no-files-found": "error",
-                "retention-days": 7,
-            },
-        ),
     ],
 )
 def test_the_durations_uploads_retry_in_place(job, name, given):
