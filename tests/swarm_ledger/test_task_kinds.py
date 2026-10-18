@@ -183,6 +183,20 @@ class KindCli(unittest.TestCase):
         self.assertNotIn("contract", sent[1][1])
         self.assertEqual(sent[2][1]["fields"], {"contract": {"push": "yes"}})
 
+    def test_task_set_sends_post_merge_contract_and_maturity(self):
+        import ledger
+
+        sent = []
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            ledger.cmd_task(
+                ledger.build_parser().parse_args(
+                    ["--slug", SLUG, "--as", "x", "task", "set", "t3", "contract.after=yes", "contract.after_at=1000"]
+                )
+            )
+        self.assertEqual(
+            sent, [("task_update", {"item": "tasks/t3", "fields": {"contract": {"after": "yes", "after_at": "1000"}}})]
+        )
+
     def test_task_set_sends_a_dotted_proof_as_one_object_the_ledger_stores(self):
         import ledger
 

@@ -41,6 +41,11 @@ def test_the_prompt_carries_the_proof_contract():
     assert all(part in text for part in ("p99 under 200 ms", "the latency panel", "master"))
 
 
+def test_the_prompt_names_post_merge_command_proof():
+    assert "After merge, record --command and --output before swarm done." in build(contract={"after": "yes"})
+    assert "After merge, record" not in build(contract={"after": "no"})
+
+
 def _start(env, kind):  # noqa: F811
     store, ledger, _ = env
     ledger.rows["t1"]["kind"] = kind

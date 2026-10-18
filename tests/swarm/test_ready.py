@@ -767,6 +767,23 @@ def test_a_merged_code_task_waits_for_declared_post_merge_proof(merging):
     assert merging.run() == []
 
 
+@pytest.mark.parametrize("after_at,until", [("", NOW + 60_000), (str(NOW + 120_000), NOW + 120_000), (str(NOW), None)])
+def test_live_post_merge_proof_owner_keeps_claim_with_declared_wait(merging, monkeypatch, after_at, until):
+    from scripts.swarm import idle
+
+    merging.rows["t1"]["contract"] = {"after": "yes", "after_at": after_at}
+    merging.pulls[URL] = MERGED
+    monkeypatch.setattr(ready, "_owners", lambda run, task_id: [SimpleNamespace(name=AGENT)])
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.shell.calls == []
+    entry = idle.wait(merging.store.redis, "sw", AGENT)
+    assert (entry["until"] if entry else None) == until
+    if entry:
+        assert entry["reason"] == "post merge proof" and entry["at"] == NOW
+
+
 @pytest.mark.parametrize(
     "contract,proof", [({"after": "no"}, {}), ({"after": "yes"}, {"command": "probe", "output": "ok"})]
 )
