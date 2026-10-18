@@ -101,8 +101,8 @@ def test_an_unfinished_tier_uses_now(event):
 
 
 def test_every_crossing_is_reported_without_a_display_limit():
-    jobs = [job(301, identity=n) for n in range(150)]
-    assert len(ci_speed.findings([record(jobs)], NOW - 2000000, NOW)) == 150
+    records = [record([job(301)], identity=n) for n in range(150)]
+    assert len(ci_speed.findings(records, NOW - 2000000, NOW)) == 150
 
 
 @pytest.mark.parametrize("wait,count", [(300, 0), (300.001, 1)])
@@ -120,15 +120,16 @@ def test_tier_wall_uses_the_exact_millisecond_boundary(elapsed, count):
 
 
 @pytest.mark.parametrize("attempt", [None, 3])
-@pytest.mark.parametrize("labels,text", [([], "unassigned"), (["self-hosted", "anton-oss"], "self-hosted, anton-oss")])
+@pytest.mark.parametrize("labels,text", [([], "unassigned"), (["self-hosted", "anton-oss"], "anton-oss, self-hosted")])
 def test_runner_notice_preserves_labels_attempt_and_human_readable_minutes(attempt, labels, text):
     queued = job(301)
     queued["labels"] = labels
     extra = {} if attempt is None else {"run_attempt": attempt}
     [finding] = ci_speed.findings([record([queued], **extra)], NOW - 2000000, NOW)
-    assert finding.subject == ("7-1-11" if attempt is None else "7-3-11")
-    assert finding.summary == f"{text} runner waited 5.02 minutes for unit"
-    assert finding.evidence == (f"run 7, job 11 unit, labels {text}, wait 301 seconds",)
+    suffix = "[]" if not labels else '["anton-oss","self-hosted"]'
+    assert finding.subject == f"7-{attempt or 1}-{suffix}"
+    assert finding.summary == f"{text} runners waited up to 5.02 minutes for 1 jobs"
+    assert finding.evidence == (f"run 7, labels {text}, 1 jobs, longest 301 seconds, median 301.0 seconds",)
     assert finding.threshold == "runner queue wait over 5 minutes"
 
 
