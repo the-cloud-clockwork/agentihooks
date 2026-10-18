@@ -788,6 +788,21 @@ def test_a_stacked_delivery_republishes_its_pull_request_branch_with_one_push(pu
     assert git(root, "branch", "--show-current") == "engineer-test"
 
 
+def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
+    from scripts.swarm import publish
+
+    repository = publication.repo
+    parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Parked predecessor work")
+    git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
+    git(repository, "fetch", "origin")
+    publication.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7", state="pr")
+
+    result = publish.prepare("swarm", publication.agent, str(repository), publication.ledger)
+
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert publication.task["repository_branches"] == {str(repository): "engineer-test"}
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
