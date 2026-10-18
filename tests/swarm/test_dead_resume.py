@@ -289,6 +289,28 @@ def prepared_recovery(store):
     return ledger, runtime, agent
 
 
+def test_dead_retiring_agent_retries_retirement(store, monkeypatch):
+    from scripts.swarm.live_binding import assignment
+
+    ledger, runtime, agent = prepared_recovery(store)
+    agent = replace(agent, state="retiring")
+    store.put_agent("sw", agent)
+
+    def bindings(agents):
+        return {
+            a.name: {**assignment(a), "hooks": True} if a.name in runtime.live else {"process": False} for a in agents
+        }
+
+    monkeypatch.setattr(runtime, "bindings", bindings)
+
+    actions = tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+
+    assert agent.pane_id in runtime.closed
+    assert agent.name not in {row.name for row in store.agents("sw")}
+    assert runtime.resumed == []
+    assert any(action.startswith(f"retired {agent.name} after mismatched process") for action in actions)
+
+
 @pytest.mark.parametrize("control", ["stopped", "stopping", "record", "seat", "owner", "state", "claim"])
 def test_recovery_refuses_a_stopped_swarm_or_stale_ownership(store, monkeypatch, control):
     from scripts.swarm import dead_resume
@@ -398,6 +420,7 @@ def test_recovery_renews_its_claim_for_the_tick_lease(store, monkeypatch):
     "state,fact,live,expected",
     [
         ("retiring", "missing", False, False),
+        ("retiring", "dead", False, False),
         ("working", "missing", False, True),
         ("working", "reported", False, False),
         ("working", "dead", False, True),
