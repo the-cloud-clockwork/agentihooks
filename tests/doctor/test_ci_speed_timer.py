@@ -1,4 +1,8 @@
+import functools
 import json
+import subprocess
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -47,7 +51,7 @@ def test_later_waiting_jobs_grow_one_finding_without_another_notice(store, monke
 def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_once(store, monkeypatch):
     calls = []
 
-    def read(since, now, pending=None):
+    def read(since, now, pending=None, known=None):
         calls.append((since, now, pending))
         return snapshot([record([job(0, queued=True, created=-301)])])
 
@@ -73,7 +77,7 @@ def test_an_api_failure_reports_incomplete_counts_and_preserves_the_window_for_r
     calls = []
     outcomes = [snapshot(), snapshot(complete=False, error="API unavailable"), snapshot()]
 
-    def read(since, now, pending=None):
+    def read(since, now, pending=None, known=None):
         calls.append((since, pending))
         return outcomes.pop(0)
 
@@ -158,3 +162,40 @@ def test_a_new_speed_crossing_resets_quiet_time_between_regular_detector_passes(
     assert int(store.redis.hget(store.key(DOCTOR, "doctor-timer"), "last_new")) == NOW + 60000
     [item] = InboxStore(store.redis).inbox(f"master@{WATCHED}")
     assert "361 seconds" in item.text
+
+
+def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_completes(store, monkeypatch):
+    runs = [{"id": n, "status": "completed", "run_attempt": 1, "event": "push"} for n in range(100)]
+    jobs, down = [], []
+
+    def api(args, **kwargs):
+        if down:
+            raise subprocess.CalledProcessError(1, args)
+        url = urlsplit(args[2])
+        if url.path.endswith("/jobs"):
+            jobs.append(int(url.path.split("/")[-2]))
+            body = {"total_count": 1, "jobs": [{**job(0, created=-30, identity=jobs[-1]), "steps": [{"name": "x"}]}]}
+        else:
+            selected = runs if "created" in parse_qs(url.query) else []
+            body = {"total_count": len(selected), "workflow_runs": selected}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    def saved():
+        return json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
+
+    monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
+    first = cli.timer(store, DOCTOR, NOW, False)
+    assert any("incomplete" in action and "budget exhausted" in action for action in first)
+    assert saved()["known"][str(jobs[0])] == {
+        "status": "completed",
+        "run_attempt": 1,
+        "jobs": [job(0, created=-30, identity=jobs[0])],
+    }
+    down.append(True)
+    cli.timer(store, DOCTOR, NOW + 60000, False)
+    assert len(saved()["known"]) == 54
+    down.clear()
+    third = cli.timer(store, DOCTOR, NOW + 120000, False)
+    assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in third
+    assert sorted(jobs) == list(range(100))
+    assert saved()["known"] == {}
