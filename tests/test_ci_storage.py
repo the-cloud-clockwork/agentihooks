@@ -221,7 +221,7 @@ def _args(**overrides):
 MB = ci_storage.MB
 
 
-def test_prune_spends_one_budget_across_repositories_and_reports_each(monkeypatch):
+def test_prune_spends_one_budget_on_the_largest_artifacts_of_every_repository(monkeypatch):
     found_a = [
         artifact(1, branch="pr", size=3 * MB),
         artifact(2, branch="pr", size=MB),
@@ -236,28 +236,28 @@ def test_prune_spends_one_budget_across_repositories_and_reports_each(monkeypatc
             "repository": "o/a",
             "listed": 3,
             "live_bytes": 4 * MB,
-            "deleted": 2,
-            "deleted_bytes": 3 * MB + MB,
+            "deleted": 1,
+            "deleted_bytes": 3 * MB,
             "failed": 1,
             "after_bytes": 0,
-            "pending": 0,
+            "pending": 1,
         },
         {
             "repository": "o/b",
             "listed": 2,
             "live_bytes": 3 * MB,
-            "deleted": 0,
-            "deleted_bytes": 0,
+            "deleted": 1,
+            "deleted_bytes": 2 * MB,
             "failed": 0,
-            "after_bytes": 3 * MB,
-            "pending": 1,
+            "after_bytes": MB,
+            "pending": 0,
         },
     ]
     deleted = sorted(command[-1] for command, _ in gh.calls if "DELETE" in command)
     assert deleted == [
         "repos/o/a/actions/artifacts/1",
         "repos/o/a/actions/artifacts/2",
-        "repos/o/a/actions/artifacts/9",
+        "repos/o/b/actions/artifacts/3",
     ]
 
 

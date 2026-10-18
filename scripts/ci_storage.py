@@ -110,11 +110,9 @@ def delete(repo: str, row: dict) -> bool:
 
 
 def prune(args, now: datetime) -> list[dict]:
-    report = []
-    budget = args.budget
+    plans = []
     for repo in billed(args.owner):
-        name = repo["full_name"]
-        found = artifacts(name)
+        found = artifacts(repo["full_name"])
         doomed, after = plan(
             found,
             kept_branches(repo),
@@ -123,10 +121,17 @@ def prune(args, now: datetime) -> list[dict]:
             timedelta(hours=args.floor_hours),
             args.limit_mb * MB,
         )
-        chosen = doomed[:budget]
-        deleted = [row for row in chosen if not args.apply or delete(name, row)]
-        budget -= len(chosen)
-        left = sum(row["size_in_bytes"] for row in doomed[len(chosen) :] if not row["expired"])
+        plans.append((repo["full_name"], found, doomed, after))
+    ranked = sorted(
+        ((name, row) for name, _, doomed, _ in plans for row in doomed),
+        key=lambda item: (item[1]["expired"], -item[1]["size_in_bytes"]),
+    )
+    chosen = {(name, row["id"]) for name, row in ranked[: args.budget]}
+    report = []
+    for name, found, doomed, after in plans:
+        picked = [row for row in doomed if (name, row["id"]) in chosen]
+        deleted = [row for row in picked if not args.apply or delete(name, row)]
+        left = sum(row["size_in_bytes"] for row in doomed if not row["expired"] and (name, row["id"]) not in chosen)
         report.append(
             {
                 "repository": name,
@@ -134,9 +139,9 @@ def prune(args, now: datetime) -> list[dict]:
                 "live_bytes": sum(row["size_in_bytes"] for row in found if not row["expired"]),
                 "deleted": len(deleted),
                 "deleted_bytes": sum(row["size_in_bytes"] for row in deleted),
-                "failed": len(chosen) - len(deleted),
+                "failed": len(picked) - len(deleted),
                 "after_bytes": after + left,
-                "pending": len(doomed) - len(chosen),
+                "pending": len(doomed) - len(picked),
             }
         )
     return report
