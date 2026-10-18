@@ -1,6 +1,7 @@
 import argparse
 import json
 import math
+import os
 import sqlite3
 import tempfile
 import threading
@@ -229,9 +230,10 @@ def append_lines(path: Path, lines: list) -> None:
 
 
 def replace_lines(path: Path, lines: list) -> None:
-    with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=path.name, delete=False) as handle:
+    descriptor, staged = tempfile.mkstemp(dir=path.parent, prefix=path.name)
+    with os.fdopen(descriptor, "w") as handle:
         handle.write(encode(lines))
-    Path(handle.name).replace(path)
+    Path(staged).replace(path)
 
 
 def restore(path: Path) -> None:
