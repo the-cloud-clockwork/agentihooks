@@ -106,6 +106,8 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
+        if scoped.get("pr_url"):
+            return root, primary, scoped
         return root, primary, {**scoped, "branch": branch}
     repositories = task.get("repositories") or [repo]
     if len(repositories) != 1:
@@ -137,7 +139,10 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 command.extend(["--from", f"origin/{scoped['branch']}"])
             output = execute(command, repository)
             root = Path(output.splitlines()[-1])
-        fields.append({**checkout_fields(root), "repository": str(repository)})
+        checkout = checkout_fields(root)
+        if scoped.get("pr_url"):
+            checkout["branch"] = target_branch(root, scoped, checkout["branch"])
+        fields.append({**checkout, "repository": str(repository)})
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, update, by=agent.name)

@@ -7,6 +7,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.hive import scope
 from scripts.hive.auth import INDEX, HiveError
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm_v2.keyspace import INSTALLATION_FILE
@@ -148,7 +149,8 @@ def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
         for field, value in _default(hive_id).items():
             pipe.hsetnx(key(hive_id), field, _encode(field, value))
         pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
-        pipe.sadd(INDEX, hive_id)
+        if hive_id != scope.member():
+            pipe.sadd(INDEX, hive_id)
         return record
 
     return redis.transaction(write, key(hive_id), value_from_callable=True)

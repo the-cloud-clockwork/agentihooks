@@ -120,6 +120,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "stage-budget",
             "select",
             "unit-selected",
+            "docs",
         }
     )
     assert gate["if"] == "${{ always() }}"
@@ -387,7 +388,7 @@ def test_lint_and_test_count_grade_a_pull_request_that_merged_dev_from_the_curre
     steps = {
         "test-count": _step("test-count", "Check out the base revision"),
         "lint": _step("lint", "Check out the base revision"),
-        "docs": next(s for s in jobs["lint"]["steps"] if s.get("id") == "docs"),
+        "docs": next(s for s in jobs.get("docs", jobs["lint"])["steps"] if s.get("id") == "docs"),
         "artifacts": next(s for s in jobs["lint"]["steps"] if s.get("id") == "artifacts"),
     }
     event = {"pull_request": {"base": {"sha": pinned}}}
