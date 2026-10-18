@@ -2,7 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
-from scripts.ci_runner_trust import ACTORS, _compact, _selector
+from scripts.ci_runner_trust import ACTORS, _compact, selectors
 
 TABLE = ".github/runner-classes.json"
 LABELS = {"light": "anton-oss-light", "standard": "anton-oss", "batch": "anton-oss-batch"}
@@ -17,8 +17,6 @@ PINNED_HOSTED = frozenset(
         "publish-pypi.yml/verify",
         "release.yml/release",
         "runner-trust.yml/actors",
-        "test.yml/gate-required",
-        "test.yml/reuse",
     }
 )
 
@@ -28,7 +26,7 @@ def _runner_problem(key: str, cls: str, runner: object, policy: dict) -> str | N
         return None
     if cls in UNROUTED:
         return f"{key}: runs-on must be ubuntu-latest for a {cls} job"
-    if not _selector(runner, policy) or not _compact(runner).endswith(f"&&'{LABELS[cls]}'||'ubuntu-latest'}}}}"):
+    if not isinstance(runner, str) or _compact(runner) not in selectors(policy, LABELS[cls]):
         return f"{key}: runs-on must be ubuntu-latest or the routed {cls} runner"
     return None
 

@@ -6,11 +6,13 @@ through its inbox, which the wake ladder delivers. A bare minutes wait, checked 
 
 import json
 import re
+import subprocess
+from collections.abc import Callable
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import idle, mutation_wait
+from scripts.swarm import idle, merge_queue, mutation_wait
 from scripts.swarm.store import SwarmError
 
 KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
@@ -23,27 +25,37 @@ PULL_URL = re.compile(r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+")
 NOTICE_RE = re.compile(r"Your wait on .+ has ended\. Pick task (\S+) back up:")
 
 
+def dependency(held: dict, task: dict, rows: dict, github: Callable) -> bool:
+    kind, target = held.get("kind"), held.get("target")
+    if kind == "task":
+        return target in rows and target != task.get("id") and rows[target].get("state") not in TASK_ENDS
+    if kind == "merge" and target and target != task.get("pr_url"):
+        pull = github(target)
+        return pull is None or pull.state == "OPEN"
+    return False
+
+
 def on(kind, target, task=""):
     if kind not in KINDS:
         raise SwarmError(f"wait on one of: {', '.join(KINDS)}")
     return {"kind": kind, "target": target, **({"task": task} if kind == "intent" else {})}
 
 
-def checks_resolution(held, github):
+def checks_resolution(held, github, reread=None):
     target = held["target"]
     pull = github(target)
     if pull is None:
         return ""
     if pull.state != "OPEN":
         return f"pull request {target}, now {pull.state.lower()}"
-    if not pull.head or held.get("previous_head") == pull.head:
+    if not pull.head:
         return ""
     if held.get("head") != pull.head:
         held["head"] = pull.head
         return ""
     if not pull.resolved or (pull.unpassed_gate and not pull.failed):
         return ""
-    current = github(target)
+    current = (reread or github)(target)
     if current is None or not current.head:
         return ""
     if current.head != pull.head:
@@ -51,8 +63,20 @@ def checks_resolution(held, github):
         return ""
     if not current.resolved or (current.unpassed_gate and not current.failed):
         return ""
+    if not current.red and not required_green(target, current.head):
+        return ""
     outcome = f"checks on {target}, now {'red' if current.red else 'green'}"
+    if current.red and current.failed:
+        outcome += f"; failed: {', '.join(current.failed)}"
     return f"{outcome}; {current.unpassed_gate} never passed" if current.unpassed_gate else outcome
+
+
+def required_green(target, head):
+    try:
+        pull = merge_queue.required_view(target, subprocess.run)
+    except (SwarmError, KeyError, TypeError):
+        return False
+    return pull is not None and pull.head == head and pull.resolved and not pull.red
 
 
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
@@ -63,8 +87,10 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
             return False
         pipe.multi()
         if outcome:
+            idle.remember_wait(pipe, slug, name, json.loads(previous), now_ms)
             pipe.delete(key)
             pipe.set(idle.key(slug, "waited", name), now_ms, ex=idle.BEAT_TTL_S)
+            pipe.set(idle.key(slug, "woke", name), now_ms, ex=idle.BEAT_TTL_S)
         else:
             pipe.set(key, json.dumps(held), keepttl=True)
         return True
@@ -74,8 +100,11 @@ def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
 
 def target_problem(kind, target, mine, rows, get):
     """Why the target cannot be waited on, or '' when the tick can check it."""
-    if kind in ("checks", "merge"):
-        return "" if PULL_URL.fullmatch(target) else f"wait on {kind} needs a pull request url, not {target}"
+    if kind == "checks":
+        known = PULL_URL.fullmatch(target) or mutation_wait.RUN_URL.fullmatch(target)
+        return "" if known else f"wait on checks needs a pull request url or an Actions run url, not {target}"
+    if kind == "merge":
+        return "" if PULL_URL.fullmatch(target) else f"wait on merge needs a pull request url, not {target}"
     if kind == "mutation":
         return "" if mutation_wait.RUN_URL.fullmatch(target) else "wait on mutation needs an Actions run url"
     if kind == "intent":
@@ -115,13 +144,17 @@ def merge_resolution(held, github, reread, fresh):
         return ""
     if pull.state == "MERGED":
         return f"pull request {target}, now merged"
-    if pull.state == "OPEN":
-        if pull.queued:
-            held["queued"] = True
-            return ""
-        if not pull.resolved or (fresh and not held.get("queued")):
-            return ""
-    return f"pull request {target}, now red; left the merge queue without merging; fix it and queue it again"
+    if pull.state == "CLOSED":
+        return f"pull request {target}, now closed unmerged; reopen it or record why it was closed"
+    if pull.queued:
+        held["queued"] = True
+        return ""
+    if not pull.resolved or (fresh and not held.get("queued")):
+        return ""
+    if pull.red:
+        failed = ", ".join(pull.failed) or pull.unpassed_gate or "a required check"
+        return f"pull request {target}, now red; failed: {failed}; fix the failing checks and queue it again"
+    return f"pull request {target}, now green; dropped from the merge queue; queue it again"
 
 
 def intent_resolution(held, record, github):
@@ -141,8 +174,10 @@ def resolution(held, rows, inbox, github, reread, fresh, verdicts=None):
         return mutation_wait.resolution(held)
     if kind == "intent":
         return intent_resolution(held, verdicts.read(held["task"]), github)
+    if kind == "checks" and mutation_wait.RUN_URL.fullmatch(target):
+        return mutation_wait.run_resolution(target)
     if kind == "checks":
-        return checks_resolution(held, github)
+        return checks_resolution(held, github, reread)
     if kind == "merge":
         return merge_resolution(held, github, reread, fresh)
     if kind == "task":
@@ -165,6 +200,8 @@ def end_pass(store, slug, rows, inbox, github, now_ms, reread):
             continue
         previous = json.dumps(held)
         outcome = resolution(held["on"], rows, inbox, github, reread, now_ms - held["at"] < FRESH_MS, verdicts)
+        if outcome and agent.task in rows and dependency(held["on"], rows[agent.task], rows, reread):
+            outcome = ""
         if (outcome or json.dumps(held) != previous) and not _save_wait(
             store.redis, slug, agent.name, previous, held, outcome, now_ms
         ):

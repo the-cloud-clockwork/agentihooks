@@ -1,0 +1,6 @@
+=== 2026-10-16T15:27:49Z agentihooks swarm proof-323133-cxc8-1 terminal exe-36e5cdccdc554952a1b7cf9822bc343f
+{"agent": "master@2572f1-0001", "thread": "01a1454f-45f4-7111-a07c-c247c6be6587", "pane": "w2:p1"}
+=== exit 0
+{"id":"cli:pane:list","result":{"panes":[{"agent":"codex","agent_status":"idle","cwd":"/home/iamroot/dev/worktrees/agentihooks/engineer-323133-1629","focused":true,"foreground_cwd":"/home/iamroot/dev/worktrees/agentihooks/engineer-323133-1629","pane_id":"w2:p1","revision":3,"scroll":{"max_offset_from_bottom":0,"offset_from_bottom":0,"viewport_rows":40},"tab_id":"w2:t1","terminal_id":"term_65df6ce9
+351814 codex resume --remote unix:///run/user/1000/cx/36e5cdccdc554952/s 01a1454f-45f4-7111-a07c-c247c6be6587
+app-server 328198 unchanged

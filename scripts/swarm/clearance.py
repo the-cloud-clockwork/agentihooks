@@ -9,14 +9,19 @@ COMMANDS = frozenset({"start", "pause", "stop", "close", "reopen", "set", "lift"
 
 
 def holder(store, slug, who, environ=None):
-    env = os.environ if environ is None else environ
     name = store.names.resolve(who.name)
     if _seated(store, slug, who, MASTER):
         return name
-    agent = any(a.name == name for other in store.slugs() for a in store.agents(other))
-    if not (who.swarm or agent) and (env.get("AGENTIHOOKS_AGENT_NAME") or OPERATOR) == OPERATOR:
+    if is_operator(store, who, environ):
         return OPERATOR
     raise SwarmError(f"only the operator or the master of swarm {slug} uses its swarm controls, and {name} is neither")
+
+
+def is_operator(store, who, environ=None):
+    env = os.environ if environ is None else environ
+    name = store.names.resolve(who.name)
+    agent = any(a.name == name for other in store.slugs() for a in store.agents(other))
+    return not (who.swarm or agent) and (env.get("AGENTIHOOKS_AGENT_NAME") or OPERATOR) == OPERATOR
 
 
 def _seated(store, slug, who, lane):
@@ -34,6 +39,12 @@ def freezer(store, slug, who):
             f"the dispatcher of swarm {slug} writes freezes only at full autonomy, and its autonomy is {autonomy}"
         )
     return store.names.resolve(who.name)
+
+
+def coverer(store, slug, who):
+    if _seated(store, slug, who, DISPATCH):
+        return store.names.resolve(who.name)
+    return holder(store, slug, who)
 
 
 def record(ledger, slug, name, before, after):

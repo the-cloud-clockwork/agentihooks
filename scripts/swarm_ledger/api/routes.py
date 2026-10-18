@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
@@ -38,12 +39,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | str | None:
         raise APIError(404, "ledger_missing", "No such ledger")
     if path == "agent-token" and handler.command == "POST":
         return agent_token(handler, server, slug)
-    principal = server.authority.principal(
-        server.repository.token(slug),
-        slug,
-        handler.headers.get("X-Ledger-Token"),
-        handler.headers.get("X-Ledger-Agent"),
-    )
+    principal = server.authority.caller(handler.headers, server.repository.token(slug), slug)
     if principal is None and server.authority.controller(handler.headers.get("X-Controller-Credential")):
         principal = ""
     if principal is None:
@@ -63,7 +59,12 @@ def dispatch(handler: object, server: ModuleType) -> dict | str | None:
 def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(server.repository, slug, path, query)
-    return resources.read(server.repository.current(slug).state, path, query)
+    if path == "architecture":
+        from . import architecture
+
+        return architecture.view(os.environ)
+    entry = server.repository.current(slug)
+    return resources.read(entry.state, path, query, entry.views)
 
 
 def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
@@ -120,12 +121,7 @@ def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
     if parts[0] == "proof-ledgers" and handler.command == "POST":
         from . import proofs
 
-        proofs.require_controller(handler, server)
-        if len(parts) == 1:
-            return proofs.create(server, body(handler, server))
-        if len(parts) == 3 and parts[2] == "remove":
-            schemas.validate({"type": "object", "maxProperties": 0}, body(handler, server))
-            return proofs.remove(handler, server, parts[1])
+        return proofs.route(handler, server, parts, body)
     raise APIError(404, "resource_missing", "No such resource")
 
 
@@ -149,6 +145,10 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
         return server.repository.encoded_view(slug, export_body)
     if path == "operations":
         return mutations.apply(server, slug, principal, payload)
+    if path == "architecture/actions":
+        from . import architecture
+
+        return architecture.act(handler, server, slug, principal, payload, os.environ)
     raise APIError(404, "resource_missing", "No such operation resource")
 
 

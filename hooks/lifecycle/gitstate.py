@@ -1,3 +1,4 @@
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -12,6 +13,12 @@ BUSY_MARKERS = (
     "REVERT_HEAD",
     "BISECT_LOG",
     "index.lock",
+)
+
+
+_REFLOG_ENTRY = re.compile(
+    r"(?:[0-9a-f]{40}|[0-9a-f]{64}) (?:[0-9a-f]{40}|[0-9a-f]{64}) "
+    r"[^\t]* <[^<>]*> ([0-9]+) [+-][0-9]{4}(?:\t.*)?"
 )
 
 
@@ -41,6 +48,19 @@ def _mtime(path: Path) -> float:
         return 0.0
 
 
+def _reflog_time(path: Path) -> float:
+    try:
+        stamps = []
+        for line in path.read_text(encoding="utf-8").splitlines():
+            entry = _REFLOG_ENTRY.fullmatch(line)
+            if entry is None:
+                return _mtime(path)
+            stamps.append(int(entry[1]))
+        return max(stamps)
+    except (OSError, ValueError):
+        return _mtime(path)
+
+
 def _dirty(path: Path) -> tuple[str, ...] | None:
     result = git(path, "status", "--porcelain", "--untracked-files=normal")
     if result.returncode != 0:
@@ -57,7 +77,8 @@ def inspect(path: Path, now: float) -> TreeState | None:
     admin = admin_dir(path)
     if admin is None or not admin.is_dir():
         return None
-    touched = [_mtime(admin / name) for name in ("index", "HEAD", "logs/HEAD")]
+    touched = [_mtime(admin / name) for name in ("index", "HEAD")]
+    touched.append(_reflog_time(admin / "logs" / "HEAD"))
     try:
         dirty, unpushed = _dirty(path), _unpushed(path)
     except (OSError, subprocess.TimeoutExpired):

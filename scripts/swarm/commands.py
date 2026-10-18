@@ -8,11 +8,14 @@ from collections.abc import Callable
 
 from scripts.hive import registry
 from scripts.swarm import bottleneck_status, execution_card, lease
-from scripts.swarm.store import RedisStore
+from scripts.swarm.store import RedisStore, redis_url
 from scripts.swarm_v2.herdr import visibility
 
 
 def hive_id() -> str:
+    member = os.environ.get("AGENTIHOOKS_HIVE_ID")
+    if member and redis_url(os.environ) == os.environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+        return member
     return os.environ.get("SWARM_HIVE_ID") or registry.seeded_id() or socket.gethostname()
 
 
@@ -98,7 +101,7 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 
 
 def view(store: RedisStore, slug: str) -> dict:
-    from scripts.swarm import lifecycle
+    from scripts.swarm import lifecycle, tick_activity
 
     config = store.config(slug)
     data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
@@ -108,8 +111,9 @@ def view(store: RedisStore, slug: str) -> dict:
     executions, errors = execution_card.cards(status.get("agents", []), terminals)
     return {
         **status,
+        "last_tick_activity": tick_activity.read(store, slug),
         "top_bottleneck": bottleneck_status.report(store, slug, now),
-        "config": {**status.get("config", config.__dict__), "state": config.state},
+        "config": {**status.get("config", config.__dict__), "state": config.state, "autonomy": config.autonomy},
         "commands": rows(store, slug),
         "terminals": terminals,
         "executions": executions,

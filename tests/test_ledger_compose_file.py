@@ -1,9 +1,36 @@
+import json
+import subprocess
 from pathlib import Path
 
 import yaml
 
 STACK = yaml.safe_load((Path(__file__).resolve().parents[1] / "deploy/compose/ledger.yaml").read_text())
 SERVICE = STACK["services"]["ledger"]
+
+
+def test_the_rendered_ledger_container_limits_malloc_arenas(tmp_path):
+    result = subprocess.run(
+        [
+            "docker",
+            "compose",
+            "--file",
+            str(Path(__file__).parents[1] / "deploy" / "compose" / "ledger.yaml"),
+            "config",
+            "--format",
+            "json",
+        ],
+        env={
+            "HOME": str(tmp_path),
+            "LEDGER_CODE": str(tmp_path),
+            "LEDGER_DIR": str(tmp_path),
+            "MALLOC_ARENA_MAX": "7",
+        },
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    service = json.loads(result.stdout)["services"]["ledger"]
+    assert service["environment"]["MALLOC_ARENA_MAX"] == "2"
 
 
 def test_the_service_caps_memory_cpu_and_threads_and_restarts_itself():

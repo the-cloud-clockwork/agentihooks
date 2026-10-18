@@ -550,7 +550,7 @@ def reading_traces(monkeypatch):
 
     monkeypatch.setattr(doctor.detect, "readers", readers)
     monkeypatch.setattr(doctor.detect.traces_read, "client", client)
-    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {})
+    monkeypatch.setattr(doctor.detect.traces_read, "record", lambda *args: {"traces": []})
     monkeypatch.setattr(doctor.detect.traces, "findings", lambda data, limits: [UNTRACED])
     return reads, passes
 
@@ -570,7 +570,18 @@ def sent(store):
 def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(env, monkeypatch, scheduled):
     store, rt, _ = env
     reads, passes = reading_traces(monkeypatch)
-    every = {"health", "inbox", "handoff", "spawn", "master launch", "startup", "ci", "trace"}
+    every = {
+        "health",
+        "inbox",
+        "handoff",
+        "spawn",
+        "master launch",
+        "startup",
+        "context overrun",
+        "ci",
+        "trace",
+        "runtime storage",
+    }
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]
     assert STALE.id in sent(store) and UNTRACED.id not in sent(store)

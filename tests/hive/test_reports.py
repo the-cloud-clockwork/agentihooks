@@ -124,12 +124,14 @@ def test_the_tick_records_a_remote_conversation_when_the_local_listing_fails(rem
 
 
 def test_a_remote_worker_is_not_reaped_while_its_hive_reports_it(remote):
-    from scripts.swarm import tick
+    from scripts.swarm import idle, tick
 
     _publish(remote)
     remote.store.claim("fixture", "task", remote.agent.name, 60000)
     rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
-    actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, remote.agent.started_at + 10**9)
+    now = remote.agent.started_at + 10**9
+    idle.beat(remote.store.redis, "fixture", remote.agent.name, idle.WORKING, now)
+    actions = tick._reap("fixture", remote.store, Mock(), remote.runtime, rows, now)
     assert actions == []
     kept = remote.store.agents("fixture")
     assert [a.name for a in kept] == [remote.agent.name]

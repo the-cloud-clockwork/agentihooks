@@ -129,7 +129,7 @@ def test_a_supervisor_launch_uses_the_restored_native_command(tmp_path, monkeypa
     monkeypatch.setattr(owner, "ready", lambda *args: True)
     commands = []
     monkeypatch.setattr(
-        owner, "herdr", lambda words: commands.append(words) or {"result": {"root_pane": {"pane_id": "p"}}}
+        owner, "herdr", lambda words, _deadline: commands.append(words) or {"result": {"root_pane": {"pane_id": "p"}}}
     )
     monkeypatch.setattr(supervision_runtime, "native_command", lambda command, *args: command)
     assert owner.start() is None

@@ -3,6 +3,7 @@
 The calculator only reports; the master diagnoses and the operator decides.
 """
 
+import dataclasses
 import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
@@ -60,6 +61,8 @@ class Finding:
     evidence: tuple
     threshold: str
     measure: int = 0
+    basis: str = dataclasses.field(default="", compare=False)
+    links: tuple = ()
 
     @property
     def id(self):
@@ -67,7 +70,11 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"]
+        del found["measure"], found["basis"]
+        if not self.links:
+            del found["links"]
+        else:
+            found["links"] = list(self.links)
         return {**found, "evidence": list(self.evidence)}
 
 
@@ -87,11 +94,13 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
     return [
         *ceremony(events, tasks, limits, green, talk),
         *scope_inflation(events, tasks, limits),
-        *proof_loops(events, tasks, limits),
+        *proof_loops(events, tasks, limits, ledger.get("review_rounds", {})),
         *failed_launches(events, tasks),
         *idle_with_claim(agents, tasks, limits, waiting),
         *waiting_on_input(agents, tasks),
         *stalled(agents, limits),
+        *master_rc(agents),
+        *master_fallback_auth(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -212,13 +221,14 @@ def scope_inflation(events, tasks, limits):
     return found
 
 
-def proof_loops(events, tasks, limits):
-    claims = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task started")
-    rounds = Counter(_task_id(e["target"]) for e in events if e.get("kind") == "task pr")
+def proof_loops(
+    events: list[dict], tasks: dict[str, dict], limits: Limits, reviews: dict[str, dict[str, int]]
+) -> list[Finding]:
+    claims, reruns = _lives(events)
+    rounds = {tid: max(reviews.get(tid, {}).values(), default=0) for tid in tasks}
     found = []
     for tid in tasks:
-        reruns = max(claims[tid] - 1, 0)
-        if reruns > limits.reruns or rounds[tid] > limits.review_rounds:
+        if reruns[tid] > limits.reruns or rounds[tid] > limits.review_rounds:
             found.append(
                 Finding(
                     "proof loop",
@@ -226,14 +236,24 @@ def proof_loops(events, tasks, limits):
                     "reruns or review rounds over the cap",
                     (
                         f"task {_title(tasks, tid)}",
-                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns, 'rerun')})",
+                        f"started {_plural(claims[tid], 'time')} ({_plural(reruns[tid], 'rerun')})",
                         _plural(rounds[tid], "review round"),
                     ),
                     f"more than {limits.reruns} reruns or {limits.review_rounds} review rounds",
-                    reruns + rounds[tid],
+                    reruns[tid] + rounds[tid],
                 )
             )
     return found
+
+
+def _lives(events: list[dict]) -> tuple[Counter, Counter]:
+    starts, reruns = Counter(), Counter()
+    for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
+        tid = _task_id(e["target"])
+        if starts[tid] and not e.get("after"):
+            reruns[tid] += 1
+        starts[tid] += 1
+    return starts, reruns
 
 
 def failed_launches(events: list[dict], tasks: dict) -> list[Finding]:
@@ -312,6 +332,48 @@ def stalled(agents: list[dict], limits: Limits) -> list[Finding]:
                 (f"pane working; task {agent.get('task', '')}",),
                 f"{limits.stalled_minutes} minutes without a tool call",
                 minutes,
+            )
+        )
+    return found
+
+
+def master_rc(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        failed = agent.get("remote_control_failure")
+        if agent.get("lane") != "master" or not failed or failed["at"] < agent.get("started_at", 0):
+            continue
+        found.append(
+            Finding(
+                "master-rc",
+                agent.get("seat") or agent["name"],
+                "Remote Control failed on the master, phone access lost",
+                (f"notice: {failed['message']}", f"agent {agent['name']}"),
+                "a Remote Control failure notice since the master started",
+                1,
+            )
+        )
+    return found
+
+
+def master_fallback_auth(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if (
+            agent.get("lane") != "master"
+            or agent.get("desired_route_kind") != "interactive"
+            or agent.get("route_kind") == "interactive"
+            or agent.get("state") == "finished"
+        ):
+            continue
+        found.append(
+            Finding(
+                "master-fallback-auth",
+                agent.get("seat") or agent["name"],
+                "master on fallback auth, phone access lost",
+                (f"route: {agent.get('route_kind', 'subscription')}", f"agent {agent['name']}"),
+                "the master desires interactive authentication but runs on fallback authentication",
+                1,
             )
         )
     return found

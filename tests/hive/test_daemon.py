@@ -64,6 +64,27 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     assert redis.exists(registry.key("machine"))
 
 
+@pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
+def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm.keyspace import ROOT
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon, "_executions", lambda redis, local_id, processes: {"claude:one": ["first"]})
+    slots = LaunchSlots(redis)
+    assert slots.reserve("claude:one", "first", 1, 10000)
+    assert slots.acknowledge("first")
+    redis.pexpire(f"{ROOT}:launch-slot:first", 10000)
+
+    daemon.beat(redis, "machine")
+
+    assert redis.smembers(registry.INDEX) == indexed
+    assert round(redis.pttl(f"{ROOT}:launch-slot:first") / 1000) == ttl
+
+
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     events = []
     connection = object()
@@ -425,6 +446,24 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     balancer.cached_observations.assert_called_once_with(environ=environ)
     daemon.codex_router.accounts.assert_called_once_with(environ)
     daemon.codex_router.quotas.assert_called_once_with([account], environ)
+
+
+def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
+    from scripts.codex_quota import CodexQuota
+
+    balancer = observations
+    balancer.cached_observations.return_value = []
+    account = daemon.codex_router.CodexAccount("two", "AH_CX_TOKEN_two")
+    daemon.codex_router.accounts.return_value = [account]
+    reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000), expired=True)
+    daemon.codex_router.quotas.return_value = {"two": reading}
+    slots, quota = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 122)
+    assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
+    assert quota["codex:two"] == {
+        "five_hour": {"used": None, "resets_at": None},
+        "seven_day": {"used": None, "resets_at": None},
+        "observed_at": None,
+    }
 
 
 def test_stale_claude_reading_does_not_advertise_capacity(observations):

@@ -495,9 +495,9 @@ def test_the_reap_keeps_earlier_actions_when_a_remote_agent_turns_suspect(remote
     assert f"suspect {agent.name}: its runtime did not answer" in actions
 
 
-def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_swarm):
+def test_an_idle_remote_agent_is_retired_through_its_runtime_without_a_typed_nudge(remote_swarm):
     from scripts.gates import log
-    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+    from scripts.swarm.tick import IDLE_KILL_TICKS
 
     store, ledger, agent = remote_swarm
     store.update("sw", state="paused")
@@ -505,8 +505,7 @@ def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_
     runtime.statuses[agent.name] = "idle"
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-        if n + 1 == IDLE_NUDGE_TICKS:
-            assert runtime.nudged == [agent.name]
+    assert runtime.nudged == []
     assert [row["at"] for row in log.recent("sw")][:2] == [2_000, 2_001]
     assert agent.name in runtime.homes and ledger.rows["t1"]["state"] == "open"
 

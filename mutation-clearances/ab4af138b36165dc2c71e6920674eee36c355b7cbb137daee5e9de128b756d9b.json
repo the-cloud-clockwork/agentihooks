@@ -1,0 +1,6 @@
+{
+  "hooks/context/ledger_decision.py:hooks.context.ledger_decision.x__is_plan_accept__mutmut_6:e7c09c71399f1a1172d3765ddbb574f82786e9b499c6a525a153eea5401ff7c9": {
+    "reader": "standards_reader",
+    "reason": "Changes only the fallback for a missing prompt from an empty string to 'XXXX'. The only accept prompt in any harness's set is 'Implement the plan.' and the other harnesses map to an empty set, so neither fallback is a member and the plan accept check returns False either way; holds while no accept prompt equals '' or 'XXXX'."
+  }
+}

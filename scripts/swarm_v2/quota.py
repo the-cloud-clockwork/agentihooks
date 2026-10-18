@@ -210,16 +210,27 @@ class QuotaObservations:
         age = (now - observation.observed_ms) / 1000
         five = session_bands.left(observation.five_used, observation.five_reset, now / 1000)
         week = session_bands.left(observation.week_used, observation.week_reset, now / 1000)
-        if observation.provider_status == "error" or five is None or week is None or age > FRESH_SECONDS:
+        if (
+            observation.provider_status == "error"
+            or (harness != "codex" and five is None)
+            or week is None
+            or age > FRESH_SECONDS
+        ):
             return Reading(account, harness, UNKNOWN, age)
-        room = 0.0 if observation.provider_status == "rejected" else min(five, week)
+        room = 0.0 if observation.provider_status == "rejected" else week if harness == "codex" else min(five, week)
         return Reading(account, harness, OBSERVED, age, room, five, week)
 
     def cap(self, account: str, harness: str) -> int:
         reading = self.reading(account, harness)
         if reading.state == UNKNOWN:
             return 0
-        return session_bands.cap(reading.five_left, reading.week_left) if reading.routing_left else 0
+        if not reading.routing_left:
+            return 0
+        return (
+            session_bands.week_cap(reading.week_left)
+            if harness == "codex"
+            else session_bands.cap(reading.five_left, reading.week_left)
+        )
 
     def _room(self, account: str, harness: str) -> bool:
         reading = self.reading(account, harness)

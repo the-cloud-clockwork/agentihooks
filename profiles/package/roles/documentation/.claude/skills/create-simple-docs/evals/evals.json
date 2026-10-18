@@ -1,0 +1,27 @@
+[
+  {
+    "query": "Document the new retry setting and its failure behavior",
+    "files": ["pyproject.toml", "docs/index.md", "docs/configuration.md"],
+    "expected_behavior": [
+      "discovers the existing source and extends the configuration page",
+      "explains the setting and failure behavior from delivered code with examples",
+      "updates navigation and runs available documentation checks in CI"
+    ]
+  },
+  {
+    "query": "Create docs for a project with no documentation, capped at four sections",
+    "files": ["package.json", "src/index.js"],
+    "expected_behavior": [
+      "uses the default docs source and numbered pages with a master index",
+      "honors the section cap and writes complete content rather than placeholders"
+    ]
+  },
+  {
+    "query": "The bundle requires handbook pages with team navigation; document the delivered feature",
+    "files": ["handbook/index.md", "handbook/features.md"],
+    "expected_behavior": [
+      "follows the bundle destination and existing format",
+      "extends the relevant handbook page without creating a second docs source"
+    ]
+  }
+]

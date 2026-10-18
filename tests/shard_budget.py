@@ -5,16 +5,26 @@ from pathlib import Path
 FIFTEEN_MINUTES = 900
 
 
+def _seconds(durations: Path) -> float:
+    elapsed = durations.parent / "elapsed.json"
+    if elapsed.is_file():
+        return float(json.loads(elapsed.read_text())["seconds"])
+    return sum(json.loads(durations.read_text()).values())
+
+
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="fail when a shard's summed test time passes the budget")
+    parser = argparse.ArgumentParser(
+        description="fail when a shard's elapsed test step time, else its summed test time, passes the budget"
+    )
     parser.add_argument("durations", type=Path, nargs="+", help="the durations.json each shard stored")
     parser.add_argument("--budget", type=float, default=FIFTEEN_MINUTES, help="seconds of test time per shard")
+    parser.add_argument("--report", action="store_true", help="warn on a shard over budget instead of failing")
     args = parser.parse_args(argv)
     unread = [str(path) for path in args.durations if not path.is_file()]
     if unread:
         print(f"::error::No shard durations at {', '.join(unread)}, so those shards cannot be graded.")
         return 1
-    seconds = {path: sum(json.loads(path.read_text()).values()) for path in args.durations}
+    seconds = {path: _seconds(path) for path in args.durations}
     ranked = sorted(seconds, key=lambda shard: -seconds[shard])
     budget = f"{args.budget:g}"
     print(f"{len(seconds)} shards, slowest {seconds[ranked[0]]:.1f} s of test time against a budget of {budget} s")
@@ -22,8 +32,9 @@ def main(argv: list[str] | None = None) -> int:
     for shard in ranked:
         print(f"{shard.parent.name} {seconds[shard]:.1f} s{' over budget' if shard in over else ''}")
     if over:
-        print(f"::error::{len(over)} of {len(seconds)} shards passed the {budget} s budget.")
-        return 1
+        level = "warning" if args.report else "error"
+        print(f"::{level}::{len(over)} of {len(seconds)} shards passed the {budget} s budget.")
+        return 0 if args.report else 1
     return 0
 
 

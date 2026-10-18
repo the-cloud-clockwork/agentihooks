@@ -393,6 +393,7 @@ cases:
       what: Fix terminal notices, settle terminal seat and orphan mail, preserve resumable seats, distinguish sent age and
         backlog with red tests, and measure equal new timer finding cohorts without rewriting history
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -814,6 +815,7 @@ cases:
       number: 3
       what: Update reader expectations for a head with one rerun
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -1225,6 +1227,7 @@ cases:
       number: 1
       what: Cap local mutation worker requests and print the cap while preserving CI counts
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -1701,6 +1704,7 @@ cases:
       what: Update existing swarm and handoff test fixtures that close work items so they supply an outcome while retaining
         their routing and history assertions
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -2125,6 +2129,7 @@ cases:
       number: 1
       what: Remove the nested test worker option so the Redis guard test runs serially with parallel plugins disabled
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -2552,6 +2557,7 @@ cases:
       what: Bound the six hour share sample to picks after the proven target change, suppress unknown periods and samples
         below ten picks, and retain steady target drift detection
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -3006,6 +3012,7 @@ cases:
       number: 6
       what: Record independent equivalence rulings for unchanged mutation outcomes
       ruling: true
+    covers: []
     sized:
     - {}
   expected:
@@ -3444,6 +3451,7 @@ cases:
       number: 3
       what: Bound spawn journal reads above and below while retaining the existing unbounded behavior
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -3893,6 +3901,7 @@ cases:
       number: 5
       what: Supply started launch records to health reporting
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -4331,6 +4340,7 @@ cases:
       what: Verify matching accepted and remote counts clear the false stale finding while a truly missing observation remains
         stale
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -4789,6 +4799,7 @@ cases:
       number: 6
       what: Keep missing tool timestamps unmeasured without launch time fallback
       ruling: false
+    covers: []
     sized:
     - {}
   expected:
@@ -5225,6 +5236,7 @@ cases:
       number: 3
       what: Wire publication collection dependencies when required
       ruling: false
+    covers: []
     sized:
     - {}
   expected:

@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 from coverage import CoverageData
+from coverage.exceptions import NotPython
 
 from tests import coverage_history
 from tests import coverage_ratchet as ratchet
@@ -49,6 +50,45 @@ def test_a_line_the_base_ran_and_the_head_no_longer_runs_is_lost():
     result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter([base]))
     assert result.base == "b1"
     assert result.lost == {"hooks/a.py": [3]}
+
+
+def test_a_base_line_that_is_no_statement_of_the_base_source_is_never_lost():
+    source = 'SCRIPT = """\nconst a = 1;\n"""\n\n\ndef f(x):\n    return x\n'
+    base = _measure("b1", {"hooks/a.py": {1, 2, 6, 7}}, {"hooks/a.py": source})
+    result = ratchet.grade({"hooks/a.py": {1, 6}}, lambda path: source, iter([base]))
+    assert result.lost == {"hooks/a.py": [7]}
+
+
+def test_a_statement_the_head_runs_only_through_its_continuation_lines_is_kept():
+    source = "x = max(\n    1,\n    2,\n)\n"
+    base = _measure("b1", {"hooks/a.py": {1}}, {"hooks/a.py": source})
+    result = ratchet.grade({"hooks/a.py": {2, 3}}, lambda path: source, iter([base]))
+    assert result.lost == {}
+
+
+def test_a_statement_whose_first_line_changed_is_lost_when_the_head_stops_running_it():
+    old = "v = max(\n    1,\n    2,\n)\n"
+    new = "v = min(\n    1,\n    2,\n)\n"
+    base = _measure("b1", {"hooks/a.py": {2, 3}}, {"hooks/a.py": old})
+    result = ratchet.grade({"hooks/a.py": set()}, lambda path: new, iter([base]))
+    assert result.lost == {"hooks/a.py": [1]}
+
+
+def test_history_that_ran_a_statement_only_through_continuation_lines_keeps_it_lost():
+    source = "v = max(\n    1,\n    2,\n)\n"
+    runs = [
+        _measure(commit, {"hooks/a.py": lines}, {"hooks/a.py": source})
+        for commit, lines in [("b1", {1, 2, 3}), ("b2", {2, 3}), ("b3", {2, 3})]
+    ]
+    result = ratchet.grade({"hooks/a.py": set()}, lambda path: source, iter(runs))
+    assert result.lost == {"hooks/a.py": [1]}
+    assert result.unconfirmed == {}
+
+
+def test_an_unparsable_source_cannot_be_graded():
+    base = _measure("b1", {"hooks/a.py": {1}}, {"hooks/a.py": "def (\n"})
+    with pytest.raises(NotPython):
+        ratchet.grade({"hooks/a.py": set()}, lambda path: "def (\n", iter([base]))
 
 
 def test_an_added_line_no_test_runs_is_not_a_lost_line():
@@ -218,6 +258,60 @@ def test_a_base_only_line_with_two_measured_misses_is_unconfirmed(snapshots):
         ({"hooks/a.py": [3]}, {}, {}),
         ({}, {}, {"hooks/a.py": {3: snapshots}}),
     )
+
+
+@pytest.mark.parametrize("snapshots", [0, 1, 2, 3])
+def test_incidental_classification_requires_two_measured_misses(snapshots):
+    runs = [_measure("base", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}) for n in range(snapshots)]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == ({"hooks/a.py": [3]} if snapshots < 2 else {})
+    assert result.unconfirmed == ({"hooks/a.py": {3: snapshots}} if snapshots >= 2 else {})
+
+
+def test_unconfirmed_counts_take_precedence_over_different_version_clearance():
+    runs = [_measure("base", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, {"hooks/a.py": SOURCE}) for n in range(2)]
+    runs.append(_measure("different", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE + "\n# different version\n"}))
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == {}
+    assert result.unstable == {}
+    assert result.unconfirmed == {"hooks/a.py": {3: 2}}
+
+
+@pytest.mark.parametrize("history,count", [([False, True, False], 2), ([False, False, True, False], 3)])
+def test_other_version_coverage_does_not_truncate_same_version_snapshot_count(history, count):
+    runs = [_measure("base", {"hooks/a.py": {1, 2, 3}}, {"hooks/a.py": SOURCE})]
+    runs += [
+        _measure(
+            f"older{n}",
+            {"hooks/a.py": {1, 2, 3} if covered else {1, 2}},
+            {"hooks/a.py": SOURCE + "\n# different version\n" if covered else SOURCE},
+        )
+        for n, covered in enumerate(history)
+    ]
+    result = ratchet.grade({"hooks/a.py": {1, 2}}, lambda path: SOURCE, iter(runs))
+    assert result.lost == {}
+    assert result.unstable == {}
+    assert result.unconfirmed == {"hooks/a.py": {3: count}}
+
+
+@pytest.mark.parametrize("covered,snapshots", [(True, 20), (False, 1), (False, 2), (False, 20)])
+def test_ledger_stall_fixture_grades_each_history_case(covered, snapshots):
+    fixture = json.loads((Path(__file__).parent / "fixtures" / "coverage_incidental.json").read_text())
+    path, source = fixture["path"], fixture["source"]
+    runs = [_measure(fixture["commit"], {path: {315}}, {path: source})]
+    runs += [
+        _measure(snapshot["commit"], {path: {315} if covered else set()}, {path: source})
+        for snapshot in fixture["history"][:snapshots]
+    ]
+    result = ratchet.grade({path: set()}, lambda name: source, iter(runs))
+    assert result.lost == ({path: [315]} if covered or snapshots < 2 else {})
+    assert result.unstable == {}
+    assert result.unconfirmed == ({path: {315: snapshots}} if not covered and snapshots >= 2 else {})
+    text = ratchet.report(result, {path: [315]}, {path: 0}, {path: 1})
+    if result.unconfirmed:
+        assert f"{path}:315 unconfirmed: {snapshots} measured history snapshots did not run it" in text
 
 
 def test_the_ledger_hook_baseline_line_accepts_old_or_unconfirmed_grading():
@@ -400,13 +494,151 @@ def test_the_report_lists_every_missed_line_and_every_lost_line(tmp_path):
     assert "hooks/a.py:3 ran on base b1 and no head test runs it" in text
 
 
+@pytest.mark.parametrize("snapshots", [0, 1, 2, 3])
+def test_command_reports_unconfirmed_history_counts(tmp_path, monkeypatch, snapshots):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    sources = {"hooks/a.py": SOURCE}
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
+    _repo(tmp_path, sources)
+    base = coverage_history.git("rev-parse", "HEAD", cwd=tmp_path).strip()
+    runs = [_measure(base, {"hooks/a.py": {1, 2, 3}}, sources)]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, sources) for n in range(snapshots)]
+    monkeypatch.setattr(ratchet, "_cached_runs", lambda *args: iter(runs))
+    shards = tmp_path / "shards" / "coverage-3.12-1"
+    shards.mkdir(parents=True)
+    _shard(shards / ".coverage", {"hooks/a.py": [1, 2]})
+    out = tmp_path / "out"
+    status = ratchet.main(
+        [
+            "--base",
+            base,
+            "--head",
+            str(tmp_path),
+            "--shards",
+            "1",
+            "--head-shards",
+            str(shards.parent),
+            "--out",
+            str(out),
+            "--base-baseline",
+            "fixture.json",
+        ]
+    )
+    assert status == (1 if snapshots < 2 else 0)
+    text = (out / "report.txt").read_text()
+    if snapshots >= 2:
+        assert f"hooks/a.py:3 unconfirmed: {snapshots} measured history snapshots did not run it" in text
+    else:
+        assert "hooks/a.py:3 ran on base" in text
+
+
+@pytest.mark.parametrize("change", ["unchanged", "deleted", "removed", "added", "unrelated", "renamed"])
+def test_command_keeps_changed_importing_tests_red(tmp_path, monkeypatch, change):
+    monkeypatch.delenv("GITHUB_EVENT_NAME", raising=False)
+    test = "tests/test_a.py"
+    imports = "import hooks.a\nassert True\n"
+    base_test = "assert True\n" if change in {"added", "unrelated"} else imports
+    sources = {"hooks/a.py": SOURCE, test: base_test}
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
+    _repo(tmp_path, sources)
+    base = coverage_history.git("rev-parse", "HEAD", cwd=tmp_path).strip()
+    if change == "deleted":
+        (tmp_path / test).unlink()
+    elif change == "renamed":
+        (tmp_path / test).rename(tmp_path / "tests/test_renamed.py")
+    elif change != "unchanged":
+        (tmp_path / test).write_text(
+            "import hooks.b\n" if change == "unrelated" else imports if change == "added" else "assert True\n"
+        )
+    if change != "unchanged":
+        subprocess.run(["git", "-C", str(tmp_path), "add", "tests"], check=True, capture_output=True)
+        subprocess.run(
+            ["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", "change tests"],
+            check=True,
+            capture_output=True,
+        )
+    runs = [_measure(base, {"hooks/a.py": {1, 2, 3}}, sources)]
+    runs += [_measure(f"older{n}", {"hooks/a.py": {1, 2}}, sources) for n in range(2)]
+    monkeypatch.setattr(ratchet, "_cached_runs", lambda *args: iter(runs))
+    shards = tmp_path / "shards" / "coverage-3.12-1"
+    shards.mkdir(parents=True)
+    _shard(shards / ".coverage", {"hooks/a.py": [1, 2]})
+    out = tmp_path / "out"
+    status = ratchet.main(
+        [
+            "--base",
+            base,
+            "--head",
+            str(tmp_path),
+            "--shards",
+            "1",
+            "--head-shards",
+            str(shards.parent),
+            "--out",
+            str(out),
+            "--base-baseline",
+            "fixture.json",
+        ]
+    )
+    assert status == (0 if change in {"unchanged", "unrelated"} else 1)
+    text = (out / "report.txt").read_text()
+    if status:
+        assert "hooks/a.py:3 ran on base" in text
+    else:
+        assert "hooks/a.py:3 unconfirmed: 2 measured history snapshots did not run it" in text
+
+
+@pytest.mark.parametrize("queued_before", [False, True])
+@pytest.mark.parametrize("event", ["merge_group", "pull_request"])
+@pytest.mark.parametrize("changed", ["hooks/a.py", "hooks/b.py", "README.md", None])
+def test_queue_ratchet_only_fails_losses_in_the_entry_diff(tmp_path, monkeypatch, event, changed, queued_before):
+    sources = {"hooks/a.py": SOURCE, "hooks/b.py": SOURCE, "README.md": "base\n"}
+    subprocess.run(["git", "-C", str(tmp_path), "init", "-q"], check=True, capture_output=True)
+    _repo(tmp_path, sources)
+    base = coverage_history.git("rev-parse", "HEAD", cwd=tmp_path).strip()
+    if queued_before:
+        _repo(tmp_path, {"hooks/a.py": SOURCE + "\n"})
+    if changed:
+        _repo(tmp_path, {changed: sources[changed] + "\n\n"})
+    else:
+        coverage_history.git(
+            "-c", "user.name=t", "-c", "user.email=t@t", "commit", "--allow-empty", "-qm", "entry", cwd=tmp_path
+        )
+    runs = [_measure(base, {"hooks/a.py": {1, 2, 3}, "hooks/b.py": {1, 2, 3}}, sources)]
+    monkeypatch.setattr(ratchet, "_cached_runs", lambda *args: iter(runs))
+    monkeypatch.setenv("GITHUB_EVENT_NAME", event)
+    shards = tmp_path / "shards" / "coverage-3.12-1"
+    shards.mkdir(parents=True)
+    _shard(shards / ".coverage", {"hooks/a.py": [1, 2], "hooks/b.py": [1, 2]})
+    out = tmp_path / "out"
+    status = ratchet.main(
+        [
+            "--base",
+            base,
+            "--head",
+            str(tmp_path),
+            "--shards",
+            "1",
+            "--head-shards",
+            str(shards.parent),
+            "--out",
+            str(out),
+            "--base-baseline",
+            "fixture.json",
+        ]
+    )
+    expected = {"hooks/a.py", "hooks/b.py"} if event == "pull_request" else {changed} & {"hooks/a.py", "hooks/b.py"}
+    assert status == int(bool(expected))
+    text = (out / "report.txt").read_text()
+    for path in ("hooks/a.py", "hooks/b.py"):
+        assert (f"{path}:3 ran on base" in text) == (path in expected)
+
+
 def test_the_report_lists_only_lines_no_head_shard_ran(tmp_path):
     (tmp_path / "hooks").mkdir()
     (tmp_path / "hooks/a.py").write_text(SOURCE)
-    (tmp_path / "coverage-3.12-1").mkdir()
-    shard = _shard(tmp_path / "coverage-3.12-1/.coverage", {"hooks/a.py": [1, 2, 3]})
     (tmp_path / "out").mkdir()
-    assert ratchet._missed(tmp_path, [shard], tmp_path / "out") == {"hooks/a.py": [4]}
+    assert ratchet._missed(tmp_path, {"hooks/a.py": {1, 2, 3}}, tmp_path / "out") == {"hooks/a.py": [4]}
 
 
 def test_a_failed_github_read_is_retried_before_the_gate_gives_up(monkeypatch):

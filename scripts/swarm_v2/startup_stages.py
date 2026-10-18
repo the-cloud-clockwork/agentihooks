@@ -47,6 +47,7 @@ PULL_FAILURES = (
 )
 LAUNCH = re.compile(r"Launching a new EC2 instance(?P<warm> from warm pool)?: (?P<id>i-[0-9a-f]+)$")
 SCALE = re.compile(r"\{(?P<group>\S+) (?P<before>\d+)->(?P<after>\d+)")
+SCALED_GROUP = re.compile(r"setting group (?P<group>\S+) size to (?P<after>\d+) instead of (?P<before>\d+)")
 PULL_TIME = re.compile(r" in (?:(?P<m>\d+)m)?(?:(?P<s>[\d.]+)s|(?P<ms>[\d.]+)ms)\b")
 ASSIGNED = re.compile(r" to (?P<node>\S+)$")
 
@@ -67,6 +68,18 @@ def pull_ms(message: str) -> int | None:
     return round((int(found["m"] or 0) * 60 + float(found["s"])) * 1000)
 
 
+def image_pulls(events: Sequence[Mapping]) -> list[dict]:
+    pulls = []
+    for event in events:
+        if event["reason"] != "Pulled":
+            continue
+        image = event["message"].partition('"')[2].partition('"')[0]
+        pulls.append(
+            {"container": event.get("container", ""), "image": image, "duration_ms": pull_ms(event["message"])}
+        )
+    return pulls
+
+
 def _ready_at(conditions: Iterable[Mapping]) -> int | None:
     for condition in conditions:
         if condition.get("type") == "Ready" and condition.get("status") == "True":
@@ -82,6 +95,8 @@ def _event(item: Mapping) -> dict | None:
     if not when or target.get("kind") != "Pod":
         return None
     kept = {"pod": f"{target.get('namespace')}/{target.get('name')}", "reason": item["reason"], "at": instant(when)}
+    if target.get("fieldPath"):
+        kept["container"] = target["fieldPath"].partition("{")[2].removesuffix("}")
     if item["reason"] in MESSAGE_REASONS:
         kept["message"] = item.get("message", "")
     return kept
@@ -131,7 +146,9 @@ def reduce(raw: Mapping) -> dict:
         "events": events,
         "nodes": dict(sorted(nodes.items())),
         "pods": dict(sorted(pods.items())),
-        "launches": _launches(raw["activities"]["Activities"], raw["instances"]["Reservations"]),
+        "launches": _launches(raw["activities"]["Activities"], raw["instances"]["Reservations"])
+        | _oci_launches(raw["instances"].get("Oci", [])),
+        "scaled_groups": scaled_groups(raw["events"]["items"]),
     }
 
 
@@ -147,6 +164,35 @@ def _launches(activities: Sequence[Mapping], reservations: Sequence[Mapping]) ->
                 "launched": started.get(found["id"]),
                 "source": WARM_POOL if found["warm"] else NEW_INSTANCE,
             }
+    return dict(sorted(launches.items()))
+
+
+def scaled_groups(items: Iterable[Mapping]) -> dict[str, list[list[int]]]:
+    """Each group's scale ups as [time, size before]. A Pod's TriggeredScaleUp event can be recorded after the launch
+    it caused; ScaledUpGroup is recorded when the size is set. A repeated identical scale up is one event with a
+    count, so only its first and last occurrence are known."""
+    seen: dict[str, set[tuple[int, int]]] = {}
+    for item in items:
+        found = SCALED_GROUP.search(item["message"]) if item.get("reason") == "ScaledUpGroup" else None
+        times = {item.get("eventTime") or item.get("firstTimestamp"), item.get("lastTimestamp")} - {None}
+        for when in times if found else ():
+            seen.setdefault(found["group"], set()).add((instant(when), int(found["before"])))
+    return {group: [list(up) for up in sorted(ups)] for group, ups in sorted(seen.items())}
+
+
+def _oci_launches(instances: Sequence[Mapping]) -> dict:
+    """An OCI pool instance has no separate launch request, so its creation is both request and launch."""
+    launches = {}
+    for instance in instances:
+        if not instance.get("instance-pool"):
+            raise ValueError(f"OCI instance {instance['id']} carries no instance pool tag")
+        created = instant(instance["time-created"])
+        launches[instance["id"]] = {
+            "group": instance["instance-pool"],
+            "requested": created,
+            "launched": created,
+            "source": NEW_INSTANCE,
+        }
     return dict(sorted(launches.items()))
 
 
@@ -283,6 +329,7 @@ def sample(name: str, events: Sequence[Mapping], read: Mapping, ups: Mapping) ->
         "node_source": launch["source"] if cold else EXISTING,
         "from_zero": from_zero,
         "image_cache": _cache(pulls),
+        "image_pulls": image_pulls(events),
         "outcome": STARTED if started else kind or PENDING,
         "transient": kind if started else "",
         "sandbox_retries": sum(1 for e in events if e["reason"] == "FailedCreatePodSandBox"),
@@ -297,6 +344,8 @@ def attribute(read: Mapping) -> list[dict]:
     for event in read["events"]:
         grouped.setdefault(event["pod"], []).append(event)
     ups = scale_ups(read["events"])
+    for group, scaled in read.get("scaled_groups", {}).items():
+        ups[group] = sorted({*ups.get(group, ()), *map(tuple, scaled)})
     found = (sample(name, events, read, ups) for name, events in sorted(grouped.items()))
     return [entry for entry in found if entry]
 
@@ -313,6 +362,17 @@ def _total(entry: Mapping, stages: Sequence[str]) -> int | None:
 def _spread(values: Iterable[int | None]) -> dict | None:
     present = [v for v in values if v is not None]
     return distribution(present) if present else None
+
+
+def summarize_pulls(samples: Sequence[Mapping]) -> list[dict]:
+    grouped: dict[tuple[str, str], list[int | None]] = {}
+    for sample in samples:
+        for pull in sample.get("image_pulls", []):
+            grouped.setdefault((pull["container"], pull["image"]), []).append(pull["duration_ms"])
+    return [
+        {"container": container, "image": image, "duration_ms": _spread(durations)}
+        for (container, image), durations in sorted(grouped.items())
+    ]
 
 
 def summarize(group: Sequence[Mapping]) -> dict:
@@ -332,6 +392,7 @@ def summarize(group: Sequence[Mapping]) -> dict:
         "stages": {stage: spread for stage, spread in stages.items() if spread},
         "node_provision_ms": _spread(_total(e, NODE_STAGES) for e in started),
         "image_init_ms": _spread(_total(e, IMAGE_STAGES) for e in started),
+        "image_pulls": summarize_pulls(started),
     }
 
 

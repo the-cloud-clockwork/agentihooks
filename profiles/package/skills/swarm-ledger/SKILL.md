@@ -67,8 +67,8 @@ agentihooks ledger new --content <content.json> --plan <plan-file> [--size small
 ```
 
 A ledger is small (the default) or swarm. A small ledger is one session's work
-without a swarm: troubleshooting, an investigation, several steps with no
-accepted plan. The session that creates it joins it as its worker through
+without a swarm, created only when the operator asks for one. The session that
+creates it joins it as its worker through
 `--as <name>` (default `$AGENTIHOOKS_AGENT_NAME`; refused without one) and
 records its steps and findings there. A plan a swarm works takes `--size swarm`;
 `agentihooks swarm <slug> create` marks its ledger swarm. HOME shows each size.

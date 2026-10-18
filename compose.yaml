@@ -54,7 +54,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 70s
-      start_interval: 5s
+      start_interval: 1s
     depends_on:
       redis:
         condition: service_healthy
@@ -83,6 +83,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       redis:
         condition: service_healthy
@@ -106,6 +108,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 30s
+      start_interval: 1s
     restart: unless-stopped
 volumes:
   swarm-data:

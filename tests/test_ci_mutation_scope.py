@@ -235,6 +235,37 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
+def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
+    import yaml
+
+    from scripts.ci_mutation.scope import discover_changes, own_bases
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    plan = next(step for step in jobs["mutation-plan"]["steps"] if step.get("run", "").endswith('--base "$BASE"'))
+    assert jobs["mutation-plan"]["steps"][0]["with"]["fetch-depth"] == 0
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 1\n")
+    git("add", "tests/test_x.py")
+    pinned = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    commit("own.py", "def f():\n    return 1\n")
+    (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 2\n")
+    git("commit", "-q", "-am", "edit test")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "def d():\n    return 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    merged_dev = git("rev-parse", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    assert discover_changes(tmp_path, [pinned, merged_dev], "HEAD") == {"hooks/own.py": {1, 2}, "hooks/dev.py": {1, 2}}
+    event = {"pull_request": {"base": {"sha": pinned}}}
+    bases = own_bases(tmp_path, _evaluate(plan["env"]["BASE"], event=event), "HEAD")
+    assert bases == [merged_dev]
+    assert discover_changes(tmp_path, bases, "HEAD") == {"hooks/own.py": {1, 2}}
+
+
 def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
     from scripts.ci_mutation.scope import discover_changes
 
@@ -438,6 +469,8 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
     calls = []
 
     def run(command, **kwargs):
+        if "test.yml" in command[4]:
+            return subprocess.CompletedProcess(command, 0, "", "")
         calls.append((command, kwargs))
         code, out = jobs[command[4].split("/")[5]] if len(calls) > 1 else runs
         return subprocess.CompletedProcess(command, code, out, "")
@@ -460,3 +493,102 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
         [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "--jq", green] for run in asked
     ]
     assert calls == [(command, {"capture_output": True, "text": True}) for command in expected_calls]
+
+
+@pytest.mark.parametrize(
+    ("preflight", "runs", "jobs", "expected"),
+    [
+        ("", "9\n", {"9": "success\nsuccess\n"}, True),
+        ("5\n", "9\n", {"9": "success\n"}, True),
+        ("", "9\n", {"9": "success\nfailure\n"}, False),
+        ("", "9\n", {"9": "failure\nsuccess\n"}, False),
+        ("", "9\n", {"9": "success\nskipped\n"}, False),
+        ("", "9\n", {"9": ""}, False),
+        ("", "8\n9\n", {"8": "cancelled\n", "9": "success\n"}, True),
+        ("", "", {}, False),
+    ],
+)
+def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_push_preflight_skipped(
+    monkeypatch, preflight, runs, jobs, expected
+):
+    import subprocess
+
+    from scripts.ci_mutation import scope
+
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        path = command[4]
+        if "mutation-preflight.yml" in path:
+            out = preflight
+        elif "test.yml" in path:
+            out = runs
+        elif "--paginate" not in command:
+            out = "0\n"
+        else:
+            out = jobs[path.split("/")[5]]
+        return subprocess.CompletedProcess(command, 0, out, "")
+
+    monkeypatch.setattr(scope.subprocess, "run", run)
+    assert scope.graded_green("abc") is expected
+    api = ["gh", "api", "-X", "GET"]
+    shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
+    listed = [
+        *api,
+        "repos/{owner}/{repo}/actions/workflows/test.yml/runs",
+        "-f",
+        "head_sha=abc",
+        "-f",
+        "event=pull_request",
+        "--jq",
+        ".workflow_runs[].id",
+    ]
+    checked = len(preflight.split())
+    assert calls[checked + 1] == listed
+    asked = runs.split()[: runs.split().index("9") + 1] if expected else runs.split()
+    jobs_listed = [
+        [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards]
+        for run in asked
+    ]
+    assert calls[checked + 2 :] == jobs_listed
+
+
+@pytest.mark.parametrize("helper", ["oracle.py", "transitive", "fixture", "other.py", "dev.py"])
+def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_their_tests_import(tmp_path, helper):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    fixtures = {"transitive": "from hooks import dev\n", "fixture": "from hooks.oracle import ONE\n"}
+    imports = {
+        "transitive": "from hooks import oracle\nfrom tests.fixtures import dev\n",
+        "fixture": "from hooks import dev\nfrom tests.fixtures import ONE as oracle_one\n",
+    }
+    if helper in fixtures:
+        (tmp_path / "tests" / "fixtures.py").write_text(fixtures[helper])
+    oracle = "oracle_one" if helper == "fixture" else "oracle.ONE"
+    head = imports.get(helper, "from hooks import dev, oracle\n")
+    (tmp_path / "tests" / "test_api.py").write_text(f"{head}\n\ndef test_d():\n    assert dev.d() == {oracle}\n")
+    helper = "oracle.py" if helper in fixtures else helper
+    (tmp_path / "tests" / "test_other.py").write_text("from hooks import other\n")
+    git("add", "tests")
+    commit("oracle.py", "ONE = 1\n")
+    kept = "def d():\n    return 1\n\n\ndef k():\n    return 1\n"
+    pinned = commit("dev.py", kept)
+    git("checkout", "-q", "-b", "branch")
+    if helper == "dev.py":
+        commit(helper, kept + "\n\ndef g():\n    return 3\n")
+    else:
+        commit(helper, "ONE = 1\nTWO = 2\n")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "def c():\n    return 0\n\n\n" + kept)
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    expected = {
+        "oracle.py": {"hooks/oracle.py": {2}, "hooks/dev.py": {1, 2, 3, 4}},
+        "other.py": {"hooks/other.py": {1, 2}},
+        "dev.py": {"hooks/dev.py": {11, 12, 13, 14}},
+    }
+    assert discover_changes(tmp_path, pinned, "HEAD") == expected[helper]

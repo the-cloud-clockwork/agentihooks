@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wall_clock.py:scripts.ci_wall_clock.x\u01c1Timing\u01c1indexed__mutmut_54:5f3efadabf219f6dd865c5320f767b22b8217272ec1ae15ca67744fbdd5beae1": {
+    "reader": "standards-reader",
+    "reason": "The changed boundary requires index == -len(elts). Parsed negative subscripts use UnaryOp and never enter the Constant-index branch; synthetic destructuring indices come from nonnegative enumerate. For an empty sequence both versions reject index zero. Thus the changed boundary is unreachable from the CLI source parser."
+  }
+}

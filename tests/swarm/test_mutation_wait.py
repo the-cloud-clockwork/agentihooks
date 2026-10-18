@@ -79,6 +79,8 @@ def preflight(monkeypatch):
             {"id": 9, "name": "other-report", "expired": False, "created_at": report_at},
             {"id": 8, "name": "mutation-preflight-report", "expired": True, "created_at": report_at},
         ],
+        jobs=[],
+        pr_runs=[],
         requests=[],
     )
 
@@ -95,6 +97,10 @@ def preflight(monkeypatch):
             output = data.getvalue()
         elif "artifacts?" in args[-1]:
             output = json.dumps({"artifacts": [] if state.missing else state.artifacts})
+        elif "/jobs?" in args[-1]:
+            output = json.dumps({"jobs": state.jobs})
+        elif "/actions/workflows/test.yml/runs?" in args[-1]:
+            output = json.dumps({"workflow_runs": state.pr_runs})
         elif "/git/ref/heads/" in args[-1]:
             output = json.dumps({"object": {"sha": state.tip}})
         elif "/compare/" in args[-1]:
@@ -124,6 +130,70 @@ def test_the_tick_ends_a_clean_preflight_once(tick, preflight):  # noqa: F811
         "repos/org/repo/actions/runs/123/artifacts?per_page=100",
         "repos/org/repo/actions/artifacts/7/zip",
     ]
+
+
+@pytest.fixture(params=["pull-request", "plan"])
+def open_pr(preflight, request):
+    preflight.missing = True
+    preflight.jobs = [
+        {
+            "name": request.param,
+            "conclusion": "success",
+            "steps": [{"name": "Record the revisions the report grades", "conclusion": "skipped"}],
+        },
+    ]
+    if request.param == "pull-request":
+        preflight.jobs.append({"name": "plan", "conclusion": "skipped"})
+    preflight.pr_runs = [
+        {"html_url": "wrong", "head_sha": "old", "pull_requests": [{"base": {"ref": "dev"}}]},
+        {"html_url": "wrong", "head_sha": "first", "pull_requests": [{"base": {"ref": "main"}}]},
+        {
+            "html_url": "https://github.com/org/repo/actions/runs/456",
+            "head_sha": "first",
+            "pull_requests": [{"base": {"ref": "dev"}}],
+        },
+    ]
+    return preflight
+
+
+def test_the_tick_reports_an_open_pull_request_skip_with_its_run(tick, open_pr, pauses):  # noqa: F811
+    held = {**waits.on("mutation", URL), "head": "first"}
+    idle.declare_wait(tick.store.redis, "sw", ME, 10_000_000, "", 1, on=held)
+    assert tick.end() == [
+        f"ended the wait of {ME}: mutation preflight {URL}, now skipped; "
+        "the open pull request runs mutation in https://github.com/org/repo/actions/runs/456"
+    ]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+    assert len(tick.told()) == 1
+    assert tick.end() == []
+    assert pauses == []
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("run", "path", ".github/workflows/proofs.yml"),
+        ("run", "conclusion", "failure"),
+        ("job", "name", "refine"),
+        ("job", "conclusion", "failure"),
+        ("step", "name", "another step"),
+        ("step", "conclusion", "success"),
+    ],
+)
+def test_missing_evidence_without_the_successful_branch_skip_stays_red(open_pr, section, field, value):
+    targets = {"run": open_pr.run, "job": open_pr.jobs[0], "step": open_pr.jobs[0]["steps"][0]}
+    targets[section][field] = value
+    if field == "path":
+        open_pr.run["event"] = "workflow_dispatch"
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert "now red; complete mutation report unavailable" in waits.resolution(held, {}, None, None, None, False)
+
+
+def test_a_skip_waits_until_its_matching_pull_request_run_is_visible(open_pr, pauses):
+    open_pr.pr_runs = open_pr.pr_runs[:2]
+    held = {**waits.on("mutation", URL), "head": "first"}
+    assert waits.resolution(held, {}, None, None, None, False) == ""
+    assert pauses == []
 
 
 def test_the_tick_names_every_failing_mutant_and_unmutated_file(tick, preflight):  # noqa: F811

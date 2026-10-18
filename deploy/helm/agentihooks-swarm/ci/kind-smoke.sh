@@ -6,16 +6,32 @@ chart=deploy/helm/agentihooks-swarm
 release=agentihooks-swarm
 image=local/agentihooks-swarm:dev
 bundle_image=local/agentihooks-bundle:fixture
+terminal_image=local/agentihooks-swarm-terminal-worker:kind
 slug=kind-proof
 cluster="swarm-kind-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
 ca_dir=""
+route=""
+terminal=""
 
+if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
+  mkdir -p "$KIND_LAYER_CACHE"
+  rm -f "$KIND_LAYER_CACHE/complete"
+fi
 python3 tests/kind_request.py
 
 finish() {
   status=$?
+  wait "$build" || true
+  wait "$cluster_setup" || true
+  if [[ -n $terminal ]]; then
+    wait "$terminal" || true
+  fi
+  rm -f "$load_lock"
+  if [[ -n $route ]]; then
+    wait "$route" || true
+  fi
   if [[ -n $ca_dir ]]; then
     rm -rf "$ca_dir"
   fi
@@ -29,6 +45,50 @@ finish() {
   kind delete cluster --name "$cluster" || true
   exit "$status"
 }
+
+layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  if [[ -d $KIND_LAYER_CACHE/$1 ]]; then
+    printf '%s\n' --cache-from "type=local,src=$KIND_LAYER_CACHE/$1"
+  fi
+  if [[ ${KIND_LAYER_CACHE_HIT:-} != true ]]; then
+    printf '%s\n' --cache-to "type=local,dest=$KIND_LAYER_CACHE/$1.next,mode=max"
+  fi
+}
+keep_layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  for name in "$@"; do
+    if [[ -d $KIND_LAYER_CACHE/$name.next ]]; then
+      rm -rf "${KIND_LAYER_CACHE:?}/$name"
+      mv "$KIND_LAYER_CACHE/$name.next" "$KIND_LAYER_CACHE/$name"
+    fi
+  done
+  touch "$KIND_LAYER_CACHE/complete"
+}
+(
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
+  mapfile -t terminal_layers < <(layers terminal)
+  docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
+    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
+  packages=$!
+  trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
+  mapfile -t swarm_layers < <(layers swarm)
+  docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
+  printf 'main fixture image built\n'
+  printf 'FROM %s\nCOPY . /\n' "$image" \
+    | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
+  wait "$packages"
+  keep_layers swarm terminal
+) &
+build=$!
+kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
+cluster_setup=$!
+load_lock="$(mktemp)"
+trap finish EXIT
 
 helm lint --strict "$chart"
 helm lint --strict "$chart" -f "$chart/ci/kind-values.yaml"
@@ -239,10 +299,7 @@ if [[ $refusal != *"controller.api.proof needs controller.workers.apiUrl"* ]]; t
   exit 1
 fi
 printf 'the chart renders the proof setting only when set and refuses an incomplete proof\n'
-docker build -q -t "$image" . >/dev/null &
-build=$!
-trap finish EXIT
-kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" --wait 120s
+wait "$cluster_setup"
 kubectl create namespace swarm-pod-proof
 kubectl create serviceaccount swarm-worker --namespace swarm-pod-proof
 printf 'apiVersion: node.k8s.io/v1\nkind: RuntimeClass\nmetadata:\n  name: kata-fc\nhandler: kata-fc\n' | kubectl create -f -
@@ -255,12 +312,18 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
-bash scripts/packaging/swarm-image-clients.sh "$image"
-printf 'FROM %s\nCOPY . /\n' "$image" \
-  | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
-kind load docker-image "$image" --name "$cluster"
-kind load docker-image "$bundle_image" --name "$cluster"
-bash "$chart/ci/terminal-route-proof.sh" "$image"
+(
+  bash scripts/packaging/swarm-image-clients.sh "$image"
+  docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
+    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
+  printf 'terminal fixture image built\n'
+  flock "$load_lock" kind load docker-image "$terminal_image" --name "$cluster"
+) &
+terminal=$!
+flock "$load_lock" kind load docker-image "$image" "$bundle_image" --name "$cluster"
+kubectl wait --for=condition=Ready node --all --timeout=120s
+bash "$chart/ci/terminal-route-proof.sh" "$image" &
+route=$!
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 
@@ -770,26 +833,43 @@ if [[ $calm != "0" ]]; then
   printf 'the host pressure alert was already active before the simulated pressure\n' >&2
   exit 1
 fi
-kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import connect; connect().update('$slug', memory_per_agent_mb=10**9); print('simulated host pressure: one agent now needs more memory than the node has')"
-alert=""
+kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.incidents import PRESSURE_OFF_KEY; from scripts.swarm.store import connect; store = connect(); store.update('$slug', memory_per_agent_mb=10**9); store.redis.delete(store.key('$slug', PRESSURE_OFF_KEY)); print('simulated host pressure: one agent now needs more memory than the node has')"
+pressure=""
 for _ in $(seq 120); do
-  alert="$(kubectl exec "$ledger_pod" -- python -c "import json; from scripts.swarm.store import PREFIX, connect; root = f'{PREFIX}:host:$host:incident:pressure'; redis = connect().redis; print(json.dumps({'incident': redis.hgetall(root), 'mailed': {k: redis.hgetall(k) for k in redis.scan_iter(root + ':mail:*')}}, sort_keys=True))")" || alert=""
-  if [[ $alert == *'"active": "1"'* && $alert == *'"raised": "1"'* ]]; then
+  pressure="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOST="$host" python - <<'EOF'
+import json
+import os
+
+from scripts.swarm import host_budget, incidents
+from scripts.swarm.store import PREFIX, connect
+
+store = connect()
+off = store.redis.get(store.key(os.environ["SLUG"], incidents.PRESSURE_OFF_KEY))
+if off != host_budget.PRESSURE_OFF:
+    raise SystemExit(0)
+root = f'{PREFIX}:host:{os.environ["HOST"]}:incident:pressure'
+incident = store.redis.hgetall(root)
+mailed = {key: store.redis.hgetall(key) for key in store.redis.scan_iter(root + ":mail:*")}
+assert incident.get("active") != "1", f"controller node pressure incident is active: {incident}"
+assert not mailed, f"controller node pressure incident was mailed: {mailed}"
+print(json.dumps({"off": off, "incident": incident, "mailed": mailed}, sort_keys=True))
+EOF
+)"
+  if [[ -n $pressure ]]; then
     break
   fi
-  alert=""
   sleep 1
 done
-if [[ -z $alert ]]; then
-  printf 'the controller never sent the host pressure alert\n' >&2
+if [[ -z $pressure ]]; then
+  printf 'the controller never recorded the deployed host pressure off reason\n' >&2
   exit 1
 fi
 after="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $after != "$before" ]]; then
-  printf 'the controller restarted while sending the host pressure alert (%s then %s)\n' "$before" "$after" >&2
+  printf 'the controller restarted while recording the host pressure off reason (%s then %s)\n' "$before" "$after" >&2
   exit 1
 fi
-printf 'controller sent the host pressure alert without a restart: %s\n' "$alert"
+printf 'controller recorded the host pressure off reason without an incident, mail or restart: %s\n' "$pressure"
 
 mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
   'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"
@@ -819,5 +899,7 @@ if [[ $kept != *"refused {}"* ]]; then
   exit 1
 fi
 printf 'the controller start pass reached the herdr client and refused nothing\n'
-bash "$chart/ci/terminal-attach-proof.sh" "$image" "$cluster" "$release" "$slug"
+wait "$terminal"
+bash "$chart/ci/terminal-attach-proof.sh" "$terminal_image" "$release" "$slug"
+wait "$route"
 printf 'Helm chart kind proof passed\n'

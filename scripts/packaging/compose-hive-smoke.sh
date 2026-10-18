@@ -5,7 +5,8 @@ cd "$(dirname "$0")/../.."
 run="hive-compose-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:12])')"
 tls="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 export COMPOSE_PROJECT_NAME="$run" COMPOSE_PROFILES=join SWARM_TLS_DIR="$tls" SWARM_REDIS_SCHEME=rediss \
-  SWARM_CA_FILE=/tls/ca.pem SWARM_MEMBER_REDIS_URL=rediss://redis:6379/0
+  SWARM_CA_FILE=/tls/ca.pem SWARM_MEMBER_REDIS_URL=rediss://redis:6379/0 SWARM_PORT="${SWARM_PORT:-18765}" \
+  SWARM_HIVE_PORT="${SWARM_HIVE_PORT:-18770}" SWARM_REDIS_PORT="${SWARM_REDIS_PORT:-16379}"
 SWARM_REDIS_PASSWORD="$(python3 -c 'import secrets; print(secrets.token_urlsafe())')"
 export SWARM_REDIS_PASSWORD
 cleanup() {
@@ -20,7 +21,15 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run" -addext "subj
 cp "$tls/cert.pem" "$tls/ca.pem"
 chmod 0755 "$tls"
 chmod 0644 "$tls"/*.pem
-if ! docker compose up --build --wait --wait-timeout 180; then
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7
+build=(--build)
+if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
+  docker tag "$SWARM_SMOKE_IMAGE" ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+  build=(--no-build)
+else
+  bash scripts/packaging/pull-runtime-image.sh ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+fi
+if ! docker compose up --pull never "${build[@]}" --wait --wait-timeout 180; then
   docker compose logs >&2
   exit 1
 fi
@@ -43,12 +52,12 @@ print(f"seeded swarm {slug} with host-agent and member-agent seated, in the comp
 PY
 docker compose restart controller >/dev/null
 held=""
-for _ in $(seq 30); do
+for _ in $(seq 60); do
   held="$(docker compose exec -T swarm agentihooks swarm "$slug" controller || true)"
   if [[ $held == *'"owner": "compose-controller"'* ]]; then
     break
   fi
-  sleep 2
+  sleep 1
 done
 printf 'controller lease: %s\n' "$held"
 if [[ $held != *'"owner": "compose-controller"'* ]]; then
@@ -109,14 +118,19 @@ printf 'after a Redis restart, the refreshed '
 docker exec "$run-member" python -c "$member_auth"
 docker exec "$run-member" agentihooks hive refresh >/dev/null
 printf 'after a Redis restart, a refresh still finds the member record\n'
-docker compose exec -T -e SLUG="$slug" swarm python -c '
+member_id="${joined#joined the hive as }"
+docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="${member_id%%;*}" swarm python -c '
 import os
+from scripts.hive import registry
 from scripts.inbox.seats import SeatRegistry
 from scripts.swarm.store import connect
 slug = os.environ["SLUG"]
-seat = SeatRegistry(connect().redis).occupant(f"eng-1@{slug}")
+redis = connect().redis
+seat = SeatRegistry(redis).occupant(f"eng-1@{slug}")
 assert seat and seat.occupant == "member-agent", f"the seat lost its occupant after the Redis restart: {seat}"
 print(f"after a Redis restart, the seat is still held by {seat.occupant}")
+assert os.environ["MEMBER_ID"] in redis.smembers(registry.INDEX), "the member left the hive index"
+print("after a Redis restart and a refresh, the member is still in the hive index")
 '
 anonymous="$(docker compose exec -T redis redis-cli --tls --cacert /run/swarm-tls/ca.pem ping 2>&1 || true)"
 printf 'unauthenticated Redis client: %s\n' "$anonymous"

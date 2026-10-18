@@ -1,0 +1,7 @@
+## Process tree at 2026-10-16T15:24:53Z
+    PID    PPID     SID CMD
+ 328131    1514  328131 sh -c /home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc8/venv/bin/python -m scripts.codex_session serve --cwd /home/iamroot/dev/worktrees/age
+ 328133  328131  328131 /home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc8/venv/bin/python -m scripts.codex_session serve --cwd /home/iamroot/dev/worktrees/agentihoo
+ 328198  328133  328198 codex app-server --listen unix:///run/user/1000/cx/36e5cdccdc554952/s -c model_provider="agentihooks-chatgpt" -c model_providers.agentihooks-chatgpt
+ 328317  328133  328131 /home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc8/venv/bin/python -m scripts.inbox.codex proof-323133-cxc8-1 exe-36e5cdccdc554952a1b7cf9822b
+ 328405  328132  327565 codex resume --remote unix:///run/user/1000/cx/36e5cdccdc554952/s 01a1454f-45f4-7111-a07c-c247c6be6587

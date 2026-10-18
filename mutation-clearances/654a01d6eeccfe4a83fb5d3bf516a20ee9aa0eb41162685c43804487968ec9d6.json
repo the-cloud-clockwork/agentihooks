@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1_due_open__mutmut_35:f0746e70b32b56ac0c1156197bcaf60254b7c49e11638bcae058fa296216e270": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled that Redis accepts either infinity case; -inf and -INF are the same negative infinity range bound and return identical items."
+  }
+}

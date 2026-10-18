@@ -11,7 +11,7 @@ from scripts.inbox.seats import is_seat
 IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "started_at", "runtime_backend", "transport")
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
-PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport")
+PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
 
 
 if TYPE_CHECKING:
@@ -70,7 +70,8 @@ class ExecutionRegistry:
         with self.redis.pipeline() as pipe:
             pipe.hgetall(self.store.key(slug, "agents"))
             pipe.hvals(self.store.key(slug, "executions"))
-            projections, attempts = pipe.execute()
+            pipe.hgetall(self.store.key(slug, "desired-routes"))
+            projections, attempts, desired = pipe.execute()
         latest = {}
         for raw in attempts:
             row = json.loads(raw)
@@ -83,6 +84,8 @@ class ExecutionRegistry:
                 row.update({field: latest[name][field] for field in EXECUTION_FIELDS})
                 row["hive"] = latest[name].get("hive", "")
                 row["transport"] = latest[name].get("transport", "")
+                row["remote_control"] = latest[name].get("remote_control", {})
+            row["desired_route_kind"] = desired.get(name) or latest.get(name, {}).get("desired_route_kind", "")
             result.append(AgentRecord(**row))
         return result
 
@@ -101,7 +104,7 @@ class ExecutionRegistry:
                         return
                     previous = pipe.hget(self.store.key(slug, "agents"), agent.name)
                     pipe.multi()
-                    _write_projection(pipe, self.store.key(slug, "agents"), agent)
+                    _write_projection(pipe, self.store, slug, agent)
                     self.write_status(pipe, slug, agent, previous)
                     pipe.execute()
                     return
@@ -248,12 +251,35 @@ class ExecutionRegistry:
                     continue
         raise SwarmError("execution history kept changing; update was not committed")
 
+    def set_pane(self, slug: str, execution_id: str, pane_id: str) -> None:
+        from redis.exceptions import WatchError
+
+        from scripts.swarm.store import AgentRecord, SwarmError
+
+        key = self.store.key(slug, "executions")
+        for _ in range(WRITE_ATTEMPTS):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(key)
+                    raw = pipe.hget(key, execution_id)
+                    if not raw:
+                        pipe.unwatch()
+                        self.conflict(slug, "unknown execution identity; display labels cannot identify attempts")
+                    current = AgentRecord(**json.loads(raw))
+                    pipe.multi()
+                    self.write(pipe, slug, replace(current, pane_id=pane_id), current)
+                    pipe.execute()
+                    return
+                except WatchError:
+                    continue
+        raise SwarmError("execution history kept changing; pane was not committed")
+
     def write(self, pipe: Pipeline, slug: str, agent: AgentRecord, previous: AgentRecord | None = None) -> None:
         from scripts.swarm.tick import agent_status
 
         raw = json.dumps(asdict(agent))
         pipe.hset(self.store.key(slug, "executions"), agent.execution_id, raw)
-        _write_projection(pipe, self.store.key(slug, "agents"), agent)
+        _write_projection(pipe, self.store, slug, agent)
         if previous is None or agent_status(previous) != agent_status(agent):
             pipe.hset(self.store.key(slug, "state-since"), agent.name, int(time.time() * 1000))
 
@@ -300,9 +326,13 @@ def _has_identity(agent):
     )
 
 
-def _write_projection(pipe, key, agent):
+def _write_projection(pipe, store, slug, agent):
     pipe.hset(
-        key,
+        store.key(slug, "agents"),
         agent.name,
         json.dumps({field: value for field, value in asdict(agent).items() if field not in PROJECTION_OMITTED}),
     )
+    if agent.desired_route_kind:
+        pipe.hset(store.key(slug, "desired-routes"), agent.name, agent.desired_route_kind)
+    else:
+        pipe.hdel(store.key(slug, "desired-routes"), agent.name)

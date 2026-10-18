@@ -183,6 +183,26 @@ def requested(store, slug: str, agent, choice: str, now_ms: int) -> Outcome:
 
 RECOVERY = "outage-resumes"
 RECOVERY_ATTEMPTS = 3
+STUCK_HANDOFF = """## Intent
+Continue task {task}; the swarm retired {name} while its turns kept failing on a provider error.
+
+## Done
+unknown: {name} left no handoff document; its task folder records its steps and evidence.
+
+## Stopped at
+Its pane showed this provider error: {error}
+
+## Decisions and promises
+unknown: none recorded outside the task folder and the ledger.
+
+## Next
+Read the task folder {folder} (steering.md, progress.md, proof.md) and the ledger task {task}, then continue the task.
+
+## Read first
+{folder}/progress.md
+
+<!-- handoff complete -->
+"""
 
 
 def _recovery_record(store, slug, agent):
@@ -202,7 +222,7 @@ def _recovery_owner(store, slug, agent, rows, now_ms):
         return False
     raw = store.redis.get(store.key(slug, "task-authority", agent.task))
     if not raw:
-        return not agent.execution_id
+        return not agent.execution_id or agent.runtime_backend == "local"
     claim = json.loads(raw)
     return (
         claim["state"] == "active"
@@ -387,7 +407,7 @@ def _restart_from_handoff(store, slug, agent, task, context):
 
     if not _recovery_current(store, slug, agent, context):
         return "task ownership changed"
-    handoff = store.handoff(slug, agent.task) or transfers.last_handoff(store, slug, agent.task)
+    handoff = recovery_text(store, slug, agent.task)
     transfer = transfers.record(store, slug, agent, "outage", handoff, context.at)
     transfers.attach(store, slug, agent)
     task = primed(store, slug, agent.seat, {**task, "handoff": handoff, "transfer": transfer["id"]})
@@ -398,3 +418,17 @@ def _restart_from_handoff(store, slug, agent, task, context):
         slug, replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
     )
     return ""
+
+
+def recovery_text(store: RedisStore, slug: str, task: str) -> str:
+    return store.handoff(slug, task) or transfers.last_handoff(store, slug, task)
+
+
+def free_seat(store: RedisStore, slug: str, agent: AgentRecord, now_ms: int) -> dict:
+    store.redis.hdel(store.key(slug, RECOVERY), agent.name)
+    error = store.redis.get(store.key(slug, outage.PANE, agent.name))
+    folder = ledger_workspace.folder(slug, agent.task)
+    handoff = recovery_text(store, slug, agent.task) or STUCK_HANDOFF.format(
+        task=agent.task, name=agent.name, error=error, folder=folder
+    )
+    return transfers.record(store, slug, agent, "outage", handoff, now_ms, agent.harness)

@@ -1,8 +1,13 @@
 import argparse
+import ast
+import hashlib
+import importlib.metadata
 import json
+import os
 import subprocess
 import sys
 import tempfile
+from collections.abc import Iterator
 from pathlib import Path
 
 # Runs inside each tree so the base imports its own sources, never the head's.
@@ -15,44 +20,330 @@ class Collected:
     def pytest_collection_finish(self, session):
         Collected.nodeids = [item.nodeid for item in session.items]
 
-code = pytest.main(["--collect-only", "-qq", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
+code = pytest.main(["--collect-only", "-qq", "--assert=plain", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
 with open(sys.argv[2], "w") as out:
     json.dump(Collected.nodeids if code == 0 else None, out)
 """
 
 
-def collect_all(trees: dict[str, Path], tests: str) -> dict[str, list[str] | None]:
+def collection_identity(root: Path, tests: str, environment: str) -> str | None:
+    status = subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True, check=False)
+    if status.returncode or status.stdout:
+        return None
+    tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=root, text=True).strip()
+    # The project's own version is derived from its commit; the tree hash already names its code.
+    packages = sorted(
+        (name, None if name == "agentihooks" else dist.version)
+        for dist in importlib.metadata.distributions()
+        if (name := dist.metadata["Name"])
+    )
+    options = {name: value for name, value in os.environ.items() if name.startswith("PYTEST_")}
+    identity = json.dumps(
+        [tree, tests, environment, sys.version, sys.platform, packages, _COLLECT, options], sort_keys=True
+    )
+    return hashlib.sha256(identity.encode()).hexdigest()
+
+
+def collection_cache(root: Path, tests: str, cache: Path | None, environment: str) -> Path | None:
+    if cache is None or not environment:
+        return None
+    key = collection_identity(root, tests, environment)
+    return cache / f"{key}.json" if key else None
+
+
+def recorded_base(record: Path, tree: Path, tests: str) -> list[str] | None:
+    try:
+        recorded = json.loads(record.read_text())
+    except (OSError, ValueError):
+        return None
+    if not isinstance(recorded, dict) or recorded.get("identity") != collection_identity(tree, tests, ""):
+        return None
+    nodeids = recorded.get("nodeids")
+    return nodeids if isinstance(nodeids, list) and nodeids and all(isinstance(n, str) for n in nodeids) else None
+
+
+def dev_record(listing: dict, base: str) -> int | None:
+    for artifact in listing.get("artifacts", []):
+        run = artifact.get("workflow_run") or {}
+        if (
+            not artifact.get("expired")
+            and run.get("head_branch") == "dev"
+            and run.get("head_sha") == base
+            and run.get("repository_id") is not None
+            and run.get("repository_id") == run.get("head_repository_id")
+        ):
+            return artifact["id"]
+    return None
+
+
+def write_record(head: Path, tests: str, out: Path) -> int:
+    identity = collection_identity(head, tests, "")
+    nodeids = collect_all({"head": head}, tests)["head"]
+    if not nodeids or identity is None or identity != collection_identity(head, tests, ""):
+        print("::error::The tree did not collect cleanly, so no record is written.")
+        return 1
+    out.write_text(json.dumps({"identity": identity, "nodeids": nodeids}))
+    print(f"recorded {len(nodeids)} tests")
+    return 0
+
+
+def base_from_record(base: Path, tests: str) -> list[str] | None:
+    record = os.environ.get("TEST_COUNT_BASE_RECORD")
+    if not record:
+        return None
+    recorded = recorded_base(Path(record), base, tests)
+    print("base count read from the dev record" if recorded else "no dev record matches the base, so it is collected")
+    return recorded
+
+
+def collect_sides(base: Path, head: Path, tests: str) -> dict[str, list[str] | None]:
+    recorded = base_from_record(base, tests)
+    cache = os.environ.get("TEST_COUNT_COLLECTION_CACHE")
+    collected = collect_all(
+        {"head": head} if recorded else {"base": base, "head": head},
+        tests,
+        cache=Path(cache) if cache else None,
+        environment=os.environ.get("TEST_COUNT_ENVIRONMENT", ""),
+    )
+    return {"base": recorded, **collected} if recorded else collected
+
+
+def collect_all(
+    trees: dict[str, Path], tests: str, cache: Path | None = None, environment: str = ""
+) -> dict[str, list[str] | None]:
+    cached = {side: collection_cache(tree, tests, cache, environment) for side, tree in trees.items()}
+    collected = {}
     with tempfile.TemporaryDirectory() as scratch:
         outputs = {side: Path(scratch) / f"{side}.json" for side in trees}
-        runs = {
-            side: subprocess.Popen(
-                [sys.executable, "-c", _COLLECT, tests, str(outputs[side])], cwd=tree, stdout=subprocess.DEVNULL
-            )
-            for side, tree in trees.items()
-        }
-        for run in runs.values():
+        runs = {}
+        for side, tree in trees.items():
+            if cached[side] and cached[side].is_file():
+                nodeids = json.loads(cached[side].read_text())
+                collected[side] = (
+                    nodeids
+                    if isinstance(nodeids, list) and all(isinstance(nodeid, str) for nodeid in nodeids)
+                    else None
+                )
+            else:
+                runs[side] = subprocess.Popen(
+                    [sys.executable, "-c", _COLLECT, tests, str(outputs[side])], cwd=tree, stdout=subprocess.DEVNULL
+                )
+        for side, run in runs.items():
             run.wait()
-        return {side: json.loads(outputs[side].read_text()) if outputs[side].is_file() else None for side in trees}
+            collected[side] = json.loads(outputs[side].read_text()) if outputs[side].is_file() else None
+            if run.returncode:
+                collected[side] = None
+            if collected[side] and cached[side]:
+                cached[side].parent.mkdir(parents=True, exist_ok=True)
+                cached[side].write_text(json.dumps(collected[side]))
+    return collected
+
+
+_DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)
+
+
+def _definitions(body: list[ast.stmt]) -> Iterator[str]:
+    for node in body:
+        if isinstance(node, _DEFINITIONS):
+            yield node.name
+        elif isinstance(node, ast.Assign):
+            yield from (target.id for target in node.targets if isinstance(target, ast.Name))
+        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+            yield node.target.id
+        elif isinstance(node, (ast.If, ast.Try)):
+            yield from _definitions(node.body + node.orelse + getattr(node, "finalbody", []))
+            for handler in getattr(node, "handlers", []):
+                yield from _definitions(handler.body)
+
+
+def _module_name(relative: Path) -> str:
+    parts = relative.with_suffix("").parts
+    return ".".join(parts[:-1] if parts[-1] == "__init__" else parts)
+
+
+def _sources(tree: Path, skipped: set[Path]) -> Iterator[Path]:
+    for root, dirs, files in os.walk(tree):
+        dirs[:] = [name for name in dirs if name != ".git" and (Path(root) / name).resolve() not in skipped]
+        yield from (Path(root) / name for name in files if name.endswith(".py"))
+
+
+def _top_level(tree: Path, tests: str) -> Iterator[tuple[str, list[ast.stmt]]]:
+    for path in _sources(tree, {(tree / tests).resolve()}):
+        try:
+            body = ast.parse(path.read_bytes()).body
+        except (OSError, SyntaxError, ValueError):
+            continue
+        yield _module_name(path.relative_to(tree)), body
+
+
+def top_level_definitions(tree: Path, tests: str) -> set[tuple[str, str]]:
+    return {(module, definition) for module, body in _top_level(tree, tests) for definition in _definitions(body)}
+
+
+_FUNCTIONS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    arguments = function.args
+    variadic = [arguments.vararg] if arguments.vararg else []
+    return {argument.arg for argument in arguments.posonlyargs + arguments.args + arguments.kwonlyargs + variadic}
+
+
+def _branch_parameters(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    conditions = (node.test for node in ast.walk(function) if isinstance(node, (ast.If, ast.IfExp, ast.While)))
+    used = {name.id for condition in conditions for name in ast.walk(condition) if isinstance(name, ast.Name)}
+    rebound = {name.id for name in ast.walk(function) if isinstance(name, ast.Name) and isinstance(name.ctx, ast.Store)}
+    return _parameters(function) & (used - rebound)
+
+
+def deleted_branches(base: Path, head: Path, tests: str) -> set[tuple[str, str]]:
+    kept = {
+        (module, node.name): node
+        for module, body in _top_level(head, tests)
+        for node in body
+        if isinstance(node, _FUNCTIONS)
+    }
+    deleted = set()
+    for module, body in _top_level(base, tests):
+        for node in body:
+            if not isinstance(node, _FUNCTIONS) or (survivor := kept.get((module, node.name))) is None:
+                continue
+            if survivor.args.kwarg or _parameters(survivor) - _parameters(node):
+                continue
+            deleted.update(
+                (module, f"{node.name}({name})") for name in _branch_parameters(node) - _parameters(survivor)
+            )
+    return deleted
+
+
+def bound_names(tree: Path) -> tuple[set[str], list[Path]]:
+    names, opaque = set(), []
+    for path in _sources(tree, set()):
+        try:
+            module = ast.parse(path.read_bytes())
+        except (OSError, SyntaxError, ValueError):
+            opaque.append(path.relative_to(tree))
+            continue
+        for node in ast.walk(module):
+            if isinstance(node, ast.alias) and node.name == "*":
+                opaque.append(path.relative_to(tree))
+            elif isinstance(node, _DEFINITIONS):
+                names.add(node.name)
+            elif isinstance(node, ast.Name) and isinstance(node.ctx, ast.Store):
+                names.add(node.id)
+            elif isinstance(node, ast.alias):
+                names.add(node.asname or node.name.split(".")[0])
+            elif isinstance(node, (ast.ExceptHandler, ast.MatchAs, ast.MatchStar)) and node.name:
+                names.add(node.name)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                names.add(node.rest)
+    return names, opaque
+
+
+def _dotted(node: ast.expr) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute) and (prefix := _dotted(node.value)):
+        return f"{prefix}.{node.attr}"
+    return None
+
+
+def _imports(module: ast.Module) -> tuple[dict[str, set[tuple[str, str]]], dict[str, set[str]]]:
+    names: dict[str, set[tuple[str, str]]] = {}
+    modules: dict[str, set[str]] = {}
+    for statement in ast.walk(module):
+        if isinstance(statement, ast.Import):
+            for alias in statement.names:
+                bound = alias.asname or alias.name.split(".")[0]
+                modules.setdefault(bound, set()).add(alias.name if alias.asname else bound)
+        elif isinstance(statement, ast.ImportFrom) and statement.module and not statement.level:
+            for alias in statement.names:
+                bound = alias.asname or alias.name
+                names.setdefault(bound, set()).add((statement.module, alias.name))
+                modules.setdefault(bound, set()).add(f"{statement.module}.{alias.name}")
+    return names, modules
+
+
+def _test_function(module: ast.Module, scopes: list[str]) -> ast.FunctionDef | ast.AsyncFunctionDef | None:
+    body, node = module.body, None
+    for scope in scopes:
+        node = next((child for child in body if isinstance(child, _DEFINITIONS) and child.name == scope), None)
+        if node is None:
+            return None
+        body = node.body
+    return None if isinstance(node, ast.ClassDef) else node
+
+
+def _resolve(
+    node: ast.expr, names: dict[str, set[tuple[str, str]]], modules: dict[str, set[str]]
+) -> set[tuple[str, str]]:
+    if isinstance(node, ast.Name):
+        return names.get(node.id, set())
+    if isinstance(node, ast.Attribute) and (prefix := _dotted(node.value)):
+        root, _, rest = prefix.partition(".")
+        return {(f"{bound}.{rest}" if rest else bound, node.attr) for bound in modules.get(root, ())}
+    return set()
+
+
+def referenced_subjects(tree: Path, nodeid: str) -> set[tuple[str, str]]:
+    path, *scopes = nodeid.split("[", 1)[0].split("::")
+    try:
+        module = ast.parse((tree / path).read_bytes())
+    except (OSError, SyntaxError, ValueError):
+        return set()
+    if (node := _test_function(module, scopes)) is None:
+        return set()
+    names, modules = _imports(module)
+    subjects = set()
+    for child in (descendant for statement in node.body for descendant in ast.walk(statement)):
+        subjects.update(_resolve(child, names, modules))
+        if isinstance(child, ast.Call):
+            subjects.update(
+                (callee, f"{function}({keyword.arg})")
+                for callee, function in _resolve(child.func, names, modules)
+                for keyword in child.keywords
+                if keyword.arg
+            )
+    return subjects
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="fail when the head collects fewer tests than the base")
-    parser.add_argument("--base", type=Path, required=True, help="checkout of the base revision")
+    side = parser.add_mutually_exclusive_group(required=True)
+    side.add_argument("--base", type=Path, help="checkout of the base revision")
+    side.add_argument("--record", type=Path, help="write the head's collection as a record a later base can reuse")
     parser.add_argument("--head", type=Path, default=Path.cwd(), help="checkout of the head revision")
     parser.add_argument("--tests", default="tests/")
     args = parser.parse_args(argv)
-    collected = collect_all({"base": args.base, "head": args.head}, args.tests)
+    if args.record:
+        return write_record(args.head, args.tests, args.record)
+    collected = collect_sides(args.base, args.head, args.tests)
     failed = [side for side, nodeids in collected.items() if not nodeids]
     for side in failed:
         print(f"::error::Collecting the {side} tests failed or found none, so the floor cannot be graded.")
     if failed:
         return 1
     base, head = collected["base"], collected["head"]
-    print(f"head collects {len(head)} tests, base floor {len(base)}")
+    lost = sorted(set(base) - set(head))
+    admitted = {}
     if len(head) < len(base):
-        for nodeid in sorted(set(base) - set(head)):
-            print(f"{nodeid} is in the base and not in the head")
-        print(f"::error::The head collects {len(base) - len(head)} fewer tests than the base floor of {len(base)}.")
+        surviving, opaque = bound_names(args.head)
+        for path in opaque:
+            print(f"{path} hides its names in the head (unparseable or a star import), so no lost test is admitted")
+        definitions = set() if opaque else top_level_definitions(args.base, args.tests)
+        deleted = {definition for definition in definitions if definition[1] not in surviving}
+        deleted |= set() if opaque else deleted_branches(args.base, args.head, args.tests)
+        for nodeid in lost:
+            if subjects := sorted(".".join(subject) for subject in referenced_subjects(args.base, nodeid) & deleted):
+                admitted[nodeid] = subjects
+                print(f"{nodeid} is admitted: the head deletes {', '.join(subjects)}, which it referenced")
+    floor = len(base) - len(admitted)
+    print(f"head collects {len(head)} tests, base floor {floor}")
+    if len(head) < floor:
+        for nodeid in lost:
+            if nodeid not in admitted:
+                print(f"{nodeid} is in the base and not in the head")
+        print(f"::error::The head collects {floor - len(head)} fewer tests than the base floor of {floor}.")
         return 1
     return 0
 

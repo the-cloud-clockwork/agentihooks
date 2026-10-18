@@ -269,6 +269,19 @@ def test_promotion_records_the_registry_digest_and_tags(replayed):
     assert made["digest"] is None
 
 
+@pytest.mark.parametrize("replayed", [False, True])
+def test_promotion_accepts_the_tested_index_digest_and_preserves_the_config(replayed):
+    made = attestation.attest(VALID, DIGEST, ORIGIN)
+
+    promoted = attestation.promote(made, DIGEST, IMAGE_ID, ["ghcr.io/o/worker:dev"], replayed)
+
+    assert promoted["digest"] == DIGEST
+    assert promoted["image_id"] == DIGEST
+    assert promoted["config"] == IMAGE_ID
+    assert promoted["promoted"] is (not replayed)
+    assert promoted["replayed"] is replayed
+
+
 def test_promotion_defaults_to_a_new_publication():
     made = attestation.attest(VALID, IMAGE_ID, ORIGIN)
 

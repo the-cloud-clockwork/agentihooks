@@ -10,7 +10,8 @@ label="$1"
 [[ "$2" == -- ]]
 shift 2
 
-transient='returned error: (401|403|408|429|5[0-9][0-9])|Failed to connect|Connection refused|Connection reset|timed out|Empty reply from server|Recv failure|Fail to request url|Call to URL .* failed|unexpected end of stream|SocketTimeoutException|Error status returned by url .*: (401|403|408|429|5[0-9][0-9])|failed with HTTP (401|403|408|429|5[0-9][0-9])'
+transient='returned error: (401|403|408|429|5[0-9][0-9])|Failed to connect|Connection refused|Connection reset|timed out|Empty reply from server|Recv failure|Fail to request url|Call to URL .* failed|unexpected end of stream|SocketTimeoutException|Error status returned by url .*: (401|403|408|429|5[0-9][0-9])|failed with HTTP (401|403|408|429|5[0-9][0-9])|HTTP code (401|403|408|429|5[0-9][0-9])'
+authorization='returned error: (401|403)|Error status returned by url .*: (401|403)|failed with HTTP (401|403)|HTTP code (401|403)'
 deadline="${SONAR_RETRY_SECONDS:-180}"
 out=$(mktemp)
 err=$(mktemp)
@@ -19,6 +20,7 @@ start=$SECONDS
 waited=0
 wait=2
 attempt=0
+denials=0
 
 while true; do
   attempt=$((attempt + 1))
@@ -36,7 +38,11 @@ while true; do
     exit "$status"
   fi
   spent=$((SECONDS - start > waited ? SECONDS - start : waited))
-  if ((spent + wait > deadline)); then
+  if [[ "$reason" =~ $authorization ]]; then
+    denials=$((denials + 1))
+    wait=2
+  fi
+  if ((denials == 2 || spent + wait > deadline)); then
     cat "$err" >&2
     cat "$out" >&2
     message="$label failed $attempt times over ${spent}s: $reason. The Sonar server or its Access proxy did not answer; this is not a code verdict."

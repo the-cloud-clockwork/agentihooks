@@ -1,11 +1,12 @@
 """Swarm tasks: claimable units of work under a phase, each in the eng or ci lane."""
 
 import re
+from pathlib import Path
 
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_plans, ledger_rank
+from scripts.swarm_ledger import ledger_plans, ledger_rank, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -33,6 +34,8 @@ UPDATABLE = (
     "rank",
     "branch",
     "branch_repo",
+    "repositories",
+    "repository_branches",
     "stacked_base",
     "parked_on",
     "parked_repos",
@@ -44,6 +47,7 @@ UPDATABLE = (
     "slice",
     "follow_up",
     "split_pulls",
+    "after_release",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
@@ -51,11 +55,12 @@ DIFFICULTIES = ("S", "M", "L")
 DIFFICULTY_SOURCES = ("operator", "rule", "classifier", "default")
 DIFFICULTY_FIELDS = ("difficulty", "difficulty_source", "difficulty_confidence")
 NUMBER_FIELDS = ("difficulty_confidence",)
-LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls")
+LIST_FIELDS = ("depends_on", "territory", "parked_on", "parked_repos", "overlays", "split_pulls", "repositories")
 OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery")
+RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -127,6 +132,7 @@ def check(op):
     check_quote(op)
     check_lists(fields)
     check_stack(fields)
+    check_release(fields)
     check_bools(fields)
     check_profile(fields)
     check_urls(fields)
@@ -140,6 +146,21 @@ def check_guards(op: dict) -> None:
     guard = op.get("if_state", [])
     if not isinstance(guard, list) or not all(state in STATES for state in guard):
         raise ValueError(f"if_state must be a list of states from {STATES}")
+    expected = op.get("if_match", {})
+    if not isinstance(expected, dict) or set(expected) - {"claimed_by", "claim_generation", "pr_url", "awaiting"}:
+        raise ValueError("if_match must contain task ownership fields")
+    if any(not isinstance(value, str) for key, value in expected.items() if key != "claim_generation"):
+        raise ValueError("if_match ownership fields must be strings")
+    generation = expected.get("claim_generation", 0)
+    if type(generation) is not int or generation < 0:
+        raise ValueError("if_match claim_generation must be a nonnegative integer")
+
+
+def _guarded(task, op):
+    expected = op.get("if_match", {})
+    return (bool(op.get("if_state")) and task.get("state", "open") not in op["if_state"]) or any(
+        task.get(key, 0 if key == "claim_generation" else "") != value for key, value in expected.items()
+    )
 
 
 def check_quote(op: dict) -> None:
@@ -162,6 +183,12 @@ def check_stack(fields):
         raise ValueError("stacked_base must be a lowercase commit hash of 7 to 64 characters, or empty to clear it")
     if not all(ID_RE.match(task_id) for task_id in fields.get("parked_on", [])):
         raise ValueError("parked_on must list task ids")
+
+
+def check_release(fields):
+    value = fields.get("after_release", "")
+    if not (isinstance(value, str) and RELEASE_RE.fullmatch(value)):
+        raise ValueError("after_release must be a release tag such as v2.17.1, or empty to clear it")
 
 
 def check_rank(fields):
@@ -190,11 +217,27 @@ def sized(fields):
     return {"difficulty_source": "operator", "difficulty_confidence": 1.0, **fields}
 
 
+def check_repository_branches(fields: dict) -> None:
+    branches = fields.get("repository_branches", {})
+    if not isinstance(branches, dict) or not all(
+        isinstance(repo, str)
+        and Path(repo).is_absolute()
+        and isinstance(branch, str)
+        and branch
+        and BRANCH_RE.match(branch)
+        for repo, branch in branches.items()
+    ):
+        raise ValueError("repository_branches must map absolute local repository paths to branch names")
+
+
 def check_lists(fields):
+    check_repository_branches(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
             raise ValueError(f"{key} must be a list of nonempty strings")
+    if not all(Path(repo).is_absolute() for repo in fields.get("repositories", [])):
+        raise ValueError("repositories must list absolute local repository paths")
     if len(set(fields.get("overlays", []))) > OVERLAY_CAP:
         raise ValueError(f"overlays lists at most {OVERLAY_CAP} overlay names")
 
@@ -226,6 +269,7 @@ def check_task(task):
         raise ValueError(f"tasks/{task.get('id')}/state must be one of {STATES}")
     check_lists(task)
     check_stack(task)
+    check_release(task)
     check_urls(task)
     check_profile(task)
     check_rank(task)
@@ -246,6 +290,8 @@ def _add(doc, op, ctx):
         )
         return False
     if not _known(tasks, op.get("depends_on", [])):
+        missing = sorted(set(op["depends_on"]) - {t["id"] for t in tasks})
+        ctx.refused.append(f"task {op['task']} depends on unknown tasks: {', '.join(missing)}")
         return False
     appended = {p["id"] for p in doc.get("phases", []) if p.get("added_by") == op["by"]}
     if refusal := (
@@ -280,6 +326,8 @@ def _add(doc, op, ctx):
         "profile",
         "overlays",
         "not_duplicate",
+        "repositories",
+        "repository_branches",
         "slice",
         "follow_up",
     ):
@@ -300,7 +348,7 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
-    if refusal := ledger_plans.task_refusal(doc, task):
+    if refusal := ledger_plans.task_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc):
         ctx.refused.append(refusal)
         return False
     tasks.append(task)
@@ -379,11 +427,15 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    if refusal := park_refusal(op, task):
-        return refusal
-    if phase is not None and phase != task.get("phase"):
-        return unsliced_refusal(doc, {**task, "plan_slice": "", **op["fields"]}, op["by"])
-    return ""
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc)
+
+
+def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
+    fields = op["fields"]
+    if "rank" not in fields and "phase" not in fields:
+        return ""
+    rank = fields.get("rank", task.get("rank"))
+    return ledger_rank.urgent_refusal({**task, **fields, "rank": ledger_rank.ALIASES.get(rank, rank)}, doc)
 
 
 def park_refusal(op: dict, task: dict) -> str:
@@ -450,13 +502,38 @@ def _update_fields(task: dict, fields: dict) -> dict:
     return fields
 
 
+def _block_author(by: str) -> bool:
+    from scripts.swarm.naming import lane_of
+
+    return by == "operator" or lane_of(by) == "master"
+
+
+def _held_block(task: dict, op: dict, ctx) -> bool:
+    return (
+        task.get("state") == "blocked"
+        and "state" in op["fields"]
+        and not _block_author(op["by"])
+        and _block_author(ledger_rank.author(ctx, f"{op['item']}/state"))
+    )
+
+
+def _record_timing(task, changed, op, ctx):
+    if "state" in changed:
+        extra = {"pr_url": task.get("pr_url", ""), "branch": task.get("branch", "")} if changed["state"] == "pr" else {}
+        ctx.record(op["by"], f"task {changed['state']}", op["item"], **extra)
+    elif "pr_url" in changed and task.get("state") == "pr":
+        ctx.record(op["by"], "task pr", op["item"], pr_url=task["pr_url"], branch=task.get("branch", ""))
+    if "parked_on" in changed:
+        ctx.record(op["by"], "task parked" if changed["parked_on"] else "task unparked", op["item"])
+
+
 def _update(doc, op, ctx):
     task_id = op["item"].split("/")[1]
     task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
     others = [t for t in doc["tasks"] if t["id"] != task_id]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
-    if op.get("if_state") and task.get("state", "open") not in op["if_state"]:
+    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
         return True
     if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)
@@ -485,7 +562,7 @@ def _update(doc, op, ctx):
     task.update(changed)
     if "state" in changed:
         task["done"] = changed["state"] == "done"
-        ctx.record(op["by"], f"task {changed['state']}", op["item"])
+    _record_timing(task, changed, op, ctx)
     for key in changed:
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
@@ -500,6 +577,9 @@ def _relay_rank(doc, op, ctx):
     if task is None or not ledger_rank.quoted(rank, words):
         ctx.refused.append(UNRELAYED)
         return False
+    if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
+        ctx.refused.append(refusal)
+        return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
@@ -509,8 +589,12 @@ def _relay_rank(doc, op, ctx):
 
 def _changed(task, fields, op, ctx):
     changed = {k: v for k, v in fields.items() if task.get(k) != v}
+    if "claimed_by" in changed:
+        changed["claim_generation"] = task.get("claim_generation", 0) + 1
     if "rank" in fields and ledger_rank.author(ctx, f"{op['item']}/rank") != op["by"]:
         changed["rank"] = fields["rank"]
+    if fields.get("state") == "blocked" and _block_author(op["by"]):
+        changed["state"] = "blocked"
     return changed
 
 
@@ -571,6 +655,10 @@ def _move_plan(doc: dict, task: dict, fields: dict, phase: dict) -> None:
     source = next((p for p in doc["phases"] if p["id"] == task.get("phase")), {})
     if "plan_url" not in fields and (fields.get("plan_slice") or task.get("plan_url") == source.get("plan_url")):
         fields["plan_url"] = phase.get("plan_url", "") if fields.get("plan_slice") else ""
+    if fields.get("plan_slice") or fields.get("slice"):
+        fields.setdefault("follow_up", False)
+    elif phase.get("plan_ref") or phase.get("plan_url"):
+        fields.setdefault("follow_up", True)
     fields.setdefault("plan_slice", "")
     if task.get("slice"):
         fields.setdefault("slice", "")

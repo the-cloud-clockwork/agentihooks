@@ -15,11 +15,15 @@ def test_shard_graders_check_out_event_base_before_installing():
     steps = _jobs()["shard-check"]["steps"]
     checkout = steps[0]
     assert checkout["uses"] == "actions/checkout@v4"
-    assert checkout["with"]["ref"] == (
+    legacy = (
         "${{ github.event.pull_request.base.ref == 'main' && github.sha || "
-        "github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
+        "github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
         "github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )
+    promotion = legacy.replace(
+        "github.event.before ||", "github.event_name == 'push' && github.sha || github.event.before ||"
+    )
+    assert checkout["with"]["ref"] in (legacy, promotion)
     assert checkout["with"]["persist-credentials"] is False
     assert sum(step.get("uses", "").startswith("actions/checkout@") for step in steps) == 1
 
@@ -57,9 +61,9 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     steps = _jobs()["shard-check"]["steps"]
     commands = [step["run"] for step in steps if step.get("run", "").startswith("python -m tests.shard_")]
     assert commands == [
-        "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json",
+        "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         "python -m tests.shard_check shard-durations/*/durations.json",
-        "python -m tests.shard_budget shard-durations/*/durations.json",
+        "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
 
 

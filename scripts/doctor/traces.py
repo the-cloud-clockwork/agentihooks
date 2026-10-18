@@ -121,20 +121,47 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
     return found
 
 
+def _wait_covers(waits, start, end):
+    cursor = start
+    for held in sorted(waits, key=lambda held: held["at"]):
+        if held["at"] > cursor:
+            break
+        cursor = max(cursor, held["until"])
+        if cursor >= end:
+            return True
+    return False
+
+
+def _uncovered_gaps(trace, waits, limit):
+    turns = _turns(trace)
+    return [
+        (a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS, a["end"], b["start"])
+        for a, b in zip(turns, turns[1:])
+        if (b["start"] - a["end"]) // MINUTE_MS > limit and not _wait_covers(waits, a["end"], b["start"])
+    ]
+
+
 def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
     found = []
     for trace in record["traces"]:
-        long = [g for g in _gaps(trace) if g[2] > limits.turn_gap_minutes]
+        waits = record.get("waits", {}).get(_agent(trace), [])
+        long = _uncovered_gaps(trace, waits, limits.turn_gap_minutes)
         if not long:
             continue
         found.append(
             Finding(
                 "turn gap",
                 _subject(trace),
-                f"{len(long)} gaps between turns over {limits.turn_gap_minutes} minutes",
-                (f"agent {_agent(trace)}", *(f"turn {a} to turn {b}: {m} minutes" for a, b, m in long)),
+                f"{len(long)} gaps between turns over {limits.turn_gap_minutes} minutes without a covering declared wait",
+                (
+                    f"agent {_agent(trace)}",
+                    *(
+                        f"turn {a} to turn {b}: {m} minutes; gap {start} to {end}; no declared wait covered it"
+                        for a, b, m, start, end in long
+                    ),
+                ),
                 f"over {limits.turn_gap_minutes} minutes between turns",
-                max(m for _, _, m in long),
+                max(gap[2] for gap in long),
             )
         )
     return found

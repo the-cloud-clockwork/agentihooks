@@ -30,6 +30,7 @@ def live(authority_live):
     html, document = core.paths(SLUG)
     html.write_text(page)
     document.unlink(missing_ok=True)
+    server.ledger_bin.restore(SLUG)
     core.sync(
         SLUG,
         ops=[
@@ -38,7 +39,8 @@ def live(authority_live):
             {"op": "add", "id": "seed-chat-two", "thread": "chat", "text": "Second message"},
         ],
     )
-    return {**authority_live, "admin": core.read_token(page)}
+    yield {**authority_live, "admin": core.read_token(page)}
+    server.ledger_bin.restore(SLUG)
 
 
 from scripts.swarm_ledger import api as api
@@ -66,7 +68,7 @@ def request(live, method, resource, body=None, **headers):
 def stored(monkeypatch, document):
     from types import SimpleNamespace
 
-    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document))
+    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):
@@ -192,6 +194,24 @@ def test_operation_contract_covers_existing_domain_dispatch():
     }
     assert set(schemas.FIELDS) == kinds
     assert schemas.FIELDS["title_set"] == "text"
+
+
+def test_task_update_schema_accepts_the_ownership_guard():
+    from scripts.swarm_ledger.api import schemas
+
+    schema = schemas.operation_schema("task_update")
+    guarded = {
+        "op": "task_update",
+        "id": "op-1",
+        "by": "swarm",
+        "item": "t1",
+        "fields": {"claimed_by": "engineer-two"},
+        "if_state": ["claimed"],
+        "if_match": {"claimed_by": "engineer-one", "claim_generation": 1},
+    }
+
+    assert schemas.mismatched_field(schema, guarded) is None
+    assert schemas.mismatched_field(schema, {**guarded, "if_match": "engineer-one"}) == "if_match"
 
 
 def test_export_is_explicit_and_summary_is_paginated(live):
@@ -497,6 +517,55 @@ def test_guarded_task_update_returns_only_the_requested_row(live):
     assert "comments" not in row
 
 
+def test_task_collection_token_survives_chat_and_reload_without_hashing(live, monkeypatch):
+    from scripts.swarm.ledger_client import LedgerClient
+    from tests.swarm_ledger.test_ledger_authority import ledger
+
+    ledger.request(SLUG, [{"op": "join", "id": "token-planner", "by": "boss", "role": "orchestrator"}], service=True)
+    ledger.request(
+        SLUG,
+        [
+            {
+                "op": "task_add",
+                "id": f"token-create-{index}",
+                "by": "boss",
+                "task": f"t{index}",
+                "title": f"Token task {index}",
+                "lane": "eng",
+                "phase": "p1",
+            }
+            for index in (1, 2)
+        ],
+        service=True,
+    )
+    status, first = request(live, "GET", "tasks?limit=1")
+    assert status == 200
+    assert first["next_cursor"] is not None
+    original = json.dumps
+
+    def bounded_dumps(value, *args, **kwargs):
+        if isinstance(value, list) and {row.get("id") for row in value if isinstance(row, dict)} >= {"t1", "t2"}:
+            raise AssertionError("Whole task collection serialized for revision")
+        return original(value, *args, **kwargs)
+
+    monkeypatch.setattr(json, "dumps", bounded_dumps)
+    ledger.request(
+        SLUG,
+        [{"op": "add", "id": "token-chat", "by": "boss", "thread": "chat", "text": "Unrelated collection update"}],
+        service=True,
+    )
+    assert request(live, "GET", "tasks?limit=1") == (200, first)
+    assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 200
+    LedgerClient(service=True).update_task(SLUG, "t2", {"description": "Changed outside page"})
+    status, changed = request(live, "GET", "tasks?limit=1")
+    assert status == 200
+    assert changed["revision"] != first["revision"]
+    assert changed["page_hash"] == first["page_hash"]
+    assert request(live, "GET", f"tasks?limit=1&cursor={first['next_cursor']}")[0] == 409
+    server.repository.inner._cache.clear()
+    assert request(live, "GET", "tasks?limit=1") == (200, changed)
+
+
 def test_repeated_edit_and_delete_keep_entry_identity(live):
     from scripts.swarm_ledger.api.client import ResourceClient
     from tests.swarm_ledger.test_ledger_authority import ledger
@@ -655,11 +724,13 @@ def test_metadata_resource_reports_its_named_fields(live, monkeypatch):
 
 
 def test_forbidden_error_envelope_keeps_its_status_and_bounds(live, monkeypatch):
+    from types import SimpleNamespace
+
     from scripts.swarm_ledger.api.resources import MAX_REPLY
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"tasks": [], "_meta": {"warnings": ["x" * 3000] * 100}}
-    monkeypatch.setattr(server.repository, "get_document", lambda slug, **kwargs: document)
+    monkeypatch.setattr(server.repository, "current", lambda slug, **kwargs: SimpleNamespace(state=document))
     headers = {
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),
@@ -2323,6 +2394,7 @@ def test_cli_collection_consumers_read_all_pages(live, tmp_path, capsys, monkeyp
         depends_on="",
         territory="",
         overlays="",
+        repositories="",
         gain=None,
         must="",
         check="",
@@ -2539,20 +2611,27 @@ def test_repository_optional_collections_have_empty_http_resources(live, monkeyp
     stored(monkeypatch, document)
     assert request(live, "GET", path) == (
         200,
-        {"data": [], "revision": revision([]), "next_cursor": None},
+        {
+            "data": [],
+            "revision": f"{0:064x}" if path == "tasks" else revision([]),
+            "next_cursor": None,
+            **({"page_hash": revision([])} if path == "tasks" else {}),
+        },
     )
 
 
 def test_optional_repository_fields_preserve_forbidden_details(live, monkeypatch):
+    from types import SimpleNamespace
+
     from tests.swarm_ledger.test_ledger_authority import authority
 
     document = {"_meta": {}}
 
     def read(slug):
         assert slug == SLUG
-        return document
+        return SimpleNamespace(state=document)
 
-    monkeypatch.setattr(server.repository, "get_document", read)
+    monkeypatch.setattr(server.repository, "current", read)
     headers = {
         "X-Ledger-Agent": "api-reader",
         "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, "api-reader"),

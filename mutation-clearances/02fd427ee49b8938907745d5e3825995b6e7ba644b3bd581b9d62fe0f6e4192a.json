@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x_control__mutmut_34:ba805fe0e408b4a3ecbb29c5fbd6623dbeb11d89998b4bc250a58177764f383b": {
+    "reader": "independent Standards reader",
+    "reason": "The caller first requires a named creator. local_credentials consumes service only in if service or not agent; False and None choose the same named-agent credential branch, with identical headers and outputs."
+  }
+}

@@ -325,13 +325,16 @@ def test_updates_preserve_status_timestamp_until_status_changes(store, agent, mo
     monkeypatch.setattr(execution.time, "time", lambda: 20)
     store.put_agent("fixture", current)
     assert store.redis.hget(key, agent.name) == "10000"
+    store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
+    assert store.redis.hget(key, agent.name) == "10000"
+    current = replace(current, pane_id="w2:p7")
     changed = replace(current, state="finished")
     store.put_agent("fixture", changed)
     assert store.redis.hget(key, agent.name) == "20000"
     assert store.execution("fixture", current.execution_id) == changed
 
 
-@pytest.mark.parametrize("operation", ["start", "update", "legacy"])
+@pytest.mark.parametrize("operation", ["start", "update", "legacy", "pane"])
 @pytest.mark.parametrize("failures", [1, 5])
 def test_transaction_contention_is_bounded_and_never_partially_commits(store, agent, monkeypatch, operation, failures):
     from redis.exceptions import WatchError
@@ -362,12 +365,15 @@ def test_transaction_contention_is_bounded_and_never_partially_commits(store, ag
                 store.start_execution("fixture", agent, current.execution_id)
             elif operation == "update":
                 store.put_agent("fixture", replace(current, idle_ticks=2))
+            elif operation == "pane":
+                store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
             else:
                 store.put_agent("fixture", legacy)
         messages = {
             "start": "execution history kept changing; admission was not committed",
             "update": "execution history kept changing; update was not committed",
             "legacy": "agent registry kept changing; update was not committed",
+            "pane": "execution history kept changing; pane was not committed",
         }
         assert str(error.value) == messages[operation]
         assert protected(store) == before
@@ -380,10 +386,32 @@ def test_transaction_contention_is_bounded_and_never_partially_commits(store, ag
         elif operation == "update":
             store.put_agent("fixture", replace(current, idle_ticks=2))
             assert store.execution("fixture", current.execution_id).idle_ticks == 2
+        elif operation == "pane":
+            store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
+            assert store.execution("fixture", current.execution_id) == replace(current, pane_id="w2:p7")
         else:
             store.put_agent("fixture", legacy)
             assert store.redis.hexists(store.key("fixture", "agents"), legacy.name)
         assert len(attempts) == 2
+
+
+def test_a_pane_write_keeps_every_other_field_and_updates_the_projection(store, agent):
+    current = store.start_execution("fixture", replace(agent, pane_id="w1:p1"))
+    store.put_agent("fixture", replace(current, state="idle", idle_ticks=3))
+    store.execution_registry.set_pane("fixture", current.execution_id, "w2:p7")
+    expected = replace(current, state="idle", idle_ticks=3, pane_id="w2:p7")
+    assert store.execution("fixture", current.execution_id) == expected
+    assert store.agents("fixture") == [expected]
+
+
+def test_a_pane_write_for_an_unknown_execution_is_refused(store, agent):
+    store.start_execution("fixture", agent)
+    before = protected(store)
+    with pytest.raises(SwarmError) as error:
+        store.execution_registry.set_pane("fixture", "missing", "w2:p7")
+    assert str(error.value) == "unknown execution identity; display labels cannot identify attempts"
+    assert protected(store) == before
+    assert store.execution_identity_conflicts_total("fixture") == 1
 
 
 def test_explicit_local_runtime_identity_is_preserved(store, agent):
@@ -467,6 +495,34 @@ def test_execution_records_saved_before_hive_ownership_load_with_an_empty_hive(s
     raw.pop("hive")
     store.redis.hset(store.key("fixture", "executions"), current.execution_id, json.dumps(raw))
     assert store.agents("fixture")[0].hive == ""
+
+
+def test_desired_route_survives_execution_updates_without_changing_the_legacy_projection(store, agent):
+    current = store.start_execution("fixture", replace(agent, desired_route_kind="interactive"))
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+    assert "desired_route_kind" not in json.loads(store.redis.hget(store.key("fixture", "agents"), current.name))
+    store.put_agent("fixture", replace(current, idle_ticks=2))
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+
+
+def test_desired_route_on_a_local_record_lives_in_its_own_hash(store, agent):
+    master = replace(agent, desired_route_kind="interactive")
+    routes = store.key("fixture", "desired-routes")
+    store.put_agent("fixture", master)
+    assert store.redis.hget(routes, master.name) == "interactive"
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+    store.put_agent("fixture", replace(master, desired_route_kind=""))
+    assert not store.redis.hexists(routes, master.name)
+    assert store.agents("fixture")[0].desired_route_kind == ""
+    store.put_agent("fixture", master)
+    store.drop_agent("fixture", master.name)
+    assert not store.redis.hexists(routes, master.name)
+
+
+def test_a_controller_admission_without_the_route_hash_reads_the_desired_route_from_its_execution(store, agent):
+    current = store.start_execution("fixture", replace(agent, desired_route_kind="interactive"))
+    store.redis.hdel(store.key("fixture", "desired-routes"), current.name)
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
 
 
 @pytest.mark.parametrize(

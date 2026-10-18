@@ -2,7 +2,7 @@
 
 Development Manifesto §7. Primary checkouts (dev-direct work) and new files stay open.
 Formatters (ruff format, black) and patch / git apply stay open: they rewrite mechanically
-and the gates require formatted code.
+and the gates require formatted code. AGENTIHOOKS_SERENA=false turns the guard off.
 """
 
 import re

@@ -110,6 +110,7 @@ def _join(doc, op, ctx):
 
 def _leave(doc, op, ctx):
     if ctx.meta["members"].pop(op["by"], None) is None:
+        ctx.refused.append(f"leave refused: {op['by']} has not joined this ledger")
         return False
     ctx.record(op["by"], "left", "")
     return True

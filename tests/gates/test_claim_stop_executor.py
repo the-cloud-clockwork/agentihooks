@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -165,6 +166,34 @@ def test_a_stop_with_work_owed_is_blocked_and_the_third_blocks_the_task(rig):
         ("claim-stop", "deny", ME),
         ("claim-stop", "blocked", ME),
     ]
+
+
+@pytest.mark.parametrize("scope", ["session", "agent", "task"])
+def test_a_lifted_stop_never_blocks_the_claim_and_clear_restarts_the_streak(rig, scope):
+    from scripts.gates import lift
+
+    assert rig.stop().returncode == 2
+    assert rig.stop().returncode == 2
+    paths = {
+        "session": lift.lift_path(SLUG, SID, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+        "agent": lift.agent_lift_path(SLUG, ME, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+        "task": lift.task_lift_path(SLUG, rig.task, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+    }
+    path = paths[scope]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": time.time()}))
+    for _ in range(4):
+        stopped = rig.stop()
+        assert stopped.returncode == 0, stopped.stderr
+        assert rig.ledger_task()["state"] == "claimed"
+    assert not any(row["kind"] == "blocked" for row in rig.rows())
+
+    path.unlink()
+    first = rig.stop()
+    assert first.returncode == 2 and "stop block 1 of 2" in first.stderr
+    assert rig.stop().returncode == 2
+    assert rig.stop().returncode == 0
+    assert rig.ledger_task()["state"] == "blocked"
 
 
 def test_a_stop_after_the_merge_is_blocked_and_one_on_pending_checks_passes_with_a_wait(rig):

@@ -1,5 +1,6 @@
 """The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself, then refuses the stop over
-uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push."""
+uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push,
+unless a checked wait on another task not yet done holds it."""
 
 import os
 import re
@@ -109,9 +110,32 @@ def gate_refusal(tree, budget):
     return None if code == 0 else GATE_FAILED.format(path=tree.path)
 
 
-def push(tree):
-    ref = f"refs/heads/{tree.branch}"
-    return git(tree.path, "push", "--set-upstream", "origin", f"{ref}:{ref}").returncode == 0
+def push(tree, branch, seconds):
+    ref = f"refs/heads/{branch}"
+    lease = [] if branch == tree.branch else [f"--force-with-lease={ref}"]
+    process = subprocess.Popen(
+        ["git", "-C", str(tree.path), "push", *lease, "--set-upstream", "origin", f"refs/heads/{tree.branch}:{ref}"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        start_new_session=True,
+    )
+    try:
+        return process.wait(min(GIT_TIMEOUT_S, seconds)) == 0
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
+        return False
+
+
+def target(tree, task):
+    """The retained pull request branch HEAD continues, as swarm publish pushes it, else the worktree's own branch."""
+    from scripts.swarm.continuation import retained
+
+    branch = retained(task)
+    if not branch:
+        return tree.branch
+    continues = git(tree.path, "merge-base", "--is-ancestor", f"refs/remotes/origin/{branch}", "HEAD")
+    return branch if continues.returncode == 0 else tree.branch
 
 
 def record_text(remote, branch, head):
@@ -178,12 +202,14 @@ class PushStop:
         for tree in trees(self.root(), who.name):
             if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
-            elif tree.unpushed and push(tree):
-                self.record(store, ledger, who, tree)
+            elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
+                self.record(store, ledger, who, tree, branch)
             owed = owed or tree.dirty or (tree.unpushed and not self.on_origin(tree))
             owed = owed or (doc and tree.own and not task.get("pr_url") and self.unrecorded(store, doc, who))
         if not owed:
             self.settle(store, who)
+            return Decision()
+        if self.waiting(store, who, doc, task):
             return Decision()
         self.notify(store, who)
         return Decision.deny(" ".join([TEMPLATE, *failed]))
@@ -195,6 +221,15 @@ class PushStop:
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
+    def waiting(self, store, who, doc, task):
+        """Whether a live checked wait on another unfinished task holds the stop, so a refused push never deadlocks."""
+        from scripts.swarm import idle, waits
+
+        held = idle.wait(store.redis, who.swarm, who.name)
+        if not (doc and held and held["until"] > self.now() and (held.get("on") or {}).get("kind") == "task"):
+            return False
+        return waits.dependency(held["on"], task, {row.get("id"): row for row in doc["tasks"]}, None)
+
     def unrecorded(self, store, doc, who):
         from scripts.gates.progress import Progress
 
@@ -203,7 +238,7 @@ class PushStop:
             doc.get("_meta", {}).get("events", []), who.name, mark.outcome_at
         )
 
-    def record(self, store, ledger, who, tree):
+    def record(self, store, ledger, who, tree, branch):
         from scripts.gates.progress import Progress
         from scripts.swarm.store import SwarmError
 
@@ -211,7 +246,7 @@ class PushStop:
         head = git(tree.path, "rev-parse", "HEAD").stdout.strip()
         Progress(store.redis, who.swarm).outcome(who.name, PUSHED, self.now())
         try:
-            ledger.comment(who.swarm, who.task, record_text(remote, tree.branch, head), by=SENDER)
+            ledger.comment(who.swarm, who.task, record_text(remote, branch, head), by=SENDER)
         except SwarmError:
             pass
 

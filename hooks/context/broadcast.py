@@ -8,6 +8,7 @@ import contextlib
 import hashlib
 import json
 import os
+import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -242,18 +243,20 @@ def _sessions_path() -> Path:
 
 
 def _read_broadcasts() -> list[dict]:
+    from hooks.context import scheduled_broadcasts
+
     path = _broadcast_path()
     if not path.exists() or path.stat().st_size == 0:
-        return []
+        return scheduled_broadcasts.merge(path, [])
     try:
         data = json.loads(path.read_text())
     except (json.JSONDecodeError, OSError):
-        return []
+        return scheduled_broadcasts.merge(path, [])
 
     if not isinstance(data, list):
-        return []
+        return scheduled_broadcasts.merge(path, [])
 
-    return data
+    return scheduled_broadcasts.merge(path, data)
 
 
 def _load_broadcasts(cleanup: bool = False) -> list[dict]:
@@ -277,7 +280,10 @@ def _unique_tmp(path: Path) -> Path:
 
 
 def _save_broadcasts(messages: list[dict]) -> None:
+    from hooks.context import scheduled_broadcasts
+
     path = _broadcast_path()
+    messages = scheduled_broadcasts.save(path, messages)
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp = _unique_tmp(path)
     tmp.write_text(json.dumps(messages, indent=2))
@@ -425,8 +431,9 @@ def create_broadcast(
     source: str = "operator",
     persistent: bool | None = None,
     channel: str | None = None,
+    delivery_id: str = "",
 ) -> str | None:
-    """Publish a broadcast to the shared file (and Redis if configured).
+    """Publish a broadcast; delivery_id makes scheduled publication idempotent.
 
     Args:
         message: Body text. Empty / whitespace-only messages are dropped.
@@ -442,9 +449,10 @@ def create_broadcast(
             sessions whose ``AGENTIHOOKS_BASE_CHANNELS`` env var includes this
             channel name (or contains the wildcard ``*``). When ``None``, the
             message is global and reaches every session regardless of subscription.
+        delivery_id: Durable identity; retries cannot republish an entry after clearing.
 
     Returns:
-        The 12-char message ID on success, or ``None`` for empty input.
+        The generated message ID or supplied delivery identity, or ``None`` for empty input.
     """
     if channel and channel.startswith(MASTERS_CHANNEL_PREFIX):
         slug = channel.removeprefix(MASTERS_CHANNEL_PREFIX)
@@ -455,9 +463,15 @@ def create_broadcast(
     if entry is None:
         return None
 
+    from hooks.context import scheduled_broadcasts
+
     with _file_lock(_broadcast_path()):
+        if delivery_id:
+            entry["id"] = delivery_id
+            scheduled_broadcasts.publish(_broadcast_path(), entry)
         msgs = _read_broadcasts()
-        msgs.append(entry)
+        if not delivery_id:
+            msgs.append(entry)
 
         # Enforce max messages — keep newest
         if len(msgs) > BROADCAST_MAX_MESSAGES:
@@ -1166,13 +1180,21 @@ def check_and_inject_broadcasts(session_id: str) -> None:
                 continue
 
             banner = format_broadcast_banner(msg)
-            inject_banner("BROADCAST", banner)
+            inject_banner(
+                "BROADCAST", banner, kind="alert" if msg.get("severity") in ("critical", "nuclear") else "brain"
+            )
             injection_trace.record_broadcast(session_id, msg)
             emit_span("brain.delivery", span_attrs)
             _record_delivery(session_id, msg, now_ts)
             injected += 1
     except Exception:
         pass
+
+
+def context_kind(context: str) -> str:
+    """Budget kind of a formatted broadcast block: an alert only when it carries a critical or nuclear message."""
+    labels = "|".join(_SEVERITY_DISPLAY_LABEL[s] for s in ("nuclear", "critical"))
+    return "alert" if re.search(rf"^  - \[(?:{labels})\] \(id:", context, re.MULTILINE) else "brain"
 
 
 def get_pretool_context(session_id: str, *, claim_unseen: bool = True) -> str | None:

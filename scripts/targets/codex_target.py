@@ -50,6 +50,7 @@ from scripts.targets._common import (
     strip_persona,
     write_persona,
 )
+from scripts.targets.codex_hook_trust import trusted_state
 
 _MANAGED_HEADER = "<!-- managed-by: agentihooks — regenerate with: agentihooks init --target codex -->"
 _MANAGED_FOOTER = "<!-- agentihooks:managed-end -->"
@@ -172,7 +173,7 @@ def _is_ours(group: object, wrapper: Path) -> bool:
 def restore_hook_order(home: Path) -> list[str]:
     """Events whose agentihooks group drifted behind a foreign one; the hooks file is rewritten only when one did.
 
-    Codex keys hook trust by group position, so this restores the order `init` writes and never touches trust.
+    Codex keys hook trust by group position, so this restores the order `init` writes and trusts the new positions.
     """
     path = (home / "hooks.json").resolve()
     try:
@@ -193,7 +194,30 @@ def restore_hook_order(home: Path) -> list[str]:
             moved.append(event)
     if moved:
         _atomic_write(path, json.dumps(doc, indent=2))
+        trust_hooks(home)
+        if path.parent != home.resolve():
+            trust_hooks(path.parent)
     return moved
+
+
+def trust_hooks(home: Path) -> int:
+    import tomlkit
+
+    path = home / "config.toml"
+    doc = CodexAdapter._load_toml(path)
+    if "hooks" not in doc:
+        doc["hooks"] = tomlkit.table()
+    if "state" not in doc["hooks"]:
+        doc["hooks"]["state"] = tomlkit.table()
+    state = doc["hooks"]["state"]
+    changed = 0
+    for key, value in trusted_state(home / "hooks.json", home / "hooks.json").items():
+        if state.get(key, {}).get("trusted_hash") != value["trusted_hash"]:
+            state[key] = {**state.get(key, {}), **value}
+            changed += 1
+    if changed:
+        CodexAdapter._dump_toml(path, doc)
+    return changed
 
 
 _TOOL_FILTERS = ("enabled_tools", "disabled_tools")
@@ -300,6 +324,12 @@ class CodexAdapter:
     # settings: config.toml managed keys + hooks.json + wrapper
     # ------------------------------------------------------------------
 
+    def summary_counts(self) -> dict[str, int]:
+        from scripts.init_reporter import installed_counts
+
+        config = self._load_toml(self.home() / "config.toml")
+        return installed_counts(config.get("mcp_servers", {}), agents_skills_home(), {})
+
     @staticmethod
     def _apply_managed(target: dict, recorded: dict, key: str, value, label: str) -> None:
         """Write *value* unless the operator hand-edited that key since our last write."""
@@ -382,6 +412,8 @@ class CodexAdapter:
         _i._cprint(f"[OK] Wrote managed keys into {config_path}")
 
         self._write_hooks_json(home, native.get("_agentihooks", {}).get("env", {}))
+        if trusted := trust_hooks(home):
+            _i._cprint(f"[OK] Trusted {trusted} Codex hook entries in {config_path}")
         return config_path
 
     def _write_hooks_json(self, home: Path, profile_env: dict[str, str] | None = None) -> None:
@@ -443,11 +475,6 @@ class CodexAdapter:
             return
         _atomic_write(hooks_path, text)
         _i._cprint(f"[OK] Wrote {hooks_path} ({len(CODEX_HOOK_EVENTS)} events)")
-        _i._cprint(
-            "  [!!] Codex trusts hooks by content hash: run /hooks inside codex once to "
-            "trust these (or launch automation with --dangerously-bypass-hook-trust). "
-            "Until trusted, codex SILENTLY skips them."
-        )
 
     # ------------------------------------------------------------------
     # features: skills / agents / commands / rules
@@ -768,6 +795,12 @@ class CodexAdapter:
         print(
             "  [--] Hook trust cannot be verified from outside codex — run /hooks in a "
             "codex session to confirm; untrusted hooks are SILENTLY skipped."
+        )
+        from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT
+
+        print(
+            f"  [--] Codex inbox transport: swarm create stores {APP_SERVER_TRANSPORT}; roll a swarm back "
+            f"with: agentihooks swarm <id> set codex-inbox-transport={LEGACY_TRANSPORT}"
         )
         return failed
 

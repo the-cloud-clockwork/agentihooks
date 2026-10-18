@@ -22,7 +22,14 @@ def _record(evidence: Path, run: dict) -> dict:
     folder = evidence / str(run["id"])
     record = ci_reuse._proof(folder / "proof.zip")
     jobs = ci_reuse._lines(folder / "jobs.jsonl")
-    if not ci_reuse._authenticated(folder, record, jobs):
+    producer = "reuse"
+    if run["event"] == "merge_group" and not any(
+        job["name"] == "reuse" and job["conclusion"] == "success" for job in jobs
+    ):
+        producer = (
+            "select" if any(job["name"] == "select" and job["conclusion"] == "success" for job in jobs) else "durations"
+        )
+    if not ci_reuse._authenticated(folder, record, jobs, producer=producer):
         raise ValueError("unauthenticated provenance")
     expected = {"version": 1, "run": run["id"], "attempt": run["run_attempt"], "event": run["event"]}
     if any(record.get(key) != value for key, value in expected.items()):
@@ -50,6 +57,8 @@ def _complete(evidence: Path, run: dict) -> bool:
         f"unit ({version}, {shard})" for version, count in (("3.11", 6), ("3.12", 12)) for shard in range(1, count + 1)
     }
     passed = {job["name"] for job in jobs if job["conclusion"] == "success"}
+    if any(name.startswith("reused-tests-") for name in kept):
+        return False
     return artifact_names() <= kept and expected <= passed
 
 

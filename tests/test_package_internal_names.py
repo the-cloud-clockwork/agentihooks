@@ -6,7 +6,10 @@ import pytest
 
 PACKAGE = Path(__file__).resolve().parents[1] / "profiles" / "package"
 LEAKS = re.compile(
-    r"\b(anton|smith|tcc|homeofanton|litellm|openbao|plane|manifesto|nestor|colt)\b|gateway[ _-]tools|§"
+    r"\b(anton|smith|tcc|homeofanton|litellm|openbao|plane|manifesto|nestor|colt|nestorcolt|agenticore-app)\b"
+    r"|gateway[ _-]tools|§|cloudclockwork"
+    r"|\bclockwork\b(?!(?<=github\.com/the-cloud-clockwork)/agentihooks\b(?!-)"
+    r"|(?<=//the-cloud-clockwork)\.github\.io/agentihooks\b(?!-))"
     r"|\b10\.\d+\.\d+\.\d+|\b192\.168\.\d+\.\d+|\b172\.(1[6-9]|2\d|3[01])\.\d+\.\d+|[\w.+-]+@gmail\.com",
     re.IGNORECASE,
 )
@@ -45,6 +48,19 @@ def test_package_names_nothing_internal():
         "Nestor",
         "colt",
         "someone@gmail.com",
+        "the-cloud-clockwork",
+        "The-Cloud-Clockwork/antoncore",
+        "https://github.com/the-cloud-clockwork/agentihooks-bundle/pull/1",
+        "the actor nestorcolt",
+        "agenticore-app[bot]",
+        "tcc-main-ci[bot]",
+        "runs-on: anton-oss-light",
+        "the anton-oss-queue pool",
+        "langfuse.homeofanton.com",
+        "TheCloudClockwork",
+        "repos/the-cloud-clockwork/agentihooks",
+        "the-cloud-clockwork.github.io agentihooks",
+        "clockwork/agentihooks",
     ],
 )
 def test_package_scan_turns_red_on_a_planted_name(tmp_path, planted):
@@ -55,6 +71,18 @@ def test_package_scan_turns_red_on_a_planted_name(tmp_path, planted):
     assert internal_names(tree)["skills/planted.md"] == [f"3: Written for {planted}."]
 
 
-@pytest.mark.parametrize("clean", ["planet", "airplane", "host 172.15.0.1", "10.5 seconds", "colts"])
+@pytest.mark.parametrize(
+    "clean",
+    [
+        "planet",
+        "airplane",
+        "host 172.15.0.1",
+        "10.5 seconds",
+        "colts",
+        "clockworks",
+        "https://github.com/the-cloud-clockwork/agentihooks/pull/913",
+        "https://the-cloud-clockwork.github.io/agentihooks/docs/",
+    ],
+)
 def test_package_scan_passes_words_that_only_contain_a_name(clean):
     assert not LEAKS.search(clean)

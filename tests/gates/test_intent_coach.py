@@ -1,3 +1,4 @@
+import hashlib
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -528,6 +529,7 @@ def test_an_unmoved_head_is_read_once_and_skips_the_full_view(tmp_path):
         "head": "original",
         "url": url,
         "phase": "p8",
+        "persisted_at": None,
     }
 
 
@@ -655,3 +657,88 @@ def test_a_draft_whose_pull_request_cannot_be_read_keeps_its_draft_record_and_ti
         "at": NOW - 60_000,
         "phase": "p8",
     }
+
+
+@pytest.mark.parametrize("change", [{"body": "Closes 1 and states the seam"}, {"title": "Gate merges on intent"}])
+def test_a_changed_pull_request_text_is_judged_again_on_the_same_head(tmp_path, change):
+    asked = []
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
+    coach(tmp_path, {**PR, "head": "final"}, asked).run(DOC)
+    assert len(asked) == 1
+    coach(tmp_path, {**PR, **change, "head": "final"}, asked, "pass").run(DOC)
+    assert len(asked) == 2
+    assert asked[1]["pull_request_body"] == change.get("body", PR["body"])
+    record = Verdicts(SLUG, "intent", tmp_path).read(TASK)
+    assert (record["verdict"], record["head"]) == ("pass", "final")
+    assert gate(tmp_path).allowed
+
+
+def text_check(tmp_path, views, text, asked):
+    return intent.Check(
+        SLUG,
+        "coach",
+        NOW + 1,
+        Ledger(),
+        Mail(),
+        lambda url: views.append(url) or {**PR, "body": "edited", "head": "original"},
+        lambda state: asked.append(state) or ("pass", "ok"),
+        home=tmp_path,
+        head=lambda url: "original",
+        text=text,
+    )
+
+
+def test_an_unmoved_head_with_edited_text_takes_the_full_view_and_is_judged_again(tmp_path):
+    run_check(tmp_path, "original")
+    views, asked, texts = [], [], []
+    edited = intent.text_key(PR["title"], "edited")
+    actions = text_check(tmp_path, views, lambda url: texts.append(url) or edited, asked).run(DOC)
+    url = DOC["tasks"][0]["pr_url"]
+    assert (texts, views, len(asked)) == ([url], [url], 1)
+    assert actions == [f"task {TASK} intent check pass"]
+    assert Verdicts(SLUG, "intent-coach", tmp_path).read(TASK)["text"] == edited
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_an_unmoved_head_and_text_skips_the_full_view(tmp_path, readable):
+    run_check(tmp_path, "original")
+    views, key = [], intent.text_key(PR["title"], PR["body"])
+    actions = text_check(tmp_path, views, lambda url: key if readable else None, []).run(DOC)
+    assert actions == ([] if readable else [f"task {TASK} intent check pass"])
+    assert views == ([] if readable else [DOC["tasks"][0]["pr_url"]])
+
+
+def test_a_record_without_text_and_an_unreadable_text_takes_the_full_view(tmp_path):
+    Verdicts(SLUG, "intent-coach", tmp_path).write(
+        TASK,
+        "fail",
+        "missing behavior",
+        5,
+        coach_rounds=1,
+        head="original",
+        url=DOC["tasks"][0]["pr_url"],
+        phase="p8",
+        inputs=intent._fingerprint(DOC, DOC["tasks"][0]),
+    )
+    views = []
+    actions = text_check(tmp_path, views, lambda url: None, []).run(DOC)
+    assert views == [DOC["tasks"][0]["pr_url"]]
+    assert actions == [f"task {TASK} intent check pass"]
+
+
+def test_text_lookup_reads_title_and_body_with_one_call():
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        return SimpleNamespace(returncode=0, stdout='{"title": "T", "body": null}\n')
+
+    url = "https://github.com/o/r/pull/7"
+    assert intent.pr_text(url, run) == intent.text_key("T", "")
+    assert calls == [["gh", "api", "repos/o/r/pulls/7", "--jq", "{title, body}"]]
+    assert intent.pr_text(url, lambda *a, **k: SimpleNamespace(returncode=1, stdout="")) is None
+    assert intent.pr_text("not a pull", run) is None
+    assert intent.text_key("T", None) == intent.text_key("T", "") != intent.text_key("T", "x")
+    assert intent.text_key("T", None) == hashlib.sha256(b'["T", ""]').hexdigest()
+    with_body = SimpleNamespace(returncode=0, stdout='{"title": "T", "body": "B"}\n')
+    assert intent.pr_text(url, lambda *a, **k: with_body) == intent.text_key("T", "B") != intent.text_key("T", "")

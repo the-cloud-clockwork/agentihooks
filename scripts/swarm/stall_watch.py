@@ -15,7 +15,7 @@ from dataclasses import dataclass, fields
 
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, outage, ready
+from scripts.swarm import capacity, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
 
@@ -98,6 +98,7 @@ class Watch:
     now_ms: int
     environ: dict | None = None
     post: Callable = ntfy
+    released: Callable = lambda task: True
 
 
 def _key(watch, name):
@@ -114,12 +115,26 @@ def stall_pass(watch, doc):
     if gone:
         watch.store.redis.srem(_key(watch, QUEUED), *gone)
     for task in held:
+        if _waiting(watch, task, rows):
+            continue
         actions += _pull_request(watch, mail, task, limit, marks, seen)
     actions += _unclaimed(watch, mail, rows, limit, marks, seen)
     watch.store.redis.delete(_key(watch, SEEN))
     if seen:
         watch.store.redis.hset(_key(watch, SEEN), mapping=seen)
     return actions + _escalate(watch, rows)
+
+
+def _waiting(watch, task, rows):
+    tid, owner = task["id"], task.get("claimed_by")
+    if not watch.released(task):
+        return True
+    if any(dep != tid and rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
+        return True
+    found = ready.record(watch.store, watch.slug, tid) if ready.awaiting(task) else None
+    declared = idle.wait(watch.store.redis, watch.slug, owner) if owner else None
+    held = ((found or {}).get("dependency"), (declared or {}).get("on"))
+    return any(on and waits.dependency(on, task, rows, watch.view) for on in held)
 
 
 def _minutes(watch, since):
@@ -131,6 +146,11 @@ def _since(watch, marks, seen, mark):
     return seen[mark]
 
 
+def _woken(watch, task):
+    owner = task.get("claimed_by")
+    return idle.woke(watch.store.redis, watch.slug, owner) if owner else 0
+
+
 def _stall(watch, task, pull, marks, seen, agent):
     tid, queued = task["id"], _key(watch, QUEUED)
     if pull.queued:
@@ -140,11 +160,20 @@ def _stall(watch, task, pull, marks, seen, agent):
             return None, None
         return "unmergeable", _since(watch, marks, seen, f"{tid}:unmergeable")
     marks_red = [mark for mark in (pull.pushed_at, pull.red_at) if mark is not None]
-    if pull.red and pull.resolved and not pull.queued and marks_red:
+    if (
+        pull.red
+        and pull.resolved
+        and not pull.queued
+        and marks_red
+        and not pull.latest_run_cancelled
+        and not pull.draft
+    ):
         return "red", max(marks_red)
+    if ready.awaiting(task):
+        return None, None
     if pull.resolved and not pull.red and not pull.queued and not pull.draft:
         return "green", _since(watch, marks, seen, f"{tid}:green")
-    if not ready.awaiting(task) and task.get("claimed_by") not in watch.live:
+    if task.get("claimed_by") not in watch.live:
         return "owner", _since(watch, marks, seen, f"{tid}:owner")
     return None, None
 
@@ -164,7 +193,7 @@ def _pull_request(watch, mail, task, limit, marks, seen):
     if case is None:
         return []
     if case != "owner":
-        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0)
+        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0, _woken(watch, task))
     minutes = _minutes(watch, since)
     if minutes < getattr(limit, case):
         return []
@@ -177,6 +206,8 @@ def _reopen(watch, mail, task, case, minutes, limit):
     fresh = watch.ledger.task(watch.slug, tid) or {}
     if fresh.get("state") not in HELD or (fresh.get("claimed_by") or "") != owner:
         return []
+    if case in {"green", "owner"} and ready.awaiting(fresh):
+        return []
     if outage.held(watch.store, watch.slug, owner or None):
         return []
     agent = next((a for a in watch.store.agents(watch.slug) if a.name == owner and a.state != FINISHED), None)
@@ -187,6 +218,7 @@ def _reopen(watch, mail, task, case, minutes, limit):
     )
     if reopened.get("state") != "open" or reopened.get("claimed_by"):
         return []
+    watch.store.mark_restart(watch.slug, tid, "watchdog")
     if owner:
         watch.store.release(watch.slug, tid, owner)
     if agent is not None:

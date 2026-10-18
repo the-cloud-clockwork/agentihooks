@@ -62,9 +62,32 @@ def reconcile(
     asked = _asked(environ)
     stale = [other for other in store.slugs() if naming.PROOF_RE.fullmatch(other) and (asked is None or other != slug)]
     lines = [_remove(environ, store, other, ledger, require if other == slug else None) for other in stale]
-    if asked is not None and slug not in store.slugs():
-        lines.append(_create(environ, store, slug, ledger, asked))
+    if asked is not None:
+        if slug not in store.slugs():
+            lines.append(_create(environ, store, slug, ledger, asked))
+        _configured(environ, slug, ledger, asked, require)
     return lines
+
+
+def _configured(
+    environ: Mapping[str, str],
+    slug: str,
+    ledger: ModuleType,
+    asked: dict,
+    require: Callable[[], None] | None,
+) -> None:
+    if "parent" not in asked:
+        if "control" in asked:
+            raise SwarmError("proof controls need an explicit requester parent")
+        return
+    if require is not None:
+        require()
+    owner = {key: asked[key] for key in ("agent", "task", "parent")}
+    _call(ledger.migrate, slug, owner, environ)
+    if "control" in asked:
+        if require is not None:
+            require()
+        _call(ledger.controller_control, slug, owner, asked["control"], environ)
 
 
 def choose_fresh(environ: Mapping[str, str], recovery: "Recovery") -> list[str]:
@@ -110,7 +133,7 @@ def _create(environ: Mapping[str, str], store: RedisStore, slug: str, ledger: Mo
         if created != slug:
             _call(ledger.remove, created, environ)
             raise SwarmError(f"the proof ledger is named {created} but the controller serves {slug}")
-    store.create(SwarmConfig(slug, repo, 1, 0))
+    store.create(SwarmConfig(slug, repo, 1, 0, scratch=True))
     return f"controller: created proof swarm {slug} with one engineer task"
 
 

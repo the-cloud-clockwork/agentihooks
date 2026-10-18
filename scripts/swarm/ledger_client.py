@@ -85,8 +85,10 @@ class LedgerClient:
     def hierarchy(self, slug):
         return self._resource(slug, "hierarchy", collection=True)
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         guard = {"if_state": list(if_state)} if if_state else {}
+        if if_match is not None:
+            guard["if_match"] = if_match
         state = self._call(slug, [_op("task_update", by, item=f"tasks/{task_id}", fields=fields, **guard)])
         return next((t for t in state.get("tasks", []) if t["id"] == task_id), {})
 
@@ -157,6 +159,12 @@ class LedgerClient:
 
     def notify(self, slug, text):
         self._call(slug, [_op("notice", "swarm", text=text)])
+
+    def raise_alert(self, slug, source, text):
+        self._call(slug, [_op("alert_raise", "swarm", source=source, text=text)])
+
+    def close_alert(self, slug, alert_id, outcome):
+        self._call(slug, [_op("alert_close", "swarm", target=alert_id, outcome=outcome)])
 
     def followup(self, slug, text, needs_operator=False):
         flag = {"needs_operator": True} if needs_operator else {}

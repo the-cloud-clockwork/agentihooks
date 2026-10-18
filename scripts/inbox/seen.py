@@ -76,11 +76,11 @@ def first_showing(marks, name, slug, events):
 
 
 def claim(store, me):
-    """Deliver each item pending for me, its seat and aliases included; a ledger write already shown closes instead."""
+    """Deliver at most five oldest pending items across me, my seat and aliases; close ledger writes already shown."""
     store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
-    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
+    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:5])):
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:

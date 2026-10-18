@@ -5,8 +5,8 @@ description: >
   planning, with PR sized tasks in the eng and ci lanes, then create and start the swarm. Takes
   code plans and plans for ops, troubleshooting, tuning or research work, whose
   tasks carry a kind and a proof contract. Use when the operator says
-  "init swarm", "init-swarm", "start a swarm for this plan", or hands over an
-  accepted plan to run with agents.
+  "init swarm", "init-swarm", "start a swarm for this plan", or asks for an
+  accepted plan to be run by agents.
 argument-hint: "<plan-file> --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]"
 ---
 

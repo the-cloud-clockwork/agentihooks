@@ -48,6 +48,7 @@ def status(**changes):
             "max_eng": 3,
             "max_ci": 1,
             "max_plan": 1,
+            "masters_step": 12,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -230,6 +231,20 @@ def test_header_names_the_swarm_state_tick_controls_and_autonomy(open_page):
     assert page.puts == [{"action": "set", "autonomy": "manual"}]
 
 
+@pytest.mark.parametrize(
+    "completed,activity,expected",
+    [
+        (NOW_MS - 1_200_000, NOW_MS - 2_000, "tick activity 2s ago · completed 20m ago"),
+        (0, NOW_MS - 2_000, "tick activity 2s ago · no completed tick"),
+        (NOW_MS - 12_000, NOW_MS - 20_000, "tick 12s ago"),
+    ],
+)
+def test_tick_label_distinguishes_recent_activity_from_completion(open_page, completed, activity, expected):
+    page = open_page(status(last_tick=completed, last_tick_activity=activity), width=1920)
+    page.tab.set_viewport_size({"width": 1920, "height": 1080})
+    assert page.text("#swarm-tick") == expected
+
+
 def test_alert_line_shows_only_while_a_finding_is_open_with_the_live_caps(open_page):
     assert not open_page().tab.locator("#swarm-alert").is_visible()
     finding = {
@@ -275,6 +290,20 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
         page.tab.wait_for_timeout(100)
     assert page.puts == [{"action": "set", "max_eng": 5, "max_ci": 2, "compact_limit": 750}]
     assert apply.is_disabled()
+
+
+def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
+    page = open_page()
+    field = page.tab.locator("#cap-masters")
+    assert field.input_value() == "12"
+    page.tab.get_by_role("button", name="Lower masters step").click()
+    assert field.input_value() == "11"
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "masters_step": 11}]
 
 
 def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
@@ -364,8 +393,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 10
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][8:]
+    assert len(boxes["row"]) == 11
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -387,13 +416,14 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "—", "opus high", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["master-1", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
         [
             "eng-58",
             "eng",
             "—",
             "qitp-tuner · trader · reviewer",
             "opus high",
+            "—",
             "pb10",
             "IDLE",
             "1m",
@@ -419,6 +449,21 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     ]
 
 
+def test_agents_table_shows_push_inbox_and_native_terminal_for_each_agent(open_page):
+    payload = status()
+    payload["agents"][0]["capabilities"] = {"push_inbox": True, "native_terminal_attach": False}
+    payload["agents"][1]["capabilities"] = {"push_inbox": False, "native_terminal_attach": True}
+    page = open_page(payload)
+    cells = page.tab.eval_on_selector_all(
+        "#swarm-agents tr",
+        "rows => rows.map(r => [...r.querySelectorAll('.sw-transport .lbl')].map(l => [l.textContent, l.className]))",
+    )
+    assert cells == [
+        [["push", "lbl on"], ["no native terminal", "lbl off"]],
+        [["no push", "lbl off"], ["native terminal", "lbl on"]],
+    ]
+
+
 def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_view_as_live(open_page):
     payload = status()
     fresh = {"state": "live", "checked_at": NOW_MS - 30_000, "live_at": NOW_MS - 30_000, "fresh_ms": 30_000}
@@ -428,8 +473,8 @@ def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_vie
     }
     page = open_page(payload, clock=True)
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
-    assert heads[6:10] == ["state", "execution", "terminal", "age"]
-    assert [row[8] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
+    assert heads[7:11] == ["state", "execution", "terminal", "age"]
+    assert [row[9] for row in page.table("swarm-agents")] == ["CACHED live 1m ago · stale", "LIVE"]
     payload["terminals"] = {
         "master-1": {
             "state": "unverified",
@@ -441,7 +486,7 @@ def test_agents_table_shows_live_terminals_and_never_shows_an_aged_or_failed_vie
         "eng-58": {**fresh, "state": "cached", "live_at": NOW_MS - 120_000, "reason": "conversation_mismatch"},
     }
     page = open_page(payload, clock=True)
-    assert [row[8] for row in page.table("swarm-agents")] == [
+    assert [row[9] for row in page.table("swarm-agents")] == [
         "UNVERIFIED unreachable",
         "CACHED live 2m ago · conversation mismatch",
     ]
@@ -499,12 +544,13 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     }
     page = open_page(payload, clock=True)
     heads = page.tab.eval_on_selector_all("#agents-table thead th", "ths => ths.map(t => t.innerText.trim())")
-    assert heads[:10] == [
+    assert heads[:11] == [
         "agent",
         "lane",
         "profile",
         "overlays",
         "model",
+        "transport",
         "task",
         "state",
         "execution",
@@ -512,7 +558,7 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
         "age",
     ]
     rows = page.table("swarm-agents")
-    assert [row[:2] + row[6:9] for row in rows] == [
+    assert [row[:2] + row[7:10] for row in rows] == [
         ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
         ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
         [
@@ -540,8 +586,8 @@ def test_a_remote_agent_without_a_terminal_view_still_shows_the_execution_column
         }
     }
     page = open_page(payload, clock=True)
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 11
-    assert [row[7:9] for row in page.table("swarm-agents")] == [
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 12
+    assert [row[8:10] for row in page.table("swarm-agents")] == [
         ["—", "—"],
         ["STARTING seen 1m ago\nkubernetes · gen 2 · standard", "—"],
     ]
@@ -562,14 +608,14 @@ def test_a_local_only_swarm_keeps_the_familiar_agents_table(open_page):
         for a in payload["agents"]
     }
     page = open_page(payload)
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 10
     assert "execution" not in page.text("#agents-table thead")
 
 
-def test_an_agents_table_without_agents_spans_all_nine_columns(open_page):
+def test_an_agents_table_without_agents_spans_all_ten_columns(open_page):
     page = open_page(status(agents=[]))
-    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 9
-    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 9
+    assert page.tab.eval_on_selector("#swarm-agents td", "td => td.colSpan") == 10
+    assert page.tab.eval_on_selector_all("#agents-table th", "ths => ths.length") == 10
 
 
 def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest_first(open_page):
@@ -592,7 +638,7 @@ def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest
     rows = page.table("swarm-agents")
     assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
     assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
-    assert all(row[6] == "FINISHED" and row[8] == "" for row in rows[2:52])
+    assert all(row[7] == "FINISHED" and row[9] == "" for row in rows[2:52])
     assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
     assert page.text("#agents-count").lower() == "2 live · 120 finished"
     page.tab.locator("#swarm-agents .page-more button").click()
@@ -637,10 +683,11 @@ def test_overlays_box_lists_every_base_role_with_the_overlays_that_wear_it(open_
         ["planner", [["reviewer", "false", False]], ""],
         ["qa", [["qitp-tuner", "false", False]], ""],
         ["cicd", [["sre", "false", False]], ""],
+        ["documentation", [], none],
     ]
     assert page.tab.locator("#overlays-apply").is_disabled()
     payload = status(overlays_available=[])
-    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 5
+    assert [row[2] for row in overlay_rows(open_page(payload))] == [none] * 6
 
 
 def test_overlay_names_start_at_the_role_text_edge(open_page):
@@ -651,7 +698,7 @@ def test_overlay_names_start_at_the_role_text_edge(open_page):
           const range = document.createRange(); range.selectNodeContents(t);
           return Math.round(range.getBoundingClientRect().left); })""",
     )
-    assert len(edges) == 5
+    assert len(edges) == 6
     assert len(set(edges)) == 1
 
 
@@ -814,6 +861,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["eng", ["−", "3", "+"]],
         ["ci", ["−", "1", "+"]],
         ["plan", ["−", "1", "+"]],
+        ["masters step", ["−", "12", "+"]],
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],

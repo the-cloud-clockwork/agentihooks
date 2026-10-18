@@ -1,0 +1,272 @@
+---
+title: Managed Codex terminals
+parent: Reference
+nav_order: 16
+---
+
+# Managed Codex terminals and push masters
+
+A Codex swarm execution using `app_server` runs through a supervised server.
+Herdr displays a native Codex terminal attached to that execution's recorded
+thread. Closing the terminal closes the viewer; the server and inbox delivery
+continue. Reopening the viewer attaches to the same thread.
+An unsent draft belongs to the viewer: inbox delivery preserves it while the
+viewer stays open, but closing and reopening the viewer does not restore it.
+
+## Runtime dependencies
+
+The installed `agentihooks` tool includes `websockets>=15.0` as a runtime
+dependency. Managed app-server launches can therefore connect without installing
+development extras. The client uses `websockets.sync.client` when it connects;
+an installation missing that package fails at connection time, even if importing
+the protocol module alone succeeds.
+
+Use the [installed tool setup and import check](../getting-started/installation.md#installed-tool-and-codex-app-server-dependencies)
+to verify the CLI's environment. Installing the package in a separate workspace
+venv does not repair the uv tool environment.
+
+Worker images install a hashed runtime lock before installing AgentiHooks with
+`--no-deps`. The delivered dependency change pins `websockets==17.2` in that
+worker lock and updates its recorded checksum. The runtime dependency coverage
+check scans imports across the Codex session package and app-server probe,
+maps third party imports to distributions, and requires them in both the
+runtime dependency set and the worker lock. This keeps future client imports
+from silently depending on development-only packages.
+
+The delivery proof for [the runtime dependency fix](https://github.com/the-cloud-clockwork/agentihooks/pull/3552)
+verified a fresh tool install without development extras, imported
+`websockets.sync.client`, and launched an admitted Codex worker on an isolated
+scratch swarm. Its supervisor reached `state=connected` with a thread recorded
+and its mounted profile validated. An import check alone does not establish
+that a live execution connected or that inbox delivery works.
+
+## Choose the transport
+
+The swarm setting `codex-inbox-transport` accepts `app_server` (what
+`swarm create` stores) or `legacy`. A swarm that stored `legacy` keeps it; set it before launching the
+Codex agents that should receive inbox work in their thread:
+
+```bash
+agentihooks swarm <id> set codex-inbox-transport=app_server
+```
+
+The launch records the chosen transport. Changing the setting affects subsequent
+executions; it does not convert a running session. To select legacy for
+subsequent launches (the full rollback is in
+[Codex inbox transport](codex-inbox-transport.md#roll-back)):
+
+```bash
+agentihooks swarm <id> set codex-inbox-transport=legacy
+```
+
+The swarm launch path passes `--codex-transport app_server` and the admitted
+seat to `init-agent`. This flag is for a managed swarm execution, which needs
+its swarm identity and admission; it is not a standalone terminal switch.
+
+After the next admitted launch, inspect its recorded transport and state:
+
+```bash
+agentihooks swarm <id> status --json
+```
+
+Check the selected transport in status, then confirm the supervisor's launch
+log reports `state=connected` with its execution, endpoint and thread.
+For an end to end inbox check, follow the
+[scratch swarm canary order](codex-inbox-transport.md#canary-order) and confirm
+an item is answered from that thread. Keep the proof isolated from live work.
+
+Delivery and attachment depend on the recorded harness and transport:
+
+| Execution | Push inbox | Native remote terminal attachment | Foreground inbox wait |
+|---|---|---|---|
+| Claude | Yes, through its channel | No | No |
+| Codex `app_server` | Yes, through its managed transport | Yes | No |
+| Codex `legacy` | No | No | Yes for the master's inbox loop |
+
+The inbox waker skips pane typing when the execution's transport owns push
+delivery. Master panes are never typed into by that worker wake path. An unsent
+draft in the viewer is separate from incoming inbox work.
+
+## Open and reopen a viewer
+
+The managed launch starts the server separately and runs the attach helper in
+the foreground of its herdr pane. To reopen a local managed Codex execution,
+use its recorded execution identity:
+
+```bash
+agentihooks swarm <id> terminal <execution-id>
+```
+
+For a connected local execution this opens a herdr tab in the swarm workspace
+and prints JSON containing `agent`, `thread` and `pane`. The viewer runs
+`codex resume --remote` with the recorded endpoint and thread, with the Codex
+update check turned off so a new Codex release never stops it at the update
+prompt. It does not create a new conversation. The same command retains the
+existing worker-terminal path for Kubernetes executions; see
+[Swarm](../pillars/swarm.md).
+
+For attachment diagnostics, the launcher helper can wait for the recorded thread:
+
+```bash
+python -m scripts.codex_session attach \
+  --slug <id> \
+  --agent <registered-agent-name> \
+  --timeout 120
+```
+
+It polls every half second for a connected transport with a thread id. The
+default timeout is 120 seconds. `--codex-bin` selects the Codex executable.
+A viewer that exits nonzero in under five seconds is retried, up to three
+attempts, because a newly created thread may not yet have a resumable rollout.
+A successful exit or a viewer that stayed open at least five seconds returns
+its exit status without another attempt.
+
+## Work as a push master
+
+A push-mode Codex master's opening prompt tells it to read `agentihooks msg
+inbox`, handle every open item, then end its turn when no work remains. New
+items arrive in that thread after the turn finishes. It must not enter
+`agentihooks swarm <id> wait --inbox`, including when older profile text asks
+for that loop.
+
+Receipt does not settle an action item. Read and answer it through the inbox:
+
+```bash
+agentihooks msg inbox
+agentihooks msg read <item-id>
+agentihooks msg reply <item-id> "The requested work is complete."
+```
+
+An explicit dependency still uses the normal swarm wait, for example:
+
+```bash
+agentihooks swarm <id> wait --on checks <pull-request-url>
+```
+
+Waits on a reply or another task remain available too. A legacy Codex master
+retains its foreground `wait --inbox` loop.
+
+Push-mode handoff rendering replaces a Next instruction to rearm a Monitor
+with reading the inbox. The transfer's expected first Next action receives the
+same rewrite, so continuity confirmation compares the rendered action exactly.
+Legacy rendering retains the foreground inbox wait. New push-master handoffs
+should make their first Next action read `agentihooks msg inbox`.
+
+## Profile check in the execution home
+
+Every profiled launch asks the agent to validate its mounted profile with the
+binding canary command written into its instructions. For an `app_server`
+execution the check runs against the execution home, a private copy of the
+shared rendered profile home, not the shared home itself.
+
+1. `init-agent` writes the launch request to a private report file under the
+   runtime folder and names it in `AGENTIHOOKS_PROFILE_REPORT`. The request
+   records the profile, the harness, `state: pending` and the shared rendered
+   home's binding evidence, its canary included.
+2. The supervisor copies the shared home into the execution home with mode
+   `0700`. The copy's binding evidence names the execution home; the shared
+   home's evidence is left unchanged.
+3. When the launch environment names a report, the supervisor re-records the
+   request against the execution home (`binding.rehome`). It re-inspects the
+   execution home's rendered evidence and keeps the request only when its
+   canary equals the canary recorded at launch. The report's `rendered` block
+   then names the execution home; its canary, profile, harness and pending
+   state are unchanged.
+4. The server starts with `CODEX_HOME` set to the execution home. When the
+   agent runs its canary command, validation compares the live process home
+   with the recorded home. Both name the execution home, so the check passes
+   and the report moves to `state: validated`.
+
+A launch whose environment names no report (an unprofiled launch) skips the
+re-record, and the report file is never touched. Legacy Codex launches never
+pass through the supervisor, so their request keeps the rendered home they
+started with.
+
+The execution home is `<execution folder>/codex`. The execution folder is the
+parent of the server's socket, which the supervisor's launch line prints as
+`endpoint=unix://<path>`. Sockets sit under `$XDG_RUNTIME_DIR/cx` when that
+variable is set, else under `~/.agentihooks/cx`.
+
+### Refusals
+
+When the execution home's evidence cannot be confirmed, the supervisor marks
+the pending request `state: failed` with the reason and the launch fails: the
+transport binding is recorded `failed`, the agent is dropped and the execution
+folder is removed. The reasons are:
+
+| Reason | Cause |
+|---|---|
+| `execution home canary differs from the launch request` | The execution home's instructions carry another canary than the shared home did at launch: the profile was rendered again between the request and the execution home. |
+| `profile mismatch in rendered binding` | The execution home's evidence names another profile, harness or home than the request: the shared home was rendered for another profile or harness after the request was written. |
+| `mounted persona changed since render`, `rendered source manifest changed`, `missing or invalid rendered profile evidence: …` | The execution home's instructions or source manifest no longer match its evidence, or the evidence file is missing or unreadable. |
+
+The reason is written to the report, so `init-agent` prints
+`profile_validation=failed` and `agentihooks init-agent: <reason>` and exits 3.
+Read the reason there or in the report. Known gap: the supervisor process
+does not print the `agentihooks codex-session: launch refused:` line other
+launch refusals print; a follow up on the ledger tracks it.
+
+A failure while copying the home (an `OSError` from the copy) refuses no
+request: the report stays `pending`, and `init-agent` fails with
+`mounted profile canary did not validate before timeout`.
+
+### Read the result
+
+From inside the agent session:
+
+```bash
+agentihooks profile binding
+```
+
+It prints the session home's profile, harness, persona and source digests,
+the routed account and the report state (`pending`, `validated` or
+`failed: <reason>`), never an environment value. Point `--home` at an
+execution home to check its evidence without a report:
+
+```bash
+agentihooks profile binding --home <execution folder>/codex
+```
+
+That states `rendered` or `invalid: <reason>`. A home with no evidence file
+prints `ERROR:` with the read error and exits 1.
+
+The delivered behaviour is
+[pull request 3533](https://github.com/the-cloud-clockwork/agentihooks/pull/3533),
+covered by `test_rehomed_request_validates_against_the_execution_copy`,
+`test_rehome_refuses_and_marks_an_invalid_execution_copy` and
+`test_execution_home_rerecords_the_profile_report_for_the_copy`. Those tests
+run against fixture homes; no live `app_server` launch passing its profile
+check is cited here.
+
+## Lifecycle and failures
+
+Reopening a viewer and retiring an execution are separate operations. Managed
+execution retirement uses its supervised runtime. The ordinary runtime resume
+path refuses a managed execution with `unsupported resume: a managed Codex
+execution continues through its supervised server`. Use terminal reopening for
+a live execution. Renaming a managed agent renames its herdr pane and registry
+identity without typing a session-name command into the viewer.
+
+The live qualification also recorded these viewer limits:
+
+- Initial launch can leave its `/rename` command in the composer while the
+  server starts work; the recorded thread remains the attachment identity.
+- Retiring the execution can leave a reopened viewer showing
+  `Reconnecting to server…`. Close that viewer pane separately.
+- A Codex update prompt can interrupt attachment. Dismiss or complete it in
+  the viewer before checking the conversation history.
+
+| Symptom | Meaning and action |
+|---|---|
+| Launch fails with `ModuleNotFoundError: No module named 'websockets'` | The launching tool environment lacks its runtime dependency. Update the checkout to a revision containing the dependency fix, reinstall the tool using the installation instructions, and repeat the tool Python import check before retrying an admitted launch. Installing development extras in another venv does not fix this environment. |
+| Profile check fails with `live process binding changed since validation` on an `app_server` execution | The report records a home other than the execution home. A revision without the execution home re-record step produces this on every launch; update to one that contains it. See [Profile check in the execution home](#profile-check-in-the-execution-home). |
+| Launch fails with `execution home canary differs from the launch request` | The profile was rendered again between the launch request and the execution home. Relaunch; the new request records the current canary. |
+| Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
+| Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
+| Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |
+| Agent runs no attachable app-server | The recorded harness or transport lacks native terminal attachment. Use its normal terminal path. |
+| Closing a viewer leaves the agent working | Expected: the viewer does not own execution lifetime or inbox delivery. |
+
+See [Swarm inbox delivery](../pillars/swarm.md#delivered-then-confirmed) for
+receipt, redelivery and closure rules, and [Codex compatibility](CODEX-COMPAT.md)
+for the hook and profile contract.

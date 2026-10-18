@@ -255,10 +255,10 @@ def test_pass_goes_on_past_a_refused_task(asked):
     asked("S", 0.9)
 
     class Refusing(FakeLedger):
-        def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
             if task_id == "a":
                 raise LedgerRefused("refused")
-            return super().update_task(slug, task_id, fields, by, if_state)
+            return super().update_task(slug, task_id, fields, by, if_state, if_match)
 
     ledger = Refusing([{**TASK, "id": "a"}, {**TASK, "id": "b"}])
     assert difficulty.size_pass("sw", ledger, {**DOC, "tasks": ledger.tasks("sw")}) == [

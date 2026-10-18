@@ -17,9 +17,15 @@ hive=(python -c "import sys; from scripts.hive.cli import main; sys.exit(main(sy
 openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$run-hive" -addext "subjectAltName=DNS:$run-hive" \
   -keyout "$tls/key.pem" -out "$tls/cert.pem" 2>/dev/null
 chmod 0644 "$tls/cert.pem"
-docker build --progress=plain -t "$image" .
+bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine
+if [[ -n "${SWARM_SMOKE_IMAGE:-}" ]]; then
+  docker tag "$SWARM_SMOKE_IMAGE" "$image"
+else
+  bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm
+  docker build --progress=plain -t "$image" .
+fi
 docker network create "$run" >/dev/null
-docker run -d --name "$run-redis" --network "$run" mirror.gcr.io/library/redis:7-alpine >/dev/null
+docker run --pull never -d --name "$run-redis" --network "$run" mirror.gcr.io/library/redis:7-alpine >/dev/null
 docker run -d --name "$run-hive" --network "$run" --user "$(id -u):$(id -g)" -v "$tls:/tls:ro" \
   -e AGENTIHOOKS_SWARM_REDIS_URL="redis://$run-redis:6379/0" \
   "$image" "${hive[@]}" serve --host 0.0.0.0 --port 8770 --tls-cert /tls/cert.pem --tls-key /tls/key.pem >/dev/null
@@ -53,10 +59,15 @@ member_id="${member_id%%;*}"
 docker exec -i -e JOINED="$joined" "$run-member" python - <<'PY'
 import os
 import stat
+import time
 from pathlib import Path
+from types import SimpleNamespace
 
 import redis
 
+from scripts.hive import daemon, orders, registry
+from scripts.inbox.store import InboxStore
+from scripts.swarm import idle
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import redis_client
 
@@ -67,16 +78,52 @@ assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in os.environ["JOINED"]
 assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in os.environ["JOINED"]
 print("hive.env: mode 0600, credentials absent from the join output")
 client = redis_client()
-assert client.acl_whoami() == f"hive-{env['AGENTIHOOKS_HIVE_ID']}"
-assert client.set(f"{ROOT}:hive-proof", "1")
-print(f"Redis as {client.acl_whoami()}: SET under {ROOT}: allowed")
-for command in (("FLUSHALL",), ("CONFIG", "GET", "maxmemory"), ("SET", "outside", "1"), ("SET", f"{ROOT}-hive:invite:forged", "1"), ("ACL", "LIST")):
+member = env["AGENTIHOOKS_HIVE_ID"]
+assert client.acl_whoami() == f"hive-{member}"
+for command in (
+    ("HSET", f"{ROOT}:swarm:proof:agents", "eng-1", '{"hive": "forged"}'),
+    ("HSET", f"{ROOT}:swarm:proof:executions", "forged", "{}"),
+    ("HSET", f"{ROOT}:hive:other-member", "heartbeat_at", "1"),
+    ("SREM", f"{ROOT}:hives", member),
+    ("SADD", f"{ROOT}:hives", "forged"),
+    ("PEXPIRE", f"{ROOT}:launch-slot:forged", "45000"),
+    ("SET", f"{ROOT}:hive-proof", "1"),
+    ("FLUSHALL",),
+    ("CONFIG", "GET", "maxmemory"),
+    ("SET", "outside", "1"),
+    ("SET", f"{ROOT}-hive:invite:forged", "1"),
+    ("ACL", "LIST"),
+):
     try:
         client.execute_command(*command)
     except redis.exceptions.NoPermissionError as refused:
         print(f"{command[0]}: refused ({refused})")
     else:
         raise SystemExit(f"{command[0]} was allowed for a hive member")
+os.environ.update(AGENTIHOOKS_HIVE_ID=member, AGENTIHOOKS_HIVE_REDIS_URL=env["AGENTIHOOKS_HIVE_REDIS_URL"])
+assert daemon.hive_id() == member
+
+
+class NoOrders:
+    runtime = SimpleNamespace(herdr=None)
+
+    def poll(self):
+        return 0
+
+    def poll_commands(self):
+        return 0
+
+
+orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders())
+daemon.execution_report = lambda redis, local_id, herdr: {"names": [], "panes": {}, "executions": {}}
+daemon.beat(client, member)
+assert registry.live(registry.show(client, member), int(time.time() * 1000))
+assert member in client.smembers(registry.INDEX)
+idle.beat(client, "proof", "member-agent", "working", 1)
+item = InboxStore(client).send("member-agent", "master@proof", "hello from the member")
+assert [mail.id for mail in InboxStore(client).open_items("master@proof")] == [item.id]
+assert client.hgetall(f"{ROOT}:swarm:proof:agents") == {}
+print(f"Redis as {client.acl_whoami()}: own hive heartbeat, agent heartbeat, inbox send and agent record reads allowed")
 PY
 
 if docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code" 2>/dev/null; then

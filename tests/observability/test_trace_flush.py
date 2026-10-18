@@ -621,8 +621,13 @@ def test_flush_once_reports_pending_work(monkeypatch, home):
 def test_stopped_codex_cursor_replays_all_pages_once(home, monkeypatch):
     from tests.observability.test_trace_paging import Receiver, _codex, _line
 
+    monkeypatch.setattr(trace_flush.time, "monotonic", Clock())
     transcript = home / "rollout.jsonl"
     transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+    monkeypatch.setattr(
+        agent_trace, "identity_from_env", lambda session: agent_trace.Identity(session_id=session, account="test")
+    )
     receiver = Receiver()
     monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
     monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)

@@ -3,14 +3,14 @@ import { $, age, clock, h, newId, span } from "./dom.js";
 import { readRouting, writeRouting, writeSwarm } from "./api.js";
 import { renderStats } from "./render.js";
 import { renderChatTo } from "./chat.js";
-import { clearNoteError, renderControls, renderGates, showNote } from "./controls.js";
+import { appliedCaps, clearNoteError, renderControls, renderGates, settleCaps, showNote } from "./controls.js";
 import { firstPage, moreButton, wanted } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
-const ROLES = ["master", "engineer", "planner", "qa", "cicd"];
+const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
 const OVERLAY_CAP = 3;
 const VERDICTS = ["false-positive", "early-real", "established", "insufficient-evidence", "resolved"];
 const VERDICT_TEXT = { "false-positive": "FP", "early-real": "early real", established: "established", "insufficient-evidence": "insufficient", resolved: "resolved" };
@@ -18,7 +18,7 @@ export let swarm = null;
 let swarmReadError = false;
 export let pending = "";
 
-export let capDraft = {};
+export const capDraft = {};
 export let overlayDraft = {};
 
 export function receiveSwarm(sw) {
@@ -27,6 +27,7 @@ export function receiveSwarm(sw) {
   swarmReadError = false;
   clearNoteError();
   const resend = reconcile(sw);
+  settleCaps(sw);
   renderSwarm(sw);
   renderChatTo(sw);
   if (resend && !pending) swarmControl(resend, resend.control);
@@ -53,7 +54,7 @@ export async function swarmControl(body, op = body.action) {
     settle(body);
     if (resp.ok) {
       swarm = await resp.json();
-      if (op === "apply") capDraft = {};
+      if (op === "apply") appliedCaps(body, swarm);
       if (op === "overlays") overlayDraft = {};
       showNote("queued", op);
     } else {
@@ -136,7 +137,7 @@ function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master", offer = sw.lifecycle && sw.lifecycle.agents && sw.lifecycle.agents[a.name];
-    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", task: master ? "" : a.task || "",
+    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: a.capabilities || null, task: master ? "" : a.task || "", remoteControl: master && a.remote_control && a.remote_control.state ? a.remote_control : null,
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
       finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now),
       execution: executionView((sw.executions || {})[a.name], now), lifecycle: offer ? { offer, controls: sw.lifecycle.controls.filter((c) => c.action in offer.disabled), terminate: !!offer.terminate } : null };
@@ -144,10 +145,13 @@ function agentRows(sw, now) {
 }
 
 function agentRow(a, remote) {
-  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state),
+  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), label("promoted")) : label(a.state),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
 }
+
+const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
+  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";
@@ -292,13 +296,23 @@ function seatText(seat) {
   return seat.startsWith("master@") ? seat : seat.split("@")[0].replace(/-(\d+)$/, " $1");
 }
 
+function tickText(sw, now) {
+  if (!sw) return "";
+  const completed = sw.last_tick || 0, activity = sw.last_tick_activity || 0;
+  if (activity > completed) {
+    const previous = completed ? `completed ${age(now - completed)} ago` : "no completed tick";
+    return `tick activity ${age(now - activity)} ago · ${previous}`;
+  }
+  return completed ? `tick ${age(now - completed)} ago` : "tick not recorded";
+}
+
 export function renderSwarm(sw) {
   swarm = sw;
   const state = sw ? sw.config.state : "unavailable";
   $("swarm-state").className = `sw-state ${state}`;
   $("swarm-state").textContent = state;
   $("swarm-name").textContent = (sw && (sw.config.name || sw.config.slug)) || SLUG;
-  $("swarm-tick").textContent = !sw ? "" : sw.last_tick ? `tick ${age(Date.now() - sw.last_tick)} ago` : "tick not recorded";
+  $("swarm-tick").textContent = tickText(sw, Date.now());
   $("tab-swarm").replaceChildren(...["Swarm ", h("span", { class: $("swarm-state").className, text: state }),
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
@@ -308,7 +322,7 @@ export function renderSwarm(sw) {
   renderFreezes();
   if (!sw) {
     terminalHead(false);
-    $("swarm-agents").replaceChildren(emptyRow(9, "No agents running. Start the swarm to work the open tasks."));
+    $("swarm-agents").replaceChildren(emptyRow(10, "No agents running. Start the swarm to work the open tasks."));
     renderOverlays(sw);
     return;
   }
@@ -328,7 +342,7 @@ export function renderSwarm(sw) {
 
 function terminalHead(remote) {
   const head = $("agents-table").querySelector("thead tr"), found = head.querySelector("[data-terminal]");
-  if (remote && !found) head.children[6].after(h("th", { "data-execution": "", text: "execution" }), h("th", { "data-terminal": "", text: "terminal" }));
+  if (remote && !found) head.querySelector(".ag-state").after(h("th", { "data-execution": "", text: "execution" }), h("th", { "data-terminal": "", text: "terminal" }));
   if (!remote && found) head.querySelectorAll("[data-execution], [data-terminal]").forEach((th) => th.remove());
   if (remote !== !!found) document.dispatchEvent(new Event("columns"));
 }
@@ -336,7 +350,7 @@ function terminalHead(remote) {
 function renderAgents(sw, now = Date.now()) {
   const agents = agentRows(sw, now), live = agents.filter((a) => !a.finished), finished = agents.filter((a) => a.finished).sort((x, y) => y.since - x.since);
   $("agents-count").textContent = finished.length ? `${live.length} live · ${finished.length} finished` : `${live.length} live`;
-  const remote = remoteSwarm(sw), columns = remote ? 11 : 9, row = (a) => agentRow(a, remote);
+  const remote = remoteSwarm(sw), columns = remote ? 12 : 10, row = (a) => agentRow(a, remote);
   terminalHead(remote);
   $("swarm-agents").replaceChildren(...(live.length ? live.map(row) : [emptyRow(columns, "No agents running. Start the swarm to work the open tasks.")]),
     ...firstPage("agents", finished, (a) => `agent-${a.name}`).map(row), moreRow("agents", finished.length, "more finished agents", columns, () => renderAgents(swarm)) || "");
@@ -351,12 +365,12 @@ function renderHealth(findings, now = Date.now()) {
 
 function healthRow(f, now) {
   const earlier = f.verdict || {};
-  const pick = h("select", { class: "hl-pick", "aria-label": `Verdict on ${f.kind} ${f.subject}`, "data-verdict": f.id },
-    h("option", { value: "", text: "?" }), ...VERDICTS.map((v) => h("option", { value: v, text: VERDICT_TEXT[v] })));
+  const pick = h("select", { class: "hl-pick", "aria-label": `Verdict on ${f.kind} ${f.subject}`, "data-verdict": f.id }, h("option", { value: "", text: "?" }), ...VERDICTS.map((v) => h("option", { value: v, text: VERDICT_TEXT[v] })));
   pick.value = earlier.value || "";
   const note = h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "—", "aria-label": `Verdict note on ${f.kind} ${f.subject}` });
   note.value = earlier.note || "";
-  return cells(f.kind, idCell(f.subject), (f.evidence || []).join(" · ") || f.summary, f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
+  return cells(f.kind, idCell(f.subject), h("div", {}, h("div", { text: (f.evidence || []).join(" · ") || f.summary }), ...(f.links || []).filter((link) => /^https?:\/\//.test(link.url || "")).map((link) =>
+      h("div", {}, h("a", { href: link.url, target: "_blank", rel: "noopener", text: link.label })))), f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
 }
 
 function renderHandoffs(rows) {

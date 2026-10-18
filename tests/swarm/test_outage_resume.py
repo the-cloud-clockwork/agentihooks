@@ -208,7 +208,9 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
 
 
 @pytest.mark.parametrize("error_state", ["idle", "waiting"])
-def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store, error_state):
+def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_free_the_seat(
+    store, error_state
+):
     from scripts.swarm.store import RedisStore
 
     ledger, runtime, agents = three_owners(store)
@@ -228,10 +230,13 @@ def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_tim
         tick("sw", store, ledger, runtime, at * MINUTE)
         idle.beat(store.redis, "sw", stuck.name, "idle", at * MINUTE + 1)
     assert runtime.nudged.count(stuck.name) == 3
+    assert store.claimant("sw", stuck.task) == stuck.name
     tick("sw", store, ledger, runtime, 13 * MINUTE)
     assert runtime.nudged.count(stuck.name) == 3
-    assert next(agent for agent in store.agents("sw") if agent.name == stuck.name).idle_ticks == 1
-    assert store.claimant("sw", stuck.task) == stuck.name
+    assert stuck.name in runtime.killed
+    assert stuck.name not in {agent.name for agent in store.agents("sw")}
+    assert store.claimant("sw", stuck.task) is None
+    assert ledger.rows[stuck.task]["state"] == "open"
 
 
 def test_a_new_task_generation_fences_the_recovery_pass(store):

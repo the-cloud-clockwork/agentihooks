@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/runtime.py:scripts.doctor.runtime.x__allocated__mutmut_5:879e22f5fd8aabf271a076c51c4d6a274c8dc5382cf064acc5fa32eb1da2a6fa": {
+    "reader": "Standards",
+    "reason": "Standards final ruling: os.walk treats followlinks None as false, identical to explicit False; no traversal or public output changes."
+  }
+}

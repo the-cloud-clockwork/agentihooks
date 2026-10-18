@@ -1,0 +1,6 @@
+{
+  "hooks/context/scheduled_broadcasts.py:hooks.context.scheduled_broadcasts.x_merge__mutmut_11:9c7aa2554d324a69239fc55752fa4507bb6fe962820ec2edc29045038019b398": {
+    "reader": "Standards",
+    "reason": "Only SQL keyword capitalization changes. SQLite keywords are case-insensitive; selected value, table, predicate and bound parameter remain identical."
+  }
+}

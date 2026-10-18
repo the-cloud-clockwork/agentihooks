@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/proof_ledger.py:scripts.swarm_ledger.proof_ledger.x_control__mutmut_26:b97952ded25434533d66c8f382c6df66a600e47e311a46772052323dd699baf3": {
+    "reader": "independent Standards reader",
+    "reason": "Only the spelling case of an HTTP header name changes. urllib.request.Request normalizes outbound names and HTTPMessage performs case-insensitive inbound lookup; transmitted normalized headers or selected values, authentication, responses and stored operations are unchanged."
+  }
+}

@@ -20,6 +20,7 @@ LANE = (
 MUTATION_LANE = LANE.replace("hosted-lane", "mutation-lane")
 
 DIRECT = {
+    "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
@@ -29,6 +30,7 @@ DIRECT = {
     "startup-stages.yml": ("Startup stages", "startup-stages"),
 }
 LANE_USERS = {
+    "mutation-refinement-proof.yml",
     "test.yml",
     "proofs.yml",
     "test-leaks.yml",
@@ -39,6 +41,8 @@ LANE_USERS = {
 MUTATION_LANE_USERS = {"mutation-preflight.yml:stats", "mutation-preflight.yml:mutation-shard"}
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
 EXCLUDED = {
+    "branch-lanes.yml": "every branch push runs one short grader that must refuse and cancel lane skipping workflows at once",
+    "codex-cache.yml": "main push, six hourly and manual, one short job that seeds the Codex cache, no pull request trigger",
     "coverage-stability.yml": "a manual dispatch runs one short job that only reads dev run data",
     "pages.yml": "a rare manual docs build and deploy; the github-pages environment decides which branches deploy",
     "publish-pypi.yml": "operator release path from main",
@@ -58,13 +62,20 @@ class _Context(dict):
         return _Context(value) if isinstance(value, dict) else value
 
 
-def _evaluate(value, inputs=None, matrix=None, **github):
+def _evaluate(value, inputs=None, matrix=None, needs=None, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
     names = {
         "github": _Context(github),
         "inputs": _Context(inputs or {}),
         "matrix": _Context(matrix or {"part": 0, "shard": 0}),
+        "needs": _Context(
+            needs
+            or {
+                "plan": {"outputs": {"stats_lane": str(github.get("run_id", 1000) % 10)}},
+                "refine": {"outputs": {"shard_lane": str(github.get("run_id", 1000) % 10)}},
+            }
+        ),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
@@ -153,7 +164,15 @@ def test_every_lane_user_names_the_same_three_lanes():
         for name, lane in (("hosted-lane", LANE), ("mutation-lane", MUTATION_LANE)):
             if name in str(block["group"]):
                 assert str(block["group"]).count(name) == 1, where
-                assert lane in block["group"], where
+                if name == "mutation-lane" and "needs." in block["group"]:
+                    output = (
+                        "needs.plan.outputs.stats_lane"
+                        if where.endswith(":stats")
+                        else "needs.refine.outputs.shard_lane"
+                    )
+                    assert f"format('mutation-lane-{{0}}', {output})" in block["group"], where
+                else:
+                    assert lane in block["group"], where
 
 
 def test_a_run_on_a_lane_queues_and_is_never_cancelled():
@@ -207,7 +226,10 @@ def test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait
             group = _resolve(_block(where), matrix={leg if leg == "shard" else "part": index}, run_id=run_id, **push)
             assert group["group"].endswith(f"-{leg}-{index}"), (where, group)
             mutation.add(group["group"].removesuffix(f"-{leg}-{index}"))
-    assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
+    if "needs." in _block("mutation-preflight.yml:stats")["group"]:
+        assert mutation == {f"mutation-lane-{index}" for index in range(10)}
+    else:
+        assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
     shared = {
         _resolve(block, **github)["group"]
         for where, block in _blocks()
@@ -240,21 +262,36 @@ def test_a_called_workflow_never_waits_on_its_callers_lane(caller):
         assert mutation["group"] != _resolve(_block("mutation-preflight.yml"), **github)["group"]
 
 
-def test_direct_dispatches_and_branch_pushes_queue_on_a_lane():
+def test_direct_dispatches_and_mutation_branch_pushes_queue_on_a_lane():
     dispatch = {"event_name": "workflow_dispatch", "ref": "refs/heads/diffcheck/plant", "run_id": 1000}
     for name, (title, _) in DIRECT.items():
         assert _is_lane(_resolve(_block(name), workflow=title, **dispatch)["group"]), name
     assert _is_lane(_resolve(_block("test-leaks.yml"), workflow="Test leaks", **dispatch)["group"])
     assert _is_lane(_resolve(_block("swarm-node-image.yml"), workflow="Swarm worker image", **dispatch)["group"])
     push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight", "run_id": 1000}
-    assert _resolve(_block("mutation-preflight.yml:stats"), **push)["group"] == "mutation-lane-a-stats-0"
-    assert _resolve(_block("mutation-preflight.yml:mutation-shard"), **push)["group"] == "mutation-lane-a-shard-0"
+    lane = "0" if "needs." in _block("mutation-preflight.yml:stats")["group"] else "a"
+    assert _resolve(_block("mutation-preflight.yml:stats"), **push)["group"] == f"mutation-lane-{lane}-stats-0"
+    assert _resolve(_block("mutation-preflight.yml:mutation-shard"), **push)["group"] == f"mutation-lane-{lane}-shard-0"
     schedule = {"event_name": "schedule", "ref": "refs/heads/dev", "workflow": "Test leaks", "run_id": 1000}
     assert _resolve(_block("test-leaks.yml"), **schedule) == {
         "group": "test-leaks-refs/heads/dev",
         "queue": "single",
         "cancel-in-progress": True,
     }
+
+
+@pytest.mark.parametrize("name", ["startup-stages.yml", "worker-resources.yml"])
+def test_a_measurement_branch_push_never_holds_a_lane_that_proof_dispatches_wait_on(name):
+    title, own = DIRECT[name]
+    push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": title}
+    for run_id in range(1000, 1010):
+        assert _resolve(_block(name), run_id=run_id, **push) == {
+            "group": f"{own}-refs/heads/task-branch",
+            "queue": "single",
+            "cancel-in-progress": None,
+        }
+    dispatch = {"event_name": "workflow_dispatch", "ref": "refs/heads/task-branch", "workflow": title, "run_id": 1000}
+    assert _resolve(_block(name), **dispatch) == {"group": "hosted-lane-a", "queue": "max", "cancel-in-progress": None}
 
 
 @pytest.mark.parametrize("event", ["push", "workflow_dispatch"])

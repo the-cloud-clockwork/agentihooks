@@ -45,6 +45,43 @@ def remove(slug: str, environ=os.environ) -> dict:
     return call(f"proof-ledgers/{slug}/remove", {}, environ)
 
 
+def migrate(slug: str, owner: dict, environ=os.environ) -> dict:
+    return call(f"proof-ledgers/{slug}/migrate", owner, environ)
+
+
+def controller_control(slug: str, owner: dict, request: dict, environ=os.environ) -> dict:
+    return call(f"proof-ledgers/{slug}/controller-controls", {"owner": owner, "request": request}, environ)
+
+
+def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) -> dict:
+    request = urllib.request.Request(
+        f"{ledger_link.base(environ)}/api/v1/proof-ledgers/{slug}/{route}",
+        data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json", **headers},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+            return json.loads(response.read())["data"]
+    except urllib.error.HTTPError as exc:
+        message = json.loads(exc.read())["error"]["message"]
+        sys.exit(f"proof control refused: {exc.code} {message}")
+
+
+def control(slug: str, payload: dict, environ=os.environ) -> dict:
+    from scripts.swarm_ledger import ledger
+
+    name, parent = environ.get("AGENTIHOOKS_AGENT_NAME"), environ.get("AGENTIHOOKS_SWARM")
+    if not name or not parent:
+        sys.exit("proof controls need the creating engineer identity and parent swarm")
+    if ledger_link.remote(environ):
+        token = environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or ledger.launch_token(parent, name)
+        headers = {"X-Ledger-Agent": name, "X-Ledger-Token": token}
+    else:
+        headers = ledger.local_credentials(parent, name, False)
+    issued = _control_call(slug, "credential", {}, headers, environ)
+    return _control_call(slug, "controls", payload, {"X-Proof-Credential": issued["credential"]}, environ)
+
+
 def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="action", required=True)

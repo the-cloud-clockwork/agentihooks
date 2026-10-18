@@ -1,5 +1,6 @@
 """One supervised Codex app-server per admitted execution: admit, spawn, connect, bind, then open exactly once."""
 
+import contextlib
 import json
 import os
 import shutil
@@ -110,8 +111,22 @@ def socket_path(root: Path, execution_id: str) -> Path:
         raise LaunchFailure("endpoint", LONG_SOCKET)
     for private in (root, directory):
         private.mkdir(parents=True, exist_ok=True)
-        private.chmod(PRIVATE_MODE)
+        try:
+            private.chmod(PRIVATE_MODE)
+        except BaseException:
+            if private == directory:
+                shutil.rmtree(directory)
+            raise
     return path
+
+
+def execution_directory(record: TransportRecord) -> Path | None:
+    directory = Path(record.endpoint_ref.removeprefix(UNIX)).parent
+    if directory.parent.name != RUNTIME_SUBDIR:
+        return None
+    if directory.name != record.execution_id.removeprefix(EXECUTION_PREFIX)[:ENDPOINT_ID_CHARS]:
+        return None
+    return directory
 
 
 def server_command(codex_bin: str, path: Path, args: tuple) -> list[str]:
@@ -203,6 +218,12 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
     return thread
 
 
+def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:
+    """A refused name leaves the default one; the launch still opens its turn."""
+    with contextlib.suppress(protocol.Refused):
+        protocol.set_thread_name(connection, thread_id, name)
+
+
 def stop(process: subprocess.Popen) -> None:
     if process.poll() is not None:
         return
@@ -249,6 +270,7 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
         bindings.put(launch.slug, record)
         agent = replace(agent, conversation_id=thread["id"])
         store.put_agent(launch.slug, agent)
+        name_thread(connection, thread["id"], agent.name)
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
             record = replace(record, active_turn_id=protocol.start_turn(connection, thread["id"], launch.opening))
             bindings.put(launch.slug, record)
@@ -275,7 +297,15 @@ def spawn(spec: Launch, deps: Deps, path: Path) -> subprocess.Popen:
 def execution_home(spec: Launch, directory: Path) -> Launch:
     source = Path(spec.codex_home)
     home = directory / "codex"
-    shutil.copytree(source, home, ignore_dangling_symlinks=True)
+    shutil.copytree(
+        source,
+        home,
+        ignore=lambda directory, _names: ("bin",) if Path(directory) == source else (),
+        ignore_dangling_symlinks=True,
+    )
+    binaries = source / "bin"
+    if binaries.exists():
+        (home / "bin").symlink_to(binaries.resolve())
     home.chmod(PRIVATE_MODE)
     for name in ("codex.sources.json", "codex.mounts.json"):
         manifest = source.parent / name
@@ -286,6 +316,8 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
         data = json.loads(evidence.read_text())
         data["home"] = str(home.resolve())
         evidence.write_text(json.dumps(data) + "\n")
+    if spec.environ.get(binding.REPORT):
+        binding.rehome(Path(spec.environ[binding.REPORT]), home)
     return replace(spec, codex_home=str(home), environ={**spec.environ, "CODEX_HOME": str(home)})
 
 
@@ -293,7 +325,7 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     check_environment(spec.environ, spec.allowed_tokens)
     agent = admit(store, spec, deps)
     bindings = BindingStore(store)
-    record, process = None, None
+    record, process, path = None, None, None
     try:
         path = socket_path(deps.runtime_root or runtime_root(spec.environ), agent.execution_id)
         record = bindings.reserve(spec.slug, _record(spec, agent, path))
@@ -303,16 +335,22 @@ def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
         bindings.put(spec.slug, record)
         record, agent = _connect_bound(store, bindings, spec, agent, record, process, deps)
     except BaseException as failure:
-        if process is not None:
-            stop(process)
         try:
-            if record is not None:
-                error_class = getattr(failure, "error_class", type(failure).__name__)
-                bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
-                bindings.release(spec.slug, record)
+            if process is not None:
+                stop(process)
         finally:
-            store.put_agent(spec.slug, replace(agent, state="finished"))
-            store.drop_agent(spec.slug, agent.name, deps.now_ms())
+            try:
+                if record is not None:
+                    error_class = getattr(failure, "error_class", type(failure).__name__)
+                    bindings.put(spec.slug, replace(record, state=FAILED, last_error_class=error_class))
+                    bindings.release(spec.slug, record)
+            finally:
+                try:
+                    store.put_agent(spec.slug, replace(agent, state="finished"))
+                    store.drop_agent(spec.slug, agent.name, deps.now_ms())
+                finally:
+                    if path is not None:
+                        shutil.rmtree(path.parent)
         raise
     return Started(record, agent, process)
 
