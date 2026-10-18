@@ -151,7 +151,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
-| `agentihooks swarm <id> set master-per=N\|hive\|off` | The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) keeps the `masters=N` count. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
+| `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the running engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
+| `agentihooks swarm <id> set master-per=N\|hive\|off` | Overrides `masters-step`. The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) hands sizing back to `masters-step`. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
@@ -177,6 +178,9 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> culture set FILE` | Replace the swarm's culture with the file's text. Every new occupant of every seat, the master included, reads it in its priming chain. |
 | `agentihooks swarm <id> culture show` | Print the swarm's culture. |
 | `agentihooks swarm <id> masters-channel say TEXT`, `agentihooks swarm <id> masters-channel read [--all]` | The masters channel (`masters.<id>`): only a session holding one of the swarm's master seats posts and reads; every other caller is refused. Posts are kept in Redis with no expiry. Each `say` post leaves every other occupied master seat an information inbox item from the poster that names the post and the read command, so the other masters receive it at their next tool call; the text stays in the channel. `read` prints the posts the seat has not read and moves the seat's cursor, which its successor inherits; `--all` prints every post. `channel_publish` and `agentihooks channel publish` refuse every `masters.` name, so no post reaches the shared broadcast file. The tick posts each master count change there. |
+
+For grouped CI stage counts, worst times, run links and report retention, see
+[Standing CI budget report](../ci-timing.md#standing-ci-budget-report).
 
 ### Templates
 
@@ -407,6 +411,66 @@ in `repository_branches` for the selected repository; `branch_repo` identifies
 its origin repository. The push sets the checkout's upstream to the chosen
 remote branch. Publication does not retarget or open a pull request: record the
 pull request for the published branch with `swarm pr`.
+
+### Continue an existing pull request with one push
+
+A successor continuing an existing pull request publishes its commit only to
+the retained pull request branch. Its newly prepared local branch is not also
+pushed. This removes the second branch push that previously started another
+Mutation preflight for the same commit. The `push-stop` gate uses the same
+retained target when it pushes committed work at Stop.
+
+The retained target comes from `continue_from` in the task's handoff envelope,
+or its reclaim record when there is no nonempty handoff envelope. It must name
+an `origin/` branch, and its local remote tracking ref must be an ancestor of
+`HEAD`. The protected names `dev`, `main`, `master` and `v1` are excluded from
+retained targets. A fresh continuation supplies no retained target. These are
+runtime records; no new flag or environment variable enables this behavior.
+
+For example, a successor may prepare a local branch with its own worker name
+while its handoff retains the predecessor's pull request branch. Work in the
+returned checkout and publish normally:
+
+```bash
+agentihooks swarm <id> prepare
+cd <returned-worktree>
+agentihooks swarm <id> publish \
+  --message "Document continuation publication" \
+  -- docs/pillars/swarm.md
+```
+
+The returned `branch` should name the predecessor's pull request branch, and
+`head` should match that pull request's updated head. The local upstream also
+tracks the retained branch. Keep using the existing pull request; do not push
+the prepared branch separately to publish the same commit. From the repository
+checkout, compare the result with GitHub; replace `PR_NUMBER` with the existing
+pull request's number:
+
+```bash
+gh api 'repos/{owner}/{repo}/pulls/PR_NUMBER' \
+  --jq '{branch: .head.ref, head: .head.sha}'
+git rev-parse --abbrev-ref '@{upstream}'
+```
+
+If the retained ref is missing or fails ancestry, `publish` tries its other
+recorded candidate before falling back to the local branch, as described
+above. `push-stop` falls back directly to the worktree's own branch. Thus a
+restacked successor that no longer continues the retained history may publish
+a new branch instead.
+
+Both push paths use a lease when the target differs from the local branch.
+A remote branch deleted while its tracking ref remains stale is refused
+rather than recreated; a changed remote ref can also reject the push. Read the
+remote state and reconcile the continuation before retrying. Removing the
+lease or pushing the same commit to a second branch defeats this protection.
+
+See [continuation publication and preflight runs](../reference/mutation-gate.md#continuation-publication-and-preflight-runs)
+for CI inspection and the distinction between a workflow run and mutation work.
+Delivered by [pull request 4076](https://github.com/the-cloud-clockwork/agentihooks/pull/4076),
+with a [successful focused regression proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39036611380)
+and [successful mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39037126637).
+Those proofs establish the tested branch selection and gate results; inspecting
+one live continuation's workflow runs is a separate operational check.
 
 ### Resume parked work and publish
 

@@ -19,6 +19,43 @@ gh workflow run proofs.yml \
 
 For a stacked branch, set `base` to its dependency branch. Branch pushes run Mutation preflight before the first draft pull request; wait for its current head to pass. Once a branch has an open pull request into `dev`, the push preflight skips it and the pull request checks own mutation. Tests and mutation runs execute in CI only.
 
+## Continuation publication and preflight runs
+
+When a successor continues an existing pull request, `swarm publish` and the
+Stop push gate select the retained pull request branch when its tracking ref
+is an ancestor of the new head. They do not additionally push the successor's
+prepared branch. One publication therefore produces one branch push, avoiding
+two Mutation preflight runs caused by publishing the same commit on two
+branches. See [continuation usage, configuration and failures](../pillars/swarm.md#continue-an-existing-pull-request-with-one-push).
+
+Inspect the runs for the published commit across all branches, rather than
+filtering only to the pull request branch. Run from the repository checkout
+and replace `PUBLISHED_SHA` with the `head` returned by `swarm publish`:
+
+```bash
+gh api --method GET \
+  'repos/{owner}/{repo}/actions/workflows/mutation-preflight.yml/runs' \
+  -f event=push \
+  -f head_sha=PUBLISHED_SHA \
+  -f per_page=100 \
+  --jq '.workflow_runs[] | {id, head_branch, head_sha, status, conclusion, html_url}'
+```
+
+For a single continuation publication without independent pushes or retries,
+expect one run on the retained branch and none on the prepared successor
+branch. Inspect that run with `gh run view RUN_ID --log`. An open pull request
+into `dev` makes the push preflight skip mutation; its pull request checks own
+the mutation work. A workflow record alone does not prove that mutants ran,
+and an empty run list does not establish success. Confirm the workflow has
+started and the returned head matches before recording the count.
+
+If the same head appears on two branches, compare both `head_branch` values
+with the publication result and continuation record. Check for a separate
+manual push of the prepared branch. If ancestry no longer holds after
+restacking, a new prepared branch can be the intended publication target.
+Branch selection does not disable preflight or change its mutation grading
+and report reuse rules.
+
 ## Measured shards and split mutants
 
 The preflight collects shared function-to-test coverage and test durations, then its `refine` job builds the measured plan. Expensive mutants are placed first on the least loaded shard. A survivor must run all its covering tests, which can leave one shard running long after shards whose mutants were killed early.
