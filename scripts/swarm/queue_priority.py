@@ -58,13 +58,31 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     return apply(store, slug, url, sender, tasks, journal)
 
 
+def drop_reason(url: str) -> str:
+    raw = merge_queue.graphql(merge_queue.STATE, {"url": url}, subprocess.run)["resource"]
+    if raw is None:
+        raise SwarmError("pull request could not be read")
+    if raw["state"] != "OPEN":
+        return f"pull request is {raw['state']}"
+    if raw["baseRefName"] != "dev":
+        return "pull request no longer targets dev"
+    return ""
+
+
 def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
     actions = []
     for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items():
         record = json.loads(raw)
         try:
+            journal = queue_record.Journal(url)
+            reason = drop_reason(url)
+            if reason:
+                store.redis.hdel(store.key(slug, PENDING), url)
+                journal.write("priority-dropped", url, "", None, None, reason=reason, **record)
+                actions.append(f"dropped deferred merge queue priority for {url}: {reason}")
+                continue
             if record["run_id"] is None:
-                held = blocking(url, queue_record.Journal(url), record["group_head"])
+                held = blocking(url, journal, record["group_head"])
                 if held is not None:
                     store.redis.hset(store.key(slug, PENDING), url, json.dumps({**held, "sender": record["sender"]}))
                     continue
@@ -72,7 +90,6 @@ def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
                 run = merge_queue.rest(f"repos/{record['repo']}/actions/runs/{record['run_id']}", subprocess.run)
                 if run["status"] != "completed":
                     continue
-            journal = queue_record.Journal(url)
             apply(store, slug, url, record["sender"], tasks, journal)
             journal.write("priority-applied", url, "", None, None, **record)
             actions.append(f"applied deferred merge queue priority for {url}")

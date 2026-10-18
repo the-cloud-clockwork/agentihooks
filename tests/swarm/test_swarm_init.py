@@ -274,8 +274,19 @@ def test_init_help_names_the_command_and_every_option():
         "--template TEMPLATE the swarm template for caps, models and lanes",
         "--operator-asked OPERATOR_ASKED the operator's words asking for a swarm with fewer than three tasks",
         "--timeout TIMEOUT seconds to wait for every service to be healthy",
+        "--prepare-clients verify bundle credentials on existing local Redis and activate clients",
     ):
         assert words in text
+
+
+def test_prepare_clients_needs_no_name_and_runs_only_the_stack_preparation(monkeypatch):
+    seen = []
+    monkeypatch.setattr(stack_init, "init", lambda *given: seen.append(given) or 3)
+    out = io.StringIO()
+    docker = Stack()
+    assert swarm_init.init(["--prepare-clients"], {"A": "1"}, docker, page, out) == 3
+    assert seen == [(["--prepare-clients"], {"A": "1"}, docker, page, out, "")]
+    assert (docker.calls, out.getvalue()) == ([], "")
 
 
 def test_names_check_help_names_the_command_and_its_plan_option(capsys):

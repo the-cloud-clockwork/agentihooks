@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/publish.py:scripts.swarm.publish.x_staged_changes__mutmut_74:9dd331463a13855d7ab74553a1d9c997fbd290a7766891566251a090c75e09be": {
+    "reader": "standards_reader",
+    "reason": "With rename detection disabled in both unstaged and parent diffs, every index versus worktree path difference already enters the unstaged set. Outside that set index equals worktree, so parent versus index and parent versus worktree yield the same paths. Their union with unstaged changes therefore produces identical scope results. Independent Standards reader ruled this comparison mutant equivalent."
+  }
+}

@@ -271,3 +271,30 @@ def test_api_job_reads_have_a_fixed_concurrency_ceiling(monkeypatch):
     result = ci_speed_read.read(NOW - 60000, NOW, run=run)
     assert result["complete"] is True
     pool.assert_called_once_with(max_workers=6)
+
+
+def test_kept_jobs_are_reused_only_for_runs_still_finished_on_the_same_attempt():
+    from scripts.doctor import ci_speed_read
+
+    records = [
+        {"id": 1, "status": "completed", "run_attempt": 1, "event": "push"},
+        {"id": 2, "status": "completed", "run_attempt": 2, "event": "push"},
+        {"id": 3, "status": "in_progress", "run_attempt": 1, "event": "push"},
+        {"id": 4, "status": "completed", "run_attempt": 1, "event": "push"},
+    ]
+    kept = {str(n): {"status": "completed", "run_attempt": 1, "jobs": [{"id": "kept"}]} for n in (1, 2, 3)}
+    run, calls = api(records, [{"id": "read"}])
+    result = ci_speed_read.read(NOW - 60000, NOW, known=kept, run=run)
+    assert result["complete"] is True
+    assert {r["id"]: r["jobs"][0]["id"] for r in result["runs"]} == {1: "kept", 2: "read", 3: "read", 4: "read"}
+    assert sorted(args[2].split("/")[-2] for args, _ in calls if "/jobs?" in args[2]) == ["2", "3", "4"]
+
+
+def test_a_failed_job_read_still_keeps_every_other_finished_read():
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api([{"id": n, "status": "completed", "event": "push"} for n in range(101)], [{"id": 5}])
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert result["complete"] is False
+    assert result["error"] == "Actions API read failed: RuntimeError: Actions API request or time budget exhausted"
+    assert len(result["runs"]) == result["api_calls"] - 7 == 53

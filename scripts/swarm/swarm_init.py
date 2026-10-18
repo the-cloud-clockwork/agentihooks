@@ -56,6 +56,11 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument("--template", help="the swarm template for caps, models and lanes")
     parser.add_argument("--operator-asked", help="the operator's words asking for a swarm with fewer than three tasks")
     parser.add_argument("--timeout", default="300", help="seconds to wait for every service to be healthy")
+    parser.add_argument(
+        "--prepare-clients",
+        action="store_true",
+        help="verify bundle credentials on existing local Redis and activate clients",
+    )
     return parser
 
 
@@ -143,6 +148,8 @@ def main(argv: list[str]) -> int:
 
 def init(argv: list[str], environ: Mapping[str, str], run: stack_init.Run, opener: Callable, out: TextIO) -> int:
     args = parser().parse_args(argv)
+    if args.prepare_clients:
+        return stack_init.init(["--prepare-clients"], environ, run, opener, out, args.name)
     paint = stack_init.painter(out, environ)
     content = seed(args)
     title = plan_title(args.plan) or str(content.get("title", ""))

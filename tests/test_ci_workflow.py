@@ -1192,7 +1192,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     )
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["if"] == "steps.reuse.outputs.reused != 'true'"
-    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE" --repository "$GITHUB_REPOSITORY"'
     assert step["env"] == {
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
@@ -1334,6 +1334,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'pull_request' && {skipped}",
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
+        f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
     )
     for job in (stats, mutation):
         assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
