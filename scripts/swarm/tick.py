@@ -47,6 +47,7 @@ from scripts.swarm import (
     lifetime,
     live_binding,
     master_alarm,
+    master_move,
     master_retire,
     master_start,
     master_wake,
@@ -177,6 +178,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     store.redis.delete(store.key(slug, SPAWN_HOLD))
     actions = skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
     if config.state != "stopped" or _woken(slug, config, store, ledger):
+        actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
         actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
@@ -1195,6 +1197,7 @@ def _master(slug, config, store, runtime, now_ms):
                 {"id": MASTER, "handoff": store.handoff(slug, MASTER), "peer": store.peer(slug), "transfer": transfer},
             )
         )
+        task = master_move.pinned(store, slug, task, transfer)
         master_start.begin(store, slug, record.name, task, now_ms)
         affinity.handed_off(store, slug)
         return task
@@ -1212,6 +1215,7 @@ def _master(slug, config, store, runtime, now_ms):
             master_start.save(store, slug, {**failed, "name": "", "retry": True})
         return [f"master spawn failed: {exc}"]
     affinity.placed(store, slug, placed.harness)
+    master_move.placed(store, slug)
     record = placed_record(record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
