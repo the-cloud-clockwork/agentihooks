@@ -41,10 +41,8 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
                         f"Python {version} cannot fit {count} queue shards below the step timeout: {predicted:.1f}s"
                     )
                 break
-            if predicted < STEP_SECONDS / 2:
+            if predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
                 break
-            if count == MAX_SHARDS:
-                raise SystemExit(f"Python {version} cannot fit below half the step timeout: {predicted:.1f}s")
             count += 1
         print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {STEP_SECONDS / 2:.0f}s")
         result.extend(

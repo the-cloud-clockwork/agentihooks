@@ -52,14 +52,16 @@ def test_queue_sizing_keeps_independent_worker_groups_parallel(tmp_path):
 def test_a_single_test_that_cannot_fit_refuses_the_queue_plan(tmp_path):
     import pytest
 
-    from tests.queue_shards import matrix
+    from tests.queue_shards import MAX_SHARDS, main, matrix
 
     path = tmp_path / "tests/test_slow.py"
     path.parent.mkdir()
     path.write_text("")
 
-    with pytest.raises(SystemExit, match="cannot fit below half the step timeout"):
-        matrix(tmp_path, {"3.11": {"tests/test_slow.py::test_slow": 200.0}})
+    plan = matrix(tmp_path, {"3.11": {"tests/test_slow.py::test_slow": 200.0}})
+    assert len(plan) == MAX_SHARDS
+    with pytest.raises(SystemExit, match="Queue plan exceeds 210s of the step timeout"):
+        main(["combine", "--plans", json.dumps(plan)[1:-1], ""])
 
 
 def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
