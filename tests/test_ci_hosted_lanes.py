@@ -62,13 +62,20 @@ class _Context(dict):
         return _Context(value) if isinstance(value, dict) else value
 
 
-def _evaluate(value, inputs=None, matrix=None, **github):
+def _evaluate(value, inputs=None, matrix=None, needs=None, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
     names = {
         "github": _Context(github),
         "inputs": _Context(inputs or {}),
         "matrix": _Context(matrix or {"part": 0, "shard": 0}),
+        "needs": _Context(
+            needs
+            or {
+                "plan": {"outputs": {"stats_lane": str(github.get("run_id", 1000) % 10)}},
+                "refine": {"outputs": {"shard_lane": str(github.get("run_id", 1000) % 10)}},
+            }
+        ),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
@@ -157,7 +164,15 @@ def test_every_lane_user_names_the_same_three_lanes():
         for name, lane in (("hosted-lane", LANE), ("mutation-lane", MUTATION_LANE)):
             if name in str(block["group"]):
                 assert str(block["group"]).count(name) == 1, where
-                assert lane in block["group"], where
+                if name == "mutation-lane" and "needs." in block["group"]:
+                    output = (
+                        "needs.plan.outputs.stats_lane"
+                        if where.endswith(":stats")
+                        else "needs.refine.outputs.shard_lane"
+                    )
+                    assert f"format('mutation-lane-{{0}}', {output})" in block["group"], where
+                else:
+                    assert lane in block["group"], where
 
 
 def test_a_run_on_a_lane_queues_and_is_never_cancelled():
@@ -211,7 +226,10 @@ def test_a_branch_mutation_job_never_holds_a_lane_that_proofs_or_dispatches_wait
             group = _resolve(_block(where), matrix={leg if leg == "shard" else "part": index}, run_id=run_id, **push)
             assert group["group"].endswith(f"-{leg}-{index}"), (where, group)
             mutation.add(group["group"].removesuffix(f"-{leg}-{index}"))
-    assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
+    if "needs." in _block("mutation-preflight.yml:stats")["group"]:
+        assert mutation == {f"mutation-lane-{index}" for index in range(10)}
+    else:
+        assert mutation == {"mutation-lane-a", "mutation-lane-b", "mutation-lane-c"}
     shared = {
         _resolve(block, **github)["group"]
         for where, block in _blocks()
@@ -251,8 +269,9 @@ def test_direct_dispatches_and_mutation_branch_pushes_queue_on_a_lane():
     assert _is_lane(_resolve(_block("test-leaks.yml"), workflow="Test leaks", **dispatch)["group"])
     assert _is_lane(_resolve(_block("swarm-node-image.yml"), workflow="Swarm worker image", **dispatch)["group"])
     push = {"event_name": "push", "ref": "refs/heads/task-branch", "workflow": "Mutation preflight", "run_id": 1000}
-    assert _resolve(_block("mutation-preflight.yml:stats"), **push)["group"] == "mutation-lane-a-stats-0"
-    assert _resolve(_block("mutation-preflight.yml:mutation-shard"), **push)["group"] == "mutation-lane-a-shard-0"
+    lane = "0" if "needs." in _block("mutation-preflight.yml:stats")["group"] else "a"
+    assert _resolve(_block("mutation-preflight.yml:stats"), **push)["group"] == f"mutation-lane-{lane}-stats-0"
+    assert _resolve(_block("mutation-preflight.yml:mutation-shard"), **push)["group"] == f"mutation-lane-{lane}-shard-0"
     schedule = {"event_name": "schedule", "ref": "refs/heads/dev", "workflow": "Test leaks", "run_id": 1000}
     assert _resolve(_block("test-leaks.yml"), **schedule) == {
         "group": "test-leaks-refs/heads/dev",

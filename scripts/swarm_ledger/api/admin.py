@@ -127,7 +127,7 @@ CONTROL = {
         },
         **{
             key: {"type": "integer"}
-            for key in ("max_eng", "max_ci", "max_plan", "compact_limit", "memory_per_agent_mb")
+            for key in ("max_eng", "max_ci", "max_plan", "masters_step", "compact_limit", "memory_per_agent_mb")
         },
         "scaling": {"enum": ["auto", "manual"]},
         "load_high": {"type": "number"},

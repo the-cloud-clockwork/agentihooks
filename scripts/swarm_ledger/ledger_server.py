@@ -44,6 +44,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
+from scripts.swarm import freeze  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     ledger_task_duplicates,
     page_policy,
@@ -54,7 +55,10 @@ from scripts.swarm_ledger import (  # noqa: E402
 )
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
-from scripts.swarm_ledger.repository import legacy  # noqa: E402
+from scripts.swarm_ledger.repository import (
+    hierarchy,  # noqa: E402
+    legacy,  # noqa: E402
+)
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
 from scripts.swarm_v2 import front_door, ledger_writer, master_fence  # noqa: E402
@@ -95,7 +99,12 @@ def served_version():
 def ledger_view(state):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
     meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
-    return {**state, "_meta": meta}
+    graph = hierarchy.project(state)[0]
+    tasks = [
+        {**task, "freeze_ancestry": freeze.ancestry(task, graph)} if task.get("merged_into") else task
+        for task in state.get("tasks", [])
+    ]
+    return {**state, "tasks": tasks, "_meta": meta}
 
 
 def publish_ledger(slug, state):
@@ -317,6 +326,7 @@ def control_argv(body):
         ("max_eng", "max-eng-agents", MAX_CAP),
         ("max_ci", "max-ci-agents", MAX_CAP),
         ("max_plan", "max-plan-agents", MAX_CAP),
+        ("masters_step", "masters-step", MAX_CAP),
         ("compact_limit", "compact-limit", MAX_COMPACT),
     ):
         value = body.get(key)
@@ -347,7 +357,7 @@ def control_argv(body):
         pairs += overlay_pairs(body["overlays"])
     if not pairs:
         raise ValueError(
-            "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
+            "set needs max_eng, max_ci, max_plan, masters_step, compact_limit, effort_min, effort_max, autonomy, "
             "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
         )
     return ["set", *pairs]
