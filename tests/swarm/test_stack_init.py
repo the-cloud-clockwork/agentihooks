@@ -3,7 +3,6 @@ import json
 import stat
 import subprocess
 import urllib.error
-import urllib.request
 from pathlib import Path
 
 import pytest

@@ -2134,7 +2134,7 @@ def main(argv):
 
 
 def typed(argv):
-    """The agentihooks swarm command line: create is init's own step, so a typed one names init instead."""
+    """The agentihooks swarm command line, where create is refused for every swarm not named by code."""
     if argv[1:2] == ["create"] and not naming.is_code_named_swarm(argv[0]):
         print(f"swarm: a swarm is created with its ledger by one command: {naming.SWARM_INIT}", file=sys.stderr)
         return 1

@@ -203,7 +203,6 @@ def is_built_slug(slug):
 
 
 def is_code_named_swarm(slug):
-    """A proof or demo swarm, whose ledger and swarm code names and creates by the older two step path."""
     return any(PATTERNS[kind].fullmatch(slug or "") for kind in CODE_SWARM_KINDS)
 
 

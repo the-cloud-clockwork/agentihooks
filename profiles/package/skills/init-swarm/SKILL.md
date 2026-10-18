@@ -102,9 +102,10 @@ two suggestions. `ledger new --size swarm` and a typed `swarm <slug> create`
 are refused and name this command; only proof and demo swarms named by code
 keep them.
 
-Init refuses unless this session is a master seat or the operator's own, and
-in the shared ledger folder refuses content with fewer than three phases or
-tasks unless `--operator-asked "<his words>"` quotes the operator asking for it.
+Init creates both inside the stack, whose ledger page then serves them. In
+the shared ledger folder it refuses unless this session is a master seat or the
+operator's own. Content `sources` are host paths and stay out of the stack's
+ledger; the plan reaches it through `publish-plan` in step 4.
 
 A template sets the caps, compact limit and per lane agent, model, effort,
 role and default task kind. Use the one the operator names; list them with

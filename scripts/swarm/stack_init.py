@@ -8,7 +8,6 @@ import json
 import shutil
 import subprocess
 import urllib.parse
-import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
