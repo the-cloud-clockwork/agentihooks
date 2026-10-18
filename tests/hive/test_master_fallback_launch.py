@@ -65,6 +65,7 @@ def test_controller_routes_an_unpinned_primary_master_through_hive_placement(set
     fenced = controller.FencedRuntime(
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
+    assert fenced.placement_refusal("master", {}) == ""
     assert fenced.placement_refusal("master", task) == ""
     assert fenced.runtime.router.placed_backend("master", task) == "hive"
     fenced.runtime.spawn = Mock(return_value="hive master")

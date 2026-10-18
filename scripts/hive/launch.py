@@ -232,7 +232,7 @@ class HiveLaunch:
             profile_decision=agent.profile_decision,
             execution=agent,
             route_kind=agent.route_kind,
-            desired_route_kind=agent.desired_route_kind,
+            desired_route_kind=agent.desired_route_kind if agent.lane == "master" else None,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 

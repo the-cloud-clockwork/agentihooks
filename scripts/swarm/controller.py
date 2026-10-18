@@ -77,6 +77,7 @@ class FencedRuntime:
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
     def placement_refusal(self, lane: str, task: dict) -> str:
+        task = {"id": "master", **task} if lane == "master" else task
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
