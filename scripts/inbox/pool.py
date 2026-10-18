@@ -118,7 +118,7 @@ class MasterPool:
             self.redis.srem(self.key(slug, "holders"), seat)
 
     def _routes(self, slug, live):
-        """None with intent grouping off; else the matched master per waiting item, '' leaving it to round robin."""
+        """None with intent grouping off; else the matched master per waiting item, None leaving it to round robin."""
         if not intent.enabled():
             return None
         items = [self.inbox.get(item_id) for item_id, _ in self.redis.zscan_iter(self.key(slug))]

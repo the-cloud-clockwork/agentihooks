@@ -91,8 +91,8 @@ def _ask_all(redis, asks: dict) -> dict:
     return {futures[future]: future.result() for future in done if future.exception() is None}
 
 
-def routes(pool: MasterPool, slug: str, items: list[Item], live: list[str]) -> dict[str, str]:
-    """The master each item's intent matches, '' for round robin; the estimated tokens sent add to the item's cache."""
+def routes(pool: MasterPool, slug: str, items: list[Item], live: list[str]) -> dict[str, str | None]:
+    """The master each item's intent matches, None for round robin; the estimated tokens sent add to the item's cache."""
     histories = {seat: pool.redis.lrange(pool.key(slug, "recent", seat), 0, -1) for seat in live}
     histories = {seat: recent for seat, recent in histories.items() if recent}
     verdicts, asks = {}, {}
@@ -115,6 +115,8 @@ def routes(pool: MasterPool, slug: str, items: list[Item], live: list[str]) -> d
     return {item.id: _best(item.id, histories, verdicts) for item in items}
 
 
-def _best(item_id: str, histories: dict, verdicts: dict) -> str:
+def _best(item_id: str, histories: dict, verdicts: dict) -> str | None:
     matched = [(verdicts[item_id, seat], seat) for seat in histories if verdicts.get((item_id, seat), 0) >= MATCH]
-    return max(matched)[1] if matched else ""
+    if matched:
+        return max(matched)[1]
+    return None
