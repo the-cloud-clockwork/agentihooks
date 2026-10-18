@@ -8,25 +8,30 @@ import argparse
 import json
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
 LONG_LIVED = frozenset({"dev", "main", "master"})
 RUNS_PER_WORKFLOW = 3
-WORKERS = 4
 MB = 1000**2
 # Docker build actions upload one record per build under a random name that no run reads back.
 BUILD_RECORD = ".dockerbuild"
 
 
-def rows(path: str, key: str | None, paginate: bool = True) -> list[dict]:
-    command = ["gh", "api", path, "--jq", f".{key}[]" if key else ".[]"]
-    if paginate:
-        command.insert(2, "--paginate")
-    done = subprocess.run(command, capture_output=True, text=True, check=True, timeout=900)
+def _read(command: list[str], key: str | None) -> list[dict]:
+    done = subprocess.run(
+        [*command, "--jq", f".{key}[]" if key else ".[]"], capture_output=True, text=True, check=True, timeout=900
+    )
     return [json.loads(line) for line in done.stdout.splitlines() if line]
+
+
+def rows(path: str, key: str | None) -> list[dict]:
+    return _read(["gh", "api", "--paginate", path], key)
+
+
+def first_page(path: str, key: str) -> list[dict]:
+    return _read(["gh", "api", path], key)
 
 
 def billed(owner: str) -> list[dict]:
@@ -41,7 +46,7 @@ def by_name(repo: str) -> list[dict]:
     names = set()
     for workflow in rows(f"repos/{repo}/actions/workflows?per_page=100", "workflows"):
         runs = f"repos/{repo}/actions/workflows/{workflow['id']}/runs?status=success&per_page={RUNS_PER_WORKFLOW}"
-        for run in rows(runs, "workflow_runs", paginate=False):
+        for run in first_page(runs, "workflow_runs"):
             names |= {
                 row["name"]
                 for row in rows(f"repos/{repo}/actions/runs/{run['id']}/artifacts?per_page=100", "artifacts")
@@ -119,12 +124,7 @@ def prune(args, now: datetime) -> list[dict]:
             args.limit_mb * MB,
         )
         chosen = doomed[:budget]
-        if args.apply:
-            with ThreadPoolExecutor(WORKERS) as pool:
-                results = list(pool.map(lambda row: delete(name, row), chosen))
-        else:
-            results = [True] * len(chosen)
-        deleted = [row for row, ok in zip(chosen, results, strict=True) if ok]
+        deleted = [row for row in chosen if not args.apply or delete(name, row)]
         budget -= len(chosen)
         left = sum(row["size_in_bytes"] for row in doomed[len(chosen) :] if not row["expired"])
         report.append(
@@ -165,7 +165,7 @@ def verdict(report: list[dict], limit: int) -> tuple[list[str], int]:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Delete expired and superseded artifacts in billed repositories.")
+    parser = argparse.ArgumentParser()
     parser.add_argument("--owner", required=True)
     parser.add_argument("--keep-hours", type=float, default=24)
     parser.add_argument("--floor-hours", type=float, default=6)

@@ -117,14 +117,16 @@ class Gh:
         path = next(part for part in command if "/" in part and not part.startswith("."))
         if self.routes.get(path) is None:
             raise subprocess.CalledProcessError(1, command, "", "gh: Server Error (HTTP 500)")
-        return SimpleNamespace(returncode=0, stdout="".join(json.dumps(row) + "\n" for row in self.routes[path]))
+        jq = command[command.index("--jq") + 1]
+        found = self.routes[path] if jq == ".[]" else self.routes[path][jq[1:-2]]
+        return SimpleNamespace(returncode=0, stdout="".join(json.dumps(row) + "\n" for row in found))
 
 
 def test_rows_paginates_reads_json_lines_and_fails_loudly(monkeypatch):
-    gh = Gh({"orgs/o/repos?per_page=100": [{"a": 1}, {"b": 2}], "x/y": [{"c": 3}]})
+    gh = Gh({"orgs/o/repos?per_page=100": [{"a": 1}, {"b": 2}], "x/y": {"artifacts": [{"c": 3}]}})
     monkeypatch.setattr(subprocess, "run", gh)
     assert ci_storage.rows("orgs/o/repos?per_page=100", None) == [{"a": 1}, {"b": 2}]
-    assert ci_storage.rows("x/y", "artifacts", paginate=False) == [{"c": 3}]
+    assert ci_storage.first_page("x/y", "artifacts") == [{"c": 3}]
     assert gh.calls[0] == (
         ["gh", "api", "--paginate", "orgs/o/repos?per_page=100", "--jq", ".[]"],
         {"capture_output": True, "text": True, "check": True, "timeout": 900},
@@ -155,13 +157,13 @@ def test_kept_branches_add_the_default_and_every_open_pull_request_head(monkeypa
 def test_a_listing_the_api_refuses_falls_back_to_names_from_recent_runs(monkeypatch):
     routes = {
         "repos/o/r/actions/artifacts?per_page=100": None,
-        "repos/o/r/actions/workflows?per_page=100": [{"id": 7}, {"id": 8}],
-        "repos/o/r/actions/workflows/7/runs?status=success&per_page=3": [{"id": 70}, {"id": 71}],
-        "repos/o/r/actions/workflows/8/runs?status=success&per_page=3": [],
-        "repos/o/r/actions/runs/70/artifacts?per_page=100": [{"name": "cov x"}, {"name": "b"}],
-        "repos/o/r/actions/runs/71/artifacts?per_page=100": [{"name": "b"}],
-        "repos/o/r/actions/artifacts?name=b&per_page=100": [{"id": 1}],
-        "repos/o/r/actions/artifacts?name=cov%20x&per_page=100": [{"id": 2}, {"id": 3}],
+        "repos/o/r/actions/workflows?per_page=100": {"workflows": [{"id": 7}, {"id": 8}]},
+        "repos/o/r/actions/workflows/7/runs?status=success&per_page=3": {"workflow_runs": [{"id": 70}, {"id": 71}]},
+        "repos/o/r/actions/workflows/8/runs?status=success&per_page=3": {"workflow_runs": []},
+        "repos/o/r/actions/runs/70/artifacts?per_page=100": {"artifacts": [{"name": "cov x"}, {"name": "b"}]},
+        "repos/o/r/actions/runs/71/artifacts?per_page=100": {"artifacts": [{"name": "b"}]},
+        "repos/o/r/actions/artifacts?name=b&per_page=100": {"artifacts": [{"id": 1}]},
+        "repos/o/r/actions/artifacts?name=cov%20x&per_page=100": {"artifacts": [{"id": 2}, {"id": 3}]},
     }
     gh = Gh(routes)
     monkeypatch.setattr(subprocess, "run", gh)
@@ -175,7 +177,7 @@ def test_a_listing_the_api_refuses_falls_back_to_names_from_recent_runs(monkeypa
 
 
 def test_a_listing_the_api_answers_is_used_whole(monkeypatch):
-    monkeypatch.setattr(subprocess, "run", Gh({"repos/o/r/actions/artifacts?per_page=100": [{"id": 9}]}))
+    monkeypatch.setattr(subprocess, "run", Gh({"repos/o/r/actions/artifacts?per_page=100": {"artifacts": [{"id": 9}]}}))
     assert ids(ci_storage.artifacts("o/r")) == [9]
 
 
@@ -197,8 +199,8 @@ def _org(found_a, found_b):
             {"full_name": "o/a", "visibility": "private", "archived": False, "default_branch": "dev"},
             {"full_name": "o/b", "visibility": "private", "archived": False, "default_branch": "dev"},
         ],
-        "repos/o/a/actions/artifacts?per_page=100": found_a,
-        "repos/o/b/actions/artifacts?per_page=100": found_b,
+        "repos/o/a/actions/artifacts?per_page=100": {"artifacts": found_a},
+        "repos/o/b/actions/artifacts?per_page=100": {"artifacts": found_b},
         "repos/o/a/pulls?state=open&per_page=100": [],
         "repos/o/b/pulls?state=open&per_page=100": [{"head": {"ref": "open"}}],
     }
@@ -304,21 +306,35 @@ def test_main_writes_the_report_and_prints_each_repository(monkeypatch, tmp_path
     report = tmp_path / "report.json"
     assert ci_storage.main(["--owner", "o", "--report", str(report)]) == 0
     assert seen == {"keep": timedelta(hours=24), "floor": timedelta(hours=6), "limit": 300 * MB, "aware": True}
+    assert report.read_text() == json.dumps(json.loads(report.read_text()), indent=2) + "\n"
     assert json.loads(report.read_text())[0]["deleted"] == 1
-    assert report.read_text().endswith("}\n]\n")
     out = capfd.readouterr().out
     assert "o/a: 2 listed, 4.0 MB live, 1 deleted (3.0 MB), 1.0 MB kept, 0 pending\n" in out
     assert "o/b: 0 listed, 0.0 MB live, 0 deleted (0.0 MB), 0.0 MB kept, 0 pending\n" in out
 
 
 def test_main_options_reach_the_plan_and_the_verdict(monkeypatch, tmp_path, capfd):
-    found_a = [artifact(1, branch="pr", size=3 * MB, hours=2, now=datetime.now(UTC))]
-    monkeypatch.setattr(subprocess, "run", Gh(_org(found_a, [])))
+    now = datetime.now(UTC)
+    found = [artifact(1, branch="pr", size=3 * MB, hours=2, now=now)]
+    monkeypatch.setattr(subprocess, "run", Gh(_org(found, found)))
     argv = ["--owner", "o", "--keep-hours", "1", "--floor-hours", "0.5", "--limit-mb", "2", "--budget", "0"]
     assert ci_storage.main([*argv, "--report", str(tmp_path / "r.json")]) == 0
-    assert "::warning title=Pruning continues::o/a keeps 3.0 MB with 1 deletions left for the next run" in (
-        capfd.readouterr().out
+    assert capfd.readouterr().out.endswith(
+        "::warning title=Pruning continues::o/a keeps 3.0 MB with 1 deletions left for the next run\n"
+        "::warning title=Pruning continues::o/b keeps 3.0 MB with 1 deletions left for the next run\n"
     )
+
+
+def test_main_defaults_to_a_dry_run_that_reports_in_the_working_folder(monkeypatch, tmp_path):
+    seen = []
+    monkeypatch.setattr(ci_storage, "prune", lambda args, now: seen.append(args) or [])
+    monkeypatch.chdir(tmp_path)
+    assert ci_storage.main(["--owner", "o"]) == 0
+    assert ci_storage.main(["--owner", "o", "--apply"]) == 0
+    assert (seen[0].owner, seen[0].budget, seen[0].apply, seen[1].apply) == ("o", 1500, False, True)
+    assert (tmp_path / "storage-report.json").read_text() == "[]\n"
+    with pytest.raises(SystemExit):
+        ci_storage.main([])
 
 
 def test_the_workflow_prunes_hourly_with_its_own_app_token():
