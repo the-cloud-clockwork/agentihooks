@@ -67,7 +67,10 @@ def test_unit_shards_adopt_dev_durations_through_the_script_before_the_tests_run
     download = next(s for s in steps if s.get("name") == "Download the durations this run splits on")
     assert download["with"] == {"name": "split-${{ matrix.python-version }}"}
     assert steps.index(download) < next(i for i, s in enumerate(steps) if s.get("name") == "Run tests")
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] in (
+        ["split", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission", "suite-speed"],
+    )
 
 
 def test_unit_shards_restore_dev_durations_from_the_cache_the_dev_push_saves():

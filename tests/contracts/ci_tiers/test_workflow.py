@@ -92,7 +92,7 @@ def jobs_for(event, base_ref="dev", scope="full"):
             del pending[name]
             ready = True
         assert ready, pending
-    return {name for name, job in completed.items() if job.result == "success"}
+    return {name for name, job in completed.items() if job.result == "success" and name != "suite-speed"}
 
 
 @pytest.mark.parametrize(
@@ -120,7 +120,9 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary) for summary in (False, True)
+        ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, suite_speed=speed)
+        for summary in (False, True)
+        for speed in (False, True)
     ]
 
 

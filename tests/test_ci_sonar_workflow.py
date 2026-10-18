@@ -1,4 +1,3 @@
-import json
 import os
 import subprocess
 from pathlib import Path
@@ -34,7 +33,10 @@ def test_sonar_remains_required_during_promotion_trigger_rollout():
     assert "if" not in gate
     assert not gate.get("continue-on-error")
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] in (
+        ["split", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission", "suite-speed"],
+    )
 
 
 def test_sonar_restores_downloads_before_every_scan():
@@ -70,11 +72,13 @@ def test_sonar_download_cache_tracks_scanner_and_server_versions():
 
 @pytest.mark.parametrize("sonar", ["success", "failure", "skipped", "cancelled", "pending"])
 def test_required_gate_rejects_unsuccessful_sonar(sonar):
+    from tests.test_ci_gate_workflow import _gate_needs
+
     step = _workflow()["jobs"]["gate-required"]["steps"][0]
     needs = {"unit": {"result": "success"}, "lint": {"result": "success"}, "sonar": {"result": sonar}}
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
-        env=dict(os.environ, NEEDS=json.dumps(needs)),
+        env=dict(os.environ, NEEDS=_gate_needs(needs)),
         capture_output=True,
         text=True,
     )

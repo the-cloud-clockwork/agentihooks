@@ -65,6 +65,7 @@
   "test.yml/sonar": "standard",
   "test.yml/split": "standard",
   "test.yml/stage-budget": "light",
+  "test.yml/suite-speed": "standard",
   "test.yml/test-count": "standard",
   "test.yml/unit": "standard",
   "test.yml/unit-selected": "standard",

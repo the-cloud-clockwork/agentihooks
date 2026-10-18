@@ -32,6 +32,12 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
+def _gate_needs(needs):
+    if "  suite-speed:\n" in (_ROOT / ".github/workflows/test.yml").read_text():
+        needs = {"suite-speed": {"result": "skipped"}, **needs}
+    return json.dumps(needs)
+
+
 def test_stored_durations_share_selection_admission_before_both_shard_paths():
     jobs = _workflow()["jobs"]
     assert "durations" not in jobs
@@ -120,10 +126,14 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "stage-budget",
             "select",
             "unit-selected",
+            "suite-speed",
         }
     )
     assert gate["if"] == "${{ always() }}"
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] in (
+        ["split", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission", "suite-speed"],
+    )
     assert jobs["split"]["needs"] in (
         ["durations", "select", "reuse", "admission"],
         ["select", "reuse", "admission"],
@@ -639,11 +649,41 @@ def test_coverage_ratchet_refuses_a_base_without_its_grader(tmp_path):
 def test_required_gate_rejects_every_non_success_result(unit, lint):
     step = _workflow()["jobs"]["gate-required"]["steps"][0]
     assert step["env"]["NEEDS"] == "${{ toJSON(needs) }}"
-    env = dict(os.environ, NEEDS=json.dumps({"unit": {"result": unit}, "lint": {"result": lint}}))
+    env = dict(os.environ, NEEDS=_gate_needs({"unit": {"result": unit}, "lint": {"result": lint}}))
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (unit == lint == "success"), result.stdout + result.stderr
     if result.returncode:
         assert "::error::" in result.stdout
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group", "push"])
+@pytest.mark.parametrize("result", ["success", "failure", "cancelled", "skipped", "pending"])
+def test_required_gate_grades_early_suite_speed_only_on_pull_requests(event, result):
+    jobs = _workflow()["jobs"]
+    if "suite-speed" not in jobs:
+        return
+    from tests.contracts.ci_tiers.test_workflow import jobs_for
+
+    running = jobs_for(event)
+    running |= {"suite-speed"} if event == "pull_request" else set()
+    needs = {
+        name: {"result": "success" if name in running else "skipped", "outputs": {"scope": "full"}}
+        for name in jobs["gate-required"]["needs"]
+    }
+    needs["suite-speed"]["result"] = result
+    step = jobs["gate-required"]["steps"][0]
+    env = dict(
+        os.environ,
+        NEEDS=_gate_needs(needs),
+        EVENT=event,
+        MUTATION=str(event == "pull_request").lower(),
+        KIND="true",
+        REUSED="false",
+    )
+    graded = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+    assert (graded.returncode == 0) == (result == ("success" if event == "pull_request" else "skipped")), (
+        graded.stdout + graded.stderr
+    )
 
 
 @pytest.mark.parametrize("durations", ["success", "failure", "skipped", "cancelled"])
@@ -653,7 +693,7 @@ def test_required_gate_is_red_when_the_durations_lookup_did_not_succeed(duration
     producer = "durations" if "durations" in jobs else "select"
     assert producer in gate["needs"]
     needs = {producer: {"result": durations}, "unit": {"result": "skipped" if durations != "success" else "success"}}
-    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false")
+    env = dict(os.environ, NEEDS=_gate_needs(needs), MUTATION="false")
     result = subprocess.run(["bash", "-e", "-c", gate["steps"][0]["run"]], env=env, capture_output=True, text=True)
     assert (result.returncode == 0) == (durations == "success"), result.stdout + result.stderr
 
@@ -672,7 +712,7 @@ def test_required_gate_is_red_unless_mutation_passed_or_was_not_due(job, mutatio
     )
     needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar")}
     needs[job] = {"result": mutation}
-    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION=expected)
+    env = dict(os.environ, NEEDS=_gate_needs(needs), MUTATION=expected)
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     passes = mutation == "success" or (mutation == "skipped" and expected == "false")
     assert (result.returncode == 0) == passes, result.stdout + result.stderr
@@ -696,7 +736,7 @@ def test_required_gate_accepts_a_skipped_chart_proof_only_when_its_path_rule_sai
     )
     assert step["env"]["KIND"] == "${{ needs.kind-due.outputs.due }}"
     needs = {"kind-due": {"result": due_job}, "helm-kind": {"result": kind}}
-    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND=due)
+    env = dict(os.environ, NEEDS=_gate_needs(needs), MUTATION="false", KIND=due)
     result = subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
     passes = due_job == "success" and (kind == "success" or (kind == "skipped" and due == "false"))
     assert (result.returncode == 0) == passes, result.stdout + result.stderr
@@ -787,6 +827,7 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
         job = jobs[name]
         assert job["if"] in (
             expected[name],
+            "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.suite-speed.result == 'success' && needs.select.outputs.scope == 'full') }}",
             "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
@@ -797,7 +838,7 @@ def test_unit_and_lint_run_on_every_event_and_feed_the_required_gate():
     step = jobs["gate-required"]["steps"][0]
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
-        env=dict(os.environ, NEEDS=json.dumps({"unit": {"result": "success"}, "lint": {"result": "success"}})),
+        env=dict(os.environ, NEEDS=_gate_needs({"unit": {"result": "success"}, "lint": {"result": "success"}})),
         capture_output=True,
         text=True,
     )
