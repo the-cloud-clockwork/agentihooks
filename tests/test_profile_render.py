@@ -863,6 +863,10 @@ def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     out = render.render_claude("package:master")
 
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+    assert json.loads((out / ".claude.json").read_text())["mcpServers"]["playwright-cmd"] == {
+        "command": str(world["python"]),
+        "args": ["-I", "-m", "scripts.profiles.browser"],
+    }
 
 
 def test_claude_render_keeps_a_home_without_brain_off_the_brain_channel(world):
