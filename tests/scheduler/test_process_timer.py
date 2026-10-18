@@ -212,3 +212,34 @@ def test_retirement_during_dispatch_removes_a_late_wake(redis, monkeypatch):
         Scheduler(redis).run_due(now=timer.entry.record["due"])
     assert redis.hlen(Scheduler(redis).key("entries")) == 0
     assert not redis.exists(timer.key)
+
+
+def test_member_scheduler_runs_with_real_acl_enforcement(monkeypatch):
+    import fakeredis
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive import auth
+
+    server = fakeredis.FakeServer()
+    admin = fakeredis.FakeRedis(server=server, decode_responses=True)
+    admin.acl_setuser(
+        "hive-member",
+        enabled=True,
+        nopass=True,
+        categories=auth.ACL_CATEGORIES,
+        keys=auth._acl_keys("member"),
+        channels=auth.ACL_PATTERNS,
+    )
+    member = fakeredis.FakeRedis(server=server, decode_responses=True, username="hive-member")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    shared = Scheduler(admin).key("entries")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    with process_timer.Timer(0, redis=member) as timer:
+        assert Scheduler(member).run_due(now=timer.entry.record["due"]) == 1
+        timer.wait()
+    Scheduler(member).run_due()
+    assert not admin.exists(timer.key)
+    with pytest.raises(NoPermissionError):
+        member.hset(shared, "forbidden", "write")
