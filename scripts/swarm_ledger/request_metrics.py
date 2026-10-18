@@ -173,7 +173,7 @@ def journal_row(row: object) -> bool:
         return False
     texts = (2, 3) if row[0] == "s" else ()
     return all(
-        isinstance(value, str) if index in texts else isinstance(value, int | float) and math.isfinite(value)
+        isinstance(value, str) if index in texts else type(value) in (int, float) and math.isfinite(value)
         for index, value in enumerate(row[1:], 1)
     )
 
@@ -235,10 +235,11 @@ def restore(path: Path) -> None:
                 hold(row)
             HELD_SINCE = max(held, floor) if held is not None else None
             LOST[:] = [span for span in lost if span[1] >= floor]
-            PENDING.clear()
-            JOURNAL, APPENDED = path, 0
             lines = journal_lines(None)
         write_lines(path, lines, "w")
+        with GUARD:
+            PENDING.clear()
+            JOURNAL, APPENDED = path, 0
 
 
 def persist(stopped: bool = False) -> None:
@@ -246,7 +247,7 @@ def persist(stopped: bool = False) -> None:
 
     with JOURNAL_GUARD:
         with GUARD:
-            if JOURNAL is None or not (PENDING or stopped):
+            if JOURNAL is None or not (PENDING or stopped or APPENDED > SAMPLES.maxlen):
                 return
             now = time.time()
             if APPENDED + len(PENDING) > SAMPLES.maxlen:
@@ -256,7 +257,12 @@ def persist(stopped: bool = False) -> None:
                 APPENDED += len(lines)
             PENDING.clear()
             path = JOURNAL
-        write_lines(path, lines + ([["stop", now]] if stopped else []), mode)
+        try:
+            write_lines(path, lines + ([["stop", now]] if stopped else []), mode)
+        except OSError:
+            with GUARD:
+                APPENDED = SAMPLES.maxlen + 1
+            raise
 
 
 def measured(method: Callable) -> Callable:

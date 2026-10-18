@@ -202,6 +202,7 @@ def test_corrupt_journal_lines_are_skipped(tmp_path, monkeypatch, now):
         f'["s", {START - 4.0}, "POST", 7, 1.0, 0.0, 0.0]',
         f'["s", {START - 4.0}, "POST", "{OPERATIONS}", "slow", 0.0, 0.0]',
         '["flush", NaN]',
+        '["flush", true]',
         '["flush", "later"]',
         f'["stop", {START - 3.0}, 1.0]',
     ]
@@ -287,3 +288,39 @@ def test_server_keeps_serving_when_the_journal_cannot_be_read(tmp_path, now, cap
     server.metrics_journal(request_metrics.restore, tmp_path)
     assert request_metrics.JOURNAL is None
     assert capsys.readouterr().err.startswith("request metrics journal: ")
+    coverage = request_metrics.report(2.0)["coverage"]
+    assert coverage["held_since"] == request_metrics.STARTED_AT
+    assert coverage["complete"] is False
+
+
+def test_failed_journal_write_keeps_the_rows_for_the_next_pass(tmp_path, monkeypatch, now, capsys):
+    path = tmp_path / "metrics.jsonl"
+    request_metrics.restore(path)
+    request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
+    real = request_metrics.write_lines
+
+    def full(*args):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(request_metrics, "write_lines", full)
+    server.metrics_journal(request_metrics.persist)
+    assert capsys.readouterr().err == "request metrics journal: disk full\n"
+    monkeypatch.setattr(request_metrics, "write_lines", real)
+    now[0] += 2.0
+    request_metrics.persist(stopped=True)
+    reload(monkeypatch, now, path, 1.0)
+    result = request_metrics.records(1.0, None, limit=10)
+    assert result["coverage"]["lost"] == []
+    assert [row["wall_seconds"] for row in result["routes"][0]["records"]] == [1.0]
+
+
+def test_restore_binds_the_journal_only_after_its_rewrite(tmp_path, monkeypatch, now):
+    def refused(*args):
+        raise OSError("read only")
+
+    monkeypatch.setattr(request_metrics, "write_lines", refused)
+    with pytest.raises(OSError):
+        request_metrics.restore(tmp_path / "metrics.jsonl")
+    assert request_metrics.JOURNAL is None
+    request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
+    assert request_metrics.PENDING == []
