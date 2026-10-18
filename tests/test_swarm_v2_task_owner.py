@@ -34,7 +34,8 @@ def world(tmp_path, monkeypatch):
         built.store.seats.occupy(seat, name, 1)
 
     def state(slug):
-        assert slug == SLUG
+        if slug != SLUG:
+            pytest.fail(f"read the ledger of {slug}")
         return built.doc()
 
     monkeypatch.setattr(master_fence, "_ledger_state", state, raising=False)
