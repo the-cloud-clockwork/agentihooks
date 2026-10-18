@@ -154,3 +154,41 @@ def test_requirements_layer_depends_on_the_lock_alone():
         )
     )
     assert stage.index("-r requirements.lock") < stage.index("COPY pyproject.toml README.md ./")
+
+
+def test_controller_setup_runs_beside_the_lease_proof_and_finishes_before_the_upgrade():
+    start = _at('ca_dir="$(mktemp -d)"\n(\n')
+    started = _at("prep=$!\n")
+    background = SCRIPT[start:started]
+    for step in (
+        "kubectl create secret generic swarm-launch-signing",
+        "kubectl create serviceaccount swarm-controller",
+        "kubectl create configmap swarm-pod-policy",
+        "kubectl create secret generic swarm-terminal-attach-ca",
+    ):
+        assert step in background
+        assert SCRIPT.count(step) == 1
+    order = [
+        'helm test "$release"',
+        'ca_dir="$(mktemp -d)"\n(\n',
+        "prep=$!\n",
+        "registered, no lease bound",
+        "pkill -STOP",
+        'wait "$prep"\nhelm upgrade "$release"',
+    ]
+    assert [_at(text) for text in order] == sorted(_at(text) for text in order)
+
+
+def test_one_exec_waits_for_the_lease_and_its_renewal():
+    watch = SCRIPT[_at("python - <<'EOF'\nimport dataclasses") : _at("pkill -STOP")]
+    assert "controller lease: " in watch
+    assert "controller lease renewed: " in watch
+    assert 'held["expires_at"] > first["expires_at"]' in watch
+    assert "sleep 1" not in watch
+
+
+def test_every_controller_probe_still_runs_and_fails_the_proof():
+    probes = SCRIPT[_at("declare -A probe_jobs") : _at('kubectl wait pod "${controller[@]}" --for=condition=Ready')]
+    assert probes.count("for probe in startup liveness readiness; do") == 2
+    assert 'if ! wait "${probe_jobs[$probe]}"; then' in probes
+    assert "exit 1" in probes
