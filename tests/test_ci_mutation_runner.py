@@ -391,9 +391,9 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
         ('subprocess.check_call(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
         ('subprocess.call(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
         ('subprocess.Popen(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
-        ('(ROOT / "extra").glob("*.txt")', ["text.txt"]),
-        ('(ROOT / "extra").rglob("*.json")', ["nested/child.json"]),
-        ('(ROOT / "extra").iterdir()', ["bytes.bin", "text.txt", "unused.ignore"]),
+        ('list((ROOT / "extra").glob("*.txt"))', ["text.txt"]),
+        ('list((ROOT / "extra").rglob("*.json"))', ["nested/child.json"]),
+        ('list((ROOT / "extra").iterdir())', ["bytes.bin", "text.txt", "unused.ignore"]),
         (
             'def read(name):\n    return (ROOT / name).read_text()\nread("extra/text.txt")\nread("extra/nested/child.json")',
             ["nested/child.json", "text.txt"],
@@ -414,7 +414,9 @@ def test_workspace_discovers_repository_inputs_for_each_selected_read_operation(
     for name in ("text.txt", "bytes.bin", "nested/child.json", "unused.ignore"):
         (root / "extra" / name).write_text(name)
     (root / "tests/test_selected.py").write_text(
-        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n" + source + "\n"
+        "import subprocess\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        + source
+        + "\ndef test_selected():\n    pass\n"
     )
     work = tmp_path / "work"
     work.mkdir()
