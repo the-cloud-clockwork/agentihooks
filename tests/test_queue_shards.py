@@ -92,3 +92,30 @@ def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
     assert workflow["jobs"]["unit"]["strategy"]["matrix"]["include"] == (
         "${{ fromJSON(needs.split.outputs.queue_matrix || '[]') }}"
     )
+
+
+def test_queue_plan_prices_new_cases_and_publishes_one_immutable_partition(tmp_path):
+    import hashlib
+
+    from tests.queue_shards import main
+
+    root = tmp_path / "root"
+    tests = root / "tests"
+    tests.mkdir(parents=True)
+    (tests / "test_old.py").write_text("")
+    (tests / "test_new.py").write_text("")
+    (root / ".test_durations").write_text(json.dumps({"tests/test_old.py::test_old": 40.0}))
+    collection = root / "collected.json"
+    collection.write_text(json.dumps(["tests/test_old.py::test_old", "tests/test_new.py::test_new"]))
+    output = tmp_path / "output"
+
+    main(["--root", str(root), "--collection", str(collection), "--version", "3.11", "--output", str(output)])
+
+    measured = (root / ".test_durations").read_bytes()
+    assert json.loads(measured) == {"tests/test_old.py::test_old": 40.0, "tests/test_new.py::test_new": 40.0}
+    assert (root / "durations.sha256").read_text().strip() == hashlib.sha256(measured).hexdigest()
+    key, value = output.read_text().strip().split("=", 1)
+    assert key == "queue_311"
+    plan = json.loads("[" + value + "]")
+    assert len(plan) == 12
+    assert {leg["python-version"] for leg in plan} == {"3.11"}
