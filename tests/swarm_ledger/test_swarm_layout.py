@@ -890,15 +890,18 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
 
 def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
     page = open_page(clock=True)
-    page.tab.clock.run_for(299_000)
-    page.tab.wait_for_timeout(200)
-    assert {"action": "quota_refresh"} not in page.puts
-    page.tab.clock.run_for(2_000)
-    for _ in range(50):
-        if {"action": "quota_refresh"} in page.puts:
-            break
-        page.tab.wait_for_timeout(50)
-    assert page.puts.count({"action": "quota_refresh"}) == 1
+    assert page.tab.evaluate("Date.now()") == NOW_MS
+    for count in (1, 2):
+        page.tab.clock.run_for(299_999)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000 - 1
+        assert page.puts.count({"action": "quota_refresh"}) == count - 1
+        with page.tab.expect_response(
+            lambda response: response.request.method == "PUT"
+            and response.request.post_data_json == {"action": "quota_refresh"}
+        ):
+            page.tab.clock.run_for(1)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000
+        assert page.puts.count({"action": "quota_refresh"}) == count
 
 
 def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):
