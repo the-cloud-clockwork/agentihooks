@@ -12,6 +12,7 @@ shift 2
 
 transient='returned error: (401|403|408|429|5[0-9][0-9])|Failed to connect|Connection refused|Connection reset|timed out|Empty reply from server|Recv failure|Fail to request url|Call to URL .* failed|unexpected end of stream|SocketTimeoutException|Error status returned by url .*: (401|403|408|429|5[0-9][0-9])|failed with HTTP (401|403|408|429|5[0-9][0-9])|HTTP code (401|403|408|429|5[0-9][0-9])'
 authorization='returned error: (401|403)|Error status returned by url .*: (401|403)|failed with HTTP (401|403)|HTTP code (401|403)'
+upload='Failed to upload report: Error 5[0-9][0-9] on https?://[^[:space:]]*/api/ce/submit([?[:space:]]|$)'
 deadline="${SONAR_RETRY_SECONDS:-180}"
 out=$(mktemp)
 err=$(mktemp)
@@ -21,6 +22,7 @@ waited=0
 wait=2
 attempt=0
 denials=0
+uploads=0
 
 while true; do
   attempt=$((attempt + 1))
@@ -31,21 +33,28 @@ while true; do
     cat "$out"
     exit 0
   fi
-  reason=$(cat "$out" "$err" | grep -E "$transient" | tail -n1 || true)
+  reason=$(cat "$out" "$err" | grep -E "$transient|$upload" | tail -n1 || true)
   if [[ -z "$reason" || (-n "$unless" && -e "$unless") ]]; then
     cat "$err" >&2
     cat "$out"
     exit "$status"
   fi
   spent=$((SECONDS - start > waited ? SECONDS - start : waited))
+  if [[ "$reason" =~ $upload ]]; then
+    uploads=$((uploads + 1))
+    wait=2
+  fi
   if [[ "$reason" =~ $authorization ]]; then
     denials=$((denials + 1))
     wait=2
   fi
-  if ((denials == 2 || spent + wait > deadline)); then
+  if ((uploads == 2 || denials == 2 || spent + wait > deadline)); then
     cat "$err" >&2
     cat "$out" >&2
     message="$label failed $attempt times over ${spent}s: $reason. The Sonar server or its Access proxy did not answer; this is not a code verdict."
+    if ((uploads > 0)); then
+      message="$message Sonar report upload failed during a Sonar server outage (infrastructure)."
+    fi
     echo "::error title=Sonar server unavailable::$message" >&2
     [[ -z "${GITHUB_STEP_SUMMARY:-}" ]] || echo "Sonar server unavailable: $message" >> "$GITHUB_STEP_SUMMARY"
     exit "$status"
