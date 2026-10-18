@@ -16,11 +16,16 @@ def isolated(tmp_path, monkeypatch):
     from scripts.routing import native_login
 
     monkeypatch.setattr(login, "MANAGED", tmp_path / "no-managed-settings.json")
-    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
     monkeypatch.setattr(login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
     monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
     monkeypatch.setenv("SWARM_HIVE_ID", "hive-a")
     monkeypatch.setattr(native_login, "check", lambda *_: {"loggedIn": True, "authMethod": "claude.ai"})
+
+
+@pytest.fixture
+def ah(tmp_path, monkeypatch):
+    monkeypatch.setattr(login.hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "ah"))
+    return tmp_path / "ah"
 
 
 @pytest.fixture
@@ -66,7 +71,7 @@ def _environ(rendered, slug):
     }
 
 
-def test_primary_masters_of_two_swarms_launch_on_one_credential_home(tmp_path, rendered):
+def test_primary_masters_of_two_swarms_launch_on_one_credential_home(ah, tmp_path, rendered):
     home = login.build(rendered)
     (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "r"}}))
     (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
@@ -77,7 +82,7 @@ def test_primary_masters_of_two_swarms_launch_on_one_credential_home(tmp_path, r
     assert login.checkpoint({"AGENTIHOOKS_SWARM": "doctor", "CLAUDE_CONFIG_DIR": str(second)}) is False
 
 
-def test_several_primary_masters_hold_the_login_at_once_and_one_name_once(tmp_path):
+def test_several_primary_masters_hold_the_login_at_once_and_one_name_once(ah):
     assert login.claim("master@rig-1", 10, lambda pid: True) == 1
     assert login.claim("master@doctor-1", 20, lambda pid: True) == 2
     holders = json.loads((login.root() / login.OWNER).read_text())["holders"]
