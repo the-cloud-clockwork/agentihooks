@@ -114,7 +114,7 @@ def fixture_literals(node: ast.AST) -> list[str]:
                     parameters.setdefault(parameter.arg, []).append(value)
         if isinstance(call.func, ast.Attribute) and call.func.attr == "parametrize" and len(call.args) >= 2:
             names = path_parts(call.args[0], bindings)
-            if len(names) == 1 and "," not in names[0]:
+            if len(names) == 1:
                 bindings[names[0]] = call.args[1]
     bindings.update({name: ast.List(elts=values) for name, values in parameters.items()})
     return [path for call in ast.walk(node) if isinstance(call, ast.Call) for path in read_paths(call, bindings)]

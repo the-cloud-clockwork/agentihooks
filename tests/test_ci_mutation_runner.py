@@ -502,7 +502,9 @@ def test_workspace_keeps_generated_configuration_and_handles_probed_path_length_
         "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
         '(ROOT / "pyproject.toml").read_text()\n'
         f'(ROOT / "extra" / {allowed!r}).read_text()\n'
-        f'(ROOT / "extra" / {rejected!r}).exists()\n'
+        "import pytest\n"
+        "with pytest.raises(OSError):\n"
+        f'    (ROOT / "extra" / {rejected!r}).read_text()\n'
     )
     work = tmp_path / "work"
     work.mkdir()
