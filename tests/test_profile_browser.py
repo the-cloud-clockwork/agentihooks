@@ -261,6 +261,14 @@ def test_the_cache_key_follows_the_installed_playwright_mcp(monkeypatch, tmp_pat
     assert browser.fingerprint() != first
 
 
+def test_a_missing_or_unreadable_cache_is_no_cache(monkeypatch):
+    monkeypatch.setattr(browser, "fingerprint", lambda: "playwright-mcp 1")
+    assert browser.cached_tools() is None
+    browser.tools_file().parent.mkdir(exist_ok=True)
+    browser.tools_file().write_text("{not json")
+    assert browser.cached_tools() is None
+
+
 @pytest.mark.asyncio
 async def test_the_first_tool_call_launches_the_browser_once_and_keeps_the_task_folder(monkeypatch, types):
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
