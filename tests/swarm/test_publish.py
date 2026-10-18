@@ -654,9 +654,10 @@ def test_an_unchanged_publish_still_pushes_a_branch_the_remote_lacks(publication
     head = git(root, "rev-parse", "HEAD")
     pushes = counted_pushes(publish, monkeypatch)
     result = publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", [])
-    assert len(pushes) == 1
+    assert pushes == [["git", "push", "-u", "origin", "HEAD:refs/heads/engineer-test"]]
     assert "unchanged" not in result
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert publish.remote_head(root, "engineer-absent") == ""
 
 
 def fake_python(path, log, ruff):
