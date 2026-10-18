@@ -2,14 +2,16 @@ import contextlib
 import io
 import json
 import os
+import secrets
 import subprocess
 import sys
 import urllib.request
+from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
-from scripts.swarm import cli, naming, swarm_init
+from scripts.swarm import cli, naming, stack_env, swarm_init
 from scripts.swarm_ledger import ledger_creator, new_ledger
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_create_gate import as_lane
@@ -18,6 +20,7 @@ from tests.swarm.test_stack_init import home as home
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
+REAL_TOKEN = secrets.token_urlsafe
 TITLE = "One way to create a swarm, with an operator given name"
 RULE = (
     "  Rule: a swarm name is one or two lowercase words joined by a dash and ending in swarm, such as "
@@ -83,6 +86,8 @@ class Stack(Docker):
 
 @pytest.fixture
 def scratch(env, home, monkeypatch, tmp_path):
+    monkeypatch.setattr(stack_env, "secrets", SimpleNamespace(token_urlsafe=stack_env.secrets.token_urlsafe))
+    monkeypatch.setattr(secrets, "token_urlsafe", REAL_TOKEN)
     ledgers = tmp_path / "stack-ledgers"
     ledgers.mkdir()
     as_lane(monkeypatch, "operator", ledgers)
