@@ -311,7 +311,7 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     for name in SHARED_ROLLOUTS:
         canonical = (source / name).resolve()
         canonical.mkdir(parents=True, exist_ok=True)
-        (home / name).symlink_to(canonical, target_is_directory=True)
+        (home / name).symlink_to(canonical)
     binaries = source / "bin"
     if binaries.exists():
         (home / "bin").symlink_to(binaries.resolve())
