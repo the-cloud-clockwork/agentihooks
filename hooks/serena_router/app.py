@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -79,6 +79,8 @@ def build_app(pool: Pool, tools: list[Tool]) -> Starlette:
                 yield
             finally:
                 evictor.cancel()
+                with suppress(asyncio.CancelledError):
+                    await evictor
                 await pool.close()
 
     app = Starlette(
