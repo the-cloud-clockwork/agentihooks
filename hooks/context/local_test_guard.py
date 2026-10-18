@@ -2,6 +2,7 @@ import ast
 import os
 import posixpath
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from hooks.context.shell_commands import commands
@@ -77,7 +78,7 @@ _LITERAL = (
 )
 _LAUNCH = re.compile(
     r"\b(?:\w+_)?(?:subprocess|system|popen|spawn|exec)\w*"
-    r"|\b(?:eval|compile|Function|vm|run_module|run_path|__import__|import_module|child_process)\b"
+    r"|\b(?:eval|compile|Function|vm|_?run_module\w*|run_path|__import__|import_module|child_process)\b"
     r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
 _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
@@ -94,7 +95,7 @@ def local_tests_allowed() -> bool:
     return os.getenv(ALLOW_LOCAL_TEST_RUN_ENV, _FALSE).lower() == _TRUE
 
 
-def _strip(source: str, comment: str, keep) -> str:
+def _strip(source: str, comment: str, keep: Callable[[str, re.Match], bool]) -> str:
     return re.sub(
         f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
         lambda match: match[0] if keep(source, match) else match["q"],
@@ -146,29 +147,36 @@ def _read_roots(tree: ast.Module, imports: list[tuple[str, str]]) -> set[int]:
     for node in ast.walk(tree):
         if isinstance(node, ast.Call) and _is_reader(node, modules, functions):
             for arg in node.args:
-                while isinstance(arg, ast.Attribute):
-                    arg = arg.value
-                if isinstance(arg, ast.Name):
-                    roots.add(id(arg))
+                chain = [arg]
+                while isinstance(chain[-1], ast.Attribute):
+                    chain.append(chain[-1].value)
+                if isinstance(chain[-1], ast.Name):
+                    roots.update(id(link) for link in chain)
     return roots
+
+
+def _node_text(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return ""
 
 
 def _reads_runner_source(code: str) -> bool:
     try:
         tree = ast.parse(code)
-    except SyntaxError:
+    except (SyntaxError, ValueError, RecursionError):
         return False
     imports = _imports(tree)
     runners = {bound for path, bound in imports if _PYTHON_TEST.search(path)}
     if not runners or "*" in runners or any(path in _RUNS_ON_IMPORT for path, _ in imports):
         return False
     roots = _read_roots(tree, imports)
-    names = [
-        node
-        for node in ast.walk(tree)
-        if isinstance(node, ast.Name) and (node.id in runners or _PYTHON_TEST.search(node.id))
-    ]
-    return bool(names) and all(id(node) in roots for node in names)
+    uses = [node for node in ast.walk(tree) if _node_text(node) in runners or _PYTHON_TEST.search(_node_text(node))]
+    return bool(uses) and all(id(node) in roots for node in uses)
 
 
 def _python_code_runs_tests(code: str) -> bool:

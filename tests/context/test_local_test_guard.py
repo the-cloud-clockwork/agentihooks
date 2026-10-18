@@ -541,6 +541,9 @@ def test_source_inspection_and_prose_naming_a_runner_pass(command, monkeypatch):
         "python3 -c \"import inspect, importlib; print(inspect.getsource(importlib.import_module('pytest')))\"",
         'python3 -c "f\'{__import__(\\"pytest\\").main()}\'"',
         ISSUE_BODY_WRITER.removesuffix("PY") + "import subprocess\nsubprocess.run(['mutmut', 'run'])\nPY",
+        "python3 -c \"import inspect, pytest, sys; print(inspect.getsource(pytest)); sys.modules['pytest'].main()\"",
+        "python3 -c \"import runpy; runpy._run_module_as_main('pytest'); print('launch via subprocess')\"",
+        "python3 -c \"import runpy; runpy._run_module_as_main('pytest')\"",
     ],
 )
 def test_runner_use_beside_an_inspection_is_blocked(command, monkeypatch):
