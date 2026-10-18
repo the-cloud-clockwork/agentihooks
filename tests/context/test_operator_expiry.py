@@ -67,7 +67,7 @@ def test_operator_off_without_a_timer_keeps_the_session_off(clocked_scheduler):
 
     operator_mode.observe("pane", "operator off", True, now=100)
     assert not operator_mode.present("pane", now=100)
-    assert "timer_id" not in operator_mode._load("pane")
+    assert operator_mode._load("pane") == {"on": False, "at": 100, "turn_at": None}
     assert clocked_scheduler.run_due(now=400) == 0
     assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
 
