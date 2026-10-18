@@ -1306,6 +1306,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'pull_request' && {skipped}",
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
+        f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
     )
     for job in (stats, mutation):
         assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
