@@ -524,6 +524,7 @@ ISSUE_BODY_WRITER = (
         "python3 -c 'import inspect, scripts.ci_mutation.selection; print(inspect.getsource(scripts.ci_mutation.selection))'",
         "python3 - <<'PY'\nimport inspect\nimport mutmut.__main__ as runner  # read only, no subprocess\n"
         "print(inspect.getsource(runner))\nPY",
+        "python3 -c 'import inspect, pytest as XXXX; print(inspect.getsource(XXXX))'",
         ISSUE_BODY_WRITER,
     ],
 )
@@ -559,6 +560,7 @@ def test_source_inspection_and_prose_naming_a_runner_pass(command, monkeypatch):
         "python3 -c 'import pytest; from doctest import getfile; print(getfile(pytest))'",
         "python3 -c 'import pytest; from inspect import cleandoc; print(cleandoc(pytest))'",
         "python3 -c 'import inspect, pytest; print(inspect.getsource(pytest)); pytest.main('",
+        "python3 -c 'import inspect, mutmut.__main__ as runner; print(inspect.getsource(runner), pytest.main)'",
         "python3 -c \"import inspect, pytest, sys\n@sys.modules['pyt'+'est'].main\ndef f(): pass\n"
         'print(inspect.getsource(pytest))"',
     ],
