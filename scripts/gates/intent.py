@@ -334,7 +334,7 @@ def _split_note(task):
 
 
 def _plan_chunk(doc, task):
-    half = _split_half(task) if ledger_splits.ranged(task.get("split") or []) else None
+    half = _split_half(task) if task.get("split") and ledger_splits.ranged(task["split"]) else None
     task = {**task, "plan_lines": half[1]} if half else task
     if not task.get("plan_lines") or task.get("follow_up") or _declared(task):
         return {}
