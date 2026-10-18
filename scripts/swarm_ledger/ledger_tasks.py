@@ -348,7 +348,7 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
-    if refusal := ledger_plans.task_refusal(doc, task):
+    if refusal := ledger_plans.task_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc):
         ctx.refused.append(refusal)
         return False
     tasks.append(task)
@@ -427,7 +427,15 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    return park_refusal(op, task)
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc)
+
+
+def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
+    fields = op["fields"]
+    if "rank" not in fields and "phase" not in fields:
+        return ""
+    rank = fields.get("rank", task.get("rank"))
+    return ledger_rank.urgent_refusal({**task, **fields, "rank": ledger_rank.ALIASES.get(rank, rank)}, doc)
 
 
 def park_refusal(op: dict, task: dict) -> str:
@@ -568,6 +576,9 @@ def _relay_rank(doc, op, ctx):
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
     if task is None or not ledger_rank.quoted(rank, words):
         ctx.refused.append(UNRELAYED)
+        return False
+    if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
+        ctx.refused.append(refusal)
         return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)

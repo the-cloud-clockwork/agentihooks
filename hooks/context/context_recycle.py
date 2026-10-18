@@ -78,7 +78,7 @@ def _swarm_of(environ, session_id: str = "") -> str:
     if not slug:
         return _pinned_swarm(session_id).get("swarm")
     if _used(session_id) is not None:
-        _pin_swarm(session_id, slug)
+        pin_swarm(session_id, slug)
     return slug
 
 
@@ -89,11 +89,13 @@ def _pinned_swarm(session_id: str) -> dict:
         return {}
 
 
-def _pin_swarm(session_id: str, slug: str) -> None:
+def pin_swarm(session_id: str, slug: str, compact_limit: int | None = None) -> None:
     pin = _marker(session_id, "swarm")
     if not pin.exists():
         pin.parent.mkdir(parents=True, exist_ok=True)
-        pin.write_text(json.dumps({"swarm": slug, "compact_limit": COMPACT_LIMIT}))
+        pin.write_text(
+            json.dumps({"swarm": slug, "compact_limit": COMPACT_LIMIT if compact_limit is None else compact_limit})
+        )
 
 
 def over_limit(session_id: str, environ=None) -> str | None:

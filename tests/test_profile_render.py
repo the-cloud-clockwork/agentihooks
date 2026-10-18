@@ -295,6 +295,28 @@ def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
         claude_md_sanity.check_claude_md_write(payload)
 
 
+@pytest.mark.parametrize("characters", [149_999, 150_000, 150_001])
+def test_render_enforces_the_compiled_instruction_character_limit(world, characters):
+    from scripts.profiles import render
+
+    out = render.render_claude("rb-role")
+    original = out / "CLAUDE.md"
+    before = original.read_text()
+    source = world["role"] / "CLAUDE.md"
+    source.write_text(source.read_text().strip() + "é" * (characters - len(before)))
+
+    if characters > 150_000:
+        with pytest.raises(ValueError, match=r"rb-role.*150001 characters.*150000"):
+            render.render_claude("rb-role", force=True)
+        assert render.profile_dir("rb-role") == out.parent
+        assert original.read_text() == before
+    else:
+        rebuilt = render.render_claude("rb-role", force=True)
+        text = (rebuilt / "CLAUDE.md").read_text()
+        assert len(text) == characters
+        assert "é" * (characters - len(before)) in text
+
+
 def test_claude_render_settings(world):
     from scripts.profiles import render
 

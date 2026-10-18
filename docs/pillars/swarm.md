@@ -113,6 +113,67 @@ that phase; any other item, and one whose owner seat has no live master, reaches
 `@master` stay with the lead, which answers the operator; while the lead seat is empty the lowest numbered live
 master answers.
 
+### Master inbox pool
+
+The lead address `master@<id>` is the swarm's front door. While two or more masters are live, an item sent to
+`master@<id>` by any sender other than `operator` (a tick item, an agent's question or follow up, a
+`msg send master@<id>`) does not wait at the lead's seat. It enters one pool per swarm and is handed to exactly one
+live master:
+
+| Rule | Behavior |
+|---|---|
+| Order | Items leave the pool oldest first, by the arrival sequence number the inbox gives each item sent to `master@<id>`. |
+| Exactly once | A master takes an item in one Redis transaction that removes it from the pool, moves it pending to that master's seat and records the seat as its holder. Two processes handing out the same pool never give one item to two masters. |
+| Round robin | The pool remembers the last seat it served and gives the next item to the next live seat in seat order, lead first, then `master-2@<id>`, `master-3@<id>` and on, wrapping back to the first. |
+| Skips | A seat whose master is finished, retiring, asked to retire, retired early, numbered above the seat count with no live master record, or recorded as having left its seat is not live and is passed over. |
+| Redelivery | A pooled item its holder does not confirm within `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds) goes back to the pool and on to the next live master, passing over the master that let it lapse while another is live. It keeps its id. |
+| Gone holder | Items a master claimed that are still pending at its seat return to the pool when that master stops being live, for the remaining masters. Items it had already been delivered return at the next redelivery pass, as any unconfirmed item does. |
+| No master | Items already in the pool wait there, in order, until a master is live. A new item sent while fewer than two masters are live does not enter the pool and waits at the lead seat. |
+
+The inbox hands out the pool when an item enters it and again on every redelivery pass, so an item waiting for a
+master, or one whose holder lapsed, moves within a redelivery pass. Each move is a line on the item's history:
+`claimed from the master pool by <seat>` when a master takes it, and `returned to the master pool: its master is
+gone` when it comes back from a master that left. While an item waits in the pool it belongs to no master. A
+master other than the front door seat is refused with `message <id> belongs to master@<id>, not <name>`; for the front
+door seat, `msg read` and every state change other than a close are refused with `message <id> waits in the master
+pool for the next master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
+leaves the pool and stays where it was sent.
+
+Operator facing items never enter the pool. Page chat, every operator write on the ledger page (comments, replies,
+answers, notes, checks) and every relayed decision are sent as `operator` and reach the front door master: the lead,
+or the lowest numbered live master while the lead seat is empty. An item addressed to a numbered seat, such as
+`master-2@<id>` for a phase that seat owns, reaches that seat directly.
+
+A swarm with one live master has no pool: items for `master@<id>` wait at its seat and redeliver to it exactly as in
+a single master swarm. When a second master goes, the remaining master takes the items still pooled at the next
+redelivery pass, and a lapsed item of its own redelivers to it as before.
+
+The pool, the master write fence and the operator mail routing read the live master seats from one reader, built on
+the seat registry: a seat counts while its registered occupant has neither left it, finished nor retired, and a master
+record whose seat the registry does not hold yet counts by its record. During a handoff the successor that took the
+seat counts and its predecessor does not, so all three agree on the same seat list and the same lead. The page chat
+front door gate reads the seat registry too: a master writes page chat only while its seat pointer in the registry
+names the lead seat or names no seat, as for a master that predates seats. A registry read that fails lets the write
+through and records it in the gate log.
+
+Inspect a pool with the inbox commands and, for the raw state, Redis (the key prefix is
+`AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`):
+
+```bash
+agentihooks msg inbox --of master@<id>
+agentihooks msg inbox --of master-2@<id>
+redis-cli ZRANGE agentihooks:inbox:pool:<id> 0 -1 WITHSCORES
+redis-cli GET agentihooks:inbox:pool:<id>:last
+redis-cli SMEMBERS agentihooks:inbox:pool:<id>:holders
+```
+
+The sorted set lists the item ids still waiting, scored by arrival sequence number; `last` is the seat served last
+and `holders` the seats that have claimed pool items, kept until a seat stops being live and its pending items
+return. An item that stays in the pool while masters are live, or a master that never receives
+pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters, and the item's
+history, which `msg read <id>` prints for the master that claimed it, for the `claimed from the master pool by <seat>`
+line naming that seat. `msg read` also marks the item read, so run it only as the master taking up the item.
+
 ## Commands
 
 The swarm id is a lowercase slug of letters, digits and dashes, starting with a letter, at most 48 long.
@@ -953,6 +1014,83 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Stalled activity findings
+
+A `stalled` health finding means a pane reports `working` while its recorded
+tool activity has been quiet for at least `AGENTIHOOKS_HEALTH_STALLED_MINUTES`
+(default **10**). A pane that is not working, or an agent with no recorded
+tool timestamp, does not produce this finding. Inspect the finding through:
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+Compare the finding with recent tool calls and the agent's progress. Inbox
+messages and task changes can show that work continued, but successful commands
+alone do not establish that the hook retained the identity needed to record
+activity. A finding is evidence to investigate; the master or operator judges
+it with `verdict`.
+
+#### Wrapper loss and swarm identity
+
+A launched Claude agent can keep running after its agentihooks wrapper exits.
+Its process is then reparented, so the hook's parent walk no longer reaches the
+original launcher. Before the correction delivered in
+[pull request 3906](https://github.com/the-cloud-clockwork/agentihooks/pull/3906),
+that condition caused hooks to treat the agent as nested and drop its swarm
+identity. Tool calls continued while activity recording returned early, leaving
+the stall clock frozen and producing false findings.
+
+The hook now checks the launcher's terminal session when its parent walk sees
+one agent but misses the launcher. The launched agent keeps its identity when
+it is the only recognized agent in that session. This requires no manual
+identity repair or new setting. A recognized agent in another terminal session,
+a session containing another agent, or an agent nested inside an orphaned
+agent remains isolated from the outer swarm identity. Consecutive processes
+with the same agent command name are treated as one wrapper chain.
+
+The check recognizes Claude and Codex process names. This correction does not
+establish Copilot orphan recovery or explain why a wrapper exited.
+
+#### Configure the threshold
+
+Set the threshold in the environment used by the health pass. For a manually
+invoked tick, this example raises it to twenty minutes for that invocation:
+
+```bash
+AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 agentihooks swarm tick
+```
+
+For a timer or controller, supply the variable through that service's managed
+environment so later passes use the same value. Setting it only in a worker
+shell does not configure a separately running health pass. Raising the threshold
+changes when the finding appears; it does not repair a frozen activity record.
+
+#### Investigate an active agent reported as stalled
+
+1. Read `status --json` and compare the reported inactivity with recent tool
+   calls, progress and task changes. Successful hook execution with a frozen
+   activity clock matches the symptom investigated in
+   [issue 3899](https://github.com/the-cloud-clockwork/agentihooks/issues/3899).
+2. Confirm the running hook installation includes the correction. Use read-only
+   process diagnostics to compare the agent's parent and terminal session with
+   the launcher when investigating wrapper loss; do not dump its environment.
+3. Observe a subsequent tool call and the next health pass. If inactivity still
+   grows, retain the hook and process evidence for investigation. Do not remove
+   `AGENTIHOOKS_SWARM_LAUNCHER` to force identity acceptance: it protects nested
+   sessions from inheriting the outer task.
+4. The master or operator records the evidence-based verdict. For example,
+   substitute the finding identifier returned by status:
+
+   ```bash
+   agentihooks swarm <slug> verdict <finding> false-positive --note 'Recent tool calls continued while activity recording was frozen'
+   ```
+
+A verdict suppresses the finding under the existing cooldown rules; it does
+not update the activity clock. See the `verdict` command above for recurrence
+behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
+or Redis outages, which have their own hold and resume behavior.
 
 ### Ledger event pass
 

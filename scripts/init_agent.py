@@ -874,6 +874,9 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
         if not args.dry_run:
+            from scripts.scheduler.service import ensure_running
+
+            ensure_running(active_env)
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
         claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args

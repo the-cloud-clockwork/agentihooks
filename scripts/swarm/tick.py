@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
 
+from hooks.context import context_recycle
 from scripts.ci_budget import defects as ci_defects
 from scripts.ci_budget import flakes as ci_flakes
 from scripts.doctor import priming
@@ -29,6 +30,7 @@ from scripts.swarm import (
     affinity,
     bottleneck_remedy,
     ci_speed,
+    claim_hold,
     claim_order,
     continuation,
     control_notifications,
@@ -49,7 +51,6 @@ from scripts.swarm import (
     master_start,
     master_wake,
     outage,
-    phase_state,
     profile_first,
     promotion_watch,
     reaper,
@@ -71,7 +72,7 @@ from scripts.swarm.pane import PaneObservation
 from scripts.swarm.profile_choice import ProfileUnresolved
 from scripts.swarm.ready import awaiting as awaiting_merge
 from scripts.swarm.store import MASTER, PREFIX, AgentRecord, SwarmConfig, SwarmError
-from scripts.swarm_ledger import ledger_rank, ledger_workspace, task_dependencies
+from scripts.swarm_ledger import ledger_rank, ledger_workspace
 from scripts.swarm_ledger.repository import hierarchy
 from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
@@ -695,6 +696,8 @@ def _conversations(slug, store, runtime):
         if pane not in found and (local is None or reports.host(agent) or resume.recovery_pending(store, slug, agent)):
             continue
         current = found.get(pane, "")
+        if current:
+            context_recycle.pin_swarm(current, slug, store.config(slug).compact_limit or None)
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)
@@ -750,9 +753,7 @@ def ready(task, rows, doc, graph, fix):
         task.get("state") == "open"
         and not task.get("out_of_scope")
         and not task.get("merged_into")
-        and phase_state.admits(task, doc)
-        and not freeze.held(task, doc, graph, fix)
-        and _unblocked(task, rows)
+        and not claim_hold.hold(task, rows, doc, graph, fix)
     )
 
 
@@ -765,10 +766,6 @@ def _launch_order(slug, store, tasks, dispatched=None):
             not claim_order.resumed(task),
         ),
     )
-
-
-def _unblocked(task, rows):
-    return task_dependencies.ready(task, rows)
 
 
 def _parked(task, rows):
