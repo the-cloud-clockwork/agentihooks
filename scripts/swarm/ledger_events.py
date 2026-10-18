@@ -170,7 +170,7 @@ def pull_request(raw):
         any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
         _stale_red(raw, checks, results),
-        any(result in PENDING for result in results),
+        any(result in PENDING - {"EXPECTED"} for result in results),
     )
 
 

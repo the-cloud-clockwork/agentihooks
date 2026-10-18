@@ -1320,6 +1320,8 @@ def test_a_stale_red_run_beside_fresh_passing_runs_is_stale_and_pending_required
     assert ledger_events.pull_request({**raw, "statusCheckRollup": [fresh, running]}).required_pending is True
     optional_pull = ledger_events.pull_request({**raw, "statusCheckRollup": [{**fresh, "isRequired": True}, optional]})
     assert optional_pull.checks_pending and not optional_pull.required_pending
+    expected = {"context": "deleted workflow", "state": "EXPECTED", "createdAt": "1970-01-01T02:52:00Z"}
+    assert ledger_events.pull_request({**raw, "statusCheckRollup": [fresh, expected]}).required_pending is False
 
 
 def test_only_pending_optional_checks_never_hold_a_dropped_pull_request():
