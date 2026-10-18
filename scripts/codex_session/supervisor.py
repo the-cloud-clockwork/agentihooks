@@ -350,7 +350,9 @@ def preserve_legacy_rollouts(home: Path) -> None:
                 if current.startswith(previous):
                     outgoing.write(current[len(previous) :])
                 elif not previous.startswith(current):
-                    recovered = canonical / sessions.name / f"recovered-{home.parent.name}" / rollout.relative_to(sessions)
+                    recovered = (
+                        canonical / sessions.name / f"recovered-{home.parent.name}" / rollout.relative_to(sessions)
+                    )
                     recovered.parent.mkdir(parents=True, exist_ok=True)
                     recovered.write_bytes(current)
 
