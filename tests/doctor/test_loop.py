@@ -287,6 +287,6 @@ def test_inbox_wording_does_not_return_a_finding_but_a_new_wake_does(store, monk
     after = inbox.past_window([item], T0 + 90 * MINUTE_MS, MINUTE_MS)
     assert after[0].evidence != first[0].evidence
     assert loop.record(store, DOCTOR, after, T0 + 90 * MINUTE_MS, MINUTE_MS) == []
-    item["history"].append({"event": "wake", "at": T0 + 90 * MINUTE_MS})
+    item["history"].append({"event": "woken", "at": T0 + 90 * MINUTE_MS})
     wake = inbox.past_window([item], T0 + 91 * MINUTE_MS, MINUTE_MS)
     assert len(loop.record(store, DOCTOR, wake, T0 + 91 * MINUTE_MS, MINUTE_MS)) == 1
