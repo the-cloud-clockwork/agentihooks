@@ -182,8 +182,8 @@ every other phase keeps its owner. Items already delivered stay with the old own
 request notice or task health finding about a phase or a task in it reaches the live master owning that phase; any
 other item, and one whose owner seat has no live master, reaches the lead. Every operator write that no task
 claimant takes reaches the lead, the front door, whatever phase or hive it is about, and so does page chat naming a
-backend master; the lead hands work to backend masters over the masters channel. While the lead seat is empty the
-lowest numbered live master answers.
+backend master; only a sync order and the `@swarm` information copy reach every live agent. The lead hands work to
+backend masters over the masters channel. While the lead seat is empty the lowest numbered live master answers.
 
 ### Master inbox pool
 

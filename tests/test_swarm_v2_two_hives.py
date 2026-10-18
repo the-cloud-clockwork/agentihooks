@@ -138,6 +138,26 @@ def test_operator_comment_on_a_hive_item_and_chat_both_reach_the_lead(world):
     assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, held) == [cases.LEAD]
 
 
+def test_an_operator_comment_on_a_hive_question_reaches_only_the_front_door(world):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import operator_mail
+
+    add(world, "questions")
+    inbox = InboxStore(world.redis)
+    event = {
+        "rev": 901,
+        "at": 1000,
+        "by": "operator",
+        "kind": "comment added",
+        "target": "questions/targeted/comments/c1",
+        "id": "c1",
+        "text": "Go ahead",
+    }
+    sent = operator_mail.relay(inbox, world.store, cases.SLUG, world.doc(), [event], lambda e: e["text"])
+    assert [item.address for item in sent] == [cases.LEAD]
+    assert [item.text for item in inbox.pending_items(cases.SECOND)] == []
+
+
 @pytest.mark.parametrize("command", ["question", "followup"])
 def test_untargeted_cli_retains_the_original_write(monkeypatch, command):
     from scripts.swarm_ledger import ledger

@@ -1,7 +1,8 @@
 """Operator writes on a swarm ledger as inbox items: a task's to the agent that claimed it, a chat line to its
 addressee (for @swarm and @master the lead master, with an information only copy of @swarm for every other live agent),
-everything else to the lead master, the front door: a backend master never receives an operator write. The lead is
-the lead seat while it is live, else the lowest numbered live master. A gone addressee falls back to the lead."""
+everything else to the lead master, the front door: a backend master receives no operator write beyond a sync
+order and the @swarm information copy. The lead is the lead seat while it is live, else the lowest numbered live
+master. A gone addressee falls back to the lead."""
 
 from scripts.inbox import outbox
 from scripts.inbox.seen import write_ref
