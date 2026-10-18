@@ -25,11 +25,13 @@ from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 if TYPE_CHECKING:
     from scripts.codex_quota import CodexQuota
     from scripts.routing.master_account import MasterAccount
+    from scripts.routing.reservation import Reservation
     from scripts.routing.slots import SlotSource
 
 PAGE_TTL_S = 60
 RETIRED_AFTER_S = session_bands.FRESH_SECONDS
 STALE = "STALE"
+CLOSED = "CLOSED"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
 CURRENT_MARK = "(current)"
@@ -82,6 +84,7 @@ class QuotaRow:
     fable_left: float | None = None
     fable_resets_at: int | None = None
     identity: str = ""
+    reserved: str = ""
 
 
 def claude_rows(
@@ -418,6 +421,18 @@ def _observed(results: list, now: float, fable: bool) -> dict[str, float]:
     return {result.account: cached.get(result.account, now) for result in results}
 
 
+def with_reservations(rows: list[QuotaRow], holds: Mapping[str, "Reservation | None"]) -> list[QuotaRow]:
+    return [
+        replace(row, state=CLOSED, cap=0, reserved=held.reason)
+        if (held := holds.get(row.agent))
+        and row.kind != API
+        and row.seven_day_left is not None
+        and held.closes(row.account, 100 - row.seven_day_left)
+        else row
+        for row in rows
+    ]
+
+
 def balance_table(
     results: list,
     sessions: dict[str, int],
@@ -432,9 +447,10 @@ def balance_table(
     observed = _observed(results, now, fable) if observed is None else observed
     claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
-    table = _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
-    held = [reservation.current(harness, os.environ) for harness in (HARNESSES[:1] if fable else HARNESSES)]
-    return "\n".join([table, *(f"{h.harness} {h.slug}: {h.reason}" for h in held if h and h.reason)])
+    holds = {harness: reservation.current(harness, os.environ) for harness in (("claude",) if fable else HARNESSES)}
+    rows = with_reservations(claude + ([] if fable else _codex(now)), holds)
+    table = _render_live(rows, sessions, now, fable, current)
+    return "\n".join([table, *(f"{row.agent} {row.account}: {row.reserved}" for row in rows if row.reserved)])
 
 
 def current_observations(cached: list) -> list:

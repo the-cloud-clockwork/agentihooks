@@ -73,8 +73,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     fresh, _ = tokens.results(environ, now)
     observed.update({result.account: (now, result) for result in fresh})
-    snapshot = _master_snapshot(environ, now)
-    observed.update(snapshot)
+    observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
     routed = set(account_sessions.token_accounts(environ).values())
     rows = []
@@ -85,7 +84,6 @@ def _claude(environ: dict, now: float) -> list[Account]:
         if token and result.account not in routed:
             continue
         cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
-        cap = 0 if result.account in snapshot else cap
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)

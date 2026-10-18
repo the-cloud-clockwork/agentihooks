@@ -52,9 +52,10 @@ def account_snapshot(account: str, now: float) -> tuple[float, dict] | None:
     for path in (AGENTIHOOKS_HOME / "quota_usage").glob("*.json"):
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
-            if data.get("account") == account and now - float(data["updated_at"]) <= QUOTA_USAGE_STALE_SEC:
+            fresh = now - float(data["updated_at"]) <= QUOTA_USAGE_STALE_SEC
+            if data.get("account") == account and fresh and isinstance(data.get("rate_limits"), dict):
                 found.append((float(data["updated_at"]), data["rate_limits"]))
-        except (OSError, ValueError, TypeError, KeyError, AttributeError):
+        except (OSError, ValueError, TypeError, KeyError):
             continue
     return max(found, key=lambda entry: entry[0], default=None)
 

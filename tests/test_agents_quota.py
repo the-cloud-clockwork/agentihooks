@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -246,6 +247,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "fable_left": None,
             "fable_resets_at": None,
             "identity": "",
+            "reserved": "",
             "harness": "claude",
         }
     ]
@@ -1031,6 +1033,28 @@ def test_quota_json_is_indented_two_spaces(monkeypatch, capsys):
     assert capsys.readouterr().out.startswith('[\n  {\n    "agent": "codex",')
 
 
+def _week_row(agent: str, account: str, week_left: float | None, kind: str = SUBSCRIPTION) -> agents_quota.QuotaRow:
+    return agents_quota.QuotaRow(agent, account, "NORMAL", 1, 90.0, week_left, None, "log", cap=4, kind=kind)
+
+
+def test_the_master_reservation_closes_only_the_rows_the_swarm_quota_view_closes():
+    from scripts.routing.reservation import Reservation
+
+    reason = "reserved for 1 live master: workers stop at 70% of the week"
+    rows = [
+        _week_row("codex", "default", 30.0),
+        _week_row("codex", "default", 30.1),
+        _week_row("codex", "spare", 10.0),
+        _week_row("codex", "default", None),
+        _week_row("codex", "default", 10.0, API),
+        _week_row("claude", "default", 10.0),
+    ]
+    closed = replace(rows[0], state="CLOSED", cap=0, reserved=reason)
+    held = {"codex": Reservation("codex", "default", 1), "claude": None}
+    assert agents_quota.with_reservations(rows, held) == [closed, *rows[1:]]
+    assert agents_quota.with_reservations(rows, {"codex": Reservation("codex", "default", 0)}) == rows
+
+
 @pytest.mark.parametrize("fable", [False, True])
 def test_balance_table_names_the_master_reservation_for_each_harness(monkeypatch, fable):
     from hooks.context import account_sessions
@@ -1041,17 +1065,24 @@ def test_balance_table_names_the_master_reservation_for_each_harness(monkeypatch
         "codex": reservation.Reservation("codex", "default", 1),
     }
     asked = []
-    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
+    codex = [_week_row("codex", "default", 20.0), _week_row("codex", "spare", 20.0)]
+    home = ProbeResult("home", "allowed", "NORMAL", 30.0, QuotaWindow(10.0, 10**10), QuotaWindow(70.0, 10**10))
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: codex)
     monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
     monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
     monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
-    monkeypatch.setattr(reservation, "current", lambda harness, environ: asked.append(harness) or held[harness])
-    lines = agents_quota.balance_table([], {}, 20_000.0, fable, observed={}).splitlines()
-    claude = "claude home: reserved for 2 live masters: workers stop at 60% of the week"
-    codex = "codex default: reserved for 1 live master: workers stop at 70% of the week"
-    assert [line for line in lines if "reserved for" in line] == ([claude] if fable else [claude, codex])
-    assert asked == (["claude"] if fable else ["claude", "codex"])
-    monkeypatch.setattr(reservation, "current", lambda harness, environ: reservation.Reservation(harness, "x", 0))
-    assert "reserved" not in agents_quota.balance_table([], {}, 20_000.0, fable, observed={})
     monkeypatch.setattr(reservation, "current", lambda harness, environ: None)
-    assert "reserved" not in agents_quota.balance_table([], {}, 20_000.0, fable, observed={})
+    plain = agents_quota.balance_table([home], {}, 20_000.0, fable, observed={"home": 20_000.0})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: asked.append(harness) or held[harness])
+    lines = agents_quota.balance_table([home], {}, 20_000.0, fable, observed={"home": 20_000.0}).splitlines()
+    claude = "claude home: reserved for 2 live masters: workers stop at 60% of the week"
+    codex_line = "codex default: reserved for 1 live master: workers stop at 70% of the week"
+    footer = [claude, *([] if fable else [codex_line])]
+    assert lines[len(plain.splitlines()) :] == footer
+    assert asked == (["claude"] if fable else ["claude", "codex"])
+    states = {
+        (cells[1], cells[2]): cells[4] for cells in (line.split() for line in lines[2 : -len(footer)]) if len(cells) > 4
+    }
+    assert states[("claude", "home")] == "CLOSED"
+    if not fable:
+        assert (states[("codex", "default")], states[("codex", "spare")]) == ("CLOSED", "NORMAL")

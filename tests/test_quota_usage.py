@@ -280,7 +280,16 @@ def test_account_snapshot_is_the_freshest_fresh_snapshot_of_that_account(monkeyp
     ):
         monkeypatch.setattr(quota_usage.time, "time", lambda at=at: at)
         quota_usage.record_rate_limits(session, limits, environ)
-    (tmp_path / "quota_usage" / "broken.json").write_text("{", encoding="utf-8")
+    folder = tmp_path / "quota_usage"
+    for name, text in (
+        ("broken", "{"),
+        ("listed", "[]"),
+        ("empty", "{}"),
+        ("unset", '{"updated_at": null, "account": "main", "rate_limits": {}}'),
+        ("shape", '{"updated_at": 1400, "account": "main", "rate_limits": []}'),
+    ):
+        (folder / f"{name}.json").write_text(text, encoding="utf-8")
+    (folder / "folder.json").mkdir()
     expected = {
         name: {**window, "used_percentage": float(window["used_percentage"])}
         for name, window in _limits(30, 40).items()
@@ -289,3 +298,14 @@ def test_account_snapshot_is_the_freshest_fresh_snapshot_of_that_account(monkeyp
     assert quota_usage.account_snapshot("main", 1_501.0) is None
     assert quota_usage.account_snapshot("spare", 1_300.0)[0] == 1_250.0
     assert quota_usage.account_snapshot("absent", 1_300.0) is None
+
+
+def test_the_statusline_snapshot_reads_the_session_environment(monkeypatch, tmp_path):
+    import hooks.context.quota_usage as quota_usage
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    for name in [name for name in os.environ if name.startswith("AH_ROUTE_INTERACTIVE_")]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
+    quota_usage.record_rate_limits("live", _limits(10, 20))
+    assert json.loads((tmp_path / "quota_usage" / "live.json").read_text())["account"] == "main"

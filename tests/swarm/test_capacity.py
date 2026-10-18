@@ -2353,19 +2353,24 @@ def test_a_tokenless_master_account_reads_its_session_snapshot(monkeypatch, tmp_
     reading = balancer.ProbeResult("main", "allowed", "NORMAL", 40.0, five, week)
     assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_000.0, reading)}
     rows = capacity._claude({}, 1_100.0)
-    assert rows == [capacity.Account("claude", "main", "CLOSED", 1, 70.0, 40.0, 0, 9_000, five_resets_at=5_000)]
+    assert rows == [capacity.Account("claude", "main", "UNKNOWN", 1, 70.0, 40.0, None, 9_000, five_resets_at=5_000)]
     assert rows[0].observed_at == 1_000.0
 
 
-def test_a_master_snapshot_with_one_window_reads_the_other_as_unknown(monkeypatch, tmp_path):
+@pytest.mark.parametrize("kept", ["five_hour", "seven_day"])
+def test_a_master_snapshot_with_one_window_reads_the_other_as_unknown(monkeypatch, tmp_path, kept):
     from hooks.context import quota_usage
 
     _interactive_master(monkeypatch, tmp_path, {"main": 1})
     monkeypatch.setattr(quota_usage.time, "time", lambda: 1_050.0)
-    limits = {"seven_day": {"used_percentage": 20, "resets_at": 9_000}}
+    limits = {kept: {"used_percentage": 20, "resets_at": 9_000}}
     quota_usage.record_rate_limits("later", limits, {"AH_ROUTE_INTERACTIVE_main": "1"})
-    week = balancer.QuotaWindow(20.0, 9_000)
-    reading = balancer.ProbeResult("main", "allowed", "UNKNOWN", None, balancer.QuotaWindow(), week)
+    windows = {
+        "five_hour": balancer.QuotaWindow(),
+        "seven_day": balancer.QuotaWindow(),
+        kept: balancer.QuotaWindow(20.0, 9_000),
+    }
+    reading = balancer.ProbeResult("main", "allowed", "UNKNOWN", None, windows["five_hour"], windows["seven_day"])
     assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_050.0, reading)}
 
 
@@ -2385,13 +2390,14 @@ def test_a_master_snapshot_never_reads_for_an_undeclared_or_token_account(monkey
     assert capacity._claude({}, 1_100.0) == unknown
 
 
-def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp_path):
+@pytest.mark.parametrize("error", ["redis", "os"])
+def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp_path, error):
     from redis.exceptions import ConnectionError as RedisConnectionError
 
     _interactive_master(monkeypatch, tmp_path, {"main": 1})
 
     def down(env):
-        raise RedisConnectionError("down")
+        raise RedisConnectionError("down") if error == "redis" else OSError("down")
 
     monkeypatch.setattr(capacity.master_account, "load", down)
     assert capacity._claude({}, 1_100.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
