@@ -1,9 +1,14 @@
 def ready(task: dict, rows: dict) -> bool:
     dependencies = task.get("depends_on") or []
-    finish = (task.get("parked_on") or []) + (dependencies if task.get("pr_url") else [])
+    measured = [dep for dep in dependencies if measures(task, rows.get(dep, {}))]
+    finish = (task.get("parked_on") or []) + (dependencies if task.get("pr_url") else measured)
     if any(rows.get(dep, {}).get("state") != "done" for dep in finish):
         return False
     return all(stackable(rows.get(dep, {})) for dep in dependencies)
+
+
+def measures(task: dict, dependency: dict) -> bool:
+    return task.get("kind") == "tune" and (dependency.get("kind") or "code") in ("code", "ci")
 
 
 def stackable(task: dict) -> bool:

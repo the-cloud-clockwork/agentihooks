@@ -6,12 +6,13 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.observability.trace_flush import start_time
 from scripts.inbox.seats import of_swarm, seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications
+from scripts.swarm import apply_wait, control_notifications
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger import server_code
@@ -54,7 +55,23 @@ def pull_dev(ctx, args):
     if branch != "dev":
         raise SwarmError(f"the main checkout {repo} is on {branch}, not dev; the Doctor pulls only into dev")
     _call(ctx, ["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
-    return "The Doctor pulled dev into the main checkout of the watched swarm."
+    stamped = record_applied(ctx)
+    if not stamped:
+        return "The Doctor pulled dev into the main checkout of the watched swarm."
+    return (
+        "The Doctor pulled dev into the main checkout of the watched swarm "
+        f"and recorded {len(stamped)} merged fixes applied."
+    )
+
+
+def record_applied(ctx):
+    rows = {t["id"]: t for t in ctx.ledger.tasks(ctx.doctor)}
+    found = (d for t in rows.values() if t.get("state") != "done" for d in apply_wait.unapplied(t, rows))
+    fresh = [d for d in dict.fromkeys(found) if rows.get(d, {}).get("state") == "done"]
+    at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for task_id in fresh:
+        ctx.ledger.update_task(ctx.doctor, task_id, {apply_wait.FIELD: at}, by=seat_address(ctx.doctor, MASTER))
+    return fresh
 
 
 def _module_files(root, dotted):
