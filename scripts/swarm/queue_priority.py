@@ -45,7 +45,7 @@ def apply(
     return result
 
 
-def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], lift: bool = False) -> dict:
+def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], lift: bool) -> dict:
     journal = queue_record.Journal(url)
     held = None if lift else blocking(url, journal)
     if held is not None:

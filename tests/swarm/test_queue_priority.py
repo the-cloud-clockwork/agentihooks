@@ -1,4 +1,5 @@
 import json
+import subprocess
 from types import SimpleNamespace
 
 import pytest
@@ -25,9 +26,19 @@ def priority(monkeypatch, tmp_path):
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: tasks))
     queue = FakeQueue()
     reorder = merge_queue.prioritize
-    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: reorder(url, run=queue.run, journal=journal))
+
+    def prioritize(url, journal):
+        assert isinstance(journal, queue_record.Journal) and journal.url == url
+        return reorder(url, run=queue.run, journal=journal)
+
+    monkeypatch.setattr(merge_queue, "prioritize", prioritize)
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
-    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
+
+    def read_groups(journal):
+        assert journal.url in (URL, URL + "0")
+        return groups
+
+    monkeypatch.setattr(queue_record.Journal, "groups", read_groups)
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: None)
     observed = {"id": 42, "head_sha": "group-head", "status": "in_progress"}
     reads = []
@@ -36,6 +47,7 @@ def priority(monkeypatch, tmp_path):
     def rest(path, run):
         if "/actions/" not in path:
             return original(path, run)
+        assert run is subprocess.run
         reads.append(path)
         if "workflows/" in path:
             assert (
@@ -77,9 +89,14 @@ def test_operator_lift_applies_immediately_and_clears_pending(priority, monkeypa
 
 
 def test_master_cannot_lift_the_running_group(priority, monkeypatch, capsys):
-    monkeypatch.setattr(cli.clearance, "is_operator", lambda store, who: False)
+    def is_operator(store, who):
+        assert store is priority.store
+        assert who == cli.Who.from_env()
+        return False
+
+    monkeypatch.setattr(cli.clearance, "is_operator", is_operator)
     assert cli.main(["sw", "merge", "priority", URL, "--lift"]) == 1
-    assert "only the operator" in capsys.readouterr().err
+    assert capsys.readouterr().err == "swarm: only the operator lifts a running merge group priority hold\n"
     assert priority.queue.mutations == []
     assert priority.reads == []
 
@@ -103,7 +120,7 @@ def test_completed_head_group_prioritizes_immediately(priority, capsys):
 def test_unreadable_queue_never_mutates(priority, monkeypatch, capsys):
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: None)
     assert cli.main(["sw", "merge", "priority", URL]) == 1
-    assert "head group can be read" in capsys.readouterr().err
+    assert capsys.readouterr().err == "swarm: queue priority waits until the head group can be read\n"
     assert priority.queue.mutations == []
 
 
@@ -284,3 +301,47 @@ def test_operator_lift_is_journaled(priority, monkeypatch, capsys):
     assert cli.main(["sw", "merge", "priority", URL, "--lift"]) == 0
     assert json.loads(capsys.readouterr().out)["errors"] == []
     assert records[0] == (("priority-lift", URL, "", None, None), {})
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_one_held_request_does_not_block_a_completed_request(priority, monkeypatch, missing):
+    p = priority
+    p.store.redis.hset(
+        p.store.key("sw", queue_priority.PENDING),
+        mapping={
+            URL: json.dumps(
+                {"repo": "o/r", "group_head": "group-head", "run_id": None if missing else 42, "sender": "master"}
+            ),
+            URL + "0": json.dumps({"repo": "o/r", "group_head": "other-head", "run_id": 43, "sender": "master"}),
+        },
+    )
+    original_rest = merge_queue.rest
+
+    def rest(path, run):
+        assert run is subprocess.run
+        if path == "repos/o/r/actions/runs/43":
+            return {"status": "completed"}
+        if "workflows/" in path:
+            assert missing
+            return {"workflow_runs": []}
+        return original_rest(path, run)
+
+    applied = []
+
+    def reorder(url, journal):
+        assert isinstance(journal, queue_record.Journal) and journal.url == url
+        applied.append(url)
+        return {"url": url, "displaced": [], "errors": []}
+
+    monkeypatch.setattr(merge_queue, "rest", rest)
+    monkeypatch.setattr(merge_queue, "prioritize", reorder)
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}0"]
+    assert applied == [URL + "0"]
+    assert list(p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))) == [URL]
+
+
+def test_priority_help_explains_operator_lift(capsys):
+    with pytest.raises(SystemExit) as stopped:
+        cli.main(["sw", "merge", "--help"])
+    assert stopped.value.code == 0
+    assert "operator: prioritize immediately despite a running head group" in " ".join(capsys.readouterr().out.split())
