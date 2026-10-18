@@ -145,7 +145,12 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
         'n=$(cat "$FAKE/count" 2>/dev/null || echo 0)\necho $((n + 1)) > "$FAKE/count"\n'
         'if [[ "$*" == *--jq* ]]; then cat "$FAKE/$n.json"; else cat "$FAKE/$n.page"; fi\n',
         "sleep": 'echo "$1" >> "$FAKE/sleeps"\n(( $(wc -l < "$FAKE/sleeps") <= 30 ))\n',
-        "python3": f'exec "{sys.executable}" "$@"\n',
+        "python3": 'if [[ "$2" == scripts.ci_queue_rebuild ]]; then\n'
+        '  echo "${3-unset}" > "$FAKE/rebuild-arg"\n'
+        '  echo "record queue-rebuild-7-2: unknown cause: g"\n'
+        "  exit 0\n"
+        "fi\n"
+        f'exec "{sys.executable}" "$@"\n',
     }
     for name, body in scripts.items():
         (bin_dir / name).write_text("#!/usr/bin/env bash\n" + body)
@@ -182,7 +187,8 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
 def test_a_deleted_or_replaced_queue_group_stops_before_jobs_finish(tmp_path, head):
     result, output, sleeps, calls = _watch(tmp_path, [[_job("lint")]], heads=[head])
     assert result.returncode == 0, result.stderr
-    assert output == "failed=queue group is no longer current\n"
+    assert output == "failed=queue group is no longer current (record queue-rebuild-7-2: unknown cause: g)\n"
+    assert (tmp_path / "fake" / "rebuild-arg").read_text() == head + "\n"
     assert sleeps == []
     assert calls == []
     ref_call = (tmp_path / "fake" / "ref-calls").read_text()
@@ -272,6 +278,7 @@ def test_the_watcher_reads_and_cancels_on_the_app_token():
         "repositories": "${{ github.event.repository.name }}",
         "permission-actions": "write",
         "permission-contents": "read",
+        "permission-pull-requests": "read",
     }
     assert watch["id"] == "watch"
     assert watch["env"] == {"GH_TOKEN": _APP_TOKEN}

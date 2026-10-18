@@ -885,7 +885,8 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
-    def operate(action, url, admit):
+    def operate(action, url, admit, journal):
+        assert journal.url == URL
         admit("abc")
         queued.append(url)
         return {"queued": True}

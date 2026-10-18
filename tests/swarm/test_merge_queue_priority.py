@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue
+from scripts.swarm import cli, ledger_events, merge_queue, queue_record
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/o/r/pull/9"
@@ -151,8 +151,9 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
 
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=ledger_tasks))
 
-    def prioritize(url):
+    def prioritize(url, journal):
         assert url == URL
+        assert isinstance(journal, queue_record.Journal) and journal.url == URL
         return {"url": url, "displaced": [URL[:-1] + "2", URL[:-1] + "3"], "errors": errors}
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
@@ -185,7 +186,7 @@ def test_worker_cannot_prioritize(monkeypatch, capsys):
     store.config = lambda slug: None
     monkeypatch.setattr(cli, "connect", lambda: store)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
-    monkeypatch.setattr(merge_queue, "prioritize", lambda url: pytest.fail("worker reordered queue"))
+    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: pytest.fail("worker reordered queue"))
     assert cli.main(["sw", "merge", "priority", URL]) == 1
     assert capsys.readouterr().err == "swarm: only the master or the operator prioritizes the merge queue\n"
 
