@@ -73,3 +73,24 @@ def test_master_waits_when_no_hive_has_an_eligible_authentication_route(fields):
     assert placement.place_master("claude", "login", REPO, [hive("bad", **fields)], NOW) == placement.Wait(
         "no live hive can run the master with interactive, subscription or api authentication"
     )
+
+
+def test_master_ties_follow_hive_preference_room_lifetime_and_slot_name():
+    hives = [
+        hive("ephemeral", ephemeral="yes", max_agents=4),
+        hive("small", max_agents=2),
+        hive("full", max_agents=5, agents=5),
+        hive(
+            "room",
+            max_agents=4,
+            slots=[
+                {"harness": "claude", "account": "z", "kind": "subscription"},
+                {"harness": "claude", "account": "a", "kind": "api"},
+            ],
+        ),
+    ]
+    assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
+        "room", "a", "api", False
+    )
+    hives[2]["prefer"] = {"master": 0}
+    assert placement.place_master("claude", "", REPO, hives, NOW).hive == "full"

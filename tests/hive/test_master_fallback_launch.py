@@ -122,7 +122,9 @@ def test_master_order_preserves_placement_health_through_the_consumer(setup, rou
     assert outcome.value.execution.desired_route_kind == "interactive"
 
 
-def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_flag(setup):
+@pytest.mark.parametrize("lane", ["master", "eng"])
+@pytest.mark.parametrize("route", ["subscription", "api", "interactive"])
+def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_flag(setup, lane, route):
     from dataclasses import replace
     from types import SimpleNamespace
 
@@ -132,21 +134,22 @@ def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_fl
 
     task = master(setup)
     setup.store.update(setup.config.slug, master_claude_login=True)
-    name = setup.store.next_name(setup.config.slug, "master")
-    task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
-    request = SpawnRequest(setup.store.config(setup.config.slug), "master", name, task)
-    selected = setup.launcher.select(request.config, "master", task)
+    write_hive(setup, roles=["master"], ui="yes", interactive={"claude": "account"})
+    name = setup.store.next_name(setup.config.slug, lane)
+    task.update(seat=f"{lane}@fixture", controller_epoch=setup.held.epoch, route_kind=route)
+    request = SpawnRequest(setup.store.config(setup.config.slug), lane, name, task)
+    selected = setup.launcher.select(request.config, lane, task)
     admitted = setup.launcher.admit(request, selected)
     order = orders.LaunchOrder(
         setup.config.slug,
         admitted.execution_id,
         admitted.generation,
         "master",
-        "master",
+        lane,
         "master",
         "account",
         "claude",
-        "subscription",
+        route,
         "prompt",
         setup.held.epoch,
         lease.now_ms(setup.store) + 60000,
@@ -164,7 +167,9 @@ def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_fl
     assert consumer.launch(order, admitted, task).status == "live"
     sent = runtime.spawn.call_args.args[0]
     assert sent.config == replace(
-        request.config, lanes={"master": {"agent": "claude", "role": "master"}}, master_claude_login=False
+        request.config,
+        lanes={lane: {"agent": "claude", "role": "master"}},
+        master_claude_login=lane != "master" or route == "interactive",
     )
-    assert sent.task["route_kind"] == "subscription"
+    assert sent.task["route_kind"] == route
     assert sent.task["launch_assignment"]["account"] == "account"

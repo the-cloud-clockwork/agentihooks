@@ -41,3 +41,16 @@ def test_completed_headless_master_does_not_raise_current_health_findings(state)
         "profile_decision": {"master_placement": {"hive": "headless", "headless": True}},
     }
     assert health.findings({}, [agent], {}, health.Limits()) == []
+
+
+def test_headless_health_is_master_only_and_names_an_unseated_master():
+    agent = {
+        "name": "unseated-master",
+        "lane": "eng",
+        "state": "working",
+        "profile_decision": {"master_placement": {"hive": "remote", "headless": True}},
+    }
+    assert health.findings({}, [agent], {}, health.Limits()) == []
+    agent["lane"] = "master"
+    [found] = health.findings({}, [agent], {}, health.Limits())
+    assert found.id == "master-headless/unseated-master"
