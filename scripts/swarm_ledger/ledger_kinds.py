@@ -3,7 +3,9 @@
 import re
 
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan")
-CONTRACT_KEYS = ("must", "check", "judge", "after_at")
+BRANCHED = ("code", "ci")
+CONTRACT_KEYS = ("must", "check", "judge")
+CONTRACT_TIMES = ("after_at",)
 CONTRACT_FLAGS = ("push", "after")
 FLAG_VALUES = ("yes", "no")
 PROOF_KEYS = ("command", "output", "root_cause", "evidence", "fix", "filed", "finding", "slice")
@@ -22,13 +24,17 @@ def kind(task):
 
 
 def after(task):
-    return kind(task) in ("code", "ci") and (task.get("contract") or {}).get("after") == "yes"
+    return kind(task) in BRANCHED and (task.get("contract") or {}).get("after") == "yes"
+
+
+def read_only(task):
+    return kind(task) not in BRANCHED
 
 
 def check(fields):
     if fields.get("kind", "code") not in KINDS:
         raise ValueError(f"kind must be one of {KINDS}")
-    for key, allowed in (("contract", CONTRACT_KEYS + CONTRACT_FLAGS), ("proof", PROOF_KEYS)):
+    for key, allowed in (("contract", CONTRACT_KEYS + CONTRACT_TIMES + CONTRACT_FLAGS), ("proof", PROOF_KEYS)):
         value = fields.get(key, {})
         if (
             not isinstance(value, dict)

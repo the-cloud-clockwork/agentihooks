@@ -63,6 +63,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
                                       after_release=vX.Y.Z holds its claim until a newer release tag exists;
+                                      applied_at=YYYY-MM-DDTHH:MM:SSZ records when the Doctor applied a merged fix;
                                       phase moves it to another phase, from the master or a planner;
                                       a move naming no slice drops it, into a phase with a plan as a follow up;
                                       plan_slice computes its plan lines from the published plan;
@@ -127,7 +128,7 @@ AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
+    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_TIMES + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
 }
 
 

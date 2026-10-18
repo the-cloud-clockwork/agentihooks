@@ -342,9 +342,12 @@ def _plan_chunk(doc, task):
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
-    if isinstance(text, str) and _foreign_slice(doc, task, text):
+    part = {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    if task.get("plan_slice") != task.get("id"):
+        part = plan_read.scoped(doc, task, part)
+    if "shared_slice" not in part and isinstance(text, str) and _foreign_slice(doc, task, text):
         return {}
-    return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    return part
 
 
 def _foreign_slice(doc, task, text):
@@ -618,7 +621,8 @@ def _plan_verdict(state, answers, thresholds):
 def _verdicts(definition, state, params, answers):
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
     verdict, reason, criterion = _verdict(state, answers, thresholds)
-    return {"verdict": verdict, "reason": reason + _judged_on(state), "criterion": criterion}
+    shared = f"; {state['shared_slice']}" if state.get("shared_slice") else ""
+    return {"verdict": verdict, "reason": reason + _judged_on(state) + shared, "criterion": criterion}
 
 
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})

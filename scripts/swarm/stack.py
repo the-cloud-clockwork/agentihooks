@@ -6,9 +6,11 @@ from pathlib import Path
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
+from scripts.swarm import apply_wait
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
+READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
 
@@ -194,6 +196,8 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     state = ledger.state(slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
+    if ledger_kinds.read_only(row):
+        return park_read_only(store, slug, agent, text, ledger, rows), ""
     _pushed(row.get("branch"))
     top = worktree()
     _issue_ready(row)
@@ -213,6 +217,27 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base, "parked_repos": list(repos.values())}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     return fields, top
+
+
+def _read_only_note(open_):
+    note = READ_ONLY_NOTE.format(names=" and ".join(b.get("title") or "its dependency" for b in open_))
+    return note if not ledger_comments.problems(note, "comment") else READ_ONLY_NOTE.format(names="its dependencies")
+
+
+def park_read_only(store, slug: str, agent, text: str, ledger, rows: dict) -> dict:
+    row = rows[agent.task]
+    held = apply_wait.waiting(store.config(slug), row, rows)
+    deps = row.get("depends_on") or []
+    open_ = [rows.get(d, {"id": d}) for d in deps if d in held or rows.get(d, {}).get("state") != "done"]
+    if not open_:
+        raise SwarmError("the task waits on no open dependency; finish it, or hand it off for its window")
+    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
+    if found:
+        raise SwarmError(handoff_check.refusal(found))
+    ledger.comment(slug, agent.task, _read_only_note(open_), by=agent.name)
+    fields = {"parked_on": [b["id"] for b in open_]}
+    ledger.update_task(slug, agent.task, fields, by=agent.name)
+    return fields
 
 
 def remove_worktree(top: str) -> str:

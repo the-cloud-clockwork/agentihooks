@@ -10,7 +10,8 @@ from scripts.ci_mutation import plan, runner
 def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_path, monkeypatch, tests, browser):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
-    (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
+    source = "def sample(value):\n    return value + 1\n" if tests else "VALUE = 1\n"
+    (tmp_path / "scripts/sample.py").write_text(source)
     (tmp_path / "tests/test_sample.py").write_text("import playwright\n")
     (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
     output = tmp_path / "output"
