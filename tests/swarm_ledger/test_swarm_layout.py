@@ -899,10 +899,11 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
 
 def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
     page = open_page(clock=True)
-    page.tab.clock.run_for(299_000)
+    loaded_ms = int(page.tab.evaluate("() => performance.now()"))
+    page.tab.clock.run_for(299_000 - loaded_ms)
     page.tab.wait_for_timeout(200)
     assert {"action": "quota_refresh"} not in page.puts
-    page.tab.clock.run_for(2_000)
+    page.tab.clock.run_for(2_000 + loaded_ms)
     for _ in range(50):
         if {"action": "quota_refresh"} in page.puts:
             break

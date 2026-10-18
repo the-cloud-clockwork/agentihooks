@@ -94,9 +94,9 @@ def route(handler: object, server: ModuleType, parts: list, read_body: Callable[
         raise APIError(405, "method_not_allowed", "Use GET, or PATCH on one hive")
     try:
         store, now_ms = server.swarm_store(), int(time.time() * 1000)
-    except SwarmError as exc:
+        if handler.command == "PATCH":
+            _write(handler, server, store, parts[1], read_body(handler, server))
+        data = one(store, parts[1], now_ms) if len(parts) == 2 else view(store, now_ms)
+    except (SwarmError, HiveError) as exc:
         raise APIError(503, "storage_error", str(exc)) from None
-    if handler.command == "PATCH":
-        _write(handler, server, store, parts[1], read_body(handler, server))
-    data = one(store, parts[1], now_ms) if len(parts) == 2 else view(store, now_ms)
     return {"data": data, "revision": resources.revision(data)}

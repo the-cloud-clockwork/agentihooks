@@ -191,8 +191,20 @@ def test_the_registry_refuses_settings_it_does_not_accept(store, body, message):
 
 @pytest.mark.parametrize("body", [{}, {"color": "red"}, {"ui": "maybe"}, {"roles": ["boss"]}, {"max_agents": "3"}])
 def test_the_schema_refuses_bodies_outside_the_settings(store, body):
-    status, _ = refusal(request("PATCH", "/api/v1/hives/pod", body), store)
-    assert status == 400
+    expected = (400, "Request does not match the resource schema")
+    assert refusal(request("PATCH", "/api/v1/hives/pod", body), store) == expected
+
+
+@pytest.mark.parametrize(
+    ("method", "path", "payload"),
+    [("GET", "/api/v1/hives", None), ("GET", "/api/v1/hives/desk", None), ("PATCH", "/api/v1/hives/pod", {"ui": "no"})],
+)
+def test_an_unreadable_hive_record_answers_storage_error(store, method, path, payload):
+    from scripts.hive import registry
+
+    store.redis.hset(registry.key("pod"), "max_agents", "many")
+    expected = (503, "hive pod holds an unreadable max_agents: 'many'")
+    assert refusal(request(method, path, payload), store) == expected
 
 
 @pytest.mark.parametrize(

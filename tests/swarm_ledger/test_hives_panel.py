@@ -36,8 +36,9 @@ HIVES = [
 
 
 class HivesPage(Page):
-    def __init__(self, browser, payload, width, refusal=None):
+    def __init__(self, browser, payload, width, refusal=None, read_status=200):
         self.hives, self.refusal, self.patches = json.loads(json.dumps(HIVES)), refusal, []
+        self.read_status = read_status
         super().__init__(browser, payload, width)
 
     def route(self, route, html):
@@ -56,7 +57,7 @@ class HivesPage(Page):
                 found = next(h for h in self.hives if h["id"] == hive_id)
                 found.update(body)
                 return route.fulfill(json={"data": found, "revision": "r"})
-            return route.fulfill(json={"data": self.hives, "revision": "r"})
+            return route.fulfill(status=self.read_status, json={"data": self.hives, "revision": "r"})
         return super().route(route, html)
 
 
@@ -105,13 +106,25 @@ def test_each_hive_shows_liveness_tags_roles_prefer_max_agents_slots_and_master(
         ["max_agents", "2"],
     ]
     assert fields(page, "desk")[3] == ["prefer", "eng:1"]
-    assert page.text("#hives-count") == "2 live · 3 hives"
+    assert page.text("#hives-count").lower() == "2 live · 3 hives"
+
+
+def test_a_failed_read_says_the_hives_could_not_be_read(browser):
+    page = HivesPage(browser, status(), 1920, read_status=500)
+    try:
+        page.tab.wait_for_function(
+            "() => document.querySelector('#swarm-hives').textContent === 'Could not read hives.'", timeout=3000
+        )
+        assert page.text("#hives-count") == "—"
+        assert page.errors == []
+    finally:
+        page.context.close()
 
 
 def test_the_quota_count_names_each_hive_with_its_agents_and_max(hives_page):
     page = hives_page()
     page.tab.wait_for_function("() => document.querySelector('#quota-count').textContent.includes('desk 2/4')")
-    assert page.text("#quota-count").endswith("desk 2/4 · pod 0/2 · lab 0/4")
+    assert page.text("#quota-count").lower().endswith("desk 2/4 · pod 0/2 · lab 0/4")
 
 
 def test_editing_max_agents_writes_it_as_the_operator(hives_page):
@@ -122,6 +135,7 @@ def test_editing_max_agents_writes_it_as_the_operator(hives_page):
     wait_for(page, lambda: page.patches)
     assert page.patches == [("pod", {"max_agents": 5}, "__LEDGER_TOKEN__", "__LEDGER_SLUG__")]
     page.tab.wait_for_function("() => document.querySelector('#hive-pod').cells[7].textContent === '0/5'")
+    assert page.text("#quota-count").lower().endswith("desk 2/4 · pod 0/5 · lab 0/4")
 
 
 def test_roles_prefer_and_flags_are_sent_in_their_api_shape(hives_page):

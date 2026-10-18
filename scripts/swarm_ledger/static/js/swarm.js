@@ -8,7 +8,7 @@ import { firstPage, moreButton, wanted } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
-import { hiveCounts, renderHives } from "./hives.js";
+import { quotaCount, renderHives } from "./hives.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -278,11 +278,6 @@ export async function saveRouting(input) {
 
 function sessionCell(q) {
   return h("span", { class: "sw-sessions-value", text: String(q.sessions) });
-}
-
-function quotaCount(sw, count, now) {
-  const at = (sw.quota || {}).probed_at, accounts = `${count} ${count === 1 ? "account" : "accounts"}`;
-  return [accounts, at ? `probed ${age(now - at * 1000)} ago` : "", hiveCounts()].filter(Boolean).join(" · ");
 }
 
 function renderDoctor(sw, now) {

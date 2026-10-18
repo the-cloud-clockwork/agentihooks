@@ -1,22 +1,24 @@
-import { $, h } from "./dom.js";
+import { $, age, h } from "./dom.js";
 import { readHives, writeHive } from "./api.js";
 import { showNote } from "./controls.js";
 import { label, pending, renderQuota, swarm, swarmControl } from "./swarm.js";
 
 const HIVES_READ_MS = 15000;
-let hives = null, hivesRead = null, hivesAt = -Infinity;
+let hives = null, hivesFailed = false, hivesRead = null, hivesAt = -Infinity;
 
 function loadHives() {
   if (hivesRead || Date.now() - hivesAt < HIVES_READ_MS) return;
   hivesAt = Date.now();
   hivesRead = readHives().then((resp) => (resp.ok ? resp.json() : Promise.reject(resp.status)))
-    .then((reply) => { hives = reply.data; renderHives(true); renderQuota(swarm, Date.now()); })
-    .catch(() => {})
+    .then((reply) => { hives = reply.data; hivesFailed = false; renderHives(true); renderQuota(swarm, Date.now()); })
+    .catch(() => { hivesFailed = hives === null; renderHives(true); })
     .finally(() => { hivesRead = null; });
 }
 
-export function hiveCounts() {
-  return (hives || []).map((hive) => `${hive.name || hive.id} ${hive.agents}/${hive.max_agents}`).join(" · ");
+export function quotaCount(sw, count, now) {
+  const at = (sw.quota || {}).probed_at, accounts = `${count} ${count === 1 ? "account" : "accounts"}`;
+  const counts = (hives || []).map((hive) => `${hive.name || hive.id} ${hive.agents}/${hive.max_agents}`).join(" · ");
+  return [accounts, at ? `probed ${age(now - at * 1000)} ago` : "", counts].filter(Boolean).join(" · ");
 }
 
 function flag(hive, field) {
@@ -60,9 +62,9 @@ export function renderHives(force) {
   loadHives();
   if ($("swarm").hidden || (!force && $("swarm-hives").contains(document.activeElement))) return;
   const list = hives || [];
-  $("hives-count").textContent = `${list.filter((hive) => hive.live).length} live · ${list.length} ${list.length === 1 ? "hive" : "hives"}`;
+  $("hives-count").textContent = hivesFailed ? "—" : `${list.filter((hive) => hive.live).length} live · ${list.length} ${list.length === 1 ? "hive" : "hives"}`;
   $("swarm-hives").replaceChildren(...(list.length ? list.map(hiveRow)
-    : [h("tr", { class: "sw-empty" }, h("td", { colspan: "11", text: "No hives registered." }))]));
+    : [h("tr", { class: "sw-empty" }, h("td", { colspan: "11", text: hivesFailed ? "Could not read hives." : "No hives registered." }))]));
 }
 
 function value(input) {
@@ -85,6 +87,7 @@ async function saveHive(input) {
     showNote("error", "hive", e instanceof TypeError ? "ledger server unreachable" : e.message);
   }
   renderHives(true);
+  renderQuota(swarm, Date.now(), true);
 }
 
 export function wireHives() {
