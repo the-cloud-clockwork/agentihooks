@@ -171,6 +171,29 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
     assert len(trips) <= 16
 
 
+@pytest.mark.parametrize("state, cap, waiting", [("running", 2, True), ("stopped", 2, False), ("running", 0, False)])
+def test_receiver_reads_keep_delivery_seats_and_exited_occupants(redis, state, cap, waiting):
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import AgentRecord, SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig(SLUG, "/r", cap, 1, state))
+    name, seat, taker = f"{SLUG}-eng-1", f"eng-1@{SLUG}", f"eng-2@{SLUG}"
+    store.put_agent(SLUG, AgentRecord(name=name, lane="eng", task="t1", harness="codex"))
+    store.seats.occupy(seat, name, 10)
+    store.seats.record_exit(name, seat, "left")
+    items = [
+        {"address": seat, "history": [{"state": "delivered", "by": taker}]},
+        {"address": seat, "history": []},
+        {"address": name, "history": []},
+    ]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        seat: Receiver(seat_wait=waiting),
+        taker: Receiver(seat_wait=waiting),
+        name: Receiver(live=True, occupant=name, harness="codex"),
+    }
+
+
 def prompt(name, seat, task, handoff):
     lines = [f"You are {name}, an engineer in swarm {SLUG}.", f"Your one task for this session is {task}: a title"]
     lines.append(f"Your seat {seat} carries what earlier occupants left. Read it in this order:")

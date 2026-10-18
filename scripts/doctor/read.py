@@ -73,7 +73,11 @@ def inbox_receivers(store, inbox, slug, items):
     addresses = sorted({item["address"] for item in items})
     owners = names.slugs_of(addresses)
     scoped = SimpleNamespace(slug_of=lambda name: owners[name])
-    seats = [address for address in addresses if is_seat(address) and any(of_swarm(address, s) for s in slugs)]
+    reachable = {
+        address for address in addresses if address == OPERATOR or any(of_swarm(address, s, scoped) for s in slugs)
+    }
+    takers = {reader(item) for item in items if item["address"] in reachable}
+    seats = sorted(address for address in reachable | takers if is_seat(address))
     with inbox.redis.pipeline() as pipe:
         for address in seats:
             pipe.hgetall(inbox.seats.key(address))
