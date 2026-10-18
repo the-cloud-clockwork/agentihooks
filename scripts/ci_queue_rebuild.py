@@ -118,8 +118,8 @@ def summary(found: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    observed = next(iter(sys.argv[1:] if argv is None else argv), "")
-    found = record(observed, os.environ, subprocess.run)
+    args = sys.argv[1:] if argv is None else argv
+    found = record(args[0] if args else "", os.environ, subprocess.run)
     print(f"queue-rebuild {json.dumps(found)}", file=sys.stderr)
     print(summary(found))
     if path := os.environ.get("GITHUB_STEP_SUMMARY"):
