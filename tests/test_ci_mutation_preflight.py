@@ -34,8 +34,21 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     jobs = _workflow()["jobs"]
     assert "pull-request" not in jobs
     plan = jobs["plan"]
-    assert "needs" not in plan
-    assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
+    if "capacity" in jobs:
+        assert plan["needs"] == "capacity"
+        assert plan["if"] == (
+            "${{ !cancelled() && (needs.capacity.result == 'success' || needs.capacity.result == 'skipped')"
+            " && (github.event_name != 'push' || !github.event.deleted) }}"
+        )
+        assert "secrets." not in str(plan)
+        capacity = jobs["capacity"]
+        assert [step.get("id") for step in capacity["steps"]] == ["capacity-token", "capacity"]
+        assert capacity["steps"][0]["uses"] == "actions/create-github-app-token@v3.2.0"
+        assert capacity["steps"][1]["run"].startswith("gh api ")
+        assert "checkout" not in str(capacity)
+    else:
+        assert "needs" not in plan
+        assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
     assert plan["outputs"]["graded"] == "${{ steps.plan.conclusion == 'success' }}"
     step = plan["steps"][0]
     assert step["id"] == "open"
@@ -79,7 +92,13 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     gated = "steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'"
     assert steps[upload_at + 1 :]
     for step in steps[upload_at + 1 :]:
-        assert step["if"] == gated, step
+        if step.get("id") in {"capacity-token", "lanes"}:
+            assert (
+                step["if"]
+                == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
+            )
+        else:
+            assert step["if"] == gated, step
 
 
 def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
@@ -99,7 +118,11 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
     jobs = _workflow()["jobs"]
     plan = jobs["plan"]
     assert plan["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-    assert plan["outputs"] == {
+    outputs = dict(plan["outputs"])
+    if "stats_lane" in outputs:
+        assert outputs.pop("stats_lane") == "${{ steps.lanes.outputs.lane }}"
+        assert outputs.pop("batch_ceiling") == "${{ steps.lanes.outputs.ceiling }}"
+    assert outputs == {
         "shards": "${{ steps.plan.outputs.shards }}",
         "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
         "bases": "${{ steps.plan.outputs.bases }}",

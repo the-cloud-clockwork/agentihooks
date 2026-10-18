@@ -410,6 +410,8 @@ class SwarmPanel(unittest.TestCase):
             "ci_up",
             "plan_down",
             "plan_up",
+            "masters_down",
+            "masters_up",
             "compact_down",
             "compact_up",
             "apply",
@@ -537,7 +539,7 @@ class SwarmPanel(unittest.TestCase):
         )
 
     def test_step_buttons_at_a_bound_are_disabled(self):
-        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "compact_limit": 100}
+        low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "masters_step": 12, "compact_limit": 100}
         out = self.run_js(["capBounds"], f"capBounds({json.dumps(low)})")
         self.assertEqual(
             out,
@@ -548,6 +550,8 @@ class SwarmPanel(unittest.TestCase):
                 "ci_up": True,
                 "plan_down": False,
                 "plan_up": False,
+                "masters_down": False,
+                "masters_up": False,
                 "compact_down": True,
                 "compact_up": False,
                 "effort_min_down": True,

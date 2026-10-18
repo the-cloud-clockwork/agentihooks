@@ -55,12 +55,15 @@ def exempt(task: dict, fix_phase: str) -> bool:
 
 def ancestry(task: dict, graph: dict) -> list:
     chain = [f"tasks/{task['id']}"]
-    up = hierarchy.parent("tasks", task)
-    for _ in range(hierarchy.CHAIN - 1):
-        if not up or up in chain:
-            return chain
-        chain.append(up)
-        up = (graph.get(up) or (None, None))[1]
+    roots = [hierarchy.parent("tasks", task)]
+    if task.get("merged_into"):
+        roots.append(f"tasks/{task['merged_into']}")
+    for up in roots:
+        for _ in range(hierarchy.CHAIN - 1):
+            if not up or up in chain:
+                break
+            chain.append(up)
+            up = (graph.get(up) or (None, None))[1]
     return chain
 
 

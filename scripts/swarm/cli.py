@@ -139,6 +139,7 @@ from scripts.swarm.store import (
     ASSIST,
     AUTO_SCALING,
     AUTONOMY,
+    DEFAULT_MASTERS_STEP,
     DELEGATE,
     DISPATCH,
     MASTER,
@@ -157,6 +158,7 @@ SETTABLE = {
     "max-eng-agents": "max_eng",
     "max-ci-agents": "max_ci",
     "max-plan-agents": "max_plan",
+    "masters-step": "masters_step",
     "compact-limit": "compact_limit",
     "snapshot-minutes": "snapshot_minutes",
 }
@@ -248,7 +250,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             runtime or routed(herdr=HerdrRuntime()),
             os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL),
         )
-        from scripts.swarm.health import prompt_backlog, spawn_stall
+        from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
         pressured = skip_refused(incidents.host_pressure, store, slug)
         restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
@@ -271,6 +273,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
+            timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
             if actions:
                 doc = timing.call(ledger.state, slug)
@@ -555,6 +558,7 @@ def cmd_create(store, args):
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
         codex_inbox_transport=APP_SERVER_TRANSPORT,
+        masters_step=DEFAULT_MASTERS_STEP,
     )
     store.create(config)
     from scripts.swarm import commands
@@ -866,9 +870,14 @@ def _store_master_rules(store, slug, rules):
         master_scale.set_rule(store.redis, slug, rule)
 
 
+def _manual_count_step(counts):
+    return {"masters_step": 0} if counts else {}
+
+
 def cmd_set(store, args):
     changes, lanes = {}, {key: dict(value) for key, value in store.config(args.slug).lanes.items()}
     counts, pairs = _split_master_pairs(args.pairs, "masters", masters.count_of)
+    changes.update(_manual_count_step(counts))
     rules, pairs = _split_master_pairs(pairs, "master-per", master_scale.rule_of)
     hives, pairs = masters.hive_pairs(args.slug, pairs)
     masters.MasterSeats(store.redis).check_hives(args.slug, counts, hives)
@@ -922,6 +931,7 @@ def cmd_set(store, args):
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
                 "max_plan": config.max_plan,
+                "masters_step": config.masters_step,
                 "compact_limit": config.compact_limit,
                 "autonomy": config.autonomy,
                 "snapshot_minutes": config.snapshot_minutes,
@@ -1022,7 +1032,7 @@ def cmd_status(store, args):
     counts = task_counts(tasks)
     found = findings(store, args.slug, config, tasks, ledger.events(args.slug))
     print(
-        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  scaling {config.scaling}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
+        f"{naming.swarm_name(config.code) or '-'}  {config.slug}  {config.state}  eng {config.max_eng}  ci {config.max_ci}  plan {config.max_plan}  masters step {config.masters_step}  scaling {config.scaling}  effort {config.effort_min} to {config.effort_max}  repo {config.repo}"
     )
     print(
         "gate modes  "

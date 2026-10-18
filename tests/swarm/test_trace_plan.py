@@ -315,7 +315,7 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         ],
     }
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
-    assert questions["piece_2"].instructions == "Is piece 3, a diesel generator, needed to deliver the task?"
+    assert questions["piece_2"].instructions.startswith("Is piece 3, a diesel generator, needed to deliver the task?")
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
     assert questions["size"].instructions == (
         "How much source work is the plan? Judge only pieces with nonempty areas; "
@@ -356,6 +356,27 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         "filed": [],
         "at": 5,
     }
+
+
+def test_scope_questions_keep_required_runner_registration_without_allowing_unrelated_workflows(ask):
+    fake = ask(0.95, 0.95, 0.05)
+    pieces = [
+        piece("Add the receipt replay CI job", ".github/workflows/proofs.yml"),
+        piece("Register the receipt replay job in the runner class table", "scripts/ci_runner_classes.py"),
+        piece("Change the release workflow schedule", ".github/workflows/release.yml"),
+    ]
+    state = {**INTENT, "task": "Add a CI job that replays receipt requests"}
+    record = trace_plan.trace(pieces, state, None, now_ms=5)
+    [(sent, questions, _)] = fake.calls
+    assert sent["task"] == state["task"]
+    for key in ("piece_0", "piece_1", "piece_2"):
+        assert (
+            "Registering a CI job added by the task in the runner class table is required"
+            in questions[key].instructions
+        )
+        assert "Unrelated workflow edits remain out of scope" in questions[key].instructions
+    assert [row["kept"] for row in record["pieces"]] == [True, True, False]
+    assert record["verdict"] == "pass"
 
 
 @pytest.mark.parametrize(

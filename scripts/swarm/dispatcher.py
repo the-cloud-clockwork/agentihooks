@@ -2,9 +2,9 @@
 
 Each tick it orders every claimable task in focus, leaves included, by the longest open dependency chain behind it, then
 the open work it unblocks, the bottleneck lane, focus order and ledger position. A rank the master or the swarm set is a
-default it reorders; only an operator rank, set by him or relayed with his quoted words, orders ahead of that queue, and
-an operator rank or a low rank the swarm set on work it generated, such as documentation tasks, or a generated
-documentation task left unranked, orders behind it; that low work never leads the head, the chain guard or a proposal.
+default it reorders; only an operator rank, set by him or relayed with his quoted words, and an urgent rank, whoever
+set it, order ahead of that queue, and an operator rank or a low rank the swarm set on work it generated, such as
+documentation tasks, or a generated documentation task left unranked, orders behind it; that low work never leads the head, the chain guard or a proposal.
 At delegate and full the tick claims from this queue, resumed work first within a rank band and clear territory before
 overlapping, and the dispatcher writes no rank: it comments on a task only when the task enters the head of its lane's
 queue, as many tasks as the lane has seats among those that unblock work or carry an operator rank, or leaves it while
@@ -49,6 +49,7 @@ ENTERED = "The dispatcher put this task at the head of the {lane} claim queue: {
 LEFT = "The dispatcher moved this task out of the head of the {lane} claim queue: {why}."
 LEADS = "it leads a chain of {chain} and unblocks {work}"
 OPERATOR_RANK = "the operator ranked it {rank}"
+URGENT_RANK = "it is ranked urgent"
 OUTRANKED = "it was outranked by {ahead} in focus with longer chains, more unblocked work or an operator rank"
 ENTER = (ENTERED, "put task {} at the head of")
 LEAVE = (LEFT, "moved task {} out of the head of")
@@ -194,8 +195,8 @@ def rank_pass(slug, config, store, ledger, doc, now_ms):
     }
     scores, fixed = leverage(doc), _fixed(doc)
     if config.autonomy in APPLIES:
-        before = _saved_heads(store, slug)
-        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in fixed)]
+        before, banded = _saved_heads(store, slug), _banded(doc)
+        leading = [t for t in queue(doc, fix) if t in claimable and (scores[t] or t in banded)]
         heads = _heads(store, slug, config, leading, known, before)
         landed = {
             lane: [t for t in before.get(lane, []) if t in head or known.get(t, {}).get("state") == "open"]
@@ -259,6 +260,8 @@ def _head_steps(slug, ledger, doc, before, heads, standing, landed):
 def _entered_why(task, fixed, depth, scores):
     if task["id"] in fixed:
         return OPERATOR_RANK.format(rank=task["rank"])
+    if task.get("rank") == "urgent":
+        return URGENT_RANK
     return LEADS.format(chain=_work(depth[task["id"]]), work=_work(scores[task["id"]]))
 
 
@@ -346,7 +349,8 @@ def _fixed(doc):
 
 
 def _banded(doc):
-    return _fixed(doc) | _deferred(doc)
+    urgent = {t["id"] for t in doc["tasks"] if t.get("rank") == "urgent"}
+    return _fixed(doc) | _deferred(doc) | urgent
 
 
 def _deferred(doc):

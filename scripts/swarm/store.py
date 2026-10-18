@@ -27,6 +27,7 @@ SCALING = ("auto", "manual")
 AUTO_SCALING, MANUAL_SCALING = SCALING
 DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
 DEFAULT_MEMORY_PER_AGENT_MB = 700
+DEFAULT_MASTERS_STEP = 12
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
@@ -70,6 +71,7 @@ class SwarmConfig:
     scratch: bool = False
     codex_inbox_transport: str = LEGACY_TRANSPORT
     master_claude_login: bool = False
+    masters_step: int = 0
 
 
 def scaling_refusal(config):
@@ -200,6 +202,7 @@ class RedisStore:
             raw.get("scratch") == "True",
             raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
             raw.get("master_claude_login") == "True",
+            int(raw.get("masters_step") or 0),
         )
 
     def update(self, slug, **changes):

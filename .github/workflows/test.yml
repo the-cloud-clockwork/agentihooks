@@ -950,7 +950,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
     needs: [split, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 15
+    timeout-minutes: 17
     permissions:
       contents: read
     outputs:
@@ -1090,7 +1090,7 @@ jobs:
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
         if: needs.split.outputs.source == ''
-        timeout-minutes: 7
+        timeout-minutes: 9
         env:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini --cov-context=test -p tests.browser_coverage -p tests.dep_inputs', github.workspace) || '-p no:pytest_cov' }}
@@ -1900,6 +1900,15 @@ jobs:
         with:
           source: ./
           destination: ./_site
+
+      - name: Retain the rendered documentation
+        if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: _site/
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
