@@ -150,6 +150,10 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, status):
 @pytest.mark.parametrize(
     "payload",
     [
+        None,
+        [],
+        1,
+        "bin_closed",
         {},
         {"action": "delete"},
         {"action": "bin_closed"},
