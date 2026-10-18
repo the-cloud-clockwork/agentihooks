@@ -190,11 +190,11 @@ def test_a_job_leaves_a_lock_another_job_took_after_its_own_expired(store, monke
 def test_spawn_starts_the_job_detached_with_its_errors_in_the_swarm_folder(monkeypatch):
     calls = []
     monkeypatch.setattr(snapshot_job.subprocess, "Popen", lambda argv, **kw: calls.append((argv, kw)))
-    snapshot_job.log_path("sw").parent.mkdir(parents=True)
+    snapshot_job.spawn("sw")
     snapshot_job.log_path("sw").write_bytes(b"earlier error\n")
     snapshot_job.spawn("sw")
     assert snapshot_job.log_path("sw").read_bytes() == b"earlier error\n"
-    [(argv, kw)] = calls
+    [_, (argv, kw)] = calls
     assert argv == [sys.executable, "-m", "scripts.swarm.snapshot_job", "sw"]
     assert kw["start_new_session"] is True
     assert kw["stdin"] is subprocess.DEVNULL
