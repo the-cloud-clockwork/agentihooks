@@ -74,6 +74,7 @@ def lifecycle(principal: str, slug: str, payload: dict) -> dict:
     )
     return {"data": bin_storage.bin_closed(slug, payload["closed_at"])}
 
+
 def control(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     if principal:
         raise APIError(403, "forbidden", "Swarm controls need the operator")
