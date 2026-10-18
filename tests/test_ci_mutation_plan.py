@@ -639,6 +639,21 @@ def test_planning_checks_selected_test_collection_and_worker_contracts(
         assert "stats_parts=" in output.read_text()
 
 
+def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    _project(tmp_path, {})
+    (tmp_path / "tests/__init__.py").write_text("import mcp\n")
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    with pytest.raises(SystemExit, match="tests/test_sample.py"):
+        plan.main()
+
+
 @pytest.mark.parametrize(
     ("estimated", "shards", "parts"),
     [
