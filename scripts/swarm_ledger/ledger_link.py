@@ -14,7 +14,14 @@ from pathlib import Path
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 USER_AGENT = "agentihooks-swarm"
-CREDENTIAL_HEADERS = ("X-Controller-Credential", "X-Hive-Credential", "X-Ledger-Token", "X-Proof-Credential")
+CREDENTIAL_HEADERS = (
+    "X-Controller-Credential",
+    "X-Hive-Credential",
+    "X-Ledger-Token",
+    "X-Proof-Credential",
+    "X-Ledger-Tick",
+    "X-Ledger-Migration",
+)
 TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM"
 
 
@@ -89,7 +96,8 @@ def remote(environ=os.environ) -> bool:
 
 
 def access_headers(environ=os.environ) -> dict:
-    client, secret = environ.get("SWARM_ACCESS_CLIENT_ID"), environ.get("SWARM_ACCESS_CLIENT_SECRET")
+    client = environ.get("SWARM_ACCESS_CLIENT_ID") or environ.get("CF_ACCESS_CLIENT_ID")
+    secret = environ.get("SWARM_ACCESS_CLIENT_SECRET") or environ.get("CF_ACCESS_CLIENT_SECRET")
     if not (client and secret):
         return {}
     return {"CF-Access-Client-Id": client, "CF-Access-Client-Secret": secret, "User-Agent": USER_AGENT}

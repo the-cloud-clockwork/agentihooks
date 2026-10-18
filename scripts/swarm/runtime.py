@@ -82,7 +82,9 @@ def parse_fields(text):
 
 
 def _ledger_token(slug, name):
-    secret = os.environ.get("SWARM_SECRET")
+    from scripts.swarm_ledger.authority_context import secret as trusted_secret
+
+    secret = trusted_secret()
     if not secret:
         return {}
     from scripts.swarm_ledger.ledger_authority import agent_token

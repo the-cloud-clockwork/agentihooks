@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_transfer__mutmut_13:353cf5c36c3907115bcb5daecf909ef6f3d6b7cc2bfdfd22f85e06dff41850da": {
+    "reader": "Standards",
+    "reason": "The transport guard lowercases header names and urllib Request canonicalizes the key identically, so credential checks and emitted requests are unchanged."
+  }
+}

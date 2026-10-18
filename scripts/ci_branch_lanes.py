@@ -65,7 +65,13 @@ def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -
         return False
     stage, index = stages[name]
     group = f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
-    return block == {"group": group}
+    superseded = {
+        "group": f"${{{{ format('{{0}}-{stage}-{{1}}', github.workflow == 'Mutation preflight' && "
+        f"{LANE.replace('hosted-lane-', 'mutation-lane-')} || format('mutation-preflight-job-{{0}}', github.run_id), "
+        f"matrix.{index}) }}}}",
+        "queue": "${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}",
+    }
+    return block in ({"group": group}, superseded)
 
 
 def problems(workflow: object, baseline: object = None) -> list[str]:

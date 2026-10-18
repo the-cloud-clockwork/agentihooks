@@ -137,8 +137,13 @@ def base():
 
 
 def credentials(slug, service=False):
+    from scripts.swarm_ledger.authority_context import tick_headers
+
     who = Who.from_env()
     if ledger_link.remote():
+        tick = tick_headers(slug)
+        if tick:
+            return tick
         controller = os.environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
         if controller and not who.pinned:
             return {"X-Controller-Credential": controller}
@@ -167,7 +172,9 @@ def replay(slug, ops, agent, service):
 
 
 def derived_token(slug, name):
-    secret = os.environ.get("SWARM_SECRET")
+    from scripts.swarm_ledger.authority_context import secret as trusted_secret
+
+    secret = trusted_secret()
     return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
