@@ -7,6 +7,7 @@ import shutil
 import socket
 import subprocess
 import time
+import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -328,6 +329,30 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     return replace(spec, codex_home=str(home), environ={**spec.environ, "CODEX_HOME": str(home)})
 
 
+def preserve_legacy_rollouts(home: Path) -> None:
+    legacy = [home / name for name in SHARED_ROLLOUTS if not (home / name).is_symlink() and (home / name).is_dir()]
+    if not legacy:
+        return
+    config = home / "config.toml"
+    settings = tomllib.loads(config.read_text()) if config.is_file() else {}
+    canonical = Path(settings.get("sqlite_home") or Path.home() / ".codex")
+    if canonical.is_relative_to(home):
+        canonical = Path.home() / ".codex"
+    for sessions in legacy:
+        for rollout in sessions.rglob("*.jsonl"):
+            destination = canonical / sessions.name / rollout.relative_to(sessions)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with rollout.open("rb") as incoming, contextlib.suppress(FileExistsError):
+                with destination.open("xb") as outgoing:
+                    shutil.copyfileobj(incoming, outgoing)
+
+
+def remove_home(directory: Path) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        preserve_legacy_rollouts(directory / "codex")
+        shutil.rmtree(directory)
+
+
 def reclaim_homes(store: RedisStore, slug: str, deps: Deps) -> None:
     bindings = BindingStore(store)
     for raw in store.redis.hgetall(store.key(slug, RECORDS)).values():
@@ -345,7 +370,7 @@ def reclaim_homes(store: RedisStore, slug: str, deps: Deps) -> None:
             alive = not bridge.isdecimal() or deps.start_identity(int(bridge)) is not None
         if alive:
             continue
-        shutil.rmtree(directory)
+        remove_home(directory)
         ended = replace(record, state=EXITED, active_turn_id="")
         bindings.put(slug, ended)
         bindings.release(slug, ended)
@@ -393,6 +418,6 @@ def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> Trans
     bindings.put(slug, record)
     bindings.release(slug, record)
     directory = execution_directory(record)
-    if started.process.poll() is not None and directory is not None and directory.exists():
-        shutil.rmtree(directory)
+    if started.process.poll() is not None and directory is not None:
+        remove_home(directory)
     return record
