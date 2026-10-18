@@ -293,7 +293,9 @@ def test_ledger_root_search_refused_and_ledger_file_allowed(ledger):
 
 def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
     folder = "/home/x/.agentihooks/swarm/demo/tasks/t1"
-    assert check(bash(f'echo "plan read done, ledger at {ledger} checked" >> {folder}/progress.md'), env(ledger)) is None
+    assert (
+        check(bash(f'echo "plan read done, ledger at {ledger} checked" >> {folder}/progress.md'), env(ledger)) is None
+    )
     assert check(bash(f"printf '%s\\n' 'listed {ledger}/{SLUG}.media' >> {folder}/proof.md"), env(ledger)) is None
     assert check(bash(f"cat >> {folder}/proof.md <<'EOF'\nsearched {ledger} with grep -rn\nEOF"), env(ledger)) is None
 
