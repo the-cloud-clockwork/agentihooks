@@ -400,7 +400,7 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 
 Every attempt sets `overwrite: true`, so a caller does not pass it. A retry deletes any copy an earlier attempt finalized under the same name and uploads the files again: the artifact keeps the caller's name, files and retention, whichever attempt succeeds. `if-no-files-found` reaches every attempt, so a caller that asks for `error` stays red when its files are missing: all three attempts report no files and the step fails, 30 s later than a plain upload would.
 
-Two steps in `test.yml` use it; every other upload in the workflow calls `actions/upload-artifact@v4` directly.
+Four steps in `test.yml` use it; every other upload in the workflow calls `actions/upload-artifact@v4` directly.
 
 ```yaml
       - name: Upload the chosen durations        # split
