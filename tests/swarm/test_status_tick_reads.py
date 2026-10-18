@@ -2,7 +2,6 @@ import json
 import subprocess
 from types import SimpleNamespace
 
-import fakeredis
 import pytest
 
 from scripts.swarm import ledger_events, status
@@ -66,6 +65,8 @@ def test_legacy_status_contexts_retain_check_state_flags(states, pending, passin
     ],
 )
 def test_tick_findings_preserve_check_waits_without_reading_github(monkeypatch, pending, passing, autonomy, idle):
+    import fakeredis
+
     now = 2_000_000
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, autonomy=autonomy)
@@ -87,6 +88,8 @@ def test_tick_findings_preserve_check_waits_without_reading_github(monkeypatch, 
 
 
 def test_cli_findings_reuse_existing_scoped_check_cache_without_an_injected_view(monkeypatch):
+    import fakeredis
+
     now = 2_000_000
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, autonomy="full")
@@ -110,6 +113,8 @@ def test_cli_findings_reuse_existing_scoped_check_cache_without_an_injected_view
 def test_slow_merge_observation_is_bounded_and_keeps_the_existing_finding(monkeypatch):
     import time
     from datetime import datetime, timezone
+
+    import fakeredis
 
     from scripts.swarm.health import merge_stall
 
