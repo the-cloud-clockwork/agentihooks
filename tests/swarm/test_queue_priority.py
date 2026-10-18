@@ -344,4 +344,6 @@ def test_priority_help_explains_operator_lift(capsys):
     with pytest.raises(SystemExit) as stopped:
         cli.main(["sw", "merge", "--help"])
     assert stopped.value.code == 0
-    assert "operator: prioritize immediately despite a running head group" in " ".join(capsys.readouterr().out.split())
+    assert " ".join(capsys.readouterr().out.split()).endswith(
+        "--lift operator: prioritize immediately despite a running head group"
+    )
