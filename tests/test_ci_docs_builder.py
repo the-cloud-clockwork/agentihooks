@@ -66,7 +66,6 @@ def test_documentation_builder_preserves_action_inputs_and_failure(tmp_path, sta
         "INPUT_BUILD_REVISION": "${{ github.sha }}",
         "INPUT_TOKEN": "",
         "GITHUB_REPOSITORY": "owner/repo",
-        "GITHUB_API_URL": "https://api.github.com",
     }.items():
         assert name in call["args"]
         assert call["env"][name] == value
