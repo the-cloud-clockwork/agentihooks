@@ -31,9 +31,6 @@ concurrency:
 permissions:
   contents: read
 
-env:
-  UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
-
 jobs:
   promote:
     needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar]
@@ -582,6 +579,8 @@ jobs:
     needs: [reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 16
+    env:
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
     permissions:
       contents: read
     strategy:
@@ -747,6 +746,7 @@ jobs:
         python-version: ["3.11", "3.12"]
     env:
       UNIT_SOURCE: ${{ needs.select.outputs.source }}
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
     outputs:
       source: ${{ needs.select.outputs.source }}
       reused: ${{ steps.plan.outputs.reused }}
@@ -961,6 +961,7 @@ jobs:
     env:
       CODEX_RELEASE: rust-v0.160.0
       UNIT_SOURCE: ${{ needs.split.outputs.source }}
+      UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
     strategy:
       fail-fast: false
       matrix:
