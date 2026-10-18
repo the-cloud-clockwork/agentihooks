@@ -82,7 +82,9 @@ def place_master(harness: str, login: str, repo: str, hives: list[dict], now: in
             continue
         native = hive["interactive"].get(harness)
         if not headless and native and (not login or login == native):
-            candidates.append((0, _order(MASTER)(hive), native, MasterPlacement(hive["id"], native, INTERACTIVE, False)))
+            candidates.append(
+                (0, _order(MASTER)(hive), native, MasterPlacement(hive["id"], native, INTERACTIVE, False))
+            )
         for slot in hive["slots"]:
             if slot["harness"] != harness or slot["kind"] not in ("subscription", "api"):
                 continue
