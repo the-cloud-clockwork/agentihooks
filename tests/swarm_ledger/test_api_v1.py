@@ -68,7 +68,7 @@ def request(live, method, resource, body=None, **headers):
 def stored(monkeypatch, document):
     from types import SimpleNamespace
 
-    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document))
+    monkeypatch.setattr(server.repository, "current", lambda slug: SimpleNamespace(state=document, views={}))
 
 
 def test_invalid_schema_leaves_resource_unchanged(live):
@@ -1724,7 +1724,7 @@ def test_layout_schema_and_bin_refusals_preserve_state(live, monkeypatch):
             400,
             {"error": {"code": "schema_invalid", "message": "Request does not match the resource schema"}},
         )
-    monkeypatch.setattr(server.ledger_bin, "restore", lambda slug: False)
+    monkeypatch.setattr(server.repository, "restore", lambda slug: False)
     for payload, code, message in (
         ({"action": "delete", "slug": "absent"}, "ledger_missing", "No such ledger"),
         ({"action": "restore", "slug": SLUG}, "resource_missing", "Ledger is not in the bin"),

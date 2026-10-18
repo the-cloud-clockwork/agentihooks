@@ -7,6 +7,7 @@ reader.
 """
 
 import collections
+import contextlib
 import functools
 import json
 import re
@@ -16,7 +17,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from scripts.inbox.store import CLOSED, InboxError
-from scripts.swarm import merge_queue, operator_mail, outage
+from scripts.swarm import merge_queue, outage
 from scripts.swarm.health.verdicts import VERDICTS
 from scripts.swarm.naming import lane_of
 from scripts.swarm.store import MASTER, PREFIX, SwarmError
@@ -45,18 +46,16 @@ RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no 
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
     "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
-    "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
+    "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
 )
-SUITE_NODES = (
-    "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} pageInfo{hasNextPage endCursor}"
-)
+SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id resourcePath}}} pageInfo{hasNextPage endCursor}"
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
     "mergeable isDraft "
-    "commits(last:1){nodes{commit{id committedDate "
-    'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
+    "commits(last:1){nodes{commit{id oid committedDate "
+    'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
     + "statusCheckRollup{contexts(first:100){"
     + CONTEXT_NODES
     + "}} checkSuites(first:100){"
@@ -91,6 +90,8 @@ class PullRequest:
     mergeable: str = ""
     draft: bool = False
     latest_run_cancelled: bool = False
+    checks_pending: bool = False
+    checks_passed: bool = False
 
 
 def iso_ms(text):
@@ -102,12 +103,26 @@ def pull_request(raw):
     rollup = raw.get("statusCheckRollup") or []
     newest = _newest_runs(rollup, suites)
     everything = _newest([check for check in rollup if not _superseded(check, newest)])
-    commits, checks = raw.get("commits") or [], _required(raw.get("gated"), everything)
+    workflows = set(raw.get("gate_workflows") or [])
+    commits, required = raw.get("commits") or [], _required(raw.get("gated"), rollup, workflows)
+    checks = _newest([check for check in required if not _superseded(check, newest)])
     results = [check.get("conclusion") or check.get("state") for check in checks]
-    running = any(
-        suite.get("workflowRun") and suite.get("status") != "COMPLETED" and not _superseded(suite, newest)
-        for suite in suites
+    required_runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    required_runs.update(
+        _run_key(suite) for suite in suites if _workflow_file(suite) in workflows and _run_key(suite)[0]
     )
+    present = {_workflow_file(item) for item in [*rollup, *suites]}
+    expected = {
+        (_run_key(check), check.get("name")) for check in rollup if check.get("isRequired") or check.get("name") == GATE
+    }
+    reported = {(_run_key(check), check.get("name")) for check in checks}
+    running = any(
+        suite.get("workflowRun")
+        and suite.get("status") != "COMPLETED"
+        and not _superseded(suite, newest)
+        and (not raw.get("gated") or not required_runs or _run_key(suite) in required_runs)
+        for suite in suites
+    ) or bool(expected - reported or required_runs - {key for key, _ in reported} or workflows - present)
     pushes = [
         iso_ms(suite["workflowRun"]["createdAt"])
         for suite in suites
@@ -135,7 +150,7 @@ def pull_request(raw):
         )
         if failing
         else (),
-        raw.get("headRefOid") or "",
+        _read_head(raw.get("headRefOid") or "", commits),
         min(reds, default=None),
         unpassed_gate,
         raw.get("mergeQueueEntry") is not None,
@@ -148,7 +163,15 @@ def pull_request(raw):
         raw.get("mergeable") or "",
         bool(raw.get("isDraft")),
         _latest_run_cancelled(suites),
+        any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
+        any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
+        and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
     )
+
+
+def _read_head(head, commits):
+    read = (commits[-1].get("oid") if commits else None) or head
+    return head if read == head else ""
 
 
 def _newest(checks):
@@ -182,13 +205,21 @@ def _run_key(item):
     return (run.get("workflow") or {}).get("id"), run.get("event")
 
 
-def _required(gated, checks):
+def _workflow_file(item):
+    path = (_workflow_run(item).get("workflow") or {}).get("resourcePath")
+    if path:
+        return path.split("/")[-1]
+
+
+def _required(gated, checks, workflows=()):
     required = [
         check
         for check in checks
         if check.get("isRequired", True) or (check.get("name") or check.get("context")) == GATE
     ]
-    return required if gated or required else checks
+    runs = {_run_key(check) for check in required if _run_key(check)[0]}
+    runs.update(_run_key(check) for check in checks if _workflow_file(check) in workflows and _run_key(check)[0])
+    return [check for check in checks if check in required or _run_key(check) in runs] if gated or required else checks
 
 
 def _mark(item):
@@ -220,7 +251,11 @@ def _unpassed_gate(gated, checks, results, running):
 
 def _resolved(gated, checks, results, running):
     if gated:
-        return any(result in FINAL_RED | {"TIMED_OUT"} for result in results) or "SUCCESS" in _gate(checks, results)
+        return any(result in RED for result in results) or (
+            not running
+            and set(_gate(checks, results)) == {"SUCCESS"}
+            and all(result in PASSED | {"NEUTRAL"} for result in results)
+        )
     if not running and any(result in FINAL_RED for result in results):
         return True
     return not running and "SUCCESS" in results and all(result in PASSED for result in results)
@@ -231,9 +266,16 @@ def _gate(checks, results):
 
 
 def declares_gate(tree):
+    return bool(_gate_files(tree))
+
+
+def _gate_files(tree):
     entries = ((tree or {}).get("object") or {}).get("entries") or []
-    texts = [(entry.get("object") or {}).get("text") for entry in entries]
-    return any(GATE_JOB.search(text) for text in texts if text)
+    return [
+        entry.get("name")
+        for entry in entries
+        if (text := (entry.get("object") or {}).get("text")) and GATE_JOB.search(text)
+    ]
 
 
 def view(url, run=subprocess.run, required_checks=None):
@@ -295,11 +337,11 @@ def _required_pull_request(raw, required_checks):
             for check, result in zip(checks, results)
             if result in RED
         ),
-        head=raw["headRefOid"],
+        head=_read_head(raw["headRefOid"], raw.get("commits")),
     )
 
 
-def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None):
+def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=None, gate_workflows=None):
     try:
         raw = dict(raw)
         commits = [node["commit"] for node in raw["commits"]["nodes"]]
@@ -316,7 +358,9 @@ def _view_resource(raw, number, gated=None, run=subprocess.run, required_checks=
         raw["checkSuites"] = suites
         if required_checks is not None:
             return _required_pull_request(raw, required_checks)
-        raw["gated"] = gated if gated is not None else bool(commits) and declares_gate(commit.get("file"))
+        files = _gate_files(commit.get("file")) if gate_workflows is None else gate_workflows
+        raw["gated"] = gated if gated is not None else declares_gate(commit.get("file"))
+        raw["gate_workflows"] = [name for name in files if name]
         return pull_request(raw)
     except (ValueError, KeyError, TypeError):
         return None
@@ -343,7 +387,7 @@ def views(
     urls = list(dict.fromkeys(urls))
     found = dict.fromkeys(urls)
     selection = PULL_QUERY.partition("{")[2][:-1].replace(
-        'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}}',
+        'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}}',
         'file(path:".github/workflows"){object{id}}',
     )
     for start in range(0, len(urls), 20):
@@ -356,8 +400,12 @@ def views(
         gates = _workflow_gates(data, run, cache)
         for i, url in enumerate(batch):
             raw = data.get(f"p{i}")
-            gated = gates.get(_workflow_id(raw))
-            found[url] = _view_resource(raw, _number(url), gated, run) if gated is not None else None
+            declaration = gates.get(_workflow_id(raw))
+            found[url] = (
+                _view_resource(raw, _number(url), declaration["gated"], run, gate_workflows=declaration["workflows"])
+                if declaration is not None
+                else None
+            )
     return found
 
 
@@ -398,33 +446,40 @@ def _workflow_id(raw):
 
 def _workflow_gates(data, run, cache):
     trees = {_workflow_id(raw) for raw in data.values()} - {None, ""}
-    gates = {None: False, "": None, **dict.fromkeys(trees)}
+    gates = {None: {"gated": False, "workflows": []}, **dict.fromkeys(trees)}
     pending = []
     for tree in sorted(trees):
-        saved = cache.get(f"{PREFIX}:workflow-gate:{tree}") if cache is not None else None
-        if saved in ("0", "1"):
-            gates[tree] = saved == "1"
+        saved = cache.get(f"{PREFIX}:workflow-gate-files:{tree}") if cache is not None else None
+        if saved is not None:
+            gates[tree] = json.loads(saved)
         else:
             pending.append(tree)
     if pending:
-        query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{object{...on Blob{text}}}}}}"
+        query = "{nodes(ids:" + json.dumps(pending) + "){id ...on Tree{entries{name object{...on Blob{text}}}}}}"
         for node in _graphql(query, run).get("nodes") or []:
             if node is None or "entries" not in node:
                 continue
             tree = node["id"]
-            gates[tree] = declares_gate({"object": node})
+            files = _gate_files({"object": node})
+            gates[tree] = {"gated": declares_gate({"object": node}), "workflows": [name for name in files if name]}
             if cache is not None:
-                cache.set(f"{PREFIX}:workflow-gate:{tree}", int(gates[tree]), ex=SENT_TTL_S)
+                cache.set(f"{PREFIX}:workflow-gate-files:{tree}", json.dumps(gates[tree]), ex=SENT_TTL_S)
     return gates
 
 
 def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
+    from scripts.swarm import metrics_outbox, metrics_swarm
+
     urls = [
         task["pr_url"] for task in doc.get("tasks", []) if task.get("state") in ("pr", "claimed") and task.get("pr_url")
     ]
+    at = int(datetime.now().timestamp() * 1000)
+    recent = metrics_outbox.read_recent("delivery_events", at)
+    if recent is not None:
+        urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
-    snapshots = views(urls, cache=store.redis)
+    snapshots = views(list(dict.fromkeys(urls)), cache=store.redis)
 
     @functools.cache
     def lookup(url):
@@ -441,8 +496,8 @@ class Mail:
         self.seats = {a.name: a.seat or a.name for a in live}
         self.held = {a.name: a.task for a in agents if a.lane != MASTER}
         self.has_master = any(a.lane == MASTER for a in live)
-        self.master = operator_mail.master_address(slug, live)
-        self.masters = masters.live_seats(live)
+        self.masters = list(masters.held(store.redis, slug, agents))
+        self.master = masters.lead_of(slug, self.masters)
 
     @functools.cached_property
     def owners(self):
@@ -464,11 +519,6 @@ class Mail:
             return [f"told {address}: {key}"]
         return []
 
-    def send_red(self, key, address, text, url):
-        if self.once(key, lambda: self.track_red(self.inbox.send(SENDER, address, text), url)):
-            return [f"told {address}: {key}"]
-        return []
-
     def red_index(self):
         return self.store.key(self.slug, "red-notices")
 
@@ -477,6 +527,14 @@ class Mail:
 
     def engineer(self, task):
         return self.seats.get(task.get("claimed_by")) or self.owner(f"tasks/{task['id']}")
+
+    def held_elsewhere(self, address, task):
+        occupant = self.store.seats.occupant(address).occupant
+        live = occupant in self.seats and occupant != task.get("claimed_by")
+        return live and self.held.get(occupant) != task["id"]
+
+    def task_index(self):
+        return self.store.key(self.slug, "task-notices")
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
@@ -488,8 +546,9 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
         + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
-        + _pull_requests(mail, tasks.values(), now_ms, github)
+        + _pull_requests(mail, tasks.values(), now_ms, github, ledger)
         + _settle_red_notices(mail, github)
+        + _move_task_notices(mail, ledger, tasks)
         + _priorities(mail, doc, raised)
     )
 
@@ -533,10 +592,15 @@ def _settle_red_notices(mail, github):
 
 
 def _open(inbox, item_id):
+    return _open_item(inbox, item_id) is not None
+
+
+def _open_item(inbox, item_id):
     try:
-        return inbox.get(item_id).state not in CLOSED
+        item = inbox.get(item_id)
     except InboxError:
-        return False
+        return None
+    return None if item.state in CLOSED else item
 
 
 def _backfill_red_notices(mail):
@@ -692,7 +756,7 @@ def _priorities(mail, doc, raised):
     return sent
 
 
-def _pull_requests(mail, tasks, now_ms, github):
+def _pull_requests(mail, tasks, now_ms, github, ledger):
     sent = []
     for task in tasks:
         url = task.get("pr_url", "")
@@ -709,13 +773,13 @@ def _pull_requests(mail, tasks, now_ms, github):
                     f"Your pull request {url} merged ten minutes ago and {title} is still in pull request. "
                     f"Finish it: agentihooks swarm {mail.slug} done --pr {url}"
                 )
-                sent += mail.send(f"{url}:merged:engineer", mail.engineer(task), text)
+                sent += _tell_engineer(mail, ledger, task, f"{url}:merged:engineer", text)
             if age >= MERGED_MASTER_MS:
                 text = f"{title} on ledger {mail.slug} is still in pull request twenty minutes after {url} merged."
                 sent += mail.send(f"{url}:merged:master", mail.owner(f"tasks/{task['id']}"), text)
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
-            sent += mail.send(f"{url}:closed", mail.engineer(task), text)
+            sent += _tell_engineer(mail, ledger, task, f"{url}:closed", text)
         elif (
             found.red
             and not found.gate_passed
@@ -725,5 +789,42 @@ def _pull_requests(mail, tasks, now_ms, github):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )
-            sent += mail.send_red(f"{url}:red:{found.head}", mail.engineer(task), text, url)
+            sent += _tell_engineer(mail, ledger, task, f"{url}:red:{found.head}", text, url)
     return sent
+
+
+def _tell_engineer(mail, ledger, task, key, text, url=""):
+    seat = mail.seats.get(task.get("claimed_by"))
+    if seat and mail.held_elsewhere(seat, task):
+        if mail.once(key, lambda: ledger.comment(mail.slug, task["id"], text, by=SENDER)):
+            return [f"noted on tasks/{task['id']}: {key}"]
+        return []
+    address = mail.engineer(task)
+
+    def tell():
+        item = mail.inbox.send(SENDER, address, text)
+        if address == seat:
+            mail.store.redis.hset(mail.task_index(), item.id, task["id"])
+        if url:
+            mail.track_red(item, url)
+
+    return [f"told {address}: {key}"] if mail.once(key, tell) else []
+
+
+def _move_task_notices(mail, ledger, tasks):
+    index, moved = mail.task_index(), []
+    for item_id, task_id in mail.store.redis.hgetall(index).items():
+        task, item = tasks.get(task_id), _open_item(mail.inbox, item_id)
+        if task is None or item is None:
+            mail.store.redis.hdel(index, item_id)
+            continue
+        if not mail.held_elsewhere(item.address, task):
+            continue
+        ledger.comment(mail.slug, task_id, item.text, by=SENDER)
+        mail.store.redis.hdel(index, item_id)
+        with contextlib.suppress(InboxError):
+            mail.inbox.close(
+                item_id, SENDER, "done", f"moved onto task {task_id}; {item.address} now holds another task"
+            )
+        moved.append(f"moved {item_id} onto tasks/{task_id}")
+    return moved

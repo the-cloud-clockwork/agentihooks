@@ -255,6 +255,14 @@ class NameRegistry:
             return {name: name for name in names}
         return {name: alias or name for name, alias in zip(names, found)}
 
+    def slugs_of(self, names):
+        resolved = self.resolve_many(names)
+        parsed = {name: parse(current) for name, current in resolved.items()}
+        codes = sorted({found.code for found in parsed.values() if found})
+        rows = self.redis.hmget(self.key("codes"), codes) if codes else []
+        swarms = {code: json.loads(row or "{}").get("swarm", "") for code, row in zip(codes, rows)}
+        return {name: swarms[found.code] if found else legacy_slug(resolved[name]) for name, found in parsed.items()}
+
     def alias(self, old, new):
         from redis.exceptions import WatchError
 

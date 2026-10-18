@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/loop.py:scripts.doctor.loop.x_speed__mutmut_107:6f6787033fa46399f73711615be9e11d4f21935b0fd71a097991284190755d62": {
+    "reader": "Standards reader /root/standards_reader",
+    "reason": "limits explicitly resolves None to os.environ. Passing None and passing os.environ therefore read the same cooldown configuration."
+  }
+}

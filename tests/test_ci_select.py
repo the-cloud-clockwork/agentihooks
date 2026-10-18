@@ -10,7 +10,7 @@ import yaml
 
 from scripts import ci_select
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/test.yml"
 EXPRESSION = re.compile(r"\$\{\{\s*([\w.]+)\s*\}\}")
@@ -88,6 +88,29 @@ def test_a_changed_file_is_also_selected_by_its_full_path(repo):
     assert decide(repo, ["docs/guide/index.md"]) == ("selected", [["tests/test_docs.py"]])
 
 
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ".github/workflows/new.yml",
+        ".github/workflows/new.yaml",
+        ".github/runner-classes.json",
+        ".github/workflows/trusted-actors.json",
+        "scripts/ci_runner_classes.py",
+        "scripts/ci_runner_trust.py",
+    ],
+)
+def test_workflow_and_runner_changes_select_routing_contracts(repo, changed):
+    contracts = {
+        "tests/test_ci_anton_runners.py",
+        "tests/test_ci_runner_classes.py",
+        "tests/test_ci_runner_trust.py",
+    }
+    write(repo, {path: "import os\n" for path in contracts})
+    scope, legs = decide(repo, [changed])
+    assert scope == "selected"
+    assert set().union(*map(set, legs)) == contracts
+
+
 def test_a_python_source_is_not_selected_by_its_bare_file_name(repo):
     write(repo, {"tests/test_names.py": "NAME = 'lonely.py'\n"})
     assert decide(repo, ["scripts/lonely.py"]) == ("full", [])
@@ -108,6 +131,49 @@ def test_a_nested_test_that_names_a_changed_file_is_selected(repo):
         "selected",
         [["tests/swarm/test_nested.py", "tests/test_page.py"]],
     )
+
+
+SUITE_SPEED = "tests/test_suite_speed.py"
+UNREGISTERED_FAKEREDIS = "import fakeredis\nfrom hooks import sample\n"
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        ["tests/test_store.py"],
+        ["tests/test_other.py"],
+        ["tests/test_gone.py", "tests/test_other.py"],
+        ["tests/swarm/test_plain.py"],
+    ],
+)
+def test_a_changed_test_module_selects_the_suite_speed_checks(repo, changed):
+    write(repo, {SUITE_SPEED: "import os\n", "tests/test_store.py": UNREGISTERED_FAKEREDIS})
+    write(repo, {"tests/swarm/test_plain.py": "import os\n"})
+    scope, legs = decide(repo, changed)
+    assert scope == "selected"
+    assert SUITE_SPEED in set().union(*map(set, legs))
+
+
+def test_a_source_a_fakeredis_test_imports_selects_the_suite_speed_checks(repo):
+    write(repo, {SUITE_SPEED: "import os\n", "tests/test_store.py": UNREGISTERED_FAKEREDIS})
+    scope, legs = decide(repo, ["hooks/sample.py"])
+    assert scope == "selected"
+    assert set().union(*map(set, legs)) == {SUITE_SPEED, "tests/test_sample.py", "tests/test_store.py"}
+
+
+def test_a_source_no_fakeredis_test_imports_leaves_the_suite_speed_checks_out(repo):
+    write(repo, {SUITE_SPEED: "import os\n"})
+    assert decide(repo, ["hooks/sample.py"]) == ("selected", [["tests/test_sample.py"]])
+
+
+def test_a_changed_file_outside_python_leaves_the_suite_speed_checks_out(repo):
+    write(repo, {SUITE_SPEED: "import os\n", "scripts/static/ledger.js": "x\n"})
+    assert decide(repo, ["scripts/static/ledger.js"]) == ("selected", [["tests/test_page.py"]])
+
+
+def test_a_test_module_whose_name_breaks_the_output_line_still_runs_the_full_suite(repo):
+    write(repo, {SUITE_SPEED: "import os\n", "tests/test_spaced name.py": "import os\n"})
+    assert decide(repo, ["tests/test_spaced name.py"]) == ("full", [])
 
 
 @pytest.mark.parametrize("name", ["tests/test_spaced name.py", "tests/test_split\nscope=none.py"])

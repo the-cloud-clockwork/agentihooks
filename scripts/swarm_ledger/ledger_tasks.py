@@ -47,7 +47,9 @@ UPDATABLE = (
     "slice",
     "follow_up",
     "split_pulls",
+    "pull_scopes",
     "after_release",
+    "applied_at",
     "recovery",
 )
 BOOL_FIELDS = ("artifact", "follow_up")
@@ -60,7 +62,10 @@ OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
+APPLIED_RE = re.compile(r"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ)?")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+PULL_SCOPE_KINDS = ("stage", "prerequisite")
+PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -133,6 +138,7 @@ def check(op):
     check_lists(fields)
     check_stack(fields)
     check_release(fields)
+    check_applied(fields)
     check_bools(fields)
     check_profile(fields)
     check_urls(fields)
@@ -191,6 +197,12 @@ def check_release(fields):
         raise ValueError("after_release must be a release tag such as v2.17.1, or empty to clear it")
 
 
+def check_applied(fields):
+    value = fields.get("applied_at", "")
+    if not (isinstance(value, str) and APPLIED_RE.fullmatch(value)):
+        raise ValueError("applied_at must be a UTC time such as 2026-10-18T12:00:00Z, or empty to clear it")
+
+
 def check_rank(fields):
     if "rank" in fields:
         ledger_rank.canonical(fields["rank"])
@@ -230,8 +242,25 @@ def check_repository_branches(fields: dict) -> None:
         raise ValueError("repository_branches must map absolute local repository paths to branch names")
 
 
+def check_pull_scopes(fields: dict) -> None:
+    scopes = fields.get("pull_scopes", {})
+    if not isinstance(scopes, dict) or not all(
+        PULL_URL_RE.fullmatch(url)
+        and isinstance(declared, dict)
+        and set(declared) == {"kind", "scope"}
+        and declared["kind"] in PULL_SCOPE_KINDS
+        and isinstance(declared["scope"], str)
+        and declared["scope"].strip()
+        for url, declared in scopes.items()
+    ):
+        raise ValueError(
+            "pull_scopes must map pull request URLs to a kind, stage or prerequisite, and a nonempty scope"
+        )
+
+
 def check_lists(fields):
     check_repository_branches(fields)
+    check_pull_scopes(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
@@ -270,6 +299,7 @@ def check_task(task):
     check_lists(task)
     check_stack(task)
     check_release(task)
+    check_applied(task)
     check_urls(task)
     check_profile(task)
     check_rank(task)
@@ -348,7 +378,9 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
-    if refusal := ledger_plans.task_refusal(doc, task):
+    if refusal := (
+        ledger_plans.task_refusal(doc, task) or shared_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc)
+    ):
         ctx.refused.append(refusal)
         return False
     tasks.append(task)
@@ -427,12 +459,22 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    return park_refusal(op, task)
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc)
+
+
+def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
+    fields = op["fields"]
+    if "rank" not in fields and "phase" not in fields:
+        return ""
+    rank = fields.get("rank", task.get("rank"))
+    return ledger_rank.urgent_refusal({**task, **fields, "rank": ledger_rank.ALIASES.get(rank, rank)}, doc)
 
 
 def park_refusal(op: dict, task: dict) -> str:
     after = {**task, **op["fields"]}
     if "parked_on" not in op["fields"] or not after["parked_on"] or (after.get("branch") and after.get("stacked_base")):
+        return ""
+    if ledger_kinds.read_only(after):
         return ""
     return f"{op['item']} cannot be parked without a branch and a stacked base: park it with agentihooks swarm park"
 
@@ -569,6 +611,9 @@ def _relay_rank(doc, op, ctx):
     if task is None or not ledger_rank.quoted(rank, words):
         ctx.refused.append(UNRELAYED)
         return False
+    if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
+        ctx.refused.append(refusal)
+        return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)
     marks = {"relayed_by": op["by"], "relayed_from": RELAYED_FROM, "quote": words}
@@ -686,7 +731,21 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
+    if fields["plan_slice"] != task.get("plan_slice") and (refusal := shared_refusal(doc, {**task, **fields})):
+        ctx.refused.append(refusal)
+        return False
     return True
+
+
+def shared_refusal(doc: dict, task: dict) -> str:
+    from scripts.swarm_ledger import plan_read
+
+    if not task.get("plan_slice") or not (others := plan_read.sharers(doc, task)):
+        return ""
+    return (
+        f"plan slice {task['plan_slice']} already belongs to open task {', '.join(others)}: give each task its own "
+        "slice anchor, a <!-- slice: name --> line above its own row or section, or group the tasks into one grouped task"
+    )
 
 
 def apply(doc, op, ctx):

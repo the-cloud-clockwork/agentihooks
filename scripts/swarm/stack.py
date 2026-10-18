@@ -6,8 +6,11 @@ from pathlib import Path
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
+from scripts.swarm import apply_wait
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
+READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
 
@@ -36,6 +39,29 @@ def _pushed(branch):
         raise SwarmError(f"the worktree holds commits origin lacks; push {branch} first")
     if _out(["git", "status", "--porcelain"], "cannot inspect the worktree"):
         raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
+
+
+def pushed(root: Path, recorded: str = "") -> bool:
+    git = ["git", "-C", str(root)]
+    local = _out([*git, "branch", "--show-current"], "cannot read the worktree branch")
+    upstream = _out(
+        [*git, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", f"refs/heads/{local}"],
+        "cannot read the worktree upstream",
+    )
+    remote_name, _, remote_ref = upstream.partition(" ")
+    branch = remote_ref.removeprefix("refs/heads/") or recorded or local
+    remote_name = remote_name or "origin"
+    listed = shell([*git, "ls-remote", "--heads", remote_name, branch]).stdout.splitlines()
+    remote = [line.split()[0] for line in listed if line.endswith(f"\trefs/heads/{branch}")]
+    if remote and shell([*git, "merge-base", "--is-ancestor", "HEAD", remote[0]]).returncode == 0:
+        return True
+    if remote or _out([*git, "rev-list", "--count", "origin/dev..HEAD"], "cannot count the worktree commits") != "0":
+        target = branch if branch == local else f"HEAD:{branch}"
+        raise SwarmError(
+            f"the worktree {root} holds commits origin lacks; "
+            f"push them with git -C {root} push -u {remote_name} {target} before blocking"
+        )
+    return False
 
 
 def worktree() -> str:
@@ -117,6 +143,15 @@ def _merged_into_dev(dep):
         raise SwarmError(f"cannot read the dependency pull request: {exc}") from exc
 
 
+def _fetch_foreign(dep, branch):
+    wanted = repo_key(dep["branch_repo"])
+    checkouts = [path for path in dep.get("repository_branches") or {} if origin_key(path) == wanted]
+    if checkouts:
+        _out(["git", "-C", checkouts[0], "fetch", "origin", branch], f"cannot fetch {branch} in {checkouts[0]}")
+    else:
+        _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
+
+
 def _base_of(dep, foreign):
     branch = dep["branch"]
     merged = _merged_into_dev(dep)
@@ -124,7 +159,7 @@ def _base_of(dep, foreign):
         _out(["git", "fetch", "origin", branch], f"cannot fetch {branch}")
         return _out(["git", "merge-base", "HEAD", f"origin/{branch}"], f"{branch} shares no history")
     if not merged:
-        _out(["git", "fetch", "--", dep["branch_repo"], branch], f"cannot fetch {branch} from {dep['branch_repo']}")
+        _fetch_foreign(dep, branch)
     _out(["git", "fetch", "origin", "dev"], "cannot fetch dev")
     return _out(["git", "merge-base", "HEAD", "origin/dev"], "the task shares no history with dev")
 
@@ -151,13 +186,18 @@ def _issue_body(row, open_, base, foreign):
 
 def _ledger_note(open_):
     names = " and ".join(b.get("title") or "its dependency" for b in open_)
-    return f"Parked on its branch until {names} is done. The next engineer restacks it onto dev and finishes it."
+    note = f"Parked on its branch until {names} is done. The next engineer restacks it onto dev and finishes it."
+    if not ledger_comments.problems(note, "comment"):
+        return note
+    return "Parked on its branch until every open dependency is done. The next engineer restacks it onto dev and finishes it."
 
 
 def park(store, slug: str, agent, text: str, ledger) -> dict:
     state = ledger.state(slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
+    if ledger_kinds.read_only(row):
+        return park_read_only(store, slug, agent, text, ledger, rows), ""
     _pushed(row.get("branch"))
     top = worktree()
     _issue_ready(row)
@@ -167,6 +207,7 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
         raise SwarmError(handoff_check.refusal(found))
     foreign = _foreign(open_)
     base = _stacked_base(open_, foreign)
+    ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     if row.get("issue_url"):
         body = _issue_body(row, open_, base, foreign)
         _out(["gh", "issue", "comment", row["issue_url"], "--body", body], "could not comment on the issue")
@@ -175,8 +216,28 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
         repos.setdefault(repo_key(dep["branch_repo"]), dep["branch_repo"])
     fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base, "parked_repos": list(repos.values())}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
-    ledger.comment(slug, agent.task, _ledger_note(open_), by=agent.name)
     return fields, top
+
+
+def _read_only_note(open_):
+    note = READ_ONLY_NOTE.format(names=" and ".join(b.get("title") or "its dependency" for b in open_))
+    return note if not ledger_comments.problems(note, "comment") else READ_ONLY_NOTE.format(names="its dependencies")
+
+
+def park_read_only(store, slug: str, agent, text: str, ledger, rows: dict) -> dict:
+    row = rows[agent.task]
+    held = apply_wait.waiting(store.config(slug), row, rows)
+    deps = row.get("depends_on") or []
+    open_ = [rows.get(d, {"id": d}) for d in deps if d in held or rows.get(d, {}).get("state") != "done"]
+    if not open_:
+        raise SwarmError("the task waits on no open dependency; finish it, or hand it off for its window")
+    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
+    if found:
+        raise SwarmError(handoff_check.refusal(found))
+    ledger.comment(slug, agent.task, _read_only_note(open_), by=agent.name)
+    fields = {"parked_on": [b["id"] for b in open_]}
+    ledger.update_task(slug, agent.task, fields, by=agent.name)
+    return fields
 
 
 def remove_worktree(top: str) -> str:

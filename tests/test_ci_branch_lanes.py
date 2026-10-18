@@ -373,3 +373,32 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
     assert lanes.refused(sha, base) == {
         f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
     }
+
+
+@pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
+@pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
+def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, index, change):
+    import copy
+
+    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    for name in ("stats", "mutation-shard"):
+        baseline["jobs"][name]["concurrency"] = {"group": "${{ 'mutation-lane-a' }}", "queue": "max"}
+    updated = copy.deepcopy(baseline)
+    block = {"group": f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"}
+    updated["jobs"][job]["concurrency"] = block
+    if change == "runs-on":
+        updated["jobs"][job]["runs-on"] = "ubuntu-latest"
+    elif change == "queue":
+        block["queue"] = "max"
+    elif change == "cancel":
+        block["cancel-in-progress"] = True
+    elif change == "stage":
+        block["group"] = block["group"].replace(f"-{stage}-", "-other-")
+    elif change == "index":
+        block["group"] = block["group"].replace(f"matrix.{index}", "matrix.other")
+    elif change == "group":
+        block["group"] = "${{ github.run_id }}"
+    elif change == "untrusted":
+        baseline = None
+    found = [problem for problem in lanes.problems(updated, baseline) if problem.startswith(f"job {job} ")]
+    assert bool(found) == (change is not None)

@@ -115,9 +115,9 @@ def test_parse_refuses_a_piece_the_ledger_would_refuse_as_a_follow_up():
     assert "file name or path" in str(refused.value)
 
 
-def test_parse_refuses_a_task_id_the_ledger_would_refuse_in_a_follow_up():
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.parse("- a light | a | b", "my_task")
+@pytest.mark.parametrize("task_id", ["my_task", "promo-38842603017-0"])
+def test_parse_accepts_task_identifiers_the_ledger_would_refuse_in_prose(task_id):
+    assert trace_plan.parse("- a light | a | b", task_id) == [trace_plan.Piece("a light", ("a",), "b")]
 
 
 def test_parse_names_every_problem_of_a_piece():
@@ -133,8 +133,11 @@ def test_parse_caps_the_number_of_pieces():
         trace_plan.parse(allowed + "- one more | a | b\n", "t1")
 
 
-def test_followup_text_names_the_task_and_the_piece():
-    assert trace_plan.followup_text("t1", "a generator") == "Cut from the plan of task t1: a generator"
+@pytest.mark.parametrize("task_id", ["t1", "promo-38842603017-0"])
+def test_followup_text_keeps_the_piece_without_the_task_identifier(task_id):
+    text = trace_plan.followup_text(task_id, "a generator")
+    assert text == "Cut from the plan: a generator"
+    assert trace_plan.ledger_comments.problems(text, "item") == []
 
 
 def test_plan_hash_changes_with_any_field_and_ignores_nothing():
@@ -312,7 +315,7 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         ],
     }
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
-    assert questions["piece_2"].instructions == "Is piece 3, a diesel generator, needed to deliver the task?"
+    assert questions["piece_2"].instructions.startswith("Is piece 3, a diesel generator, needed to deliver the task?")
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
     assert questions["size"].instructions == (
         "How much source work is the plan? Judge only pieces with nonempty areas; "
@@ -353,6 +356,27 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         "filed": [],
         "at": 5,
     }
+
+
+def test_scope_questions_keep_required_runner_registration_without_allowing_unrelated_workflows(ask):
+    fake = ask(0.95, 0.95, 0.05)
+    pieces = [
+        piece("Add the receipt replay CI job", ".github/workflows/proofs.yml"),
+        piece("Register the receipt replay job in the runner class table", "scripts/ci_runner_classes.py"),
+        piece("Change the release workflow schedule", ".github/workflows/release.yml"),
+    ]
+    state = {**INTENT, "task": "Add a CI job that replays receipt requests"}
+    record = trace_plan.trace(pieces, state, None, now_ms=5)
+    [(sent, questions, _)] = fake.calls
+    assert sent["task"] == state["task"]
+    for key in ("piece_0", "piece_1", "piece_2"):
+        assert (
+            "Registering a CI job added by the task in the runner class table is required"
+            in questions[key].instructions
+        )
+        assert "Unrelated workflow edits remain out of scope" in questions[key].instructions
+    assert [row["kept"] for row in record["pieces"]] == [True, True, False]
+    assert record["verdict"] == "pass"
 
 
 @pytest.mark.parametrize(
@@ -633,7 +657,7 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     ask(0.9, 0.8, 0.1)
     record, block = run(folder, ledger, home)
     assert (block, record["at"]) == (False, 11)
-    assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
     assert record["filed"] == ["a diesel generator | power/generator | it powers the light"]
     assert json.loads((folder / "plan-verdict.json").read_text()) == record
     [row] = rows(home)
@@ -648,7 +672,7 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     fake = ask(0.9, score=None, start=3)
     record, _ = run(folder, ledger, home)
     assert len(fake.calls) == 1
-    assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
     assert len(record["pieces"]) == 4 and len(rows(home)) == 1
 
 
@@ -784,14 +808,36 @@ def test_run_needs_a_plan_file(tmp_path):
     assert str(refused.value) == f"write the plan first: {tmp_path / 't1' / 'plan.md'}, {trace_plan.FORMAT}"
 
 
-def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
+@pytest.mark.parametrize(("mode", "kind"), [("enforce", "deny"), ("observe", "observe"), ("off", None)])
+@pytest.mark.parametrize(
+    ("text", "refusal"),
+    [
+        (None, "write the plan first"),
+        ("- a light\n", "plan line 1 is not a piece"),
+        ("- fix Run 38842603017 failed | a | b\n", "plan line 1: the ledger would refuse its follow up"),
+        ("prose only\n", "the plan holds no pieces"),
+    ],
+)
+def test_run_logs_every_refusal_by_its_mode_before_raising(ask, tmp_path, mode, kind, text, refusal):
+    folder, home = tmp_path / "t1", tmp_path / "home"
+    if text is not None:
+        write_plan(folder, text)
+    fake = ask(0.9)
+    with pytest.raises(ValueError) as refused:
+        trace_plan.run(folder, INTENT, Ledger(), WHO, mode, home=home)
+    assert str(refused.value).startswith(refusal) and fake.calls == []
+    expected = [("trace-plan", kind, WHO.name, WHO.task, str(refused.value))] if kind else []
+    assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in rows(home)] == expected
+
+
+def test_run_accepts_a_task_identifier_the_ledger_would_refuse_in_prose(ask, tmp_path):
     folder = tmp_path / "t1"
     write_plan(folder, "- a light | a | b\n")
     fake = ask(0.9)
     who = Who(name="engineer@1-1", swarm="sw", task="my_task")
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
-    assert fake.calls == []
+    record, block = trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert len(fake.calls) == 1
 
 
 @pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause", "promo-38842603017-0"])
@@ -808,13 +854,24 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
 
     class CheckedLedger(Ledger):
         def followup(self, slug, text):
-            trace_plan.ledger_comments.check(text, "item", task_ids=[task["id"] for task in doc["tasks"]])
+            trace_plan.ledger_comments.check(text, "item")
             super().followup(slug, text)
 
     ledger = CheckedLedger()
     record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
     assert record["verdict"] == "pass" and not block
-    assert ledger.followups == [f"Cut from the plan of task {task_id}: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
+
+
+@pytest.mark.parametrize("task_id", ["fx-8be892c4-code", "promo-38842603017-0"])
+def test_run_accepts_registered_task_identifiers_in_piece_text(ask, tmp_path, task_id):
+    folder = tmp_path / "task"
+    write_plan(folder, f"- fix {task_id} | a | keep the task working\n")
+    ask(0.9)
+    state = {**INTENT, "task ids": [task_id]}
+    record, block = trace_plan.run(folder, state, Ledger(), WHO, "enforce", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert record["pieces"][0]["what"] == f"fix {task_id}"
 
 
 @pytest.mark.parametrize(

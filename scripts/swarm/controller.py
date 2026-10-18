@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,7 @@ class FencedRuntime:
             and callable(getattr(runtime.herdr_runtime, "_profile_decision", None))
         ):
             runtime = hive_controller(runtime, store, slug, held)
+            runtime.router.placement = replace(runtime.router.placement, master_seats=lambda: frozenset(("master",)))
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
@@ -75,13 +77,14 @@ class FencedRuntime:
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
     def placement_refusal(self, lane: str, task: dict) -> str:
+        task = {"id": "master", **task} if lane == "master" else task
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
             return ""
         router = self.runtime.router
         if router.placement.backend == "hive":
-            if lane not in ("eng", "ci"):
+            if not _hive_lane(lane, task):
                 original = self.runtime.original_runtime.router
                 wanted = original.placed_backend(lane, task)
                 return (
@@ -112,9 +115,13 @@ class FencedRuntime:
             raise SwarmError(refused)
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
-            if lane not in ("eng", "ci") and getattr(runtime, "hive_launch", None) is not None:
+            if not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+
+
+def _hive_lane(lane: str, task: dict) -> bool:
+    return lane in ("eng", "ci") or (lane == "master" and task.get("id") == "master") or bool(task.get("hive"))
 
 
 def _read(path: str) -> str:

@@ -94,6 +94,14 @@ def test_exact_passed_queue_commit_reuses_all_unit_artifacts(tmp_path):
     assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) == 123
 
 
+def test_queue_partitions_with_more_shards_do_not_reuse_a_partial_promotion_suite(tmp_path):
+    _, _, folder = evidence(tmp_path)
+    with (folder / "jobs.jsonl").open("a") as jobs:
+        jobs.write(json.dumps({"name": "unit (3.11, 7)", "conclusion": "success"}) + "\n")
+
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

@@ -39,6 +39,9 @@ def main() -> int:
         print(f"Mutation stats part: {part[0] + 1} of {part[1]}" if part else f"Mutation stats from {args.stats}")
     print(f"Mutation shard: {args.shard + 1} of {args.shards}")
     report = run_gate(root, changes, args.output.resolve(), args.budget, (args.shard, args.shards), stats)
+    if (failing := report.get("failing_tests")) and (summary := os.environ.get("GITHUB_STEP_SUMMARY")):
+        with Path(summary).open("a") as stream:
+            stream.write("### Mutation clean baseline failed\n\n" + "".join(f"- `{test}`\n" for test in failing))
     return int(report["failed"])
 
 

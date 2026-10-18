@@ -1,19 +1,21 @@
 """One supervised Codex app-server per admitted execution: admit, spawn, connect, bind, then open exactly once."""
 
 import contextlib
+import fcntl
 import json
 import os
 import shutil
 import socket
 import subprocess
 import time
+import tomllib
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, replace
 from pathlib import Path
 
 from hooks.observability.trace_flush import start_time
 from scripts.codex_session import protocol
-from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, BindingStore, TransportRecord
+from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
 from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore
@@ -32,7 +34,8 @@ UNIX = "unix://"
 EXECUTION_PREFIX = "exe-"
 ENDPOINT_ID_CHARS = 16
 PRIVATE_MODE = 0o700
-RUNTIME_DIR_ENV = "XDG_RUNTIME_DIR"
+SHARED_ROLLOUTS = ("sessions", "archived_sessions")
+OMITTED_STATE = (*SHARED_ROLLOUTS, "bin", "history.jsonl", "session_index.jsonl", "log", "tmp", "shell_snapshots")
 RUNTIME_SUBDIR = "cx"
 HOME_SUBDIR = ".agentihooks"
 CODEX_HOME_KEY = "codexHome"
@@ -99,9 +102,7 @@ class Started:
 
 
 def runtime_root(environ: Mapping[str, str]) -> Path:
-    runtime = environ.get(RUNTIME_DIR_ENV)
-    base = Path(runtime) if runtime else Path(environ.get("HOME") or Path.home()) / HOME_SUBDIR
-    return base / RUNTIME_SUBDIR
+    return Path(environ.get("HOME") or Path.home()) / HOME_SUBDIR / RUNTIME_SUBDIR
 
 
 def socket_path(root: Path, execution_id: str) -> Path:
@@ -300,9 +301,17 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     shutil.copytree(
         source,
         home,
-        ignore=lambda directory, _names: ("bin",) if Path(directory) == source else (),
+        ignore=lambda directory, names: (
+            tuple(name for name in names if name in OMITTED_STATE or ".sqlite" in name)
+            if Path(directory) == source
+            else ()
+        ),
         ignore_dangling_symlinks=True,
     )
+    for name in SHARED_ROLLOUTS:
+        canonical = (source / name).resolve()
+        canonical.mkdir(parents=True, exist_ok=True)
+        (home / name).symlink_to(canonical)
     binaries = source / "bin"
     if binaries.exists():
         (home / "bin").symlink_to(binaries.resolve())
@@ -321,8 +330,65 @@ def execution_home(spec: Launch, directory: Path) -> Launch:
     return replace(spec, codex_home=str(home), environ={**spec.environ, "CODEX_HOME": str(home)})
 
 
+def preserve_legacy_rollouts(home: Path) -> None:
+    legacy = [home / name for name in SHARED_ROLLOUTS if not (home / name).is_symlink() and (home / name).is_dir()]
+    if not legacy:
+        return
+    config = home / "config.toml"
+    settings = tomllib.loads(config.read_text()) if config.is_file() else {}
+    canonical = Path(settings.get("sqlite_home") or Path.home() / ".codex")
+    if canonical.is_relative_to(home):
+        canonical = Path.home() / ".codex"
+    for sessions in legacy:
+        for rollout in sessions.rglob("*.jsonl"):
+            destination = canonical / sessions.name / rollout.relative_to(sessions)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            with rollout.open("rb") as incoming, destination.open("a+b") as outgoing:
+                fcntl.flock(outgoing.fileno(), fcntl.LOCK_EX)
+                outgoing.seek(0)
+                previous, current = outgoing.read(), incoming.read()
+                if current.startswith(previous):
+                    outgoing.write(current[len(previous) :])
+                elif not previous.startswith(current):
+                    recovered = (
+                        canonical / sessions.name / f"recovered-{home.parent.name}" / rollout.relative_to(sessions)
+                    )
+                    recovered.parent.mkdir(parents=True, exist_ok=True)
+                    recovered.write_bytes(current)
+
+
+def remove_home(directory: Path) -> None:
+    with contextlib.suppress(FileNotFoundError):
+        preserve_legacy_rollouts(directory / "codex")
+        shutil.rmtree(directory)
+
+
+def reclaim_homes(store: RedisStore, slug: str, deps: Deps) -> None:
+    bindings = BindingStore(store)
+    for raw in store.redis.hgetall(store.key(slug, RECORDS)).values():
+        record = decode(raw)
+        directory = execution_directory(record)
+        if record.host_id != socket.gethostname() or directory is None or not directory.exists():
+            continue
+        if record.server_pid:
+            identity = deps.start_identity(record.server_pid)
+            alive = identity is not None and (
+                not record.server_start_identity or identity == record.server_start_identity
+            )
+        else:
+            bridge = record.bridge_owner.rpartition(":")[2]
+            alive = not bridge.isdecimal() or deps.start_identity(int(bridge)) is not None
+        if alive:
+            continue
+        remove_home(directory)
+        ended = replace(record, state=EXITED, active_turn_id="")
+        bindings.put(slug, ended)
+        bindings.release(slug, ended)
+
+
 def launch(store: RedisStore, spec: Launch, deps: Deps) -> Started:
     check_environment(spec.environ, spec.allowed_tokens)
+    reclaim_homes(store, spec.slug, deps)
     agent = admit(store, spec, deps)
     bindings = BindingStore(store)
     record, process, path = None, None, None
@@ -361,4 +427,7 @@ def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> Trans
     record = replace(current, state=EXITED, active_turn_id="", last_transport_activity=now_ms)
     bindings.put(slug, record)
     bindings.release(slug, record)
+    directory = execution_directory(record)
+    if directory is not None:
+        remove_home(directory)
     return record

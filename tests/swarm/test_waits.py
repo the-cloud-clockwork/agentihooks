@@ -5,13 +5,15 @@ import pytest
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import cli, idle, waits
+from scripts.swarm import cli, idle, merge_queue, waits
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.ledger_events import head as github_head
 from scripts.swarm.ledger_events import view as github_view
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
+
+REAL_REQUIRED_GREEN = waits.required_green
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -440,7 +442,11 @@ def test_checks_wait_uses_only_the_newest_run_of_each_check(tick, conclusion, ob
 
 
 def _run_info(run_id, workflow="W1", event="pull_request"):
-    return {"databaseId": run_id, "event": event, "workflow": {"id": workflow, "name": "Tests"}}
+    return {
+        "databaseId": run_id,
+        "event": event,
+        "workflow": {"id": workflow, "name": "Tests", "resourcePath": f"/o/r/actions/workflows/{workflow}.yml"},
+    }
 
 
 def _run_check(name, check_id, run_id, conclusion, **run):
@@ -472,13 +478,20 @@ CANCELLED_RUN = [
 ]
 
 
-def _gated(checks, suites, reverse, gated=True):
+def _gated(checks, suites, reverse, gated=True, workflows=()):
     from scripts.swarm.ledger_events import pull_request
 
     if reverse:
         checks, suites = checks[::-1], suites[::-1]
     return pull_request(
-        {"state": "OPEN", "headRefOid": "first", "gated": gated, "statusCheckRollup": checks, "checkSuites": suites}
+        {
+            "state": "OPEN",
+            "headRefOid": "first",
+            "gated": gated,
+            "gate_workflows": workflows,
+            "statusCheckRollup": checks,
+            "checkSuites": suites,
+        }
     )
 
 
@@ -1012,14 +1025,14 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "graphql",
                 "-f",
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft "
-                "commits(last:1){nodes{commit{id committedDate "
-                'file(path:".github/workflows"){object{...on Tree{entries{object{...on Blob{text}}}}}} '
+                "commits(last:1){nodes{commit{id oid committedDate "
+                'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
                 "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
-                "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name}}}} "
+                "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){"
-                "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id}}} "
+                "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id resourcePath}}} "
                 "pageInfo{hasNextPage endCursor}}}}}}}}",
                 "-f",
                 f"url={URL}",
@@ -1298,6 +1311,13 @@ def workflows(*texts):
 def gated_probe(rollup, suites, tree):
     from types import SimpleNamespace
 
+    entries = ((tree or {}).get("object") or {}).get("entries") or []
+    path = f"/o/r/actions/workflows/{entries[-1]['name']}" if entries else ""
+    run = {"workflow": {"resourcePath": path}}
+    rollup = [
+        {**check, "checkSuite": {"workflowRun": run}} if "name" in check and not check.get("checkSuite") else check
+        for check in rollup
+    ]
     commit = {
         "committedDate": "2026-10-07T17:00:00Z",
         "statusCheckRollup": {"contexts": {"nodes": rollup, "pageInfo": {"hasNextPage": False}}},
@@ -1347,10 +1367,17 @@ def test_the_probe_reads_the_gate_from_the_last_commit():
     from types import SimpleNamespace
 
     def commit(tree):
+        checks = [
+            {
+                **check,
+                "checkSuite": {"workflowRun": {"workflow": {"resourcePath": "/o/r/actions/workflows/w0.yml"}}},
+            }
+            for check in UNIT_PASSED
+        ]
         return {
             "commit": {
                 "committedDate": "2026-10-07T17:00:00Z",
-                "statusCheckRollup": {"contexts": {"nodes": UNIT_PASSED, "pageInfo": {"hasNextPage": False}}},
+                "statusCheckRollup": {"contexts": {"nodes": checks, "pageInfo": {"hasNextPage": False}}},
                 "checkSuites": NO_SUITES,
                 "file": tree,
             }
@@ -1381,8 +1408,134 @@ def test_a_gated_checks_wait_ends_only_on_its_gate(tick, rollup, outcome):
     assert (idle.wait(tick.store.redis, "sw", ME) is None) is bool(outcome)
 
 
+@pytest.mark.parametrize("required", [False, True])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
+@pytest.mark.parametrize("event", [None, "pull_request"])
+def test_checks_wait_judges_every_job_of_the_current_required_run(tick, required, conclusion, event):
+    tick.hold("checks", URL)
+    gate = {**_run_check("Gate — Required", 20, 2, "SUCCESS", event=event), "isRequired": True}
+    job = {**_run_check("selected tests", 21, 2, conclusion, event=event), "isRequired": required}
+    tick.pulls[URL] = _gated([gate, job], [_suite(2, "COMPLETED", event=event)], False)
+    if conclusion is None:
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+    else:
+        outcome = "red; failed: selected tests" if conclusion == "FAILURE" else "green"
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("status", ["IN_PROGRESS", "COMPLETED"])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
+@pytest.mark.parametrize("event", [None, "pull_request"])
+@pytest.mark.parametrize("other_required", [False, True])
+def test_a_status_gate_cannot_hide_the_current_workflow_jobs(tick, status, conclusion, event, other_required):
+    tick.hold("checks", URL)
+    gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    job = {**_run_check("selected tests", 20, 2, conclusion, event=event), "isRequired": False}
+    checks = [gate, job]
+    if other_required:
+        checks.append({**_run_check("security", 10, 1, "SUCCESS", workflow="W2"), "isRequired": True})
+    tick.pulls[URL] = _gated(checks, [_suite(2, status, event=event)], False, workflows=["W1.yml"])
+    if conclusion == "FAILURE":
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red; failed: selected tests"]
+    elif conclusion == "SUCCESS" and status == "COMPLETED":
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    else:
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS", "COMPLETED"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_a_status_gate_holds_a_superseding_run_without_current_jobs(tick, status, reverse):
+    tick.hold("checks", URL)
+    gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    old = {**_run_check("selected tests", 10, 1, "SUCCESS"), "isRequired": False}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, status)]
+    tick.pulls[URL] = _gated([gate, old], suites, reverse, workflows=["W1.yml"])
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    current = {**_run_check("selected tests", 20, 2, "SUCCESS"), "isRequired": False}
+    suites[-1] = _suite(2, "COMPLETED", "SUCCESS")
+    tick.pulls[URL] = _gated([gate, old, current], suites, reverse, workflows=["W1.yml"])
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+@pytest.mark.parametrize("conclusion", [None, "FAILURE"])
+def test_a_status_gate_ignores_workflows_without_a_declared_gate(tick, conclusion):
+    tick.hold("checks", URL)
+    gate = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    unit = {**_run_check("unit", 10, 1, "SUCCESS"), "isRequired": False}
+    optional = {**_run_check("measure", 20, 2, conclusion, workflow="W2"), "isRequired": False}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, "IN_PROGRESS", workflow="W2")]
+    tick.pulls[URL] = _gated([gate, unit, optional], suites, False, workflows=["W1.yml"])
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+@pytest.mark.parametrize("conclusion", ["SKIPPED", "NEUTRAL"])
+def test_a_status_success_cannot_replace_a_gate_check_that_did_not_pass(tick, conclusion):
+    tick.hold("checks", URL)
+    status = {"context": "Gate — Required", "state": "SUCCESS", "isRequired": True}
+    gate = {**_run_check("Gate — Required", 10, 1, conclusion), "isRequired": True}
+    tick.pulls[URL] = _gated([status, gate], [_suite(1, "COMPLETED")], False)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS"])
+@pytest.mark.parametrize("reverse", [False, True])
+def test_checks_wait_holds_the_new_required_run_after_an_old_green_gate(tick, status, reverse):
+    tick.hold("checks", URL)
+    checks = [_run_check("Gate — Required", 10, 1, "SUCCESS")]
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(2, status)]
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    checks += [_run_check("Gate — Required", 20, 2, "SUCCESS"), _run_check("lint", 21, 2, None)]
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+
+
+@pytest.mark.parametrize("status", ["QUEUED", "IN_PROGRESS", "COMPLETED"])
+@pytest.mark.parametrize("reverse", [False, True])
+@pytest.mark.parametrize("sibling", [False, True])
+@pytest.mark.parametrize("name", ["security", "Gate — Required"])
+def test_checks_wait_retains_a_separate_required_workflow_after_superseding_its_check(
+    tick, status, reverse, sibling, name
+):
+    tick.hold("checks", URL)
+    gate = {**_run_check("Gate — Required", 10, 1, "SUCCESS"), "isRequired": True}
+    old = {**_run_check(name, 20, 2, "SUCCESS", workflow="W2"), "isRequired": name == "security"}
+    suites = [_suite(1, "COMPLETED", "SUCCESS"), _suite(3, status, workflow="W2")]
+    checks = [gate, old]
+    if sibling:
+        checks.append({**_run_check("measure", 29, 3, "SUCCESS", workflow="W2"), "isRequired": False})
+    tick.pulls[URL] = _gated(checks, suites, reverse)
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME) is not None
+    current = {**_run_check(name, 30, 3, "SUCCESS", workflow="W2"), "isRequired": name == "security"}
+    suites[-1] = _suite(3, "COMPLETED", "SUCCESS", workflow="W2")
+    tick.pulls[URL] = _gated([*checks, current], suites, reverse)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
+@pytest.mark.parametrize("conclusion", [None, "FAILURE"])
+@pytest.mark.parametrize("event", [None, "pull_request"])
+def test_an_optional_workflow_cannot_hold_or_fail_the_required_run(tick, conclusion, event):
+    tick.hold("checks", URL)
+    gate = {**_run_check("Gate — Required", 10, 1, "SUCCESS", event=event), "isRequired": True}
+    optional = {**_run_check("measure", 20, 2, conclusion, workflow="W2"), "isRequired": False}
+    suites = [_suite(1, "COMPLETED", "SUCCESS", event=event), _suite(2, "IN_PROGRESS", workflow="W2")]
+    tick.pulls[URL] = _gated([gate, optional], suites, False)
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert idle.wait(tick.store.redis, "sw", ME) is None
+
+
 @pytest.mark.parametrize("conclusion", ["SUCCESS", "FAILURE", "TIMED_OUT"])
-def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick, conclusion):
+def test_a_required_gate_holds_green_or_ends_red_beside_a_pending_jobless_workflow(tick, conclusion):
     tick.hold("checks", URL)
     tick.pulls[URL] = gated_probe(
         [{"name": "Gate — Required", "conclusion": conclusion}],
@@ -1390,13 +1543,18 @@ def test_a_required_gate_ends_checks_wait_beside_a_pending_jobless_workflow(tick
         workflows(GATE_WORKFLOW),
     )
     assert tick.end() == []
-    outcome = "green" if conclusion == "SUCCESS" else "red; failed: Gate — Required"
-    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
-    assert idle.wait(tick.store.redis, "sw", ME) is None
-    assert tick.told() == [
-        f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
-        "agentihooks swarm sw done, block, or wait on the next thing."
-    ]
+    if conclusion == "SUCCESS":
+        assert tick.end() == []
+        assert idle.wait(tick.store.redis, "sw", ME) is not None
+        assert tick.told() == []
+    else:
+        outcome = "red; failed: Gate — Required"
+        assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now {outcome}"]
+        assert idle.wait(tick.store.redis, "sw", ME) is None
+        assert tick.told() == [
+            f"Your wait on checks on {URL}, now {outcome} has ended. Pick task t1 back up: "
+            "agentihooks swarm sw done, block, or wait on the next thing."
+        ]
 
 
 @pytest.mark.parametrize("conclusion", ["FAILURE", "ERROR", "STARTUP_FAILURE", "ACTION_REQUIRED", "TIMED_OUT"])
@@ -1754,3 +1912,145 @@ def test_an_intent_wait_holds_on_a_verdict_judged_on_another_head(tick):
     assert tick.end() == []
     tick.pulls[URL] = PullRequest("OPEN", None, 1, False, head="old")
     assert tick.end() == [f"ended the wait of {ME}: the intent verdict on {URL}, now pass: fine"]
+
+
+@pytest.mark.parametrize(
+    "queued",
+    [
+        {"name": "unit"},
+        {"context": "unit", "state": "PENDING"},
+        {"name": "unit", "state": "EXPECTED"},
+        {"name": "unit", "conclusion": "CANCELLED"},
+    ],
+)
+def test_a_queued_required_check_holds_the_wait_after_the_gate_passed(tick, queued):
+    from scripts.swarm.ledger_events import GATE, pull_request
+
+    tick.hold("checks", URL)
+    gate = {"name": GATE, "conclusion": "SUCCESS", "isRequired": True}
+    raw = {"state": "OPEN", "headRefOid": "first", "gated": True}
+    tick.pulls[URL] = pull_request({**raw, "statusCheckRollup": [gate, {**queued, "isRequired": True}]})
+    assert tick.end() == []
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    assert tick.told() == []
+    done = {**queued, "isRequired": True, "conclusion": "SUCCESS"}
+    tick.pulls[URL] = pull_request({**raw, "statusCheckRollup": [gate, done]})
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_result_read_from_an_older_commit_never_ends_the_wait(tick):
+    from scripts.swarm.ledger_events import GATE, pull_request
+
+    tick.hold("checks", URL)
+    raw = {
+        "state": "OPEN",
+        "headRefOid": "first",
+        "gated": True,
+        "commits": [{"oid": "older", "committedDate": "2026-10-17T10:00:00Z"}],
+        "statusCheckRollup": [{"name": GATE, "conclusion": "SUCCESS"}],
+    }
+    tick.pulls[URL] = pull_request(raw)
+    assert tick.pulls[URL].head == ""
+    assert tick.end() == []
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    tick.pulls[URL] = pull_request({**raw, "commits": [{"oid": "first", "committedDate": "2026-10-17T10:00:00Z"}]})
+    assert tick.pulls[URL].head == "first"
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_cached_green_result_ends_the_wait_only_once_a_fresh_read_confirms_it(tick):
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head="first")
+    tick.fresh[URL] = PullRequest("OPEN", None, 1, False, False, head="first")
+    assert tick.end() == []
+    tick.fresh[URL] = PullRequest("OPEN", None, 1, False, True, head="second")
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "second"}
+    tick.pulls[URL] = tick.fresh[URL]
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_neutral_required_check_beside_a_passed_gate_ends_the_wait_green(tick):
+    from scripts.swarm.ledger_events import GATE, pull_request
+
+    tick.hold("checks", URL)
+    checks = [{"name": GATE, "conclusion": "SUCCESS"}, {"name": "unit", "conclusion": "NEUTRAL", "isRequired": True}]
+    tick.pulls[URL] = pull_request({"state": "OPEN", "headRefOid": "first", "gated": True, "statusCheckRollup": checks})
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+
+
+def test_a_green_wait_holds_until_the_branch_rules_confirm_every_required_check(tick, monkeypatch):
+    seen, answer = [], {"green": False}
+
+    def required(target, head):
+        seen.append((target, head))
+        return answer["green"]
+
+    monkeypatch.setattr(waits, "required_green", required)
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head="first")
+    assert tick.end() == []
+    assert idle.wait(tick.store.redis, "sw", ME)["on"] == {"kind": "checks", "target": URL, "head": "first"}
+    answer["green"] = True
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now green"]
+    assert seen == [(URL, "first"), (URL, "first")]
+
+
+def test_a_red_wait_ends_without_asking_the_branch_rules(tick, monkeypatch):
+    def required(target, head):
+        pytest.fail("a red result needs no required check confirmation")
+
+    monkeypatch.setattr(waits, "required_green", required)
+    tick.hold("checks", URL)
+    tick.pulls[URL] = PullRequest("OPEN", None, 1, True, True, head="first")
+    assert tick.end() == [f"ended the wait of {ME}: checks on {URL}, now red"]
+
+
+@pytest.mark.parametrize(
+    "pull, green",
+    [
+        (None, False),
+        (PullRequest("OPEN", None, None, False, True, head="first"), True),
+        (PullRequest("OPEN", None, None, False, True, head="second"), False),
+        (PullRequest("OPEN", None, None, False, False, head="first"), False),
+        (PullRequest("OPEN", None, None, True, True, head="first"), False),
+    ],
+)
+def test_required_green_needs_every_required_check_passed_on_the_head(monkeypatch, pull, green):
+    import subprocess
+
+    calls = []
+
+    def view(url, run):
+        calls.append((url, run))
+        return pull
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is green
+    assert calls == [(URL, subprocess.run)]
+
+
+@pytest.mark.parametrize("error", [SwarmError("GitHub API failed"), KeyError("repository"), TypeError("none")])
+def test_required_green_holds_when_github_cannot_answer(monkeypatch, error):
+    def view(url, run):
+        raise error
+
+    monkeypatch.setattr(merge_queue, "required_view", view)
+    assert REAL_REQUIRED_GREEN(URL, "first") is False
+
+
+def test_the_required_reading_of_an_older_commit_carries_no_head():
+    from scripts.swarm.ledger_events import GATE, _required_pull_request
+
+    raw = {
+        "state": "OPEN",
+        "headRefOid": "first",
+        "commits": [{"oid": "older"}],
+        "statusCheckRollup": [{"name": GATE, "conclusion": "SUCCESS", "isRequired": True}],
+        "checkSuites": [],
+    }
+    assert _required_pull_request(raw, {GATE: None}).head == ""
+    assert _required_pull_request({**raw, "commits": [{"oid": "first"}]}, {GATE: None}).head == "first"
+    assert _required_pull_request({k: v for k, v in raw.items() if k != "commits"}, {GATE: None}).head == "first"

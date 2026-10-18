@@ -9,6 +9,8 @@ from pathlib import Path
 UNIT = "agentihooks-swarm"
 WAKER = "agentihooks-inbox-waker"
 ALERTS = "agentihooks-alert-intake"
+PROBER = "agentihooks-quota-prober"
+WAITS = "agentihooks-swarm-waits"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
 
@@ -44,11 +46,36 @@ def units(binary):
         "Restart=on-failure\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
+    prober = (
+        "[Unit]\nDescription=agentihooks quota prober for the ledger page refresh\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm prober\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
+    wait_service = (
+        "[Unit]\nDescription=agentihooks swarm wait checks\n\n"
+        "[Service]\nType=oneshot\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm waits\n'
+        "TimeoutStartSec=120\n"
+    )
+    wait_timer = (
+        "[Unit]\nDescription=agentihooks swarm wait checks every fifteen seconds\n\n"
+        "[Timer]\nOnBootSec=15s\nOnUnitActiveSec=15s\nAccuracySec=1s\n\n"
+        "[Install]\nWantedBy=timers.target\n"
+    )
     return {
+        f"{WAITS}.service": wait_service,
+        f"{WAITS}.timer": wait_timer,
         f"{UNIT}.service": service,
         f"{UNIT}.timer": timer,
         f"{WAKER}.service": waker,
         f"{ALERTS}.service": alerts,
+        f"{PROBER}.service": prober,
     }
 
 
@@ -57,7 +84,7 @@ def _current(path, text):
 
 
 def _services(names):
-    return [name for name in names if name.endswith(".service") and name != f"{UNIT}.service"]
+    return [name for name in names if name.endswith(".service") and name not in (f"{UNIT}.service", f"{WAITS}.service")]
 
 
 def _foreign_run(unit_dir):
@@ -90,7 +117,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
     procs = [
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
-        for name in [*_services(expected), f"{UNIT}.timer"]
+        for name in [*_services(expected), f"{WAITS}.timer", f"{UNIT}.timer"]
     ]
     return all(proc.returncode == 0 for proc in procs)
 
@@ -99,7 +126,7 @@ def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
     expected = units(binary)
     if all(_current(unit_dir / name, text) for name, text in expected.items()):
-        names = [*_services(expected), f"{UNIT}.timer"]
+        names = [*_services(expected), f"{WAITS}.timer", f"{UNIT}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):
             return True

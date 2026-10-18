@@ -191,6 +191,68 @@ def test_publish_from_second_worktree_pushes_and_records_its_branch(
     assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test-2"
 
 
+def test_publish_from_a_prepared_continuation_pushes_only_the_retained_pull_request_branch(
+    publication, tmp_path, monkeypatch
+):
+    from scripts.swarm import publish
+
+    first = publication.root
+    git(first, "push", "origin", "HEAD:engineer-test")
+    second = tmp_path / "second"
+    git(first, "worktree", "add", "-b", "engineer-test-2", str(second))
+    publication.task.update(branch="engineer-test-2", handoff_envelope={"continue_from": "origin/engineer-test"})
+    (second / "chosen.txt").write_text("after")
+    monkeypatch.chdir(second)
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(second, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert git(second, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert git(second, "ls-remote", "origin", "refs/heads/engineer-test-2") == ""
+    assert git(second, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/engineer-test"
+
+
+def test_publish_never_continues_a_protected_branch(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    dev = git(publication.root, "ls-remote", "origin", "refs/heads/dev").split()[0]
+    publication.task["handoff_envelope"] = {"continue_from": "origin/dev"}
+    (publication.root / "chosen.txt").write_text("after")
+    monkeypatch.chdir(publication.root)
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    assert result["branch"] == "engineer-test"
+    assert git(publication.root, "ls-remote", "origin", "refs/heads/dev").split()[0] == dev
+
+
+def test_publish_does_not_recreate_a_deleted_retained_branch(publication, tmp_path, monkeypatch):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    first = publication.root
+    git(first, "push", "origin", "HEAD:engineer-test")
+    origin = git(first, "remote", "get-url", "--push", "origin")
+    git(first, "push", origin, "--delete", "engineer-test")
+    second = tmp_path / "second"
+    git(first, "worktree", "add", "-b", "engineer-test-2", str(second))
+    publication.task.update(branch="engineer-test-2", handoff_envelope={"continue_from": "origin/engineer-test"})
+    (second / "chosen.txt").write_text("after")
+    monkeypatch.chdir(second)
+
+    with pytest.raises(SwarmError, match="stale info"):
+        publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        )
+
+    assert git(second, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
 def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(repository, tmp_path, monkeypatch):
     from scripts.swarm import publish, stack
 
@@ -687,6 +749,58 @@ def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
     assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
     assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+
+
+@pytest.mark.parametrize("cwd", ["worktree", "outside"])
+def test_a_stacked_delivery_republishes_its_pull_request_branch_with_one_push(publication, monkeypatch, cwd):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    pr_url = "https://github.com/example/repo/pull/7"
+    publication.task.update(branch="predecessor", pr_url=pr_url, state="pr")
+    if cwd == "worktree":
+        monkeypatch.chdir(root)
+    pushes = []
+    native = publish.execute
+
+    def counted(argv, where):
+        if argv[:2] == ["git", "push"]:
+            pushes.append(argv)
+        return native(argv, where)
+
+    monkeypatch.setattr(publish, "execute", counted)
+    publish.prepare("swarm", publication.agent, str(publication.repo), publication.ledger)
+    assert publication.task["branch"] == "predecessor"
+    for name in ("chosen.txt", "other.txt"):
+        (root / name).write_text("after")
+        pushes.clear()
+        result = publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, f"Change {name}", [name]
+        )
+        head = git(root, "rev-parse", "HEAD")
+        assert len(pushes) == 1
+        assert result["branch"] == publication.task["branch"] == "predecessor"
+        assert publication.task["repository_branches"] == {str(publication.repo): "predecessor"}
+        assert publication.task["pr_url"] == pr_url
+        assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+        assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(root, "branch", "--show-current") == "engineer-test"
+
+
+def test_prepare_records_the_worktree_branch_when_it_does_not_descend_from_the_pull_request(publication):
+    from scripts.swarm import publish
+
+    repository = publication.repo
+    parked = git(repository, "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "Parked predecessor work")
+    git(repository, "push", "origin", f"{parked}:refs/heads/predecessor")
+    git(repository, "fetch", "origin")
+    publication.task.update(branch="predecessor", pr_url="https://github.com/example/repo/pull/7", state="pr")
+
+    result = publish.prepare("swarm", publication.agent, str(repository), publication.ledger)
+
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert publication.task["repository_branches"] == {str(repository): "engineer-test"}
 
 
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):

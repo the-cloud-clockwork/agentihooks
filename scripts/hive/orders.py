@@ -129,6 +129,8 @@ class Consumer:
         return cls(redis, hive, LocalHerdrRuntime(HerdrRuntime()))
 
     def poll(self) -> int:
+        from redis.exceptions import NoPermissionError
+
         entries = self.store.redis.xrange(self.orders.stream(self.hive), count=32)
         for item, fields in entries:
             try:
@@ -136,19 +138,19 @@ class Consumer:
                 ack = self.orders.ack(order)
                 if ack is None:
                     ack = self.apply(order)
+                if ack is not None:
+                    self.orders.finish(self.hive, item, order, ack)
             except (KeyError, TypeError, ValueError):
-                with self.store.redis.pipeline() as pipe:
-                    pipe.hset(
-                        f"{self.orders.stream(self.hive)}:acks",
-                        item,
-                        json.dumps(asdict(Ack("failed", {}, "invalid_order"))),
-                    )
-                    pipe.xdel(self.orders.stream(self.hive), item)
-                    pipe.execute()
-                continue
-            if ack is not None:
-                self.orders.finish(self.hive, item, order, ack)
+                self._drop(item, "invalid_order")
+            except NoPermissionError:
+                self._drop(item, "refused")
         return len(entries)
+
+    def _drop(self, item: str, failure: str) -> None:
+        with self.store.redis.pipeline() as pipe:
+            pipe.hset(f"{self.orders.stream(self.hive)}:acks", item, json.dumps(asdict(Ack("failed", {}, failure))))
+            pipe.xdel(self.orders.stream(self.hive), item)
+            pipe.execute()
 
     def poll_commands(self) -> int:
         stream = self.orders.commands(self.hive)
@@ -249,6 +251,8 @@ class Consumer:
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
         config = replace(config, lanes={**config.lanes, order.lane: chosen})
+        if order.lane == "master" and order.route_kind != "interactive":
+            config = replace(config, master_claude_login=False)
         task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
         task["launch_assignment"] = {
             "profile": order.profile,
@@ -275,7 +279,14 @@ class Consumer:
             pane_id=placed.pane_id,
             model=placed.model,
             effort=placed.effort,
-            profile_decision=placed.profile_decision,
+            profile_decision={
+                **(
+                    {"master_placement": agent.profile_decision["master_placement"]}
+                    if "master_placement" in agent.profile_decision
+                    else {}
+                ),
+                **placed.profile_decision,
+            },
         )
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")

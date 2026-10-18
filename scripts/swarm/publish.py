@@ -9,7 +9,7 @@ from pathlib import Path
 
 from scripts import ci_prepush
 from scripts.gates import entry as gate_entry
-from scripts.swarm import naming, stack
+from scripts.swarm import continuation, naming, stack
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, SwarmError
 
@@ -106,6 +106,8 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
         own = re.fullmatch(rf"{re.escape(naming.plain(agent.name))}(?:-\d+)?", branch)
         if not (own or branch == scoped.get("branch")):
             raise SwarmError(f"current worktree {root} does not belong to this task")
+        if scoped.get("pr_url"):
+            return root, primary, scoped
         return root, primary, {**scoped, "branch": branch}
     repositories = task.get("repositories") or [repo]
     if len(repositories) != 1:
@@ -113,6 +115,16 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
     primary = repository_root(Path(repositories[0]))
     scoped = repository_task(primary, task)
     return existing(primary, scoped, agent), primary, scoped
+
+
+def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
+    record = {}
+    for repository in dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo]):
+        scoped = repository_task(repository, task)
+        root = existing(repository, scoped, agent)
+        if root and stack.pushed(root, scoped["branch"]):
+            record = branch_record(checkout_fields(root), repository, {**task, **record})
+    return record
 
 
 def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> dict:
@@ -128,7 +140,10 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 command.extend(["--from", f"origin/{scoped['branch']}"])
             output = execute(command, repository)
             root = Path(output.splitlines()[-1])
-        fields.append({**checkout_fields(root), "repository": str(repository)})
+        checkout = checkout_fields(root)
+        if scoped.get("pr_url"):
+            checkout["branch"] = target_branch(root, scoped, checkout["branch"])
+        fields.append({**checkout, "repository": str(repository)})
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, update, by=agent.name)
@@ -183,12 +198,12 @@ def check_build(root: Path) -> None:
 
 
 def target_branch(root: Path, task: dict, branch: str) -> str:
-    recorded = task.get("branch")
-    if recorded:
-        ref = f"refs/remotes/origin/{recorded}"
-        done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
-        if done.returncode == 0:
-            return recorded
+    for recorded in (continuation.retained(task), task.get("branch")):
+        if recorded:
+            ref = f"refs/remotes/origin/{recorded}"
+            done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
+            if done.returncode == 0:
+                return recorded
     return branch
 
 
@@ -217,7 +232,8 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     if root is None:
         raise SwarmError(f"task worktree missing; Next: agentihooks swarm {shlex.quote(slug)} prepare")
     fields = checkout_fields(root)
-    fields["branch"] = target_branch(root, scoped, fields["branch"])
+    own = fields["branch"]
+    fields["branch"] = target_branch(root, scoped, own)
     selected = selected_files(root, files)
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
@@ -236,7 +252,9 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
             execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
         if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
             raise SwarmError("the committed HEAD has no passing prepush evidence")
-        git(root, "push", "-u", "origin", f"HEAD:{fields['branch']}")
+        ref = f"refs/heads/{fields['branch']}"
+        lease = [] if fields["branch"] == own else [f"--force-with-lease={ref}"]
+        git(root, "push", *lease, "-u", "origin", f"HEAD:{ref}")
     except SwarmError as exc:
         detail = str(exc)
         if fields.get("gate") == "AgentiHooks touched Python fallback":

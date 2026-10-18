@@ -1,9 +1,11 @@
 import argparse
+import ast
 import json
 import math
 import os
 from pathlib import Path
 
+from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
 
@@ -12,11 +14,20 @@ MUTANT_SECONDS = 5.6
 WORKERS = 4
 
 
-def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, list[str]]:
+def estimate(
+    root: Path, changes: dict[str, set[int]], selection: dict[str, list[str]] | None = None
+) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
+        if selection is not None:
+            selection[path] = chosen
         if not chosen:
+            if any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                for node in ast.walk(ast.parse((root / path).read_text()))
+            ):
+                raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
         _, mutations = changed_mutations(path, (root / path).read_text(), lines)
@@ -47,6 +58,18 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
     return parts, walls[parts - 1]
 
 
+def validate_tests(root: Path, tests: list[str]) -> None:
+    from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
+
+    for test in tests:
+        path = root / test
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+            raise SystemExit(f"{test}: loads the MCP SDK while collecting")
+        source = path.read_text()
+        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+            raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/dev")
@@ -59,7 +82,11 @@ def main() -> int:
     bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
     changes = discover_changes(root, bases, args.head)
-    seconds, mutants, tests = estimate(root, changes)
+    selection = {}
+    seconds, mutants, tests = estimate(root, changes, selection)
+    validate_tests(root, tests)
+    browser = str(needs_browser(root, tests)).lower()
+    (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
@@ -72,6 +99,7 @@ def main() -> int:
             stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
             stream.write(f"bases={','.join(bases)}\n")
             stream.write(f"changed={len(changes)}\n")
+            stream.write(f"browser={browser}\n")
     return 0
 
 

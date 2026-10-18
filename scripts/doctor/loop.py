@@ -4,12 +4,13 @@ import hashlib
 import json
 import os
 
+from scripts.doctor import ci_speed, ci_speed_read
 from scripts.doctor.words import plural
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm.health.findings import MINUTE_MS, limits
+from scripts.swarm.health.findings import MINUTE_MS, Finding, limits
 from scripts.swarm.health.verdicts import VERDICTS, VerdictStore
-from scripts.swarm.store import MASTER, SwarmError
+from scripts.swarm.store import MASTER, RedisStore, SwarmError
 
 INTERVAL_ENV = "AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES"
 QUIET_ENV = "AGENTIHOOKS_DOCTOR_QUIET_MINUTES"
@@ -79,18 +80,69 @@ def news(watched, found):
     return "\n".join(lines)
 
 
-def run(store, doctor, now_ms, collect, close, environ=None):
+def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str]:
+    key = store.key(doctor, "ci-speed")
+    state = json.loads(store.redis.get(key) or "{}")
+    since = state.get("last", now_ms - MINUTE_MS)
+    snapshot = ci_speed_read.read(since, now_ms, pending=state.get("pending"))
+    found = ci_speed.findings(snapshot["runs"], since, now_ms)
+    report = {
+        "complete": snapshot["complete"],
+        "runs": len(snapshot["runs"]),
+        "discovered_runs": snapshot["discovered_runs"],
+        "jobs": sum(len(run["jobs"]) for run in snapshot["runs"]),
+        "crossings": len(found),
+        "api_calls": snapshot["api_calls"],
+    }
+    if not snapshot["complete"]:
+        report["error"] = snapshot["error"]
+        found.append(
+            Finding(
+                "ci speed read",
+                "agentihooks",
+                "CI speed API read is incomplete",
+                (snapshot["error"],),
+                "Actions API read must complete",
+                1,
+            )
+        )
+    record(store, doctor, found, now_ms, limits(os.environ).cooldown_minutes * MINUTE_MS)
+    mail = InboxStore(store.redis)
+    for slug in (watched, doctor):
+        notified = store.key(doctor, "ci-speed-notified", slug)
+        fresh = [finding for finding in found if not store.redis.sismember(notified, finding.id)]
+        if fresh:
+            mail.send(
+                SENDER,
+                seat_address(slug, MASTER),
+                news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh]),
+            )
+            store.redis.sadd(notified, *(finding.id for finding in fresh))
+            store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
+    if snapshot["complete"]:
+        state.update(last=now_ms, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
+    state["report"] = report
+    store.redis.set(key, json.dumps(state))
+    status = "complete" if report["complete"] else f"incomplete: {report['error']}"
+    return [
+        f"doctor CI speed: {status}; {report['runs']} runs read of {report['discovered_runs']} discovered, "
+        f"{report['jobs']} jobs, {report['crossings']} crossings, {report['api_calls']} API calls"
+    ]
+
+
+def run(store, doctor, now_ms, collect, close, environ=None, speed=None):
     """One timer step: a detection pass on the last tick before the interval is up, then the close after quiet."""
     env = os.environ if environ is None else environ
     watched = store.peer(doctor)
     if not watched or store.config(doctor).state in IDLE:
         return []
-    key, actions = _timer_key(store, doctor), []
+    key, actions = _timer_key(store, doctor), speed(watched) if speed else []
     timer = {k: int(v) for k, v in store.redis.hgetall(key).items()}
     timer["gap"] = max(timer.get("gap", 0), now_ms - timer.get("tick", now_ms))
     interval = interval_minutes(env) * MINUTE_MS
     if "last" not in timer or now_ms - timer["last"] + timer["gap"] > interval:
-        found, actions = collect(watched)
+        found, collected = collect(watched)
+        actions.extend(collected)
         new = record(store, doctor, found, now_ms, limits(env).cooldown_minutes * MINUTE_MS)
         timer = {"last": now_ms, "last_new": now_ms if new or "last_new" not in timer else timer["last_new"], "gap": 0}
         if new:

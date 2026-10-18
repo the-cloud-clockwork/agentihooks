@@ -48,6 +48,7 @@ def status(**changes):
             "max_eng": 3,
             "max_ci": 1,
             "max_plan": 1,
+            "masters_step": 12,
             "autonomy": "delegate",
             "effort_min": "medium",
             "effort_max": "high",
@@ -127,8 +128,10 @@ class Page:
         html = shell_html()
         self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
         if clock:
-            self.context.clock.install(time=NOW_MS)
-        self.context.add_init_script(f"Date.now = () => {NOW_MS};")
+            self.context.clock.install(time=NOW_S - 1)
+            self.context.clock.pause_at(NOW_S)
+        else:
+            self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
         serve_modules(self.context)
         self.tab = self.context.new_page()
@@ -291,6 +294,20 @@ def test_capacity_fields_take_typed_values_and_apply_sends_one_set(open_page):
     assert apply.is_disabled()
 
 
+def test_the_masters_step_stepper_drafts_and_apply_sends_it(open_page):
+    page = open_page()
+    field = page.tab.locator("#cap-masters")
+    assert field.input_value() == "12"
+    page.tab.get_by_role("button", name="Lower masters step").click()
+    assert field.input_value() == "11"
+    page.tab.get_by_role("button", name="Apply capacity").click()
+    for _ in range(100):
+        if page.puts:
+            break
+        page.tab.wait_for_timeout(100)
+    assert page.puts == [{"action": "set", "masters_step": 11}]
+
+
 def test_the_effort_range_shows_in_the_caps_row_and_apply_sends_it(open_page):
     page = open_page(width=1920)
     floor, ceiling = page.tab.locator("#cap-effort_min"), page.tab.locator("#cap-effort_max")
@@ -378,8 +395,8 @@ def test_capacity_caps_and_apply_share_one_row_and_gates_start_below(open_page):
           };
         }"""
     )
-    assert len(boxes["row"]) == 10
-    caps, (affinity, apply) = boxes["row"][:6], boxes["row"][8:]
+    assert len(boxes["row"]) == 11
+    caps, (affinity, apply) = boxes["row"][:7], boxes["row"][9:]
     middle = (caps[0][0] + caps[0][1]) / 2
     assert all(top <= middle <= bottom for top, bottom in caps)
     last = (affinity[0] + affinity[1]) / 2
@@ -801,24 +818,7 @@ def test_quota_rows_come_from_the_stubbed_balance_and_mark_the_master_account(op
 
 def test_the_quota_table_fits_its_box_at_1920(open_page):
     payload = status()
-    payload["quota_capacity"] = {
-        "configured": {"eng": 4, "ci": 1, "plan": 1},
-        "effective": {"eng": 2, "ci": 1, "plan": 0},
-        "reason": "accounts are closed; Claude has 1 free seats and Codex has 1 free seats",
-        "lanes": ["eng", "ci", "plan"],
-        "accounts": [
-            {
-                "harness": "claude",
-                "name": "tccgma",
-                "state": "CLOSED",
-                "sessions": 2,
-                "five_left": 92,
-                "week_left": 78,
-                "routing": 78,
-            }
-        ],
-        "at": NOW_MS - 7 * 60_000,
-    }
+    payload["quota"]["rows"][0] = {**payload["quota"]["rows"][0], "state": "CLOSED", "routing_left": 78}
     page = open_page(payload, 1920)
     scroll = page.tab.eval_on_selector("#quota-box .sw-scroll", "s => [s.scrollWidth, s.clientWidth]")
     assert scroll[0] == scroll[1]
@@ -846,6 +846,7 @@ def test_every_capacity_stepper_puts_minus_before_and_plus_after_its_value(open_
         ["eng", ["−", "3", "+"]],
         ["ci", ["−", "1", "+"]],
         ["plan", ["−", "1", "+"]],
+        ["masters step", ["−", "12", "+"]],
         ["compact limit", ["−", "600k", "+"]],
         ["effort min", ["−", "medium", "+"]],
         ["effort max", ["−", "high", "+"]],
@@ -874,15 +875,19 @@ def test_the_refresh_icon_beside_the_title_probes_every_account_and_redraws(open
 
 def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
     page = open_page(clock=True)
-    page.tab.clock.run_for(299_000)
-    page.tab.wait_for_timeout(200)
-    assert {"action": "quota_refresh"} not in page.puts
-    page.tab.clock.run_for(2_000)
-    for _ in range(50):
-        if {"action": "quota_refresh"} in page.puts:
-            break
-        page.tab.wait_for_timeout(50)
-    assert page.puts.count({"action": "quota_refresh"}) == 1
+    assert page.tab.evaluate("Date.now()") == NOW_MS
+    for count in (1, 2):
+        page.tab.clock.run_for(299_999)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000 - 1
+        assert page.puts.count({"action": "quota_refresh"}) == count - 1
+        with page.tab.expect_response(
+            lambda response: (
+                response.request.method == "PUT" and response.request.post_data_json == {"action": "quota_refresh"}
+            )
+        ):
+            page.tab.clock.run_for(1)
+        assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000
+        assert page.puts.count({"action": "quota_refresh"}) == count
 
 
 def test_doctor_row_shows_off_or_on_and_toggles_its_own_button(open_page):

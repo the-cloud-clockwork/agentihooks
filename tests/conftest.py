@@ -17,7 +17,7 @@ for _redis_name in list(os.environ):
     if "REDIS" in _redis_name.upper():
         os.environ.pop(_redis_name)
 
-from tests import installer_isolation, ledger_guard, redis_key_guard, swarm_v2_isolation
+from tests import installer_isolation, ledger_guard, mutation_trace, redis_key_guard, swarm_v2_isolation
 from tests.shards import (
     FIRST_SHARD_FILES,
     assign_nodes,
@@ -134,6 +134,7 @@ def _shard_files(config) -> frozenset[str]:
 
 def pytest_configure(config):
     _reused(config)
+    mutation_trace.trace_browser_deadlines()
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
@@ -306,6 +307,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
     monkeypatch.setattr(
         "hooks.context.broadcast.BROADCAST_DELIVERY_STATE_FILE", str(fake_state_dir / "broadcast_delivery_state.json")
     )
+    monkeypatch.setattr("hooks.context.context_recycle.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.quota_policy.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.branch_guard.AGENTIHOOKS_HOME", fake_state_dir)
     monkeypatch.setattr("hooks.context.prod_lockdown.AGENTIHOOKS_HOME", fake_state_dir)
@@ -369,6 +371,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
 
     from hooks import config as hooks_config
     from hooks.config import _agentibrain_home
+    from hooks.context import context_recycle
     from scripts.claude_config import claude_home, claude_json
     from scripts.herdr_setup import config_path as herdr_config_path
 
@@ -376,6 +379,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
         ("claude_home", claude_home()),
         ("claude_json", claude_json()),
         ("agentihooks home", hooks_config.AGENTIHOOKS_HOME),
+        ("context recycling home", context_recycle.AGENTIHOOKS_HOME),
         ("codex_home", codex_home()),
         ("copilot_home", copilot_home()),
         ("agents_skills_home", agents_skills_home()),
@@ -440,6 +444,17 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
+
+
+@pytest.fixture(autouse=True)
+def _swarm_snapshot_job_runs_inline(request, monkeypatch):
+    from scripts.swarm import snapshot_job
+
+    if not getattr(request.module, "SNAPSHOT_SPAWN", False):
+        run = snapshot_job.run
+        monkeypatch.setattr(
+            snapshot_job, "start", lambda store, slug, now, environ: bool(run(store, slug, now, environ))
+        )
 
 
 @pytest.fixture(autouse=True)

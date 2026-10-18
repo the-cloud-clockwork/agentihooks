@@ -6,7 +6,7 @@ import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
-const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
+const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], masters: ["masters_step", 1, 0, 50, "masters step"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
 const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
@@ -120,7 +120,7 @@ function capBounds(values) {
 
 function opNote(phase, action, error) {
   const name = { start: "Start", pause: "Pause", stop: "Stop", stop_now: "Stop now", close: "Close ledger", terminate: "Terminate", reopen: "Reopen", doctor_start: "Start doctor", doctor_stop: "Stop doctor", autonomy: "Set autonomy", gate: "Set gate mode",
-    eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap",
+    eng_down: "Lower eng cap", eng_up: "Raise eng cap", ci_down: "Lower ci cap", ci_up: "Raise ci cap", plan_down: "Lower planner cap", plan_up: "Raise planner cap", masters_down: "Lower masters step", masters_up: "Raise masters step",
     compact_down: "Lower compact limit", compact_up: "Raise compact limit",
     effort_min_down: "Lower effort floor", effort_min_up: "Raise effort floor", effort_max_down: "Lower effort ceiling", effort_max_up: "Raise effort ceiling", apply: "Apply capacity", overlays: "Apply overlays", verdict: "Verdict", lift: "Lift the gate", quota_refresh: "Refresh quota", routing: "Set routing",
     attach: "Attach", drain: "Drain", cancel: "Cancel", force_stop: "Force stop" }[action] || action;
@@ -275,7 +275,7 @@ export function wireSwarm() {
     const btn = event.target.closest("button[data-swarm]");
     if (!btn || btn.disabled) return;
     const action = btn.dataset.swarm;
-    const step = action.match(/^(eng|ci|plan|compact|effort_min|effort_max)_(up|down)$/);
+    const step = action.match(/^(eng|ci|plan|masters|compact|effort_min|effort_max)_(up|down)$/);
     if (step) {
       const change = capStep(capCurrent(), step[1], step[2] === "up");
       Object.assign(capDraft, change);

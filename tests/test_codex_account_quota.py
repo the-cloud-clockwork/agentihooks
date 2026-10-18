@@ -192,13 +192,20 @@ def test_rows_say_stale_unknown_and_blocked_and_never_carry_a_stale_cap():
     rows = agents_quota.codex_rows(accounts, {"default": stale, "alpha": blocked}, {"alpha": 1}, NOW)
     assert [(row.account, row.state, row.cap, row.sessions) for row in rows] == [
         ("default", "STALE", None, 0),
-        ("alpha", "BLOCKED", 0, 1),
+        ("alpha", "CLOSED", 0, 1),
         ("beta", "UNKNOWN", None, 0),
     ]
     assert [(row.five_hour_left, row.seven_day_left) for row in rows] == [(None, 80.0), (None, None), (None, None)]
     assert rows[0].source == "session-log 6h00m ago"
     assert rows[1].source == f"session-log 2m ago, {DEPLETED}"
     assert rows[2].source == "no session log"
+
+
+def test_a_fresh_reading_at_eight_percent_of_its_week_drains_like_capacity():
+    drained = CodexQuota(NOW - 60, "pro", QuotaWindow(10.0, NOW + 60), QuotaWindow(92.0, NOW + 6000))
+    [row] = agents_quota.codex_rows([CodexAccount("alpha", "AH_CX_TOKEN_alpha")], {"alpha": drained}, {}, NOW)
+    assert (row.state, row.routing_left) == ("DRAIN", 8.0)
+    assert row.cap
 
 
 def test_an_old_reading_keeps_its_week_state_and_cap_without_its_old_five_hour_window(monkeypatch):
@@ -209,9 +216,9 @@ def test_an_old_reading_keeps_its_week_state_and_cap_without_its_old_five_hour_w
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha"), CodexAccount("beta", "x")]
     rows = agents_quota.codex_rows(accounts, {"default": hot, "alpha": reset, "beta": fresh}, {}, NOW)
     assert [(row.account, row.state, row.cap) for row in rows] == [
-        ("default", "NORMAL", 6),
-        ("alpha", "NORMAL", 6),
-        ("beta", fresh.state_at(NOW), 6),
+        ("default", "OPEN", 6),
+        ("alpha", "OPEN", 6),
+        ("beta", "OPEN", 6),
     ]
     assert fresh.state_at(NOW) != "NORMAL"
     assert [row.five_hour_left for row in rows] == [None, None, 5.0]
@@ -226,8 +233,8 @@ def test_a_window_whose_reset_has_passed_reads_full_and_unused():
     accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
     rows = agents_quota.codex_rows(accounts, {"default": five_passed, "alpha": week_passed}, {}, NOW)
     assert [(row.five_hour_left, row.seven_day_left, row.state) for row in rows] == [
-        (100.0, 60.0, "NORMAL"),
-        (30.0, 100.0, "REDUCE"),
+        (100.0, 60.0, "OPEN"),
+        (30.0, 100.0, "OPEN"),
     ]
     assert (rows[0].five_hour_resets_at, rows[0].seven_day_resets_at, rows[0].observed_at) == (
         NOW,
@@ -251,7 +258,7 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "beta",
         agents_quota.NEXT_MARK,
         "subscription",
-        "REDUCE",
+        "OPEN",
         "2/6",
         "-",
         "6",
@@ -260,13 +267,14 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "30m",
         "60%",
         "4d15h",
+        "0m",
     ]
     assert table[3].split() == [
         "2",
         "codex",
         "alpha",
         "subscription",
-        "DRAIN",
+        "CLOSED",
         "1/0",
         "-",
         "0",
@@ -275,6 +283,7 @@ def test_two_accounts_render_both_windows_their_resets_and_the_reading_age():
         "1h00m",
         "3%",
         "1d00h",
+        "1m",
     ]
 
 

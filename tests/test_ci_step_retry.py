@@ -122,6 +122,16 @@ def test_a_missing_file_stays_red_by_default_only_where_the_caller_asks():
                 "retention-days": 14,
             },
         ),
+        (
+            "unit",
+            "Upload the flake report",
+            {
+                "name": "flakes-${{ matrix.python-version }}-${{ matrix.shard }}",
+                "path": "flakes.jsonl",
+                "if-no-files-found": "error",
+                "retention-days": 14,
+            },
+        ),
     ],
 )
 def test_the_durations_uploads_retry_in_place(job, name, given):

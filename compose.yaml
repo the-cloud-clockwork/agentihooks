@@ -5,7 +5,7 @@ x-swarm-env: &swarm-env
 
 services:
   swarm:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     build: .
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
@@ -26,7 +26,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   controller:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     command:
       - sh
       - -c
@@ -62,7 +62,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   hive:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     profiles: [join]
     command:
       - agentihooks

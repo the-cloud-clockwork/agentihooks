@@ -365,7 +365,7 @@ def test_twenty_back_to_five_retires_extra_seats_through_their_handoffs(swarm, t
     after = owners(store)
     assert Counter(after.values()) == {LEAD: 8, SECOND: 8}
     assert all(after[p] == before[p] for p in PHASES if before[p] in (LEAD, SECOND))
-    texts = [item.text for item in inbox.pending_items(LEAD)]
+    texts = [item.text for address in (LEAD, SECOND) for item in inbox.pending_items(address)]
     assert any("notes of " + THIRD in text for text in texts)
     assert any("notes of " + FOURTH in text for text in texts)
     assert inbox.get(question.id).address == LEAD

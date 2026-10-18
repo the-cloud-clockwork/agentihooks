@@ -137,10 +137,16 @@ def _telemetry_exports(name: str, environ: dict[str, str]) -> str:
 def _swarm_exports(environ: dict[str, str]) -> str:
     if not environ.get("AGENTIHOOKS_SWARM"):
         return ""
-    names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_COMPACT_LIMIT")
+    names = (
+        "AGENTIHOOKS_SWARM",
+        "AGENTIHOOKS_SWARM_LANE",
+        "AGENTIHOOKS_SWARM_TASK",
+        "AGENTIHOOKS_COMPACT_LIMIT",
+        "AGENTIHOOKS_LEDGER_AGENT_TOKEN",
+    )
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
-    pin = "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
+    pin = "unset SWARM_SECRET\nexport AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
 
 
@@ -778,9 +784,10 @@ PROMPT_ARGUMENT_LIMIT = 131_072
 OPENING_FILE_INSTRUCTION = "Read the complete opening instructions in this file and follow them: "
 
 
-def _inbox_channel_args() -> list[str]:
+def _inbox_channel_args(environ: dict[str, str]) -> list[str]:
     from scripts.inbox import channel
 
+    channel.register(environ)
     return channel.launch_args()
 
 
@@ -873,9 +880,12 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
         if not args.dry_run:
+            from scripts.scheduler.service import ensure_running
+
+            ensure_running(active_env)
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
-        claude_args = [*_inbox_channel_args(), *claude_args] if channel else claude_args
+        claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,

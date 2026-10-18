@@ -59,7 +59,8 @@ reopening the same thread and handoff behavior, and
 the canary order and rollback. The Claude inbox channel, the Codex push pump and
 broadcast topics are separate paths; that page tells them apart.
 
-Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
+Every swarm that is not stopped keeps at least one master, named `master@<code>-<n>`, and adds more as it grows
+(see [Master pool](#master-pool)). The tick spawns it when the
 swarm starts and recovers it when its execution ends (closing a managed Codex viewer alone leaves it running); it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
@@ -85,6 +86,77 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Interactive masters and Remote Control
+
+Claude masters prefer a valid native claude.ai login at launch and handoff;
+workers retain their token and API routing. Declare the master account and
+optional tier with `agentihooks balance master-account` as described under
+[reserved headroom](load-balancing.md#master-accounts-and-reserved-headroom).
+The declaration alone neither signs in nor enables Remote Control.
+
+For the lead Claude master to appear in the Claude app, the operator enables
+the optional master login and signs in from their own terminal:
+
+```bash
+agentihooks swarm <id> set master-claude-login=on
+agentihooks claude login --master <id>
+```
+
+`master-claude-login` defaults to off. When on, the front door master uses its
+private Claude config home, forces `claudeai` login and receives
+`--remote-control "master · <id>"`. Workers do not receive this login or the
+Remote Control flags. A failed private login, conflicting declared master
+account, live login holder or missing worker quota tokens refuses this route;
+it does not silently replace the selected private login. See
+[Master claude ai login](../reference/account-login.md#master-claude-ai-login)
+for isolation, ownership and recovery.
+
+Remote Control connects to the same running local conversation from
+[claude.ai/code](https://claude.ai/code) or the Claude mobile app. Sign in on
+the device with the same account and organization as the master. The local
+Claude process must remain running and have network access. According to the
+[Claude Code Remote Control requirements](https://code.claude.com/docs/en/remote-control#requirements):
+
+- A Pro, Max, Team or Enterprise subscription and a native claude.ai login are
+  required. Team and Enterprise also need the organization owner to enable
+  Remote Control. A routed setup token or API key does not supply this login.
+- Bedrock, Google Cloud and Foundry routes, a custom `ANTHROPIC_BASE_URL`, and
+  enterprise Claude apps gateways block Remote Control.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK` blocks it.
+  Organizations requiring Trusted Devices also require device enrollment and
+  a recent sign-in. Consult the upstream requirements for version restrictions
+  when telemetry is disabled.
+- The launch directory must be trusted. AgentiHooks normally establishes
+  trust before launch; an untrusted noninteractive launch cannot answer the
+  native trust prompt.
+
+Outside the explicitly enabled private login route, a Claude master tries its
+valid interactive login first. If that is unavailable, it falls back to normal
+subscription token placement and configured API capacity under the
+[live share rules](load-balancing.md#live-share-weight). With the default API
+weight of zero, the order is interactive login, token pool, then API overflow;
+a nonzero weight can select API capacity earlier. If no permitted account has
+room, launch fails. A fallback master may use the headroom reserved against
+workers, but cannot bypass a spent or otherwise ineligible account. Its desired
+interactive route is retained: the next handoff or recycle checks login again
+and returns to it when available, rather than changing credentials in the
+running process.
+
+Inspect `agentihooks swarm <id> status` and the ledger master card for the
+recorded launch decision:
+
+| Status or finding | Meaning |
+|---|---|
+| `Remote Control: on (master · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
+| `Remote Control: off (flag)` | The master login option is off. |
+| `Remote Control: off (fallback auth)` | The master uses subscription token authentication. |
+| `Remote Control: off (gateway)` | The master uses the API route. |
+| `master-fallback-auth/<seat>` | An active master wanted interactive authentication but runs on fallback auth: phone access is lost. Returning to interactive auth removes this finding. |
+| `master-rc/<seat>` | A Remote Control failure notification was recorded since this master started: phone access is lost even if the launch decision was on. A `Remote Control back on` notification clears the recorded failure. |
+
+Codex masters have no Claude Remote Control decision. These findings report
+lost access; they do not stop the master or change its authentication.
+
 ### Master outage and promotion
 
 When a swarm has had no live master (none whose hook reported) for `AGENTIHOOKS_MASTER_DOWN_MINUTES` (default 5),
@@ -107,11 +179,111 @@ swarm already uses, then `master-2@<id>` up to `master-N@<id>`. A swarm with no 
 before. Code gives every ledger phase one owning seat and saves the owners per swarm, so a restart reads the same
 owners. A phase keeps its owner while its seat exists, except that a seat add or removal rebalances: an added seat
 takes the busiest seats' last phases up to an even share, a removed seat's phases go to the seats owning fewest, and
-every other phase keeps its owner. Items already delivered stay with the old owner. An operator write, tick item,
-priority, pull request notice or task health finding about a phase or a task in it reaches the live master owning
-that phase; any other item, and one whose owner seat has no live master, reaches the lead. Unaddressed chat and
-`@master` stay with the lead, which answers the operator; while the lead seat is empty the lowest numbered live
-master answers.
+every other phase keeps its owner. Items already delivered stay with the old owner. A tick item, priority, pull
+request notice or task health finding about a phase or a task in it reaches the live master owning that phase; any
+other item, and one whose owner seat has no live master, reaches the lead. Every operator write that no task
+claimant takes reaches the lead, the front door, whatever phase or hive it is about, and so does page chat naming a
+backend master; only a sync order and the `@swarm` information copy reach every live agent. The lead hands work to
+backend masters over the masters channel. While the lead seat is empty the lowest numbered live master answers.
+
+### Master pool
+
+Masters scale with the swarm so no single master drowns in inbox items. Claude and Codex masters behave
+identically: the same seats, pool, channel and duties, and both read the same master role text and swarm-master
+skill. Only a Claude front door takes the claude ai login and Remote Control. A swarm below one step behaves exactly as a single master swarm.
+
+- **Sizing.** With no `master-per` rule, the wanted count is one plus the unfinished engineer, CI and planner agents
+  divided by `masters-step` (default 12), masters not counted: 0 to 11 agents one master, 12 two, 24 three. Every
+  master has the same authority; the operator and Priorities stay with the front door.
+- **Seats.** Seat names come from code. The front door keeps `master@<id>`; backend masters are `master-2@<id>`,
+  `master-3@<id>` and on, launched by the same seat launcher as the first master on either harness.
+- **Cool off.** A rise launches the next backend seat at once. A fall waits until the wanted count stayed lower for
+  ten minutes running, and the cool off restarts whenever the count rises. Then every extra backend master is asked
+  to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
+  as soon as it is empty. A retired seat's handoff and open inbox items go to the front door. The front door never retires by
+  scaling.
+- **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
+  pool per swarm, first in first out, and each is claimed by exactly one live master in round robin seat order,
+  skipping a master that is gone or being retired by the tick; a backend master asked to hand off by a shrink keeps taking items until it
+  leaves. An unconfirmed item goes to the next master with
+  the same id. Items from the operator bypass the pool and go to the front door. Master inbox pool below gives
+  every rule.
+- **Front door.** Only `master@<id>`, or the lowest numbered live master while that seat is empty, faces the
+  operator: it receives page chat and every operator write, holds Priorities and, with
+  `master-claude-login` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
+  naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
+  master through its herdr pane, or through the front door.
+- **Private channel.** Masters sync with `agentihooks swarm <id> masters-channel say TEXT` and
+  `agentihooks swarm <id> masters-channel read`; only master seats send and read, and engineer, CI and planner
+  sessions are refused. It carries sync only: an item that arrived without context, or a fact another master holds.
+  The front door answers the operator about the backend masters from it.
+- **Intent grouping.** `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (off by default) turns on the classifier. Each
+  master keeps its last 15 delivered items; every waiting pool item is compared for intent against each master's
+  items in parallel, using only first lines, the first configured API classifier model falling through to the next on a backend failure, one short verdict per master and a cache
+  by item id. A match sends the item to that master, so related items reach the same master together. Any
+  classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
+  round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
+
+### Master inbox pool
+
+The lead address `master@<id>` is the swarm's front door. While two or more masters are live, an item sent to
+`master@<id>` by any sender other than `operator` (a tick item, an agent's question or follow up, a
+`msg send master@<id>`) does not wait at the lead's seat. It enters one pool per swarm and is handed to exactly one
+live master:
+
+| Rule | Behavior |
+|---|---|
+| Order | Items leave the pool oldest first, by the arrival sequence number the inbox gives each item sent to `master@<id>`. |
+| Exactly once | A master takes an item in one Redis transaction that removes it from the pool, moves it pending to that master's seat and records the seat as its holder. Two processes handing out the same pool never give one item to two masters. |
+| Round robin | The pool remembers the last seat it served and gives the next item to the next live seat in seat order, lead first, then `master-2@<id>`, `master-3@<id>` and on, wrapping back to the first. |
+| Skips | A seat whose master is finished, retiring, under a tick retire request (a shrink handoff ask is not one), retired early, numbered above the seat count with no live master record, or recorded as having left its seat is not live and is passed over. |
+| Redelivery | A pooled item its holder does not confirm within `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds) goes back to the pool and on to the next live master, passing over the master that let it lapse while another is live. It keeps its id. |
+| Gone holder | Items a master claimed that are still pending at its seat return to the pool when that master stops being live, for the remaining masters. Items it had already been delivered return at the next redelivery pass, as any unconfirmed item does. |
+| No master | Items already in the pool wait there, in order, until a master is live. A new item sent while fewer than two masters are live does not enter the pool and waits at the lead seat. |
+
+The inbox hands out the pool when an item enters it and again on every redelivery pass, so an item waiting for a
+master, or one whose holder lapsed, moves within a redelivery pass. Each move is a line on the item's history:
+`claimed from the master pool by <seat>` when a master takes it, and `returned to the master pool: its master is
+gone` when it comes back from a master that left. While an item waits in the pool it belongs to no master. A
+master other than the front door seat is refused with `message <id> belongs to master@<id>, not <name>`; for the front
+door seat, `msg read` and every state change other than a close are refused with `message <id> waits in the master
+pool for the next master`. Closing it (`msg close <id> cancel`) takes it out of the pool. An item redirected to another address
+leaves the pool and stays where it was sent.
+
+Operator facing items never enter the pool. Page chat, every operator write on the ledger page (comments, replies,
+answers, notes, checks) and every relayed decision are sent as `operator` and reach the front door master: the lead,
+or the lowest numbered live master while the lead seat is empty. An item addressed to a numbered seat, such as
+`master-2@<id>` for a phase that seat owns, reaches that seat directly.
+
+A swarm with one live master has no pool: items for `master@<id>` wait at its seat and redeliver to it exactly as in
+a single master swarm. When a second master goes, the remaining master takes the items still pooled at the next
+redelivery pass, and a lapsed item of its own redelivers to it as before.
+
+The pool, the master write fence and the operator mail routing read the live master seats from one reader, built on
+the seat registry: a seat counts while its registered occupant has neither left it, finished nor retired, and a master
+record whose seat the registry does not hold yet counts by its record. During a handoff the successor that took the
+seat counts and its predecessor does not, so all three agree on the same seat list and the same lead. The page chat
+front door gate reads the seat registry too: a master writes page chat only while its seat pointer in the registry
+names the lead seat or names no seat, as for a master that predates seats. A registry read that fails lets the write
+through and records it in the gate log.
+
+Inspect a pool with the inbox commands and, for the raw state, Redis (the key prefix is
+`AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`):
+
+```bash
+agentihooks msg inbox --of master@<id>
+agentihooks msg inbox --of master-2@<id>
+redis-cli ZRANGE agentihooks:inbox:pool:<id> 0 -1 WITHSCORES
+redis-cli GET agentihooks:inbox:pool:<id>:last
+redis-cli SMEMBERS agentihooks:inbox:pool:<id>:holders
+```
+
+The sorted set lists the item ids still waiting, scored by arrival sequence number; `last` is the seat served last
+and `holders` the seats that have claimed pool items, kept until a seat stops being live and its pending items
+return. An item that stays in the pool while masters are live, or a master that never receives
+pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters, and the item's
+history, which `msg read <id>` prints for the master that claimed it, for the `claimed from the master pool by <seat>`
+line naming that seat. `msg read` also marks the item read, so run it only as the master taking up the item.
 
 ## Commands
 
@@ -121,6 +293,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 
 | Command | Effect |
 |---|---|
+| `agentihooks swarm init [--timeout SECONDS]` | Bring up the local swarm stack, Redis with its password, the ledger server and the controller, from the Compose files packaged with agentihooks into `$AGENTIHOOKS_HOME/swarm-stack`. The first run writes `.env` there with a random Redis password, free ledger and Redis ports and `SWARM_IMAGE_TAG=release`, so the stack runs the released swarm image; later runs keep them, so a rerun is safe and keeps the data. It waits until every service is healthy (default 300 seconds) and the ledger home page answers, then prints the ledger address, the `client.env` line that points a shell at the stack and the commands that start a swarm. A missing Docker, daemon or Compose plugin, an unhealthy service or a silent ledger page is named with its fix and exits 1. It never creates or starts a swarm, and `init`, like `list` and `tick`, is read as a command word before any swarm id, so do not name a swarm `init`. Output is coloured on a terminal, plain when piped or with `NO_COLOR`. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
@@ -151,15 +324,20 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
-| `agentihooks swarm <id> set master-per=N\|hive\|off` | The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) keeps the `masters=N` count. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
+| `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the unfinished engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
+| `agentihooks swarm <id> set master-per=N\|hive\|off` | Overrides `masters-step`. The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) hands sizing back to `masters-step`. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
 | `agentihooks swarm <id> set effort-min=E effort-max=E` | The effort range every lane agent starts inside, default `medium` to `xhigh`. The classifier's pick, a lane or template effort, a resume and the `init-agent` launch of a swarm lane are each clamped into it; Claude levels are `low`, `medium`, `high`, `xhigh` and `max`, and Codex levels map by rank, so Codex runs `max` as `xhigh`. Setting a lane effort outside the range is refused with the range named. The swarm panel caps row edits both ends. |
-| `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `claims`, `trace-plan`, `talk`. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
+| `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `claims`, `trace-plan`, `talk`, `stall`, `lane-split`. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
+| `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. |
+| `agentihooks swarm <id> set lane-split-gate=deny\|log only\|skip` | Operator or master only. The lane split moves one seat between the eng and ci lanes after the bottleneck report names the same stage three ticks running, and the `seat_wait` remedy moves one from ci to eng. It defaults to `log only`, recording each would-be move in the swarm gate log; `deny` lets it move seats, `skip` holds every move without logging. In every mode it holds a move into a lane with no ready task, and it never moves caps the operator or the master set with `max-eng-agents` or `max-ci-agents`, through `swarm set`, the ledger page or `create` flags; those caps stay where they set them for the swarm's life, and a swarm stored before the pin existed counts as set. A tick hold names its reason in the tick's held line; a remedy hold names it in the task proposal to the master. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
-| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, the tick writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
+| `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. |
+| `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. |
+| `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
 | `agentihooks swarm <id> send-message TEXT` | Message to every live agent's inbox; never posts to chat. |
@@ -176,7 +354,10 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> retire SEAT NUMBER --reason TEXT` | Retire learned note NUMBER on SEAT so no later occupant's opening prompt carries it; the note keeps its number and records who retired it and why. Only the master or the operator. |
 | `agentihooks swarm <id> culture set FILE` | Replace the swarm's culture with the file's text. Every new occupant of every seat, the master included, reads it in its priming chain. |
 | `agentihooks swarm <id> culture show` | Print the swarm's culture. |
-| `agentihooks swarm <id> masters-channel say TEXT`, `agentihooks swarm <id> masters-channel read [--all]` | The masters channel (`masters.<id>`): only a session holding one of the swarm's master seats posts and reads; every other caller is refused. Posts are kept in Redis with no expiry. `read` prints the posts the seat has not read and moves the seat's cursor, which its successor inherits; `--all` prints every post. `channel_publish` and `agentihooks channel publish` refuse every `masters.` name, so no post reaches the shared broadcast file. The tick posts each master count change there. |
+| `agentihooks swarm <id> masters-channel say TEXT`, `agentihooks swarm <id> masters-channel read [--all]` | The masters channel (`masters.<id>`): only a session holding one of the swarm's master seats posts and reads; every other caller is refused. Posts are kept in Redis with no expiry. Each `say` post leaves every other occupied master seat an information inbox item from the poster that names the post and the read command, so the other masters receive it at their next tool call; the text stays in the channel. `read` prints the posts the seat has not read and moves the seat's cursor, which its successor inherits; `--all` prints every post. `channel_publish` and `agentihooks channel publish` refuse every `masters.` name, so no post reaches the shared broadcast file. The tick posts each master count change there. |
+
+For grouped CI stage counts, worst times, run links and report retention, see
+[Standing CI budget report](../ci-timing.md#standing-ci-budget-report).
 
 ### Templates
 
@@ -239,17 +420,390 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. |
-| `agentihooks swarm <id> ready DOC` | Release the seat of a code or ci task whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff, removing the worktree with `wt.sh done --pushed`. Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
+| `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff, removing the worktree with `wt.sh done --pushed`. Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
-| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
+| `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
 | `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item, which for a red Actions run names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), records branch and head on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
-| `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, the task's own fork from `origin/dev`), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. |
+| `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, the task's own fork from `origin/dev`), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
+
+## Task scope authorizations
+
+Record extra scope on the task before the engineer retraces its plan. This lets
+an authorized piece remain in the plan even when the task description omits it.
+The tracer reads the task's comments alongside the project, phase and task
+intent; it does not require rewriting the description.
+
+### Record the authorization
+
+The tracer recognizes these task comments:
+
+| Record | Requirement |
+|---|---|
+| Master relay of the operator's words | Record it on `tasks/<task>` with `ledger relay`; the stored comment has `relayed_by`. |
+| Master or operator scope comment | Start the comment with `In scope:`. Leading whitespace and letter case are ignored. |
+
+Only the latest five qualifying, nondeleted comments are included, in their
+stored order. Ordinary comments, engineer comments marked `In scope:`, phase
+comments and page chat do not supply task authorizations. Question answers are
+not read because ledger questions carry no task link. Put an authorization from
+an answer onto the task through one of the recognized records.
+
+For example, a master authorizes removal of a size allowance while the task
+description only mentions fixing the size gate. Run this as the task's master,
+using the actual ledger, master name and task:
+
+```bash
+agentihooks ledger \
+  --slug example-swarm \
+  --as master@a1b2c3-0001 \
+  comment tasks/t747 \
+  "In scope: Remove the size allowance while fixing the size gate."
+```
+
+When the operator authorized that work in the master's pane, the master can
+record the operator's words instead. Relay actual words received from the
+operator:
+
+```bash
+agentihooks ledger \
+  --slug example-swarm \
+  --as master@a1b2c3-0001 \
+  relay tasks/t747 \
+  "Remove the size allowance while fixing the size gate." \
+  --quote "Remove the size allowance too."
+```
+
+### Retrace and inspect the result
+
+In the engineer's task work folder, include the authorized piece in `plan.md`
+using the usual `what | areas | why` format. The area is a repository relative
+prefix for the work it permits, for example:
+
+```text
+- Remove the size allowance | scripts/ci_prepush | The master authorized removal while fixing the size gate
+```
+
+From the task worktree, run:
+
+```bash
+agentihooks swarm example-swarm trace-plan
+```
+
+For each newly judged piece that is not a mutation clearance, the classifier
+asks whether each included authorization covers it. Coverage at or above `0.7`
+keeps the piece even if its task relevance score would otherwise cut it. The
+piece counts as kept when checking whether more than half the plan was cut,
+and it is excluded from new cut follow ups. Naming an authorization in the
+plan's reason provides context; the classifier still judges coverage.
+
+The command's report names the authorization comment ID, rather than repeating
+its text. An illustrative excerpt is:
+
+```json
+{
+  "kept": ["Remove the size allowance"],
+  "cut": [],
+  "authorized": [
+    {
+      "what": "Remove the size allowance",
+      "authorization": "add-example"
+    }
+  ]
+}
+```
+
+The corresponding piece in `plan-verdict.json` has
+`"authorized": "add-example"`. Match that ID to the task comment to see who
+authorized the work and what they approved. The report's `authorized` list
+contains pieces kept through authorization, rather than every kept piece.
+
+A changed authorization list causes an unchanged plan to be traced again;
+retracing that same plan does not add another failed-plan attempt. Follow ups
+filed before the authorization remain on the ledger. Authorization does not
+waive the plan size check, the intent check or the build gate's area and task
+territory checks.
+
+### Configuration and troubleshooting
+
+Authorization requires no separate enable flag. The packaged `trace-plan`
+[classifier definition](../reference/classifier.md) supplies the `covered: 0.7`
+threshold. The master or operator controls enforcement through the swarm's gate
+settings, for example:
+
+```bash
+agentihooks swarm example-swarm set \
+  trace-plan-gate=deny \
+  build-gate=deny
+```
+
+Both gates default to `log only`. In `deny` mode the second failed plan blocks
+the task; the build gate requires a current passing plan and permits only its
+kept areas within task territory. Gate modes control enforcement, not whether
+a comment grants scope.
+
+| Symptom | Check or action |
+|---|---|
+| An authorized piece is still cut | Confirm the authorization is on this task, has a recognized author and marker or relay metadata, is not deleted, and is among the latest five qualifying comments. Make its wording specific enough to cover the piece, then retrace. |
+| The report has no authorization for a kept piece | It may have been kept by ordinary task relevance; inspect the piece row and task comments. |
+| A prior cut follow up is still present | Retracing does not close existing follow ups. The master decides their disposition through the normal follow up workflow. |
+| The plan still fails after the piece is kept | Read `reasons`: authorized scope can still exceed one pull request. Narrow the plan without discarding the authorization record. |
+| The report says `unchecked` | The classifier did not answer. Edits are allowed and counted; run tracing again when the classifier is available. |
+
+## Publishing after a successor prepares a branch
+
+`swarm publish` selects a branch from the prepared checkout and its continuation
+record. A successor can therefore publish after restacking parked work onto
+`dev`, even when that rebase means its head no longer descends from the parked
+predecessor's remote branch.
+
+The branch choice follows Git ancestry, rather than simply reusing the previous
+worker's branch name:
+
+| Checkout and continuation state | Publication target |
+|---|---|
+| An eligible recorded continuation's local `origin` ref is an ancestor of `HEAD` | Keep that continuation branch. A fast forward continuation can keep updating an existing pull request. |
+| Restacking removed that ancestry, and no other eligible recorded branch passes the ancestry check | Use the prepared checkout's own branch. The parked predecessor branch stays at its previous head. |
+| No recorded branch exists, or its local `origin` ref is missing | Use the prepared checkout's own branch unless another recorded candidate passes the ancestry check. A missing ref does not print a fatal Git diagnostic. |
+
+The current implementation checks a retained continuation from the handoff or
+reclaim record first, then the branch supplied by repository and checkout
+selection. Each candidate must pass the ancestry check. Inside a task worktree,
+checkout selection supplies the local branch; preserving a predecessor target
+there requires a retained handoff or reclaim continuation. From a primary
+checkout, selection can instead supply the task's recorded repository branch.
+In those continuation contexts, a different local branch name alone does not
+require a new remote branch: even parked work stays on an eligible recorded
+branch when it still fast forwards, including when there were no task commits
+beyond the stacked base.
+
+After a successful push, the result's `branch` names the actual target and
+`head` names the published commit. The task records that target in `branch` and
+in `repository_branches` for the selected repository; `branch_repo` identifies
+its origin repository. The push sets the checkout's upstream to the chosen
+remote branch. Publication does not retarget or open a pull request: record the
+pull request for the published branch with `swarm pr`.
+
+### Continue an existing pull request with one push
+
+A successor continuing an existing pull request publishes its commit only to
+the retained pull request branch. Its newly prepared local branch is not also
+pushed. This removes the second branch push that previously started another
+Mutation preflight for the same commit. The `push-stop` gate uses the same
+retained target when it pushes committed work at Stop.
+
+The retained target comes from `continue_from` in the task's handoff envelope,
+or its reclaim record when there is no nonempty handoff envelope. It must name
+an `origin/` branch, and its local remote tracking ref must be an ancestor of
+`HEAD`. The protected names `dev`, `main`, `master` and `v1` are excluded from
+retained targets. A fresh continuation supplies no retained target. These are
+runtime records; no new flag or environment variable enables this behavior.
+
+For example, a successor may prepare a local branch with its own worker name
+while its handoff retains the predecessor's pull request branch. Work in the
+returned checkout and publish normally:
+
+```bash
+agentihooks swarm <id> prepare
+cd <returned-worktree>
+agentihooks swarm <id> publish \
+  --message "Document continuation publication" \
+  -- docs/pillars/swarm.md
+```
+
+The returned `branch` should name the predecessor's pull request branch, and
+`head` should match that pull request's updated head. The local upstream also
+tracks the retained branch. Keep using the existing pull request; do not push
+the prepared branch separately to publish the same commit. From the repository
+checkout, compare the result with GitHub; replace `PR_NUMBER` with the existing
+pull request's number:
+
+```bash
+gh api 'repos/{owner}/{repo}/pulls/PR_NUMBER' \
+  --jq '{branch: .head.ref, head: .head.sha}'
+git rev-parse --abbrev-ref '@{upstream}'
+```
+
+If the retained ref is missing or fails ancestry, `publish` tries its other
+recorded candidate before falling back to the local branch, as described
+above. `push-stop` falls back directly to the worktree's own branch. Thus a
+restacked successor that no longer continues the retained history may publish
+a new branch instead.
+
+Both push paths use a lease when the target differs from the local branch.
+A remote branch deleted while its tracking ref remains stale is refused
+rather than recreated; a changed remote ref can also reject the push. Read the
+remote state and reconcile the continuation before retrying. Removing the
+lease or pushing the same commit to a second branch defeats this protection.
+
+See [continuation publication and preflight runs](../reference/mutation-gate.md#continuation-publication-and-preflight-runs)
+for CI inspection and the distinction between a workflow run and mutation work.
+Delivered by [pull request 4076](https://github.com/the-cloud-clockwork/agentihooks/pull/4076),
+with a [successful focused regression proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39036611380)
+and [successful mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39037126637).
+Those proofs establish the tested branch selection and gate results; inspecting
+one live continuation's workflow runs is a separate operational check.
+
+### Resume parked work and publish
+
+Use this sequence as the task's current worker, after reading its handoff and
+after its parked dependencies have finished. Replace angle bracket arguments
+with the swarm name and explicit files you changed. Worktree and branch names
+come from `prepare`.
+
+```bash
+agentihooks swarm <id> prepare
+```
+
+Change into the returned worktree. For parked work, restack from a clean
+checkout before making further changes:
+
+```bash
+cd <returned-worktree>
+agentihooks swarm <id> restack
+```
+
+A rebase conflict leaves the parked list intact. Resolve the reported files,
+stage the resolved files explicitly, run `git rebase --continue`, and run
+`swarm restack` again to finish. Once restacking succeeds and the task changes
+are ready, publish the selected files:
+
+```bash
+agentihooks swarm <id> publish \
+  --message "Document successor publication" \
+  -- docs/pillars/swarm.md docs/pillars/index.md
+```
+
+Inspect `branch`, `head`, `worktree` and `gate` in the returned result. For a
+restacked successor whose history diverged from the predecessor, expect the
+prepared branch and its published head. For a retained fast forward
+continuation, expect the retained branch. Use the resulting branch when
+opening a pull request into `dev`, then record its URL:
+
+```bash
+agentihooks swarm <id> pr <pull-request-url>
+```
+
+### Repository configuration and failures
+
+There is no separate branch selection flag or environment variable. Configure
+the task's repositories explicitly when it spans repositories; prose names in
+the task description do not select them. For an existing task:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task set <task> repositories=/absolute/repo,/absolute/other
+agentihooks swarm <id> prepare
+```
+
+`prepare` returns a worktree and branch per repository. Run `publish` from the
+appropriate returned worktree to select that repository; its recorded branch
+is kept separately from the others. From a primary checkout, publication can
+resolve a sole task repository, but refuses an ambiguous selection when the
+task declares several repositories. Without a `repositories` list, the swarm
+repository is the default.
+
+Publication stages only the named files, commits if needed, runs the selected
+repository's prepush gate, then pushes. A failure reports a `Next:` command;
+fix the reported cause and repeat that command. An already committed head is
+graded again without an empty commit. Missing worktrees require `prepare`;
+unrelated tracked changes must be dealt with before publication. Tests run in
+CI. A push rejected because the remote changed remains a failure to reconcile;
+branch selection does not resolve concurrent remote updates.
+
+The successor branch fix was delivered in [pull request 3385](https://github.com/the-cloud-clockwork/agentihooks/pull/3385).
+The regression reproduced a push rejected against the predecessor before the
+fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38723619720));
+the corrected publication and continuation cases passed afterward
+([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
+
+## Plan tracing for promotion fixer tasks
+
+Promotion failures create fixer tasks whose identifiers include the Actions run
+number, for example `promo-38842603017-0`. Plan tracing accepts any task
+identifier registered in the swarm ledger, matched as a whole token, in the
+follow-up text it generates. Free text run numbers are still refused.
+
+### Trace the fix plan
+
+Work as the agent claiming the promotion fixer task. Write `plan.md` in the task
+work folder supplied at launch, with one piece per line:
+
+```text
+- Repair coverage accounting | scripts/ci_coverage.py | Restore the promotion coverage check
+- Add a coverage regression case | tests/test_ci_coverage.py | Prove the reported failure stays fixed
+- Add an unrelated feature | scripts/unrelated.py | Extend another service
+```
+
+Use the actual areas needed by the fix. Then run:
+
+```bash
+agentihooks swarm example-swarm trace-plan
+```
+
+The command resolves the agent and claimed task from the session. Before any
+classifier call it checks each piece's follow-up text,
+`Cut from the plan of task <task id>: <what>`, against the ledger's plain words
+rules. Its report names the verdict, kept pieces and cut pieces. If the
+classifier cuts the unrelated piece and the plan passes, the filed follow-up
+reads:
+
+```text
+Cut from the plan of task promo-38842603017-0: Add an unrelated feature
+```
+
+Classifier scope and size judgments still apply; accepting the identifier does
+not make every plan pass. The command reference above also describes
+authorization handling and the separate build and intent gates.
+
+### Configure enforcement
+
+The operator or master selects the gate mode, as described in the
+`<gate>-gate` row of the command reference:
+
+```bash
+agentihooks swarm example-swarm set trace-plan-gate=deny
+agentihooks swarm example-swarm set "trace-plan-gate=log only"
+```
+
+The mode governs what follows a failed verdict. `deny` logs each failed plan as
+a denial, and a second failed plan with different content sets the task to
+blocked, comments the reasons on it and retires the agent. `log only` logs each
+failed plan as a would-be denial. `skip` writes no failure row and never blocks
+the task, though a refused follow-up still stops the trace; the classifier still runs, the verdict
+is still saved, and unchecked verdicts and filed cuts are still logged.
+
+### Plain words limits and refusals
+
+The exception covers a token that exactly equals a task identifier registered
+in the swarm ledger. It exempts that token from the commit hash and run or job
+identifier checks; other prose rules still apply.
+
+With `promo-38842603017-0` registered and no other promotion task:
+
+| Text | Plain words result |
+|---|---|
+| `Cut from the plan of task promo-38842603017-0: Add an unrelated feature` | Accepted by the identifier checks. |
+| `Run 38842603017 failed` | Refused: a free text run number. |
+| `promo-38842603017-1` | Refused: the token is not a registered task identifier. |
+| `promo-38842603017-0 Run 38842603017 failed` | Refused: the separate run number remains in the prose. |
+
+A piece whose follow-up would be refused stops the trace in every gate mode,
+with `plan line <n>: the ledger would refuse its follow up` and the named
+violation. No passing verdict exists for the current `plan.md`; the build gate
+parses it again, reports the same refusal and refuses the task's edits under `build-gate=deny` and logs them under `log only` until
+the piece is rewritten and a trace passes.
+Rewrite the piece's description in plain words; a registered
+identifier does not authorize bare run numbers elsewhere in a plan piece or
+comment. Put run evidence in the task proof and link the Actions run when
+referencing it in ledger prose. If only the generated task token is refused,
+confirm the claimed task appears in the swarm ledger under that exact
+identifier. Retrying unchanged text does not resolve a validation refusal.
 
 ## Deployed host capacity
 
@@ -479,7 +1033,7 @@ agentihooks ledger --slug <id> --as <agent> leave
 agentihooks swarm <id> ready <handoff-document>
 ```
 
-The normal `ready` requirements still apply: a code or ci task, delegate or full autonomy, a recorded open pull request, and a clean worktree whose head matches that pull request. No additional environment variable enables split completion; `split` and `split_pulls` supply the configuration. Register all halves before releasing completed work. `ready` does not create a missing half or its pull request.
+The normal `ready` requirements still apply: delegate or full autonomy, a recorded open pull request, and a clean worktree whose head matches that pull request. No additional environment variable enables split completion; `split` and `split_pulls` supply the configuration. Register all halves before releasing completed work. `ready` does not create a missing half or its pull request.
 
 | Merge observation | Task and cleanup behavior |
 |---|---|
@@ -560,7 +1114,9 @@ An outage holds the affected idle and delivery decisions until recovery (see
 10. Send each new health finding to the master with the `verdict` command to judge it.
 11. Wake idle panes holding unread items, except a Codex pane whose push pump owns its inbox, and climb the wake
     ladder for items nobody reads.
-12. Write the automatic snapshot when it is due.
+12. Start the automatic snapshot job when a snapshot is due and no job holds the swarm's snapshot lock. The job
+    runs as its own detached process, writes its errors to `~/.agentihooks/swarm/<id>/snapshot-job.log`, and the
+    tick returns without waiting for it.
 
 The health pass reports `merge stall` when the dev merge queue holds entries and no pull request has merged
 into dev for sixty minutes. Its evidence names the queue length, minutes since the latest dev merge and the
@@ -576,6 +1132,95 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Staged and prerequisite pull requests
+
+A task that lands in stages, or registers a prerequisite pull request before its own, declares the scope each such pull request delivers when it records it:
+
+```bash
+agentihooks swarm <id> pr <prerequisite-pull-request-url> --prerequisite "tests that accept both gate states"
+agentihooks swarm <id> pr <stage-pull-request-url> --stage "the ledger field and its validation"
+agentihooks swarm <id> pr <final-pull-request-url>
+```
+
+The task keeps each declaration in `pull_scopes`, a map from the pull request URL to its kind, `stage` or `prerequisite`, and its nonempty scope. The intent check grades a declared pull request against its declared scope alone, without the whole task text or the task's plan lines, and the parent intent stamped on its body names that scope in place of the task text. A declaration needs a GitHub pull request URL. A changed declaration is judged again. A pull request recorded without `--stage` or `--prerequisite` is the task's final pull request and is graded against the whole task contract; recording a declared pull request again without either option drops its declaration. A blank scope is refused, and one pull request declares one kind.
+
+### Stalled activity findings
+
+A `stalled` health finding means a pane reports `working` while its recorded
+tool activity has been quiet for at least `AGENTIHOOKS_HEALTH_STALLED_MINUTES`
+(default **10**). A pane that is not working, or an agent with no recorded
+tool timestamp, does not produce this finding. Inspect the finding through:
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+Compare the finding with recent tool calls and the agent's progress. Inbox
+messages and task changes can show that work continued, but successful commands
+alone do not establish that the hook retained the identity needed to record
+activity. A finding is evidence to investigate; the master or operator judges
+it with `verdict`.
+
+#### Wrapper loss and swarm identity
+
+A launched Claude agent can keep running after its agentihooks wrapper exits.
+Its process is then reparented, so the hook's parent walk no longer reaches the
+original launcher. Before the correction delivered in
+[pull request 3906](https://github.com/the-cloud-clockwork/agentihooks/pull/3906),
+that condition caused hooks to treat the agent as nested and drop its swarm
+identity. Tool calls continued while activity recording returned early, leaving
+the stall clock frozen and producing false findings.
+
+The hook now checks the launcher's terminal session when its parent walk sees
+one agent but misses the launcher. The launched agent keeps its identity when
+it is the only recognized agent in that session. This requires no manual
+identity repair or new setting. A recognized agent in another terminal session,
+a session containing another agent, or an agent nested inside an orphaned
+agent remains isolated from the outer swarm identity. Consecutive processes
+with the same agent command name are treated as one wrapper chain.
+
+The check recognizes Claude and Codex process names. This correction does not
+establish Copilot orphan recovery or explain why a wrapper exited.
+
+#### Configure the threshold
+
+Set the threshold in the environment used by the health pass. For a manually
+invoked tick, this example raises it to twenty minutes for that invocation:
+
+```bash
+AGENTIHOOKS_HEALTH_STALLED_MINUTES=20 agentihooks swarm tick
+```
+
+For a timer or controller, supply the variable through that service's managed
+environment so later passes use the same value. Setting it only in a worker
+shell does not configure a separately running health pass. Raising the threshold
+changes when the finding appears; it does not repair a frozen activity record.
+
+#### Investigate an active agent reported as stalled
+
+1. Read `status --json` and compare the reported inactivity with recent tool
+   calls, progress and task changes. Successful hook execution with a frozen
+   activity clock matches the symptom investigated in
+   [issue 3899](https://github.com/the-cloud-clockwork/agentihooks/issues/3899).
+2. Confirm the running hook installation includes the correction. Use read-only
+   process diagnostics to compare the agent's parent and terminal session with
+   the launcher when investigating wrapper loss; do not dump its environment.
+3. Observe a subsequent tool call and the next health pass. If inactivity still
+   grows, retain the hook and process evidence for investigation. Do not remove
+   `AGENTIHOOKS_SWARM_LAUNCHER` to force identity acceptance: it protects nested
+   sessions from inheriting the outer task.
+4. The master or operator records the evidence-based verdict. For example,
+   substitute the finding identifier returned by status:
+
+   ```bash
+   agentihooks swarm <slug> verdict <finding> false-positive --note 'Recent tool calls continued while activity recording was frozen'
+   ```
+
+A verdict suppresses the finding under the existing cooldown rules; it does
+not update the activity clock. See the `verdict` command above for recurrence
+behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
+or Redis outages, which have their own hold and resume behavior.
 
 ### Ledger event pass
 
@@ -657,7 +1302,7 @@ other dependencies are all done), or is the last task of its phase not yet done,
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
 tick then applies the usual
 rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
-urgent task never skips a dependency that is not done and never takes a task another agent holds. A territory
+urgent task never skips a dependency that is not done and never takes a task another agent holds. A `tune` task never stacks on a `code` or `ci` dependency that is claimed or in pull request: it waits until that dependency is done. In a Doctor swarm it also waits until the dependency carries `applied_at`, which the Doctor's `pull-dev` intervention records on each merged fix an open tune task measures, or `ledger task set <id> applied_at=<UTC time>` records by hand; the dispatcher's queue head reads the same rule. A territory
 another agent holds moves a task back within its rank without blocking it (see
 [Shared areas in the opening prompt](#shared-areas-in-the-opening-prompt)).
 Among open tasks whose territories overlap, the higher rank claims first. The rank is read from the ledger on every

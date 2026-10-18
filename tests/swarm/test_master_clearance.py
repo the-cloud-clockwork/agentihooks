@@ -159,6 +159,13 @@ def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
     assert capsys.readouterr().err == refused(MASTER)
 
 
+def test_the_holder_judges_the_operator_by_the_environment_it_is_given(swarm, monkeypatch):
+    from scripts.gates import Who
+
+    acting(monkeypatch, "engineer@unregistered-0009", "")
+    assert clearance.holder(swarm[0], "demo", Who(), {}) == clearance.OPERATOR
+
+
 @pytest.mark.parametrize("argv", [["pause"], ["--as", MASTER, "pause"], ["set", "intent-gate=coach"]])
 def test_an_agent_that_drops_its_swarm_pin_is_still_refused_by_its_session_name(swarm, monkeypatch, capsys, argv):
     store, ledger = swarm

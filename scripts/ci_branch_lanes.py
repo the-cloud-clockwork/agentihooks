@@ -56,6 +56,18 @@ def events(workflow: dict) -> list:
     return [workflow[key] for key in ("on", True) if key in workflow]
 
 
+def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+    stages = {"stats": ("stats", "part"), "mutation-shard": ("shard", "shard")}
+    baseline = (trusted.get("jobs") or {}).get(name)
+    if trusted.get("name") != "Mutation preflight" or name not in stages or not isinstance(baseline, dict):
+        return False
+    if job.get("runs-on") != baseline.get("runs-on"):
+        return False
+    stage, index = stages[name]
+    group = f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
+    return block == {"group": group}
+
+
 def problems(workflow: object, baseline: object = None) -> list[str]:
     if not isinstance(workflow, dict):
         return ["is not a workflow mapping"]
@@ -75,6 +87,8 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
+        if per_run_mutation_group(name, block, job, trusted):
+            continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue
         problem = lane_problem(block)

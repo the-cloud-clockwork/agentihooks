@@ -56,6 +56,27 @@ def test_profile_defaults_and_native_codex_layer(profile):
     renderer.assert_called_once_with("codex", "qa", overlays=(), bundle_revision="")
 
 
+@pytest.mark.parametrize("activated", [False, True])
+def test_channel_registration_follows_the_final_selected_profile_home(profile, tmp_path, activated):
+    from scripts.inbox import channel
+
+    root, renderer = profile
+    flags = channel.launch_args() if activated else []
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    original = caller / ".claude.json"
+    original.write_text('{"mcpServers":{"caller":{"command":"existing"}}}')
+    env, argv = select_profile.prepare("qa", "claude", "", "", flags, {"CLAUDE_CONFIG_DIR": str(caller)})
+    config = root / "rendered" / "qa" / "claude" / ".claude.json"
+    assert config.exists() is activated
+    if activated:
+        server = json.loads(config.read_text())["mcpServers"]["inbox"]
+        assert "main(active=False)" in server["args"][-1]
+        assert channel.FLAG in argv
+        assert env["CLAUDE_CONFIG_DIR"] == str(config.parent)
+    assert json.loads(original.read_text()) == {"mcpServers": {"caller": {"command": "existing"}}}
+
+
 @pytest.mark.parametrize("agent,swarm", [("codex", "crew"), ("codex", ""), ("claude", "crew")])
 def test_prepare_isolates_only_swarm_codex(profile, agent, swarm):
     root, renderer = profile

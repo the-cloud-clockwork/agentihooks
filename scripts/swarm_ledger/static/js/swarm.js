@@ -137,7 +137,7 @@ function agentRows(sw, now) {
   const agents = [...(sw.agents || [])].sort((x, y) => (y.lane === "master") - (x.lane === "master"));
   return agents.map((a) => {
     const master = a.lane === "master", offer = sw.lifecycle && sw.lifecycle.agents && sw.lifecycle.agents[a.name];
-    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: a.capabilities || null, task: master ? "" : a.task || "",
+    return { name: a.name, master, gates: a.gates || [], lane: master ? "—" : a.lane, profile: a.profile || "—", overlays: (a.overlays || []).join(" · ") || "—", model: modelText(a) || "—", transport: a.capabilities || null, task: master ? "" : a.task || "", remoteControl: master && a.remote_control && a.remote_control.state ? a.remote_control : null,
       state: master && (a.status || "working") === "working" ? "live" : a.status || "working", promoted: !!a.promoted, age: a.started_at ? span(now - a.started_at) : "—",
       finished: a.status === "finished", since: a.state_since || 0, terminal: terminalView((sw.terminals || {})[a.name], now),
       execution: executionView((sw.executions || {})[a.name], now), lifecycle: offer ? { offer, controls: sw.lifecycle.controls.filter((c) => c.action in offer.disabled), terminate: !!offer.terminate } : null };
@@ -145,7 +145,7 @@ function agentRows(sw, now) {
 }
 
 function agentRow(a, remote) {
-  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), label("promoted")) : label(a.state),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
 }
@@ -209,14 +209,13 @@ function resetIn(at, now) {
   return s < 3600 ? `${m}m` : s < 86400 ? `${hr}h${pad(m)}m` : `${d}d${pad(hr)}h`;
 }
 
-function accountState(sw, r) {
-  const seen = ((sw.quota_capacity || {}).accounts || []).find((a) => a.name === r.account && a.harness === r.agent);
-  return seen ? { state: seen.state.toLowerCase(), routing: percent(seen.routing) } : { state: "—", routing: "—" };
+function accountState(r) {
+  return r.state ? { state: r.state.toLowerCase().replace(/_/g, " "), routing: percent(r.routing_left) } : { state: "—", routing: "—" };
 }
 
 function quotaRows(sw, now) {
   const quota = sw.quota || {}, master = (sw.agents || []).find((a) => a.lane === "master") || {};
-  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, kind: r.kind || "subscription", ...accountState(sw, r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
+  return (quota.rows || []).map((r) => ({ account: r.account, harness: r.agent, kind: r.kind || "subscription", ...accountState(r), five: percent(r.five_hour_left), fiveReset: resetIn(r.five_hour_resets_at, now),
     seven: percent(r.seven_day_left), sevenReset: resetIn(r.seven_day_resets_at, now), sessions: r.sessions, cap: r.cap, weight: r.weight,
     master: !!master.account && r.account === master.account && r.agent === (master.harness || "claude") }));
 }
@@ -365,12 +364,12 @@ function renderHealth(findings, now = Date.now()) {
 
 function healthRow(f, now) {
   const earlier = f.verdict || {};
-  const pick = h("select", { class: "hl-pick", "aria-label": `Verdict on ${f.kind} ${f.subject}`, "data-verdict": f.id },
-    h("option", { value: "", text: "?" }), ...VERDICTS.map((v) => h("option", { value: v, text: VERDICT_TEXT[v] })));
+  const pick = h("select", { class: "hl-pick", "aria-label": `Verdict on ${f.kind} ${f.subject}`, "data-verdict": f.id }, h("option", { value: "", text: "?" }), ...VERDICTS.map((v) => h("option", { value: v, text: VERDICT_TEXT[v] })));
   pick.value = earlier.value || "";
   const note = h("input", { class: "hl-note", type: "text", maxlength: "500", placeholder: "—", "aria-label": `Verdict note on ${f.kind} ${f.subject}` });
   note.value = earlier.note || "";
-  return cells(f.kind, idCell(f.subject), (f.evidence || []).join(" · ") || f.summary, f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
+  return cells(f.kind, idCell(f.subject), h("div", {}, h("div", { text: (f.evidence || []).join(" · ") || f.summary }), ...(f.links || []).filter((link) => /^https?:\/\//.test(link.url || "")).map((link) =>
+      h("div", {}, h("a", { href: link.url, target: "_blank", rel: "noopener", text: link.label })))), f.threshold, f.seen_at ? `${span(now - f.seen_at)} ago` : "—", pick, note);
 }
 
 function renderHandoffs(rows) {

@@ -2,7 +2,7 @@
 set -euo pipefail
 
 if [[ $# -lt 1 ]]; then
-  echo "usage: open.sh <script> [title]" >&2
+  echo "usage: open_param_pane.sh <script> [title]" >&2
   exit 2
 fi
 script="$(readlink -f "$1")"
@@ -27,7 +27,7 @@ fi
 split="$(herdr pane split --pane "$HERDR_PANE_ID" --direction right --cwd "$(dirname "$script")")"
 pane="$(printf '%s' "$split" | python3 -c 'import json, sys; print(json.load(sys.stdin)["result"]["pane"]["pane_id"])')"
 herdr pane rename "$pane" "$title" >/dev/null 2>&1 || true
-herdr pane run "$pane" "bash $(printf '%q' "$here/run.sh") $(printf '%q' "$script") $(printf '%q' "$status") $(printf '%q' "$pane")" >/dev/null
+herdr pane run "$pane" "bash $(printf '%q' "$here/run_param_pane.sh") $(printf '%q' "$script") $(printf '%q' "$status") $(printf '%q' "$pane")" >/dev/null
 
 echo "pane=$pane"
 echo "status=$status"

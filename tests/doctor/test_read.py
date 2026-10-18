@@ -38,6 +38,67 @@ def test_inbox_items_of_the_swarm_carry_their_history(redis):
     assert [e["state"] for e in rows[kept.id]["history"]] == ["pending", "done"]
 
 
+def test_one_inbox_read_of_a_large_inbox_takes_a_bounded_number_of_round_trips(redis, monkeypatch):
+    from dataclasses import asdict
+
+    from redis.client import Pipeline
+
+    from scripts.inbox.seats import of_swarm
+
+    box, sent = InboxStore(redis), []
+    for n in range(100):
+        for k in range(3):
+            sent.append(box.send(f"{SLUG}-eng-{k}", f"other-{n}", f"note {n} {k}").id)
+        box.close(sent[-1], f"other-{n}", "done", "answered in the thread")
+    for n in range(30):
+        box.send("operator", f"stranger-{n}", "not ours")
+    prefix = box.key("address", "")
+    expected = [
+        {**asdict(item), "history": box.history(item.id)}
+        for key in sorted(redis.scan_iter(match=prefix + "*"))
+        for item in box.inbox(key[len(prefix) :])
+        if of_swarm(item.address, SLUG, box.names) or of_swarm(item.sender, SLUG, box.names)
+    ]
+    trips = []
+    direct, batched = redis.execute_command, Pipeline.execute
+    monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))
+    monkeypatch.setattr(Pipeline, "execute", lambda pipe, *a, **k: trips.append("pipeline") or batched(pipe, *a, **k))
+    rows = read.inbox_items(box, SLUG)
+    assert rows == expected
+    assert sorted(row["id"] for row in rows) == sorted(sent)
+    assert sum(len(row["history"]) for row in rows) == len(sent) + 100
+    assert len(trips) <= 12
+
+
+def test_an_inbox_read_in_small_batches_keeps_every_batch_and_registry_named_agents(redis, monkeypatch):
+    from scripts.swarm.store import SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig(SLUG, "/home/x/dev/r", max_eng=1, max_ci=1))
+    named, other = store.next_name(SLUG, "eng"), "stranger-9"
+    to_named = [box.send("operator", named, f"to the named agent {n}").id for n in range(3)]
+    from_named = [box.send(named, f"other-{n}", f"from the named agent {n}").id for n in range(3)]
+    box.send("operator", other, "not ours")
+    box.deliver(to_named[0], named)
+    box.read(to_named[0], named)
+    box.close(to_named[0], named, "done", "answered in the thread")
+    monkeypatch.setattr(read, "BATCH", 2)
+    rows = read.inbox_items(box, SLUG)
+    assert sorted(row["id"] for row in rows) == sorted(to_named + from_named)
+    assert {row["id"]: row["history"] for row in rows} == {row["id"]: box.history(row["id"]) for row in rows}
+    assert max(len(row["history"]) for row in rows) >= 3
+
+
+def test_an_inbox_listing_whose_item_is_gone_is_refused(redis):
+    from scripts.inbox.store import InboxError
+
+    box = InboxStore(redis)
+    box.send(f"{SLUG}-eng-1", "operator", "kept")
+    redis.zadd(box.key("address", "operator"), {"gone": 1})
+    with pytest.raises(InboxError, match="no message gone"):
+        read.inbox_items(box, SLUG)
+
+
 def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_the_swarm(redis):
     from scripts.doctor.inbox import Receiver
     from scripts.doctor.priming import doctor_slug
@@ -54,13 +115,13 @@ def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_th
     addresses = [seat, named, f"{SLUG}-eng-2", f"{SLUG}-eng-5", "engineer-100001-0001-tmp-1", "operator", doctor]
     items = [{"address": address, "history": []} for address in addresses]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True, quiet_ms=2 * 60_000),
-        named: Receiver(live=True),
+        seat: Receiver(live=True, quiet_ms=2 * 60_000, occupant=f"{SLUG}-eng-1"),
+        named: Receiver(live=True, occupant=named),
         f"{SLUG}-eng-2": Receiver(),
         f"{SLUG}-eng-5": Receiver(),
         "engineer-100001-0001-tmp-1": Receiver(scoped=False),
         "operator": Receiver(),
-        doctor: Receiver(),
+        doctor: Receiver(seat_wait=True),
     }
 
 
@@ -76,7 +137,7 @@ def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_o
     took = [{"state": "pending", "by": "swarm"}, {"state": "delivered", "by": f"{SLUG}-eng-1"}]
     items = [{"address": seat, "history": took}, {"address": seat, "history": took[:1]}]
     assert read.inbox_receivers(store, box, SLUG, items) == {
-        seat: Receiver(live=True),
+        seat: Receiver(live=True, occupant=f"{SLUG}-eng-2"),
         f"{SLUG}-eng-1": Receiver(),
     }
 
