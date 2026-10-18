@@ -772,11 +772,11 @@ def test_a_stacked_delivery_republishes_its_pull_request_branch_with_one_push(pu
     monkeypatch.setattr(publish, "execute", counted)
     publish.prepare("swarm", publication.agent, str(publication.repo), publication.ledger)
     assert publication.task["branch"] == "predecessor"
-    for change in ("after", "again"):
-        (root / "chosen.txt").write_text(change)
+    for name in ("chosen.txt", "other.txt"):
+        (root / name).write_text("after")
         pushes.clear()
         result = publish.publish(
-            "swarm", publication.agent, str(publication.repo), publication.ledger, f"Change {change}", ["chosen.txt"]
+            "swarm", publication.agent, str(publication.repo), publication.ledger, f"Change {name}", [name]
         )
         head = git(root, "rev-parse", "HEAD")
         assert len(pushes) == 1
