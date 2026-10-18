@@ -680,7 +680,7 @@ class HerdrRuntime:
             desired_route_kind=None
             if lane != MASTER
             else "interactive"
-            if agent == "claude" and not task.get("route_kind")
+            if front and agent == "claude" and not task.get("route_kind")
             else "",
         )
 
