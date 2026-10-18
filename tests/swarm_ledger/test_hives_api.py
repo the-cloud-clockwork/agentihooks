@@ -40,7 +40,16 @@ def store(monkeypatch):
         store.redis.hset(registry.key(hive_id), mapping={k: registry._encode(k, v) for k, v in record.items()})
         store.redis.sadd(registry.INDEX, hive_id)
     store.redis.set(f"{registry.key('desk')}:sessions", json.dumps({"claude:luna": 2}))
-    store.put_agent("sw", AgentRecord("master@sw-1", MASTER, MASTER, seat="master@sw", hive="desk"))
+    record = AgentRecord(
+        store.next_name("sw", MASTER),
+        MASTER,
+        MASTER,
+        harness="claude",
+        seat="master@sw",
+        hive="desk",
+        runtime_target={"host_id": "desk"},
+    )
+    store.start_execution("sw", record)
     return store
 
 
@@ -105,7 +114,7 @@ def test_a_read_lists_every_hive_with_liveness_slots_agents_and_its_master(store
         4,
     )
     assert desk["slots"] == [{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6, "agents": 2}]
-    assert desk["master"] == {"slug": "sw", "name": "master@sw-1"}
+    assert desk["master"] == {"slug": "sw", "name": store.agents("sw")[0].name}
     assert (pod["id"], pod["live"], pod["master"], pod["slots"][0]["agents"]) == ("pod", False, None, 0)
     assert reply["revision"] == resources.revision(reply["data"])
 
@@ -119,12 +128,14 @@ def test_a_read_of_one_hive_answers_that_hive_and_a_missing_one_is_not_found(sto
 def test_a_finished_master_or_one_without_a_hive_is_not_shown(store):
     from dataclasses import replace
 
+    from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig
     from scripts.swarm_ledger.api import hives
 
+    store.create(SwarmConfig("local", "agentihooks", 1, 1))
+    store.put_agent("local", AgentRecord("master@local-1", MASTER, MASTER, seat="master@local"))
+    assert hives.masters(store) == {"desk": {"slug": "sw", "name": store.agents("sw")[0].name}}
     master = store.agents("sw")[0]
     store.put_agent("sw", replace(master, state="finished"))
-    assert hives.masters(store) == {}
-    store.put_agent("sw", replace(master, hive=""))
     assert hives.masters(store) == {}
 
 
@@ -141,7 +152,7 @@ def test_the_operator_writes_settings_through_the_hive_registry(store):
         6,
     )
     assert reply["data"]["name"] == "Desk"
-    assert reply["data"]["master"] == {"slug": "sw", "name": "master@sw-1"}
+    assert reply["data"]["master"] == {"slug": "sw", "name": store.agents("sw")[0].name}
 
 
 def test_flags_reach_the_registry_as_yes_or_no(store):
