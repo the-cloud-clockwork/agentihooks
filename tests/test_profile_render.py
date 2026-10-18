@@ -281,6 +281,45 @@ def test_refresh_rules_updates_the_rendered_claude_md(world, monkeypatch):
     assert "ROLE LOCAL OVERRIDE" in payload
 
 
+def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monkeypatch, tmp_path):
+    from argparse import Namespace
+
+    from hooks.context import rules_refresh
+    from scripts.profiles import render
+
+    monkeypatch.delenv("CI_MANIFESTO_PATH", raising=False)
+    monkeypatch.delenv("MANIFESTOS_DIR", raising=False)
+    monkeypatch.setattr(rules_refresh, "_refresh_dir", lambda: tmp_path / "force_refresh")
+    monkeypatch.setattr(rules_refresh, "_collect_pending_sessions", lambda: ["s-master"])
+    bundle = world["bundle"]
+    _write(bundle / "profiles" / "master" / "profile.yml", "name: master\nextends: [package:master]\n")
+    manifesto = _write(bundle / "manifestos" / "FLEET-MANIFESTO.md", "OLD FLEET DOCTRINE\n")
+    _commit(bundle, "two")
+    master = render.render_claude("master")
+    caller = render.render_claude("rb-role")
+    assert "OLD FLEET DOCTRINE" in (master / "CLAUDE.md").read_text()
+    manifesto.write_text("MERGED FLEET DOCTRINE\n")
+    _commit(bundle, "three")
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(caller))
+
+    world["install"]._cmd_refresh_rules(Namespace(profile=None, clear=False, dry_run=False))
+
+    rerendered = render.profile_dir("master") / "claude"
+    assert rerendered != master
+    assert "MERGED FLEET DOCTRINE" in (rerendered / "CLAUDE.md").read_text()
+    assert rules_refresh._load_marker("master")["pending"] == ["s-master"]
+    received = []
+    monkeypatch.setattr(rules_refresh, "inject_context", received.append)
+    monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))
+
+    rules_refresh.maybe_inject("s-master")
+
+    assert len(received) == 1
+    assert "MERGED FLEET DOCTRINE" in received[0]
+    assert "OLD FLEET DOCTRINE" not in received[0]
+    assert rules_refresh._load_marker("master") is None
+
+
 def test_claude_md_sanity_still_caps_the_rendered_claude_md(world, monkeypatch):
     from hooks.context import claude_md_sanity
     from hooks.hook_manager import BlockAction
