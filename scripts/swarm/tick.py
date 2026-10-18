@@ -334,7 +334,8 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
     if refund and held and store.claims(slug, agent.task) > 0:
         store.refund_claim(slug, agent.task)
-    reopen = held and _reopen(slug, ledger, rows, agent.task)
+    expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
+    reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
 
@@ -548,6 +549,8 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
     if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
         return [f"resumed {agent.name}"]
+    if next((current for current in store.agents(slug) if current.name == agent.name), None) != agent:
+        return []
     runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
     return [f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent)]
 
@@ -719,8 +722,8 @@ def _session_models(slug, store):
             store.put_agent(slug, reported)
 
 
-def _reopen(slug, ledger, rows, task_id):
-    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE)
+def _reopen(slug, ledger, rows, task_id, expected=None):
+    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE, if_match=expected)
     rows[task_id].update(live)
     return live["state"] == "open"
 

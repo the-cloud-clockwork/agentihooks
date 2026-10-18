@@ -158,3 +158,60 @@ def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, 
 
     assert runtime.resumed == [agent]
     assert agent.pane_id not in runtime.closed
+
+
+def test_lost_agent_cannot_reopen_a_successors_claim(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == "eng")
+    agent = replace(agent, conversation_id="old-conversation", profile="engineer")
+    store.put_agent("sw", agent)
+    rows = {"t1": dict(ledger.rows["t1"])}
+    original_resume = runtime.resume
+
+    def resume_and_replace(config, original, text):
+        placed = original_resume(config, original, text)
+        ledger.rows["t1"].update(claimed_by="successor", claim_generation=99, state="pr")
+        return placed
+
+    monkeypatch.setattr(runtime, "resume", resume_and_replace)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+
+    tick_module._lost("sw", store, ledger, runtime, rows, agent, 10)
+
+    assert ledger.rows["t1"]["claimed_by"] == "successor"
+    assert ledger.rows["t1"]["claim_generation"] == 99
+    assert ledger.rows["t1"]["state"] == "pr"
+
+
+def test_resumed_agent_keeps_the_runtime_model_and_route(store, monkeypatch):
+    from scripts.swarm import dead_resume
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == "master")
+    agent = replace(agent, conversation_id="old-conversation", profile="engineer")
+    store.put_agent("sw", agent)
+    original_resume = runtime.resume
+    remote = {"enabled": True, "name": "master"}
+
+    def resume_on_login(config, original, text):
+        return replace(
+            original_resume(config, original, text),
+            model="resolved-model",
+            effort="high",
+            model_source="recorded",
+            route_kind="interactive",
+            remote_control=remote,
+            desired_route_kind="interactive",
+        )
+
+    monkeypatch.setattr(runtime, "resume", resume_on_login)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+
+    assert dead_resume.reopen("sw", store, ledger, runtime, agent, 10)
+    current = next(a for a in store.agents("sw") if a.name == agent.name)
+    assert (current.model, current.effort, current.model_source) == ("resolved-model", "high", "recorded")
+    assert current.route_kind == current.desired_route_kind == "interactive"
+    assert current.remote_control == remote
+    assert current.conversation_id == "old-conversation"

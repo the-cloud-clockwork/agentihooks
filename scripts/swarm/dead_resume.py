@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 
 
 def skip_binding(agent: AgentRecord, facts: dict) -> bool:
-    from scripts.swarm import reports
+    from scripts.hive import reports
 
     return (agent.name not in facts and agent.state != "retiring") or (
         facts.get(agent.name, {}).get("process") is False
@@ -76,6 +76,15 @@ def reopen(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, agent
                     started_at=at,
                     idle_ticks=0,
                     account=placed.account or agent.account,
+                    model=placed.model or agent.model,
+                    effort=placed.effort or agent.effort,
+                    model_source=placed.model_source or agent.model_source,
+                    profile=placed.profile or agent.profile,
+                    route_kind=placed.route_kind,
+                    remote_control=placed.remote_control,
+                    desired_route_kind=agent.desired_route_kind
+                    if placed.desired_route_kind is None
+                    else placed.desired_route_kind,
                     profile_decision={**agent.profile_decision, **placed.profile_decision},
                     launch_timings=placed.launch_timings,
                 ),
