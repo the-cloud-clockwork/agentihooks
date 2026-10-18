@@ -122,11 +122,99 @@ def test_incomplete_pagination_reports_the_missing_full_count():
     result = ci_speed_read.read(NOW - 60000, NOW, run=run)
     assert result == {
         "complete": False,
-        "error": "Actions API read failed: RuntimeError: Actions API pagination ended before the full count",
+        "error": "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?"
+        "created=2026-10-17T21%3A59%3A00%2B00%3A00..2026-10-17T22%3A00%3A00%2B00%3A00; "
+        "page=1; rows=0; total=1",
         "runs": [],
-        "api_calls": 1,
+        "api_calls": 2,
         "discovered_runs": 0,
     }
+
+
+@pytest.mark.parametrize("target", ["runs", "jobs"])
+def test_pagination_accepts_growing_totals_and_deduplicates_ids(target):
+    from scripts.doctor import ci_speed_read
+
+    calls = []
+    fallback, _ = api([{"id": 999}])
+
+    def run(args, **kwargs):
+        url = urlsplit(args[2])
+        query = parse_qs(url.query)
+        selected = (target == "runs" and "created" in query) or (target == "jobs" and url.path.endswith("/jobs"))
+        if not selected:
+            return fallback(args, **kwargs)
+        page = int(query["page"][0])
+        calls.append(page)
+        rows = [{"id": n} for n in range(100)] if page == 1 else [{"id": 99}, {"id": 100}]
+        field = "workflow_runs" if target == "runs" else "jobs"
+        return SimpleNamespace(stdout=json.dumps({"total_count": 101 if page == 1 else 103, field: rows}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=300)
+    assert result["complete"] is True
+    rows = result["runs"] if target == "runs" else result["runs"][0]["jobs"]
+    assert sorted(row["id"] for row in rows) == list(range(101))
+    assert calls == [1, 2]
+
+
+@pytest.mark.parametrize("target", ["runs", "jobs"])
+def test_a_short_list_is_retried_from_its_first_page(target):
+    from scripts.doctor import ci_speed_read
+
+    pages = []
+    fallback, _ = api([{"id": 999}])
+
+    def run(args, **kwargs):
+        url = urlsplit(args[2])
+        query = parse_qs(url.query)
+        selected = (target == "runs" and "created" in query) or (target == "jobs" and url.path.endswith("/jobs"))
+        if not selected:
+            return fallback(args, **kwargs)
+        pages.append(int(query["page"][0]))
+        field = "workflow_runs" if target == "runs" else "jobs"
+        rows = [] if len(pages) == 1 else [{"id": 1}, {"id": 2}]
+        return SimpleNamespace(stdout=json.dumps({"total_count": 2, field: rows}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert result["complete"] is True
+    rows = result["runs"] if target == "runs" else result["runs"][0]["jobs"]
+    assert sorted(row["id"] for row in rows) == [1, 2]
+    assert pages == [1, 1]
+
+
+@pytest.mark.parametrize("target", ["runs", "jobs"])
+def test_duplicate_rows_do_not_hide_a_persistently_incomplete_list(target):
+    from scripts.doctor import ci_speed_read
+
+    pages = []
+    fallback, _ = api([{"id": 999}])
+
+    def run(args, **kwargs):
+        url = urlsplit(args[2])
+        query = parse_qs(url.query)
+        selected = (target == "runs" and "created" in query) or (target == "jobs" and url.path.endswith("/jobs"))
+        if not selected:
+            return fallback(args, **kwargs)
+        page = int(query["page"][0])
+        pages.append(page)
+        rows = [{"id": n} for n in range(100)] if page == 1 else [{"id": 99}, {"id": 100}]
+        field = "workflow_runs" if target == "runs" else "jobs"
+        return SimpleNamespace(stdout=json.dumps({"total_count": 102, field: rows}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert result["complete"] is False
+    assert pages == [1, 2, 1, 2]
+    expected_endpoint = (
+        "repos/the-cloud-clockwork/agentihooks/actions/runs?"
+        "created=2026-10-17T21%3A59%3A00%2B00%3A00..2026-10-17T22%3A00%3A00%2B00%3A00"
+        if target == "runs"
+        else "repos/the-cloud-clockwork/agentihooks/actions/runs/999/jobs?filter=latest"
+    )
+    assert result["error"] == (
+        "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+        f"endpoint={expected_endpoint}; page=2; rows=101; total=102"
+    )
 
 
 @pytest.mark.parametrize("elapsed,complete", [(24.5, True), (25, False), (25.5, False)])

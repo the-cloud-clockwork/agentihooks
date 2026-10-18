@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/ci_speed_read.py:scripts.doctor.ci_speed_read.x\u01c1_Api\u01c1pages__mutmut_5:a5120285b2a3c8a54db781ef63e1f7d7faf7fa24b9470aa1e7c9ec0895ef1e6d": {
+    "reader": "Standards",
+    "reason": "Every _Api.pages call from read supplies an endpoint containing a query separator: workflow lists append ? before urlencode(created/status), and job lists append ?filter=latest. The mutated no-query separator branch is unreachable through read, so this exact mutant changes no observed output."
+  }
+}

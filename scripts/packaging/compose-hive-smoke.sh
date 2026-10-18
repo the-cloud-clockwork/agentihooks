@@ -35,20 +35,26 @@ if ! docker compose up --pull never "${build[@]}" --wait --wait-timeout 180; the
 fi
 
 slug="compose-proof"
-docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
+host_agent="$(docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
 import os
+import time
 
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm.store import SwarmConfig, connect
+from scripts.swarm.store import AgentRecord, SwarmConfig, connect
 from scripts.swarm_ledger.new_ledger import create
 
 store, slug = connect(), os.environ["SLUG"]
 create(slug, {"title": "Compose proof", "phases": [{"title": "Prove the compose stack"}]}, "swarm")
 store.create(SwarmConfig(slug, "/data", 1, 1))
 seats = SeatRegistry(store.redis)
-seats.occupy(f"master@{slug}", "host-agent", 0)
-print(f"seeded swarm {slug} with host-agent seated, in the compose Redis over TLS")
+name = store.next_name(slug, "master")
+started = int(time.time() * 1000)
+store.start_execution(slug, AgentRecord(name, "master", "", seat=f"master@{slug}", started_at=started))
+seats.occupy(f"master@{slug}", name, started)
+print(name)
 PY
+)"
+printf 'seeded swarm %s with %s seated, in the compose Redis over TLS\n' "$slug" "$host_agent"
 docker compose restart controller >/dev/null
 held=""
 for _ in $(seq 60); do
@@ -82,13 +88,19 @@ member_id="${joined#joined the hive as }"
 member_id="${member_id%%;*}"
 member_agent="$(docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="$member_id" swarm python -c '
 import os, time
+from scripts.inbox import exits
+from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, connect
 store, slug, member = connect(), os.environ["SLUG"], os.environ["MEMBER_ID"]
 name = store.next_name(slug, "eng")
 started = int(time.time() * 1000)
 agent = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", started_at=started, hive=member, runtime_target={"host_id": member})
-store.start_execution(slug, agent)
-store.seats.occupy(f"eng-1@{slug}", name, started)
+def place_member():
+    store.start_execution(slug, agent)
+    store.seats.occupy(agent.seat, name, started)
+    return {}
+exits.sweep(InboxStore(store.redis), slug, store, place_member)
+assert store.seats.exit_of(name) == {}, "the exit sweep marked the newly placed member as exited"
 print(name)
 ')"
 printf 'placed %s on the member in seat eng-1\n' "$member_agent"
@@ -100,10 +112,10 @@ from scripts.swarm.store import connect
 print(relay.relay(connect().redis))
 ')"
 printf 'controller relay of member mail: %s\n' "$relayed"
-inbox="$(docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks msg inbox)"
+inbox="$(docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks msg inbox)"
 printf 'host inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the member hive"* ]]
-docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks msg send "eng-1@$slug" "hello from the host"
+docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks msg send "eng-1@$slug" "hello from the host"
 inbox="$(docker exec -e AGENTIHOOKS_AGENT_NAME="$member_agent" "$run-member" agentihooks msg inbox)"
 printf 'member inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the host"* ]]

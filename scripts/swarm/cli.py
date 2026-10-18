@@ -358,7 +358,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
                 actions += skip_refused(langfuse.refresh, store, slug, now_ms())
             found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
+                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
             actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
             actions += timing.call(
@@ -398,6 +398,8 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
+        if not _tickable(slug):
+            return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
@@ -478,6 +480,14 @@ def cmd_waits(store, args):
             list(pool.map(check, slugs))
 
 
+def _tickable(slug):
+    ledger = LedgerClient()
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
+
+
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
@@ -536,6 +546,12 @@ def cmd_alerts(store, args):
     from scripts.swarm import alert_intake
 
     alert_intake.serve(store.redis, alert_intake.settings(os.environ), now_ms)
+
+
+def cmd_prober(store, args):
+    from scripts.swarm import command_runner, quota_refresh
+
+    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
 
 
 def cmd_create(store, args):
@@ -2103,7 +2119,7 @@ def _tick_store():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "prober", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (

@@ -28,6 +28,7 @@ def pool(label):
 
 
 MOVED = {
+    ("test.yml", "docs"): QUEUED,
     ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
     ("branch-lanes.yml", "grade"): LIGHT,
@@ -80,7 +81,7 @@ MOVED = {
     ("test.yml", "mutation-stats"): BATCH,
     ("test.yml", "queue-fail-fast"): LIGHT,
     ("test.yml", "refresh-durations"): QUEUED,
-    ("test.yml", "count-record"): QUEUED,
+    ("count-record.yml" if (WORKFLOWS / "count-record.yml").exists() else "test.yml", "count-record"): QUEUED,
     ("test.yml", "reuse"): LIGHT,
     ("test.yml", "select"): LIGHT,
     ("test.yml", "shard-check"): LIGHT,
