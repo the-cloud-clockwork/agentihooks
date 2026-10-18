@@ -7,6 +7,7 @@ and the gates require formatted code. AGENTIHOOKS_SERENA=false turns the guard o
 """
 
 import re
+import shlex
 from pathlib import Path
 
 from hooks.hook_manager import BlockAction
@@ -29,7 +30,7 @@ _SHELL_WRITES = (
     re.compile(r"""Path\(\s*""" + _PY + r"""\s*\)\.write_(?:text|bytes)"""),
 )
 _SHELL_DELETE = re.compile(r"(?:^|[;&|\n(])\s*(?:git\s+)?rm\s([^|;&\n]*)")
-_PATCH_DELETE = re.compile(r"^\*\*\* Delete File: (.+)$", re.MULTILINE)
+_PATCH_ACTION = re.compile(r"^\*\*\* (Delete File|Add File|Update File|Move to): (.+)$", re.MULTILINE)
 
 
 def _worktree_root(path: Path) -> Path | None:
@@ -38,6 +39,13 @@ def _worktree_root(path: Path) -> Path | None:
         if marker.is_dir():
             return None
         if marker.is_file():
+            return d
+    return None
+
+
+def _checkout_root(path: Path) -> Path | None:
+    for d in (path, *path.parents):
+        if (d / ".git").exists():
             return d
     return None
 
@@ -54,41 +62,57 @@ def _block(path: Path, root: Path) -> None:
         "(Development Manifesto §7).\n"
         f"Call mcp__serena__activate_project with {root}, then edit with replace_symbol_body, "
         "insert_after_symbol / insert_before_symbol, rename_symbol or replace_content. "
-        "A new .py file may be created with Write; a whole file in this worktree is deleted with git rm."
+        "A new .py file may be created with Write; a whole file in this worktree is deleted with git rm or rm."
     )
 
 
 def _block_foreign_delete(path: Path, root: Path) -> None:
     raise BlockAction(
-        f"BLOCKED: {path} is Python in another worktree, {root}. "
-        "A session deletes Python files only inside its own worktree."
+        f"BLOCKED: {path} is Python in another checkout, {root}. "
+        "A session deletes Python files only inside its own checkout."
     )
 
 
 def _check_files(tool_input: dict, cwd: Path) -> None:
-    session = _worktree_root(cwd.resolve())
-    content = tool_input.get("content") or ""
-    patch_deletes = _PATCH_DELETE.findall(content) if content.startswith("*** Begin Patch") else []
-    deleted = {(cwd / Path(target.strip())).resolve() for target in patch_deletes}
+    session = _checkout_root(cwd.resolve())
+    deleted = _patch_deletions(tool_input, cwd)
     for raw in tool_input.get("file_paths") or [tool_input.get("file_path") or ""]:
         path = Path(raw)
         full = path if path.is_absolute() else cwd / path
-        root = _guarded(full)
-        if not root:
+        if full.resolve() in deleted:
+            _check_delete(path, full, session)
             continue
-        if full.resolve() not in deleted:
+        root = _guarded(full)
+        if root:
             _block(path, root)
-        if root != session:
-            _block_foreign_delete(path, root)
+
+
+def _patch_deletions(tool_input: dict, cwd: Path) -> set[Path]:
+    if not tool_input.get("file_paths"):
+        return set()
+    actions: dict[Path, set[str]] = {}
+    for action, target in _PATCH_ACTION.findall(tool_input.get("content") or ""):
+        actions.setdefault((cwd / Path(target.strip())).resolve(), set()).add(action)
+    return {path for path, kinds in actions.items() if kinds == {"Delete File"}}
+
+
+def _check_delete(path: Path, full: Path, session: Path | None) -> None:
+    if full.suffix != ".py" or not full.is_file():
+        return
+    root = _checkout_root(full.resolve())
+    if root and root != session:
+        _block_foreign_delete(path, root)
 
 
 def _check_shell_deletes(command: str, base: Path, session: Path | None) -> None:
     for match in _SHELL_DELETE.finditer(command):
-        for token in match.group(1).split():
-            path = Path(token.strip("'\"")).expanduser()
-            root = _guarded(path if path.is_absolute() else base / path)
-            if root and root != session:
-                _block_foreign_delete(path, root)
+        try:
+            tokens = shlex.split(match.group(1))
+        except ValueError:
+            tokens = match.group(1).split()
+        for token in tokens:
+            path = Path(token).expanduser()
+            _check_delete(path, path if path.is_absolute() else base / path, session)
 
 
 def check(payload: dict) -> None:
@@ -116,4 +140,4 @@ def check(payload: dict) -> None:
             root = _guarded(path if path.is_absolute() else base / path)
             if root:
                 _block(path, root)
-    _check_shell_deletes(command, base, _worktree_root(cwd.resolve()))
+    _check_shell_deletes(command, base, _checkout_root(cwd.resolve()))

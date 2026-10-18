@@ -152,14 +152,46 @@ def test_patch_updating_worktree_python_beside_a_deletion_is_blocked(trees):
 def test_shell_deletion_of_python_in_another_worktree_is_blocked(trees, sibling, command):
     _, worktree = trees
     command = command.format(path=sibling / "pkg" / "mod.py", root=sibling)
-    with pytest.raises(BlockAction, match="another worktree"):
+    with pytest.raises(BlockAction, match="another checkout"):
         check(_tool("Bash", worktree, command=command))
 
 
 def test_patch_deletion_of_python_in_another_worktree_is_blocked(trees, sibling):
     _, worktree = trees
     name, tool_input = _patch(f"*** Delete File: {sibling / 'pkg' / 'mod.py'}")
-    with pytest.raises(BlockAction, match="another worktree"):
+    with pytest.raises(BlockAction, match="another checkout"):
+        check({"tool_name": name, "tool_input": tool_input, "cwd": str(worktree)})
+
+
+@pytest.mark.parametrize("command", ["git rm {path}", "rm '{path}'"])
+def test_shell_deletion_of_primary_checkout_python_from_a_worktree_is_blocked(trees, command):
+    primary, worktree = trees
+    command = command.format(path=primary / "pkg" / "mod.py")
+    with pytest.raises(BlockAction, match="another checkout"):
+        check(_tool("Bash", worktree, command=command))
+
+
+def test_shell_deletion_of_a_quoted_path_with_spaces_in_another_worktree_is_blocked(trees, sibling):
+    _, worktree = trees
+    (sibling / "my dir").mkdir()
+    (sibling / "my dir" / "mod.py").write_text("x = 1\n")
+    with pytest.raises(BlockAction, match="another checkout"):
+        check(_tool("Bash", worktree, command=f'rm "{sibling / "my dir" / "mod.py"}"'))
+
+
+def test_write_with_a_patch_shaped_body_is_blocked(trees):
+    _, worktree = trees
+    target = worktree / "pkg" / "mod.py"
+    content = f"*** Begin Patch\n*** Delete File: {target}\n*** End Patch"
+    with pytest.raises(BlockAction, match="activate_project"):
+        check(_tool("Write", worktree, file_path=str(target), content=content))
+
+
+def test_patch_deleting_then_adding_the_same_python_file_is_blocked(trees):
+    _, worktree = trees
+    target = worktree / "pkg" / "mod.py"
+    name, tool_input = _patch(f"*** Delete File: {target}", f"*** Add File: {target}", "+x = 2")
+    with pytest.raises(BlockAction, match="activate_project"):
         check({"tool_name": name, "tool_input": tool_input, "cwd": str(worktree)})
 
 
