@@ -255,6 +255,8 @@ def test_a_file_tool_call_without_a_path_is_allowed(trees):
         "/bin/rm {root}/pkg/mod.py",
         "\\rm {root}/pkg/mod.py",
         "command rm {root}/pkg/mod.py",
+        "exec rm {root}/pkg/mod.py",
+        "time rm {root}/pkg/mod.py",
     ],
 )
 def test_other_deletion_forms_of_python_in_another_worktree_are_blocked(trees, sibling, command):
