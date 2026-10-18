@@ -317,8 +317,7 @@ def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, capl
 
 
 def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monkeypatch):
-    store.names.mint_code("sw", "sw", "/r")
-    store.names.mint_code("other", "other", "/r")
+    store.create(SwarmConfig("other", "/home/x/dev/other", max_eng=1, max_ci=1))
     mine, theirs = store.next_name("sw", "eng"), store.next_name("other", "ci")
     store.names.alias("sw-eng-1", mine)
     orphan = "ci@ffffff-0001"
