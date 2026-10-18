@@ -281,6 +281,7 @@ def test_the_cache_key_follows_the_installed_playwright_mcp(monkeypatch, tmp_pat
     ],
 )
 def test_a_missing_or_unreadable_cache_is_no_cache(content):
+    assert browser.tools_file() == Path.home() / ".agentihooks/browser/tools.json"
     if content is not None:
         browser.tools_file().parent.mkdir(exist_ok=True)
         browser.tools_file().write_text(content)

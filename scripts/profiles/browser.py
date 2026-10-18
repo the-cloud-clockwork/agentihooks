@@ -131,7 +131,7 @@ def save_tools(tools: list[types.Tool], key: str | None) -> None:
         return
     path = tools_file()
     path.parent.mkdir(exist_ok=True)
-    dumped = [tool.model_dump(mode="json", by_alias=True) for tool in tools]
+    dumped = [tool.model_dump(by_alias=True) for tool in tools]
     path.write_text(json.dumps({"key": key, "tools": dumped}))
 
 
