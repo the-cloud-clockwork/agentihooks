@@ -55,10 +55,12 @@ def test_launch_ignores_a_full_user_runtime_disk(store, server, root, tmp_path, 
 
 
 def test_repeated_launch_and_finish_leave_no_runtime_homes(store, root, tmp_path):
+    previous = ""
     for index in range(12):
         server = Server(str(tmp_path / "profile"))
-        spec = launch_spec(store, server, tmp_path)
+        spec = launch_spec(store, server, tmp_path, previous_execution_id=previous)
         started = supervisor.launch(store, spec, deps(server, Clock(), root))
+        previous = started.record.execution_id
         supervisor.stop(started.process)
         supervisor.finish(store, SLUG, started, 5000 + index)
         store.drop_agent(SLUG, started.agent.name, 5000 + index)
@@ -117,3 +119,32 @@ def test_concurrent_cleanup_does_not_fail_launch_or_finish(store, server, root, 
             spec = other_seat(launch_spec(store, successor, tmp_path))
             supervisor.launch(store, spec, deps(successor, Clock(), root))
     assert not directory.exists()
+
+
+@pytest.mark.parametrize("action", ["launch", "finish"])
+def test_cleanup_preserves_unique_legacy_rollouts(store, server, root, tmp_path, action):
+    from tests.codex_session.test_supervisor import other_seat
+
+    canonical = tmp_path / "canonical"
+    canonical.mkdir()
+    first = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    home = Path(server.spawns[0]["env"]["CODEX_HOME"])
+    (home / "config.toml").write_text(f'sqlite_home = "{canonical}"\n')
+    for name in ("sessions", "archived_sessions"):
+        (home / name).unlink()
+        (home / name).mkdir()
+        (home / name / "unique.jsonl").write_text("unique legacy transcript")
+        (home / name / "shared.jsonl").write_text("old snapshot")
+        (canonical / name).mkdir()
+        (canonical / name / "shared.jsonl").write_text("newer canonical transcript")
+    if action == "finish":
+        supervisor.stop(first.process)
+        supervisor.finish(store, SLUG, first, 5000)
+    else:
+        successor = Server(server.codex_home)
+        spec = other_seat(launch_spec(store, successor, tmp_path))
+        supervisor.launch(store, spec, deps(successor, Clock(), root))
+    assert not home.exists()
+    for name in ("sessions", "archived_sessions"):
+        assert (canonical / name / "unique.jsonl").read_text() == "unique legacy transcript"
+        assert (canonical / name / "shared.jsonl").read_text() == "newer canonical transcript"
