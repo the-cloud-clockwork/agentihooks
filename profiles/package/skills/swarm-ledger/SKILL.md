@@ -230,7 +230,7 @@ Done when `status` no longer lists you.
 ## Part C — Run a swarm over a ledger
 
 A swarm is a herdr workspace `<repo>-<code>` of Claude and Codex agents working the ledger's tasks, one task
-per agent life. Redis holds claims and the agent registry; a systemd user timer runs `agentihooks swarm tick`
+per agent life. Redis holds claims and the agent registry; an agentihooks scheduler cron runs `agentihooks swarm tick`
 every minute, which retires finished agents, frees the tasks of dead ones and spawns up to the caps. No
 process runs between ticks.
 

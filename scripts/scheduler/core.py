@@ -123,6 +123,10 @@ class Scheduler:
         entry.record
         return entry
 
+    def owned(self, owner: str) -> list[Entry]:
+        entries = self.redis.hgetall(self.key("entries"))
+        return [Entry(self, entry_id) for entry_id, raw in entries.items() if json.loads(raw)["owner"] == owner]
+
     def records(self) -> list[dict]:
         return [json.loads(raw) for raw in self.redis.hvals(self.key("entries"))]
 
@@ -173,6 +177,12 @@ class Scheduler:
         if limit < 0:
             raise ValueError("limit must not be negative")
         return self._new(Schedule("stopwatch", owner, payload, now + limit, limit))
+
+    def interval(self, *, owner: str, payload: str, every: float, now: float | None = None) -> Entry:
+        now = time.time() if now is None else now
+        if every <= 0:
+            raise ValueError("an interval must be positive")
+        return self._new(Schedule("interval", owner, payload, now + every, every))
 
     def cron(
         self, *, owner: str, payload: str, expression: str, timezone: str = "UTC", now: float | None = None
@@ -259,6 +269,9 @@ class Scheduler:
         if entry["kind"] == "cron":
             entry["state"] = "active"
             entry["due"] = next_due(entry["expression"], entry["timezone"], now)
+        elif entry["kind"] == "interval":
+            entry["state"] = "active"
+            entry["due"] = now + entry["delay"]
         entry.pop("pending")
 
     def retire(self, entry_id: str, wake_key: str) -> None:

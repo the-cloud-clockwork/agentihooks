@@ -191,7 +191,7 @@ GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
-# systemd stops a pass at TimeoutStartSec=540; leave an extra tick room to finish.
+# The scheduled tick holder stops a pass at scheduled_tick.TIMEOUT_S; leave an extra tick room to finish.
 EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -508,11 +508,11 @@ def cmd_tick(store, args):
         if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
             raise SwarmError(
                 "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-                "and the host timer ticks every 60 seconds"
+                "and the host scheduler ticks every 60 seconds"
             )
         slugs = store.slugs()
+        _reconcile_services()
         if slugs:
-            _reconcile_services()
             firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
             if tick_stop.run(
                 slugs,
@@ -607,7 +607,8 @@ def _state(store, args, state):
     store.update(args.slug, state=state)
     if state == "running" and not timer.ensure(timer.entry_point()):
         print(
-            "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself",
+            "warning: the scheduled swarm tick or swarm services could not be enabled; "
+            "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
     for action in run_tick(store, args.slug):

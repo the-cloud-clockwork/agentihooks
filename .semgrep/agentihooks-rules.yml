@@ -7,7 +7,7 @@ rules:
     pattern-regex: '(?:^|["'']|\\n)\[Timer\]|\bOn(Calendar|BootSec|StartupSec|ActiveSec|UnitActiveSec|UnitInactiveSec)='
     paths:
       include: ["*.py", "*.sh", "*.bash", "*.timer", "*.service", "*.unit", "*.conf", "*.ini", "Dockerfile*", "*.cron", "crontab"]
-      exclude: [/scripts/scheduler/, /hooks/lifecycle/timer.py, /scripts/swarm/timer.py, /scripts/swarm_v2/herdr/operator_setup.py]
+      exclude: [/scripts/scheduler/, /hooks/lifecycle/timer.py, /scripts/swarm/timer.py]
 
   - id: machine-cron-entry
     message: A crontab, at, launchd or Task Scheduler entry schedules work outside the agentihooks scheduler. Register the job with scripts.scheduler instead.
