@@ -709,21 +709,21 @@ def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypa
             _check_stored_durations(selected_nodeids)
 
 
-@pytest.mark.parametrize(("reused", "strays"), [(False, 0), (True, 0), (True, 9)])
-def test_stored_durations_skip_the_tests_the_queue_reuses(tmp_path, monkeypatch, reused, strays):
+@pytest.mark.parametrize(("reused", "unstored"), [(False, 0), (True, 0), (True, 8), (True, 9)])
+def test_stored_durations_skip_the_tests_the_queue_reuses(tmp_path, monkeypatch, reused, unstored):
     kept = [f"tests/test_probe.py::test_{i}" for i in range(80)]
     by_test = [f"tests/test_probe.py::test_{i}" for i in range(80, 90)]
-    by_file = [f"tests/test_cached.py::test_{i}@ledger" for i in range(10)]
-    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(kept[strays:], 0.1)))
-    (tmp_path / "collected.json").write_text(json.dumps(kept + by_test + by_file))
+    by_file = [f"tests/test_cached.py::test_{i}" for i in range(10)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(kept[unstored:], 0.1)))
+    (tmp_path / "collected.json").write_text(json.dumps(kept + [f"{node}@ledger" for node in by_test] + by_file))
     if reused:
         (tmp_path / "reused.json").write_text(json.dumps({"tests": by_test, "files": ["tests/test_cached.py"]}))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
     if not reused:
         with pytest.raises(AssertionError, match="20 of 100 tests"):
             _check_stored_durations()
-    elif strays:
-        with pytest.raises(AssertionError, match=f"{strays} of 80 tests"):
+    elif unstored > 8:
+        with pytest.raises(AssertionError, match=f"{unstored} of 80 tests"):
             _check_stored_durations()
     else:
         _check_stored_durations()
