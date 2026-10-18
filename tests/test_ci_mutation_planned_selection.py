@@ -107,7 +107,11 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {3}})
     monkeypatch.setattr(plan, "find_record", record)
     try:
-        assert plan.main() == 0
+        if tests:
+            assert plan.main() == 0
+        else:
+            with pytest.raises(SystemExit, match="scripts/core.py: not mutated, no matching or importing test modules"):
+                plan.main()
     finally:
         monkeypatch.undo()
         time.tzset()
@@ -115,7 +119,8 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     assert repository == "owner/repo"
     assert abs((datetime.now(UTC) - before).total_seconds()) < 120
     assert notice in capsys.readouterr().out.splitlines()
-    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/core.py": tests}
+    if tests:
+        assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/core.py": tests}
 
 
 def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, monkeypatch):
