@@ -467,10 +467,7 @@ def test_shards_wait_only_on_the_durations_lookup():
         ["select", "reuse", "admission"],
         ["test-count", "select", "reuse", "admission"],
     )
-    assert jobs["unit"]["needs"] in (
-        ["split", "select", "reuse", "admission"],
-        ["split", "select", "reuse", "admission", "queue-plan"],
-    )
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
 
 
