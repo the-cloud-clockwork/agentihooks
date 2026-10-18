@@ -6,6 +6,13 @@ from importlib.metadata import version
 from hooks.mcp import _resolve_categories
 from hooks.mcp._catalog import CAPABILITIES, CATALOG, PROTOCOL_VERSIONS
 
+_SERVER_INFO = {"name": "agentihooks", "version": version("mcp")}
+_EMPTY_LISTS = {
+    "resources/list": "resources",
+    "resources/templates/list": "resourceTemplates",
+    "prompts/list": "prompts",
+}
+
 
 def list_tools() -> list[dict]:
     categories = _resolve_categories()
@@ -36,12 +43,10 @@ class _Output:
     def __init__(self, stream, initialize_id):
         self.stream = stream
         self.initialize_id = initialize_id
-        self.pending = initialize_id is not None
 
     async def write(self, data: str) -> None:
-        message = json.loads(data)
-        if self.pending and message.get("id") == self.initialize_id:
-            self.pending = False
+        if self.initialize_id is not None and json.loads(data).get("id") == self.initialize_id:
+            self.initialize_id = None
             return
         await self.stream.write(data)
 
@@ -68,7 +73,11 @@ async def _serve(history, stdin, stdout, initialize_id) -> None:
         await server._mcp_server.run(read, write, server._mcp_server.create_initialization_options())
 
 
-def _method(message):
+def _request(line):
+    try:
+        message = json.loads(line)
+    except ValueError:
+        return None
     if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
         return None
     params = message.get("params", {})
@@ -78,18 +87,18 @@ def _method(message):
     if not isinstance(method, str):
         return None
     if method == "notifications/initialized" and "id" not in message:
-        return method
+        return message
     request_id = message.get("id")
     if isinstance(request_id, bool) or not isinstance(request_id, (str, int)):
         return None
     if method == "initialize":
-        client = params.get("clientInfo", {})
+        client = params.get("clientInfo")
         if not isinstance(client, dict):
             return None
         fields = (params.get("protocolVersion"), client.get("name"), client.get("version"))
         if not all(isinstance(value, str) for value in fields) or not isinstance(params.get("capabilities"), dict):
             return None
-    return method
+    return message
 
 
 def run() -> None:
@@ -97,11 +106,8 @@ def run() -> None:
     initialize_id = None
     tools = list_tools()
     for line in sys.stdin:
-        try:
-            message = json.loads(line)
-        except ValueError:
-            message = None
-        method = _method(message)
+        message = _request(line)
+        method = message["method"] if message else None
         if method == "initialize":
             history = [line]
             initialize_id = message["id"]
@@ -109,20 +115,15 @@ def run() -> None:
             result = {
                 "protocolVersion": requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[-1],
                 "capabilities": CAPABILITIES,
-                "serverInfo": {"name": "agentihooks", "version": version("mcp")},
+                "serverInfo": _SERVER_INFO,
             }
         elif method == "notifications/initialized":
             history.append(line)
             continue
         elif method == "ping":
             result = {}
-        elif method in {"resources/list", "resources/templates/list", "prompts/list"} and initialize_id is not None:
-            key = {
-                "resources/list": "resources",
-                "resources/templates/list": "resourceTemplates",
-                "prompts/list": "prompts",
-            }[method]
-            result = {key: []}
+        elif method in _EMPTY_LISTS and initialize_id is not None:
+            result = {_EMPTY_LISTS[method]: []}
         elif method == "tools/list" and initialize_id is not None:
             result = {"tools": tools}
         else:

@@ -170,17 +170,6 @@ def test_all_thirteen_tools_keep_their_results_after_lazy_start(monkeypatch):
     assert "mcp.server.fastmcp" in modules
 
 
-@pytest.mark.parametrize(
-    "categories,allowed",
-    [
-        ("all", ""),
-        ("channels,channels", "CHANNEL_LIST,brain_status"),
-        ("enforcement,conditions", ""),
-        ("unknown", ""),
-        ("all", "missing"),
-        ("all", ","),
-    ],
-)
 def test_discovery_matches_registry_configuration(monkeypatch, capsys, categories, allowed):
     from hooks.mcp import build_server
     from hooks.mcp._stdio import list_tools
@@ -188,9 +177,17 @@ def test_discovery_matches_registry_configuration(monkeypatch, capsys, categorie
     monkeypatch.setenv("MCP_CATEGORIES", categories)
     monkeypatch.setenv("ALLOWED_TOOLS", allowed)
     expected = asyncio.run(build_server().list_tools())
+    registry = capsys.readouterr()
     assert list_tools() == [tool.model_dump(by_alias=True, exclude_none=True) for tool in expected]
+    discovery = capsys.readouterr()
+    assert discovery.out == ""
+    assert discovery.err == registry.err
     if categories == "unknown" or allowed == "missing":
-        assert "ZERO tools" in capsys.readouterr().err
+        assert "ZERO tools" in discovery.err
+    else:
+        assert "ZERO tools" not in discovery.err
+    if categories == "unknown":
+        assert "ignoring unknown MCP categories ['unknown']" in discovery.err
 
 
 @pytest.mark.parametrize("requested", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "unknown"])
@@ -300,3 +297,177 @@ def test_hook_entry_point_keeps_its_public_export(monkeypatch):
     assert hooks.__dict__["main"] is main
     with pytest.raises(AttributeError, match="no attribute 'missing'"):
         hooks.missing
+
+
+_INITIALIZE = {
+    "jsonrpc": "2.0",
+    "id": "init",
+    "method": "initialize",
+    "params": {
+        "protocolVersion": "2025-03-26",
+        "capabilities": {},
+        "clientInfo": {"name": "contract", "version": "1"},
+    },
+}
+_INITIALIZED = {"jsonrpc": "2.0", "method": "notifications/initialized"}
+
+
+class _Stdout:
+    def __init__(self):
+        self.text = ""
+        self.flushes = []
+
+    def write(self, text):
+        self.text += text
+
+    def flush(self):
+        self.flushes.append(self.text.count("\n"))
+
+
+def _run(monkeypatch, messages):
+    from io import StringIO
+
+    from hooks.mcp import _stdio
+
+    transfers = []
+
+    async def serve(history, stdin, stdout, initialize_id):
+        transfers.append((history, initialize_id))
+
+    lines = [message if isinstance(message, str) else json.dumps(message) + "\n" for message in messages]
+    stdout = _Stdout()
+    monkeypatch.setenv("MCP_CATEGORIES", "channels")
+    monkeypatch.delenv("ALLOWED_TOOLS", raising=False)
+    monkeypatch.setattr(_stdio, "_serve", serve)
+    monkeypatch.setattr(sys, "stdin", StringIO("".join(lines)))
+    monkeypatch.setattr(sys, "stdout", stdout)
+    _stdio.run()
+    return lines, [json.loads(line) for line in stdout.text.splitlines()], transfers, stdout.flushes
+
+
+def test_discovery_requests_are_answered_and_flushed_without_the_protocol_library(monkeypatch):
+    from importlib.metadata import version
+
+    from hooks.mcp._stdio import list_tools
+
+    _, replies, transfers, flushes = _run(
+        monkeypatch,
+        [
+            _INITIALIZE,
+            _INITIALIZED,
+            {"jsonrpc": "2.0", "id": 1, "method": "ping"},
+            {"jsonrpc": "2.0", "id": 2, "method": "resources/list"},
+            {"jsonrpc": "2.0", "id": 3, "method": "resources/templates/list"},
+            {"jsonrpc": "2.0", "id": 4, "method": "prompts/list"},
+            {"jsonrpc": "2.0", "id": 5, "method": "tools/list"},
+        ],
+    )
+    assert transfers == []
+    assert flushes == [1, 2, 3, 4, 5, 6]
+    assert replies[0]["result"]["serverInfo"] == {"name": "agentihooks", "version": version("mcp")}
+    assert [{key: reply[key] for key in ("jsonrpc", "id", "result")} for reply in replies[1:]] == [
+        {"jsonrpc": "2.0", "id": 1, "result": {}},
+        {"jsonrpc": "2.0", "id": 2, "result": {"resources": []}},
+        {"jsonrpc": "2.0", "id": 3, "result": {"resourceTemplates": []}},
+        {"jsonrpc": "2.0", "id": 4, "result": {"prompts": []}},
+        {"jsonrpc": "2.0", "id": 5, "result": {"tools": list_tools()}},
+    ]
+
+
+@pytest.mark.parametrize(
+    "first",
+    [
+        {"jsonrpc": "2.0", "id": 1, "method": "resources/list"},
+        {"jsonrpc": "2.0", "id": 1, "method": "resources/templates/list"},
+        {"jsonrpc": "2.0", "id": 1, "method": "prompts/list"},
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "channel_list"}},
+        {"jsonrpc": "2.0", "method": "ping"},
+        "[]\n",
+        "not json\n",
+    ],
+)
+def test_request_before_initialize_moves_to_the_protocol_library_alone(monkeypatch, first):
+    lines, replies, transfers, _ = _run(monkeypatch, [first])
+    assert replies == []
+    assert transfers == [(lines, None)]
+
+
+def test_first_call_moves_the_initialized_session_to_the_protocol_library(monkeypatch):
+    call = {"jsonrpc": "2.0", "id": "call", "method": "tools/call", "params": {"name": "channel_list"}}
+    lines, replies, transfers, _ = _run(monkeypatch, [_INITIALIZE, _INITIALIZED, call])
+    assert [reply["id"] for reply in replies] == ["init"]
+    assert transfers == [(lines, "init")]
+
+
+@pytest.mark.parametrize(
+    "line,valid",
+    [
+        ("not json", False),
+        ("[]", False),
+        ({"jsonrpc": "1.0", "id": 1, "method": "ping"}, False),
+        ({"jsonrpc": "2.0", "id": 1, "method": "ping", "params": []}, False),
+        ({"jsonrpc": "2.0", "id": 1, "method": []}, False),
+        ({"jsonrpc": "2.0", "id": 1, "method": "ping"}, True),
+        ({"jsonrpc": "2.0", "id": "a", "method": "ping", "params": {}}, True),
+        ({"jsonrpc": "2.0", "method": "ping"}, False),
+        ({"jsonrpc": "2.0", "id": True, "method": "ping"}, False),
+        ({"jsonrpc": "2.0", "id": 1.5, "method": "ping"}, False),
+        (_INITIALIZED, True),
+        ({**_INITIALIZED, "id": True}, False),
+        (_INITIALIZE, True),
+        ({**_INITIALIZE, "params": {"protocolVersion": "2025-03-26", "capabilities": {}}}, False),
+        ({**_INITIALIZE, "params": {**_INITIALIZE["params"], "clientInfo": []}}, False),
+        ({**_INITIALIZE, "params": {**_INITIALIZE["params"], "clientInfo": {"name": "contract"}}}, False),
+        ({**_INITIALIZE, "params": {**_INITIALIZE["params"], "protocolVersion": 1}}, False),
+        ({**_INITIALIZE, "params": {**_INITIALIZE["params"], "capabilities": None}}, False),
+    ],
+)
+def test_request_validation_matches_the_handshake_contract(line, valid):
+    from hooks.mcp._stdio import _request
+
+    text = line if isinstance(line, str) else json.dumps(line)
+    assert _request(text) == (json.loads(text) if valid else None)
+
+
+def test_output_drops_only_the_replayed_initialize_reply():
+    from hooks.mcp._stdio import _Output
+
+    class Stream:
+        def __init__(self):
+            self.ids = []
+            self.flushed = 0
+
+        async def write(self, data):
+            self.ids.append(json.loads(data)["id"])
+
+        async def flush(self):
+            self.flushed += 1
+
+    async def scenario(initialize_id):
+        stream = Stream()
+        output = _Output(stream, initialize_id)
+        for request_id in ("other", "init", "init", ""):
+            await output.write(json.dumps({"id": request_id}))
+        await output.flush()
+        return stream
+
+    replayed = asyncio.run(scenario("init"))
+    assert replayed.ids == ["other", "init", ""]
+    assert replayed.flushed == 1
+    assert asyncio.run(scenario(None)).ids == ["other", "init", "init", ""]
+
+
+def test_protocol_library_answers_initialize_with_the_server_options(monkeypatch):
+    from io import StringIO
+
+    from hooks.mcp import build_server
+    from hooks.mcp._stdio import _serve
+
+    monkeypatch.setenv("MCP_CATEGORIES", "channels")
+    stdout = StringIO()
+    asyncio.run(_serve([json.dumps(_INITIALIZE) + "\n"], StringIO(""), stdout, None))
+    reply = json.loads(stdout.getvalue().splitlines()[0])
+    expected = build_server()._mcp_server.create_initialization_options()
+    assert reply["id"] == "init"
+    assert reply["result"]["serverInfo"] == {"name": expected.server_name, "version": expected.server_version}
