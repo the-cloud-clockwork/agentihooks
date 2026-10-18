@@ -845,31 +845,6 @@ jobs:
           fi
           python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 "${collection[@]}" --collected collected.json
 
-      - name: Size queue shards from conservative durations
-        id: queue-size
-        if: github.event_name == 'merge_group'
-        env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
-        run: |
-          for suffix in '' -3.11 -3.12; do
-            measured="$HOME/dev-durations/.test_durations-slowest$suffix"
-            [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
-          done
-          : > queue-plan.txt
-          for version in 3.11 3.12; do
-            collection=collected.json
-            [[ "$version" == 3.11 ]] || collection=queue-input/3.12/collected.json
-            destination="queue-input/$version"
-            mkdir -p "$destination"
-            python -m tests.dev_durations "$version" ~/dev-durations --hash durations.sha256 --collection "$collection" --collected "$collection"
-            python -m tests.queue_shards --root . --collection "$collection" --version "$version" --output queue-plan.txt
-            cp .test_durations durations.sha256 "$destination/"
-          done
-          python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
-          cp queue-input/3.11/.test_durations .test_durations
-          cp queue-input/3.11/durations.sha256 durations.sha256
-          cat queue-plan.txt >> "$GITHUB_OUTPUT"
-
       - name: Mint the token that reads the dev test record
         id: app-token
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch' || (github.event_name == 'pull_request' && github.base_ref == 'dev' && github.event.pull_request.head.repo.full_name == github.repository)
@@ -940,6 +915,35 @@ jobs:
             "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
               --collected "$GITHUB_WORKSPACE/queue-input/3.12/collected.json" --out "$GITHUB_WORKSPACE/queue-input/3.12/reused.json"
           fi
+
+      - name: Size queue shards from conservative durations
+        id: queue-size
+        if: github.event_name == 'merge_group'
+        env:
+          PYTHON_VERSION: ${{ matrix.python-version }}
+        run: |
+          for suffix in '' -3.11 -3.12; do
+            measured="$HOME/dev-durations/.test_durations-slowest$suffix"
+            [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
+          done
+          : > queue-plan.txt
+          for version in 3.11 3.12; do
+            collection=collected.json
+            reused=reused.json
+            if [[ "$version" == 3.12 ]]; then
+              collection=queue-input/3.12/collected.json
+              reused=queue-input/3.12/reused.json
+            fi
+            destination="queue-input/$version"
+            mkdir -p "$destination"
+            python -m tests.dev_durations "$version" ~/dev-durations --hash durations.sha256 --collection "$collection" --collected "$collection"
+            python -m tests.queue_shards --root . --collection "$collection" --version "$version" --reused "$reused" --output queue-plan.txt
+            cp .test_durations durations.sha256 "$destination/"
+          done
+          python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
+          cp queue-input/3.11/.test_durations .test_durations
+          cp queue-input/3.11/durations.sha256 durations.sha256
+          cat queue-plan.txt >> "$GITHUB_OUTPUT"
 
       - name: Upload the deselected tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
