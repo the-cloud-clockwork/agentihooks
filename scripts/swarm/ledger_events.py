@@ -92,6 +92,7 @@ class PullRequest:
     latest_run_cancelled: bool = False
     checks_pending: bool = False
     checks_passed: bool = False
+    running: bool = False
 
 
 def iso_ms(text):
@@ -166,6 +167,7 @@ def pull_request(raw):
         any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
         any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
+        running or any(result in PENDING for result in results),
     )
 
 
