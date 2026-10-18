@@ -10,8 +10,8 @@ import json
 import math
 import os
 import re
+import time
 from collections.abc import Callable
-from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
 from scripts.swarm.health import standing
@@ -78,10 +78,14 @@ def _labels(text) -> dict:
     return dict(part.partition("=")[::2] for part in found.group(1).split(", ")) if found else {}
 
 
+def _order(note: dict) -> tuple:
+    return _number(note.get("time")), _number(note.get("id"))
+
+
 def _latest(annotations: list, slug: str) -> dict:
-    notes = [note for note in annotations if isinstance(note, dict)]
+    notes = [note for note in annotations if isinstance(note, dict) and None not in _order(note)]
     latest = {}
-    for note in sorted(notes, key=lambda note: (_number(note.get("time")) or 0, _number(note.get("id")) or 0)):
+    for note in sorted(notes, key=_order):
         labels = _labels(note.get("text"))
         if labels.get("swarm") == "bottleneck" and labels.get("ledger") == slug and labels.get("stage") in STAGES:
             latest[labels["stage"]] = (note, labels)
@@ -91,14 +95,10 @@ def _latest(annotations: list, slug: str) -> dict:
 def _reading(note: dict, labels: dict):
     data = note.get("data") if isinstance(note.get("data"), dict) else {}
     values = data.get("values") if isinstance(data.get("values"), dict) else {}
-    hours, threshold, at = (
-        _number(values.get("hours")),
-        _number(labels.get("threshold_hours")),
-        _number(note.get("time")),
-    )
-    if hours is None or threshold is None or at is None:
+    hours, threshold = _number(values.get("hours")), _number(labels.get("threshold_hours"))
+    if hours is None or threshold is None:
         return None
-    episode = datetime.fromtimestamp(at / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    episode = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_number(note["time"]) / 1000))
     return standing.Reading(hours, threshold, UNIT, episode)
 
 

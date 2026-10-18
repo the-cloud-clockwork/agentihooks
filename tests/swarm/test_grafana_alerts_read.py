@@ -11,7 +11,7 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 NOTE = {"id": 1, "newState": "Alerting", "text": "x {swarm=bottleneck}", "time": 1}
 
 
-def _gateway(monkeypatch, body, error=False, timeout=0.5):
+def _gateway(monkeypatch, body, error=False, hang=0):
     import mcp
     from mcp.client import streamable_http
 
@@ -42,6 +42,9 @@ def _gateway(monkeypatch, body, error=False, timeout=0.5):
             return False
 
         async def initialize(self):
+            import asyncio
+
+            await asyncio.sleep(hang)
             calls.append("initialize")
 
         async def call_tool(self, name, arguments):
@@ -78,6 +81,13 @@ def test_the_reader_bounds_a_read_at_ten_seconds_by_default(monkeypatch):
 def test_the_reader_takes_an_empty_or_odd_reply_as_no_history(monkeypatch, body):
     _gateway(monkeypatch, body)
     assert grafana_alerts.read_annotations(100_000_000, 0.5) == []
+
+
+def test_the_reader_gives_up_on_a_gateway_that_hangs_past_the_bound(monkeypatch):
+    calls = _gateway(monkeypatch, {"Payload": [NOTE]}, hang=2)
+    with pytest.raises(TimeoutError):
+        grafana_alerts.read_annotations(100_000_000, 0.05)
+    assert "initialize" not in calls
 
 
 def test_the_reader_raises_on_a_tool_error(monkeypatch):

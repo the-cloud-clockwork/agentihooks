@@ -150,9 +150,21 @@ def test_an_unusable_annotation_raises_nothing(redis, bad):
     assert standing.read(redis, "sw") == {}
 
 
-def test_an_unusable_time_or_id_sorts_first(redis):
-    history = [note(), {**note("Normal", ident="x"), "time": "later"}]
+@pytest.mark.parametrize("odd", [{"id": "x"}, {"time": "later"}, {"time": None}])
+def test_a_transition_without_a_usable_time_or_id_is_skipped(redis, odd):
+    history = [note(), {**note("Normal", at=AT + 60_000, ident=2), **odd}]
     assert grafana_alerts.apply(redis, "sw", history, NOW) == ["fired ci_queue on sw"]
+
+
+def test_the_later_time_wins_over_a_larger_id(redis):
+    history = [note("Normal", at=AT + 60_000, ident=1), note(at=AT, ident=9)]
+    grafana_alerts.apply(redis, "sw", [note()], NOW)
+    assert grafana_alerts.apply(redis, "sw", history, NOW + 1) == ["cleared ci_queue on sw"]
+
+
+def test_a_label_value_keeps_every_equals_sign_after_its_name(redis):
+    found = {**note(), "text": note()["text"].replace("ledger=sw", "ledger=sw=2")}
+    assert grafana_alerts.apply(redis, "sw=2", [found], NOW) == ["fired ci_queue on sw=2"]
 
 
 def test_refresh_reads_nothing_without_the_gateway_settings(redis, monkeypatch):
@@ -170,6 +182,7 @@ def test_refresh_applies_what_it_read_at_the_tick_time(redis, monkeypatch):
     seen = []
     actions = grafana_alerts.refresh(redis, "sw", NOW, read=lambda now: seen.append(now) or [note()])
     assert (actions, seen) == (["fired ci_queue on sw"], [NOW])
+    assert standing.read(redis, "sw")["ci_queue"]["updated_at"] == NOW
 
 
 def test_a_failed_read_changes_nothing(redis, monkeypatch):
