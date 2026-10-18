@@ -40,6 +40,64 @@ def test_every_lost_time_stage_the_report_names_is_read():
     )
 
 
+@pytest.mark.parametrize("stage", grafana_alerts.STAGES)
+def test_each_lost_time_stage_fires_then_clears_on_its_resolve(redis, stage):
+    history = [note(stage=stage), note("Normal", stage=stage, at=AT + 60_000, ident=2)]
+    assert grafana_alerts.apply(redis, "sw", history[:1], NOW) == [f"fired {stage} on sw"]
+    assert grafana_alerts.apply(redis, "sw", history, NOW + 1) == [f"cleared {stage} on sw"]
+
+
+@pytest.mark.parametrize("stage", ["build", "ci_run", "launch", "ci_overrun", "queue_wait", "Seat_wait", ""])
+def test_productive_owned_or_unknown_stages_raise_nothing(redis, stage):
+    assert grafana_alerts.apply(redis, "sw", [note(stage=stage)], NOW) == []
+    assert standing.read(redis, "sw") == {}
+
+
+@pytest.mark.parametrize("state", ["Alerting", "Alerting (NoData)", "Alerting (Error)"])
+def test_every_alerting_state_fires(redis, state):
+    assert grafana_alerts.apply(redis, "sw", [note(state)], NOW) == ["fired ci_queue on sw"]
+
+
+@pytest.mark.parametrize("state", ["Normal (NoData)", "Normal (Error)", "Normal (Updated)"])
+def test_every_normal_state_clears(redis, state):
+    grafana_alerts.apply(redis, "sw", [note()], NOW)
+    history = [note(), note(state, at=AT + 60_000, ident=2)]
+    assert grafana_alerts.apply(redis, "sw", history, NOW + 1) == ["cleared ci_queue on sw"]
+
+
+@pytest.mark.parametrize("state", ["alerting", "normal", "", None, "Firing", "Resolved"])
+def test_an_unknown_state_name_changes_nothing(redis, state):
+    grafana_alerts.apply(redis, "sw", [note()], NOW)
+    assert grafana_alerts.apply(redis, "sw", [note(), note(state, at=AT + 60_000, ident=2)], NOW + 1) == []
+    assert standing.read(redis, "sw")["ci_queue"]["updated_at"] == NOW
+
+
+@pytest.mark.parametrize(
+    ("hours", "threshold", "value"),
+    [(0, "1", 0.0), ("2.5", "1", 2.5), (7, "0.25", 7.0), (1e3, "4", 1000.0), (-1, "1", -1.0)],
+)
+def test_the_finding_takes_the_hours_and_threshold_as_numbers(redis, hours, threshold, value):
+    grafana_alerts.apply(redis, "sw", [note(hours=hours, threshold=threshold)], NOW)
+    row = standing.read(redis, "sw")["ci_queue"]
+    assert (row["value"], row["threshold"]) == (value, float(threshold))
+
+
+@pytest.mark.parametrize("hours", ["inf", "-inf", "", [], {}, "many"])
+def test_hours_that_are_not_a_finite_number_raise_nothing(redis, hours):
+    assert grafana_alerts.apply(redis, "sw", [note(hours=hours)], NOW) == []
+
+
+@pytest.mark.parametrize("threshold", ["inf", "", "1h"])
+def test_a_threshold_that_is_not_a_finite_number_raises_nothing(redis, threshold):
+    assert grafana_alerts.apply(redis, "sw", [note(threshold=threshold)], NOW) == []
+
+
+@pytest.mark.parametrize("dropped", ["ledger=sw, ", "stage=ci_queue, ", ", swarm=bottleneck"])
+def test_an_alert_missing_a_routing_label_raises_nothing(redis, dropped):
+    found = {**note(), "text": note()["text"].replace(dropped, "")}
+    assert grafana_alerts.apply(redis, "sw", [found], NOW) == []
+
+
 def test_a_firing_alert_keeps_one_standing_finding_with_its_numbers(redis):
     assert grafana_alerts.apply(redis, "sw", [note()], NOW) == ["fired ci_queue on sw"]
     assert standing.read(redis, "sw")["ci_queue"] == {
