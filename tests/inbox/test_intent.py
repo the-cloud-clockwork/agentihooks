@@ -1,4 +1,5 @@
 import threading
+import time
 
 import pytest
 
@@ -44,7 +45,7 @@ def _decider(monkeypatch, verdict):
     def decide(state, questions, *, purpose, fallbacks):
         calls.append((state, purpose, fallbacks))
         noul = verdict(state["new"], state["recent"])
-        return DecisionResult(answers={"same": Answer(type="noul", noul=noul)}, source="liquid-d1")
+        return DecisionResult(answers={name: Answer(type="noul", noul=noul) for name in questions}, source="liquid-d1")
 
     monkeypatch.setattr(intent, "decide", decide)
     return calls
@@ -89,11 +90,19 @@ def test_a_verdict_below_the_match_floor_keeps_the_round_robin_turn(swarm, inbox
 def test_a_classifier_timeout_falls_back_to_round_robin_without_holding_the_item(swarm, inbox, grouping):
     release = threading.Event()
     grouping.setenv(intent.TIMEOUT_ENV, "0.05")
-    _decider(grouping, lambda new, recent: release.wait(5) and 0.9)
+
+    def slow(new, recent):
+        release.wait(5)
+        return 0.9
+
+    _decider(grouping, slow)
+    started = time.monotonic()
     try:
         items = [inbox.send("swarm", FRONT, text) for text in ("deploy one", "deploy two", "deploy three")]
+        elapsed = time.monotonic() - started
     finally:
         release.set()
+    assert elapsed < 2
     assert [inbox.get(i.id).address for i in items] == [FRONT, SECOND, FRONT]
     assert [inbox.get(i.id).state for i in items] == ["pending"] * 3
     assert swarm.redis.exists(f"{pool.PREFIX}:sw") == 0
@@ -126,12 +135,14 @@ def test_flag_off_asks_no_classifier_and_keeps_no_history(swarm, inbox, monkeypa
     assert swarm.redis.keys(f"{pool.PREFIX}:sw:recent:*") == []
 
 
-@pytest.mark.parametrize("value", ["", "0", "false", "off", "no"])
-def test_only_a_true_flag_turns_grouping_on(monkeypatch, value):
-    monkeypatch.setenv(intent.FLAG, value)
+@pytest.mark.parametrize(("off", "on"), [("", "1"), ("0", " true "), ("false", "YES"), ("off", " On "), ("no", "on")])
+def test_only_a_true_flag_turns_grouping_on(monkeypatch, off, on):
+    monkeypatch.setenv(intent.FLAG, off)
     assert intent.enabled() is False
-    monkeypatch.setenv(intent.FLAG, " On ")
+    monkeypatch.setenv(intent.FLAG, on)
     assert intent.enabled() is True
+    monkeypatch.delenv(intent.FLAG)
+    assert intent.enabled() is False
 
 
 def _cache(swarm, item_id):
@@ -181,12 +192,17 @@ def test_an_unreadable_cached_verdict_asks_again(swarm, inbox, grouping):
 
 def test_a_changed_history_asks_again(swarm, inbox, grouping):
     calls = _decider(grouping, _same_topic)
+    swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{FRONT}", "beta zero")
     swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{SECOND}", "alpha one")
     item = inbox.send("swarm", FRONT, "alpha two")
 
     assert inbox.get(item.id).address == SECOND
     assert _repool(inbox, item.id, SECOND) == FRONT
-    assert [state["recent"] for state, _, _ in calls] == [["alpha one"], ["alpha two", "alpha one"]]
+    assert sorted(state["recent"] for state, _, _ in calls) == [
+        ["alpha one"],
+        ["alpha two", "alpha one"],
+        ["beta zero"],
+    ]
 
 
 @pytest.mark.parametrize(

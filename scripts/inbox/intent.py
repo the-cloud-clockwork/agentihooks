@@ -35,7 +35,7 @@ SAME = YesNo(
 
 
 def enabled() -> bool:
-    return os.environ.get(FLAG, "").strip().lower() in ("1", "true", "yes", "on")
+    return str(os.environ.get(FLAG)).strip().lower() in ("1", "true", "yes", "on")
 
 
 def timeout_s() -> float:
@@ -63,7 +63,7 @@ def remember(pipe, pool: MasterPool, slug: str, seat: str, item: Item) -> None:
 
 
 def _digest(recent: list[str]) -> str:
-    return hashlib.sha256(json.dumps(recent).encode()).hexdigest()[:16]
+    return hashlib.sha256(json.dumps(recent).encode()).hexdigest()
 
 
 def _cached(cached: dict, field: str) -> float | None:
@@ -85,10 +85,9 @@ def _ask_all(redis, asks: dict) -> dict:
     """One verdict per item and master, all in parallel under one deadline; a failed or late ask has none."""
     if not asks:
         return {}
-    executor = ThreadPoolExecutor(max_workers=min(len(asks), MAX_WORKERS))
+    executor = ThreadPoolExecutor(min(len(asks), MAX_WORKERS))
     futures = {executor.submit(_verdict, redis, *ask): pair for pair, ask in asks.items()}
     done, _ = wait(futures, timeout=timeout_s())
-    executor.shutdown(wait=False, cancel_futures=True)
     return {futures[future]: future.result() for future in done if future.exception() is None}
 
 
@@ -112,7 +111,7 @@ def routes(pool: MasterPool, slug: str, items: list[Item], live: list[str]) -> d
         if sent:
             pool.redis.hincrby(cache, TOKENS, sent)
             pool.redis.expire(cache, CACHE_TTL_S)
-    verdicts |= _ask_all(pool.redis, asks)
+    verdicts = verdicts | _ask_all(pool.redis, asks)
     return {item.id: _best(item.id, histories, verdicts) for item in items}
 
 

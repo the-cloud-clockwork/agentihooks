@@ -121,7 +121,7 @@ class MasterPool:
         """None with intent grouping off; else the matched master per waiting item, '' leaving it to round robin."""
         if not intent.enabled():
             return None
-        items = [self.inbox.get(item_id) for item_id in self.redis.zrange(self.key(slug), 0, -1)]
+        items = [self.inbox.get(item_id) for item_id in self.redis.zrangebyscore(self.key(slug), "-inf", "+inf")]
         return intent.routes(self, slug, items, live)
 
     def _claim_next(self, slug, live, routed):
