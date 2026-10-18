@@ -32,7 +32,12 @@ def world(tmp_path, monkeypatch):
     for name, seat, task in ((ENGINEER, CLAIMANT, LOOSE), (OTHER_ENGINEER, OWN_CLAIMANT, "t2")):
         built.store.put_agent(SLUG, AgentRecord(name, "eng", task, pane_id=f"p-{name}", seat=seat))
         built.store.seats.occupy(seat, name, 1)
-    monkeypatch.setattr(master_fence, "_ledger_state", lambda slug: built.doc(), raising=False)
+
+    def state(slug):
+        assert slug == SLUG
+        return built.doc()
+
+    monkeypatch.setattr(master_fence, "_ledger_state", state, raising=False)
     return built
 
 
@@ -194,3 +199,15 @@ def test_a_message_check_keeps_the_owner_of_every_phase(world):
 
     saved = json.loads(world.redis.hget(masters.MasterSeats(world.redis).key(SLUG), "owners"))
     assert saved == {"p1": LEAD, "p2": SECOND}
+
+
+def test_a_message_check_reads_the_ledger_of_the_swarm_it_names(monkeypatch):
+    from scripts.swarm import ledger_client
+
+    class Client:
+        def state(self, slug):
+            return {"slug": slug}
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", Client)
+
+    assert master_fence._ledger_state(SLUG) == {"slug": SLUG}

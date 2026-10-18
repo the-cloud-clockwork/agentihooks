@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/master_fence.py:scripts.swarm_v2.master_fence.x_check_send__mutmut_11:9e0a9c127b21404d48aac37d0cbbf8eb0833e2ae83214c253a817f94d7cb69a6": {
+    "reader": "standards_reader",
+    "reason": "master_of returns a master seat address built by seat_address as master@<slug>, which holds exactly one @ because swarm slugs are code generated without @, so partition and rpartition yield the same slug."
+  }
+}
