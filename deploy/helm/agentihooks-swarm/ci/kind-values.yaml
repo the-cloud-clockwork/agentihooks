@@ -11,8 +11,8 @@ controller:
   readinessProbe:
     periodSeconds: 1
   livenessProbe:
-    initialDelaySeconds: 10
-    periodSeconds: 2
+    initialDelaySeconds: 5
+    periodSeconds: 1
     timeoutSeconds: 5
     failureThreshold: 2
   terminationGracePeriodSeconds: 1
