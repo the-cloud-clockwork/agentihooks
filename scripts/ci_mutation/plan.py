@@ -1,4 +1,5 @@
 import argparse
+import ast
 import json
 import math
 import os
@@ -30,6 +31,11 @@ def estimate(
         if selection is not None:
             selection[path] = chosen
         if not chosen:
+            if any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                for node in ast.walk(ast.parse((root / path).read_text()))
+            ):
+                raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
         _, mutations = changed_mutations(path, (root / path).read_text(), lines)
@@ -68,6 +74,18 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
     return parts, walls[parts - 1]
 
 
+def validate_tests(root: Path, tests: list[str]) -> None:
+    from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
+
+    for test in tests:
+        path = root / test
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+            raise SystemExit(f"{test}: loads the MCP SDK while collecting")
+        source = path.read_text()
+        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+            raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/dev")
@@ -91,6 +109,7 @@ def main() -> int:
             print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest)
+    validate_tests(root, tests)
     browser = str(needs_browser(root, tests)).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)

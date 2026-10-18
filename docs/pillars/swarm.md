@@ -293,6 +293,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 
 | Command | Effect |
 |---|---|
+| `agentihooks swarm init [--timeout SECONDS]` | Bring up the local swarm stack, Redis with its password, the ledger server and the controller, from the Compose files packaged with agentihooks into `$AGENTIHOOKS_HOME/swarm-stack`. The first run writes `.env` there with a random Redis password, free ledger and Redis ports and `SWARM_IMAGE_TAG=release`, so the stack runs the released swarm image; later runs keep them, so a rerun is safe and keeps the data. It waits until every service is healthy (default 300 seconds) and the ledger home page answers, then prints the ledger address, the `client.env` line that points a shell at the stack and the commands that start a swarm. A missing Docker, daemon or Compose plugin, an unhealthy service or a silent ledger page is named with its fix and exits 1. It never creates or starts a swarm, and `init`, like `list` and `tick`, is read as a command word before any swarm id, so do not name a swarm `init`. Output is coloured on a terminal, plain when piped or with `NO_COLOR`. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |

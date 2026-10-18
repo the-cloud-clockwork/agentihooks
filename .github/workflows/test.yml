@@ -1819,10 +1819,22 @@ jobs:
 
       - name: Build docs with Jekyll
         if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
-        uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./
-          destination: ./_site
+        env:
+          INPUT_SOURCE: ./
+          INPUT_DESTINATION: ./_site
+          INPUT_FUTURE: 'false'
+          INPUT_VERBOSE: 'true'
+          INPUT_BUILD_REVISION: ${{ github.sha }}
+          INPUT_TOKEN: ''
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/github/workspace" \
+            --env GITHUB_WORKSPACE=/github/workspace \
+            --env GITHUB_REPOSITORY \
+            --env INPUT_SOURCE --env INPUT_DESTINATION \
+            --env INPUT_FUTURE --env INPUT_VERBOSE \
+            --env INPUT_BUILD_REVISION --env INPUT_TOKEN \
+            ghcr.io/actions/jekyll-build-pages:v1.0.13
 
       - name: Retain the rendered documentation
         if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
