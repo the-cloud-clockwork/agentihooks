@@ -319,6 +319,8 @@ def control_argv(body):
         return restore_decision_argv(body)
     if action == "lift":
         return lift_argv(body)
+    if action == "master_move":
+        return master_move_argv(body)
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
@@ -441,6 +443,15 @@ def lift_argv(body):
     if not isinstance(gate, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,39}", gate):
         raise ValueError("A lift needs the gate's name")
     return ["lift", agent, gate]
+
+
+def master_move_argv(body):
+    from scripts.hive.registry import HIVE_ID
+
+    hive = body.get("hive")
+    if not isinstance(hive, str) or not HIVE_ID.fullmatch(hive):
+        raise ValueError("A master move needs a hive id")
+    return ["master", "move", "--to", hive]
 
 
 def verdict_argv(body):

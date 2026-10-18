@@ -170,6 +170,7 @@ CONTROL = {
                 "quota_refresh",
                 "doctor_start",
                 "doctor_stop",
+                "master_move",
             ]
         },
         **{
@@ -192,6 +193,7 @@ CONTROL = {
                 "effort_min",
                 "effort_max",
                 "autonomy",
+                "hive",
             )
         },
         "gates": {"type": "object", "additionalProperties": {"type": "string"}},
