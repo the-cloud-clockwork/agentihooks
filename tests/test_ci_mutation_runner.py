@@ -243,7 +243,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     ]
     assert config["tool"]["mutmut"]["also_copy"] in (
         existing_copies,
-        [*existing_copies, "deploy/fixture.yaml"],
+        [*existing_copies, "deploy/"],
     )
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
