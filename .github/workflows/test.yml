@@ -961,10 +961,32 @@ jobs:
           retention-days: 14
           overwrite: true
 
+  queue-plan:
+    if: github.event_name == 'merge_group'
+    needs: [split]
+    runs-on: anton-oss-light
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Require both versions to fit one runner wave
+        env:
+          QUEUE_311: ${{ needs.split.outputs.queue_311 }}
+          QUEUE_312: ${{ needs.split.outputs.queue_312 }}
+        run: python -m tests.queue_shards combine --plans "$QUEUE_311" "$QUEUE_312"
+
   unit:
     name: unit (${{ matrix.python-version }}, ${{ matrix.shard }})
-    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
-    needs: [split, select, reuse, admission]
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') && (github.event_name != 'merge_group' || needs.queue-plan.result == 'success') }}
+    needs: [split, select, reuse, admission, queue-plan]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 17
     permissions:

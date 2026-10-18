@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import sys
 from pathlib import Path
 
 from tests.shards import (
@@ -16,7 +17,7 @@ WORKERS = 4
 STEP_SECONDS = 420
 STARTUP_SECONDS = 60
 SLOWDOWN = 1.5
-MAX_SHARDS = 128
+MAX_SHARDS = 40
 
 
 def matrix(root: Path, versions: dict[str, dict[str, float]]) -> list[dict]:
@@ -38,9 +39,12 @@ def matrix(root: Path, versions: dict[str, dict[str, float]]) -> list[dict]:
                 break
             if count == MAX_SHARDS:
                 raise SystemExit(f"Python {version} cannot fit below half the step timeout: {predicted:.1f}s")
-            count = min(count * 2, MAX_SHARDS)
+            count += 1
         print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {STEP_SECONDS / 2:.0f}s")
-        result.extend({"python-version": version, "shard": shard, "total": count} for shard in range(1, count + 1))
+        result.extend(
+            {"python-version": version, "shard": shard, "total": count, "predicted_seconds": predicted}
+            for shard in range(1, count + 1)
+        )
     return result
 
 
@@ -57,7 +61,34 @@ def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, st
     ) + sum(sizes[path] * SECONDS_PER_SOURCE_BYTE for path in files)
 
 
+def _estimates(durations: dict[str, float], collected: list[str]) -> dict[str, float]:
+    values = sorted(durations.values())
+    fallback = values[(len(values) * 99 - 1) // 100]
+    per_file = {}
+    for node, seconds in durations.items():
+        path = node.split("::", 1)[0]
+        per_file[path] = max(seconds, per_file.get(path, 0.0))
+    return {node: durations.get(node, per_file.get(node.split("::", 1)[0], fallback)) for node in collected}
+
+
+def _combine(argv: list[str]) -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--plans", nargs=2, required=True)
+    args = parser.parse_args(argv)
+    plan = [leg for fragment in args.plans for leg in json.loads("[" + fragment + "]")]
+    if len(plan) > MAX_SHARDS:
+        raise SystemExit(f"{len(plan)} queue jobs exceed the pool of {MAX_SHARDS}")
+    peak = max(leg["predicted_seconds"] for leg in plan)
+    if peak >= STEP_SECONDS / 2:
+        raise SystemExit(f"Queue plan exceeds half the step timeout: {peak:.1f}s")
+    print(f"{len(plan)} queue jobs fit one wave of {MAX_SHARDS} runners; predicted slowest test step {peak:.1f}s")
+
+
 def main(argv: list[str] | None = None) -> None:
+    argv = sys.argv[1:] if argv is None else argv
+    if argv and argv[0] == "combine":
+        _combine(argv[1:])
+        return
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--collection", type=Path, required=True)
@@ -67,8 +98,7 @@ def main(argv: list[str] | None = None) -> None:
     snapshot = args.root / ".test_durations"
     measured = json.loads(snapshot.read_text())
     collected = json.loads(args.collection.read_text())
-    estimate = max(measured.values())
-    measured = {node: measured.get(node, estimate) for node in collected}
+    measured = _estimates(measured, collected)
     plan = matrix(args.root, {args.version: measured})
     snapshot.write_text(json.dumps(measured, indent=4, sort_keys=True) + "\n")
     (args.root / "durations.sha256").write_text(hashlib.sha256(snapshot.read_bytes()).hexdigest() + "\n")
