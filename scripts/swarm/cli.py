@@ -2076,6 +2076,10 @@ def main(argv):
         from scripts.swarm import stack_init
 
         return stack_init.main(argv[1:])
+    return dispatch(argv)
+
+
+def dispatch(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
