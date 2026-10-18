@@ -1058,7 +1058,7 @@ class Handler(BaseHTTPRequestHandler):
             if swarm_status(slug) is not None:
                 _, error = swarm_control(slug, ["stop", "--now"])
                 reply = {"swarm_error": error} if error else {}
-        elif not ledger_bin.restore(slug):
+        elif not repository.restore(slug):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
