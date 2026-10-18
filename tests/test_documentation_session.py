@@ -6,7 +6,7 @@ import pytest
 from hooks.classifier.errors import ClassifierUnavailable
 from hooks.classifier.result import Answer, DecisionResult
 from hooks.context import documentation, documentation_session
-from tests.test_documentation_evidence import git, repository
+from tests.test_documentation_evidence import git, pull, repository
 
 
 class Ledger:
@@ -93,6 +93,22 @@ def test_a_session_named_for_no_ledger_task_queues_no_documentation_task(world, 
     row = json.loads(args[0].read_text())
     assert row["status"] == "complete"
     assert row["verdict"] == {"needs_documentation": False, "size": "none", "source": "no ledger task"}
+
+
+def test_a_swarm_session_without_a_task_queues_documentation_without_a_dependency(world, monkeypatch):
+    root, _, ledger, jobs = world
+    monkeypatch.setattr(documentation.runner, "decide", answer())
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "")
+    payload = {"session_id": "documentation-untasked", "cwd": str(root)}
+    documentation_session.start(payload)
+    (root / "limits.py").write_text("class WidgetLimits:\n    ceiling = 5\n")
+    git(root, "add", "limits.py")
+    git(root, "commit", "-qm", "Add widget limits")
+    documentation_session.end(payload)
+    fn, args = jobs.pop()
+    fn(*args)
+    assert len(ledger.added) == 1
+    assert ledger.added[0]["depends_on"] == []
 
 
 @pytest.mark.parametrize(("needed", "covered"), [(0.05, 0.05), (0.95, 0.95)])
@@ -290,10 +306,7 @@ def test_commits_pulled_from_dev_are_not_delivered_by_the_session(tmp_path, monk
     monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: fn(*args))
     payload = {"session_id": "fast-forward-fixture", "cwd": str(tmp_path)}
     documentation_session.start(payload)
-    (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
-    git(tmp_path, "add", "policy.py")
-    git(tmp_path, "commit", "-qm", "Add retry policy")
-    git(tmp_path, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    pull(tmp_path, "policy.py", "class WidgetPolicy:\n    retries = 3\n")
     documentation_session.end(payload)
     row = json.loads(next((documentation_session.HOME / "documentation").glob("*.json")).read_text())
     assert row["status"] == "complete"

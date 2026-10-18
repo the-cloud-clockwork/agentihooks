@@ -59,12 +59,18 @@ def test_documentation_lines_are_redacted_before_the_evidence_is_truncated(tmp_p
     assert len(excerpt) <= 256
 
 
-def test_commits_already_on_dev_are_excluded_from_the_delivered_changes(tmp_path):
+def pull(root, name, text):
+    (root / name).write_text(text)
+    git(root, "add", name)
+    tree = git(root, "write-tree")
+    commit = git(root, "commit-tree", tree, "-p", "HEAD", "-m", f"Add {name}")
+    git(root, "update-ref", "refs/remotes/origin/dev", commit)
+    git(root, "merge", "-q", "--ff-only", "origin/dev")
+
+
+def test_commits_pulled_from_dev_are_excluded_from_the_delivered_changes(tmp_path):
     base = repository(tmp_path)
-    (tmp_path / "pulled.py").write_text("class PulledWidget:\n    size = 1\n")
-    git(tmp_path, "add", "pulled.py")
-    git(tmp_path, "commit", "-qm", "Add pulled widget")
-    git(tmp_path, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    pull(tmp_path, "pulled.py", "class PulledWidget:\n    size = 1\n")
     assert documentation_evidence.collect(tmp_path, base)["files"] == []
     (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
     git(tmp_path, "add", "policy.py")
@@ -72,6 +78,15 @@ def test_commits_already_on_dev_are_excluded_from_the_delivered_changes(tmp_path
     result = documentation_evidence.collect(tmp_path, base)
     assert result["files"] == ["policy.py"]
     assert "PulledWidget" not in result["changes"]
+
+
+def test_commits_the_session_authored_and_pushed_to_dev_stay_delivered(tmp_path):
+    base = repository(tmp_path)
+    (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
+    git(tmp_path, "add", "policy.py")
+    git(tmp_path, "commit", "-qm", "Add retry policy")
+    git(tmp_path, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    assert documentation_evidence.collect(tmp_path, base)["files"] == ["policy.py"]
 
 
 def test_a_session_base_ahead_of_dev_keeps_its_session_base(tmp_path):

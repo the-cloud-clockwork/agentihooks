@@ -16,6 +16,7 @@ GIT_OPTIONS = {"text": True, "stderr": subprocess.DEVNULL, "timeout": 10}
 VERIFY_REVISION = ("rev-parse", "--verify", "--end-of-options")
 DEFAULT_REVISION = "HEAD"
 INTEGRATION = "refs/remotes/origin/dev"
+HEAD_MOVES = ("reflog", "--format=%H%x09%gs", DEFAULT_REVISION)
 HEAD_REVISION = ("rev-parse", DEFAULT_REVISION)
 DIFF_NAMES = ("diff", "--name-only", "-z")
 DIFF_CONTENT = ("diff", "--no-ext-diff", "--unified=3")
@@ -59,7 +60,12 @@ def _delivered_base(root: Path, base: str, head: str) -> str:
     except subprocess.CalledProcessError:
         return base
     ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", base, integrated], cwd=root, **GIT_OPTIONS)
-    return integrated if ancestor.returncode == 0 else base
+    if ancestor.returncode:
+        return base
+    entries = (line.partition("\t") for line in git(root, *HEAD_MOVES).splitlines())
+    authored = {commit for commit, _, subject in entries if subject.startswith("commit")}
+    pulled = git(root, "rev-list", f"{base}..{integrated}").split()
+    return base if authored.intersection(pulled) else integrated
 
 
 def collect(root: Path, base: str, context: dict | None = None) -> dict:
