@@ -10,11 +10,12 @@ if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 
-def skip_binding(agent: AgentRecord, facts: dict) -> bool:
+def skip_binding(agent: AgentRecord, facts: dict, live: set[str]) -> bool:
     from scripts.hive import reports
 
     return (agent.name not in facts and agent.state != "retiring") or (
         facts.get(agent.name, {}).get("process") is False
+        and agent.name not in live
         and agent.runtime_backend == "local"
         and not reports.host(agent)
     )

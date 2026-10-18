@@ -343,14 +343,14 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
 def _verify(slug, store, ledger, runtime, rows, now_ms):
     judged = launch_check.judged(store, slug)
     agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
-    facts = runtime.bindings(agents)
+    facts, live = runtime.bindings(agents), runtime.live_names()
     for agent in agents:
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
             continue
-        if dead_resume.skip_binding(agent, facts):
+        if dead_resume.skip_binding(agent, facts, live):
             continue
         agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
         actions.extend(followed)

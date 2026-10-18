@@ -190,7 +190,7 @@ def test_resumed_agent_keeps_the_runtime_model_and_route(store, monkeypatch):
     ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
     tick_module.tick("sw", store, ledger, runtime, 1)
     agent = next(a for a in store.agents("sw") if a.lane == "master")
-    agent = replace(agent, conversation_id="old-conversation", profile="engineer")
+    agent = store.start_execution("sw", replace(agent, conversation_id="old-conversation", profile="engineer"))
     store.put_agent("sw", agent)
     original_resume = runtime.resume
     remote = {"enabled": True, "name": "master"}
