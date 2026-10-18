@@ -459,7 +459,9 @@ def test_a_task_notice_for_a_seat_now_holding_another_task_goes_onto_the_task(st
     assert texts(store, ENG_SEAT) == []
     ((slug, task_id, text, by),) = ledger.comments
     assert (slug, task_id, by) == ("sw", "t1", "swarm")
-    assert text.startswith("Your pull request https://github.com/o/r/pull/9 for task t1 (Build the thing) has red checks")
+    assert text.startswith(
+        "Your pull request https://github.com/o/r/pull/9 for task t1 (Build the thing) has red checks"
+    )
     assert told == ["noted on tasks/t1: https://github.com/o/r/pull/9:red:" + red.head]
 
 
