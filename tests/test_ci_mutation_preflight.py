@@ -126,6 +126,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
         "shards": "${{ steps.plan.outputs.shards }}",
         "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
         "bases": "${{ steps.plan.outputs.bases }}",
+        "browser": "${{ steps.plan.outputs.browser }}",
         "changed": "${{ steps.plan.outputs.changed }}",
         "graded": "${{ steps.plan.conclusion == 'success' }}",
         "open": "${{ steps.open.outputs.open }}",
