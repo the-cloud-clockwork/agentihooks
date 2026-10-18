@@ -26,11 +26,13 @@ def world(tmp_path, monkeypatch):
     core.LEDGER_DIR.mkdir()
     built = cases.World()
     built.store.names.adopt(SLUG, "abcdef", SLUG, "repo")
-    core.sync(SLUG, ops=[{"op": "task_add", "id": "add-t3", "by": "swarm", "task": LOOSE, "title": "Loose"}])
+    core.sync(
+        SLUG, ops=[{"op": "task_add", "id": "add-t3", "by": "swarm", "task": LOOSE, "title": "Loose", "lane": "eng"}]
+    )
     for name, seat, task in ((ENGINEER, CLAIMANT, LOOSE), (OTHER_ENGINEER, OWN_CLAIMANT, "t2")):
         built.store.put_agent(SLUG, AgentRecord(name, "eng", task, pane_id=f"p-{name}", seat=seat))
         built.store.seats.occupy(seat, name, 1)
-    monkeypatch.setattr(master_fence, "_ledger_state", lambda slug: built.doc())
+    monkeypatch.setattr(master_fence, "_ledger_state", lambda slug: built.doc(), raising=False)
     return built
 
 
