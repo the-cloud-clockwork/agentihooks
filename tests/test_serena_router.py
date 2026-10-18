@@ -347,3 +347,28 @@ async def test_eviction_runs_only_after_a_scheduler_signal(monkeypatch):
         await app._evict_forever(pool)
     assert calls == [app.EVICT_EVERY_SECONDS, "evict", app.EVICT_EVERY_SECONDS]
     pool.evict_idle.assert_awaited_once_with()
+
+
+async def test_app_shutdown_awaits_eviction_cleanup_before_closing_the_pool(monkeypatch):
+    from hooks.serena_router import app as router_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
+    started, finished = asyncio.Event(), asyncio.Event()
+
+    async def evict(_pool):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.set()
+
+    async def close():
+        assert finished.is_set()
+
+    pool = Pool(BackendConfig(command=(sys.executable, str(FAKE))))
+    monkeypatch.setattr(router_app, "_evict_forever", evict)
+    monkeypatch.setattr(pool, "close", close)
+    app = router_app.build_app(pool, [])
+    async with app.router.lifespan_context(app):
+        await asyncio.wait_for(started.wait(), timeout=1)
+    assert finished.is_set()
