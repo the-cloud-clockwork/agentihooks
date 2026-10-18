@@ -1832,7 +1832,7 @@ jobs:
           INPUT_FUTURE: 'false'
           INPUT_VERBOSE: 'true'
           INPUT_BUILD_REVISION: ${{ github.sha }}
-          INPUT_TOKEN: ${{ github.token }}
+          INPUT_TOKEN: ''
         run: |
           docker run --rm \
             --volume "$GITHUB_WORKSPACE:/github/workspace" \
