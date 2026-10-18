@@ -101,6 +101,24 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
             assert step["if"] == gated, step
 
 
+def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_module_changes():
+    steps, names = _steps(_workflow()["jobs"]["plan"])
+    find_at = names.index("Find a changed test module")
+    find = steps[find_at]
+    assert find_at == 2
+    assert find["id"] == "suite"
+    assert find["if"] == "steps.open.outputs.open == 'false'"
+    assert "git diff --name-only --no-renames origin/dev...HEAD" in find["run"]
+    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$'" in find["run"]
+    run_at = names.index("Run the suite speed contracts")
+    assert run_at < names.index("Record the revisions the report grades")
+    assert run_at < names.index("Reuse a green report when this head only adds tests to it")
+    changed = "steps.suite.outputs.changed == 'true'"
+    assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
+    assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
+    assert not any(step.get("continue-on-error") for step in steps)
+
+
 def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
     plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
     steps, names = _steps(plan)
