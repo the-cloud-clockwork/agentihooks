@@ -28,6 +28,11 @@ def redis_source(monkeypatch):
             password=parsed.password,
         )
 
+    def config_get(client, name):
+        assert name == "aclfile"
+        return {"aclfile": server.config.get(b"aclfile", b"").decode()}
+
+    monkeypatch.setattr(fakeredis.FakeRedis, "config_get", config_get)
     monkeypatch.setattr(redis.Redis, "from_url", connect)
     return connect("redis://127.0.0.1:6379/0")
 
