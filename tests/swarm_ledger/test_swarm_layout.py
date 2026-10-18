@@ -896,8 +896,9 @@ def test_an_untouched_page_probes_quota_every_five_minutes(open_page):
         assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000 - 1
         assert page.puts.count({"action": "quota_refresh"}) == count - 1
         with page.tab.expect_response(
-            lambda response: response.request.method == "PUT"
-            and response.request.post_data_json == {"action": "quota_refresh"}
+            lambda response: (
+                response.request.method == "PUT" and response.request.post_data_json == {"action": "quota_refresh"}
+            )
         ):
             page.tab.clock.run_for(1)
         assert page.tab.evaluate("Date.now()") == NOW_MS + count * 300_000
