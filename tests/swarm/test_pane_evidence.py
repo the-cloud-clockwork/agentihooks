@@ -125,3 +125,108 @@ def test_rolling_capture_stays_bounded_and_incident_survives_recovery(tmp_path):
         _, rows = collect(tmp_path, panes, at)
     assert len(rows) == 3
     assert sorted(row["at"] for row in rows) == [100, 106, 107]
+
+
+@pytest.mark.parametrize("changes", [{"runtime_backend": "kubernetes"}, {"hive": "remote"}, {"pane_id": ""}])
+def test_foreign_or_unbound_panes_are_not_read(tmp_path, changes):
+    panes = Panes()
+    assert collect(tmp_path, panes, agents=[agent(**changes)]) == ([], [])
+    assert panes.calls == []
+
+
+def test_runtime_without_terminal_capability_has_no_capture(tmp_path):
+    from scripts.swarm import pane_evidence
+
+    assert pane_evidence.sweep("swarm", None, object(), 100) == []
+
+
+def test_ownership_loss_does_not_read_another_conversation(tmp_path):
+    def other(args):
+        assert args == ["agent", "get", "w4:p7K"]
+        return {"agent": {"name": "someone_else"}}
+
+    assert collect(tmp_path, other) == ([], [])
+
+
+def test_missing_pane_has_no_capture(tmp_path):
+    def gone(args):
+        raise RuntimeError("gone")
+
+    assert collect(tmp_path, gone) == ([], [])
+
+
+def test_process_failure_still_saves_the_screen(tmp_path):
+    panes = Panes()
+
+    def broken(args):
+        if args[:2] == ["pane", "process-info"]:
+            raise TimeoutError("private")
+        return panes(args)
+
+    _, rows = collect(tmp_path, broken)
+    assert rows[0]["screen_text"] == "Ready"
+    assert rows[0]["process_error"] == "TimeoutError"
+    assert rows[0]["process"] == {"shell_pid": None, "foreground_process_group_id": None, "foreground_processes": []}
+
+
+def test_capture_failure_is_visible_and_does_not_stop_the_next_pane(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    calls = []
+
+    def fail(directory, rt, who, at):
+        calls.append(who.name)
+        if who.task == "t1":
+            raise OSError("private")
+        return ["second captured"]
+
+    monkeypatch.setattr(pane_evidence, "capture", fail)
+    actions, _ = collect(tmp_path, Panes(), agents=[agent(), agent(name="other", task="t2")])
+    assert calls == ["engineer@abc", "other"]
+    assert actions == ["pane evidence failed for engineer@abc: OSError", "second captured"]
+
+
+def test_incident_freezes_the_last_healthy_screen_until_recovery(tmp_path):
+    panes = Panes("Healthy")
+    collect(tmp_path, panes, 100)
+    panes.text = " "
+    collect(tmp_path, panes, 200)
+    actions, rows = collect(tmp_path, panes, 300)
+    assert actions == []
+    incident = next(row for row in rows if "previous" in row)
+    assert incident["at"] == 200
+    assert incident["previous"]["at"] == 100
+    assert incident["previous"]["screen_text"] == "Healthy"
+    panes.text = "Recovered"
+    collect(tmp_path, panes, 400)
+    panes.text = None
+    _, rows = collect(tmp_path, panes, 500)
+    incident = next(row for row in rows if "previous" in row)
+    assert incident["at"] == 500
+    assert incident["previous"]["screen_text"] == "Recovered"
+
+
+def test_record_count_screen_size_redaction_and_permissions_are_bounded(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    monkeypatch.setattr(pane_evidence, "RECORD_LIMIT", 3)
+    monkeypatch.setattr(pane_evidence, "SCREEN_LIMIT", 8)
+    seen = []
+    monkeypatch.setattr(pane_evidence, "redact", lambda text: seen.append(text) or "redacted output")
+    panes = Panes("private")
+    for name in ("one", "two", "three", "four"):
+        row_agent = agent(name=name)
+
+        def named(args):
+            answer = panes(args)
+            if args[:2] == ["agent", "get"]:
+                answer["agent"]["name"] = name
+            return answer
+
+        collect(tmp_path, named, agents=[row_agent])
+    files = list((tmp_path / "swarm" / "pane-evidence").glob("*.json"))
+    assert len(files) == 3
+    assert seen == ["private"] * 4
+    assert all(json.loads(path.read_text())["screen_ansi"] == "redacted" for path in files)
+    assert all(path.stat().st_mode & 0o777 == 0o600 for path in files)
+    assert files[0].parent.stat().st_mode & 0o777 == 0o700
