@@ -8,7 +8,7 @@ permalink: /docs/pillars/context/
 # Pillar 3: Context Intelligence
 {: .no_toc }
 
-AgentiHooks supports Claude Code and Codex. Hook context delivery differs: Codex receives tool context after calls. See the [Codex reference](../reference/CODEX-COMPAT.md) for its hook contract.
+AgentiHooks supports Claude Code and Codex; see the [Codex reference](../reference/CODEX-COMPAT.md) for hook context-delivery differences.
 
 **Your agents never forget their instructions, even 200 turns deep.**
 

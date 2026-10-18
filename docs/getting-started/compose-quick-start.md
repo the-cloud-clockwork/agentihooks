@@ -2,6 +2,7 @@
 title: Docker Compose Quick Start
 nav_order: 1
 parent: Getting Started
+permalink: /docs/getting-started/compose-quick-start/
 ---
 
 # Docker Compose Quick Start

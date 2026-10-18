@@ -26,7 +26,7 @@ Imagine a foreman on a construction site with a megaphone. One voice. Hundreds o
 
 AgentiHooks gives you that megaphone for your AI agent fleet.
 
-When production goes down, you do not hunt through terminal tabs to find which agents are mid-deploy. You do not hope that the one responsible agent happens to check a Slack channel. You type one command, and Claude Code and Codex sessions sharing the broadcast store receive the message through their hooks.
+Send one command during an incident: Claude Code and Codex sessions sharing the broadcast store receive the message through their hooks.
 
 ```bash
 agentihooks broadcast -s critical "Production incident — do NOT deploy."
