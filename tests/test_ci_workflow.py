@@ -715,7 +715,7 @@ def test_stored_durations_skip_the_tests_the_queue_reuses(tmp_path, monkeypatch,
     by_test = [f"tests/test_probe.py::test_{i}" for i in range(80, 90)]
     by_file = [f"tests/test_cached.py::test_{i}" for i in range(10)]
     (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(kept[unstored:], 0.1)))
-    (tmp_path / "collected.json").write_text(json.dumps(kept + [f"{node}@ledger" for node in by_test] + by_file))
+    (tmp_path / "collected.json").write_text(json.dumps(kept + by_test + by_file))
     if reused:
         (tmp_path / "reused.json").write_text(json.dumps({"tests": by_test, "files": ["tests/test_cached.py"]}))
     monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
