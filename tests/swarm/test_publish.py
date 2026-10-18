@@ -351,6 +351,7 @@ def test_publish_never_follows_a_tracked_protected_branch(publication):
     dev = git(root, "ls-remote", "origin", "refs/heads/dev").split()[0]
     git(root, "fetch", "origin")
     git(root, "branch", "--set-upstream-to=origin/dev")
+    publication.task["repository_branches"] = {str(publication.repo): "engineer-test", "/elsewhere/bundle": "dev"}
 
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
