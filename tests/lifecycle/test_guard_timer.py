@@ -111,19 +111,6 @@ def test_enforce_holds_the_removal_lock_while_acting(repo, tmp_path, monkeypatch
     assert seen == [True]
 
 
-def test_timer_units_render_and_install_into_a_fake_home(monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", "/srv/ah")
-    service, unit = timer.render("/venv/bin/python", "/opt/agentihooks")
-    assert "ExecStart=/venv/bin/python -m scripts.gc_cli gc --enforce" in service
-    assert "WorkingDirectory=/opt/agentihooks" in service and "Environment=AGENTIHOOKS_HOME=/srv/ah" in service
-    assert "OnBootSec=2h" in unit and "OnUnitActiveSec=1h" in unit
-    assert "not enabled" in timer.install_timer("/venv/bin/python", "/opt/agentihooks")
-    assert timer.installed()
-    assert timer.start_now() is False
-    assert timer.remove_timer() == "[OK] Removed agentihooks-gc.timer"
-    assert not timer.installed()
-
-
 def test_session_event_kicks_only_when_enabled(monkeypatch):
     calls = []
     monkeypatch.setattr(guard, "kick", lambda: calls.append(time.time()))

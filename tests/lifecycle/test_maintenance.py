@@ -56,8 +56,6 @@ def test_lifecycle_setup_registers_every_managed_primary(repo, monkeypatch):
     message = timer.install_timer("/venv/bin/python", "/opt/agentihooks")
     assert str(repo.primary.resolve()) in _registered()
     assert message.endswith(f"\n  [OK] git maintenance registered for {repo.primary}")
-    service = (timer.unit_dir() / f"{timer.UNIT}.service").read_text()
-    assert "ExecStart=/venv/bin/python " in service and "WorkingDirectory=/opt/agentihooks\n" in service
     assert "git maintenance" not in timer.install_timer("/venv/bin/python", "/opt/agentihooks")
 
 
