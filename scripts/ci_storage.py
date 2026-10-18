@@ -113,13 +113,13 @@ def plan(
     found: list[dict], branches: frozenset[str], passed: set[int], now: datetime, keep: timedelta
 ) -> tuple[list[dict], list[dict]]:
     live = sorted((row for row in found if not row["expired"]), key=_created)
-    newest = {}
+    newest, newest_passed = {}, {}
     for row in live:
         if _branch(row) in branches and not row["name"].endswith(BUILD_RECORD):
-            newest[(row["name"], _branch(row), "any")] = row["id"]
+            newest[(row["name"], _branch(row))] = row["id"]
             if _run(row) in passed:
-                newest[(row["name"], _branch(row), "passed")] = row["id"]
-    kept = set(newest.values())
+                newest_passed[(row["name"], _branch(row))] = row["id"]
+    kept = {*newest.values(), *newest_passed.values()}
     free = [row for row in live if row["id"] not in kept]
     old = [row for row in free if _created(row) < now - keep]
     young = [row for row in free if _created(row) >= now - keep]

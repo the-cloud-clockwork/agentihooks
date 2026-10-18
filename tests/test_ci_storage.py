@@ -214,7 +214,7 @@ def test_delete_counts_an_already_gone_artifact_as_deleted(monkeypatch):
     )
 
 
-def _org(found_a, found_b, open_b=True):
+def _org(found_a, found_b, unread=None):
     return {
         "orgs/o/repos?per_page=100": [
             {"full_name": "o/a", "visibility": "private", "archived": False, "default_branch": "dev"},
@@ -222,8 +222,8 @@ def _org(found_a, found_b, open_b=True):
         ],
         "repos/o/a/actions/artifacts?per_page=100": {"artifacts": found_a},
         "repos/o/b/actions/artifacts?per_page=100": {"artifacts": found_b},
-        "repos/o/a/pulls?state=open&per_page=100": [],
-        "repos/o/b/pulls?state=open&per_page=100": [{"head": {"ref": "open"}}] if open_b else None,
+        "repos/o/a/pulls?state=open&per_page=100": None if unread == "o/a" else [],
+        "repos/o/b/pulls?state=open&per_page=100": None if unread == "o/b" else [{"head": {"ref": "open"}}],
         "repos/o/a/actions/runs?branch=dev&status=success&per_page=100": {"workflow_runs": []},
         "repos/o/b/actions/runs?branch=dev&status=success&per_page=100": {"workflow_runs": []},
         "repos/o/b/actions/runs?branch=open&status=success&per_page=100": {"workflow_runs": []},
@@ -279,7 +279,11 @@ def test_prune_spends_one_budget_on_the_largest_artifacts_of_every_repository(mo
 
 
 def test_over_the_organisation_limit_young_artifacts_go_oldest_first_down_to_the_floor(monkeypatch):
-    found_a = [artifact(1, branch="pr", hours=20, size=MB), artifact(2, branch="pr", hours=7, size=MB)]
+    found_a = [
+        artifact(1, branch="pr", hours=20, size=MB),
+        artifact(2, branch="pr", hours=7, size=MB),
+        artifact(5, branch="pr", hours=48, size=MB),
+    ]
     found_b = [artifact(3, branch="pr", hours=10, size=MB), artifact(4, branch="pr", hours=5, size=MB)]
     gh = Gh(_org(found_a, found_b))
     monkeypatch.setattr(subprocess, "run", gh)
@@ -289,11 +293,11 @@ def test_over_the_organisation_limit_young_artifacts_go_oldest_first_down_to_the
         result = ci_storage.prune(_args(limit_mb=limit, budget=10), NOW)
         return sorted(int(command[-1].rsplit("/", 1)[1]) for command, _ in gh.calls if "DELETE" in command), result
 
-    assert deleted(1)[0] == [1, 2, 3]
-    assert deleted(2)[0] == [1, 3]
-    assert deleted(3)[0] == [1]
+    assert deleted(1)[0] == [1, 2, 3, 5]
+    assert deleted(2)[0] == [1, 3, 5]
+    assert deleted(3)[0] == [1, 5]
     picked, result = deleted(4)
-    assert picked == []
+    assert picked == [5]
     assert sum(row["after_bytes"] for row in result["repositories"]) == 4 * MB
 
 
@@ -307,11 +311,11 @@ def test_the_floor_window_is_exact(monkeypatch):
 
 def test_a_repository_that_cannot_be_read_is_reported_and_the_rest_still_pruned(monkeypatch):
     found = [artifact(1, branch="pr", size=MB)]
-    gh = Gh(_org(found, found, open_b=False))
+    gh = Gh(_org(found, found, unread="o/a"))
     monkeypatch.setattr(subprocess, "run", gh)
     result = ci_storage.prune(_args(), NOW)
-    assert result["unread"] == ["o/b"]
-    assert [row["repository"] for row in result["repositories"]] == ["o/a"]
+    assert result["unread"] == ["o/a"]
+    assert [row["repository"] for row in result["repositories"]] == ["o/b"]
     assert result["repositories"][0]["deleted"] == 1
 
 
@@ -381,7 +385,7 @@ def test_main_writes_the_report_and_prints_each_repository(monkeypatch, tmp_path
 def test_main_options_reach_the_plan_and_the_verdict(monkeypatch, tmp_path, capfd):
     now = datetime.now(UTC)
     found = [artifact(1, branch="pr", size=3 * MB, hours=2, now=now)]
-    monkeypatch.setattr(subprocess, "run", Gh(_org(found, found, open_b=False)))
+    monkeypatch.setattr(subprocess, "run", Gh(_org(found, found, unread="o/b")))
     argv = ["--owner", "o", "--keep-hours", "1", "--floor-hours", "0.5", "--limit-mb", "2", "--budget", "0"]
     assert ci_storage.main([*argv, "--report", str(tmp_path / "r.json")]) == 1
     assert capfd.readouterr().out.endswith(
@@ -396,7 +400,9 @@ def test_main_defaults_to_a_dry_run_that_reports_in_the_working_folder(monkeypat
     monkeypatch.chdir(tmp_path)
     assert ci_storage.main(["--owner", "o"]) == 0
     assert ci_storage.main(["--owner", "o", "--apply"]) == 0
-    first, second = seen
+    assert ci_storage.main(["--owner", "o", "--floor-hours", "0.5", "--keep-hours", "1.5"]) == 0
+    first, second, third = seen
+    assert (third.floor_hours, third.keep_hours) == (0.5, 1.5)
     assert (first.owner, first.budget, first.limit_mb, first.floor_hours, first.apply, second.apply) == (
         "o",
         1500,
