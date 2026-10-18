@@ -70,6 +70,7 @@ def test_repeated_retained_statements_still_lose_coverage(head_lines, inserted, 
     assert result.lost == ({path: [100]} if missing else {})
 
 
+@pytest.mark.wall_clock
 def test_long_repeated_line_mapping_fits_the_ratchet_budget(capsys):
     import sys
     from time import perf_counter
