@@ -1,9 +1,6 @@
 name: Hierarchy CPU proof
 
 on:
-  push:
-    branches-ignore: [dev, main, "gh-readonly-queue/**"]
-    paths: [.github/workflows/hierarchy-cpu.yml]
   workflow_dispatch:
     inputs:
       base:
