@@ -35,6 +35,7 @@ def store():
     s.create(SwarmConfig("sw", "/repo", max_eng=2, max_ci=1))
     s.put_agent("sw", AgentRecord("sw-master-1", MASTER, MASTER, seat=MASTER_SEAT))
     s.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT))
+    s.seats.occupy(ENG_SEAT, "sw-eng-1", 1)
     return s
 
 
@@ -449,28 +450,50 @@ def test_red_checks_with_no_push_for_twenty_minutes_go_to_its_engineer(store):
     assert len(texts(store, ENG_SEAT)) == 2
 
 
-def test_a_task_notice_for_a_seat_now_holding_another_task_goes_onto_the_task(store):
-    red, ledger = answer("open_red"), FakeLedger()
+def _notices():
+    red, closed, merged = answer("open_red"), answer("closed_unmerged"), answer("merged")
+    url = "https://github.com/o/r/pull/9"
+    return [
+        (red, red.red_at + 20 * MINUTE, f"{url}:red:{red.head}", "has red checks and no push"),
+        (closed, 100_000, f"{url}:closed", "was closed without merging"),
+        (merged, merged.merged_at + 10 * MINUTE, f"{url}:merged:engineer", "merged ten minutes ago"),
+    ]
+
+
+@pytest.mark.parametrize(("pull", "now", "key", "words"), _notices())
+@pytest.mark.parametrize("occupant", ["sw-eng-2", "sw-eng-gone"])
+def test_a_task_notice_for_a_seat_no_live_holder_of_the_task_occupies_goes_onto_the_task(
+    store, pull, now, key, words, occupant
+):
+    ledger = FakeLedger()
     store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", seat=ENG_SEAT))
-    store.seats.occupy(ENG_SEAT, "sw-eng-2", 1_000)
+    store.seats.occupy(ENG_SEAT, occupant, 1_000)
     run(store, recorded(), ledger=ledger)
-    told = run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
-    run(store, in_pr(), now_ms=red.red_at + 21 * MINUTE, ledger=ledger, github=lambda url: red)
-    assert texts(store, ENG_SEAT) == []
+    told = run(store, in_pr(), now_ms=now, ledger=ledger, github=lambda url: pull)
+    again = run(store, in_pr(), now_ms=now + MINUTE, ledger=ledger, github=lambda url: pull)
+    assert texts(store, ENG_SEAT) == [] and texts(store, MASTER_SEAT) == []
     ((slug, task_id, text, by),) = ledger.comments
     assert (slug, task_id, by) == ("sw", "t1", "swarm")
-    assert text.startswith(
-        "Your pull request https://github.com/o/r/pull/9 for task t1 (Build the thing) has red checks"
-    )
-    assert told == ["noted on tasks/t1: https://github.com/o/r/pull/9:red:" + red.head]
+    assert text.startswith(f"Your pull request {URL} ") and words in text and "task t1 (Build the thing)" in text
+    assert told == [f"noted on tasks/t1: {key}"] and again == []
 
 
-def test_a_task_notice_for_a_seat_its_claimant_still_occupies_goes_to_the_seat(store):
-    red, ledger = answer("open_red"), FakeLedger()
-    store.seats.occupy(ENG_SEAT, "sw-eng-1", 1_000)
+@pytest.mark.parametrize(("pull", "now", "key", "words"), _notices())
+def test_a_task_notice_for_a_seat_its_claimant_still_occupies_goes_to_the_seat(store, pull, now, key, words):
+    ledger = FakeLedger()
     run(store, recorded(), ledger=ledger)
-    run(store, in_pr(), now_ms=red.red_at + 20 * MINUTE, ledger=ledger, github=lambda url: red)
-    assert len(texts(store, ENG_SEAT)) == 1 and ledger.comments == []
+    told = run(store, in_pr(), now_ms=now, ledger=ledger, github=lambda url: pull)
+    (text,) = texts(store, ENG_SEAT)
+    assert words in text and ledger.comments == [] and told == [f"told {ENG_SEAT}: {key}"]
+
+
+def test_a_task_notice_for_a_claimant_no_longer_running_goes_to_the_master(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    store.drop_agent("sw", "sw-eng-1")
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (text,) = texts(store, MASTER_SEAT)
+    assert "was closed without merging" in text and ledger.comments == []
 
 
 @pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])

@@ -523,7 +523,7 @@ class Mail:
 
     def holds(self, address, task):
         occupant = self.store.seats.occupant(address).occupant
-        return not occupant or self.held.get(occupant) == task["id"]
+        return occupant in self.seats and self.held.get(occupant) == task["id"]
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
@@ -778,9 +778,9 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
 
 
 def _tell_engineer(mail, ledger, task, key, text, send):
-    address = mail.engineer(task)
-    if mail.holds(address, task):
-        return send(key, address, text)
+    seat = mail.seats.get(task.get("claimed_by"))
+    if not seat or mail.holds(seat, task):
+        return send(key, mail.engineer(task), text)
     if mail.once(key, lambda: ledger.comment(mail.slug, task["id"], text, by=SENDER)):
         return [f"noted on tasks/{task['id']}: {key}"]
     return []
