@@ -170,6 +170,13 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch):
         applied.append(url)
         return {"url": url, "displaced": [], "errors": []}
 
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables == {"url": URL}
+        assert run is subprocess.run
+        return {"resource": {"state": "OPEN", "baseRefName": "dev"}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
     monkeypatch.setattr(merge_queue, "rest", rest)
     monkeypatch.setattr(merge_queue, "prioritize", reorder)
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
