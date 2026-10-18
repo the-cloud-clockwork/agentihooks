@@ -468,6 +468,8 @@ def _by(recap):
 
 def contract_lines(contract):
     parts = [f"{label}: {contract[key]}." for key, label in CONTRACT_LABELS if contract.get(key)]
+    if contract.get("after") == "yes":
+        parts.append("After merge, record --command and --output before swarm done.")
     return ["Proof contract. " + " ".join(parts)] if parts else []
 
 

@@ -102,16 +102,12 @@ def free_gb() -> float:
 
 
 def kick(force: bool = False, home: Path | None = None) -> None:
-    from hooks.lifecycle.timer import start_now
-
     stamp = (home or _home()) / "gc.stamp"
     interval = float(_setting("AGENTIHOOKS_GC_INTERVAL_MIN", "60")) * 60
     if not force and stamp.exists() and time.time() - stamp.stat().st_mtime < interval:
         return
     stamp.parent.mkdir(parents=True, exist_ok=True)
     stamp.touch()
-    if start_now():
-        return
     from hooks._async import fork_and_call
     from hooks.lifecycle.run import sweep
 

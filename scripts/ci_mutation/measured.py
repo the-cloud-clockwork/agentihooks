@@ -135,7 +135,13 @@ def main() -> int:
     args = parser.parse_args()
     root = Path.cwd()
     changes = discover_changes(root, args.bases.split(","), "HEAD")
-    selected = {path: (lines, tests) for path, lines in changes.items() if (tests := select_tests(root, Path(path)))}
+    planned = root / ".mutation-selection.json"
+    selection = json.loads(planned.read_text()) if planned.is_file() else None
+    selected = {
+        path: (lines, tests)
+        for path, lines in changes.items()
+        if (tests := selection[path] if selection is not None else select_tests(root, Path(path)))
+    }
     head = subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
     plan = refine_plan(root, selected, SharedStats(args.stats, head))
     (args.stats / "plan.json").write_text(json.dumps(plan))

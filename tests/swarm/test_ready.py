@@ -754,6 +754,65 @@ def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(
     assert merging.run() == []
 
 
+def test_a_merged_code_task_waits_for_declared_post_merge_proof(merging):
+    merging.rows["t1"]["contract"] = {"after": "yes"}
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 awaits its proof, {URL} merged", f"removed the worktree {TOP}"]
+    row = merging.rows["t1"]
+    assert row["state"] == "open" and row["awaiting"] == "verify" and row["claimed_by"] == ""
+    assert row["pr_url"] == URL
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.store.redis.get(merging.store.key("sw", "claim", "t1")) is None
+    assert merging.run() == []
+
+
+@pytest.mark.parametrize("after_at,until", [("", NOW + 60_000), (str(NOW + 120_000), NOW + 120_000), (str(NOW), None)])
+def test_live_post_merge_proof_owner_keeps_claim_with_declared_wait(merging, monkeypatch, after_at, until):
+    from scripts.swarm import idle
+
+    merging.rows["t1"]["contract"] = {"after": "yes", "after_at": after_at}
+    merging.pulls[URL] = MERGED
+    monkeypatch.setattr(ready, "_owners", lambda run, task_id: [SimpleNamespace(name=AGENT)])
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr"
+    assert merging.rows["t1"]["claimed_by"] == AGENT
+    assert merging.shell.calls == []
+    entry = idle.wait(merging.store.redis, "sw", AGENT)
+    assert (entry["until"] if entry else None) == until
+    if entry:
+        assert entry["reason"] == "post merge proof" and entry["at"] == NOW
+
+
+@pytest.mark.parametrize(
+    "contract,proof", [({"after": "no"}, {}), ({"after": "yes"}, {"command": "probe", "output": "ok"})]
+)
+def test_merged_code_with_no_missing_after_proof_still_closes(merging, contract, proof):
+    merging.rows["t1"].update(contract=contract, proof=proof)
+    merging.pulls[URL] = MERGED
+    assert merging.run()[0] == f"task t1 done, {URL} merged"
+    assert merging.rows["t1"]["state"] == "done"
+
+
+def test_post_merge_verification_waits_for_maturity_or_master_reopen(monkeypatch):
+    from scripts.swarm import claim_hold
+
+    monkeypatch.setattr(claim_hold, "time", lambda: 10)
+    task = {"awaiting": "verify", "contract": {"after": "yes", "after_at": "10001"}}
+    assert claim_hold.hold(task, {}, {}, {}, "") == "it waits for its post merge proof window or a master reopen"
+    task["contract"].pop("after_at")
+    assert claim_hold.hold(task, {}, {}, {}, "")
+    task["contract"]["after_at"] = ""
+    assert claim_hold.hold(task, {}, {}, {}, "")
+    task["contract"]["after_at"] = "10000"
+    assert claim_hold.verification(task) == ""
+    task["contract"]["after_at"] = "9999"
+    assert claim_hold.verification(task) == ""
+    task["awaiting"] = ""
+    task["contract"]["after_at"] = "10001"
+    assert claim_hold.verification(task) == ""
+
+
 def test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live(merging, monkeypatch):
     merging.rows["t1"]["kind"] = "tune"
     merging.pulls[URL] = MERGED
