@@ -63,6 +63,13 @@ def test_a_labelled_half_reads_no_plan_chunk(planned):  # noqa: F811
     assert intent._plan_chunk(doc, task) == {}
 
 
+def test_a_labelled_split_drops_stale_plan_lines_from_its_contract(planned):  # noqa: F811
+    doc = split(planned)
+    task = {**doc["tasks"][0], "split": ["compatibility", "repair"]}
+    contract = intent._task_contract(doc, task)
+    assert contract == {**task, "plan_lines": ""}
+
+
 @pytest.mark.parametrize("source", ["task", "phase"])
 def test_a_split_task_keeps_its_half_when_the_plan_is_linked(planned, source):  # noqa: F811
     doc = split(planned)
