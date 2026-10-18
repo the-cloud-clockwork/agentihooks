@@ -35,3 +35,28 @@ def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp
         assert len(legs) == 48
         assert [leg["shard"] for leg in legs] == list(range(1, 49))
         assert {leg["total"] for leg in legs} == {48}
+
+
+def test_queue_sizing_keeps_independent_worker_groups_parallel(tmp_path):
+    from tests.queue_shards import matrix
+
+    for group in range(4):
+        path = tmp_path / f"tests/test_group_{group}.py"
+        path.parent.mkdir(exist_ok=True)
+        path.write_text(f"import pytest\npytestmark = pytest.mark.xdist_group('group_{group}')\n")
+    measured = {f"tests/test_group_{group}.py::test_{i}": 30.0 for group in range(4) for i in range(12)}
+
+    assert len(matrix(tmp_path, {"3.11": measured})) == 12
+
+
+def test_a_single_test_that_cannot_fit_refuses_the_queue_plan(tmp_path):
+    import pytest
+
+    from tests.queue_shards import matrix
+
+    path = tmp_path / "tests/test_slow.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+
+    with pytest.raises(SystemExit, match="cannot fit below half the step timeout"):
+        matrix(tmp_path, {"3.11": {"tests/test_slow.py::test_slow": 150.0}})
