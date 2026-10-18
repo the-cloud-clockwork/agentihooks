@@ -215,3 +215,28 @@ def test_resumed_agent_keeps_the_runtime_model_and_route(store, monkeypatch):
     assert current.route_kind == current.desired_route_kind == "interactive"
     assert current.remote_control == remote
     assert current.conversation_id == "old-conversation"
+
+
+def test_dead_master_recovers_after_a_peers_binding_mismatch(store, monkeypatch):
+    from scripts.swarm.live_binding import assignment
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    master = next(agent for agent in store.agents("sw") if agent.lane == "master")
+    master = replace(master, conversation_id="master-conversation", profile="engineer")
+    store.put_agent("sw", master)
+    runtime.live.discard(master.name)
+
+    def bindings(agents):
+        return {
+            agent.name: {**assignment(agent), "hooks": False} if agent.name in runtime.live else {"process": False}
+            for agent in agents
+        }
+
+    monkeypatch.setattr(runtime, "bindings", bindings)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+
+    tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+
+    assert runtime.resumed == [master]
+    assert "engineer@a1b2c3-0001" in runtime.killed
