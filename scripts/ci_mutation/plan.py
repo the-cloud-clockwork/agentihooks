@@ -59,11 +59,11 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 
 
 def validate_tests(root: Path, tests: list[str]) -> None:
-    from tests.test_collection_imports import SDK_GROUP, _module_level_imports, loads_heavy, loads_sdk_when_run
+    from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 
     for test in tests:
         path = root / test
-        if any(loads_heavy(name, set()) for name in _module_level_imports(path)):
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
         source = path.read_text()
         if loads_sdk_when_run(source) and SDK_GROUP not in source:

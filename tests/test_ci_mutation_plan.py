@@ -619,7 +619,11 @@ def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_p
 def test_planning_checks_selected_test_collection_and_worker_contracts(
     tmp_path, monkeypatch, imports, grouped, refused
 ):
+    from tests import test_collection_imports as contracts
+
     _project(tmp_path, {})
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
     group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n' if grouped else ""
     (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n" + group + imports)
     (tmp_path / "tests/test_unrelated.py").write_text("import mcp\n")
