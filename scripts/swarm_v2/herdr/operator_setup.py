@@ -50,6 +50,7 @@ SYNC_SECONDS = 15
 REFRESH_SECONDS = 900
 OWNER = "swarm-terminal"
 LIVE = ("active", "pending")
+STATE_KEYS = {"due", "seen", "synced", "jump"}
 REDIS_PATH = "k8s/agentihooks-swarm"
 REDIS_FIELD = "redis_password"
 REDIS_USER = "swarm"
@@ -269,9 +270,10 @@ def service(
 
 def _saved(placement: Placement) -> dict | None:
     try:
-        return json.loads(placement.state.read_text())
+        saved = json.loads(placement.state.read_text())
     except (OSError, ValueError):
         return None
+    return saved if isinstance(saved, dict) and saved.keys() >= STATE_KEYS else None
 
 
 def sync_pass(running: Service, root: Path, out=None) -> None:
@@ -296,7 +298,7 @@ def _job(event: dict) -> tuple[Path, str]:
 
 
 def _contained(command: str, work: Callable[[], object]) -> None:
-    # A slot that raises stops this machine's scheduler runner; the next interval retries the job.
+    # A raised slot error stops this machine's scheduler runner for every job, so it is reported here instead.
     try:
         work()
     except SwarmError as refused:
@@ -307,7 +309,8 @@ def _contained(command: str, work: Callable[[], object]) -> None:
 
 def refresh(event: dict, _delivery_id: str, _redis: "Redis") -> None:
     root, address = _job(event)
-    _contained("setup", lambda: setup(root, {**os.environ, ADDRESS_ENV: address}))
+    environ = {**os.environ, ADDRESS_ENV: address} if address else os.environ
+    _contained("setup", lambda: setup(root, environ))
 
 
 def sync(event: dict, _delivery_id: str, _redis: "Redis") -> None:
@@ -357,8 +360,7 @@ def scheduled(root: Path, address: str, scheduler: Scheduler) -> bool:
 def schedule(root: Path, address: str, scheduler: Scheduler) -> None:
     if scheduled(root, address, scheduler):
         return
-    placement = Placement(root / FOLDER)
-    previous, payload = _recorded(placement), _payload(root, address)
+    placement, payload = Placement(root / FOLDER), _payload(root, address)
     entries = {}
     for name, slot, seconds in JOBS:
         entries[name] = scheduler.interval(owner=OWNER, payload=payload, every=seconds)
@@ -367,9 +369,10 @@ def schedule(root: Path, address: str, scheduler: Scheduler) -> None:
     _stage(placement.schedule, json.dumps(record).encode()).replace(placement.schedule)
     for entry in entries.values():
         entry.start()
-    for name, _, _ in JOBS:
-        if _live(scheduler, previous.get(name, "")):
-            scheduler.get(previous[name]).cancel()
+    kept = {entry.id for entry in entries.values()}
+    for entry in scheduler.owned(OWNER):
+        if entry.id not in kept and entry.state in LIVE and _job(entry.record)[0] == root:
+            entry.cancel()
 
 
 def remove_units(unit_dir: Path, run: Callable = subprocess.run) -> None:
@@ -418,8 +421,8 @@ def install(
     scheduler: Scheduler | None = None,
     start: Callable | None = None,
 ) -> None:
-    remove_units(unit_dir or _unit_dir(), run)
     schedule(root, address, scheduler or _scheduler())
+    remove_units(unit_dir or _unit_dir(), run)
     (start or ensure_running)()
 
 

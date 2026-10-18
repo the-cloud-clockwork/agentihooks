@@ -116,6 +116,10 @@ class Scheduler:
         entry.record
         return entry
 
+    def owned(self, owner: str) -> list[Entry]:
+        entries = self.redis.hgetall(self.key("entries"))
+        return [Entry(self, entry_id) for entry_id, raw in entries.items() if json.loads(raw)["owner"] == owner]
+
     def update(self, entry_id: str, change: Callable[[dict], None], *, lease: "Lock | None" = None) -> None:
         from redis.exceptions import WatchError
 

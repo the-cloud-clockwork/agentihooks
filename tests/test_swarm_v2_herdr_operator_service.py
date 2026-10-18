@@ -244,7 +244,8 @@ def test_an_unchanged_pass_prints_nothing_to_standard_output(tmp_path):
     assert len(out.getvalue().splitlines()) == 1
 
 
-def test_an_unreadable_saved_state_starts_a_full_pass(tmp_path):
+@pytest.mark.parametrize("text", ["not json", "{}", "[]", '{"due": false, "seen": {}, "synced": null}'])
+def test_an_unreadable_saved_state_starts_a_full_pass(tmp_path, text):
     import io
 
     from scripts.swarm_v2.herdr import operator_setup
@@ -257,7 +258,7 @@ def test_an_unreadable_saved_state_starts_a_full_pass(tmp_path):
     client = ClientHome(tmp_path / "client", jump=operator_terminal.jump(JUMP))
     root, out = placed(tmp_path), io.StringIO()
     operator_setup.sync_pass(operator_setup.service(JUMP, client, root, herdr_run(herdr), lambda: made), root, out)
-    (root / "swarm-terminal" / "sync-state.json").write_text("not json")
+    (root / "swarm-terminal" / "sync-state.json").write_text(text)
 
     operator_setup.sync_pass(operator_setup.service(JUMP, client, root, herdr_run(herdr), lambda: made), root, out)
 

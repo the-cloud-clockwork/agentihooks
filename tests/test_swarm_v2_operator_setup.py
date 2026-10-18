@@ -375,7 +375,7 @@ def test_install_names_a_refused_disable_and_keeps_the_old_units(tmp_path):
         "agentihooks-swarm-terminal-sync.service: Unit not loaded."
     )
     assert all((tmp_path / name).exists() for name in LEGACY)
-    assert machine.redis.hgetall(machine.key("entries")) == {}
+    assert operator_setup.scheduled(tmp_path / "home", "", machine)
 
 
 def test_install_defaults_to_the_user_units_the_machine_scheduler_and_its_supervisor(tmp_path, monkeypatch):
@@ -498,7 +498,7 @@ def test_install_refuses_when_systemctl_fails(tmp_path, error, named):
     assert str(refused.value) == f"systemctl could not remove agentihooks-swarm-terminal.timer: {named}"
 
 
-def test_install_command_names_an_unreachable_scheduler_redis(tmp_path, monkeypatch):
+def test_install_command_names_an_unreachable_scheduler_redis_and_keeps_the_old_units(tmp_path, monkeypatch):
     import redis
 
     def refuse():
@@ -507,14 +507,22 @@ def test_install_command_names_an_unreachable_scheduler_redis(tmp_path, monkeypa
     monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
     monkeypatch.setattr(operator_setup, "redis_client", refuse)
     monkeypatch.setattr(operator_setup, "ensure_running", lambda: pytest.fail("started without a scheduler"))
+    units = tmp_path / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
 
-    for argv in (["install"], ["install", "--check"]):
-        code, out, err = run_main(argv, {}, Who(), tmp_path / "home")
-        assert (code, out, err) == (
-            1,
-            "",
-            "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
-        )
+    assert run_main(["install", "--check"], {}, Who(), tmp_path / "home") == (
+        1,
+        "",
+        "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
+    )
+    for name in LEGACY:
+        (units / name).write_text("old\n")
+    assert run_main(["install"], {}, Who(), tmp_path / "home") == (
+        1,
+        "",
+        "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
+    )
+    assert sorted(path.name for path in units.iterdir()) == sorted(LEGACY)
 
 
 def test_install_command_refuses_inside_an_agent_session(tmp_path, monkeypatch):
@@ -681,7 +689,7 @@ def test_a_failed_scheduled_pass_is_reported_and_never_raised(tmp_path, monkeypa
 
 def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", "stale.example:6379")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", "own.example:6379")
     monkeypatch.setenv("OPENBAO_URL", BAO_URL)
     monkeypatch.setattr(operator_setup, "setup", lambda root, environ: seen.append((root, environ)) or 1)
 
@@ -689,7 +697,10 @@ def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeyp
     operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
 
     assert [root for root, _ in seen] == [tmp_path / "home", tmp_path / "home"]
-    assert [environ["AGENTIHOOKS_HIVE_REDIS_ADDRESS"] for _, environ in seen] == ["swarm.example:6379", ""]
+    assert [environ["AGENTIHOOKS_HIVE_REDIS_ADDRESS"] for _, environ in seen] == [
+        "swarm.example:6379",
+        "own.example:6379",
+    ]
     assert [environ["OPENBAO_URL"] for _, environ in seen] == [BAO_URL, BAO_URL]
 
 
@@ -1008,8 +1019,10 @@ def test_a_changed_address_replaces_both_jobs_and_cancels_the_old_ones(tmp_path)
     assert not {old["refresh"], old["sync"]} & {new["refresh"], new["sync"]}
 
 
-def test_a_lost_job_or_record_is_scheduled_again(tmp_path):
+def test_a_lost_job_or_record_is_scheduled_again_and_the_orphans_cancelled(tmp_path):
     machine, root = scheduler(), tmp_path / "home"
+    operator_setup.install(tmp_path / "other", "", tmp_path, Systemctl(), machine, lambda: None)
+    other = recorded(tmp_path / "other")
     operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
     first = recorded(root)
     machine.get(first["sync"]).cancel()
@@ -1023,7 +1036,10 @@ def test_a_lost_job_or_record_is_scheduled_again(tmp_path):
     (root / "swarm-terminal" / "schedule.json").write_text("not json")
     assert not operator_setup.installed(root, "", tmp_path, machine)
     operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
-    assert recorded(root)["sync"] not in (first["sync"], second["sync"])
+    third = recorded(root)
+    assert [machine.get(second[name]).state for name in ("refresh", "sync")] == ["cancelled", "cancelled"]
+    assert [machine.get(third[name]).state for name in ("refresh", "sync")] == ["active", "active"]
+    assert [machine.get(other[name]).state for name in ("refresh", "sync")] == ["active", "active"]
     assert operator_setup.installed(root, "", tmp_path, machine)
 
 
