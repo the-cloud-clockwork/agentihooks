@@ -152,7 +152,7 @@ def test_a_remote_client_without_ledger_url_imports_and_is_refused_at_request_ti
     assert (imported.returncode, imported.stdout.strip()) == (0, "''")
     with patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}), patch.object(ledger, "BASE", ""):
         os.environ.pop("LEDGER_URL", None)
-        with pytest.raises(SystemExit, match="LEDGER_URL"):
+        with pytest.raises(SystemExit, match="SWARM_URL"):
             ledger.base()
 
 
@@ -191,7 +191,7 @@ def exits(message):
 
 
 def test_remote_refusals_name_what_is_missing():
-    with exits("a remote ledger client needs LEDGER_URL, the address of the hive ledger server"):
+    with exits("a remote ledger client needs SWARM_URL, the address of the hosted ledger server"):
         ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose"})
     assert ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://hub.example/X/"}) == (
         "https://hub.example/X"
