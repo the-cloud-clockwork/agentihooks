@@ -494,7 +494,7 @@ def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(en
     assert lease.current(store, "sw").epoch == 1
 
 
-def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tmp_path):
+def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tmp_path):  # noqa: F811
     import subprocess
     import sys
     from contextlib import nullcontext
