@@ -105,7 +105,17 @@ def test_a_classifier_error_falls_back_to_round_robin(swarm, inbox, grouping):
 
     grouping.setattr(intent, "decide", unavailable)
     assert _addresses(inbox, ["deploy one", "deploy two", "deploy three"]) == [FRONT, SECOND, FRONT]
-    assert swarm.redis.keys(f"{pool.PREFIX}:sw:intent:*") == []
+    caches = swarm.redis.keys(f"{pool.PREFIX}:sw:intent:*")
+    assert len(caches) == 2
+    assert [set(swarm.redis.hkeys(cache)) for cache in caches] == [{intent.TOKENS}] * 2
+
+
+def test_an_unreadable_timeout_setting_keeps_the_default_deadline(swarm, inbox, grouping):
+    grouping.setenv(intent.TIMEOUT_ENV, "soon")
+    _decider(grouping, _same_topic)
+    swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{SECOND}", "deploy one")
+    assert intent.timeout_s() == intent.DEFAULT_TIMEOUT_S
+    assert _addresses(inbox, ["deploy two"]) == [SECOND]
 
 
 def test_flag_off_asks_no_classifier_and_keeps_no_history(swarm, inbox, monkeypatch):
@@ -124,42 +134,76 @@ def test_only_a_true_flag_turns_grouping_on(monkeypatch, value):
     assert intent.enabled() is True
 
 
+def _cache(swarm, item_id):
+    return swarm.redis.hgetall(f"{pool.PREFIX}:sw:intent:{item_id}")
+
+
+def _repool(inbox, item_id, holder):
+    inbox.return_to_pool(item_id, holder)
+    inbox.pool.distribute(SLUG)
+    return inbox.get(item_id).address
+
+
+def _long_item(swarm, inbox):
+    long_line = "investigate the failing merge queue run " * 10
+    recent = [intent.first_line(long_line)] * intent.RECENT
+    for seat in (FRONT, SECOND):
+        swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{seat}", *recent)
+    item = inbox.send("swarm", FRONT, long_line + "\n" + "body " * 2000)
+    return item, intent.request(recent[0], recent).estimated_tokens()
+
+
 def test_each_item_sends_only_first_lines_within_its_token_budget_and_is_cached(swarm, inbox, grouping):
     calls = _decider(grouping, lambda new, recent: 0.1)
-    long_line = "investigate the failing merge queue run " * 10
-    for seat in (FRONT, SECOND):
-        swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{seat}", *[intent.first_line(long_line)] * intent.RECENT)
-    item = inbox.get(inbox.send("operator", FRONT, long_line + "\n" + "body " * 2000).id)
-    live = pool.live_masters(swarm.redis, SLUG)
+    item, sent = _long_item(swarm, inbox)
 
-    routes = intent.routes(inbox.pool, SLUG, [item], live)
+    assert inbox.get(item.id).address == FRONT
+    assert _cache(swarm, item.id)[intent.TOKENS] == str(2 * sent)
+    assert sent <= TOKENS_PER_MASTER
+    assert [len(state["new"]) for state, _, _ in calls] == [intent.LINE_CHARS] * 2
+    assert _repool(inbox, item.id, FRONT) == SECOND
+    assert len(calls) == 2
+    assert _cache(swarm, item.id)[intent.TOKENS] == str(2 * sent)
 
-    recent = [intent.first_line(long_line)] * intent.RECENT
-    sent = intent.request(intent.first_line(long_line), recent).estimated_tokens()
-    assert routes == {item.id: intent.Route("", 2 * sent)}
-    assert 0 < sent <= TOKENS_PER_MASTER
-    assert all(len(state["new"]) == intent.LINE_CHARS for state, _, _ in calls)
-    assert len(calls) == 2
-    assert intent.routes(inbox.pool, SLUG, [item], live) == {item.id: intent.Route("", 0)}
-    assert len(calls) == 2
+
+def test_an_unreadable_cached_verdict_asks_again(swarm, inbox, grouping):
+    calls = _decider(grouping, lambda new, recent: 0.1)
+    item, sent = _long_item(swarm, inbox)
+    cache = f"{pool.PREFIX}:sw:intent:{item.id}"
+    for field in swarm.redis.hkeys(cache):
+        if field != intent.TOKENS:
+            swarm.redis.hset(cache, field, "unreadable")
+
+    assert _repool(inbox, item.id, FRONT) == SECOND
+    assert len(calls) == 4
+    assert _cache(swarm, item.id)[intent.TOKENS] == str(4 * sent)
 
 
 def test_a_changed_history_asks_again(swarm, inbox, grouping):
     calls = _decider(grouping, _same_topic)
     swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{SECOND}", "alpha one")
-    item = inbox.get(inbox.send("operator", FRONT, "alpha two").id)
-    live = pool.live_masters(swarm.redis, SLUG)
-    assert intent.routes(inbox.pool, SLUG, [item], live)[item.id].seat == SECOND
-    swarm.redis.lpush(f"{pool.PREFIX}:sw:recent:{SECOND}", "beta three")
-    assert intent.routes(inbox.pool, SLUG, [item], live)[item.id].seat == SECOND
-    assert len(calls) == 2
+    item = inbox.send("swarm", FRONT, "alpha two")
+
+    assert inbox.get(item.id).address == SECOND
+    assert _repool(inbox, item.id, SECOND) == FRONT
+    assert [state["recent"] for state, _, _ in calls] == [["alpha one"], ["alpha two", "alpha one"]]
 
 
-def test_the_best_verdict_wins_between_matching_masters():
-    verdicts = {("i", FRONT): 0.75, ("i", SECOND): 0.95}
-    assert intent._best("i", {FRONT: ["a"], SECOND: ["b"]}, verdicts) == SECOND
-    assert intent._best("i", {FRONT: ["a"]}, verdicts) == FRONT
-    assert intent._best("j", {FRONT: ["a"]}, verdicts) == ""
+@pytest.mark.parametrize(
+    ("front", "second", "expected"),
+    [
+        (0.75, 0.95, SECOND),
+        (0.95, 0.75, FRONT),
+        (intent.MATCH, 0.2, FRONT),
+        (intent.MATCH - 0.01, 0.2, SECOND),
+    ],
+)
+def test_the_best_verdict_at_or_above_the_floor_wins(swarm, inbox, grouping, front, second, expected):
+    _decider(grouping, lambda new, recent: front if recent == ["front work"] else second)
+    swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{FRONT}", "front work")
+    swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{SECOND}", "second work")
+    swarm.redis.set(f"{pool.PREFIX}:sw:last", FRONT)
+    assert _addresses(inbox, ["any work"]) == [expected]
 
 
 def test_first_line_trims_and_bounds_the_text():

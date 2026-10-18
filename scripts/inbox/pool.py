@@ -122,9 +122,9 @@ class MasterPool:
         if not intent.enabled():
             return None
         items = [self.inbox.get(item_id) for item_id in self.redis.zrange(self.key(slug), 0, -1)]
-        return {item_id: route.seat for item_id, route in intent.routes(self, slug, items, live).items()}
+        return intent.routes(self, slug, items, live)
 
-    def _claim_next(self, slug, live, routed=None):
+    def _claim_next(self, slug, live, routed):
         from redis.exceptions import WatchError
 
         for _ in range(CLAIM_ATTEMPTS):
@@ -134,7 +134,7 @@ class MasterPool:
                 continue
         return None
 
-    def _try_claim(self, slug, live, routed=None):
+    def _try_claim(self, slug, live, routed):
         pool, last = self.key(slug), self.key(slug, "last")
         with self.redis.pipeline() as pipe:
             pipe.watch(pool, last)
