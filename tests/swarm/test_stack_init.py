@@ -391,9 +391,10 @@ def test_help_names_the_command_and_its_timeout():
     text = " ".join(stack_init.parser().format_help().split())
     description = " ".join(stack_init.__doc__.split())
     assert text == (
-        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--adopt] {description} options: "
+        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--prepare-clients] [--adopt] {description} options: "
         "-h, --help show this help message and exit "
         "--timeout TIMEOUT seconds to wait for every service to be healthy "
+        "--prepare-clients verify bundle credentials on existing local Redis and activate clients "
         "--adopt serve the existing shared ledger folder as this user from the stack, on the default ledger port, "
         "and keep doing so on every later run"
     )

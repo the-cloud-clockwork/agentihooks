@@ -408,6 +408,5 @@ def test_a_resumed_master_keeps_its_desired_route(tmp_path):
 
     runtime, config, agent, _ = _resuming(tmp_path, "c0ffee")
     config.slug = "proof"
-    config.master_claude_login = False
     master = replace(agent, lane="master", task="master", route_kind="subscription", desired_route_kind="interactive")
     assert runtime.resume(config, master, "resume").desired_route_kind == "interactive"

@@ -98,13 +98,14 @@ For the lead Claude master to appear in the Claude app, the operator enables
 the optional master login and signs in from their own terminal:
 
 ```bash
-agentihooks swarm <id> set master-claude-login=on
-agentihooks claude login --master <id>
+export AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true
+agentihooks claude login --master
 ```
 
-`master-claude-login` defaults to off. When on, the front door master uses its
-private Claude config home, forces `claudeai` login and receives
-`--remote-control "master · <id>"`. Workers do not receive this login or the
+`AGENTIHOOKS_MASTER_CLAUDE_LOGIN` defaults to off and holds for every swarm on
+the machine. When on, the front door master of each swarm uses the one private
+Claude config home, forces `claudeai` login and receives
+`--remote-control "master · <id>"`. Pool masters and workers do not receive this login or the
 Remote Control flags. A failed private login, conflicting declared master
 account, live login holder or missing worker quota tokens refuses this route;
 it does not silently replace the selected private login. See
@@ -210,7 +211,7 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   every rule.
 - **Front door.** Only `master@<id>`, or the lowest numbered live master while that seat is empty, faces the
   operator: it receives page chat and every operator write, holds Priorities and, with
-  `master-claude-login` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
+  `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
   naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
   master through its herdr pane, or through the front door.
 - **Private channel.** Masters sync with `agentihooks swarm <id> masters-channel say TEXT` and
@@ -294,6 +295,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | Command | Effect |
 |---|---|
 | `agentihooks swarm init [--timeout SECONDS]` | Bring up the local swarm stack, Redis with its password, the ledger server and the controller, from the Compose files packaged with agentihooks into `$AGENTIHOOKS_HOME/swarm-stack`. The first run writes `.env` there with a random Redis password, free ledger and Redis ports and `SWARM_IMAGE_TAG=release`, so the stack runs the released swarm image; later runs keep them, so a rerun is safe and keeps the data. It waits until every service is healthy (default 300 seconds) and the ledger home page answers, then prints the ledger address, the `client.env` line that points a shell at the stack and the commands that start a swarm. A missing Docker, daemon or Compose plugin, an unhealthy service or a silent ledger page is named with its fix and exits 1. It never creates or starts a swarm, and `init`, like `list` and `tick`, is read as a command word before any swarm id, so do not name a swarm `init`. Output is coloured on a terminal, plain when piped or with `NO_COLOR`. |
+| `agentihooks swarm init --prepare-clients` | Stage named authentication before moving an existing local swarm into the bundle. First deploy the bundle's named Redis user and persistent ACL configuration through the source service's repository, retaining existing clients, and verify authentication after a source restart. Preparation checks the bundle credential against the current localhost Redis, its named user and configured ACL file, then atomically writes the private `swarm-client.env` companion for existing environment loaders. It changes no Redis users, data, services, deployment mode, ledger address or ports. Existing sessions keep their connections; new processes use named authentication on the same source. Keep that source as the sole writer until the master completes seat turnover and verifies client counts before the final data and port cutover. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
