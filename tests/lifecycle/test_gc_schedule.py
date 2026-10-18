@@ -55,7 +55,13 @@ def test_install_schedules_one_hourly_cron_connected_to_the_gc_slot(scheduler):
     record = scheduler.get(entry_id).record
     assert record["kind"] == "cron" and record["expression"] == "0 * * * *" and record["state"] == "active"
     assert record["owner"] == "agentihooks-gc"
-    assert json.loads(record["payload"]) == {"python": "/venv/bin/python", "root": "/opt/agentihooks"}
+    from hooks.config import AGENTIHOOKS_HOME
+
+    assert json.loads(record["payload"]) == {
+        "python": "/venv/bin/python",
+        "root": "/opt/agentihooks",
+        "home": str(AGENTIHOOKS_HOME),
+    }
     assert [{key: slot[key] for key in ("signal", "kind", "reference")} for slot in record["slots"]] == [
         {"signal": "timeout", "kind": "callable", "reference": "hooks.lifecycle.timer:sweep"}
     ]
@@ -139,28 +145,47 @@ def test_the_gc_slot_starts_one_detached_sweep_per_delivery(monkeypatch):
     redis = fakeredis.FakeRedis(decode_responses=True)
     started = Mock()
     monkeypatch.setattr(timer.subprocess, "Popen", started)
-    event = {"payload": json.dumps({"python": "/venv/bin/python", "root": "/opt/agentihooks"})}
+    monkeypatch.setenv("AGENTIHOOKS_PROOF", "kept")
+    payload = {"python": "/venv/bin/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
+    event = {"payload": json.dumps(payload)}
     timer.sweep(event, "delivery-1", redis)
     timer.sweep(event, "delivery-1", redis)
-    started.assert_called_once_with(
+    started.assert_called_once()
+    assert started.call_args.args == (
         ["nice", "-n", "10", "/venv/bin/python", "-m", "scripts.gc_cli", "gc", "--enforce"],
-        cwd="/opt/agentihooks",
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
     )
-    assert redis.ttl(redis_key("scheduler", "agentihooks-gc:delivery-1")) == 86400
+    kwargs = dict(started.call_args.kwargs)
+    env = kwargs.pop("env")
+    assert env["AGENTIHOOKS_HOME"] == "/srv/ah" and env["AGENTIHOOKS_PROOF"] == "kept"
+    assert kwargs == {
+        "cwd": "/opt/agentihooks",
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.DEVNULL,
+        "stderr": subprocess.DEVNULL,
+        "start_new_session": True,
+    }
+    marker = redis_key("scheduler", "agentihooks-gc:delivery-1")
+    assert redis.get(marker) == "1" and redis.ttl(marker) == 86400
     timer.sweep(event, "delivery-2", redis)
     assert started.call_count == 2
+
+
+def test_a_sweep_that_cannot_start_never_crashes_the_runner(monkeypatch):
+    import fakeredis
+
+    from hooks.lifecycle import timer
+
+    monkeypatch.setattr(timer.subprocess, "Popen", Mock(side_effect=FileNotFoundError("nice")))
+    payload = {"python": "/gone/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
+    assert timer.sweep({"payload": json.dumps(payload)}, "delivery-1", fakeredis.FakeRedis()) is None
 
 
 def test_the_runner_fires_the_sweep_on_the_hour_and_reschedules(scheduler, monkeypatch):
     from hooks.lifecycle import timer
 
+    timer.install_timer("/venv/bin/python", "/opt/agentihooks")
     started = Mock()
     monkeypatch.setattr(timer.subprocess, "Popen", started)
-    timer.install_timer("/venv/bin/python", "/opt/agentihooks")
     [entry_id] = timer.scheduled(scheduler)
     due = scheduler.get(entry_id).record["due"]
     assert due % 3600 == 0

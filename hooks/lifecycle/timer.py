@@ -49,13 +49,15 @@ def install_timer(python: str, root: str) -> str:
 def _schedule(python: str, root: str) -> str:
     from redis.exceptions import RedisError
 
+    from hooks.config import AGENTIHOOKS_HOME
     from scripts.scheduler.service import ensure_running
 
     try:
         scheduler = _scheduler()
         for entry_id in scheduled(scheduler):
             scheduler.get(entry_id).cancel()
-        cron = scheduler.cron(owner=UNIT, payload=json.dumps({"python": python, "root": root}), expression=CRON)
+        payload = json.dumps({"python": python, "root": root, "home": str(AGENTIHOOKS_HOME)})
+        cron = scheduler.cron(owner=UNIT, payload=payload, expression=CRON)
         cron.timeout.connect(sweep)
         cron.start()
     except RedisError:
@@ -99,11 +101,15 @@ def sweep(event: dict, delivery_id: str, redis: "Redis") -> None:
     if not redis.set(redis_key("scheduler", f"{UNIT}:{delivery_id}"), "1", nx=True, ex=86400):
         return
     target = json.loads(event["payload"])
-    subprocess.Popen(
-        ["nice", "-n", "10", target["python"], "-m", "scripts.gc_cli", "gc", "--enforce"],
-        cwd=target["root"],
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
+    try:
+        subprocess.Popen(
+            ["nice", "-n", "10", target["python"], "-m", "scripts.gc_cli", "gc", "--enforce"],
+            cwd=target["root"],
+            env={**os.environ, "AGENTIHOOKS_HOME": target["home"]},
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError:
+        return

@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from hooks.lifecycle import guard, run, timer
+from hooks.lifecycle import guard, run
 from hooks.lifecycle.lease import read_lease
 from hooks.lifecycle.locks import being_removed, removing
 from hooks.lifecycle.model import Holder, Root
@@ -73,7 +73,13 @@ def test_disk_warning_fires_below_the_floor_once_per_window(tmp_path, monkeypatc
 
 def test_kick_is_throttled_unless_forced(tmp_path, monkeypatch):
     started = []
-    monkeypatch.setattr(timer, "start_now", lambda: started.append(1) or True)
+
+    def forked(target, **kwargs):
+        assert target is run.sweep
+        assert kwargs == {"timeout_sec": 3600, "task_name": "lifecycle-gc", "act": True}
+        started.append(1)
+
+    monkeypatch.setattr("hooks._async.fork_and_call", forked)
     guard.kick(home=tmp_path)
     guard.kick(home=tmp_path)
     assert started == [1]
