@@ -7,12 +7,20 @@ def _trace(task, tokens, *, complete=True, turns=True):
     observations = [{"type": "GENERATION", "tokens": tokens}]
     if turns:
         observations.append({"type": "SPAN", "turn": 1})
-    return {"tags": [f"task:{task}"], "complete": complete, "observations": observations}
+    return {
+        "id": task,
+        "name": task,
+        "session_id": task,
+        "tags": [f"task:{task}"],
+        "complete": complete,
+        "observations": observations,
+    }
 
 
 @pytest.mark.parametrize("complete,turns", [(False, True), (False, False), (True, False)])
 def test_unreliable_task_costs_cannot_raise_findings_or_lower_the_median(complete, turns):
     record = {
+        "now_ms": 0,
         "merged": ["small", "medium", "large", "partial", "partial2", "partial3"],
         "traces": [
             _trace("small", 100),
@@ -30,6 +38,7 @@ def test_unreliable_task_costs_cannot_raise_findings_or_lower_the_median(complet
 @pytest.mark.parametrize("complete,turns", [(False, True), (False, False), (True, False)])
 def test_one_unreliable_session_excludes_the_whole_task_cost(complete, turns):
     record = {
+        "now_ms": 0,
         "merged": ["small", "large"],
         "traces": [
             _trace("small", 100),
@@ -43,6 +52,7 @@ def test_one_unreliable_session_excludes_the_whole_task_cost(complete, turns):
 
 def test_complete_task_cost_keeps_every_session_and_turn():
     record = {
+        "now_ms": 0,
         "merged": ["small", "large"],
         "traces": [_trace("small", 100), _trace("large", 300), _trace("large", 500)],
     }

@@ -85,6 +85,8 @@ def _task_costs(record):
     costs = []
     for task in record["merged"]:
         traced = [t for t in record["traces"] if f"task:{task}" in t["tags"]]
+        if any(not t.get("complete", True) or not _turns(t) for t in traced):
+            continue
         costs.append(
             {
                 "task": task,
