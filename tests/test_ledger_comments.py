@@ -77,6 +77,45 @@ def test_a_progress_line_marks_its_author_seen(comments):
 
 
 @pytest.mark.parametrize(
+    "later",
+    [
+        {"id": "m1", "by": "master@1-1", "at": 4, "text": "Reopened it"},
+        {"id": "e1", "by": "engineer@2-2", "at": 4, "text": "Took the other half"},
+        {"id": "a1", "by": AGENT, "at": 4, "text": "Answered", "to": "operator"},
+    ],
+)
+def test_a_status_after_any_later_comment_posts_a_new_one_at_the_end(comments, later):
+    thread, ctx = [], Context()
+    post(comments, thread, ctx, "p1", "Building the first slice")
+    thread.append(later)
+    post(comments, thread, ctx, "p2", "Blocked again on the claim cap")
+    assert shown(thread) == [
+        ("p1", "Building the first slice", None),
+        (later["id"], later["text"], None),
+        ("p2", "Blocked again on the claim cap", None),
+    ]
+    assert "edited_at" not in thread[0]
+    assert [event for _, event, _, _ in ctx.records] == ["comment added", "comment added"]
+
+
+def test_a_status_amends_the_latest_comment_when_it_ends_the_thread(comments):
+    thread, ctx = [{"id": "m1", "by": "master@1-1", "at": 1, "text": "Assigned it"}], Context()
+    post(comments, thread, ctx, "p1", "Building the first slice")
+    post(comments, thread, ctx, "p2", "Merge queue passed")
+    assert shown(thread) == [("m1", "Assigned it", None), ("p1", "Merge queue passed", None)]
+    assert thread[1]["edited_at"] == 5
+
+
+def test_a_deleted_later_comment_leaves_the_status_amendable(comments):
+    thread, ctx = [], Context()
+    post(comments, thread, ctx, "p1", "Building the first slice")
+    thread.append({"id": "m1", "by": "master@1-1", "at": 4, "text": "", "deleted": True})
+    post(comments, thread, ctx, "p2", "Merge queue passed")
+    assert shown(thread) == [("p1", "Merge queue passed", None), ("m1", "", None)]
+    assert thread[0]["edited_at"] == 5
+
+
+@pytest.mark.parametrize(
     ("entry", "by", "allowed"),
     [
         ({"by": AGENT, "text": "Building"}, AGENT, True),

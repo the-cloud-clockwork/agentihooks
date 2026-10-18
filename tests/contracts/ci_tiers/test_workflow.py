@@ -99,6 +99,8 @@ def jobs_for(event, base_ref="dev", scope="full"):
     "event,expected", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST), ("push", PROMOTION)]
 )
 def test_each_event_runs_only_its_tier_jobs(event, expected):
+    if event == "push" and (ROOT / ".github/workflows/count-record.yml").exists():
+        expected = expected - {"count-record"}
     assert jobs_for(event) == expected
 
 

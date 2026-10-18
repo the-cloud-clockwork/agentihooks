@@ -31,9 +31,9 @@ TIERS = [
 ]
 
 
-def _gate_steps():
+def _gate_steps(*, docs=False):
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    return ci_reuse.gate_steps(queue_tier=True, **options)
+    return ci_reuse.gate_steps(queue_tier=True, docs=docs, **options)
 
 
 def gate(event, needs, mutation="true", scope="full"):
@@ -127,7 +127,9 @@ def test_duration_provenance_reads_the_base_and_records_the_queue_head():
 def test_skipping_reuse_requires_protected_duration_provenance(forged):
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
     head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps()
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
+        docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"]
+    )
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
@@ -146,7 +148,9 @@ def test_skipping_reuse_requires_protected_duration_provenance(forged):
 def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reuse_condition():
     base = {path.name: yaml.safe_load(path.read_text()) for path in (ROOT / ".github/workflows").glob("*.yml")}
     head = copy.deepcopy(base)
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps()
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
+        docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"]
+    )
     head["test.yml"]["jobs"]["reuse"]["if"] = (
         "github.event_name != 'merge_group' && github.event_name != 'pull_request'"
     )
@@ -166,7 +170,9 @@ def test_the_protected_grader_accepts_only_the_exact_tiered_aggregation_and_reus
     assert grade() == []
     head["test.yml"]["jobs"]["gate-required"]["steps"][0]["run"] += "exit 0\n"
     assert any("changes its steps" in problem for problem in grade())
-    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps()
+    head["test.yml"]["jobs"]["gate-required"]["steps"] = _gate_steps(
+        docs="docs" in head["test.yml"]["jobs"]["gate-required"]["needs"]
+    )
     head["test.yml"]["jobs"]["reuse"]["if"] = "false"
     assert any("changes the protected reuse job" in problem for problem in grade())
 

@@ -1,3 +1,6 @@
+import json
+from statistics import median
+
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import iso_ms
 
@@ -5,27 +8,40 @@ GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
 
 
-def _wait(run, job, since_ms, now_ms):
-    created = iso_ms(job["created_at"])
-    queued = job["status"] not in {"in_progress", "completed"}
-    started = iso_ms(job["started_at"]) if job.get("started_at") and not queued else now_ms
-    if not queued and created < since_ms and started < since_ms:
-        return []
-    elapsed = started - created
-    if elapsed <= 300000:
-        return []
-    seconds = elapsed // 1000
-    labels = ", ".join(job["labels"]) or "unassigned"
-    return [
-        Finding(
-            "ci runner wait",
-            f"{run['id']}-{run.get('run_attempt', 1)}-{job['id']}",
-            f"{labels} runner waited {seconds / 60:.2f} minutes for {job['name']}",
-            (f"run {run['id']}, job {job['id']} {job['name']}, labels {labels}, wait {seconds} seconds",),
-            "runner queue wait over 5 minutes",
-            seconds,
+def _wait(run, jobs, since_ms, now_ms):
+    groups = {}
+    active = set()
+    for job in jobs:
+        created = iso_ms(job["created_at"])
+        queued = job["status"] not in {"in_progress", "completed"}
+        started = iso_ms(job["started_at"]) if job.get("started_at") and not queued else now_ms
+        elapsed = started - created
+        if elapsed <= 300000:
+            continue
+        labels = tuple(sorted(set(job["labels"])))
+        groups.setdefault(labels, []).append(elapsed)
+        if queued or started >= since_ms:
+            active.add(labels)
+    found = []
+    for labels, waits in groups.items():
+        if labels not in active:
+            continue
+        longest = max(waits) // 1000
+        typical = median(waits) / 1000
+        text = ", ".join(labels) or "unassigned"
+        found.append(
+            Finding(
+                "ci runner wait",
+                f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(labels)}",
+                f"{text} runners waited up to {longest / 60:.2f} minutes for {len(waits)} jobs",
+                (
+                    f"run {run['id']}, labels {text}, {len(waits)} jobs, longest {longest} seconds, median {typical} seconds",
+                ),
+                "runner queue wait over 5 minutes",
+                longest,
+            )
         )
-    ]
+    return found
 
 
 def _wall(run, now_ms):
@@ -62,7 +78,6 @@ def _wall(run, now_ms):
 def findings(records: list[dict], since_ms: int, now_ms: int) -> list[Finding]:
     found = []
     for run in records:
-        for job in run["jobs"]:
-            found.extend(_wait(run, job, since_ms, now_ms))
+        found.extend(_wait(run, run["jobs"], since_ms, now_ms))
         found.extend(_wall(run, now_ms))
     return found

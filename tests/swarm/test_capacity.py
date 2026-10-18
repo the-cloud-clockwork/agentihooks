@@ -27,7 +27,7 @@ def _store():
 
 
 def account(name="a", cap=3, sessions=0, left=90, harness="claude"):
-    return capacity.Account(harness, name, capacity._state(cap), sessions, left, left, cap)
+    return capacity.Account(harness, name, capacity._state(cap, None), sessions, left, left, cap)
 
 
 def test_routed_session_reads_quota_for_every_occupied_account(monkeypatch, tmp_path):
@@ -103,7 +103,7 @@ def test_band_caps_follow_the_claude_five_hour_window_left(monkeypatch, five_use
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     (row,) = capacity.accounts({"AH_CC_TOKEN_a": "fake"}, 100)
     assert (row.cap, row.five_left, row.week_left) == (expected_cap, 100 - five_used, 100)
-    assert row.state == ("CLOSED" if expected_cap == 0 else "OPEN")
+    assert row.state == ("CLOSED" if expected_cap == 0 else "DRAIN" if five_used >= 90 else "OPEN")
 
 
 def test_a_reset_window_raises_the_cap_and_the_effective_caps_on_the_next_tick(monkeypatch):
@@ -186,7 +186,7 @@ def test_accounts_judge_every_window_at_the_given_time_and_pass_the_environment(
         capacity.codex_router, "quotas", lambda p, environ: calls.append(("quotas", [a.name for a in p], environ)) or {}
     )
     assert capacity.accounts(env, now) == [
-        capacity.Account("claude", "a", "OPEN", 0, 5.0, 100.0, 2, five_resets_at=now + 100),
+        capacity.Account("claude", "a", "DRAIN", 0, 5.0, 100.0, 2, five_resets_at=now + 100),
         capacity.Account("codex", "default", "OPEN", 0, 60.0, 100.0, 6, five_resets_at=now + 100),
         capacity.Account("codex", "x", "UNKNOWN", 1, None, None, None),
     ]
@@ -2077,7 +2077,9 @@ def test_quota_capacity_hands_autoscale_its_previous_state_and_warnings(tmp_path
 
 
 def api(harness="claude", weight=25, sessions=0, cap=10**6):
-    return capacity.Account(harness, "api", capacity._state(cap), sessions, None, None, cap, kind="api", weight=weight)
+    return capacity.Account(
+        harness, "api", capacity._state(cap, None), sessions, None, None, cap, kind="api", weight=weight
+    )
 
 
 def _api_policy(monkeypatch, weight=25, cap=10**6):
@@ -2233,9 +2235,11 @@ def test_an_api_account_round_trips_through_the_route_argument(tmp_path, monkeyp
         ("codex", None, 27, "OPEN", 6),
         ("codex", 100, 27, "OPEN", 6),
         ("codex", None, 96, "CLOSED", 0),
+        ("codex", None, 92, "DRAIN", 6),
         ("codex", 0, None, "UNKNOWN", None),
         ("claude", None, 27, "UNKNOWN", None),
         ("claude", 100, 27, "CLOSED", 0),
+        ("claude", 92, 27, "DRAIN", 2),
     ],
 )
 def test_aggregate_capacity_uses_the_codex_week_rule(monkeypatch, harness, five_used, week_used, state, cap):

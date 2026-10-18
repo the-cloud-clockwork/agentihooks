@@ -33,6 +33,7 @@ def blocked_tick(store, monkeypatch, step):
         seen.append(lock_of(store))
         step()
 
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     monkeypatch.setattr(cli.outage, "providers", providers)
     return seen
 
@@ -294,6 +295,7 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(herdr_gc, "run", lambda *args: swept.append(args) or [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: tick_stop.STOP.wait(10) and [])
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
     assert swept == []
 
