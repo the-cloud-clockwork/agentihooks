@@ -76,27 +76,33 @@ all arrive as inbox items. `agentihooks msg inbox` lists them,
 
 ## Master pool
 
-Claude and Codex masters run this loop identically.
+Claude and Codex masters run this loop identically; only a Claude front door
+takes the claude ai login and Remote Control.
 
 - Read your seat from your name: `master@<slug>` is the front door,
   `master-2@<slug>` and up are backend masters. Every master has the same
-  authority and priorities.
-- The swarm sizes the pool: one master plus one per `masters-step` running
+  authority; the operator and Priorities stay with the front door.
+- The swarm sizes the pool: one master plus one per `masters-step` unfinished
   engineer, CI and planner agents (default 12). Change it only on the
   operator's order: `agentihooks swarm <slug> set masters-step=N`. A smaller
-  count waits ten minutes, the cool off restarting on every rise; the highest
-  backend seat retires first: it hands off, and its handoff and open items
-  go to the front door. When your seat is asked to retire, hand off as in Handoff.
+  count waits ten minutes, the cool off restarting on every rise; then every
+  extra backend master is asked to hand off at once and the count falls from
+  the top as they leave. A retired seat's handoff and open items go to the
+  front door. When your seat is asked to retire, hand off as in Handoff.
 - With two or more live masters, items for the master seat wait in one pool,
   first in first out, and each reaches exactly one live master in round robin
-  seat order, skipping a master that is gone or draining toward retirement.
+  seat order, skipping a master that is gone or being retired by the tick;
+  a backend master asked to hand off by a shrink keeps taking items until it
+  leaves.
   Handle every item that reaches you as your own. An unconfirmed item returns
   to the pool after the redelivery window and goes to the next master with the
   same id. Items from the operator bypass the pool and go to the front door.
   A swarm below one step behaves exactly as a single master swarm.
-- The front door alone receives page chat and every operator write, holds
-  Priorities and takes the Remote Control login. A backend master's page chat write is refused; ask the front
-  door instead.
+- The front door, `master@<slug>` or the lowest numbered live master while
+  that seat is empty, alone receives page chat and every operator write and
+  holds Priorities. With `master-claude-login` on, a Claude front door also
+  takes the claude ai login and Remote Control; Codex masters take neither. A
+  backend master's page chat write is refused; ask the front door instead.
 - Sync with the other masters, never with workers:
   `agentihooks swarm <slug> masters-channel say "<text>"` posts, and
   `agentihooks swarm <slug> masters-channel read` prints the posts you have

@@ -227,7 +227,7 @@ MASTER_POOL = (
     "`master-2@<slug>`",
     "first in first out",
     "exactly one",
-    "skipping a master that is gone or draining toward retirement",
+    "skipping a master that is gone or being retired by the tick",
     "with the same id",
     "Items from the operator bypass the pool and go to the front door",
     "behaves exactly as a single master swarm",

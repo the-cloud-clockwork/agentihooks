@@ -189,24 +189,27 @@ master answers.
 
 Masters scale with the swarm so no single master drowns in inbox items. Claude and Codex masters behave
 identically: the same seats, pool, channel and duties, and both read the same master role text and swarm-master
-skill. A swarm below one step behaves exactly as a single master swarm.
+skill. Only a Claude front door takes the claude ai login and Remote Control. A swarm below one step behaves exactly as a single master swarm.
 
-- **Sizing.** With no `master-per` rule, the wanted count is one plus the running engineer, CI and planner agents
+- **Sizing.** With no `master-per` rule, the wanted count is one plus the unfinished engineer, CI and planner agents
   divided by `masters-step` (default 12), masters not counted: 0 to 11 agents one master, 12 two, 24 three. Every
-  master has the same authority and the same priorities.
+  master has the same authority; the operator and Priorities stay with the front door.
 - **Seats.** Seat names come from code. The front door keeps `master@<id>`; backend masters are `master-2@<id>`,
   `master-3@<id>` and on, launched by the same seat launcher as the first master on either harness.
 - **Cool off.** A rise launches the next backend seat at once. A fall waits until the wanted count stayed lower for
-  ten minutes running, and the cool off restarts whenever the count rises. The highest numbered backend master
-  retires first: it hands off, and its handoff and open inbox items go to the front door. The front door never retires by
+  ten minutes running, and the cool off restarts whenever the count rises. Then every extra backend master is asked
+  to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
+  as soon as it is empty. A retired seat's handoff and open inbox items go to the front door. The front door never retires by
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
   pool per swarm, first in first out, and each is claimed by exactly one live master in round robin seat order,
-  skipping a master that is gone or draining toward retirement. An unconfirmed item goes to the next master with
+  skipping a master that is gone or being retired by the tick; a backend master asked to hand off by a shrink keeps taking items until it
+  leaves. An unconfirmed item goes to the next master with
   the same id. Items from the operator bypass the pool and go to the front door. Master inbox pool below gives
   every rule.
-- **Front door.** Only `master@<id>` faces the operator: it receives page chat and every operator write, holds Priorities and, with
-  `master-claude-login` on, the claude ai login and Remote Control. A backend master's page chat write is refused
+- **Front door.** Only `master@<id>`, or the lowest numbered live master while that seat is empty, faces the
+  operator: it receives page chat and every operator write, holds Priorities and, with
+  `master-claude-login` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
   naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
   master through its herdr pane, or through the front door.
 - **Private channel.** Masters sync with `agentihooks swarm <id> masters-channel say TEXT` and
@@ -215,7 +218,7 @@ skill. A swarm below one step behaves exactly as a single master swarm.
   The front door answers the operator about the backend masters from it.
 - **Intent grouping.** `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (off by default) turns on the classifier. Each
   master keeps its last 15 delivered items; every waiting pool item is compared for intent against each master's
-  items in parallel, using only first lines, the cheapest classifier model, one short verdict per master and a cache
+  items in parallel, using only first lines, the first configured classifier model falling through to the next on failure, one short verdict per master and a cache
   by item id. A match sends the item to that master, so related items reach the same master together. Any
   classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
   round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
