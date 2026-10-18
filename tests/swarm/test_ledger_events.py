@@ -589,7 +589,7 @@ def test_skipped_seat_notices_leave_the_later_ones_to_move(store):
     assert task_notices(store) == {held.id: "t2"}
 
 
-def test_a_seat_notice_whose_close_races_stays_indexed_and_moves_next_pass(store, monkeypatch):
+def test_a_seat_notice_whose_close_races_is_moved_once_and_left_to_its_reader(store, monkeypatch):
     closed, ledger = answer("closed_unmerged"), FakeLedger()
     run(store, recorded(), ledger=ledger)
     run(store, in_pr(), ledger=ledger, github=lambda url: closed)
@@ -601,10 +601,10 @@ def test_a_seat_notice_whose_close_races_stays_indexed_and_moves_next_pass(store
 
     with monkeypatch.context() as patched:
         patched.setattr(InboxStore, "close", changed_meanwhile)
-        run(store, in_pr(), ledger=ledger, github=lambda url: closed)
-    assert ledger.comments == [] and task_notices(store) == {item.id: "t1"}
-    told = run(store, in_pr(), ledger=ledger, github=lambda url: closed)
-    assert told == [f"moved {item.id} onto tasks/t1"] and len(ledger.comments) == 1
+        told = run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert told == [f"moved {item.id} onto tasks/t1"] and ledger.comments == [("sw", "t1", item.text, "swarm")]
+    assert InboxStore(store.redis).get(item.id).state == "pending" and task_notices(store) == {}
 
 
 @pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])

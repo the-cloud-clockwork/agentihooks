@@ -7,6 +7,7 @@ reader.
 """
 
 import collections
+import contextlib
 import functools
 import json
 import re
@@ -580,10 +581,15 @@ def _settle_red_notices(mail, github):
 
 
 def _open(inbox, item_id):
+    return _open_item(inbox, item_id) is not None
+
+
+def _open_item(inbox, item_id):
     try:
-        return inbox.get(item_id).state not in CLOSED
+        item = inbox.get(item_id)
     except InboxError:
-        return False
+        return None
+    return None if item.state in CLOSED else item
 
 
 def _backfill_red_notices(mail):
@@ -797,20 +803,17 @@ def _tell_engineer(mail, ledger, task, key, text, url=""):
 def _move_task_notices(mail, ledger, tasks):
     index, moved = mail.task_index(), []
     for item_id, task_id in mail.store.redis.hgetall(index).items():
-        task = tasks.get(task_id)
-        if task is None or not _open(mail.inbox, item_id):
+        task, item = tasks.get(task_id), _open_item(mail.inbox, item_id)
+        if task is None or item is None:
             mail.store.redis.hdel(index, item_id)
             continue
-        item = mail.inbox.get(item_id)
         if not mail.held_elsewhere(item.address, task):
-            continue
-        try:
-            mail.inbox.close(
-                item_id, SENDER, "done", f"moved onto task {task_id}; {item.address} now holds another task"
-            )
-        except InboxError:
             continue
         ledger.comment(mail.slug, task_id, item.text, by=SENDER)
         mail.store.redis.hdel(index, item_id)
+        with contextlib.suppress(InboxError):
+            mail.inbox.close(
+                item_id, SENDER, "done", f"moved onto task {task_id}; {item.address} now holds another task"
+            )
         moved.append(f"moved {item_id} onto tasks/{task_id}")
     return moved
