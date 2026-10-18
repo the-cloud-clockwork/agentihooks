@@ -510,7 +510,7 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
     store.update("sw", template="doctor")
     monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
     callback = Mock(return_value=[])
-    monkeypatch.setattr(doctor, "timer", callback)
+    monkeypatch.setattr(doctor, "timer", lambda *args: callback(*args))
     monkeypatch.setattr("scripts.swarm.langfuse.refresh", lambda *args: [])
     monkeypatch.setattr(timer, "entry_point", lambda: "/agentihooks")
     monkeypatch.setattr(scheduled_tick, "runtime_dir", lambda: tmp_path)
