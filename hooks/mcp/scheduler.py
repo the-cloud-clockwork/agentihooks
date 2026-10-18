@@ -5,6 +5,7 @@ seat (the seat address in name) or session (the session name in name). Ids come 
 """
 
 import json
+import os
 
 from hooks.common import log
 from hooks.mcp._session import env_fallback_allowed
@@ -12,13 +13,13 @@ from scripts.scheduler import commands
 
 
 def _owner(session_id: str) -> str:
-    if session_id:
-        return session_id
     if not env_fallback_allowed():
-        raise commands.CommandError("pass session_id: this server cannot tell which session is calling")
+        if not session_id:
+            raise commands.CommandError("pass session_id: this server cannot tell which session is calling")
+        return session_id
     from scripts.inbox.cli import identity
 
-    return identity()
+    return identity({**os.environ, "CLAUDE_CODE_SESSION_ID": session_id} if session_id else None)
 
 
 def _answer(tool: str, action) -> str:

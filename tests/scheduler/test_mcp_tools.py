@@ -123,11 +123,12 @@ def test_a_shared_server_needs_the_caller_named(tools, monkeypatch):
     assert tools["timer_add"]("x", delay="5", session_id="sid-given")["entry"]["owner"] == "sid-given"
 
 
-def test_an_agent_owns_its_schedule_by_name_and_a_swarm_fire_skips_it(tools, scheduler, monkeypatch):
+@pytest.mark.parametrize("session_id", ["", SID])
+def test_an_agent_owns_its_schedule_by_name_and_a_swarm_fire_skips_it(tools, scheduler, monkeypatch, session_id):
     from scripts.inbox.store import InboxStore
 
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
-    entry = tools["timer_add"]("stand up", delay="0", target="swarm", name="sw")["entry"]
+    entry = tools["timer_add"]("stand up", delay="0", target="swarm", name="sw", session_id=session_id)["entry"]
     assert entry["owner"] == "sw-eng-1"
     assert scheduler.run_due(now=NOW) == 1
     inbox = InboxStore(scheduler.redis)
