@@ -2,7 +2,7 @@ import json
 import os
 import time
 
-from hooks.lifecycle.config import load_roots
+from hooks.lifecycle.config import _entries, load_roots
 from hooks.lifecycle.files import classify_files
 from hooks.lifecycle.model import Finding, Root
 from hooks.lifecycle.state import confirm
@@ -88,3 +88,18 @@ def test_roots_merge_by_id_and_drop_disabled_or_invalid(tmp_path, monkeypatch):
     assert "chat-state" not in roots and "bad" not in roots
     assert roots["extra"].kind == "ttl"
     assert roots["worktrees"].path == str(tmp_path / "dev" / "worktrees")
+
+
+def test_entries_skip_a_missing_file_a_directory_or_invalid_json(tmp_path):
+    invalid = tmp_path / "invalid.json"
+    invalid.write_text("{not json")
+    valid = tmp_path / "valid.json"
+    roots = [{"id": "extra"}, {"path": "~/x"}, {"id": ""}, {"id": None}, "x", None, 1]
+    valid.write_text(json.dumps({"roots": roots}))
+    assert _entries(tmp_path / "missing.json") == []
+    assert _entries(tmp_path) == []
+    assert _entries(invalid) == []
+    for text in ("null", "[]", "{}"):
+        invalid.write_text(text)
+        assert _entries(invalid) == []
+    assert _entries(valid) == [{"id": "extra"}]

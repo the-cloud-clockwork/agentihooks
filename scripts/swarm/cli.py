@@ -1,7 +1,9 @@
 """agentihooks swarm: run a swarm of Claude and Codex agents over a swarm ledger in herdr.
 
 agentihooks swarm list | tick | templates
-agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
+agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one way to create a swarm and its ledger, paused
+agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
+agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
@@ -191,7 +193,7 @@ GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
-# systemd stops a pass at TimeoutStartSec=540; leave an extra tick room to finish.
+# The scheduled tick holder stops a pass at scheduled_tick.TIMEOUT_S; leave an extra tick room to finish.
 EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -508,11 +510,11 @@ def cmd_tick(store, args):
         if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
             raise SwarmError(
                 "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-                "and the host timer ticks every 60 seconds"
+                "and the host scheduler ticks every 60 seconds"
             )
         slugs = store.slugs()
+        _reconcile_services()
         if slugs:
-            _reconcile_services()
             firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
             if tick_stop.run(
                 slugs,
@@ -607,7 +609,8 @@ def _state(store, args, state):
     store.update(args.slug, state=state)
     if state == "running" and not timer.ensure(timer.entry_point()):
         print(
-            "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself",
+            "warning: the scheduled swarm tick or swarm services could not be enabled; "
+            "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
     for action in run_tick(store, args.slug):
@@ -2113,10 +2116,22 @@ def _tick_store():
 
 def main(argv):
     if argv[:1] == ["init"]:
-        from scripts.swarm import stack_init
+        from scripts.swarm import swarm_init
 
-        return stack_init.main(argv[1:])
+        return swarm_init.main(argv[1:])
+    if argv[:2] == ["names", "check"]:
+        from scripts.swarm import swarm_init
+
+        return swarm_init.check(argv[2:])
     return dispatch(argv)
+
+
+def typed(argv):
+    """The agentihooks swarm command line, where create is refused for every swarm not named by code."""
+    if argv[1:2] == ["create"] and not naming.is_code_named_swarm(argv[0]):
+        print(f"swarm: a swarm is created with its ledger by one command: {naming.SWARM_INIT}", file=sys.stderr)
+        return 1
+    return main(argv)
 
 
 def dispatch(argv):

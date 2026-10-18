@@ -232,6 +232,7 @@ Small, quiet radii: 4px for inline controls, checkboxes and code, 6px for panels
 
 ### Overview
 - A muted 11px uppercase OVERVIEW label with a pen beside it. The pen opens an inset textarea with Save and Cancel; Ctrl+Enter saves, Esc cancels. Saving sends `overview_set`, an operator-only operation recorded as "overview changed".
+- **The Overview Cap Rule.** The page shows at most the first 200 words of the overview, cut at a word boundary and ending with an ellipsis; nothing folds or expands, and the stored overview and the editor keep the full text.
 
 ### Tables
 - **Columns resize (operator rule 2026-10-12, cannot be broken).** Every column in the front end resizes by dragging its header's right edge: every table on the ledger page and the HOME and BIN columns. An 8px grip shows a 1px `--grip` hairline on hover, drag or keyboard focus; arrow keys move it 16px (Shift ×4). Only columns resize this way. Widths are saved in the shared page layout (`/api/layout`, `columns` per table) beside the panel sizes, apply to every ledger page, and clear with Reset layout. A table the grips cannot reach fails its test.

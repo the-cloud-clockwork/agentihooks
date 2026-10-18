@@ -38,10 +38,11 @@ def test_every_command_exists():
     ledger_help = _help("ledger")
     swarm = set(re.findall(r"agentihooks swarm <slug> (\w[\w-]*)", text))
     ledger = set(re.findall(r"agentihooks ledger(?: --slug <slug>)? (\w[\w-]*)", text))
-    assert {"create", "start"} <= swarm
-    assert {"new", "task"} <= ledger
+    assert {"start", "status"} <= swarm and "create" not in swarm
+    assert "task" in ledger and "new" not in ledger
     assert all(re.search(rf"\b{c}\b", swarm_help) for c in swarm)
-    assert all(re.search(rf"\b{c}\b", ledger_help) for c in ledger - {"new"})
+    assert all(re.search(rf"\b{c}\b", ledger_help) for c in ledger)
+    assert "agentihooks swarm names check <name> --plan <plan-file>" in text
 
 
 def test_the_skill_describes_stacked_claims_and_territory_as_order_only():
@@ -83,13 +84,26 @@ def test_the_sweep_template_uses_flags_the_sweep_parser_accepts():
         build_sweep_parser().parse_args(run.replace("<slug>", "s").split())
 
 
-def test_create_names_the_template_flag_the_parser_accepts():
-    from scripts.swarm.cli import build_parser
+def test_init_is_the_one_create_command_and_takes_the_flags_the_skill_names():
+    from scripts.swarm import swarm_init
 
     text = SKILL.read_text()
-    assert re.search(r"agentihooks swarm <slug> create .*--template <name>", text)
-    assert "agentihooks swarm templates" in text
-    assert build_parser().parse_args(["sw", "create", "--repo", "/r", "--template", "codex-ci"]).template == "codex-ci"
+    line = "agentihooks swarm init <name> --plan <plan-file> --content <content.json> --repo <dir> [--template <name>]"
+    assert line in text and "agentihooks swarm templates" in text
+    argv = ["demo-swarm", "--plan", "p.md", "--content", "c.json", "--repo", "/r", "--template", "codex-ci"]
+    args = swarm_init.parser().parse_args(argv)
+    assert (args.name, args.plan, args.content, args.repo, args.template) == (
+        "demo-swarm",
+        "p.md",
+        "c.json",
+        "/r",
+        "codex-ci",
+    )
+
+
+def test_the_skill_asks_the_operator_for_the_name_with_the_question_tool():
+    step = SKILL.read_text().split("## 1. Name the swarm", 1)[1].split("## 2.", 1)[0]
+    assert "question tool" in step and "suggestions" in step and "Never pick a name without the operator" in step
 
 
 def test_the_final_message_hands_the_operator_the_ledger_link():

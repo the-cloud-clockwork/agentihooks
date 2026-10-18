@@ -13,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import claim_order, done_gate, idle, linked_issues, merge_queue, stack, waits
+from scripts.swarm import claim_order, done_gate, idle, linked_issues, merge_queue, stack, staged_compatibility, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -94,6 +94,7 @@ def check(
         raise SwarmError(f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers")
     if draft.stdout.strip() == "true":
         raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
+    staged_compatibility.require(url, pull.head, pull.body)
     top = _checkout(url, pull.head, previous)
     found = held_record(url, pull.head, top, agent.name, now_ms)
     if pull.queued:
