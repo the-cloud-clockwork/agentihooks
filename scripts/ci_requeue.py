@@ -2,7 +2,7 @@ import argparse
 import subprocess
 from collections.abc import Iterator
 
-from scripts.swarm import merge_queue
+from scripts.swarm import merge_queue, queue_record
 from scripts.swarm.store import SwarmError
 
 OPEN = """query($owner: String!, $name: String!, $after: String) { repository(owner: $owner, name: $name) {
@@ -36,10 +36,10 @@ def candidates(repo: str, run) -> list[dict]:
         after = page["pageInfo"]["endCursor"]
 
 
-def sweep(repo: str, run=subprocess.run) -> Iterator[dict]:
+def sweep(repo: str, run=subprocess.run, journal=queue_record.Journal) -> Iterator[dict]:
     for pull in candidates(repo, run):
         try:
-            result = merge_queue.operate("queue", pull["url"], run)
+            result = merge_queue.operate("queue", pull["url"], run, journal=journal(pull["url"], run))
             outcome = "waiting" if result.get("waiting") else "queued" if result["queued"] else result["state"].lower()
         except SwarmError as exc:
             outcome = f"refused: {exc}"

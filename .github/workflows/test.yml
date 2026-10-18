@@ -2228,6 +2228,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: write
           permission-contents: read
+          permission-pull-requests: read
 
       - name: Watch for the first failed graded job
         id: watch
@@ -2241,7 +2242,8 @@ jobs:
             if queue_head=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/${GITHUB_REF#refs/}" --jq ".[] | select(.ref == \"$GITHUB_REF\") | .object.sha"); then
               queue_misses=0
               if [[ "$queue_head" != "$GITHUB_SHA" ]]; then
-                echo 'failed=queue group is no longer current' >> "$GITHUB_OUTPUT"
+                record=$(python3 -m scripts.ci_queue_rebuild "$queue_head") || record="record unavailable"
+                echo "failed=queue group is no longer current ($record)" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
             else
