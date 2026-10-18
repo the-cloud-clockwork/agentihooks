@@ -173,7 +173,7 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
             fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)
             failed(out, paint, f"{service} is {state}", fix, service)
         return 1
-    base = f"http://{BIND}:{values['SWARM_PORT']}"
+    base = f"http://{BIND}:{values['SWARM_PORT']}"  # NOSONAR: the stack binds the ledger to loopback only
     if problem := page_problem(base, opener):
         failed(
             out, paint, "the ledger page does not answer", f"{problem}; read the ledger logs with {LOGS} swarm, {AGAIN}"
