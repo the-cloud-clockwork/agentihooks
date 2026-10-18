@@ -307,6 +307,7 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
         "mutation-clearances/reader.json",
         "data/new-fixture.txt",
         "deploy/compose/.env.example",
+        "deploy/worker/start.sh",
     ],
 )
 def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(tmp_path, fixture):
