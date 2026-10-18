@@ -240,6 +240,8 @@ def test_a_file_tool_call_without_a_path_is_allowed(trees):
     [
         "find {root} -name '*.py' -delete",
         "find {root}/pkg -type f -exec rm {{}} \\;",
+        "find {root}/pkg -execdir /bin/rm {{}} +",
+        "find {root}/pkg -exec sudo rm {{}} +",
         "find {root} -name mod.py | xargs rm",
         "echo {root}/pkg/mod.py | xargs rm -f",
         "cd {root} && ls pkg/mod.py | xargs rm",
@@ -248,6 +250,11 @@ def test_a_file_tool_call_without_a_path_is_allowed(trees):
         "rm -r {root}/pkg",
         "rm -rf {root}",
         "sudo rm {root}/pkg/mod.py",
+        "rm {root}/pkg/*.py",
+        "rm -rf {root}/*",
+        "/bin/rm {root}/pkg/mod.py",
+        "\\rm {root}/pkg/mod.py",
+        "command rm {root}/pkg/mod.py",
     ],
 )
 def test_other_deletion_forms_of_python_in_another_worktree_are_blocked(trees, sibling, command):
@@ -261,9 +268,12 @@ def test_other_deletion_forms_of_python_in_another_worktree_are_blocked(trees, s
     [
         "find . -name '*.py' -delete",
         "find pkg -exec rm {{}} +",
+        "diff {other}/pkg/mod.py pkg/mod.py; ls | xargs rm -f build.log",
         "ls pkg/mod.py | xargs rm",
         "git -C {root} rm pkg/mod.py",
         "rm -r pkg",
+        "rm pkg/*.py",
+        "rm {other}/*.md",
         "rm {other}/README.md",
         "rm -r {other}/docs",
         "rm {loose}",

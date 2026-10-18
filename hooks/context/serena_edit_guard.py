@@ -6,6 +6,7 @@ Formatters (ruff format, black) and patch / git apply stay open: they rewrite me
 and the gates require formatted code. AGENTIHOOKS_SERENA=false turns the guard off.
 """
 
+import glob
 import re
 import shlex
 from itertools import takewhile
@@ -31,10 +32,11 @@ _SHELL_WRITES = (
     re.compile(r"""Path\(\s*""" + _PY + r"""\s*\)\.write_(?:text|bytes)"""),
 )
 _SHELL_DELETE = re.compile(
-    r"(?:^|[;&|\n(])\s*(?:(?:sudo|env|nohup|xargs)(?:\s+\S+)*?\s+)?(?:git\s+(?:-C\s+(\S+)\s+)?)?rm\s([^|;&\n]*)"
+    r"(?:^|[;&|\n(])\s*(?:(?:sudo|env|nohup|xargs|command|exec|time)(?:\s+\S+)*?\s+)?"
+    r"(?:git\s+(?:-C\s+(\S+)\s+)?)?\\?(?:\S*/)?rm\s([^|;&\n]*)"
 )
-_FIND_DELETE = re.compile(r"\bfind\s([^|;&\n]*?)\s-(?:delete|exec(?:dir)?\s+(?:git\s+)?rm)\b")
-_XARGS_RM = re.compile(r"\bxargs\b[^|;&\n]*\brm\b")
+_FIND_DELETE = re.compile(r"\bfind\s([^|;&\n]*?)\s-(?:delete|exec(?:dir)?\s+(?:sudo\s+)?(?:\S*/)?(?:git\s+)?rm)\b")
+_XARGS_RM = re.compile(r"([^|;&\n]*)\|\s*xargs\b[^|;&\n]*\brm\b")
 _PATCH_ACTION = re.compile(r"^\*\*\* (Delete File|Add File|Update File|Move to): (.+)$", re.MULTILINE)
 
 
@@ -81,7 +83,7 @@ def _block_foreign_delete(path: Path, root: Path) -> None:
 def _check_files(tool_input: dict, cwd: Path) -> None:
     session = _checkout_root(cwd.resolve())
     deleted = _patch_deletions(tool_input, cwd)
-    for raw in [raw for raw in tool_input.get("file_paths") or [tool_input.get("file_path")] if raw]:
+    for raw in filter(None, tool_input.get("file_paths") or [tool_input.get("file_path")]):
         path = Path(raw)
         full = path if path.is_absolute() else cwd / path
         if full.resolve() in deleted:
@@ -131,15 +133,17 @@ def _shell_delete_targets(command: str, base: Path) -> list[tuple[str, Path]]:
     for match in _FIND_DELETE.finditer(command):
         starts = takewhile(lambda token: not token.startswith(("-", "(", "!")), _tokens(match.group(1)))
         targets += [(token, base) for token in [*starts] or ["."]]
-    if _XARGS_RM.search(command):
-        targets += [(token, base) for token in [".", *_tokens(command)]]
+    for match in _XARGS_RM.finditer(command):
+        targets += [(token, base) for token in _tokens(match.group(1))]
     return targets
 
 
 def _check_shell_deletes(command: str, base: Path, session: Path | None) -> None:
     for token, where in _shell_delete_targets(command, base):
         path = Path(token).expanduser()
-        _check_delete(path, path if path.is_absolute() else where / path, session)
+        full = path if path.is_absolute() else where / path
+        for name in glob.glob(str(full)) or [str(full)]:
+            _check_delete(path, Path(name), session)
 
 
 def check(payload: dict) -> None:
