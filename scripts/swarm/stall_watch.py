@@ -1,6 +1,6 @@
 """Stall watchdog: each tick holds every open swarm pull request and every lane against a limit.
 
-A pull request left green and unqueued, red with no push, without a live owner, or unmergeable reopens its task for
+In enforce mode, a pull request left green and unqueued, red with no push, without a live owner, or unmergeable reopens its task for
 the next engineer, who continues from the stored handoff and branch. A ready task left unclaimed while its lane is full
 and accounts show free seats only raises the alert. Every alert reaches the master's inbox and the health findings;
 one still open two more limits later reaches the operator's Priorities and ntfy.
@@ -13,6 +13,8 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 
+from scripts.gates.base import Who
+from scripts.gates.enforcement import STALL_WATCH
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
 from scripts.swarm import capacity, idle, outage, ready, waits
@@ -211,6 +213,8 @@ def _reopen(watch, mail, task, case, minutes, limit):
     if outage.held(watch.store, watch.slug, owner or None):
         return []
     agent = next((a for a in watch.store.agents(watch.slug) if a.name == owner and a.state != FINISHED), None)
+    if not _may_reopen(watch, task, agent, case, minutes):
+        return _alert(watch, mail, task, case, minutes, ALERTED, limit)
     if agent is not None and agent.name in watch.live and not watch.retire(agent):
         return [f"could not retire {owner} for stalled task {tid}, retrying next tick"]
     reopened = watch.ledger.update_task(
@@ -229,6 +233,15 @@ def _reopen(watch, mail, task, case, minutes, limit):
     text = COMMENT.format(action=REOPENED, pr=task["pr_url"], case=CASES[case], minutes=minutes)
     watch.ledger.comment(watch.slug, tid, text, by=SENDER)
     return _alert(watch, mail, task, case, minutes, REOPENED, limit)
+
+
+def _may_reopen(watch, task, agent, case, minutes):
+    who = Who(name=task.get("claimed_by") or "", swarm=watch.slug, task=task["id"])
+    reason = f"{CASES[case]} for {minutes} minutes"
+    allowed = STALL_WATCH.allows(watch.store, who, "reopen", reason, watch.now_ms)
+    if agent is not None and agent.name in watch.live:
+        allowed = STALL_WATCH.allows(watch.store, who, "stop", reason, watch.now_ms) and allowed
+    return allowed
 
 
 def _earlier(inbox, raw):

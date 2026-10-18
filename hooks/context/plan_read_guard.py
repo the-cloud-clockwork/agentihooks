@@ -4,6 +4,8 @@ import shlex
 from collections.abc import Mapping
 from pathlib import Path, PurePath
 
+from hooks.common import log
+
 LANES = {"eng", "ci"}
 MARGIN = 10
 PLAN_ID = re.compile(r"[0-9a-f]{64}\.md")
@@ -28,8 +30,9 @@ def check(payload: dict, environ: Mapping[str, str] | None = None) -> str | None
         return None
     try:
         return _decide(env, slug, tool_name, tool_input)
-    except Exception:
-        return refusal(None)
+    except Exception as e:
+        log("plan_read_guard failed", {"error": str(e)})
+        return None
 
 
 def _decide(env: Mapping[str, str], slug: str, tool_name: str, tool_input: dict) -> str | None:
@@ -37,7 +40,10 @@ def _decide(env: Mapping[str, str], slug: str, tool_name: str, tool_input: dict)
     folder = _names_folder(text, _ledger_dir(env))
     if not PLAN_ID.search(text) and not folder:
         return None
-    plans, window = _plans(env, slug)
+    try:
+        plans, window = _plans(env, slug)
+    except Exception:
+        return refusal(None)
     named = set(PLAN_ID.findall(text))
     if not (named & plans or (plans and folder)):
         return None
@@ -102,7 +108,10 @@ def _names_folder(text: str, root: Path) -> bool:
     if FOLDER.search(text) or ("/artifacts/" in GITHUB.sub("", text) and "$" in text):
         return True
     for token in text.split():
-        path = Path(os.path.expandvars(token)).expanduser()
+        try:
+            path = Path(os.path.expandvars(token)).expanduser()
+        except RuntimeError:
+            continue
         if path == root or path.name == root.name:
             return True
         if path.is_relative_to(root) and any(char in token for char in "*?["):

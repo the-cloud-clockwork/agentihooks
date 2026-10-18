@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from pathlib import Path
 
@@ -187,9 +188,36 @@ def test_boolean_offset_or_limit_refused(ledger):
     assert check(read(stored(ledger), offset=45, limit=True), env(ledger))
 
 
-def test_errors_while_deciding_refuse(ledger):
-    assert check(bash(f"cat ~nosuchuser/x {PLAN}"), env(ledger))
-    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger))
+def test_bad_read_input_fails_open_and_logs(ledger, tmp_path, monkeypatch):
+    from hooks import common
+
+    log_file = tmp_path / "guard.log"
+    monkeypatch.setattr(common, "LOG_FILE", str(log_file))
+    monkeypatch.setattr(common, "LOG_ENABLED", True)
+    assert check(read(["x", PLAN], offset=45, limit=5), env(ledger)) is None
+    entry = json.loads(log_file.read_text())
+    assert entry["message"] == "plan_read_guard failed"
+    assert "str" in entry["payload"]["error"]
+    assert set(entry["payload"]) == {"error"}
+
+
+@pytest.mark.parametrize("lane", ["eng", "ci"])
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cd ~; agentihooks plan read",
+        "cd ~&& gh pr view 3183",
+        "printf '%s' ~nosuchuser/x",
+    ],
+)
+def test_unexpandable_tokens_without_plan_artifacts_pass(ledger, lane, command):
+    assert check(bash(command), env(ledger, lane=lane)) is None
+
+
+@pytest.mark.parametrize("token", ["~;", "~&&", "~nosuchuser/x"])
+def test_unexpandable_token_does_not_hide_a_plan_read(ledger, token):
+    assert check(bash(f"cd {token} cat {PLAN}"), env(ledger)) == plan_read_guard.refusal((PLAN, 30, 70))
+    assert check(bash(f"cd {token} rg needle {ledger}"), env(ledger)) == plan_read_guard.refusal((PLAN, 30, 70))
 
 
 def test_ledger_root_by_variable_or_relative_name_refused(ledger, monkeypatch):
