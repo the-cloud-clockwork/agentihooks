@@ -203,7 +203,7 @@ def test_refusal_receipts_require_current_ownership_and_stay_with_their_task(sto
     agent = AgentRecord("worker", "eng", "t1", harness="codex")
     refused = pane.PaneObservation("idle", content_refusal=True)
     assert content_refusal.repeated(store, "sw", agent, refused) is False
-    for slug, task in [("sw", "t1"), ("sw", "t2"), ("other", "t1")]:
+    for slug, task in [("sw", "t1"), ("sw", "t2"), ("sw", "config"), ("other", "t1")]:
         if slug == "other":
             store.create(SwarmConfig(slug, "/repo", 1, 0))
         owner = agent if (slug, task) == ("sw", "t1") else replace(agent, name=f"worker-{slug}-{task}", task=task)
