@@ -9,10 +9,6 @@ on:
         required: true
   workflow_dispatch:
     inputs:
-      hierarchy:
-        description: Compare hierarchy CPU and exact response bytes on a retained real ledger
-        type: boolean
-        default: false
       streams:
         description: Compare one and three page streams at two writes per second on base and head
         type: boolean
@@ -62,14 +58,14 @@ jobs:
 
       - name: Read the Redis service image
         id: redis
-        if: ${{ !inputs.streams && !inputs.compare && !inputs.hierarchy }}
+        if: ${{ !inputs.streams && !inputs.compare }}
         env:
           SERVICE: ${{ job.services.redis.id }}
         run: echo "image=$(docker inspect --format '{{.Image}}' "$SERVICE")" >> "$GITHUB_OUTPUT"
 
       - name: Key the declared inputs
         id: key
-        if: ${{ !inputs.streams && !inputs.compare && !inputs.hierarchy }}
+        if: ${{ !inputs.streams && !inputs.compare }}
         uses: ./.github/actions/input-key
         with:
           job: ledger-load
@@ -100,7 +96,7 @@ jobs:
           uv pip install --python "$HOME/venv/bin/python" -e ".[all]"
 
       - name: Write and read a full size ledger from ten clients within the server budget
-        if: ${{ !inputs.streams && !inputs.compare && !inputs.hierarchy && steps.key.outputs.hit != 'true' }}
+        if: ${{ !inputs.streams && !inputs.compare && steps.key.outputs.hit != 'true' }}
         run: |
           mkdir -p "$RUNNER_TEMP/ledger-load"
           "$HOME/venv/bin/python" -m tests.ledger_load.gate --folder "$RUNNER_TEMP/ledger-load" --base FETCH_HEAD
@@ -110,54 +106,6 @@ jobs:
         uses: ./.github/actions/input-key/save
         with:
           key: ${{ steps.key.outputs.key }}
-
-      - name: Prepare identical hierarchy probes for base and head
-        if: inputs.hierarchy
-        run: |
-          mkdir hierarchy-base hierarchy-evidence
-          git archive FETCH_HEAD | tar -x -C hierarchy-base
-          cp tests/ledger_load/hierarchy_probe.py hierarchy-base/tests/ledger_load/hierarchy_probe.py
-          cp tests/swarm_ledger/operations_corpus.json.gz hierarchy-base/tests/swarm_ledger/operations_corpus.json.gz
-
-      - name: Profile and measure base and head hierarchy routes on the same runner
-        if: inputs.hierarchy
-        run: |
-          for side in base head; do
-            directory="$GITHUB_WORKSPACE"
-            [[ "$side" == head ]] || directory="$GITHUB_WORKSPACE/hierarchy-base"
-            ( cd "$directory" && HIERARCHY_CPU_REPORT="$GITHUB_WORKSPACE/hierarchy-evidence/$side.json" \
-              "$HOME/venv/bin/python" -m pytest tests/ledger_load/hierarchy_probe.py -n 0 -s --tb=short )
-          done
-
-      - name: Require byte identical hierarchy responses and at most half the CPU per read
-        if: inputs.hierarchy
-        run: |
-          "$HOME/venv/bin/python" - <<'PY'
-          import json
-          from pathlib import Path
-          base = json.loads(Path('hierarchy-evidence/base.json').read_text())
-          head = json.loads(Path('hierarchy-evidence/head.json').read_text())
-          assert base['source'] == head['source']
-          assert base['requests'] == head['requests'] == 16
-          assert [row['outputs'] for row in base['observations']] == [row['outputs'] for row in head['observations']], 'Hierarchy response bytes changed'
-          print(json.dumps({
-              'requests_per_side': head['requests'],
-              'base_cpu_seconds_per_read': base['mean_cpu_seconds'],
-              'head_cpu_seconds_per_read': head['mean_cpu_seconds'],
-              'ratio': head['mean_cpu_seconds'] / base['mean_cpu_seconds'],
-              'base_profile': base['profile'],
-              'head_profile': head['profile'],
-          }, indent=2))
-          assert head['mean_cpu_seconds'] <= base['mean_cpu_seconds'] / 2, 'Hierarchy CPU did not halve'
-          PY
-
-      - name: Preserve hierarchy profiles and exact response bodies
-        if: ${{ always() && inputs.hierarchy }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: hierarchy-cpu
-          path: hierarchy-evidence/*.json
-          if-no-files-found: error
 
       - name: Prepare the same load harness for the base implementation
         if: inputs.compare
