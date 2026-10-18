@@ -108,9 +108,7 @@ def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_modul
     assert find_at == 2
     assert find["id"] == "suite"
     assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
-    assert find["run"].startswith(
-        'files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n'
-    )
+    assert find["run"].startswith('files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n')
     assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
     run_at = names.index("Run the suite speed contracts")
     assert run_at < names.index("Record the revisions the report grades")
