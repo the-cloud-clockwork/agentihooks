@@ -178,11 +178,12 @@ swarm already uses, then `master-2@<id>` up to `master-N@<id>`. A swarm with no 
 before. Code gives every ledger phase one owning seat and saves the owners per swarm, so a restart reads the same
 owners. A phase keeps its owner while its seat exists, except that a seat add or removal rebalances: an added seat
 takes the busiest seats' last phases up to an even share, a removed seat's phases go to the seats owning fewest, and
-every other phase keeps its owner. Items already delivered stay with the old owner. An operator write, tick item,
-priority, pull request notice or task health finding about a phase or a task in it reaches the live master owning
-that phase; any other item, and one whose owner seat has no live master, reaches the lead. Unaddressed chat and
-`@master` stay with the lead, which answers the operator; while the lead seat is empty the lowest numbered live
-master answers.
+every other phase keeps its owner. Items already delivered stay with the old owner. A tick item, priority, pull
+request notice or task health finding about a phase or a task in it reaches the live master owning that phase; any
+other item, and one whose owner seat has no live master, reaches the lead. Every operator write that no task
+claimant takes reaches the lead, the front door, whatever phase or hive it is about, and so does page chat naming a
+backend master; the lead hands work to backend masters over the masters channel. While the lead seat is empty the
+lowest numbered live master answers.
 
 ### Master inbox pool
 

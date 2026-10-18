@@ -71,10 +71,10 @@
       ]
     },
     "output_contract": {
-      "met_by": "Four phases split two and two; a task comment on a phase owned by master-2 reaches master-2 only; unaddressed chat reaches the lead",
+      "met_by": "Four phases split two and two; an operator comment on an unclaimed task of a phase owned by master-2 reaches the front door lead only, as plan 4127 rules; unaddressed chat reaches the lead",
       "tests": [
         "tests/test_swarm_v2_master_seats.py::test_four_phases_split_two_and_two_between_two_master_seats",
-        "tests/test_swarm_v2_master_seats.py::test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_that_master"
+        "tests/test_swarm_v2_master_seats.py::test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_the_front_door"
       ]
     },
     "rejection_contract": {
