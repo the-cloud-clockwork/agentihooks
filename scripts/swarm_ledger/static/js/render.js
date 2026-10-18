@@ -265,29 +265,42 @@ export function render(focusKey) {
   $("overview").textContent = doc.overview;
   $("closed-label").textContent = closedText(doc.closed_at);
   $("closed-banner").hidden = !doc.closed_at;
-  $("sources-count").textContent = headCount([[doc.sources.length]]);
-  listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
-  $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
-  phaseList();
-  $("tasks-count").textContent = taskCounts(doc.tasks);
-  groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
-  $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
-  listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
-  $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
-  if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
-  $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
-  groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
-  renderSync();
-  renderPriorities();
-  renderNotifications();
-  renderAlerts();
-  renderArtifacts();
-  renderChat();
-  renderChatBadge();
-  renderStats();
-  renderSwarm(swarm);
-  renderOutline();
-  markToggles();
+  const sections = [
+    () => {
+      $("sources-count").textContent = headCount([[doc.sources.length]]);
+      listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
+    },
+    () => {
+      $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
+      phaseList();
+    },
+    () => {
+      $("tasks-count").textContent = taskCounts(doc.tasks);
+      groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
+    },
+    () => {
+      $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
+      listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
+    },
+    () => {
+      $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
+      if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
+    },
+    () => {
+      $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
+      groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
+    },
+    () => { renderSync(); }, () => { renderPriorities(); }, () => { renderNotifications(); }, () => { renderAlerts(); },
+    () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
+    () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
+  ];
+  for (const section of sections) {
+    try {
+      section();
+    } catch (error) {
+      console.error(error);
+    }
+  }
 
   const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
   if (!again) return;

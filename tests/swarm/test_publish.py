@@ -278,7 +278,7 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
-def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(repository, tmp_path, monkeypatch):
+def test_prepare_continues_the_recorded_remote_branch_and_publish_pushes_only_it(repository, tmp_path, monkeypatch):
     from scripts.swarm import publish, stack
 
     git(repository, "push", "origin", "HEAD:predecessor")
@@ -300,9 +300,114 @@ def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(reposito
     result = publish.prepare("swarm", agent, str(repository), ledger)
     assert result["worktree"] == str(worktree)
     assert git(worktree, "rev-parse", "HEAD") == git(repository, "rev-parse", "origin/predecessor")
-    assert task["branch"] == result["branch"] == "engineer-test"
+    assert task["branch"] == result["branch"] == "predecessor"
     assert task["branch_repo"] == str(repository.parent / "remote.git")
-    assert task["repository_branches"] == {str(repository): "engineer-test"}
+    assert task["repository_branches"] == {str(repository): "predecessor"}
+    assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+
+    (worktree / "chosen.txt").write_text("after")
+    gate = worktree / "scripts" / "ci_prepush" / "__main__.py"
+    gate.write_text(
+        "import subprocess\nfrom pathlib import Path\n"
+        "head = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True)\n"
+        "Path(subprocess.check_output(['git', 'rev-parse', '--absolute-git-dir'], text=True).strip(), 'ci_prepush').write_text(head)\n"
+    )
+    monkeypatch.chdir(worktree)
+    published = publish.publish(
+        "swarm", agent, str(repository), ledger, "Continue", ["chosen.txt", str(gate.relative_to(worktree))]
+    )
+
+    head = git(worktree, "rev-parse", "HEAD")
+    assert published["branch"] == task["branch"] == "predecessor"
+    assert task["repository_branches"] == {str(repository): "predecessor"}
+    assert git(repository, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+    assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_publish_pushes_the_tracked_delivery_branch_over_a_stale_local_record(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(root, "fetch", "origin")
+    git(root, "branch", "--set-upstream-to=origin/predecessor")
+    publication.task.update(branch="predecessor", repository_branches={str(publication.repo): "engineer-test"})
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "predecessor"
+    assert publication.task["repository_branches"] == {str(publication.repo): "predecessor"}
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_publish_never_follows_a_tracked_protected_branch(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    dev = git(root, "ls-remote", "origin", "refs/heads/dev").split()[0]
+    git(root, "fetch", "origin")
+    git(root, "branch", "--set-upstream-to=origin/dev")
+    publication.task["repository_branches"] = {str(publication.repo): "engineer-test", "/elsewhere/bundle": "dev"}
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    assert result["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/dev").split()[0] == dev
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
+
+
+def test_publish_never_follows_a_tracked_branch_the_task_does_not_record(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:another-task")
+    other = git(root, "rev-parse", "HEAD")
+    git(root, "branch", "--set-upstream-to=origin/another-task")
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    assert result["branch"] == publication.task["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/another-task").split()[0] == other
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
+
+
+def test_tracked_returns_an_upstream_recorded_only_for_its_repository(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(root, "branch", "--set-upstream-to=origin/predecessor")
+    scoped = {"branch": "engineer-test", "repository_branches": {str(publication.repo): "predecessor"}}
+
+    assert publish.tracked(root, scoped) == "predecessor"
+    assert publish.tracked(root, {"branch": "engineer-test", "repository_branches": {}}) == ""
+    assert publish.tracked(root, {"branch": "engineer-test"}) == ""
+
+
+def test_prepare_tracks_the_recorded_delivery_branch_from_an_existing_worktree(repository, tmp_path):
+    from scripts.swarm import publish
+
+    git(repository, "push", "origin", "HEAD:predecessor")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
+    task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
+
+    result = publish.prepare("swarm", AgentRecord("engineer@test", "ci", "t1"), str(repository), ledger)
+
+    assert result["worktree"] == str(worktree)
+    assert task["branch"] == result["branch"] == "predecessor"
+    assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
 
 
 def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
@@ -477,6 +582,108 @@ def test_unrelated_tracked_changes_are_preserved_and_refused(publication, staged
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
+@pytest.fixture
+def conflicted_publication(publication):
+    root = publication.root
+    (root / "chosen.txt").write_text("task edit")
+    git(root, "add", "chosen.txt")
+    git(root, "commit", "-qm", "Task edit")
+    (publication.repo / "chosen.txt").write_text("dev edit")
+    (publication.repo / "other.txt").write_text("inherited dev edit")
+    (publication.repo / "sub" / "other.txt").unlink()
+    (publication.repo / "inherited.txt").write_text("inherited addition")
+    git(publication.repo, "add", "chosen.txt", "other.txt", "sub/other.txt", "inherited.txt")
+    git(publication.repo, "commit", "-qm", "Dev edits")
+    git(publication.repo, "push", "origin", "dev")
+    result = subprocess.run(["git", "merge", "--no-edit", "origin/dev"], cwd=root, capture_output=True, text=True)
+    assert result.returncode == 1
+    assert git(root, "diff", "--name-only", "--diff-filter=U") == "chosen.txt"
+    (root / "chosen.txt").write_text("after")
+    git(root, "add", "chosen.txt")
+    return publication
+
+
+def test_publish_excludes_files_inherited_from_a_conflicted_dev_merge(conflicted_publication):
+    from scripts.swarm import publish
+
+    p = conflicted_publication
+    result = publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge dev", ["chosen.txt"])
+    assert git(p.root, "rev-list", "--parents", "-n", "1", result["head"]).count(" ") == 2
+    assert git(p.root, "show", "HEAD:other.txt") == "inherited dev edit"
+    assert git(p.root, "show", "HEAD:inherited.txt") == "inherited addition"
+    assert git(p.root, "ls-tree", "--name-only", "HEAD", "sub/other.txt") == ""
+    assert git(p.root, "rev-parse", "origin/engineer-test") == result["head"]
+
+
+@pytest.mark.parametrize("staged", [False, True])
+def test_publish_still_refuses_unrelated_edits_during_a_dev_merge(conflicted_publication, staged):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    (p.root / "other.txt").write_text("unrelated edit")
+    if staged:
+        git(p.root, "add", "other.txt")
+    before = git(p.root, "rev-parse", "HEAD")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge dev", ["chosen.txt"])
+    assert git(p.root, "rev-parse", "HEAD") == before
+    assert (p.root / "other.txt").read_text() == "unrelated edit"
+
+
+def test_publish_requires_conflict_resolutions_in_the_selected_scope(conflicted_publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: chosen.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge dev", ["other.txt"])
+
+
+def test_publish_does_not_exempt_files_from_a_merge_outside_dev(conflicted_publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    base = git(p.root, "merge-base", "HEAD", "MERGE_HEAD")
+    git(p.root, "update-ref", "refs/remotes/origin/dev", base)
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: inherited.txt, other.txt, sub/other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge another branch", ["chosen.txt"])
+
+
+@pytest.mark.parametrize("fixture", ["publication", "conflicted_publication"])
+def test_publish_requires_both_paths_of_a_staged_rename(request, fixture):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = request.getfixturevalue(fixture)
+    git(p.root, "mv", "other.txt", "renamed.txt")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Rename file", ["chosen.txt", "renamed.txt"])
+
+
+def test_publish_requires_the_source_of_an_unstaged_rename(conflicted_publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    (p.root / "other.txt").rename(p.root / "renamed.txt")
+    git(p.root, "add", "-N", "renamed.txt")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Rename file", ["chosen.txt", "renamed.txt"])
+
+
+def test_publish_missing_dev_ref_refuses_without_leaking_git_diagnostics(conflicted_publication, capfd):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    git(p.root, "update-ref", "-d", "refs/remotes/origin/dev")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: inherited.txt, other.txt, sub/other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge dev", ["chosen.txt"])
+    assert capfd.readouterr().err == ""
+
+
 @pytest.mark.parametrize("staged", [False, True])
 def test_unrelated_refusal_names_every_file_and_the_exact_worktree(publication, staged):
     from scripts.swarm import publish
@@ -585,6 +792,79 @@ def test_failed_gate_never_pushes_and_can_retry_the_committed_head(publication, 
     )
     assert git(root, "rev-parse", "HEAD") == head
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
+def counted_pushes(publish, monkeypatch):
+    pushes = []
+    native = publish.execute
+
+    def counted(argv, where):
+        if argv[:2] == ["git", "push"]:
+            pushes.append(argv)
+        return native(argv, where)
+
+    monkeypatch.setattr(publish, "execute", counted)
+    return pushes
+
+
+@pytest.mark.parametrize("files", [[], ["chosen.txt"]])
+def test_an_unchanged_publish_to_a_matching_remote_makes_no_commit_gate_or_push(publication, monkeypatch, files):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(root, "rev-parse", "HEAD")
+    (root / ".git-gate-head").unlink()
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", files
+    )
+    assert pushes == []
+    assert git(root, "rev-parse", "HEAD") == head
+    assert not (root / ".git-gate-head").exists()
+    assert result["head"] == head
+    assert (
+        result["unchanged"]
+        == "no changes in the listed files and the remote branch already points at this head; nothing pushed"
+    )
+    assert "gate" not in result
+
+
+def test_an_unchanged_publish_still_pushes_a_branch_the_remote_is_behind(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    git(root, "commit", "--allow-empty", "-qm", "Local only")
+    head = git(root, "rev-parse", "HEAD")
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert len(pushes) == 1
+    assert "unchanged" not in result
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
+def test_an_unchanged_publish_still_pushes_a_branch_the_remote_lacks(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    git(root, "push", "origin", "--delete", "engineer-test")
+    head = git(root, "rev-parse", "HEAD")
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", [])
+    assert pushes == [["git", "push", "-u", "origin", "HEAD:refs/heads/engineer-test"]]
+    assert "unchanged" not in result
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert publish.remote_head(root, "engineer-absent") == ""
 
 
 def fake_python(path, log, ruff):
@@ -855,13 +1135,15 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
     if prepared:
         result = publish.prepare("swarm", p.agent, str(repository), p.ledger)
         assert result["worktree"] == str(root)
-        assert p.task["branch"] == "engineer-test"
+        assert p.task["branch"] == "predecessor"
     predecessor = tmp_path / "predecessor"
     git(repository, "worktree", "add", "-b", "predecessor", str(predecessor), "origin/predecessor")
     monkeypatch.chdir(root)
 
     stack.restack("swarm", p.agent, p.ledger)
 
+    upstream = subprocess.run(["git", "-C", str(root), "rev-parse", "@{upstream}"], capture_output=True)
+    assert upstream.returncode != 0
     assert p.task["branch"] == "engineer-test"
     assert p.task["repository_branches"] == {str(repository): "engineer-test"}
     assert p.task["parked_on"] == []

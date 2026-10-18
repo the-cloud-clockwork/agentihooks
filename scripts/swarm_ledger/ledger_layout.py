@@ -8,6 +8,7 @@ import ledger_core as core
 ROWS = {
     "capacity-box": ("height",),
     "quota-box": ("height",),
+    "hives-box": ("height",),
     "overlays-box": ("height",),
     "agents-box": ("height",),
     "health-box": ("height",),

@@ -60,7 +60,6 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from hooks.context import injection_trace, quarantine
-from scripts import master_claude_login
 from scripts.doctor import priming
 from scripts.gates import Who, catalog, intent, lift, modes, progress, quiet
 from scripts.gates import log as gate_log
@@ -181,20 +180,18 @@ SCALING_KEYS = {
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
-ON_OFF = {"on": True, "off": False}
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
     **default_models.KEYS,
     **TRANSPORT_KEYS,
-    master_claude_login.KEY: master_claude_login.FIELD,
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
 TICK_LOCK_MS = 10 * 60 * 1000
 TICK_SECONDS = 60
-# systemd stops a pass at TimeoutStartSec=540; leave an extra tick room to finish.
+# The scheduled tick holder stops a pass at scheduled_tick.TIMEOUT_S; leave an extra tick room to finish.
 EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
@@ -495,35 +492,42 @@ def _tickable(slug):
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
+    from scripts.swarm_ledger import authority_context
 
     started = time.monotonic()
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
-    operator_env.classifier(os.environ)
-    if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
-        raise SwarmError(
-            "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-            "and the host timer ticks every 60 seconds"
-        )
-    slugs = store.slugs()
-    if slugs:
-        _reconcile_services()
-        firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
-        if tick_stop.run(
-            slugs,
-            lambda slug: _tick_while_others_run(store, slug, firsts, until),
-            firsts.settled.set,
-            time.monotonic() - started,
-        ):
-            return
-    from scripts import herdr_gc
+    value = None
+    if os.environ.get("SWARM_URL"):
+        from scripts.swarm_ledger.storage_migration.hosted import server_secret
 
-    try:
-        for line in herdr_gc.run(dict(os.environ), now_ms(), True):
-            print(f"herdr: {line}")
-    except Exception as exc:
-        print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
+        value = server_secret()
+    with authority_context.bound(value):
+        operator_env.classifier(os.environ)
+        if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
+            raise SwarmError(
+                "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
+                "and the host scheduler ticks every 60 seconds"
+            )
+        slugs = store.slugs()
+        _reconcile_services()
+        if slugs:
+            firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
+            if tick_stop.run(
+                slugs,
+                lambda slug: _tick_while_others_run(store, slug, firsts, until),
+                firsts.settled.set,
+                time.monotonic() - started,
+            ):
+                return
+        from scripts import herdr_gc
+
+        try:
+            for line in herdr_gc.run(dict(os.environ), now_ms(), True):
+                print(f"herdr: {line}")
+        except Exception as exc:
+            print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def cmd_controller(store, args):
@@ -603,7 +607,8 @@ def _state(store, args, state):
     store.update(args.slug, state=state)
     if state == "running" and not timer.ensure(timer.entry_point()):
         print(
-            "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself",
+            "warning: the scheduled swarm tick or swarm services could not be enabled; "
+            "run agentihooks swarm tick yourself",
             file=sys.stderr,
         )
     for action in run_tick(store, args.slug):
@@ -868,15 +873,7 @@ def api_address(value):
     return value
 
 
-def _on_off(key, value):
-    if value not in ON_OFF:
-        raise SwarmError(f"{key} takes on or off")
-    return ON_OFF[value]
-
-
 def config_value(key, value):
-    if key == master_claude_login.KEY:
-        return _on_off(key, value)
     if key in default_models.KEYS or key in TRANSPORT_KEYS:
         return value
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
@@ -948,7 +945,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server, master-claude-login=on|off "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)

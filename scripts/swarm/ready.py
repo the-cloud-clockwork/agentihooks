@@ -13,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import claim_order, done_gate, linked_issues, merge_queue, stack, waits
+from scripts.swarm import claim_order, done_gate, idle, linked_issues, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -244,8 +244,9 @@ def _queue(run, row, found):
 def _finish(run, rows, row, found):
     task_id, url = row["id"], found["url"]
     kind = ledger_kinds.kind(row)
-    if kind not in GATED:
-        if not _release(run, row, found, ""):
+    verify = ledger_kinds.after(row) and ledger_kinds.unmet(row)
+    if kind not in GATED or verify:
+        if not _release(run, row, found, "verify" if verify else ""):
             return []
         run.ledger.comment(run.slug, task_id, PROOF.format(url=url, kind=kind), by="swarm")
         return [f"task {task_id} awaits its proof, {url} merged", *_remove(found)]
@@ -315,7 +316,10 @@ def _reopen(run, row, found, what):
 
 def _release(run, row, found, wait):
     task_id = row["id"]
-    if _owners(run, task_id):
+    owners = _owners(run, task_id)
+    if owners:
+        if wait == "verify":
+            _proof_wait(run, row, owners)
         return False
     lease_generation = run.store.claim_generation(run.slug, task_id)
     expected_ready = run.store.redis.hget(run.store.key(run.slug, RECORDS), task_id)
@@ -328,6 +332,14 @@ def _release(run, row, found, wait):
     if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
         return False
     return run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready)
+
+
+def _proof_wait(run, row, owners):
+    until = int((row.get("contract") or {}).get("after_at") or run.now_ms + 60_000)
+    if until <= run.now_ms:
+        return
+    for owner in owners:
+        idle.declare_wait(run.store.redis, run.slug, owner.name, until, "post merge proof", run.now_ms)
 
 
 def _remove(found, *flags):

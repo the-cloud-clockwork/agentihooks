@@ -558,7 +558,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes, selection: (
+        lambda root, changes, selection, manifest: (
             (1601.4, 50, ["tests/test_sample.py"])
             if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
             else None
@@ -685,7 +685,7 @@ def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_buc
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.plan.own_bases", lambda root, base, head, graded: [f"{base}@{head}"])
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection: estimated)
+    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection, manifest: estimated)
     assert plan.main() == 0
     assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
     assert output.read_text() == (

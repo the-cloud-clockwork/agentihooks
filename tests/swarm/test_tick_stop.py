@@ -1,6 +1,5 @@
 import json
 import os
-import re
 import signal
 import threading
 import time
@@ -278,10 +277,10 @@ def test_a_finished_tick_drops_its_holder_record(env):  # noqa: F811
     assert tick_stop.release_all() == 0
 
 
-def test_the_deadline_and_grace_fit_inside_the_service_start_timeout():
-    service = timer.units("agentihooks")[f"{timer.UNIT}.service"]
-    limit = int(re.search(r"TimeoutStartSec=(\d+)", service).group(1))
-    assert tick_stop.DEADLINE_S + tick_stop.GRACE_S + tick_stop.POLL_S <= limit - 30
+def test_the_deadline_and_grace_fit_inside_the_scheduled_tick_timeout():
+    from scripts.swarm import scheduled_tick
+
+    assert tick_stop.DEADLINE_S + tick_stop.GRACE_S + tick_stop.POLL_S <= scheduled_tick.TIMEOUT_S - 30
 
 
 def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):

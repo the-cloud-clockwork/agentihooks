@@ -1,0 +1,6 @@
+{
+  "hooks/context/plan_read_guard.py:hooks.context.plan_read_guard.x__migration__mutmut_6:150afd9f0619a7d4575a2857c8c87f3a9f892e5cd3a36565466945b0d419fd2a": {
+    "reader": "Standards",
+    "reason": "The only changed migration predicate outcome occurs for three command words with no arguments; either branch retains the identical three words."
+  }
+}

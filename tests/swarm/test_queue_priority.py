@@ -32,6 +32,16 @@ def priority(monkeypatch, tmp_path):
         return reorder(url, run=queue.run, journal=journal)
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    original_graphql = merge_queue.graphql
+
+    def graphql(query, variables, run):
+        if run is subprocess.run:
+            assert query == merge_queue.STATE
+            assert variables["url"] in (URL, URL + "0")
+            return original_graphql(query, variables, queue.run)
+        return original_graphql(query, variables, run)
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
 
     def read_groups(journal):
@@ -160,6 +170,13 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch):
         applied.append(url)
         return {"url": url, "displaced": [], "errors": []}
 
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables == {"url": URL}
+        assert run is subprocess.run
+        return {"resource": {"state": "OPEN", "baseRefName": "dev"}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
     monkeypatch.setattr(merge_queue, "rest", rest)
     monkeypatch.setattr(merge_queue, "prioritize", reorder)
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
@@ -250,6 +267,71 @@ def test_refused_reorder_keeps_pending_request_for_retry(priority, monkeypatch, 
     monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: {"displaced": [], "errors": ["queue refused"]})
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority for {URL} waits: queue refused"]
     assert p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL)
+
+
+@pytest.mark.parametrize(
+    "state,base,reason",
+    [
+        ("MERGED", "dev", "pull request is MERGED"),
+        ("CLOSED", "dev", "pull request is CLOSED"),
+        ("OPEN", "main", "pull request no longer targets dev"),
+    ],
+)
+@pytest.mark.parametrize("run_status", ["in_progress", "completed", None])
+def test_refresh_drops_ineligible_priorities(priority, monkeypatch, state, base, reason, run_status):
+    p = priority
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    key = p.store.key("sw", queue_priority.PENDING)
+    record = json.loads(p.store.redis.hget(key, URL))
+    p.run["status"] = run_status
+    if run_status is None:
+        record["run_id"] = None
+        p.store.redis.hset(key, URL, json.dumps(record))
+    p.store.redis.hset(key, URL + "0", json.dumps(record))
+    records = []
+
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables in ({"url": URL}, {"url": URL + "0"})
+        assert run is subprocess.run
+        return {"resource": {"state": state, "baseRefName": base}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"dropped deferred merge queue priority for {URL}: {reason}",
+        f"dropped deferred merge queue priority for {URL}0: {reason}",
+    ]
+    assert p.store.redis.hgetall(key) == {}
+    assert records == [
+        (("priority-dropped", URL, "", None, None), {"reason": reason, **record}),
+        (("priority-dropped", URL + "0", "", None, None), {"reason": reason, **record}),
+    ]
+    assert p.queue.mutations == []
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert len(records) == 2
+
+
+@pytest.mark.parametrize("unreadable", [False, True])
+def test_refresh_keeps_priority_when_pull_request_cannot_be_read(priority, monkeypatch, unreadable):
+    p = priority
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    key = p.store.key("sw", queue_priority.PENDING)
+    before = p.store.redis.hgetall(key)
+
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables == {"url": URL}
+        assert run is subprocess.run
+        if unreadable:
+            return {"resource": None}
+        raise SwarmError("GitHub unavailable")
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    reason = "pull request could not be read" if unreadable else "GitHub unavailable"
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority for {URL} waits: {reason}"]
+    assert p.store.redis.hgetall(key) == before
+    assert p.queue.mutations == []
 
 
 def test_replay_records_application_and_notifies_the_displaced_owner(priority, monkeypatch, capsys):
