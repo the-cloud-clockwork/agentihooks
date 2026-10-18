@@ -98,7 +98,7 @@ def refusal(handler, store):
 
     with pytest.raises(APIError) as caught:
         dispatch(handler, store)
-    return caught.value.status, str(caught.value)
+    return caught.value.status, caught.value.code, str(caught.value)
 
 
 def test_a_read_lists_every_hive_with_liveness_slots_agents_and_its_master(store):
@@ -121,8 +121,8 @@ def test_a_read_lists_every_hive_with_liveness_slots_agents_and_its_master(store
 
 def test_a_read_of_one_hive_answers_that_hive_and_a_missing_one_is_not_found(store):
     assert dispatch(request("GET", "/api/v1/hives/pod", token=None, slug=None), store)["data"]["id"] == "pod"
-    assert refusal(request("GET", "/api/v1/hives/gone"), store) == (404, "No such hive")
-    assert refusal(request("GET", "/api/v1/hives/pod/extra"), store) == (404, "No such resource")
+    assert refusal(request("GET", "/api/v1/hives/gone"), store) == (404, "resource_missing", "No such hive")
+    assert refusal(request("GET", "/api/v1/hives/pod/extra"), store) == (404, "resource_missing", "No such resource")
 
 
 def test_a_finished_master_or_one_without_a_hive_is_not_shown(store):
@@ -185,13 +185,13 @@ def test_the_registry_refuses_settings_it_does_not_accept(store, body, message):
     from scripts.hive import registry
 
     before = registry.show(store.redis, "pod")
-    assert refusal(request("PATCH", "/api/v1/hives/pod", body), store) == (400, message)
+    assert refusal(request("PATCH", "/api/v1/hives/pod", body), store) == (400, "schema_invalid", message)
     assert registry.show(store.redis, "pod") == before
 
 
 @pytest.mark.parametrize("body", [{}, {"color": "red"}, {"ui": "maybe"}, {"roles": ["boss"]}, {"max_agents": "3"}])
 def test_the_schema_refuses_bodies_outside_the_settings(store, body):
-    expected = (400, "Request does not match the resource schema")
+    expected = (400, "schema_invalid", "Request does not match the resource schema")
     assert refusal(request("PATCH", "/api/v1/hives/pod", body), store) == expected
 
 
@@ -203,7 +203,7 @@ def test_an_unreadable_hive_record_answers_storage_error(store, method, path, pa
     from scripts.hive import registry
 
     store.redis.hset(registry.key("pod"), "max_agents", "many")
-    expected = (503, "hive pod holds an unreadable max_agents: 'many'")
+    expected = (503, "storage_error", "hive pod holds an unreadable max_agents: 'many'")
     assert refusal(request(method, path, payload), store) == expected
 
 
@@ -221,20 +221,32 @@ def test_only_the_operator_writes_hive_settings(store, token, slug, message):
     from scripts.hive import registry
 
     before = registry.show(store.redis, "pod")
-    assert refusal(request("PATCH", "/api/v1/hives/pod", {"max_agents": 9}, token, slug), store) == (403, message)
+    assert refusal(request("PATCH", "/api/v1/hives/pod", {"max_agents": 9}, token, slug), store) == (
+        403,
+        "forbidden",
+        message,
+    )
     assert registry.show(store.redis, "pod") == before
 
 
 def test_a_write_to_an_unknown_hive_creates_nothing(store):
     from scripts.hive import registry
 
-    assert refusal(request("PATCH", "/api/v1/hives/gone", {"max_agents": 2}), store) == (404, "No such hive")
+    assert refusal(request("PATCH", "/api/v1/hives/gone", {"max_agents": 2}), store) == (
+        404,
+        "resource_missing",
+        "No such hive",
+    )
     assert registry.show(store.redis, "gone") is None
 
 
 @pytest.mark.parametrize(("method", "path"), [("PATCH", "/api/v1/hives"), ("DELETE", "/api/v1/hives/pod")])
 def test_other_methods_are_refused(store, method, path):
-    assert refusal(request(method, path, {"ui": "no"}), store) == (405, "Use GET, or PATCH on one hive")
+    assert refusal(request(method, path, {"ui": "no"}), store) == (
+        405,
+        "method_not_allowed",
+        "Use GET, or PATCH on one hive",
+    )
 
 
 def test_an_unreachable_swarm_store_answers_storage_error():
@@ -262,7 +274,7 @@ def test_a_redis_drop_after_the_store_opens_answers_storage_error(store, monkeyp
         raise redis.ConnectionError("Connection reset by peer")
 
     monkeypatch.setattr(store.redis, "hgetall", drop)
-    assert refusal(request(method, path, payload), store) == (503, "The swarm store is unreachable")
+    assert refusal(request(method, path, payload), store) == (503, "storage_error", "The swarm store is unreachable")
 
 
 @pytest.mark.parametrize("hive", ["desk", "pod-2.a_b"])
@@ -276,8 +288,9 @@ def test_master_move_runs_the_swarm_master_move_command(hive):
 def test_master_move_needs_a_hive_id(body):
     from scripts.swarm_ledger.ledger_server import control_argv
 
-    with pytest.raises(ValueError, match="A master move needs a hive id"):
+    with pytest.raises(ValueError) as caught:
         control_argv({"action": "master_move", **body})
+    assert str(caught.value) == "A master move needs a hive id"
 
 
 def test_master_move_is_an_accepted_operator_control():
