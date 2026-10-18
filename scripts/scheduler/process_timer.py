@@ -5,10 +5,15 @@ from typing import TYPE_CHECKING
 
 from scripts.scheduler import service
 from scripts.scheduler.core import Scheduler
-from scripts.swarm.store import redis_client
 
 if TYPE_CHECKING:
     from redis import Redis
+
+
+def redis_client() -> "Redis":
+    from scripts.swarm.store import redis_client as connect
+
+    return connect()
 
 
 def blocking_client() -> "Redis":

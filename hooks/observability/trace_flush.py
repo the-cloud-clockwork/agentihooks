@@ -259,7 +259,7 @@ def supervise(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     is_alive: Callable[[Owner], bool] = alive,
-    wait: Callable[[float], None] = scheduled_wait,
+    timer_wait: Callable[[float], None] = scheduled_wait,
 ) -> str:
     limits = limits or budget()
     handle = _lock(session_id, limits.attempts * limits.attempt_timeout + limits.interval, clock, sleep)
@@ -274,7 +274,7 @@ def supervise(
             owner_alive = is_alive(_owner(record, "owner_"))
             fresh = record.get("at") != seen
             if (failing or not fresh) and owner_alive and clock() < due:
-                wait(POLL_SEC)
+                timer_wait(POLL_SEC)
                 continue
             seen = record.get("at")
             trigger = "final" if not owner_alive else f"request:{record.get('reason', '')}" if fresh else "interval"

@@ -216,3 +216,23 @@ def test_machine_lock_directory_is_shared_across_profile_configurations(monkeypa
     monkeypatch.setenv("AGENTIHOOKS_HOME", "/proof/two")
     assert service.runtime_dir() == directory
     assert directory.relative_to(Path.home()).parts == (".cache", "agentihooks", "scheduler")
+
+
+def test_same_domain_refuses_a_second_runner_and_distinct_domains_coexist(tmp_path, monkeypatch):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    first = {
+        "AGENTIHOOKS_DEPLOYMENT": "cloud",
+        "AGENTIHOOKS_HIVE_ID": "first",
+        "AGENTIHOOKS_HIVE_REDIS_URL": "redis://one.invalid:6380/2",
+    }
+    other_member = {**first, "AGENTIHOOKS_HIVE_ID": "second"}
+    other_endpoint = {**first, "AGENTIHOOKS_HIVE_REDIS_URL": "redis://two.invalid:6380/2"}
+    with service.machine_lock("runner", environ=first):
+        with pytest.raises(service.AlreadyRunning):
+            with service.machine_lock("runner", environ=dict(first)):
+                pass
+        with service.machine_lock("runner", environ=other_member):
+            with service.machine_lock("runner", environ=other_endpoint):
+                assert len({service.runtime_dir(env) for env in (first, other_member, other_endpoint)}) == 3

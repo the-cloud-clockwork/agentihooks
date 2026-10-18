@@ -172,3 +172,43 @@ def test_host_scheduler_keys_remain_unchanged_without_member_identity(redis, mon
     assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT")
     assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+
+
+def test_process_timer_records_are_bounded_across_repeated_waits(redis, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    scheduler = Scheduler(redis)
+    for _ in range(20):
+        with process_timer.Timer(0, redis=redis) as timer:
+            scheduler.run_due(now=timer.entry.record["due"])
+            timer.wait()
+        scheduler.run_due()
+        assert redis.hlen(scheduler.key("entries")) == 0
+        assert not redis.exists(timer.key)
+        assert not redis.exists(scheduler.key("retired"))
+
+
+def test_delivered_wake_survives_a_paused_consumer(redis, monkeypatch):
+    import time
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    with process_timer.Timer(0, redis=redis) as timer:
+        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        now = time.time()
+        monkeypatch.setattr(time, "time", lambda: now + 120)
+        assert redis.ttl(timer.key) == -1
+        timer.wait()
+
+
+def test_retirement_during_dispatch_removes_a_late_wake(redis, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    original = process_timer.wake
+    with process_timer.Timer(0, redis=redis) as timer:
+
+        def retire_then_wake(event, delivery_id, connection):
+            timer.close()
+            original(event, delivery_id, connection)
+
+        monkeypatch.setattr(process_timer, "wake", retire_then_wake)
+        Scheduler(redis).run_due(now=timer.entry.record["due"])
+    assert redis.hlen(Scheduler(redis).key("entries")) == 0
+    assert not redis.exists(timer.key)

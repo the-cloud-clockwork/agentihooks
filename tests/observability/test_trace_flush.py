@@ -147,7 +147,7 @@ def test_exporter_flushes_during_an_active_turn_and_once_after_the_owner_exits(h
         clock,
         clock.sleep,
         lambda owner: state["alive"],
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert result == "owner exited"
     assert [(at, trigger) for at, trigger, _ in calls] == [
@@ -172,7 +172,7 @@ def test_owner_exit_drains_new_records_with_a_final_trigger(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: state["alive"],
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start"), (3, "final")]
 
@@ -190,7 +190,7 @@ def test_failed_export_retries_three_times_per_wake_and_keeps_pending_work(home,
         clock,
         clock.sleep,
         lambda owner: state["alive"],
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start")] * 3 + [(15, "interval")] * 3 + [(30, "interval")] * 3 + [(40, "final")] * 3
 
@@ -210,7 +210,7 @@ def test_a_request_wakes_the_exporter_before_its_interval(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: state["alive"],
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start"), (4, "request:stop")]
 
@@ -229,7 +229,7 @@ def test_requests_do_not_wake_a_failing_exporter_before_its_interval(home, tmp_p
         clock,
         clock.sleep,
         lambda owner: state["alive"],
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start")] * 3 + [(15, "request:stop")] * 3 + [(20, "final")] * 3
 
@@ -253,7 +253,7 @@ def test_a_resumed_owner_takes_over_the_running_exporter(home, tmp_path):
         return owner.pid == os.getpid() and clock() < 20
 
     assert trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, is_alive, wait=clock.sleep
+        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, is_alive, timer_wait=clock.sleep
     ) == ("owner exited")
     assert calls == [(0, "final"), (0, "request:start")]
     assert owners[0] == 1 and os.getpid() in owners
@@ -291,7 +291,7 @@ def test_supervisor_waits_for_a_draining_owner_lock(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: False,
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert result == "owner exited"
     assert clock() == 10
@@ -433,7 +433,10 @@ def _supervise_in_background(session):
     thread = threading.Thread(
         target=lambda: result.update(
             outcome=trace_flush.supervise(
-                session, trace_flush.Budget(1, 5, 3), sleep=lambda s: time.sleep(0.1), wait=lambda s: time.sleep(0.1)
+                session,
+                trace_flush.Budget(1, 5, 3),
+                sleep=lambda s: time.sleep(0.1),
+                timer_wait=lambda s: time.sleep(0.1),
             )
         ),
         daemon=True,
@@ -838,7 +841,7 @@ def _run(session, limits, outcome, clock, state):
         return outcome
 
     result = trace_flush.supervise(
-        session, limits, send, clock, clock.sleep, lambda owner: state["alive"], wait=clock.sleep
+        session, limits, send, clock, clock.sleep, lambda owner: state["alive"], timer_wait=clock.sleep
     )
     return result, calls
 
@@ -919,7 +922,13 @@ def test_the_owner_record_names_the_running_exporter_until_it_exits(home, tmp_pa
         return True
 
     trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: state["alive"], wait=clock.sleep
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        send,
+        clock,
+        clock.sleep,
+        lambda o: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert seen == [me, me]
     assert not trace_flush.owner_path("session").exists()
@@ -930,7 +939,7 @@ def test_exporters_create_their_state_folder_and_run_one_after_another(tmp_path,
     for _ in range(2):
         clock = Clock()
         assert trace_flush.supervise(
-            "s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False, wait=clock.sleep
+            "s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
         ) == ("owner exited")
 
 
@@ -976,7 +985,7 @@ def test_the_exporter_checks_the_owner_named_in_the_request(home, tmp_path):
         clock,
         clock.sleep,
         lambda o: owners.append(o),
-        wait=clock.sleep,
+        timer_wait=clock.sleep,
     )
     assert owners[0] == trace_flush.Owner(os.getpid(), trace_flush.start_time(os.getpid()))
 
@@ -1005,6 +1014,6 @@ def test_a_missing_owner_record_does_not_stop_the_final_drain(home, tmp_path):
         return True
 
     result = trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False, wait=clock.sleep
+        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
     )
     assert result == "owner exited"
