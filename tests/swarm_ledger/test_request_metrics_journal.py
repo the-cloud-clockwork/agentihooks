@@ -39,6 +39,7 @@ def fresh(monkeypatch, started_at):
     monkeypatch.setattr(request_metrics, "LOST", [])
     monkeypatch.setattr(request_metrics, "JOURNAL", None)
     monkeypatch.setattr(request_metrics, "APPENDED", 0)
+    monkeypatch.setattr(request_metrics, "STALE", False)
 
 
 def reload(monkeypatch, clock, path, after):
@@ -255,6 +256,7 @@ def test_endpoint_refuses_bad_reader_queries(now, metrics_url, query):
         (["--writes"], "hours=24.0&view=writes&limit=1000"),
         (["--end", "5"], "hours=24.0&end=5.0"),
         (["--writes", "--limit", "10000", "--hours", "1"], "hours=1.0&view=writes&limit=10000"),
+        (["--writes", "--limit", "1"], "hours=24.0&view=writes&limit=1"),
     ],
 )
 def test_command_builds_the_reader_query(monkeypatch, capsys, args, query):
@@ -297,17 +299,21 @@ def test_failed_journal_write_keeps_the_rows_for_the_next_pass(tmp_path, monkeyp
     path = tmp_path / "metrics.jsonl"
     request_metrics.restore(path)
     request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
-    real = request_metrics.write_lines
+    real = request_metrics.append_lines
 
     def full(*args):
         raise OSError("disk full")
 
-    monkeypatch.setattr(request_metrics, "write_lines", full)
+    monkeypatch.setattr(request_metrics, "append_lines", full)
     server.metrics_journal(request_metrics.persist)
     assert capsys.readouterr().err == "request metrics journal: disk full\n"
-    monkeypatch.setattr(request_metrics, "write_lines", real)
+    monkeypatch.setattr(request_metrics, "append_lines", real)
     now[0] += 2.0
-    request_metrics.persist(stopped=True)
+    request_metrics.persist()
+    assert [json.loads(line)[0] for line in path.read_text().splitlines()] == ["held", "start", "s", "flush"]
+    request_metrics.persist()
+    assert len(path.read_text().splitlines()) == 4
+    request_metrics.stop()
     reload(monkeypatch, now, path, 1.0)
     result = request_metrics.records(1.0, None, limit=10)
     assert result["coverage"]["lost"] == []
@@ -320,15 +326,15 @@ def test_failed_restore_rewrite_is_retried_and_names_a_later_crash(tmp_path, mon
         f'["start", {START - 7000.0}]\n["s", {START - 10.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n'
         f'["stop", {START - 5.0}]\n'
     )
-    real = request_metrics.write_lines
+    real = request_metrics.replace_lines
 
     def refused(*args):
         raise OSError("read only")
 
-    monkeypatch.setattr(request_metrics, "write_lines", refused)
+    monkeypatch.setattr(request_metrics, "replace_lines", refused)
     server.metrics_journal(request_metrics.restore, path)
     assert capsys.readouterr().err == "request metrics journal: read only\n"
-    monkeypatch.setattr(request_metrics, "write_lines", real)
+    monkeypatch.setattr(request_metrics, "replace_lines", real)
     now[0] += 1.0
     request_metrics.record("POST", OPERATIONS, 2.0, 0.0, 0.0)
     now[0] += 1.0
@@ -355,3 +361,100 @@ def test_ring_eviction_survives_a_reload(tmp_path, monkeypatch, now):
     assert coverage["evicted_through"] == evicted
     assert coverage["complete"] is False
     assert len(request_metrics.SAMPLES) == 64
+
+
+def flushes(path):
+    return [json.loads(line)[0] for line in path.read_text().splitlines()].count("flush")
+
+
+def burst(now, count):
+    for _ in range(count):
+        now[0] += 0.01
+        request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
+
+
+def test_journal_appends_up_to_capacity_and_rewrites_past_it(tmp_path, now):
+    path = tmp_path / "metrics.jsonl"
+    request_metrics.restore(path)
+    burst(now, 1)
+    request_metrics.persist()
+    burst(now, 62)
+    request_metrics.persist()
+    assert flushes(path) == 2
+    burst(now, 1)
+    request_metrics.persist()
+    assert flushes(path) == 1
+    burst(now, 64)
+    request_metrics.persist()
+    assert flushes(path) == 2
+
+
+def test_restore_keeps_rows_and_spans_exactly_at_the_retention_floor(tmp_path, monkeypatch, now):
+    monkeypatch.setattr(request_metrics, "STARTED_AT", START)
+    floor = START - request_metrics.RETENTION_SECONDS
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(
+        f'["held", {floor - 100.0}]\n["lost", {floor - 50.0}, {floor}]\n'
+        f'["lost", {floor - 50.0}, {floor - 1.0}]\n["start", {floor - 100.0}]\n'
+        f'["s", {floor}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n'
+        f'["s", {floor - 1.0}, "POST", "{OPERATIONS}", 2.0, 0.0, 0.0]\n["stop", {floor + 1.0}]\n'
+    )
+    request_metrics.restore(path)
+    assert [row[3] for row in request_metrics.SAMPLES] == [1.0]
+    assert request_metrics.LOST == [(floor - 50.0, floor)]
+
+
+def test_coverage_counts_lost_spans_touching_the_window_edges(monkeypatch, now):
+    monkeypatch.setattr(request_metrics, "LOST", [(START - 7200.0, START - 3600.0), (START, START + 10.0)])
+    assert request_metrics.report(1.0)["coverage"]["lost"] == [
+        {"start": START - 7200.0, "end": START - 3600.0},
+        {"start": START, "end": START + 10.0},
+    ]
+    monkeypatch.setattr(request_metrics, "LOST", [(START - 7200.0, START - 3600.5), (START + 0.5, START + 10.0)])
+    assert request_metrics.report(1.0)["coverage"]["lost"] == []
+
+
+def test_a_start_without_a_stop_marks_the_span_since_the_last_row(tmp_path, monkeypatch, now):
+    monkeypatch.setattr(request_metrics, "STARTED_AT", START)
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(
+        f'["start", {START - 100.0}]\n["s", {START - 90.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n'
+        f'["start", {START - 50.0}]\n["flush", {START - 40.0}]\n["stop", {START - 30.0}]\n'
+    )
+    request_metrics.restore(path)
+    assert request_metrics.LOST == [(START - 90.0, START - 50.0)]
+
+
+def test_reader_windows_end_where_the_query_says(now, metrics_url):
+    request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
+    past = START - 7200.0
+    with urlopen(f"{metrics_url}/api/v1/metrics?hours=1&end={past}") as response:
+        summary = json.load(response)
+    with urlopen(f"{metrics_url}/api/v1/metrics?view=writes&hours=1&end={past}&limit=1") as response:
+        writes = json.load(response)
+    with urlopen(f"{metrics_url}/api/v1/metrics?view=writes&hours=1&limit=10000") as response:
+        widest = json.load(response)
+    with urlopen(f"{metrics_url}/api/v1/metrics?view=writes&hours=1") as response:
+        default = json.load(response)
+    assert (summary["window_end"], summary["writes"]["count"]) == (past, 0)
+    assert (writes["window_end"], writes["routes"]) == (past, [])
+    assert widest["matched"] == default["matched"] == 1
+
+
+def test_serve_restores_then_stops_the_journal(monkeypatch, tmp_path, now):
+    class Server:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        server_bind = server_activate = serve_forever = server_close = lambda self: None
+
+    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    monkeypatch.setattr(server, "PIDFILE", tmp_path / ".server.pid")
+    monkeypatch.setattr(server.threading, "Thread", lambda **kwargs: SimpleNamespace(start=lambda: None))
+    monkeypatch.setattr(server, "ThreadingHTTPServer", Server)
+    monkeypatch.setattr(server.server_lifetime, "watch", lambda *args: threading.Event())
+    monkeypatch.setattr(server.legacy, "adopt", lambda *args: None)
+    server.serve()
+    rows = [json.loads(line) for line in (tmp_path / request_metrics.JOURNAL_NAME).read_text().splitlines()]
+    assert [row[0] for row in rows] == ["held", "start", "flush", "stop"]
+    assert request_metrics.JOURNAL == tmp_path / request_metrics.JOURNAL_NAME

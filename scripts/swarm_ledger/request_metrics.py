@@ -2,6 +2,7 @@ import argparse
 import json
 import math
 import sqlite3
+import tempfile
 import threading
 import time
 from _thread import LockType
@@ -35,6 +36,7 @@ HELD_SINCE = None
 LOST = []
 JOURNAL = None
 APPENDED = 0
+STALE = False
 
 
 @dataclass
@@ -179,7 +181,7 @@ def journal_row(row: object) -> bool:
 
 
 def replay(rows: Iterator[list], started_at: float) -> tuple[list, float | None, list, float]:
-    samples, held, lost, open_since, evicted = [], None, [], None, float("-inf")
+    samples, held, lost, open_since, evicted = [], None, [], None, -math.inf
     for kind, stamp, *rest in rows:
         if kind == "held":
             held = stamp
@@ -217,19 +219,23 @@ def evicted_line() -> list:
     return [["evicted", EVICTED_THROUGH]] if math.isfinite(EVICTED_THROUGH) else []
 
 
-def write_lines(path: Path, lines: list, mode: str) -> None:
-    text = "".join(json.dumps(line) + "\n" for line in lines)
-    if mode == "a":
-        with path.open("a") as handle:
-            handle.write(text)
-        return
-    staged = path.with_name(path.name + ".tmp")
-    staged.write_text(text)
-    staged.replace(path)
+def encode(lines: list) -> str:
+    return "".join(json.dumps(line) + "\n" for line in lines)
+
+
+def append_lines(path: Path, lines: list) -> None:
+    with path.open("a") as handle:
+        handle.write(encode(lines))
+
+
+def replace_lines(path: Path, lines: list) -> None:
+    with tempfile.NamedTemporaryFile("w", dir=path.parent, prefix=path.name, delete=False) as handle:
+        handle.write(encode(lines))
+    Path(handle.name).replace(path)
 
 
 def restore(path: Path) -> None:
-    global JOURNAL, HELD_SINCE, APPENDED, EVICTED_THROUGH
+    global JOURNAL, HELD_SINCE, APPENDED, EVICTED_THROUGH, STALE
 
     with JOURNAL_GUARD:
         samples, held, lost, evicted = replay(journal_rows(path), STARTED_AT)
@@ -243,33 +249,39 @@ def restore(path: Path) -> None:
             LOST[:] = [span for span in lost if span[1] >= floor]
             HELD_SINCE = max(held, floor) if held is not None else None
             PENDING.clear()
-            JOURNAL, APPENDED = path, SAMPLES.maxlen + 1
+            JOURNAL, STALE = path, True
             lines = journal_lines(None)
-        write_lines(path, lines, "w")
+        replace_lines(path, lines)
         with GUARD:
-            APPENDED = 0
+            APPENDED, STALE = 0, False
+
+
+def stop() -> None:
+    persist(stopped=True)
 
 
 def persist(stopped: bool = False) -> None:
-    global APPENDED
+    global APPENDED, STALE
 
     with JOURNAL_GUARD:
         with GUARD:
-            if JOURNAL is None or not (PENDING or stopped or APPENDED > SAMPLES.maxlen):
+            if JOURNAL is None or not (PENDING or stopped or STALE):
                 return
             now = time.time()
-            if APPENDED + len(PENDING) > SAMPLES.maxlen:
-                lines, mode, APPENDED = journal_lines(now), "w", 0
+            rewrite = STALE or APPENDED + len(PENDING) > SAMPLES.maxlen
+            if rewrite:
+                lines, APPENDED = journal_lines(now), 0
             else:
-                lines, mode = [["s", *row] for row in PENDING] + evicted_line() + [["flush", now]], "a"
+                lines = [["s", *row] for row in PENDING] + evicted_line() + [["flush", now]]
                 APPENDED += len(lines)
             PENDING.clear()
-            path = JOURNAL
+            path, STALE = JOURNAL, False
+        lines += [["stop", now]] if stopped else []
         try:
-            write_lines(path, lines + ([["stop", now]] if stopped else []), mode)
+            (replace_lines if rewrite else append_lines)(path, lines)
         except OSError:
             with GUARD:
-                APPENDED = SAMPLES.maxlen + 1
+                STALE = True
             raise
 
 
