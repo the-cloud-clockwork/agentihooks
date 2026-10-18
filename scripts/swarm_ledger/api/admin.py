@@ -55,6 +55,25 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
     return {"slug": slug, "action": payload["action"], **({"swarm_error": error} if error else {})}
 
 
+def lifecycle(principal: str, slug: str, payload: dict) -> dict:
+    from scripts.swarm_ledger.repository import bin_storage
+
+    if principal:
+        raise APIError(403, "forbidden", "Ledger lifecycle actions need the operator or controller credential")
+    schemas.validate(
+        {
+            "type": "object",
+            "required": ["action", "closed_at"],
+            "additionalProperties": False,
+            "properties": {
+                "action": {"const": "bin_closed"},
+                "closed_at": {"type": "integer", "minimum": 1},
+            },
+        },
+        payload,
+    )
+    return {"data": bin_storage.bin_closed(slug, payload["closed_at"])}
+
 def control(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
     if principal:
         raise APIError(403, "forbidden", "Swarm controls need the operator")

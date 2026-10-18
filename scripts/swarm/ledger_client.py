@@ -229,7 +229,18 @@ class LedgerClient:
     def join(self, slug, name, role):
         self._call(slug, [_op("join", name, role=role)])
 
+    def _lifecycle(self, slug, payload):
+        from scripts.swarm_ledger.api.client import ResourceClient
+
+        ledger = _ledger()
+        client = ResourceClient(ledger.base(), ledger.credentials(slug, self.service))
+        return client.request(slug, "lifecycle/actions", payload)["data"]
+
     def bin_closed(self, slug, closed_at):
+        from scripts.swarm_ledger import ledger_link
+
+        if ledger_link.remote():
+            return self._lifecycle(slug, {"action": "bin_closed", "closed_at": closed_at})
         _ledger()
         import ledger_bin
 
