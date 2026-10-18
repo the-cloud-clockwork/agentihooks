@@ -104,3 +104,41 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
         await task
     assert timers[0].entry.state == "cancelled"
     assert not redis.exists(timers[0].key)
+
+
+@pytest.mark.parametrize("deployment", ["cloud", "local"])
+def test_member_heartbeat_timer_uses_its_writable_subtree(redis, monkeypatch, deployment):
+    from fnmatch import fnmatchcase
+
+    from scripts.hive.auth import _acl_keys
+    from scripts.swarm.keyspace import ROOT
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    with process_timer.Timer(15, redis=redis) as timer:
+        expected = (
+            f"{ROOT}:hive:member:scheduler:"
+            if deployment != "local"
+            else process_timer.Scheduler(redis).key("wake:").rsplit("wake:", 1)[0]
+        )
+        assert timer.key.startswith(expected)
+        if deployment != "local":
+            writable = [pattern[1:] for pattern in _acl_keys("member") if pattern.startswith("~")]
+            assert all(
+                any(fnmatchcase(key, pattern) for pattern in writable)
+                for key in redis.keys("*")
+            )
+        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        timer.wait()
+
+
+def test_member_grants_still_refuse_shared_scheduler_writes(redis, monkeypatch):
+    from fnmatch import fnmatchcase
+
+    from scripts.hive.auth import _acl_keys
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    shared = Scheduler(redis).key("entries")
+    writable = [pattern[1:] for pattern in _acl_keys("member") if pattern.startswith("~")]
+    assert not any(fnmatchcase(shared, pattern) for pattern in writable)
