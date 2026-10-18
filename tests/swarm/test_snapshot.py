@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, resume, snapshot, snapshot_job
+from scripts.swarm import cli, resume, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -355,9 +355,8 @@ def test_restore_uses_the_newest_snapshot_unless_pointed_at_another(store):
     assert store.config("sw").max_eng == 3
 
 
-def test_the_tick_takes_an_automatic_snapshot_and_restore_from_names_an_older_one(env, capsys, monkeypatch):
+def test_the_tick_takes_an_automatic_snapshot_and_restore_from_names_an_older_one(env, capsys):
     store, ledger, rt = env
-    monkeypatch.setattr(snapshot_job, "spawn", lambda slug: snapshot_job.run(store, slug, cli.now_ms(), {}))
     cli.main(["sw", "create", "--repo", "/repo"])
     cli.main(["sw", "start"])
     assert [p.name.startswith("auto-") for p in snapshot.automatic("sw")] == [True]

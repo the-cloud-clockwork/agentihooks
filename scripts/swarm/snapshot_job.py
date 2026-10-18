@@ -1,9 +1,4 @@
-"""The automatic snapshot as its own background job: the tick starts it and returns, one lock keeps one job per swarm.
-
-A snapshot reads every agent's worktree and conversation files and can take minutes; inside the tick it held the
-shared pass past its start timeout. The job runs as a detached process, takes the swarm's snapshot lock, snapshots
-only if one is still due and releases the lock it took.
-"""
+"""The automatic snapshot as a detached job the tick starts and never waits for, one job per swarm under its lock."""
 
 import os
 import subprocess

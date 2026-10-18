@@ -447,11 +447,14 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def _swarm_snapshot_job_never_spawns(request, monkeypatch):
+def _swarm_snapshot_job_runs_inline(request, monkeypatch):
     from scripts.swarm import snapshot_job
 
     if not getattr(request.module, "SNAPSHOT_SPAWN", False):
-        monkeypatch.setattr(snapshot_job, "spawn", lambda slug: None)
+        run = snapshot_job.run
+        monkeypatch.setattr(
+            snapshot_job, "start", lambda store, slug, now, environ: bool(run(store, slug, now, environ))
+        )
 
 
 @pytest.fixture(autouse=True)

@@ -1,4 +1,6 @@
 import json
+import re
+import runpy
 import subprocess
 import sys
 import threading
@@ -6,6 +8,7 @@ import threading
 import pytest
 
 from scripts.swarm import cli, snapshot, snapshot_job
+from scripts.swarm import store as swarm_store
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -109,13 +112,46 @@ def test_the_job_holds_its_lock_through_the_snapshot_and_releases_it_after(store
     key, seen, take = snapshot_job.lock_key(store, "sw"), [], snapshot.take
 
     def watched(*args, **kwargs):
-        seen.append(store.redis.pttl(key))
+        seen.append((store.redis.pttl(key), store.redis.get(key)))
         return take(*args, **kwargs)
 
     monkeypatch.setattr(snapshot, "take", watched)
     assert snapshot_job.run(store, "sw", 5, {}, _no_git) == snapshot.auto_dir("sw") / "auto-5.json"
-    assert 29 * MINUTE < seen[0] <= 30 * MINUTE
+    snapshot_job.run(store, "sw", 30 * MINUTE + 5, {}, _no_git)
+    [(ttl, token), (_, second)] = seen
+    assert 29 * MINUTE < ttl <= 30 * MINUTE
+    assert re.fullmatch(r"[0-9a-f]{32}", token)
+    assert second != token
     assert not store.redis.exists(key)
+
+
+def test_a_lock_another_job_takes_while_this_one_releases_stays_with_it(store, monkeypatch):
+    _running(store)
+    key, pipeline = snapshot_job.lock_key(store, "sw"), store.redis.pipeline
+
+    class Racing:
+        def __init__(self, *args, **kwargs):
+            self.pipe = pipeline(*args, **kwargs)
+
+        def __enter__(self):
+            self.pipe.__enter__()
+            return self
+
+        def __exit__(self, *exc):
+            return self.pipe.__exit__(*exc)
+
+        def __getattr__(self, name):
+            return getattr(self.pipe, name)
+
+        def get(self, name):
+            value = self.pipe.get(name)
+            if name == key:
+                store.redis.set(key, "other")
+            return value
+
+    monkeypatch.setattr(store.redis, "pipeline", Racing)
+    snapshot_job.run(store, "sw", 0, {}, _no_git)
+    assert store.redis.get(key) == "other"
 
 
 def test_a_job_that_is_not_due_takes_no_snapshot_and_releases_its_lock(store):
@@ -154,7 +190,10 @@ def test_a_job_leaves_a_lock_another_job_took_after_its_own_expired(store, monke
 def test_spawn_starts_the_job_detached_with_its_errors_in_the_swarm_folder(monkeypatch):
     calls = []
     monkeypatch.setattr(snapshot_job.subprocess, "Popen", lambda argv, **kw: calls.append((argv, kw)))
+    snapshot_job.log_path("sw").parent.mkdir(parents=True)
+    snapshot_job.log_path("sw").write_bytes(b"earlier error\n")
     snapshot_job.spawn("sw")
+    assert snapshot_job.log_path("sw").read_bytes() == b"earlier error\n"
     [(argv, kw)] = calls
     assert argv == [sys.executable, "-m", "scripts.swarm.snapshot_job", "sw"]
     assert kw["start_new_session"] is True
@@ -171,3 +210,19 @@ def test_the_job_command_snapshots_the_swarm_it_names(store, monkeypatch):
     monkeypatch.setattr(snapshot, "worktrees", lambda repo, names, run=None: {})
     assert snapshot_job.main(["sw"]) == 0
     assert [p.name for p in snapshot.automatic("sw")] == ["auto-7.json"]
+
+
+def test_the_job_module_run_as_a_program_snapshots_the_swarm_on_its_command_line(store, monkeypatch):
+    _running(store)
+    monkeypatch.setattr(swarm_store, "connect", lambda: store)
+    monkeypatch.setattr(snapshot, "worktrees", lambda repo, names, run=None: {})
+    monkeypatch.setattr(sys, "argv", ["snapshot_job", "sw"])
+    with pytest.raises(SystemExit) as ended:
+        runpy.run_module("scripts.swarm.snapshot_job", run_name="__main__")
+    assert ended.value.code == 0
+    assert len(snapshot.automatic("sw")) == 1
+
+
+def test_now_ms_reads_the_wall_clock_in_milliseconds(monkeypatch):
+    monkeypatch.setattr(snapshot_job.time, "time", lambda: 1.5)
+    assert snapshot_job.now_ms() == 1500
