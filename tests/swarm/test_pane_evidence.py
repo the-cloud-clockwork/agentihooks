@@ -405,8 +405,10 @@ def test_atomic_write_uses_the_target_filesystem_and_keeps_renamed_file(tmp_path
         return real(**kwargs)
 
     monkeypatch.setattr(pane_evidence, "tempfile", SimpleNamespace(NamedTemporaryFile=temporary))
-    path = tmp_path / "snapshot.json"
+    directory = tmp_path / "records"
+    directory.mkdir()
+    path = directory / "snapshot.json"
     pane_evidence._write(path, {"screen": "Ready"})
-    assert seen == [{"mode": "w", "dir": tmp_path, "delete": False}]
+    assert seen == [{"mode": "w", "dir": directory, "delete": False}]
     assert json.loads(path.read_text()) == {"screen": "Ready"}
-    assert list(tmp_path.iterdir()) == [path]
+    assert list(directory.iterdir()) == [path]
