@@ -170,6 +170,18 @@ def test_all_thirteen_tools_keep_their_results_after_lazy_start(monkeypatch):
     assert "mcp.server.fastmcp" in modules
 
 
+@pytest.mark.parametrize(
+    "categories,allowed",
+    [
+        ("all", ""),
+        ("channels,channels", "CHANNEL_LIST,brain_status"),
+        ("enforcement,conditions", ""),
+        ("unknown", ""),
+        ("all", "missing"),
+        ("all", ","),
+    ],
+)
+
 def test_discovery_matches_registry_configuration(monkeypatch, capsys, categories, allowed):
     from hooks.mcp import build_server
     from hooks.mcp._stdio import list_tools
