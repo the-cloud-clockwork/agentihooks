@@ -328,8 +328,12 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
 
+    original_rest = merge_queue.rest
+
     def rest(path, run):
-        assert path == "repos/o/r/actions/workflows/tests.yml/runs?event=merge_group&head_sha=group-head&per_page=100"
+        if "/actions/" not in path:
+            return original_rest(path, run)
+        assert path == "repos/o/r/actions/workflows/test.yml/runs?event=merge_group&head_sha=group-head&per_page=100"
         return {"workflow_runs": [{"id": 42, "status": "in_progress", "head_sha": "group-head"}]}
 
     monkeypatch.setattr(merge_queue, "rest", rest)
