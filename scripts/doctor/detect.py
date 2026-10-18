@@ -31,7 +31,6 @@ from scripts.swarm.health import activity
 from scripts.swarm.runtime import SWARM_HOME
 
 PR_RE = re.compile(r"github\.com/([^/\s]+/[^/\s]+)/pull/(\d+)")
-PULL_WORKERS = 8
 
 
 def open_pulls(tasks):
@@ -79,7 +78,7 @@ def _once(load):
 
 def _ci(store, tasks, now_ms):
     pulls = open_pulls(tasks)
-    with ThreadPoolExecutor(max_workers=PULL_WORKERS) as pool:
+    with ThreadPoolExecutor() as pool:
         records = list(pool.map(lambda pull: ci_read.pull_request(*pull, cache=store.redis), pulls))
     return [f for record in records for f in ci.findings(record, now_ms)]
 
@@ -116,7 +115,7 @@ def _timed(name, detect):
 
 def collect(found_by):
     found, failed = [], []
-    with ThreadPoolExecutor(max_workers=max(1, len(found_by))) as pool:
+    with ThreadPoolExecutor(max_workers=len(found_by)) as pool:
         running = {
             name: pool.submit(contextvars.copy_context().run, _timed, name, detect) for name, detect in found_by.items()
         }

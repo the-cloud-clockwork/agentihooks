@@ -70,6 +70,21 @@ def test_one_inbox_read_of_a_large_inbox_takes_a_bounded_number_of_round_trips(r
     assert len(trips) <= 12
 
 
+def test_an_inbox_read_in_small_batches_keeps_every_batch_and_registry_named_agents(redis, monkeypatch):
+    from scripts.swarm.store import SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig(SLUG, "/home/x/dev/r", max_eng=1, max_ci=1))
+    named, other = store.next_name(SLUG, "eng"), "stranger-9"
+    to_named = [box.send("operator", named, f"to the named agent {n}").id for n in range(3)]
+    from_named = [box.send(named, f"other-{n}", f"from the named agent {n}").id for n in range(3)]
+    box.send("operator", other, "not ours")
+    monkeypatch.setattr(read, "BATCH", 2)
+    rows = read.inbox_items(box, SLUG)
+    assert sorted(row["id"] for row in rows) == sorted(to_named + from_named)
+    assert all(len(row["history"]) == 1 for row in rows)
+
+
 def test_an_inbox_listing_whose_item_is_gone_is_refused(redis):
     from scripts.inbox.store import InboxError
 
