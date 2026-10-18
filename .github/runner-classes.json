@@ -10,6 +10,7 @@
   "gate-protected.yml/grade": "hosted",
   "github-access-audit.yml/read-back": "hosted",
   "helm-kind.yml/kind": "standard",
+  "hierarchy-cpu.yml/hierarchy": "standard",
   "hive-worker.yml/contracts": "light",
   "hive-worker.yml/kind": "standard",
   "hive-worker.yml/publish": "standard",
