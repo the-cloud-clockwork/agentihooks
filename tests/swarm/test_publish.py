@@ -324,6 +324,43 @@ def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(reposito
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
+def test_publish_pushes_the_tracked_delivery_branch_over_a_stale_local_record(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(root, "fetch", "origin")
+    git(root, "branch", "--set-upstream-to=origin/predecessor")
+    publication.task["repository_branches"] = {str(publication.repo): "engineer-test"}
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    head = git(root, "rev-parse", "HEAD")
+    assert result["branch"] == publication.task["branch"] == "predecessor"
+    assert publication.task["repository_branches"] == {str(publication.repo): "predecessor"}
+    assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+
+
+def test_publish_never_follows_a_tracked_protected_branch(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    dev = git(root, "ls-remote", "origin", "refs/heads/dev").split()[0]
+    git(root, "fetch", "origin")
+    git(root, "branch", "--set-upstream-to=origin/dev")
+
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+
+    assert result["branch"] == "engineer-test"
+    assert git(root, "ls-remote", "origin", "refs/heads/dev").split()[0] == dev
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
+
+
 def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
     from scripts.swarm import publish
 

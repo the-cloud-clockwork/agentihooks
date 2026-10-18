@@ -195,8 +195,16 @@ def check_build(root: Path) -> None:
         raise SwarmError(reason.getvalue().strip())
 
 
+def tracked(root: Path) -> str:
+    done = subprocess.run(
+        ["git", "rev-parse", "--symbolic-full-name", "@{upstream}"], cwd=root, capture_output=True, text=True
+    )
+    branch = done.stdout.strip().removeprefix("refs/remotes/origin/")
+    return "" if branch in continuation.PROTECTED else branch
+
+
 def target_branch(root: Path, task: dict, branch: str) -> str:
-    for recorded in (continuation.retained(task), task.get("branch")):
+    for recorded in (continuation.retained(task), tracked(root), task.get("branch")):
         if recorded:
             ref = f"refs/remotes/origin/{recorded}"
             done = subprocess.run(["git", "merge-base", "--is-ancestor", ref, "HEAD"], cwd=root, capture_output=True)
