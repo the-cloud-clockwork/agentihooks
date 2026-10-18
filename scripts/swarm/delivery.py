@@ -11,6 +11,7 @@ import json
 from scripts.inbox import links, outbox
 from scripts.inbox.store import Contended, DuplicateItem, InboxError, InboxStore, Item
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm_v2 import master_fence
 
 READY = ("idle", "done")
 OPERATOR = "operator"
@@ -87,6 +88,7 @@ def send(store, slug, text, sender, to, fyi=False):
     inbox = InboxStore(store.redis)
     for agent in found:
         links.check_send(inbox, sender, agent.name)
+        master_fence.check_send(inbox, sender, agent.name)
     for agent in found:
         outbox.post(inbox, outbox.Post(sender, agent.name, text, fyi=fyi, task=agent.task))
     return [a.name for a in found]
@@ -107,6 +109,7 @@ def apply_say(inbox, sender, entry):
         raise InboxError(str(exc)) from exc
     for agent in found:
         links.check_send(inbox, sender, agent.name)
+        master_fence.check_send(inbox, sender, agent.name)
     for agent in found:
         item = outbox.stable_id(entry["item"], agent.name)
         with contextlib.suppress(DuplicateItem):

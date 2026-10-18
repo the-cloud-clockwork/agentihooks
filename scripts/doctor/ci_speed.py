@@ -6,6 +6,7 @@ from scripts.swarm.ledger_events import iso_ms
 
 GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
+JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at")
 
 
 def _wait(run, jobs, since_ms, now_ms):

@@ -487,9 +487,19 @@ def overlap_lines(task):
     overlaps = task.get("overlaps") or []
     if not overlaps:
         return []
-    return [OVERLAP_LINE] + [
-        f"Task {o['task']}, claimed by {o['claimant']}, shares {' and '.join(o['areas'])}." for o in overlaps
-    ]
+    lines = [OVERLAP_LINE]
+    for overlap in overlaps:
+        owner = (
+            f"claimed by {overlap['claimant']}"
+            if overlap["claimant"]
+            else (
+                "waiting on checks with no agent; no coordination note needed"
+                if overlap["checks"]
+                else "no live agent; no coordination note needed"
+            )
+        )
+        lines.append(f"Task {overlap['task']}, {owner}, shares {' and '.join(overlap['areas'])}.")
+    return lines
 
 
 def group_lines(task):
