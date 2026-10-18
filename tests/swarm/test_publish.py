@@ -379,6 +379,37 @@ def test_publish_never_follows_a_tracked_branch_the_task_does_not_record(publica
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == git(root, "rev-parse", "HEAD")
 
 
+def test_tracked_returns_an_upstream_recorded_only_for_its_repository(publication):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    git(root, "branch", "--set-upstream-to=origin/predecessor")
+    scoped = {"branch": "engineer-test", "repository_branches": {str(publication.repo): "predecessor"}}
+
+    assert publish.tracked(root, scoped) == "predecessor"
+    assert publish.tracked(root, {"branch": "engineer-test", "repository_branches": {}}) == ""
+    assert publish.tracked(root, {"branch": "engineer-test"}) == ""
+
+
+def test_prepare_tracks_the_recorded_delivery_branch_from_an_existing_worktree(repository, tmp_path):
+    from scripts.swarm import publish
+
+    git(repository, "push", "origin", "HEAD:predecessor")
+    worktree = tmp_path / "worktrees" / "repo" / "engineer-test"
+    git(repository, "worktree", "add", "-b", "engineer-test", str(worktree))
+    task = {"id": "t1", "claimed_by": "engineer@test", "state": "claimed", "branch": "predecessor"}
+    ledger = SimpleNamespace(
+        tasks=lambda slug: {"swarm": [task]}[slug], update_task=lambda slug, task_id, fields, by: task.update(fields)
+    )
+
+    result = publish.prepare("swarm", AgentRecord("engineer@test", "ci", "t1"), str(repository), ledger)
+
+    assert result["worktree"] == str(worktree)
+    assert task["branch"] == result["branch"] == "predecessor"
+    assert git(worktree, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
+
+
 def test_prepare_reuses_the_recorded_worktree_without_pushing(repository, tmp_path):
     from scripts.swarm import publish
 
