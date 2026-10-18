@@ -51,6 +51,7 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument("--content", help="ledger content JSON as ledger new takes it; default one phase for the plan")
     parser.add_argument("--repo", help="the repository the swarm works; default the current directory")
     parser.add_argument("--template", default="", help="the swarm template for caps, models and lanes")
+    parser.add_argument("--operator-asked", help="the operator's words asking for a swarm with fewer than three tasks")
     parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for every service to be healthy")
     return parser
 
@@ -95,9 +96,14 @@ def ledger_page(environ: Mapping[str, str], name: str) -> str:
 
 def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], run: stack_init.Run, out: TextIO):
     """Create the swarm and its ledger in the stack, or find them made: (why it was refused, the name is taken)."""
+    from scripts.doctor import priming
     from scripts.swarm_ledger import ledger_creator
 
-    if refusal := ledger_creator.creator_refusal(environ):
+    tasks = ledger_creator.content_tasks(content)
+    refusal = ledger_creator.creator_refusal(environ) or (
+        args.template != priming.TEMPLATE and ledger_creator.floor_refusal(environ, tasks, args.operator_asked)
+    )
+    if refusal:
         return refusal, False
     repo = os.path.abspath(os.path.expanduser(args.repo or "."))
     flags = ["--template", args.template] if args.template else []

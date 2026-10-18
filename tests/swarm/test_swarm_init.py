@@ -2,25 +2,21 @@ import contextlib
 import io
 import json
 import os
-import secrets
 import subprocess
 import sys
 import urllib.request
-from types import SimpleNamespace
 from unittest import mock
 
 import pytest
 
-from scripts.swarm import cli, naming, stack_env, swarm_init
+from scripts.swarm import cli, naming, stack_env, stack_init, swarm_init
 from scripts.swarm_ledger import ledger_creator, new_ledger
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_create_gate import as_lane
 from tests.swarm.test_stack_init import Docker, compose, page, up
-from tests.swarm.test_stack_init import home as home
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
-REAL_TOKEN = secrets.token_urlsafe
 TITLE = "One way to create a swarm, with an operator given name"
 RULE = (
     "  Rule: a swarm name is one or two lowercase words joined by a dash and ending in swarm, such as "
@@ -85,9 +81,14 @@ class Stack(Docker):
 
 
 @pytest.fixture
+def home(tmp_path, monkeypatch):
+    monkeypatch.setattr(stack_init.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(stack_env, "free_port", lambda preferred: preferred + 1)
+    return tmp_path / "agentihooks-home"
+
+
+@pytest.fixture
 def scratch(env, home, monkeypatch, tmp_path):
-    monkeypatch.setattr(stack_env, "secrets", SimpleNamespace(token_urlsafe=stack_env.secrets.token_urlsafe))
-    monkeypatch.setattr(secrets, "token_urlsafe", REAL_TOKEN)
     ledgers = tmp_path / "stack-ledgers"
     ledgers.mkdir()
     as_lane(monkeypatch, "operator", ledgers)
@@ -158,6 +159,14 @@ def test_init_refuses_before_the_stack_writes_when_this_session_may_not_create(s
     code, out = init("demo-swarm", "--plan", str(plan), docker=docker)
     assert (code, scratch.slugs(), [c for c in docker.calls if "exec" in c]) == (1, [], [])
     assert out.endswith(f"Swarm not created: {ledger_creator.CALLER}.\n")
+
+
+def test_a_swarm_too_small_for_the_shared_folder_needs_the_operator_to_ask(scratch, plan, monkeypatch):
+    as_lane(monkeypatch, "master")
+    docker = Stack()
+    code, out = init("demo-swarm", "--plan", str(plan), docker=docker)
+    assert (code, [c for c in docker.calls if "exec" in c]) == (1, [])
+    assert out.endswith(f"Swarm not created: {ledger_creator.FLOOR.format(need=3, have=1)}.\n")
 
 
 def test_a_stack_failure_is_named(scratch, plan):
