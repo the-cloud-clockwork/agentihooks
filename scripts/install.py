@@ -2205,14 +2205,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 def _rerender_profile_homes(target: str) -> None:
     from scripts.profiles import render
 
-    for name in render.rendered_profiles(target):
-        profile, overlays = render.split_key(name)
-        try:
-            render.render(target, profile, force=True, overlays=overlays)
-        except ValueError as exc:
-            print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
-            continue
-        print(f"{_GREEN}[OK]{_RESET} Re-rendered the {name} profile home")
+    render.rerender(target)
 
 
 def _remove_bashrc_block() -> bool:
@@ -5804,7 +5797,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     """Handle the refresh-rules CLI command — push rules to running sessions."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
     from hooks.context.rules_refresh import _delete_marker, _load_marker, home_profile, write_refresh_marker
-    from scripts.targets.claude_target import refresh_rules
+    from scripts.targets.claude_target import refresh_every_home, refresh_rules
 
     profile = args.profile or home_profile(claude_home()) or _detect_active_profile()
     rules_dir = claude_home() / "rules"
@@ -5863,6 +5856,8 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print("  No running sessions to notify — marker will GC in 24h.")
     else:
         print("  Each session will consume the refresh on its next UserPromptSubmit.")
+
+    refresh_every_home(profile)
 
 
 def _cmd_broadcast(args: argparse.Namespace) -> None:
