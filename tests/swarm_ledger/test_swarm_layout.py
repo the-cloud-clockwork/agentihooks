@@ -128,8 +128,10 @@ class Page:
         html = shell_html()
         self.context = browser.new_context(viewport={"width": width, "height": 2400}, **options)
         if clock:
-            self.context.clock.install(time=NOW_MS)
-        self.context.add_init_script(f"Date.now = () => {NOW_MS};")
+            self.context.clock.install(time=NOW_MS - 1000)
+            self.context.clock.pause_at(NOW_MS)
+        else:
+            self.context.add_init_script(f"Date.now = () => {NOW_MS};")
         self.context.route("**/*", lambda route: self.route(route, html))
         serve_modules(self.context)
         self.tab = self.context.new_page()
