@@ -99,7 +99,7 @@ def test_queue_partitions_with_more_shards_do_not_reuse_a_partial_promotion_suit
     with (folder / "jobs.jsonl").open("a") as jobs:
         jobs.write(json.dumps({"name": "unit (3.11, 7)", "conclusion": "success"}) + "\n")
 
-    assert select_source(tmp_path, HEAD, REPOSITORY) is None
+    assert ci_dev_reuse.select_source(tmp_path, HEAD, REPOSITORY) is None
 
 
 @pytest.mark.parametrize(
