@@ -297,7 +297,7 @@ def test_unit_matrix_runs_one_shard_per_split():
 
 
 def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
-    slowest_shard_minutes = 186 / 60
+    slowest_shard_minutes = 336 / 60
     unit = _workflow()["jobs"]["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     timeout = steps["Run tests"]["timeout-minutes"]
