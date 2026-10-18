@@ -10,10 +10,13 @@ import pytest
 from scripts.swarm import lease
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger.api import admin
+from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import bin_storage
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, core, send, server
 from tests.swarm_ledger.test_ledger_authority import cli_ledger as ledger
 from tests.swarm_ledger.test_ledger_authority import live as authority_live
+from tests.swarm_ledger.test_remote_ledger_client import CREDENTIAL
 from tests.swarm_ledger.test_remote_ledger_client import hive as remote_hive
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -106,35 +109,42 @@ def test_displaced_controller_cannot_bin_a_ledger(live):
 def test_remote_agent_can_reopen_but_cannot_bin(live, hive, mode):
     core.sync(SLUG, ops=[{"op": "join", "id": f"join-remote-{mode}", "by": WORKER}])
     bin_storage.delete(SLUG)
-    with (
-        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": mode}),
-        patch.object(
-            ledger,
-            "credentials",
-            return_value={
-                "X-Ledger-Token": server.authority.hive_agent_token("member-1", SLUG, WORKER),
-                "X-Ledger-Agent": WORKER,
-            },
-        ),
+    with patch.dict(
+        os.environ,
+        {
+            "AGENTIHOOKS_DEPLOYMENT": mode,
+            "AGENTIHOOKS_SWARM": SLUG,
+            "AGENTIHOOKS_AGENT_NAME": WORKER,
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL,
+        },
     ):
+        os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
         client = LedgerClient()
         client.reopen(SLUG, WORKER)
         assert client.binned(SLUG) is False
+        with pytest.raises(SystemExit, match="a remote ledger client cannot make service writes"):
+            LedgerClient(service=True).binned(SLUG)
         with pytest.raises(LedgerRefused, match="403"):
             client.bin_closed(SLUG, core.now_ms() + 1)
 
 
-@pytest.mark.parametrize(
-    "failure", [OSError("offline"), urllib.error.HTTPError("", 500, "outage", {}, io.BytesIO(b"outage"))]
-)
-def test_remote_lifecycle_outages_use_swarm_errors(live, failure):
+@pytest.mark.parametrize("status", [None, 400, 500])
+def test_remote_lifecycle_outages_use_swarm_errors(live, status):
+    failure = (
+        OSError("offline")
+        if status is None
+        else urllib.error.HTTPError("", status, "outage", {}, io.BytesIO(b"outage"))
+    )
     with (
         patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
         patch.object(ledger, "credentials", return_value={"X-Ledger-Token": live["admin"]}),
         patch("urllib.request.urlopen", side_effect=failure),
-        pytest.raises(SwarmError),
+        pytest.raises(SwarmError) as caught,
     ):
         LedgerClient().bin_closed(SLUG, 1)
+    assert type(caught.value) is (LedgerRefused if status == 400 else SwarmError)
+    expected = "offline" if status is None else f"server refused: {status} outage"
+    assert str(caught.value) == f"ledger {SLUG}: {expected}"
 
 
 @pytest.mark.parametrize(
@@ -147,10 +157,20 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, failure):
         {"action": "bin_closed", "closed_at": True},
         {"action": "restore", "closed_at": 1},
         {"action": "binned", "controller_epoch": "7"},
+        {"action": "bin_closed", "closed_at": 1, "extra": True},
+        {"action": "bin_closed", "closed_at": "1"},
+        {"action": "bin_closed", "closed_at": 1, "controller_epoch": "1"},
+        {"action": "bin_closed", "closed_at": 1, "controller_epoch": 0},
+        {"action": "restore", "controller_epoch": 0},
+        {"action": "bin_closed", "closed_at": 1, "controller_epoch": True},
+        {"action": "binned", "controller_epoch": True},
     ],
 )
 def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
     before = bin_storage.entries()
+    with pytest.raises(APIError) as caught:
+        admin.lifecycle(server, "", SLUG, payload)
+    assert caught.value.status == 400
     status, _, _ = send(
         live,
         "POST",
@@ -160,3 +180,42 @@ def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
     )
     assert status == 400
     assert bin_storage.entries() == before
+
+
+def test_lifecycle_action_results_and_authority(live):
+    bin_storage.restore(SLUG)
+    payload = {"action": "bin_closed", "closed_at": core.now_ms() + 1}
+    assert admin.lifecycle(server, "", SLUG, payload) == {"data": True}
+    assert admin.lifecycle(server, "", SLUG, payload) == {"data": False}
+    assert admin.lifecycle(server, WORKER, SLUG, {"action": "binned"}) == {"data": True}
+    assert admin.lifecycle(server, WORKER, SLUG, {"action": "restore"}) == {"data": True}
+    assert admin.lifecycle(server, "", SLUG, {"action": "restore"}) == {"data": False}
+    assert admin.lifecycle(server, "", SLUG, {"action": "binned"}) == {"data": False}
+    assert admin.lifecycle(server, "", SLUG, {"action": "bin_closed", "closed_at": 1}) == {"data": False}
+    with pytest.raises(APIError) as caught:
+        admin.lifecycle(server, WORKER, SLUG, payload)
+    assert caught.value.status == 403
+    assert caught.value.envelope() == {
+        "error": {
+            "code": "forbidden",
+            "message": "Conditional binning needs the operator or controller credential",
+        },
+    }
+
+
+@pytest.mark.parametrize("action", ["bin_closed", "restore", "binned"])
+def test_lifecycle_controller_epoch_is_checked_before_storage(live, action):
+    payload = {"action": action, "controller_epoch": 1}
+    if action == "bin_closed":
+        payload["closed_at"] = 1
+    with patch.object(server.authority, "fence") as fence:
+        admin.lifecycle(server, "", SLUG, payload)
+    fence.assert_called_once_with(SLUG, 1)
+    with (
+        patch.object(server.authority, "fence", side_effect=SwarmError("stale controller")),
+        patch.object(bin_storage, "_transaction", side_effect=AssertionError("stale controller reached storage")),
+        pytest.raises(APIError) as caught,
+    ):
+        admin.lifecycle(server, "", SLUG, payload)
+    assert caught.value.status == 409
+    assert caught.value.envelope() == {"error": {"code": "stale_controller", "message": "stale controller"}}
