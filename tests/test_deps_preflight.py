@@ -107,6 +107,7 @@ def test_check_passes_when_every_declared_dependency_is_installed(env, tmp_path,
 def test_ensure_installs_a_declared_dependency_missing_from_the_tool_environment(env, tmp_path, monkeypatch, capsys):
     calls = []
     monkeypatch.setattr(tool_deps, "call", lambda argv: calls.append(argv) or "")
+    env["write"]([])
     (tmp_path / "pyproject.toml").write_text(
         '[project]\ndependencies = ["pytest>=7", "agentihooks-absent-dist-for-test>=1"]\n'
     )
@@ -134,6 +135,7 @@ def test_ensure_quiet_hides_a_failed_declared_install(env, tmp_path, monkeypatch
         raise RuntimeError("uv pip install failed: no network")
 
     monkeypatch.setattr(tool_deps, "call", fail)
+    env["write"]([])
     (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["agentihooks-absent-dist-for-test>=1"]\n')
     assert deps_preflight.ensure(quiet=True) == 0
     assert capsys.readouterr().err == ""
@@ -141,6 +143,7 @@ def test_ensure_quiet_hides_a_failed_declared_install(env, tmp_path, monkeypatch
 
 def test_ensure_with_every_declared_dependency_installed_runs_no_install(env, tmp_path, monkeypatch):
     monkeypatch.setattr(tool_deps, "call", lambda argv: pytest.fail(f"ran {argv}"))
+    env["write"]([])
     (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["pytest>=7"]\n')
     assert deps_preflight.ensure(quiet=True) == 0
 
