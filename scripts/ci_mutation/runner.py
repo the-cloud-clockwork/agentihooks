@@ -66,6 +66,22 @@ def fixture_literals(node: ast.AST) -> list[str]:
     return [value for child in ast.iter_child_nodes(node) for value in fixture_literals(child)]
 
 
+def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
+    if any(char in literal for char in ("\n", "\r", "\0")):
+        return []
+    relative = Path(literal)
+    if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+        return []
+    if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
+        return []
+    if (work / relative).exists():
+        return []
+    target = root / relative
+    if any(part.is_symlink() for part in (target, *target.parents) if part != root):
+        return []
+    return list(target.rglob("*")) if target.is_dir() else [target]
+
+
 def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
     sources = {root / test.split("::")[0] for test in tests}
     for source in tuple(sources):
@@ -75,18 +91,7 @@ def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
         if not source.is_file():
             continue
         for literal in fixture_literals(ast.parse(source.read_text())):
-            if any(char in literal for char in ("\n", "\r", "\0")):
-                continue
-            relative = Path(literal)
-            if not relative.parts or relative.is_absolute() or ".." in relative.parts:
-                continue
-            if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
-                continue
-            if (work / relative).exists():
-                continue
-            target = root / relative
-            candidates = target.rglob("*") if target.is_dir() else [target]
-            for candidate in candidates:
+            for candidate in fixture_candidates(root, work, literal):
                 name = candidate.relative_to(root)
                 if any(part.startswith(".") or part == "__pycache__" or part == work.name for part in name.parts):
                     continue
