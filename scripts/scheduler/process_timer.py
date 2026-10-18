@@ -1,13 +1,17 @@
 import asyncio
 import json
 import uuid
+from typing import TYPE_CHECKING
 
 from scripts.scheduler import service
 from scripts.scheduler.core import Scheduler
 from scripts.swarm.store import redis_client
 
+if TYPE_CHECKING:
+    from redis import Redis
 
-def blocking_client():
+
+def blocking_client() -> "Redis":
     from redis import ConnectionPool, Redis
 
     source = redis_client()
@@ -18,7 +22,7 @@ def blocking_client():
     return client
 
 
-def wake(event: dict, delivery_id: str, redis) -> None:
+def wake(event: dict, delivery_id: str, redis: "Redis") -> None:
     key = json.loads(event["payload"])["key"]
     with redis.pipeline() as pipe:
         pipe.rpush(key, delivery_id)
@@ -28,7 +32,7 @@ def wake(event: dict, delivery_id: str, redis) -> None:
 
 
 class Timer:
-    def __init__(self, delay: float, *, redis=None) -> None:
+    def __init__(self, delay: float, *, redis: "Redis | None" = None) -> None:
         self.owns_redis = redis is None
         self.redis = redis if redis is not None else blocking_client()
         scheduler = Scheduler(self.redis)
@@ -48,7 +52,7 @@ class Timer:
         if self.owns_redis:
             self.redis.close()
 
-    def __enter__(self):
+    def __enter__(self) -> "Timer":
         return self
 
     def __exit__(self, *_args) -> None:
