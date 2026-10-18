@@ -269,3 +269,52 @@ def test_joint_queue_planning_keeps_version_specific_collections_and_hashes(tmp_
         assert json.loads(data) == expected
         assert (snapshot / "durations.sha256").read_text().strip() == hashlib.sha256(data).hexdigest()
     assert json.loads((tmp_path / ".test_durations").read_text()) == cases["3.11"]
+
+
+def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path):
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    import yaml
+
+    root = Path(__file__).resolve().parents[1]
+    steps = yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]["split"]["steps"]
+    names = ["Deselect the reused tests", "Deselect the Python 3.12 queue reused tests"]
+    runner = tmp_path / "runner"
+    (runner / "planner").mkdir(parents=True)
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    other = workspace / "queue-input/3.12"
+    other.mkdir(parents=True)
+    common = "tests/test_common.py::test_common"
+    first = "tests/test_311.py::test_one"
+    second = "tests/test_312.py::test_two"
+    (workspace / "reused-tests.json").write_text(json.dumps({"tests": [common, first, second]}))
+    (workspace / "collected.json").write_text(json.dumps([common, first]))
+    (other / "collected.json").write_text(json.dumps([common, second]))
+    for name in names:
+        step = next(step for step in steps if step.get("name") == name)
+        result = subprocess.run(
+            ["bash", "-e", "-c", step["run"]],
+            cwd=workspace,
+            env={
+                **os.environ,
+                "RUNNER_TEMP": str(runner),
+                "GITHUB_WORKSPACE": str(workspace),
+                "PYTHON_PATH": sys.executable,
+                "PYTHONPATH": str(root),
+            },
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads((workspace / "reused.json").read_text())["tests"] == sorted([common, first])
+    assert json.loads((other / "reused.json").read_text())["tests"] == sorted([common, second])
+    uploads = {step.get("with", {}).get("name"): step for step in steps if "upload" in step.get("uses", "")}
+    assert uploads["reused-3.12"]["with"]["path"] == "queue-input/3.12/reused.json"
+    assert uploads["reused-tests-3.12"]["with"]["path"] == "reused-tests.json"
+    for artifact in ("reused-3.12", "reused-tests-3.12"):
+        assert "steps.plan.outputs.reused" in uploads[artifact]["if"]
+        assert "merge_group" in uploads[artifact]["if"]
