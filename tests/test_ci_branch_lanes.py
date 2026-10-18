@@ -424,7 +424,7 @@ def _superseded_block(stage, index):
 def test_a_branch_behind_dev_keeps_the_superseded_mutation_lane(job, stage, index, change):
     import copy
 
-    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    baseline = _dev_mutation_preflight()
     updated = copy.deepcopy(baseline)
     block = _superseded_block(stage, index)
     updated["jobs"][job]["concurrency"] = block
@@ -484,7 +484,7 @@ def test_the_superseded_mutation_lanes_are_refused_swapped_or_with_new_events(ch
             jobs["stats"]["concurrency"],
         )
     else:
-        updated[True if True in updated else "on"] = {"workflow_dispatch": None}
+        updated[True] = {"workflow_dispatch": None}
     found = lanes.problems(updated, _dev_mutation_preflight())
     assert "job stats has no shared hosted lane concurrency group" in found
     assert "job mutation-shard has no shared hosted lane concurrency group" in found
