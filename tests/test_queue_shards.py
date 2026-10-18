@@ -19,3 +19,19 @@ def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs
     assert json.loads((tmp_path / ".test_durations-slowest-3.12").read_text()) == {"tests/t.py::test_a": 90}
     assert json.loads((tmp_path / ".test_durations-slowest").read_text()) == {"tests/t.py::test_a": 90}
     assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"tests/t.py::test_a": 2}
+
+
+def test_queue_sizing_splits_a_serial_group_until_it_has_half_timeout_margin(tmp_path):
+    from tests.queue_shards import matrix
+
+    path = tmp_path / "tests/test_serial.py"
+    path.parent.mkdir()
+    path.write_text("import pytest\npytestmark = pytest.mark.xdist_group('serial')\n")
+    measured = {f"tests/test_serial.py::test_{i}": 30.0 for i in range(144)}
+    plan = matrix(tmp_path, {"3.11": measured, "3.12": measured})
+
+    for version in ("3.11", "3.12"):
+        legs = [leg for leg in plan if leg["python-version"] == version]
+        assert len(legs) == 48
+        assert [leg["shard"] for leg in legs] == list(range(1, 49))
+        assert {leg["total"] for leg in legs} == {48}
