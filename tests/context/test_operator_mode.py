@@ -523,6 +523,7 @@ def test_the_reminder_counts_tool_calls_upward_from_the_first(monkeypatch):
     monkeypatch.setattr(operator_mode, "QUIET_EVERY", 3)
     seen = [operator_mode.reminder("s1", SWARM, now=100) for _ in range(4)]
     assert seen == ["", "", REMINDER, ""]
+    assert operator_mode._load("s1")["calls"] == 4
 
 
 def test_the_reminder_stays_silent_while_on_unbound_or_without_a_session(ledgers):
