@@ -12,6 +12,7 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
 MINUTE = 60_000
+SNAPSHOT_SPAWN = True
 
 
 @pytest.fixture
