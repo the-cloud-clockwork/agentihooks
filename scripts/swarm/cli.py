@@ -114,6 +114,7 @@ from scripts.swarm import (
     remote_control,
     review_rounds,
     snapshot,
+    snapshot_job,
     stack,
     stages,
     stall_watch,
@@ -358,7 +359,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
                 actions += skip_refused(langfuse.refresh, store, slug, now_ms())
             found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
+                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
             actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
             actions += timing.call(
@@ -374,11 +375,10 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(
                 wake.wake_pass, inbox, slug, agents, herdr, ledger, now_ms(), window, wake.quiet_ms(os.environ)
             )
-            with lease.kept(store, slug, held):
-                taken = timing.call(snapshot.auto, store, slug, now_ms(), os.environ)
+            started = timing.call(snapshot_job.start, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
-            return probed + controls + actions + ([f"took automatic snapshot {taken.name}"] if taken else [])
+            return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
             _publish_tick_status(store, slug, doc)
@@ -398,6 +398,8 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
+        if not _tickable(slug):
+            return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
@@ -478,6 +480,14 @@ def cmd_waits(store, args):
             list(pool.map(check, slugs))
 
 
+def _tickable(slug):
+    ledger = LedgerClient()
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
+
+
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
@@ -538,6 +548,12 @@ def cmd_alerts(store, args):
     alert_intake.serve(store.redis, alert_intake.settings(os.environ), now_ms)
 
 
+def cmd_prober(store, args):
+    from scripts.swarm import command_runner, quota_refresh
+
+    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+
+
 def cmd_create(store, args):
     if not SLUG_RE.match(args.slug):
         raise SwarmError("a swarm id is lowercase letters, digits and dashes, starting with a letter, at most 48 long")
@@ -565,6 +581,7 @@ def cmd_create(store, args):
         links=template.links,
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
+        caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
     )
@@ -881,6 +898,10 @@ def _store_master_rules(store, slug, rules):
         master_scale.set_rule(store.redis, slug, rule)
 
 
+def _pinned(changes):
+    return {"caps_pinned": True} if {"max_eng", "max_ci"} & changes.keys() else {}
+
+
 def _manual_count_step(counts):
     return {"masters_step": 0} if counts else {}
 
@@ -927,7 +948,7 @@ def cmd_set(store, args):
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
-    config = store.update(args.slug, **changes)
+    config = store.update(args.slug, **changes, **_pinned(changes))
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
@@ -2103,7 +2124,7 @@ def _tick_store():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "prober", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (

@@ -8,6 +8,7 @@ import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts import quota_state
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
@@ -50,7 +51,7 @@ class Limits:
     master_watch_ratio: int = 15
     cooldown_minutes: int = 60
     drain_minutes: int = 10
-    drain_left: int = 10
+    drain_left: int = quota_state.DRAIN_LEFT
 
 
 @dataclass(frozen=True)
@@ -63,6 +64,7 @@ class Finding:
     measure: int = 0
     basis: str = dataclasses.field(default="", compare=False)
     links: tuple = ()
+    evidence_identity: tuple | None = None
 
     @property
     def id(self):
@@ -70,7 +72,7 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"], found["basis"]
+        del found["measure"], found["basis"], found["evidence_identity"]
         if not self.links:
             del found["links"]
         else:
@@ -101,6 +103,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *stalled(agents, limits),
         *master_rc(agents),
         *master_fallback_auth(agents),
+        *master_headless(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -247,12 +250,15 @@ def proof_loops(
 
 
 def _lives(events: list[dict]) -> tuple[Counter, Counter]:
-    starts, reruns = Counter(), Counter()
+    starts, reruns, heads = Counter(), Counter(), {}
     for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
         tid = _task_id(e["target"])
-        if starts[tid] and not e.get("after"):
+        head, last = e.get("head"), heads.get(tid)
+        moved = head is not None and last is not None and head != last
+        if starts[tid] and not e.get("after") and not moved:
             reruns[tid] += 1
         starts[tid] += 1
+        heads[tid] = head
     return starts, reruns
 
 
@@ -363,7 +369,7 @@ def master_fallback_auth(agents: list[dict]) -> list[Finding]:
             agent.get("lane") != "master"
             or agent.get("desired_route_kind") != "interactive"
             or agent.get("route_kind") == "interactive"
-            or agent.get("state") == "finished"
+            or agent.get("state") in ("finished", "ended")
         ):
             continue
         found.append(
@@ -373,6 +379,25 @@ def master_fallback_auth(agents: list[dict]) -> list[Finding]:
                 "master on fallback auth, phone access lost",
                 (f"route: {agent.get('route_kind', 'subscription')}", f"agent {agent['name']}"),
                 "the master desires interactive authentication but runs on fallback authentication",
+                1,
+            )
+        )
+    return found
+
+
+def master_headless(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        placed = agent.get("profile_decision", {}).get("master_placement", {})
+        if agent.get("lane") != "master" or agent.get("state") in ("finished", "ended") or not placed.get("headless"):
+            continue
+        found.append(
+            Finding(
+                "master-headless",
+                agent.get("seat") or agent["name"],
+                "master runs on a headless hive",
+                (f"hive: {placed['hive']}", f"agent {agent['name']}"),
+                "the master has no UI hive",
                 1,
             )
         )

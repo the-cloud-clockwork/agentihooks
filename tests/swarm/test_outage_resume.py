@@ -443,7 +443,10 @@ def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
     assert runtime.nudged.count(stuck.name) == 1
 
 
-def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize("conversation", ["fresh-conversation", ""])
+def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(
+    store, tmp_path, monkeypatch, conversation
+):
     from scripts.handoff import transfers
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
@@ -452,6 +455,12 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     handoff = "## Next\nContinue from the saved proof.\n"
     transfers.record(store, "sw", dead, "quota", handoff, 2 * MINUTE)
     store.put_agent("sw", replace(dead, idle_ticks=2))
+    native_spawn = runtime.spawn
+
+    def spawn(config, lane, name, task):
+        return replace(native_spawn(config, lane, name, task), conversation_id=conversation)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
     launches = len(runtime.spawned)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name}" in actions
@@ -464,7 +473,7 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (restarted.pane_id, restarted.conversation_id, restarted.started_at, restarted.idle_ticks) == (
         f"w1:p{launches + 1}",
-        "",
+        conversation,
         9 * MINUTE,
         0,
     )

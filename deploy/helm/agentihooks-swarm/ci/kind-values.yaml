@@ -2,6 +2,9 @@ image:
   repository: local/agentihooks-swarm
   tag: dev
   pullPolicy: Never
+ledger:
+  tls:
+    secretName: swarm-ledger-tls
 redis:
   image:
     repository: mirror.gcr.io/library/redis

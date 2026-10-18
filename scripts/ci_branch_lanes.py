@@ -56,29 +56,16 @@ def events(workflow: dict) -> list:
     return [workflow[key] for key in ("on", True) if key in workflow]
 
 
-def computed_mutation_lane(name: str, block: object, jobs: dict, trusted: dict) -> bool:
-    stages = {
-        "stats": ("stats", "part", "plan", "stats_lane"),
-        "mutation-shard": ("shard", "shard", "refine", "shard_lane"),
-    }
-    if trusted.get("name") != "Mutation preflight" or name not in stages:
+def per_run_mutation_group(name: str, block: object, job: dict, trusted: dict) -> bool:
+    stages = {"stats": ("stats", "part"), "mutation-shard": ("shard", "shard")}
+    baseline = (trusted.get("jobs") or {}).get(name)
+    if trusted.get("name") != "Mutation preflight" or name not in stages or not isinstance(baseline, dict):
         return False
-    baseline = trusted.get("jobs") or {}
-    if name not in baseline or any(
-        jobs.get(producer) != baseline.get(producer) for producer in ("capacity", "plan", "refine")
-    ):
+    if job.get("runs-on") != baseline.get("runs-on"):
         return False
-    if any(jobs[name].get(key) != baseline[name].get(key) for key in ("needs", "strategy")):
-        return False
-    stage, index, producer, output = stages[name]
-    if (baseline[producer].get("outputs") or {}).get(output) != "${{ steps.lanes.outputs.lane }}":
-        return False
-    value = f"needs.{producer}.outputs.{output}"
-    group = (
-        f"${{{{ format('{{0}}-{stage}-{{1}}', github.workflow == 'Mutation preflight' && {value} != '' "
-        f"&& format('mutation-lane-{{0}}', {value}) || format('mutation-preflight-job-{{0}}', github.run_id), matrix.{index}) }}}}"
-    )
-    return block == {"group": group, "queue": "${{ github.workflow == 'Mutation preflight' && 'max' || 'single' }}"}
+    stage, index = stages[name]
+    group = f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"
+    return block == {"group": group}
 
 
 def problems(workflow: object, baseline: object = None) -> list[str]:
@@ -100,19 +87,9 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
         block = job.get("concurrency", workflow.get("concurrency"))
         base_job = (trusted.get("jobs") or {}).get(name, {})
         base_block = base_job.get("concurrency", trusted.get("concurrency"))
-        if computed_mutation_lane(name, block, jobs, trusted):
+        if per_run_mutation_group(name, block, job, trusted):
             continue
-        computed = (
-            trusted.get("name") == "Mutation preflight"
-            and name in {"stats", "mutation-shard"}
-            and "needs." in str(block)
-        )
-        if (
-            trusted
-            and (name in (trusted.get("jobs") or {}) or base_block is not None)
-            and block == base_block
-            and not computed
-        ):
+        if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue
         problem = lane_problem(block)
         if problem:

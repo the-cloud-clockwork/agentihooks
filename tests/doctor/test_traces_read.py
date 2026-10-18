@@ -148,6 +148,50 @@ def test_the_history_budget_leaves_the_rest_for_a_later_scan_and_says_so(tmp_pat
     assert coverage["covered"] == 4
 
 
+def test_a_single_trace_stops_at_the_budget_without_caching_partial_history(tmp_path):
+    now = [0.0]
+    pages = []
+
+    def get(path, params):
+        if path == "traces":
+            return _page([_trace_row("a", "u")], 1, 1)
+        pages.append(params["page"])
+        now[0] += 5
+        return _page(
+            [{"type": "TOOL", "name": f"page {params['page']}", "startTime": "2026-10-05T15:00:00Z"}],
+            params["page"],
+            4,
+        )
+
+    budget = traces_read.Budget(history_seconds=10)
+    [row], coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=lambda: now[0])
+    assert pages == [1, 2]
+    assert now[0] == 10
+    assert row["complete"] is False
+    assert len(row["observations"]) == 2
+    assert coverage == {"listed": True, "traces": 1, "covered": 0, "complete": False, "unreadable": []}
+    assert failures == []
+    assert list(tmp_path.rglob("*.json")) == []
+
+    pages.clear()
+    [row], coverage, failures = traces_read.history(
+        "s", get, tmp_path, traces_read.Budget(history_seconds=30), clock=lambda: now[0]
+    )
+    assert pages == [1, 2, 3, 4]
+    assert row["complete"] is True
+    assert [o["name"] for o in row["observations"]] == ["page 1", "page 2", "page 3", "page 4"]
+    assert coverage["complete"] is True
+    assert failures == []
+
+    pages.clear()
+    [row], coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=lambda: now[0])
+    assert pages == []
+    assert row["complete"] is True
+    assert len(row["observations"]) == 4
+    assert coverage["complete"] is True
+    assert failures == []
+
+
 def test_the_trace_listing_stops_at_its_page_cap(tmp_path):
     langfuse = Langfuse([_trace_row("a", "u")], pages=50)
     _, coverage, failures = traces_read.history("s", langfuse, tmp_path, traces_read.Budget(trace_pages=3))

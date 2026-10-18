@@ -50,6 +50,16 @@ def test_restarts_that_are_all_parks_never_reach_the_reruns_threshold():
     assert findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], []) == []
 
 
+def test_restarts_that_each_start_on_a_new_pull_request_head_raise_no_proof_loop():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    for n, head in enumerate(["", "a", "b", "c", "c"]):
+        store.record_launch("sw", AgentRecord(f"worker{n}", "eng", "t1", started_at=n), "started", head=head)
+    assert findings(store, "sw", store.config("sw"), [{"id": "t1", "title": "Repair launch"}], []) == []
+
+
 def test_proof_loop_reads_each_pull_requests_review_budget(monkeypatch, tmp_path):
     import fakeredis
 
