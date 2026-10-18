@@ -147,7 +147,7 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
     from redis.client import Pipeline
 
     from scripts.doctor.inbox import Receiver
-    from scripts.swarm.store import AgentRecord
+    from scripts.swarm.store import AgentRecord, SwarmConfig
 
     store, box = RedisStore(redis), InboxStore(redis)
     store.names.mint_code(SLUG, SLUG, "/r")
@@ -159,8 +159,17 @@ def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, mo
         store.put_agent(SLUG, AgentRecord(name=name, lane="eng", task="t1", idle_ticks=n))
         seat = f"eng-{n}@{SLUG}"
         store.seats.occupy(seat, name, 10)
-        items.extend([{"address": alias, "history": []}, {"address": seat, "history": []}])
+        foreign = f"foreign-{n}"
+        store.create(SwarmConfig(foreign, "/r", 1, 1, "running" if n % 2 else "stopped"))
+        taker = f"eng-1@{foreign}"
+        items.extend(
+            [
+                {"address": alias, "history": [{"state": "delivered", "by": taker}]},
+                {"address": seat, "history": []},
+            ]
+        )
         expected[alias] = expected[seat] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name)
+        expected[taker] = Receiver(seat_wait=bool(n % 2))
     items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
     expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
     trips = []

@@ -78,17 +78,18 @@ def inbox_receivers(store, inbox, slug, items):
     }
     takers = {reader(item) for item in items if item["address"] in reachable}
     seats = sorted(address for address in reachable | takers if is_seat(address))
+    seat_slugs = sorted({address.split("@", 1)[1] for address in seats})
     with inbox.redis.pipeline() as pipe:
         for address in seats:
             pipe.hgetall(inbox.seats.key(address))
-        occupancies = dict(zip(seats, map(_occupancy, pipe.execute())))
+        for s in seat_slugs:
+            pipe.hgetall(store.key(s, "config"))
+        rows = pipe.execute()
+    occupancies = dict(zip(seats, map(_occupancy, rows[: len(seats)])))
+    configs = dict(zip(seat_slugs, rows[len(seats) :]))
     held = {address: occupancies[address].occupant if address in occupancies else address for address in addresses}
     resolved = names.resolve_many(sorted(set(held.values()) | {reader(item) for item in items}))
     departed = inbox.seats.exits(list(agents))
-    configs = {
-        s: store.config(s) if store.redis.exists(store.key(s, "config")) else None
-        for s in {address.split("@", 1)[1] for address in seats}
-    }
     found = {}
     for item in items:
         address, taker = item["address"], reader(item)
@@ -110,7 +111,8 @@ def _inbox_receiver(address, agent, seat, departed, configs):
         return Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS, occupant=agent.name, harness=agent.harness)
     if not is_seat(address):
         return Receiver()
-    config = configs[address.split("@", 1)[1]]
+    raw = configs[address.split("@", 1)[1]]
+    config = SimpleNamespace(**{"max_plan": 1, **raw}) if raw else None
     waiting = config is None or (config.state != "stopped" and not exits.no_successor(address, config))
     return Receiver(seat_wait=waiting)
 
