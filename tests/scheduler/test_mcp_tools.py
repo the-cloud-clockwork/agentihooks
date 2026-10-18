@@ -116,11 +116,27 @@ def test_a_shared_server_needs_the_caller_named(tools, monkeypatch):
     from hooks.mcp import _session
 
     monkeypatch.setattr(_session, "_ENV_FALLBACK_ALLOWED", False)
-    message = "pass session_id: this server cannot tell which session is calling"
+    message = "pass agent_name or session_id: this server cannot tell which session is calling"
     assert tools["timer_add"]("x", delay="5") == {"success": False, "error": message}
     assert tools["stopwatch_start"]("x", "5") == {"success": False, "error": message}
     assert tools["cron_add"]("x", "* * * * *") == {"success": False, "error": message}
     assert tools["timer_add"]("x", delay="5", session_id="sid-given")["entry"]["owner"] == "sid-given"
+
+
+@pytest.mark.parametrize("shared", [False, True])
+def test_a_named_agent_owns_its_schedules_and_a_swarm_fire_skips_it(tools, scheduler, monkeypatch, shared):
+    from hooks.mcp import _session
+    from scripts.inbox.store import InboxStore
+
+    monkeypatch.setattr(_session, "_ENV_FALLBACK_ALLOWED", not shared)
+    named = {"target": "swarm", "name": "sw", "session_id": SID, "agent_name": "sw-eng-1"}
+    assert tools["stopwatch_start"]("watch", "1m", **named)["entry"]["owner"] == "sw-eng-1"
+    assert tools["cron_add"]("cron", "0 9 * * *", **named)["entry"]["owner"] == "sw-eng-1"
+    assert tools["timer_add"]("stand up", delay="0", **named)["entry"]["owner"] == "sw-eng-1"
+    assert scheduler.run_due(now=NOW) == 1
+    inbox = InboxStore(scheduler.redis)
+    assert inbox.inbox("sw-eng-1") == []
+    assert [(item.sender, item.text) for item in inbox.inbox("sw-eng-2")] == [("sw-eng-1", "stand up")]
 
 
 @pytest.mark.parametrize("session_id", ["", SID])

@@ -12,10 +12,14 @@ from hooks.mcp._session import env_fallback_allowed
 from scripts.scheduler import commands
 
 
-def _owner(session_id: str) -> str:
+def _owner(session_id: str, agent_name: str = "") -> str:
+    if agent_name:
+        return agent_name
     if not env_fallback_allowed():
         if not session_id:
-            raise commands.CommandError("pass session_id: this server cannot tell which session is calling")
+            raise commands.CommandError(
+                "pass agent_name or session_id: this server cannot tell which session is calling"
+            )
         return session_id
     from scripts.inbox.cli import identity
 
@@ -36,7 +40,13 @@ def _listed(kind: str) -> dict:
 
 
 def timer_add(
-    message: str, delay: str = "", at: str = "", target: str = "fleet", name: str = "", session_id: str = ""
+    message: str,
+    delay: str = "",
+    at: str = "",
+    target: str = "fleet",
+    name: str = "",
+    session_id: str = "",
+    agent_name: str = "",
 ) -> str:
     """Fire message once at a target, after delay or at a time.
 
@@ -46,7 +56,8 @@ def timer_add(
         at: ISO time such as 2026-10-18T09:30:00+00:00. Give delay or at.
         target: fleet, swarm, seat or session.
         name: Swarm slug, seat address or session name; empty for fleet.
-        session_id: The calling session; required when the server serves many sessions.
+        session_id: The calling session; required when the server serves many sessions and agent_name is empty.
+        agent_name: The calling swarm agent's name; owns the schedule, and a swarm firing skips it.
 
     Returns:
         JSON with the timer entry and its id.
@@ -57,7 +68,7 @@ def timer_add(
             raise commands.CommandError("give delay or at")
         when = {"at": commands.moment(at)} if at else {"delay": commands.seconds(delay)}
         slot = commands.target_slot(target, name)
-        return {"entry": commands.add_timer(commands.connect(), _owner(session_id), slot, message, **when)}
+        return {"entry": commands.add_timer(commands.connect(), _owner(session_id, agent_name), slot, message, **when)}
 
     return _answer("timer_add", action)
 
@@ -72,7 +83,9 @@ def timer_cancel(timer_id: str) -> str:
     return _answer("timer_cancel", lambda: {"entry": commands.cancel(commands.connect(), "timer", timer_id)})
 
 
-def stopwatch_start(message: str, limit: str, target: str = "fleet", name: str = "", session_id: str = "") -> str:
+def stopwatch_start(
+    message: str, limit: str, target: str = "fleet", name: str = "", session_id: str = "", agent_name: str = ""
+) -> str:
     """Start a stopwatch that delivers message to a target when its elapsed time crosses limit.
 
     Args:
@@ -80,7 +93,8 @@ def stopwatch_start(message: str, limit: str, target: str = "fleet", name: str =
         limit: Seconds, or a number with s, m, h or d.
         target: fleet, swarm, seat or session.
         name: Swarm slug, seat address or session name; empty for fleet.
-        session_id: The calling session; required when the server serves many sessions.
+        session_id: The calling session; required when the server serves many sessions and agent_name is empty.
+        agent_name: The calling swarm agent's name; owns the schedule, and a swarm firing skips it.
 
     Returns:
         JSON with the stopwatch entry and its id.
@@ -89,7 +103,7 @@ def stopwatch_start(message: str, limit: str, target: str = "fleet", name: str =
     def action():
         slot = commands.target_slot(target, name)
         entry = commands.start_stopwatch(
-            commands.connect(), _owner(session_id), slot, message, limit=commands.seconds(limit)
+            commands.connect(), _owner(session_id, agent_name), slot, message, limit=commands.seconds(limit)
         )
         return {"entry": entry}
 
@@ -113,6 +127,7 @@ def cron_add(
     name: str = "",
     timezone: str = "UTC",
     session_id: str = "",
+    agent_name: str = "",
 ) -> str:
     """Deliver message to a target on every match of a five field cron expression.
 
@@ -122,7 +137,8 @@ def cron_add(
         target: fleet, swarm, seat or session.
         name: Swarm slug, seat address or session name; empty for fleet.
         timezone: Time zone the expression is read in.
-        session_id: The calling session; required when the server serves many sessions.
+        session_id: The calling session; required when the server serves many sessions and agent_name is empty.
+        agent_name: The calling swarm agent's name; owns the schedule, and a swarm firing skips it.
 
     Returns:
         JSON with the cron entry and its id.
@@ -131,7 +147,7 @@ def cron_add(
     def action():
         slot = commands.target_slot(target, name)
         entry = commands.add_cron(
-            commands.connect(), _owner(session_id), slot, message, expression=expression, timezone=timezone
+            commands.connect(), _owner(session_id, agent_name), slot, message, expression=expression, timezone=timezone
         )
         return {"entry": entry}
 
