@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
@@ -29,6 +30,8 @@ def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive.orders import Consumer
     from scripts.routing.reservation import LaunchSlots
 
+    consumer = Consumer.local(redis, local_id)
+    fenced = fence(redis, local_id, consumer.runtime)
     processes = account_sessions.local_processes()
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
@@ -50,11 +53,28 @@ def beat(redis: "Redis", local_id: str) -> None:
         pipe.execute()
     if not member:
         LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
-    consumer = Consumer.local(redis, local_id)
-    consumer.poll()
+    if not fenced:
+        consumer.poll()
     consumer.poll_commands()
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+
+
+def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
+    """Terminate the superseded executions the controller fenced on this hive; True while any still runs."""
+    from scripts.swarm import master_move
+    from scripts.swarm.store import RedisStore, SwarmError
+
+    store, key = RedisStore(redis), master_move.fenced(local_id)
+    for execution_id, raw in redis.hgetall(key).items():
+        try:
+            agent = store.execution(json.loads(raw)["slug"], execution_id)
+        except SwarmError:
+            redis.hdel(key, execution_id)
+            continue
+        if runtime.terminate(agent).ok:
+            redis.hdel(key, execution_id)
+    return redis.hlen(key) > 0
 
 
 def run(redis: "Redis") -> None:
