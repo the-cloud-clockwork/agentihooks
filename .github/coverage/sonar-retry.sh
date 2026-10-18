@@ -42,7 +42,7 @@ while true; do
   fi
   spent=$((SECONDS - start > waited ? SECONDS - start : waited))
   if [[ -n "$upload_reason" && "$upload_attempt" == 0 ]]; then
-    upload_attempt=$attempt
+    upload_attempt="$attempt"
     wait=2
   fi
   if [[ "$reason" =~ $authorization ]]; then
