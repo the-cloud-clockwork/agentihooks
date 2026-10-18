@@ -62,6 +62,20 @@ def test_an_ops_task_cannot_be_marked_done_without_command_evidence(env, monkeyp
     assert ledger.rows["t1"]["proof"] == {"command": "kubectl get pods", "output": "cache-0 Running"}
 
 
+def test_code_after_merge_done_requires_recorded_proof(env, monkeypatch, capsys):
+    store, ledger = _start(env, "code")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    ledger.rows["t1"].update(contract={"after": "yes"}, pr_url="https://github.com/o/r/pull/9")
+    assert run("sw", "done") == 1
+    assert "--command" in capsys.readouterr().err
+    assert run("sw", "done", "--command", "probe") == 1
+    assert "--output" in capsys.readouterr().err
+    assert ledger.rows["t1"]["state"] != "done"
+    assert run("sw", "done", "--command", "probe", "--output", "ok") == 0
+    assert ledger.rows["t1"]["state"] == "done"
+    assert ledger.rows["t1"]["proof"] == {"command": "probe", "output": "ok"}
+
+
 @pytest.mark.parametrize(
     "finding",
     ["my notes", "See https://example.com/artifact", "https://example.com/artifact explains the result", ""],

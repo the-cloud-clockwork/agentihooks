@@ -767,6 +767,33 @@ def test_a_merged_code_task_waits_for_declared_post_merge_proof(merging):
     assert merging.run() == []
 
 
+@pytest.mark.parametrize(
+    "contract,proof", [({"after": "no"}, {}), ({"after": "yes"}, {"command": "probe", "output": "ok"})]
+)
+def test_merged_code_with_no_missing_after_proof_still_closes(merging, contract, proof):
+    merging.rows["t1"].update(contract=contract, proof=proof)
+    merging.pulls[URL] = MERGED
+    assert merging.run()[0] == f"task t1 done, {URL} merged"
+    assert merging.rows["t1"]["state"] == "done"
+
+
+def test_post_merge_verification_waits_for_maturity_or_master_reopen(monkeypatch):
+    from scripts.swarm import claim_hold
+
+    monkeypatch.setattr(claim_hold, "time", lambda: 10)
+    task = {"awaiting": "verify", "contract": {"after": "yes", "after_at": "10001"}}
+    assert claim_hold.hold(task, {}, {}, {}, "") == "it waits for its post merge proof window or a master reopen"
+    task["contract"]["after_at"] = ""
+    assert claim_hold.hold(task, {}, {}, {}, "")
+    task["contract"]["after_at"] = "10000"
+    assert claim_hold.verification(task) == ""
+    task["contract"]["after_at"] = "9999"
+    assert claim_hold.verification(task) == ""
+    task["awaiting"] = ""
+    task["contract"]["after_at"] = "10001"
+    assert claim_hold.verification(task) == ""
+
+
 def test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live(merging, monkeypatch):
     merging.rows["t1"]["kind"] = "tune"
     merging.pulls[URL] = MERGED

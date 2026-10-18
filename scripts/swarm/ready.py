@@ -244,8 +244,9 @@ def _queue(run, row, found):
 def _finish(run, rows, row, found):
     task_id, url = row["id"], found["url"]
     kind = ledger_kinds.kind(row)
-    if kind not in GATED:
-        if not _release(run, row, found, ""):
+    verify = ledger_kinds.after(row) and ledger_kinds.unmet(row)
+    if kind not in GATED or verify:
+        if not _release(run, row, found, "verify" if verify else ""):
             return []
         run.ledger.comment(run.slug, task_id, PROOF.format(url=url, kind=kind), by="swarm")
         return [f"task {task_id} awaits its proof, {url} merged", *_remove(found)]
