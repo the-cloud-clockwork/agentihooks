@@ -49,6 +49,10 @@ def current_home(home: Path) -> Path:
     return latest if latest.is_dir() else home
 
 
+def home_rules(home: Path) -> str:
+    return collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
+
+
 def _refresh_dir() -> Path:
     from hooks.config import AGENTIHOOKS_HOME
 
@@ -183,8 +187,7 @@ def maybe_inject(session_id: str) -> None:
         if marker.get("home") != profile_home(home):
             log("rules_refresh: other profile home skipped", {"profile": profile, "session_id": session_id})
         else:
-            home = current_home(home)
-            rules = collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
+            rules = home_rules(current_home(home))
             inject_context(rules)
             log(
                 "rules_refresh: delivered",

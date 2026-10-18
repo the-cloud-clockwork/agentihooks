@@ -296,7 +296,8 @@ def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monk
     manifesto = _write(bundle / "manifestos" / "FLEET-MANIFESTO.md", "OLD FLEET DOCTRINE\n")
     _commit(bundle, "two")
     master = render.render_claude("master")
-    caller = render.render_claude("rb-role")
+    render.render_claude("rb-role")
+    caller = render.render_claude("rb-other")
     assert "OLD FLEET DOCTRINE" in (master / "CLAUDE.md").read_text()
     manifesto.write_text("MERGED FLEET DOCTRINE\n")
     _commit(bundle, "three")
@@ -307,16 +308,18 @@ def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monk
     rerendered = render.profile_dir("master") / "claude"
     assert rerendered != master
     assert "MERGED FLEET DOCTRINE" in (rerendered / "CLAUDE.md").read_text()
-    assert rules_refresh._load_marker("master")["pending"] == ["s-master"]
-    assert rules_refresh._load_marker("master")["home"] == "master"
+    for key in ("master", "rb-role", "rb-other"):
+        marker = rules_refresh._load_marker(key)
+        assert (marker["home"], marker["pending"]) == (key, ["s-master"])
+        assert "MERGED FLEET DOCTRINE" in marker["payload"]
     install = world["install"]
     out = capsys.readouterr().out
     assert f"{install._GREEN}[OK]{install._RESET} Refresh marker written for profile 'master' (1 sessions).\n" in out
-    assert "Re-rendered the rb-role profile home" not in out
-    caller_homes = [p for p in (render.rendered_root() / ".homes" / "rb-role").iterdir() if not p.is_symlink()]
+    assert f"{install._GREEN}[OK]{install._RESET} Re-rendered the rb-role profile home\n" in out
+    assert "Re-rendered the rb-other profile home" not in out
+    caller_homes = [p for p in (render.rendered_root() / ".homes" / "rb-other").iterdir() if not p.is_symlink()]
     assert len(caller_homes) == 2
-    assert "MERGED FLEET DOCTRINE" in (render.profile_dir("rb-role") / "claude" / "CLAUDE.md").read_text()
-    assert "MERGED FLEET DOCTRINE" in rules_refresh._load_marker("rb-role")["payload"]
+    assert "MERGED FLEET DOCTRINE" in (render.profile_dir("rb-other") / "claude" / "CLAUDE.md").read_text()
     received = []
     monkeypatch.setattr(rules_refresh, "inject_context", received.append)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))
