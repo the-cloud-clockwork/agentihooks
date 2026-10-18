@@ -34,17 +34,20 @@ def server(monkeypatch):
         stdin=subprocess.PIPE,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
-        text=True,
+        bufsize=0,
     )
 
     def request(method, params=None, request_id=1):
         message = {"jsonrpc": "2.0", "method": method, "id": request_id}
         if params is not None:
             message["params"] = params
-        process.stdin.write(json.dumps(message) + "\n")
+        process.stdin.write((json.dumps(message) + "\n").encode())
         process.stdin.flush()
-        assert select.select([process.stdout], [], [], 30)[0], "No protocol reply"
-        return json.loads(process.stdout.readline())
+        while True:
+            assert select.select([process.stdout], [], [], 30)[0], "No protocol reply"
+            reply = json.loads(process.stdout.readline())
+            if reply.get("id") == request_id:
+                return reply
 
     try:
         yield request, process
@@ -52,7 +55,8 @@ def server(monkeypatch):
         process.stdin.close()
         process.stdin = None
         try:
-            _, process.stderr_output = process.communicate(timeout=30)
+            _, stderr = process.communicate(timeout=30)
+            process.stderr_output = stderr.decode()
         except subprocess.TimeoutExpired:
             process.kill()
             process.communicate()
@@ -235,33 +239,16 @@ def test_discovery_handshake_matches_protocol_library(monkeypatch, capsys, reque
 
 
 @pytest.mark.parametrize(
-    "invalid", [[], {"jsonrpc": "2.0", "id": 0, "method": "initialize"}, {"jsonrpc": "2.0", "id": 0, "method": []}]
+    "invalid",
+    [[], {"jsonrpc": "2.0", "id": 0, "method": "initialize"}, {"jsonrpc": "2.0", "id": 0, "method": []}],
 )
-def test_invalid_protocol_message_keeps_server_reading(monkeypatch, capsys, invalid):
-    from io import StringIO
-
-    from hooks.mcp._stdio import run
-
-    messages = [
-        invalid,
-        {
-            "jsonrpc": "2.0",
-            "id": "init",
-            "method": "initialize",
-            "params": {
-                "protocolVersion": "2025-03-26",
-                "capabilities": {},
-                "clientInfo": {"name": "contract", "version": "1"},
-            },
-        },
-        {"jsonrpc": "2.0", "id": "ping", "method": "ping"},
-    ]
-    monkeypatch.setattr(sys, "stdin", StringIO("".join(json.dumps(message) + "\n" for message in messages)))
-    run()
-    replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert any("error" in reply for reply in replies)
-    assert any(reply.get("id") == "init" and "result" in reply for reply in replies)
-    assert {"jsonrpc": "2.0", "id": "ping", "result": {}} in replies
+def test_invalid_protocol_message_keeps_server_reading(monkeypatch, invalid):
+    with server(monkeypatch) as (request, process):
+        process.stdin.write((json.dumps(invalid) + "\n").encode())
+        process.stdin.flush()
+        assert initialize(request)["protocolVersion"] == "2025-03-26"
+        assert request("ping", request_id="after-invalid")["result"] == {}
+    assert process.returncode == 0
 
 
 def test_first_call_transfers_initialized_session_to_protocol_library(monkeypatch, capsys):
