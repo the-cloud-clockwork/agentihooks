@@ -257,12 +257,23 @@ def test_a_file_tool_call_without_a_path_is_allowed(trees):
         "command rm {root}/pkg/mod.py",
         "exec rm {root}/pkg/mod.py",
         "time rm {root}/pkg/mod.py",
+        "rm {root}/pkg/mod.py; rm build.log",
+        "rm {root}/pkg/mod.py; find . -name '*.log' -delete",
+        "cd {root} && find \\( -name '*.py' \\) -delete",
+        "cd {root} && find ! -name '*.md' -delete",
     ],
 )
 def test_other_deletion_forms_of_python_in_another_worktree_are_blocked(trees, sibling, command):
     _, worktree = trees
     with pytest.raises(BlockAction, match="another checkout"):
         check(_tool("Bash", worktree, command=command.format(root=sibling)))
+
+
+def test_deleting_a_python_file_whose_name_reads_as_a_glob_in_another_worktree_is_blocked(trees, sibling):
+    _, worktree = trees
+    (sibling / "pkg" / "x[1].py").write_text("x = 1\n")
+    with pytest.raises(BlockAction, match="another checkout"):
+        check(_tool("Bash", worktree, command=f"rm '{sibling / 'pkg' / 'x[1].py'}'"))
 
 
 @pytest.mark.parametrize(
