@@ -198,7 +198,7 @@ skill. A swarm below one step behaves exactly as a single master swarm.
   `master-3@<id>` and on, launched by the same seat launcher as the first master on either harness.
 - **Cool off.** A rise launches the next backend seat at once. A fall waits until the wanted count stayed lower for
   ten minutes running, and the cool off restarts whenever the count rises. The highest numbered backend master
-  retires first, through a handoff, and its open inbox items return to the pool. The front door never retires by
+  retires first: it hands off, and its handoff and open inbox items go to the front door. The front door never retires by
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
   pool per swarm, first in first out. Each item is claimed by exactly one live master with an atomic claim, in

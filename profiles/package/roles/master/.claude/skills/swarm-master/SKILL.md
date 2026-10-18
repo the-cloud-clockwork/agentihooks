@@ -85,8 +85,8 @@ Claude and Codex masters run this loop identically.
   engineer, CI and planner agents (default 12). Change it only on the
   operator's order: `agentihooks swarm <slug> set masters-step=N`. A smaller
   count waits ten minutes, the cool off restarting on every rise; the highest
-  backend seat retires first through a handoff and its open items return to
-  the pool. When your seat is asked to retire, hand off as in Handoff.
+  backend seat retires first: it hands off, and its handoff and open items
+  go to the front door. When your seat is asked to retire, hand off as in Handoff.
 - With two or more live masters, items for the master seat wait in one pool,
   first in first out, and each reaches exactly one live master in round robin
   seat order, skipping a master that is gone or draining toward retirement.
