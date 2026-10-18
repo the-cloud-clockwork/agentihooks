@@ -7,7 +7,7 @@ parent: Getting Started
 # Portability & Reusability
 {: .no_toc }
 
-AgentiHooks is designed to travel with you. One data directory, one env file, and an idempotent install command let you reproduce a complete Claude Code environment on any machine -- or share a setup across a team.
+AgentiHooks supports Claude Code and Codex. Move your configuration bundle and supply credentials securely on each machine, then rerun installation. Each harness retains its native configuration home; the state directory described below is separate.
 
 ## Table of contents
 {: .no_toc .text-delta }

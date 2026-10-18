@@ -24,7 +24,7 @@ connector-specific companion environment files.
 
 ## Install & Automation
 
-These variables control how `agentihooks init` installs and configures Claude Code. They are read at install time, not at hook runtime.
+These variables control how `agentihooks init` installs and configures Claude Code and Codex. Harness-specific variables apply only to their named client. They are read at install time, not at hook runtime.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
