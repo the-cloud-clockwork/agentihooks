@@ -29,8 +29,15 @@ def test_master_selects_an_interactive_hive_without_controller_credentials(setup
 
 
 def test_successor_replaces_saved_fallback_auth_with_the_best_login(setup):
-    task = master(setup)
-    task["launch_assignment"] = {"harness": "claude", "account": "account"}
+    from scripts.swarm import tick
+
+    master(setup)
+    envelope = {"launch": {"profile": "master", "harness": "claude", "account": "account"}}
+    setup.store.put_handoff(setup.config.slug, "master", "continue the master", "master@fixture", envelope)
+    task = tick.primed(setup.store, setup.config.slug, "master@fixture", {"id": "master"})
+    assert task["handoff_envelope"] == envelope
+    assert "route_kind" not in task
+    assert "hive" not in task
     assert setup.launcher.select(setup.config, "master", task).route_kind == "subscription"
     write_hive(setup, id="login", roles=["master"], ui="yes", interactive={"claude": "native"}, slots=[])
     selected = setup.launcher.select(setup.config, "master", task)
