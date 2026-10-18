@@ -6,9 +6,8 @@ import pytest
 
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm_ledger.repository import bin_storage
-from tests.swarm_ledger.test_ledger_authority import SLUG
+from tests.swarm_ledger.test_ledger_authority import SLUG, core
 from tests.swarm_ledger.test_ledger_authority import cli_ledger as ledger
-from tests.swarm_ledger.test_ledger_authority import core
 from tests.swarm_ledger.test_ledger_authority import live as authority_live
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
