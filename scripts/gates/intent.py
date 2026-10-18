@@ -325,15 +325,16 @@ def _split_note(task):
         return ""
     index, lines = half
     ranges = task["split"]
-    others = "; ".join(f"half {n} carries plan lines {other}" for n, other in enumerate(ranges, 1) if n != index + 1)
+    kind = "plan lines " if ledger_splits.ranged(ranges) else ""
+    others = "; ".join(f"half {n} carries {kind}{other}" for n, other in enumerate(ranges, 1) if n != index + 1)
     return (
-        f"\n\nThis pull request is half {index + 1} of {len(ranges)} of a split task: it carries only plan lines "
+        f"\n\nThis pull request is half {index + 1} of {len(ranges)} of a split task: it carries only {kind}"
         f"{lines}; {others} in its own pull request."
     )
 
 
 def _plan_chunk(doc, task):
-    half = _split_half(task)
+    half = _split_half(task) if ledger_splits.ranged(task.get("split") or []) else None
     task = {**task, "plan_lines": half[1]} if half else task
     if not task.get("plan_lines") or task.get("follow_up") or _declared(task):
         return {}
@@ -386,10 +387,10 @@ def _task_text(task):
 
 def _task_contract(doc, task):
     phase = _phase(doc, task)
+    if task.get("split") and not ledger_splits.ranged(task["split"]):
+        return {**task, "plan_lines": ""}
     if task.get("split") and (
-        task.get("follow_up")
-        or not ledger_splits.ranged(task["split"])
-        or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
+        task.get("follow_up") or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
     ):
         return {**task, "split": [], "plan_lines": ""}
     return task

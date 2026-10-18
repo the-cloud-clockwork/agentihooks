@@ -35,7 +35,7 @@ def _ranges(halves):
         return None
 
 
-def ranged(halves) -> bool:
+def ranged(halves: list) -> bool:
     return _ranges(halves) is not None
 
 

@@ -14,17 +14,14 @@ def split(doc, pr_url=FIRST, pulls=(), lines="15-17"):
     return {**doc, "tasks": [{**task, "pr_url": pr_url}]}
 
 
-@pytest.mark.parametrize("source", ["missing", "follow_up", "labels"])
+@pytest.mark.parametrize("source", ["missing", "follow_up"])
 def test_a_split_task_without_plan_lines_is_graded_by_its_description(planned, source):  # noqa: F811
     doc = split(planned)
     task = doc["tasks"][0]
     if source == "missing":
         doc["phases"][0].pop("plan_ref")
-    elif source == "follow_up":
-        task["follow_up"] = True
     else:
-        task.pop("plan_lines")
-        task["split"] = ["compatibility", "repair"]
+        task["follow_up"] = True
     state = intent.state_of(doc, task, PR)
     assert state["task_text"] == task["description"]
     assert "plan_lines" not in state
@@ -38,6 +35,26 @@ def test_a_split_task_without_plan_lines_is_graded_by_its_description(planned, s
     assert plan["task_text"] == task["description"]
     assert "plan_lines" not in plan
     assert "plan_chunk" not in plan
+
+
+@pytest.mark.parametrize("follow_up", [False, True])
+@pytest.mark.parametrize(
+    "pr_url, pulls, note",
+    [
+        (FIRST, (), "half 1 of 2 of a split task: it carries only compatibility; half 2 carries repair"),
+        (SECOND, (FIRST,), "half 2 of 2 of a split task: it carries only repair; half 1 carries compatibility"),
+    ],
+)
+def test_a_labelled_split_is_judged_by_its_half_without_plan_lines(planned, follow_up, pr_url, pulls, note):  # noqa: F811
+    doc = split(planned, pr_url=pr_url, pulls=pulls)
+    task = doc["tasks"][0]
+    task.pop("plan_lines")
+    task["split"] = ["compatibility", "repair"]
+    task["follow_up"] = follow_up
+    state = intent.state_of(doc, task, PR)
+    assert state["task_text"] == f"{task['description']}\n\nThis pull request is {note} in its own pull request."
+    assert "plan_lines" not in state
+    assert "plan_chunk" not in state
 
 
 @pytest.mark.parametrize("source", ["task", "phase"])
