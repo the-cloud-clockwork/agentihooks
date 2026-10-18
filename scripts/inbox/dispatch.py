@@ -30,47 +30,47 @@ class Dispatcher:
         return self.store.key(*parts)
 
     def owner(self, recipient):
-        return self.redis.get(owner_key(self.store.names.resolve(recipient))) or ""
+        return self.redis.get(owner_key(self.store.names.resolve(recipient), self.store.world)) or ""
 
     def own(self, recipient, owner, takeover=False, ttl_s=None):
         recipient = self.store.names.resolve(recipient)
 
         def claim(pipe):
-            held = pipe.get(owner_key(recipient))
+            held = pipe.get(owner_key(recipient, self.store.world))
             if held and held != owner and not takeover:
                 raise DispatchError(f"{recipient} is delivered by {held}; take over to replace it")
             pipe.multi()
-            pipe.set(owner_key(recipient), owner, ex=ttl_s or owner_ttl_s())
+            pipe.set(owner_key(recipient, self.store.world), owner, ex=ttl_s or owner_ttl_s())
 
-        transact(self.redis, claim, [owner_key(recipient)])
+        transact(self.redis, claim, [owner_key(recipient, self.store.world)])
 
     def renew(self, recipient, owner, ttl_s=None):
         """Extend owner's hold on recipient; False when it no longer holds it, which a running pump must treat as lost."""
         recipient = self.store.names.resolve(recipient)
 
         def extend(pipe):
-            if pipe.get(owner_key(recipient)) != owner:
+            if pipe.get(owner_key(recipient, self.store.world)) != owner:
                 return False
             pipe.multi()
-            pipe.expire(owner_key(recipient), ttl_s or owner_ttl_s())
+            pipe.expire(owner_key(recipient, self.store.world), ttl_s or owner_ttl_s())
             return True
 
-        return transact(self.redis, extend, [owner_key(recipient)])
+        return transact(self.redis, extend, [owner_key(recipient, self.store.world)])
 
     def release(self, recipient, owner):
         recipient = self.store.names.resolve(recipient)
 
         def drop(pipe):
-            held = pipe.get(owner_key(recipient))
+            held = pipe.get(owner_key(recipient, self.store.world))
             if held == owner and pipe.scard(self.key("deliveries", recipient)):
                 raise DispatchError(f"{recipient} still has open deliveries; accept or reject them before releasing")
             pipe.multi()
             if held != owner:
                 return False
-            pipe.delete(owner_key(recipient))
+            pipe.delete(owner_key(recipient, self.store.world))
             return True
 
-        return transact(self.redis, drop, [owner_key(recipient), self.key("deliveries", recipient)])
+        return transact(self.redis, drop, [owner_key(recipient, self.store.world), self.key("deliveries", recipient)])
 
     def reserve(self, recipient, owner):
         """Reserve each pending item in inbox order; an item whose ref was accepted or shown closes as shown."""
@@ -79,7 +79,7 @@ class Dispatcher:
         return transact(self.redis, lambda pipe: self._reserve(pipe, recipient, owner, items))
 
     def _reserve(self, pipe, recipient, owner, items):
-        check_owner(pipe, recipient, owner)
+        check_owner(pipe, recipient, owner, self.store.world)
         plan = self._plan(pipe, recipient, items)
         pipe.multi()
         reserved = []

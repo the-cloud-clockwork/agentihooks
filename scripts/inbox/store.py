@@ -79,10 +79,11 @@ def prefix(world):
     return f"{scope.root(world)}:inbox"
 
 
-def owner_key(recipient):
+def owner_key(recipient, world=None):
+    """world is the inbox's hive member; None takes this process's own."""
     from scripts.hive import scope
 
-    return f"{prefix(scope.member())}:owner:{recipient}"
+    return f"{prefix(scope.member() if world is None else world)}:owner:{recipient}"
 
 
 def owner_ttl_s(environ=None):
@@ -815,7 +816,7 @@ class InboxStore:
             return moved
 
     def _owned(self, pipe, by):
-        key = owner_key(NameRegistry(pipe).resolve(by))
+        key = owner_key(NameRegistry(pipe).resolve(by), self.world)
         pipe.watch(key)
         return pipe.get(key) is not None
 

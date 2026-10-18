@@ -14,6 +14,7 @@ from pathlib import Path
 from scripts import herdr_host, herdr_panes
 from scripts.herdr_host import HerdrError
 from scripts.herdr_panes import PaneRecord
+from scripts.hive import scope
 from scripts.inbox import wake
 from scripts.swarm import idle, naming
 from scripts.swarm.pane import typed_input
@@ -139,7 +140,8 @@ class Owners:
         try:
             if store is None:
                 return None
-            prefix = idle.key(record.owner_swarm, "prompt", "")
+            readings = scope.readings(store.redis, record.owner_swarm, record.owner_session)
+            prefix = idle.key(record.owner_swarm, "prompt", "", readings)
             names = {record.owner_session}
             names.update(
                 key.removeprefix(prefix)

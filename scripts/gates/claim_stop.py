@@ -187,7 +187,7 @@ class Streak:
 
     def __init__(self, store, slug, name):
         self.store, self.slug, self.name = store, slug, name
-        self.key = f"{scope.readings(store.redis, slug, name)}:{slug}:stop-blocks:{name}"
+        self.key = f"{scope.readings(store.redis, slug, store.names.resolve(name))}:{slug}:stop-blocks:{name}"
 
     def bump(self, now):
         from scripts.gates.progress import Progress

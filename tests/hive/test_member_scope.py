@@ -178,23 +178,46 @@ def test_a_controller_send_to_an_agent_on_a_member_lands_in_that_members_keys(re
         assert [mail.id for mail in InboxStore(redis).pending_mail(name)] == [item.id]
 
 
-def test_the_controller_refreshes_live_launch_slots_from_every_live_hive_report(redis, monkeypatch):
+def test_the_controller_refreshes_each_live_hives_own_launch_slots_across_two_ticks(redis, swarm, monkeypatch):
     from scripts.hive import registry
     from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm.store import AgentRecord
 
     monkeypatch.setattr("time.time", lambda: 100.0)
+    monkeypatch.setenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", "50")
     slots = LaunchSlots(redis)
-    for execution in ("live", "stale", "unreported"):
-        assert slots.reserve("claude:one", execution, 3, 10000)
-        assert slots.acknowledge(execution)
-        redis.pexpire(f"{ROOT}:launch-slot:{execution}", 1000)
-    for hive, at, executions in (("m1", 100_000, ["live"]), ("gone", 1, ["stale"])):
+    executions = {}
+    for index, (label, hive) in enumerate((("live", "m1"), ("stale", "gone"), ("other", "m2"), ("unreported", "m1"))):
+        name = swarm.next_name("fixture", "eng")
+        placed = AgentRecord(name, "eng", "task", seat=f"eng-{index + 1}@fixture", hive=hive)
+        executions[label] = swarm.start_execution("fixture", placed).execution_id
+        assert slots.reserve("claude:one", executions[label], 4, 10000)
+        assert slots.acknowledge(executions[label])
+        redis.pexpire(f"{ROOT}:launch-slot:{executions[label]}", 1000)
+    reports = (("m1", 100_000, ["live", "other"]), ("gone", 1, ["stale"]), ("m2", 100_000, []))
+    for hive, at, labels in reports:
         redis.sadd(registry.INDEX, hive)
         redis.hset(registry.key(hive), "heartbeat_at", at)
-        redis.set(f"{registry.key(hive)}:sessions", json.dumps({"_executions": {"claude:one": executions}}))
+        reported = {"_executions": {"claude:one": [executions[label] for label in labels]}}
+        redis.set(f"{registry.key(hive)}:sessions", json.dumps(reported))
 
     slots.refresh_reported(100_000)
 
-    assert round(redis.pttl(f"{ROOT}:launch-slot:live") / 1000) == 45
-    assert round(redis.pttl(f"{ROOT}:launch-slot:stale") / 1000) == 1
-    assert round(redis.pttl(f"{ROOT}:launch-slot:unreported") / 1000) == 1
+    ttls = {
+        label: round(redis.pttl(f"{ROOT}:launch-slot:{execution}") / 1000) for label, execution in executions.items()
+    }
+    assert ttls == {"live": 100, "stale": 1, "other": 1, "unreported": 1}
+
+
+def test_a_member_inbox_pools_and_owns_below_its_own_keys(redis, swarm):
+    from scripts.inbox.dispatch import Dispatcher
+    from scripts.inbox.store import InboxStore, owner_key
+
+    world = InboxStore(redis, world="m1")
+    Dispatcher(world).own("engineer", "session")
+
+    assert world.pool.key("fixture", "turn") == f"{ROOT}:hive:m1:inbox:pool:fixture:turn"
+    assert InboxStore(redis, world="").pool.key("fixture") == f"{ROOT}:inbox:pool:fixture"
+    assert owner_key("engineer", "m1") == f"{ROOT}:hive:m1:inbox:owner:engineer"
+    assert redis.get(f"{ROOT}:hive:m1:inbox:owner:engineer") == "session"
+    assert not redis.exists(owner_key("engineer", ""))
