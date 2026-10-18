@@ -22,13 +22,15 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
         (["FAILURE"], False, False),
         (["SUCCESS", None], True, False),
         (["FAILURE", "PENDING"], True, False),
+        (["EXPECTED"], True, False),
     ],
 )
-def test_pull_snapshot_retains_pending_and_passing_check_states(results, pending, passing):
+@pytest.mark.parametrize("result_key", ["conclusion", "state"])
+def test_pull_snapshot_retains_pending_and_passing_check_states(results, pending, passing, result_key):
     raw = {
         "state": "OPEN",
         "commits": [],
-        "statusCheckRollup": [{"name": f"check_{index}", "conclusion": result} for index, result in enumerate(results)],
+        "statusCheckRollup": [{"name": f"check_{index}", result_key: result} for index, result in enumerate(results)],
     }
     found = ledger_events.pull_request(raw)
     assert (found.checks_pending, found.checks_passed) == (pending, passing)
