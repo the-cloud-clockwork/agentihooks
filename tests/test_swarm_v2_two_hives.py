@@ -138,17 +138,15 @@ def test_operator_comment_on_a_hive_item_and_chat_both_reach_the_lead(world):
     assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, held) == [cases.LEAD]
 
 
-def test_a_target_outside_the_routed_kinds_goes_to_the_lead(world):
+@pytest.mark.parametrize("target", ["chat", "chat/targeted"])
+def test_a_target_outside_the_routed_kinds_goes_to_the_lead(target):
     from unittest import mock
 
     from scripts.swarm_v2 import masters
 
-    add(world, "questions")
-    live = [cases.LEAD, cases.SECOND]
-    for target in ("chat", "chat/targeted"):
-        owners = mock.Mock(return_value={"targeted": cases.SECOND})
-        assert masters.route(target, world.doc(), owners, live, cases.LEAD) == cases.LEAD
-        owners.assert_not_called()
+    owners = mock.Mock(return_value={f"{masters.HIVES}/anton": cases.SECOND})
+    assert masters.route(target, {}, owners, [cases.SECOND, cases.LEAD], cases.LEAD) == cases.LEAD
+    owners.assert_not_called()
 
 
 def test_an_operator_comment_on_a_hive_question_reaches_only_the_front_door(world):
