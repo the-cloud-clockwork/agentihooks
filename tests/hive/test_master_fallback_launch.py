@@ -18,12 +18,14 @@ def master(setup):
 
 def test_master_selects_an_interactive_hive_without_controller_credentials(setup):
     from scripts.hive.launch import Selection
+    from scripts.swarm.capacity import Account
 
     task = master(setup)
     setup.herdr._quota_accounts = []
     write_hive(setup, id="login", roles=["master"], ui="yes", interactive={"claude": "native"}, slots=[])
     selected = setup.launcher.select(setup.config, "master", task)
     assert isinstance(selected, Selection)
+    assert selected.account == Account("claude", "native", "room", 0, None, None, 1, kind="interactive")
     assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
     setup.herdr.choose.assert_not_called()
 
@@ -142,6 +144,7 @@ def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_fl
     request = SpawnRequest(setup.store.config(setup.config.slug), lane, name, task)
     selected = setup.launcher.select(request.config, lane, task)
     admitted = setup.launcher.admit(request, selected)
+    assert admitted.desired_route_kind == ""
     order = orders.LaunchOrder(
         setup.config.slug,
         admitted.execution_id,
@@ -175,3 +178,38 @@ def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_fl
     )
     assert sent.task["route_kind"] == route
     assert sent.task["launch_assignment"]["account"] == "account"
+
+
+@pytest.mark.parametrize("route", ["subscription", "api"])
+def test_an_explicit_master_route_keeps_its_account_when_a_native_login_is_available(setup, route):
+    task = master(setup)
+    write_hive(setup, id="login", roles=["master"], ui="yes", interactive={"claude": "native"}, slots=[])
+    selected = setup.launcher.select(setup.config, "master", {**task, "route_kind": route})
+    assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "account", route)
+    assert selected.master_placement is None
+
+
+@pytest.mark.parametrize("harness,state,sessions", [("claude", "full", 6), ("codex", "room", 0)])
+def test_master_refuses_unavailable_or_foreign_accounts_and_records_its_wait_lane(setup, harness, state, sessions):
+    from scripts.hive import placement, placement_waits
+    from scripts.swarm.capacity import Account
+
+    task = master(setup)
+    setup.herdr._quota_accounts = [Account(harness, "account", state, sessions, 80, 80, 6)]
+    expected = placement.Wait("no live hive can run the master with interactive, subscription or api authentication")
+    assert setup.launcher.select(setup.config, "master", task) == expected
+    found = placement_waits.read(setup.store, setup.config.slug)["master"]
+    assert found["lane"] == "master"
+    assert found["reason"] == expected.reason
+
+
+def test_a_pinned_secondary_master_uses_hive_selection_before_its_original_router(setup):
+    from scripts.swarm import controller
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    master(setup)
+    fenced = controller.FencedRuntime(
+        setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
+    )
+    assert fenced.placement_refusal("master", {"id": "master-2", "hive": "remote"}) == ""

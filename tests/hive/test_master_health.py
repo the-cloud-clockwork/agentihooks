@@ -51,6 +51,7 @@ def test_headless_health_is_master_only_and_names_an_unseated_master():
         "profile_decision": {"master_placement": {"hive": "remote", "headless": True}},
     }
     assert health.findings({}, [agent], {}, health.Limits()) == []
+    worker = {**agent}
     agent["lane"] = "master"
-    [found] = health.findings({}, [agent], {}, health.Limits())
+    [found] = health.findings({}, [worker, agent], {}, health.Limits())
     assert found.id == "master-headless/unseated-master"

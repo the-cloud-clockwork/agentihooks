@@ -22,12 +22,12 @@ def hive(name, **fields):
 def test_master_prefers_the_declared_interactive_login_before_ui_tokens():
     hives = [
         hive("token", prefer={"master": 1}),
-        hive("second", interactive={"claude": "login"}, prefer={"master": 3}),
-        hive("first", interactive={"claude": "login"}, prefer={"master": 2}),
+        hive("a-second", interactive={"claude": "login"}, prefer={"master": 3}),
+        hive("z-first", interactive={"claude": "login"}, prefer={"master": 2}),
         hive("wrong", interactive={"claude": "other"}, prefer={"master": 0}),
     ]
     assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.MasterPlacement(
-        "first", "login", "interactive", False
+        "z-first", "login", "interactive", False
     )
 
 
@@ -94,3 +94,35 @@ def test_master_ties_follow_hive_preference_room_lifetime_and_slot_name():
     )
     hives[2]["prefer"] = {"master": 0}
     assert placement.place_master("claude", "", REPO, hives, NOW).hive == "full"
+
+
+def test_master_skips_ineligible_hives_and_slots_without_ending_the_search():
+    hives = [
+        hive("wrong-role", roles=["eng"]),
+        hive(
+            "valid",
+            slots=[
+                {"harness": "codex", "account": "wrong", "kind": "subscription"},
+                {"harness": "claude", "account": "native", "kind": "interactive"},
+                {"harness": "claude", "account": "token", "kind": "subscription"},
+            ],
+        ),
+    ]
+    assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
+        "valid", "token", "subscription", False
+    )
+
+
+def test_duplicate_account_labels_keep_the_first_route_without_comparing_placement_objects():
+    hives = [
+        hive(
+            "ui",
+            slots=[
+                {"harness": "claude", "account": "shared", "kind": "subscription"},
+                {"harness": "claude", "account": "shared", "kind": "api"},
+            ],
+        )
+    ]
+    assert placement.place_master("claude", "", REPO, hives, NOW) == placement.MasterPlacement(
+        "ui", "shared", "subscription", False
+    )
