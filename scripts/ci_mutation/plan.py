@@ -4,6 +4,7 @@ import math
 import os
 from pathlib import Path
 
+from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
 
@@ -12,10 +13,14 @@ MUTANT_SECONDS = 5.6
 WORKERS = 4
 
 
-def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, list[str]]:
+def estimate(
+    root: Path, changes: dict[str, set[int]], selection: dict[str, list[str]] | None = None
+) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
+        if selection is not None:
+            selection[path] = chosen
         if not chosen:
             continue
         tests.update(chosen)
@@ -59,7 +64,10 @@ def main() -> int:
     bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
     changes = discover_changes(root, bases, args.head)
-    seconds, mutants, tests = estimate(root, changes)
+    selection = {}
+    seconds, mutants, tests = estimate(root, changes, selection)
+    browser = str(needs_browser(root, tests)).lower()
+    (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
@@ -72,6 +80,7 @@ def main() -> int:
             stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
             stream.write(f"bases={','.join(bases)}\n")
             stream.write(f"changed={len(changes)}\n")
+            stream.write(f"browser={browser}\n")
     return 0
 
 

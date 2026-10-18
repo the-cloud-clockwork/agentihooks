@@ -556,7 +556,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes: (
+        lambda root, changes, selection: (
             (1601.4, 50, ["tests/test_sample.py"])
             if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
             else None
@@ -568,10 +568,13 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
             (3, 120.6) if (root, tests, target, limit) == (tmp_path, ["tests/test_sample.py"], 100, 4) else None
         ),
     )
+    monkeypatch.setattr("scripts.ci_mutation.plan.needs_browser", lambda root, tests: False)
     monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
     assert plan.main() == 0
     assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
-    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\n"
+    assert output.read_text() == (
+        "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"
+    )
     assert capsys.readouterr().out == (
         "Mutation bases: earlier merged\n"
         "Changed line mutants: 50\nEstimated mutation seconds: 1601, slowest stats bucket: 121\n"
@@ -606,10 +609,12 @@ def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_buc
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.plan.own_bases", lambda root, base, head, graded: [f"{base}@{head}"])
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: estimated)
+    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection: estimated)
     assert plan.main() == 0
     assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
-    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\nchanged=0\n"
+    assert output.read_text() == (
+        f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\nchanged=0\nbrowser=false\n"
+    )
 
 
 @pytest.mark.parametrize(
