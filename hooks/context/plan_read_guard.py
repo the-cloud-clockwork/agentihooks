@@ -99,9 +99,9 @@ def _text(tool_name: str, tool_input: dict) -> str:
 
 
 def _operands(tool_name: str, tool_input: dict, text: str) -> str:
-    if tool_name != "Bash":
+    if tool_name != "Bash" or not text:
         return text
-    command = str(tool_input.get("command") or "")
+    command = str(tool_input["command"])
     bare = HEREDOC.sub(r"\3", command)
     try:
         segments = _segments(bare)

@@ -302,6 +302,9 @@ def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
         check(bash(f'echo "read lines 40 to 60 of {PLAN} by plan read" >> {folder}/progress.md'), env(ledger)) is None
     )
     assert check({"tool_name": "Bash", "tool_input": {}}, env(ledger)) is None
+    assert check(bash(f'cd {folder} && echo "ledger at {ledger} ok" >> progress.md'), env(ledger)) is None
+    every_sink = f"echo a | printf b | tee {folder}/proof.md | cat <<'EOF'\nsee {ledger}\nEOF"
+    assert check(bash(every_sink), env(ledger)) is None
 
 
 @pytest.mark.parametrize(
@@ -320,6 +323,8 @@ def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
         "echo x\nbash <<'EOF'\ngrep -rn needle {root}\nEOF",
         'echo <(bash -c "grep -rn needle {root}")',
         "cat >> progress.md <<EOF\n$(cat {root}/demo.media/{plan})\nEOF",
+        "cat <<'EOF' > {root}\nnotes\nEOF",
+        'echo "`ls {root} `" >> progress.md',
         'curl -H "X-Ref: $RUN" https://ci.example/artifacts/plan.md',
         'grep -rn needle "{root} "',
     ],
