@@ -436,6 +436,50 @@ def test_tick_prefetch_skips_recorded_completed_metrics_but_keeps_unrecorded_bac
     assert all(set(batch) == expected for batch in batches)
 
 
+def test_expired_metric_rows_do_not_hide_recent_completion_backfill(monkeypatch, tmp_path):
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox
+    from scripts.swarm.store import RedisStore
+
+    now, url = int(time.time() * 1000), "https://github.com/o/r/pull/1"
+    path = tmp_path / "metrics.sqlite"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+    table = metrics_outbox.Table("delivery_events", (("kind", "String"), ("pull_request", "String")))
+    box = metrics_outbox.Outbox(path, metrics_outbox.Settings("http://sink", "", ""))
+    try:
+        box.append(
+            table,
+            [
+                {
+                    "event_id": "old",
+                    "ledger": "sw",
+                    "plan": "",
+                    "phase": "",
+                    "slice": "",
+                    "task": "",
+                    "ts_ms": now - metrics_outbox.DAY_MS - 1,
+                    "kind": "merge",
+                    "pull_request": url,
+                }
+            ],
+        )
+    finally:
+        box.close()
+    doc = {
+        "tasks": [{"id": "done", "state": "done", "pr_url": url}],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": now}]},
+    }
+    batches = []
+    monkeypatch.setattr(ledger_events, "views", lambda found, cache: batches.append(found) or dict.fromkeys(found))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    assert batches == [[url]]
+
+
 def test_missing_workflow_directory_does_not_declare_a_required_gate():
     url = "https://github.com/o/r/pull/1"
     pr = resource()

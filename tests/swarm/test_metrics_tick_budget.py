@@ -143,3 +143,37 @@ def test_busy_first_table_cannot_starve_another_table_across_flush_restarts(tmp_
             box.close()
     assert "cold" in received, "The busy first table starved the later metric table"
     assert len(received) == len(set(received))
+
+
+def test_deadline_boundary_preserves_the_next_tables_turn(tmp_path, monkeypatch):
+    import json
+    import time
+
+    now, clock, received = 2 * metrics_outbox.DAY_MS, [0.0], []
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(metrics_outbox, "BATCH", 1)
+
+    def row(event_id):
+        return {"event_id": event_id, "ledger": "sw", "plan": "", "phase": "", "slice": "", "task": "", "ts_ms": now}
+
+    def send(sink, query, body):
+        clock[0] += 1 if query.startswith("INSERT") else 2
+        if body:
+            received.extend(json.loads(line)["event_id"] for line in body.splitlines())
+        return True
+
+    path, sink = tmp_path / "metrics.sqlite", metrics_outbox.Settings("http://sink", "", "")
+    box = metrics_outbox.Outbox(path, sink, send)
+    try:
+        box.append(metrics_outbox.Table("a_hot"), [row("a1"), row("a2")])
+        box.append(metrics_outbox.Table("z_cold"), [row("cold")])
+        assert box.flush(now) == 1
+    finally:
+        box.close()
+    box = metrics_outbox.Outbox(path, sink, send)
+    try:
+        box.append(metrics_outbox.Table("a_hot"), [row("a3")])
+        assert box.flush(now) == 1
+    finally:
+        box.close()
+    assert received == ["a1", "cold"]

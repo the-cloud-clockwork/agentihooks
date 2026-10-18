@@ -35,6 +35,26 @@ def test_pull_snapshot_retains_pending_and_passing_check_states(results, pending
 
 
 @pytest.mark.parametrize(
+    "states,pending,passing",
+    [
+        (["SUCCESS"], False, True),
+        (["PENDING"], True, False),
+        (["EXPECTED"], True, False),
+        (["SUCCESS", "ERROR"], False, False),
+        (["SUCCESS", "PENDING"], True, False),
+    ],
+)
+def test_legacy_status_contexts_retain_check_state_flags(states, pending, passing):
+    raw = {
+        "state": "OPEN",
+        "commits": [],
+        "statusCheckRollup": [{"context": f"legacy_{i}", "state": value} for i, value in enumerate(states)],
+    }
+    found = ledger_events.pull_request(raw)
+    assert (found.checks_pending, found.checks_passed) == (pending, passing)
+
+
+@pytest.mark.parametrize(
     "pending,passing,autonomy,idle",
     [
         (True, False, "full", False),
@@ -62,6 +82,27 @@ def test_tick_findings_preserve_check_waits_without_reading_github(monkeypatch, 
     found = status.findings(store, "sw", config, tasks, [], view=lambda url: snapshot)
 
     assert any(row["kind"] == "idle with claim" for row in found) is idle
+
+
+def test_cli_findings_reuse_existing_scoped_check_cache_without_an_injected_view(monkeypatch):
+    now = 2_000_000
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, autonomy="full")
+    store.create(config)
+    store.put_agent("sw", AgentRecord("eng-1@sw", "eng", "t1", started_at=now, idle_ticks=4))
+    url = "https://github.com/o/r/pull/1"
+    prefix = store.key("sw", "checks")
+    store.redis.set(f"{prefix}:{url}", "1")
+    store.redis.set(f"{prefix}:green:{url}", "0")
+    store.redis.set(store.key("sw", "merge-stall"), json.dumps({"tried": now, "queue": 0}))
+    monkeypatch.setattr(status, "now_ms", lambda: now)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("Known scoped checks were read again")
+
+    monkeypatch.setattr(subprocess, "Popen", forbidden)
+    tasks = [{"id": "t1", "title": "Deliver checks", "state": "pr", "pr_url": url}]
+    assert not any(row["kind"] == "idle with claim" for row in status.findings(store, "sw", config, tasks, []))
 
 
 def test_slow_merge_observation_is_bounded_and_keeps_the_existing_finding(monkeypatch):

@@ -502,4 +502,31 @@ def test_unreadable_metric_history_is_reported_without_changing_the_spool(tmp_pa
     assert metrics_outbox.read_recent("task_moves", NOW) is None
 
     assert "metrics history read failed" in caplog.text
+    assert caplog.records[-1].name == "scripts.swarm.metrics_outbox"
+    assert caplog.records[-1].getMessage() == "metrics history read failed: file is not a database"
     assert path.read_bytes() == contents
+
+
+def test_outbox_reports_separate_sink_and_retention_wall_times(tmp_path, monkeypatch, capsys):
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+
+    from scripts.swarm import timing
+
+    monkeypatch.setattr(
+        metrics_outbox.urllib.request, "urlopen", lambda *args, **kwargs: nullcontext(SimpleNamespace(status=200))
+    )
+    token = timing.SWARM.set("sw")
+    box = Outbox(tmp_path / "outbox.sqlite", SINK)
+    try:
+        box.append(TASKS, [row("first")])
+        assert box.flush(NOW) == 1
+    finally:
+        box.close()
+        timing.SWARM.reset(token)
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    finished = {event["step"]: event for event in events if event.get("phase") == "finished"}
+    for step in ("scripts.swarm.metrics_outbox.sink_request", "scripts.swarm.metrics_outbox.retention"):
+        assert finished[step]["wall_s"] >= 0
+        assert finished[step]["own_cpu_s"] >= 0
+        assert finished[step]["outcome"] == "success"
