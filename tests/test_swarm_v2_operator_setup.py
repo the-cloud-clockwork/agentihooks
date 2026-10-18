@@ -482,6 +482,14 @@ def test_settings_keep_an_equals_sign_in_a_path(tmp_path):
     assert operator_setup.settings(home)["AGENTIHOOKS_TERMINAL_CA_KEY"] == str(home / "swarm-terminal" / "user_ca")
 
 
+@pytest.mark.parametrize(
+    "error, named",
+    [
+        (subprocess.TimeoutExpired(["systemctl"], 30), "TimeoutExpired"),
+        (subprocess.CalledProcessError(1, ["systemctl"]), "CalledProcessError"),
+        (FileNotFoundError("systemctl"), "FileNotFoundError"),
+    ],
+)
 def test_install_refuses_when_systemctl_fails(tmp_path, error, named):
     (tmp_path / "agentihooks-swarm-terminal.timer").write_text("old\n")
     with pytest.raises(SetupRefused) as refused:
