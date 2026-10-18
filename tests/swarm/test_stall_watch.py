@@ -1367,3 +1367,13 @@ def test_the_tick_rereads_a_stall_from_github_before_acting():
     from scripts.swarm import cli
 
     assert "reread=ledger_events.view" in inspect.getsource(cli.run_tick)
+
+
+def test_a_new_owner_inside_its_limit_costs_no_github_reread():
+    swarm = Swarm(RED)
+    swarm.tick(START)
+    claim = START + 180 * MINUTE
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", started_at=claim, seat="eng-1@sw"))
+    reads = []
+    assert swarm.tick(claim + MINUTE, reread=lambda url: reads.append(url) or RED) == []
+    assert reads == []
