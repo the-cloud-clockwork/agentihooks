@@ -539,7 +539,7 @@ def test_source_inspection_and_prose_naming_a_runner_pass(command, monkeypatch):
         "python3 -c 'import inspect, pytest; print(inspect.getsource(pytest)); pytest.main()'",
         "python3 -c 'import inspect, pytest as p; inspect.getsource(p); p = p.main()'",
         "python3 -c \"import inspect, importlib; print(inspect.getsource(importlib.import_module('pytest')))\"",
-        "python3 -c \"f'{__import__(\\\"pytest\\\").main()}'\"",
+        'python3 -c "f\'{__import__(\\"pytest\\").main()}\'"',
         ISSUE_BODY_WRITER.removesuffix("PY") + "import subprocess\nsubprocess.run(['mutmut', 'run'])\nPY",
     ],
 )
