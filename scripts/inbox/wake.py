@@ -108,7 +108,7 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")
-        elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, master):
+        elif step == TO_MASTER and master and receiver != boss.name and not _sent_from(inbox, item, boss, master):
             raised = inbox.send(BY, master, _master_text(item), ref=f"inbox-escalation:{item.id}")
             inbox.note(item.id, TO_MASTER, BY, raised_note(master, raised.id), now_ms)
             actions.append(f"raised message {item.id} to {master}")
@@ -141,9 +141,9 @@ def wake_now(inbox, slug, agents, herdr, now_ms, window, quiet=DEFAULT_QUIET_S *
     return actions
 
 
-def _sent_from(inbox, item, master):
-    """The master or an earlier occupant of its seat sent the item, so raising it there returns it to its sender."""
-    return item.sender == master or inbox.seats.known_seat(item.sender) == master
+def _sent_from(inbox, item, boss, master):
+    """The master or an earlier occupant of its seat sent the item."""
+    return item.sender == boss.name or inbox.seats.known_seat(item.sender) == master
 
 
 def _wake_due(inbox, item, state, swarm, clock):
