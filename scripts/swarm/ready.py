@@ -1,8 +1,9 @@
 """swarm ready: an engineer hands its reviewed pull request to the tick and frees its seat.
 
 The merge pass watches the pull request's checks, queues it on green, waits for the merge, then writes the done fields
-swarm done writes and removes the worktree. Red checks, a closed pull request or a queue ejection reopen the task for
-the next engineer, who continues from the stored handoff.
+swarm done writes and removes the worktree; a task of a kind other than code or ci is left open instead, with its
+pull request and handoff kept, for the proof its kind needs. Red checks, a closed pull request or a queue ejection
+reopen the task for the next engineer, who continues from the stored handoff.
 """
 
 import json
@@ -12,7 +13,7 @@ from hashlib import sha256
 from pathlib import Path
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import claim_order, done_gate, linked_issues, merge_queue, stack, waits
+from scripts.swarm import claim_order, done_gate, idle, linked_issues, merge_queue, stack, staged_compatibility, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -27,6 +28,10 @@ HOLDS = ("timed out", "error connecting to api.github.com", "HTTP 5", "the curre
 REOPENED = (
     "Reopened by the swarm: its pull request {url} {what}. The next engineer continues it from the handoff its "
     "engineer left."
+)
+PROOF = (
+    "The swarm merged {url}. This {kind} task stays open for its proof; the next engineer continues it from the "
+    "handoff its engineer left."
 )
 
 
@@ -74,11 +79,6 @@ def check(
             f"this swarm runs at {autonomy} autonomy, where the operator approves each merge; "
             "follow the ship steps in your prompt"
         )
-    kind = ledger_kinds.kind(row)
-    if kind not in GATED:
-        raise SwarmError(
-            f"swarm ready carries a code or ci pull request; this {kind} task closes with swarm done and its proof"
-        )
     url = row.get("pr_url")
     if not url:
         raise SwarmError("record the pull request with swarm pr before swarm ready")
@@ -94,6 +94,7 @@ def check(
         raise SwarmError(f"cannot read whether pull request {url} is a draft; run swarm ready again when it answers")
     if draft.stdout.strip() == "true":
         raise SwarmError(f"pull request {url} is a draft; mark it ready for review with gh pr ready first")
+    staged_compatibility.require(url, pull.head, pull.body)
     top = _checkout(url, pull.head, previous)
     found = held_record(url, pull.head, top, agent.name, now_ms)
     if pull.queued:
@@ -243,6 +244,13 @@ def _queue(run, row, found):
 
 def _finish(run, rows, row, found):
     task_id, url = row["id"], found["url"]
+    kind = ledger_kinds.kind(row)
+    verify = ledger_kinds.after(row) and ledger_kinds.unmet(row)
+    if kind not in GATED or verify:
+        if not _release(run, row, found, "verify" if verify else ""):
+            return []
+        run.ledger.comment(run.slug, task_id, PROOF.format(url=url, kind=kind), by="swarm")
+        return [f"task {task_id} awaits its proof, {url} merged", *_remove(found)]
     if row.get("split") and done_gate.refusal(row, url, run.github):
         return []
     fields = {"state": "done", "pr_url": url, "awaiting": ""}
@@ -301,22 +309,38 @@ def _unmergeable(run, row, found, pull):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    if _owners(run, task_id):
+    if not _release(run, row, found, FIX):
         return []
+    run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
+    return [f"task {task_id} reopened, {url} {what}"]
+
+
+def _release(run, row, found, wait):
+    task_id = row["id"]
+    owners = _owners(run, task_id)
+    if owners:
+        if wait == "verify":
+            _proof_wait(run, row, owners)
+        return False
     lease_generation = run.store.claim_generation(run.slug, task_id)
     expected_ready = run.store.redis.hget(run.store.key(run.slug, RECORDS), task_id)
     expected = {key: row.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
     expected["claim_generation"] = row.get("claim_generation", 0)
     live = run.ledger.update_task(
-        run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",), if_match=expected
+        run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": wait}, if_state=("pr",), if_match=expected
     )
     generation = expected["claim_generation"] + (row.get("claimed_by") != "")
     if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
-        return []
-    if not run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready):
-        return []
-    run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
-    return [f"task {task_id} reopened, {url} {what}"]
+        return False
+    return run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready)
+
+
+def _proof_wait(run, row, owners):
+    until = int((row.get("contract") or {}).get("after_at") or run.now_ms + 60_000)
+    if until <= run.now_ms:
+        return
+    for owner in owners:
+        idle.declare_wait(run.store.redis, run.slug, owner.name, until, "post merge proof", run.now_ms)
 
 
 def _remove(found, *flags):

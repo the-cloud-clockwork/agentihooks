@@ -444,6 +444,25 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
+    monkeypatch.setattr(timer, "schedule", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
+    from scripts import tool_deps
+
+    monkeypatch.setattr(tool_deps, "SOURCE", tmp_path / "tool-source")
+
+
+@pytest.fixture(autouse=True)
+def _swarm_snapshot_job_runs_inline(request, monkeypatch):
+    from scripts.swarm import snapshot_job
+
+    if not getattr(request.module, "SNAPSHOT_SPAWN", False):
+        run = snapshot_job.run
+        monkeypatch.setattr(
+            snapshot_job, "start", lambda store, slug, now, environ: bool(run(store, slug, now, environ))
+        )
 
 
 @pytest.fixture(autouse=True)

@@ -15,9 +15,11 @@ ORDER = [
     "claim-stop",
     "push-stop",
     "quiet",
+    "one-push",
     "claims",
     "trace-plan",
     "stall",
+    "lane-split",
     "talk",
 ]
 

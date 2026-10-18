@@ -21,6 +21,10 @@ AGENT = {
 }
 
 
+def _at(raiser, line=1):
+    return f" at {raiser.__code__.co_filename}:{raiser.__code__.co_firstlineno + line}"
+
+
 @pytest.fixture
 def cursors(tmp_path, monkeypatch):
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "agent_trace")
@@ -297,7 +301,7 @@ def test_a_failed_read_is_returned_as_a_line_and_keeps_local_progress(cursors):
     codex = {**AGENT, "conversation_id": "sid"}
     state = {"marks": {"tr-1": {"start_ms": 5, "fresh_ms": 6}}}
     [found], failures = registry.read("s", [codex], down, state, 15, 50)
-    assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
+    assert failures == [f"active read of engineer@1-0001 failed: ConnectionError: refused{_at(down)}"]
     assert (found["read"], found["traces"], found["remote"]) == (False, [], None)
     assert found["local"]["pending"] == 1
     assert state["marks"] == {"tr-1": {"start_ms": 5, "fresh_ms": 6}}
@@ -344,7 +348,7 @@ def test_a_failure_before_the_budget_ends_keeps_its_text(cursors):
     [found], failures = registry.read("s", [AGENT], get, {}, 2, 50)
     release.set()
     assert found["read"] is False
-    assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
+    assert failures == [f"active read of engineer@1-0001 failed: ConnectionError: refused{_at(get, 3)}"]
 
 
 def test_no_retry_starts_after_the_budget_ends(cursors):
@@ -376,24 +380,21 @@ def test_bindings_are_read_at_the_same_time(cursors):
     assert failures == [] and [b["read"] for b in found] == [True, True]
 
 
-def test_no_more_bindings_than_the_workers_are_read_at_once(cursors, monkeypatch):
-    monkeypatch.setattr(registry, "WORKERS", 2)
-    agents = [{**AGENT, "name": f"engineer@1-000{n}"} for n in range(1, 5)]
-    langfuse, lock = Langfuse([], []), threading.Lock()
-    running, peak = [0], [0]
+def test_every_binding_is_read_in_one_round(cursors):
+    agents = [{**AGENT, "name": f"engineer@1-{n:04d}"} for n in range(1, 25)]
+    langfuse = Langfuse([], [])
+    everyone = threading.Barrier(len(agents), timeout=5)
 
     def get(path, params):
-        with lock:
-            running[0] += 1
-            peak[0] = max(peak[0], running[0])
-        threading.Event().wait(0.1)
-        with lock:
-            running[0] -= 1
+        everyone.wait()
         return langfuse(path, params)
 
     found, failures = registry.read("s", agents, get, {}, 15, 50)
     assert failures == [] and all(b["read"] for b in found)
-    assert peak[0] == 2
+
+
+def test_no_bindings_read_nothing(cursors):
+    assert registry.read("s", [], Langfuse([], []), {}, 15, 50) == ([], [])
 
 
 def test_a_budget_under_one_second_still_reads(cursors):
@@ -411,7 +412,7 @@ def test_a_failing_binding_is_tried_exactly_the_attempts(cursors):
     [found], failures = registry.read("s", [AGENT], get, {}, 1, 50)
     assert found["read"] is False
     assert len(tries) == registry.ATTEMPTS
-    assert failures == ["active read of engineer@1-0001 failed: ConnectionError: refused"]
+    assert failures == [f"active read of engineer@1-0001 failed: ConnectionError: refused{_at(get, 2)}"]
 
 
 def test_a_read_unfinished_when_the_budget_ends_leaves_its_binding_unread(cursors):
@@ -547,8 +548,8 @@ def test_every_failed_binding_is_reported(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
     _, failures = registry.read("s", [AGENT, second], down, {}, 15, 50)
     assert failures == [
-        "active read of engineer@1-0001 failed: ConnectionError: refused",
-        "active read of engineer@1-0002 failed: ConnectionError: refused",
+        f"active read of engineer@1-0001 failed: ConnectionError: refused{_at(down)}",
+        f"active read of engineer@1-0002 failed: ConnectionError: refused{_at(down)}",
     ]
 
 
@@ -576,6 +577,7 @@ def test_unreadable_exporter_progress_is_a_failure_line_not_a_crash(cursors):
     second = {**AGENT, "name": "engineer@1-0002"}
     found, failures = registry.read("s", [bad, second], Langfuse([], []), {}, 15, 50)
     assert [b["local"] for b in found] == [None, None]
-    assert failures == [
-        "exporter progress of engineer@1-0001 unreadable: ValueError: invalid literal for int() with base 10: 'x'"
-    ]
+    [failure] = failures
+    reason = "exporter progress of engineer@1-0001 unreadable: ValueError: invalid literal for int() with base 10: 'x'"
+    assert failure.startswith(f"{reason} at {registry.__file__}:")
+    assert failure.rpartition(":")[2].isdigit()

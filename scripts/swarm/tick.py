@@ -28,10 +28,12 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
+    apply_wait,
     bottleneck_remedy,
     ci_speed,
     claim_hold,
     claim_order,
+    content_refusal,
     continuation,
     control_notifications,
     dead_resume,
@@ -597,8 +599,28 @@ def agent_status(agent):
     return "idle" if agent.idle_ticks else "working"
 
 
+def _refusal_due(slug, store, rows, agent, observed, now_ms):
+    if not observed.content_refusal:
+        return False
+    row = rows.get(agent.task)
+    if not row or row.get("claimed_by") != agent.name or _operator_at_pane(slug, store, agent, observed, now_ms):
+        return False
+    return content_refusal.repeated(store, slug, agent, observed)
+
+
+def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
+    content_refusal.handoff(store, slug, agent, now_ms)
+    return [
+        f"freed {agent.name} after repeated content refusals" + _drop(slug, store, ledger, rows, agent, refund=True)
+    ]
+
+
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
+    if _refusal_due(slug, store, rows, agent, observed, now_ms):
+        return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
     outage.mark_pane(store, slug, agent.name, observed.provider_error, now_ms)
     if observed.provider_error and not observed.prompt_title and not observed.typed:
@@ -745,7 +767,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    released = release_wait.checker(config.repo)
+    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if (
@@ -754,6 +776,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
             and ready(t, rows, doc, graph, fix)
             and store.claimant(slug, t["id"]) is None
             and released(t)
+            and applied(t)
         ):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):
@@ -819,11 +842,17 @@ def _shared(mine, theirs):
     return sorted({b if _nested(a, b) else a for a, b in pairs if _nested(a, b) or _nested(b, a)})
 
 
-def _sharing(task, rows):
+def _sharing(task, rows, agents):
     mine = task.get("territory") or []
+    owners = {a.task: a.name for a in agents if not _ended(a, rows)}
     running = [t for t in rows.values() if t.get("state") in ACTIVE and t["id"] != task["id"]]
     return [
-        {"task": t["id"], "claimant": t.get("claimed_by") or "", "areas": areas}
+        {
+            "task": t["id"],
+            "claimant": owners.get(t["id"], ""),
+            "areas": areas,
+            **({"checks": t["state"] == "pr"} if t["id"] not in owners else {}),
+        }
         for t in running
         if (areas := _shared(mine, t.get("territory") or []))
     ]
@@ -937,7 +966,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows, config.repo)
-        task["overlaps"] = _sharing(task, rows)
+        task["overlaps"] = _sharing(task, rows, [a for a in store.agents(slug) if runtime.reported(a)])
         task["group"] = [
             {key: rows[m][key] for key in ("id", "title", "description")}
             for m in task.get("group_members") or []

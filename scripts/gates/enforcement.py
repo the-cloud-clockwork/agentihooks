@@ -20,4 +20,5 @@ class Enforcement:
 
 
 STALL_WATCH = Enforcement("stall")
-ENFORCEMENTS = {STALL_WATCH.name: STALL_WATCH}
+LANE_SPLIT = Enforcement("lane-split")
+ENFORCEMENTS = {STALL_WATCH.name: STALL_WATCH, LANE_SPLIT.name: LANE_SPLIT}

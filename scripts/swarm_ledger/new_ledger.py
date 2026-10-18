@@ -5,7 +5,8 @@ Usage: new_ledger.py --content <content.json> [--plan <plan-file> | --proof] [--
                      [--size small|swarm] [--as NAME] [--operator-asked WORDS]
 
 --size: small (default) is one session's work without a swarm; its creator, --as NAME (default
-$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
+$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works, and only proof and demo ledgers
+take it here: agentihooks swarm init NAME creates every other swarm with its ledger.
 
 content.json: {"title", "overview", "sources": [paths], "phases": [{"title", "description"}],
                "questions": [{"text"}], "followups": [{"text"}]}
@@ -30,6 +31,7 @@ import ledger_core as core  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_size  # noqa: E402
 
+from scripts.swarm import naming
 from scripts.swarm_ledger.repository import repository
 
 TEMPLATE = core.TEMPLATE
@@ -192,6 +194,8 @@ def main():
     args = parser.parse_args()
 
     slug = built_slug(args)
+    if args.size == "swarm" and not naming.is_code_named_swarm(slug):
+        sys.exit(f"a swarm ledger is created with its swarm by one command: {naming.SWARM_INIT}")
     if repository.exists(slug):
         print(json.dumps({"slug": slug, "created": False}))
         print(ledger_link.page_line(slug))

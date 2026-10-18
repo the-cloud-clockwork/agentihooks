@@ -339,6 +339,24 @@ def test_the_rank_pass_reads_releases_from_the_swarm_repository(store, home, shi
     assert repos == [store.config(SLUG).repo]
 
 
+def test_the_rank_pass_holds_tasks_the_applied_check_refuses(store, home, shipped, monkeypatch):
+    from scripts.swarm import apply_wait
+
+    seen = []
+
+    def checker(config, rows):
+        seen.append((config, sorted(rows)))
+        return lambda task: False
+
+    monkeypatch.setattr(apply_wait, "checker", checker)
+    store.update(SLUG, autonomy="delegate", max_eng=3)
+    ledger = Ledger()
+    found = doc(ladder())
+    actions = dispatcher.rank_pass(SLUG, store.config(SLUG), store, ledger, found, NOW)
+    assert seen == [(store.config(SLUG), sorted(t["id"] for t in found["tasks"]))]
+    assert [a for a in actions if "head of" in a] == [] and ledger.comments == []
+
+
 def test_the_queue_head_follows_claims_operator_ranks_and_freezes_with_one_comment_per_change(store, home, shipped):
     store.update(SLUG, autonomy="full", max_eng=2)
     tasks = [*deep_and_wide(), task("w1", phase="", depends_on=["l1"])]

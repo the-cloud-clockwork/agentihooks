@@ -2,14 +2,14 @@ import json
 import subprocess
 from collections.abc import Callable
 
-from scripts.swarm import ledger_events
+from scripts.swarm import ledger_events, staged_compatibility
 from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
     baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts requiredStatusChecks { context app { databaseId } } } }
 } } }"""
-FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } }'
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
@@ -113,6 +113,7 @@ def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None)
     if action != "state" and raw["baseRefName"] != "dev":
         raise SwarmError("swarm merge queue operations require a pull request into dev")
     if action == "queue" and raw["mergeQueueEntry"] is None:
+        staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
         if admit is not None:
             admit(raw["headRefOid"])
         if raw["repository"]["mergeQueue"] is None:
@@ -164,6 +165,7 @@ def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
         raise SwarmError("queue priority requires an open pull request into dev")
     if raw["repository"]["mergeQueue"] is None:
         raise SwarmError("queue priority requires a dev merge queue")
+    staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
     waiting = waiting_ahead(url, raw["id"], run)
     before = journal.groups() if journal is not None else None
@@ -189,6 +191,7 @@ def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
             try:
                 current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
                 if current["mergeQueueEntry"] is None:
+                    staged_compatibility.require(pull["url"], pull["headRefOid"], current.get("body") or "", run)
                     steps.append(["restore", pull["url"]])
                     graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
                     restored.append(pull["url"])

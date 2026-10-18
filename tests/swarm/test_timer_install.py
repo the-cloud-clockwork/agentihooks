@@ -6,6 +6,8 @@ from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
 real_roots = timer._roots
+real_reconcile = timer.reconcile
+real_schedule = timer.schedule
 
 
 @pytest.fixture
@@ -86,7 +88,7 @@ def test_starting_warns_when_the_timer_cannot_be_enabled(monkeypatch, capsys):
     monkeypatch.setattr(cli, "run_tick", lambda store, slug: [])
     cli._state(_Store(), Namespace(slug="sw"), "running")
     assert (
-        "warning: the systemd timer or swarm services could not be enabled; run agentihooks swarm tick yourself\n"
+        "warning: the scheduled swarm tick or swarm services could not be enabled; run agentihooks swarm tick yourself\n"
         in capsys.readouterr().err
     )
 
@@ -157,3 +159,134 @@ def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
     }
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in calls
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls
+
+
+def _systemctl(calls, failing=()):
+    import subprocess
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0)
+
+    return run
+
+
+def test_a_tick_timer_that_cannot_be_disabled_keeps_its_files_for_a_later_pass(tmp_path, capsys):
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    capsys.readouterr()
+    for name in ("agentihooks-swarm.timer", "agentihooks-swarm.service"):
+        (tmp_path / name).write_text("[Unit]\n")
+    calls = []
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls, failing={"disable"}))
+    assert ["systemctl", "--user", "daemon-reload"] not in [argv for argv, _ in calls]
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert (tmp_path / "agentihooks-swarm.service").exists()
+    assert capsys.readouterr().err == (
+        "the agentihooks-swarm timer could not be disabled; its unit files stay until a later pass\n"
+    )
+
+
+def test_an_upgrade_disables_and_deletes_the_tick_timer_without_stopping_a_running_tick(tmp_path, monkeypatch):
+    scheduled = []
+    monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\nOnUnitActiveSec=60s\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.service").exists()
+    argvs = [argv for argv, _ in calls]
+    assert argvs[0] == ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"]
+    assert calls[0][1] == {"capture_output": True, "text": True, "timeout": 30, "check": False}
+    assert argvs[1] == ["systemctl", "--user", "daemon-reload"]
+    assert not [argv for argv in argvs if "agentihooks-swarm.service" in argv]
+    assert not [argv for argv in argvs if "stop" in argv]
+    assert scheduled == [True]
+
+
+def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
+    calls.clear()
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert not (tmp_path / "agentihooks-swarm.service").exists()
+    assert [argv for argv, _ in calls][:2] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+    calls.clear()
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 4
+
+
+def test_ensure_fails_when_the_scheduled_tick_cannot_be_registered(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "schedule", lambda: False)
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is False
+    assert [argv[2] for argv, _ in calls][-4:] == ["enable"] * 4
+
+
+def test_reconcile_reruns_ensure_while_a_retired_tick_unit_is_left(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    for name in ("agentihooks-swarm.timer", "agentihooks-swarm.service"):
+        (tmp_path / name).write_text("[Unit]\n")
+        calls.clear()
+        assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+        assert calls[0][0] == ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"]
+        assert not (tmp_path / name).exists()
+
+
+def test_reconcile_of_current_units_returns_whether_the_tick_is_scheduled(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    for outcome in (True, False):
+        monkeypatch.setattr(timer, "schedule", lambda outcome=outcome: outcome)
+        calls.clear()
+        assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is outcome
+        assert {argv[2] for argv, _ in calls} == {"is-enabled"}
+
+
+def test_schedule_registers_the_tick_and_starts_the_scheduler_runner(monkeypatch):
+    from scripts.scheduler import service
+    from scripts.swarm import scheduled_tick, store
+
+    seen = []
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.setenv("SCHEDULE_MARKER", "kept")
+    monkeypatch.setattr(store, "redis_client", lambda: "redis")
+    monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: seen.append(("tick", scheduler.redis)))
+    monkeypatch.setattr(
+        service,
+        "ensure_running",
+        lambda environ: seen.append(("runner", environ["AGENTIHOOKS_SWARM_REDIS_URL"], environ["SCHEDULE_MARKER"])),
+    )
+    assert real_schedule() is True
+    assert seen == [("tick", "redis"), ("runner", "redis://127.0.0.1:6379/0", "kept")]
+
+    seen.clear()
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://swarm:6379/3")
+    assert real_schedule() is True
+    assert seen[1] == ("runner", "redis://swarm:6379/3", "kept")
+
+
+def test_schedule_reports_a_redis_failure_and_starts_no_runner(monkeypatch, capsys):
+    from redis.exceptions import ConnectionError
+
+    from scripts.scheduler import service
+    from scripts.swarm import scheduled_tick, store
+
+    def refuse(scheduler):
+        raise ConnectionError("down")
+
+    started = []
+    monkeypatch.setattr(store, "redis_client", lambda: "redis")
+    monkeypatch.setattr(scheduled_tick, "ensure", refuse)
+    monkeypatch.setattr(service, "ensure_running", lambda environ: started.append(True))
+    assert real_schedule() is False
+    assert started == []
+    assert capsys.readouterr().err == "the scheduled swarm tick could not be registered: ConnectionError: down\n"
