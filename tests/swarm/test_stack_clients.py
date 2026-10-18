@@ -42,6 +42,7 @@ def prepared(tmp_path, redis_source):
     home = tmp_path / "agentihooks"
     stack = home / "swarm-stack"
     stack.mkdir(parents=True)
+    stack_env.write_private(home / ".env", "")
     bundle = stack_env.settings(stack / ".env")
     redis_source.acl_setuser(
         "swarm", enabled=True, passwords=["+" + bundle["SWARM_REDIS_PASSWORD"]], keys=["*"], commands=["+@all"]
@@ -99,7 +100,7 @@ def test_prepare_clients_keeps_the_live_store_and_legacy_clients(prepared, redis
         ("missing_user", "Client preparation failed (AuthenticationError); existing client settings are unchanged.\n"),
     ],
 )
-def test_failed_preparation_preserves_previous_activation(prepared, redis_source, problem, message):
+def test_failed_preparation_preserves_previous_activation(prepared, redis_source, problem, message, monkeypatch):
     home, bundle, environ, out = prepared
     target = home / "swarm-client.env"
     stack_env.write_private(target, "PREVIOUS=kept\n")
@@ -112,7 +113,7 @@ def test_failed_preparation_preserves_previous_activation(prepared, redis_source
     elif problem == "missing_aclfile":
         redis_source.config_set("aclfile", "")
     elif problem == "passwordless":
-        redis_source.acl_setuser("swarm", nopass=True)
+        monkeypatch.setattr(type(redis_source), "acl_getuser", lambda client, name: {"flags": ["on", "nopass"]})
     else:
         redis_source.acl_deluser("swarm")
     assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 1
