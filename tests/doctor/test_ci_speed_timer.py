@@ -1,4 +1,8 @@
+import functools
 import json
+import subprocess
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
@@ -161,14 +165,12 @@ def test_a_new_speed_crossing_resets_quiet_time_between_regular_detector_passes(
 
 
 def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_completes(store, monkeypatch):
-    import functools
-    from types import SimpleNamespace
-    from urllib.parse import parse_qs, urlsplit
-
     runs = [{"id": n, "status": "completed", "run_attempt": 1, "event": "push"} for n in range(100)]
-    jobs = []
+    jobs, down = [], []
 
     def api(args, **kwargs):
+        if down:
+            raise subprocess.CalledProcessError(1, args)
         url = urlsplit(args[2])
         if url.path.endswith("/jobs"):
             jobs.append(int(url.path.split("/")[-2]))
@@ -178,11 +180,22 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
             body = {"total_count": len(selected), "workflow_runs": selected}
         return SimpleNamespace(stdout=json.dumps(body))
 
+    def saved():
+        return json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
+
     monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
     first = cli.timer(store, DOCTOR, NOW, False)
     assert any("incomplete" in action and "budget exhausted" in action for action in first)
-    second = cli.timer(store, DOCTOR, NOW + 60000, False)
-    assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in second
+    assert saved()["known"][str(jobs[0])] == {
+        "status": "completed",
+        "run_attempt": 1,
+        "jobs": [job(0, created=-30, identity=jobs[0])],
+    }
+    down.append(True)
+    cli.timer(store, DOCTOR, NOW + 60000, False)
+    assert len(saved()["known"]) == 54
+    down.clear()
+    third = cli.timer(store, DOCTOR, NOW + 120000, False)
+    assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in third
     assert sorted(jobs) == list(range(100))
-    saved = json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))
-    assert saved["known"]["5"] == {"status": "completed", "run_attempt": 1, "jobs": [job(0, created=-30, identity=5)]}
+    assert saved()["known"] == {}

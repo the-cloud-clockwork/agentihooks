@@ -21,7 +21,6 @@ FIXES = ("code", "tune")
 FIX_PHASE = "p2"
 SENDER = "doctor-timer"
 IDLE = ("stopped", "stopping")
-JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at")
 
 
 def verdicts(store, doctor):
@@ -122,15 +121,16 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
         state.update(last=now_ms, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
-    state["known"] = {
+    finished = {
         str(run["id"]): {
             "status": run["status"],
             "run_attempt": run.get("run_attempt"),
-            "jobs": [{field: job.get(field) for field in JOB_FIELDS} for job in run["jobs"]],
+            "jobs": [{field: job.get(field) for field in ci_speed.JOB_FIELDS} for job in run["jobs"]],
         }
         for run in snapshot["runs"]
         if run["status"] == "completed"
     }
+    state["known"] = {} if snapshot["complete"] else {**state.get("known", {}), **finished}
     state["report"] = report
     store.redis.set(key, json.dumps(state))
     status = "complete" if report["complete"] else f"incomplete: {report['error']}"

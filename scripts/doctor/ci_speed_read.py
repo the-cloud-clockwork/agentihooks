@@ -9,6 +9,7 @@ from urllib.parse import urlencode
 
 REPO = "the-cloud-clockwork/agentihooks"
 ACTIVE = ("queued", "in_progress", "waiting", "pending", "requested")
+FAILURES = (subprocess.SubprocessError, ValueError, KeyError, RuntimeError)
 
 
 class _Api:
@@ -96,12 +97,12 @@ def read(
             for future in as_completed(jobs):
                 try:
                     records.append({**jobs[future], "jobs": future.result()})
-                except (subprocess.SubprocessError, ValueError, KeyError, RuntimeError) as exc:
+                except FAILURES as exc:
                     failure = failure or exc
             if failure:
                 raise failure
         return {"complete": True, "runs": records, "api_calls": api.calls, "discovered_runs": len(discovered)}
-    except (subprocess.SubprocessError, ValueError, KeyError, RuntimeError) as exc:
+    except FAILURES as exc:
         return {
             "complete": False,
             "error": f"Actions API read failed: {type(exc).__name__}: {exc}",
