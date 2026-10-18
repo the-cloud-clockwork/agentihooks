@@ -325,6 +325,7 @@ def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
         "cat >> progress.md <<EOF\n$(cat {root}/demo.media/{plan})\nEOF",
         "cat <<'EOF' > {root}\nnotes\nEOF",
         'echo "`ls {root} `" >> progress.md',
+        "cat {root}/a:b/*",
         'curl -H "X-Ref: $RUN" https://ci.example/artifacts/plan.md',
         'grep -rn needle "{root} "',
     ],
