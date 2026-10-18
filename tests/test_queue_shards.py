@@ -193,7 +193,7 @@ def test_queue_capacity_admission_precedes_the_unit_matrix():
     jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
     capacity = jobs["queue-plan"]
     assert capacity["needs"] == ["split"]
-    assert capacity["if"] == "github.event_name == 'merge_group'"
+    assert capacity["if"] == "${{ github.event_name != 'pull_request' && github.event_name == 'merge_group' }}"
     assert "queue-plan" in jobs["unit"]["needs"]
     assert "needs.queue-plan.result == 'success'" in jobs["unit"]["if"]
     assert "unit" in jobs["gate-required"]["needs"]
