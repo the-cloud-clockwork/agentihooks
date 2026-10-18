@@ -47,6 +47,7 @@ UPDATABLE = (
     "slice",
     "follow_up",
     "split_pulls",
+    "pull_scopes",
     "after_release",
     "recovery",
 )
@@ -60,7 +61,9 @@ OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+PULL_SCOPE_KINDS = ("stage", "prerequisite")
+PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -230,8 +233,25 @@ def check_repository_branches(fields: dict) -> None:
         raise ValueError("repository_branches must map absolute local repository paths to branch names")
 
 
+def check_pull_scopes(fields: dict) -> None:
+    scopes = fields.get("pull_scopes", {})
+    if not isinstance(scopes, dict) or not all(
+        PULL_URL_RE.fullmatch(url)
+        and isinstance(declared, dict)
+        and set(declared) == {"kind", "scope"}
+        and declared["kind"] in PULL_SCOPE_KINDS
+        and isinstance(declared["scope"], str)
+        and declared["scope"].strip()
+        for url, declared in scopes.items()
+    ):
+        raise ValueError(
+            "pull_scopes must map pull request URLs to a kind, stage or prerequisite, and a nonempty scope"
+        )
+
+
 def check_lists(fields):
     check_repository_branches(fields)
+    check_pull_scopes(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):

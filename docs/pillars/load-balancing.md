@@ -255,8 +255,8 @@ records its actor and time in the store's history.
 |---|---|---|---|
 | `claude-api-weight`, `codex-api-weight` | integer 0 to 100 | `0` | Live share of the api side |
 | `claude-api-max-sessions`, `codex-api-max-sessions` | integer 0 or more | unset (unbounded) | Session cap of the api slot; `0` closes the api side to placement (a forced `--route api` still launches) |
-| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters; stored and validated, read by no launch path yet |
-| `master-tier-claude`, `master-tier-codex` | tier name | unset | Tier declared for swarm masters; stored and validated, read by no launch path yet |
+| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters, used for interactive routing and worker reservation |
+| `master-tier-claude`, `master-tier-codex` | tier name | unset | Display label for the declared master account |
 
 ```bash
 agentihooks balance settings                     # every key with its value and the store in use
@@ -270,6 +270,56 @@ one `key: before -> after` line per key, and exits 2 on an unknown key or an
 invalid value. The actor is `AGENTIHOOKS_AGENT_NAME`, else `operator`.
 `agentihooks balance` and `agentihooks quota` show each row's `KIND`, `WEIGHT`
 and `CAP`; an api row shows `n/a` for its quota windows.
+
+## Master accounts and reserved headroom
+
+Declare the account the operator uses for masters separately from worker
+placement. The declaration stores account names and optional tier labels, never
+credentials:
+
+```bash
+agentihooks balance master-account claude=<slug> tier=Max
+agentihooks balance master-account codex=default tier=Pro
+agentihooks balance settings
+agentihooks balance master-account --clear claude
+```
+
+Each `tier=` follows the account it labels. Codex accepts `default` for its
+native login or a slug with a matching `AH_CX_TOKEN_<slug>` variable. A Claude
+declaration may name an interactive login with no worker token. Declarations
+appear as `MASTER <tier>` in account reports. Clearing one harness leaves the
+other declaration in place; `--clear` without a harness clears both. These
+commands declare an identity; sign in separately using the
+[master login procedure](../reference/account-login.md#master-claude-ai-login).
+
+The declared account keeps weekly headroom according to how many masters are
+live on it, across swarms. The 70/60/50 rule is a ceiling on **weekly quota
+used**, not the percentage left and not a session cap:
+
+| Live masters on the declared account | Worker ceiling: week used | Headroom left at the ceiling |
+|---|---|---|
+| 0 | No master reservation | Normal quota rules apply |
+| 1 | 70% | 30% |
+| 2 | 60% | 40% |
+| 3 or more | 50% | 50% |
+
+At or above the ceiling, new workers and worker quota handoffs cannot select
+that account. A running worker's quota policy uses the same ceiling. Masters
+are exempt from the worker reservation; their normal account eligibility and
+quota limits still apply. Other accounts keep their normal routing rules, and
+workers can use their tokens or the configured API capacity.
+
+For example, with one master and 65% of its account's week used, workers may
+still use that account. A second master lowers the ceiling to 60%, so the same
+65% reading now closes it to workers. With three masters, workers stop selecting
+it at 50% used. When the count drops, the next reservation reading uses the
+corresponding ceiling; with no live master the reservation disappears.
+
+The account report includes the reason, for example
+`reserved for 2 live masters: workers stop at 60% of the week`. Use
+`agentihooks balance` and `agentihooks quota` to inspect the declaration and
+reservation. See [Interactive masters and Remote Control](swarm.md#interactive-masters-and-remote-control)
+for launch authentication, fallback and phone access.
 
 ## Skill evaluations
 

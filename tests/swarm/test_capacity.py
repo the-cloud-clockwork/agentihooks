@@ -2326,3 +2326,78 @@ def test_two_names_holding_one_token_offer_one_account(monkeypatch, tmp_path):
     rows = capacity.accounts(env, 100)
 
     assert sorted((r.name, r.sessions, r.state) for r in rows) == [("mail", 3, "OPEN"), ("other", 0, "OPEN")]
+
+
+def _interactive_master(monkeypatch, tmp_path, sessions):
+    from hooks.context import quota_usage
+    from scripts.routing.master_account import MasterAccount
+    from scripts.routing.slots import INTERACTIVE
+
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(quota_usage, "QUOTA_USAGE_STALE_SEC", 300)
+    monkeypatch.setattr(quota_usage.time, "time", lambda: 1_000.0)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [])
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: sessions)
+    master = MasterAccount("claude", "main", "", INTERACTIVE)
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": master})
+    limits = {
+        "five_hour": {"used_percentage": 30, "resets_at": 5_000},
+        "seven_day": {"used_percentage": 60, "resets_at": 9_000},
+    }
+    quota_usage.record_rate_limits("master", limits, {"AH_ROUTE_INTERACTIVE_main": "1"})
+
+
+def test_a_tokenless_master_account_reads_its_session_snapshot(monkeypatch, tmp_path):
+    _interactive_master(monkeypatch, tmp_path, {"main": 1})
+    five, week = balancer.QuotaWindow(30.0, 5_000), balancer.QuotaWindow(60.0, 9_000)
+    reading = balancer.ProbeResult("main", "allowed", "NORMAL", 40.0, five, week)
+    assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_000.0, reading)}
+    rows = capacity._claude({}, 1_100.0)
+    assert rows == [capacity.Account("claude", "main", "UNKNOWN", 1, 70.0, 40.0, None, 9_000, five_resets_at=5_000)]
+    assert rows[0].observed_at == 1_000.0
+
+
+@pytest.mark.parametrize("kept", ["five_hour", "seven_day"])
+def test_a_master_snapshot_with_one_window_reads_the_other_as_unknown(monkeypatch, tmp_path, kept):
+    from hooks.context import quota_usage
+
+    _interactive_master(monkeypatch, tmp_path, {"main": 1})
+    monkeypatch.setattr(quota_usage.time, "time", lambda: 1_050.0)
+    limits = {kept: {"used_percentage": 20, "resets_at": 9_000}}
+    quota_usage.record_rate_limits("later", limits, {"AH_ROUTE_INTERACTIVE_main": "1"})
+    windows = {
+        "five_hour": balancer.QuotaWindow(),
+        "seven_day": balancer.QuotaWindow(),
+        kept: balancer.QuotaWindow(20.0, 9_000),
+    }
+    reading = balancer.ProbeResult("main", "allowed", "UNKNOWN", None, windows["five_hour"], windows["seven_day"])
+    assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_050.0, reading)}
+
+
+def test_a_stale_master_snapshot_keeps_the_unknown_row(monkeypatch, tmp_path):
+    _interactive_master(monkeypatch, tmp_path, {"main": 1})
+    assert capacity._claude({}, 1_301.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
+
+
+def test_a_master_snapshot_never_reads_for_an_undeclared_or_token_account(monkeypatch, tmp_path):
+    from scripts.routing.master_account import MasterAccount
+
+    _interactive_master(monkeypatch, tmp_path, {"main": 1})
+    unknown = [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {"claude": MasterAccount("claude", "main")})
+    assert capacity._claude({}, 1_100.0) == unknown
+    monkeypatch.setattr(capacity.master_account, "load", lambda env: {})
+    assert capacity._claude({}, 1_100.0) == unknown
+
+
+@pytest.mark.parametrize("error", ["redis", "os"])
+def test_an_unreachable_settings_store_reads_no_master_snapshot(monkeypatch, tmp_path, error):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    _interactive_master(monkeypatch, tmp_path, {"main": 1})
+
+    def down(env):
+        raise RedisConnectionError("down") if error == "redis" else OSError("down")
+
+    monkeypatch.setattr(capacity.master_account, "load", down)
+    assert capacity._claude({}, 1_100.0) == [capacity.Account("claude", "main", "UNKNOWN", 1, None, None)]

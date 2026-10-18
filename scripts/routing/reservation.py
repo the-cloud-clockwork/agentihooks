@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions
 from hooks.context.account_sessions import INTERACTIVE_PREFIX
 from scripts.routing import master_account
+from scripts.routing.slots import API
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
@@ -87,6 +88,9 @@ class Reservation:
 
     def closes(self, slug: str, week_used: float | None) -> bool:
         return slug == self.slug and reached(week_used, self.masters)
+
+    def closes_row(self, harness: str, kind: str, slug: str, week_left: float | None) -> bool:
+        return harness == self.harness and kind != API and week_left is not None and self.closes(slug, 100 - week_left)
 
 
 def _store(environ: Mapping[str, str]) -> "RedisStore | None":

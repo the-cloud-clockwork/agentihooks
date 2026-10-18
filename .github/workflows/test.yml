@@ -865,7 +865,7 @@ jobs:
             python -m tests.queue_shards --root . --collection "$collection" --version "$version" --output queue-plan.txt
             cp .test_durations durations.sha256 "$destination/"
           done
-          python -m tests.queue_shards combine --from-output queue-plan.txt
+          python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
           cp queue-input/3.11/.test_durations .test_durations
           cp queue-input/3.11/durations.sha256 durations.sha256
           cat queue-plan.txt >> "$GITHUB_OUTPUT"
@@ -1549,7 +1549,7 @@ jobs:
           pattern: coverage-3.12-*
           path: .coverage-shards
 
-      # The merge runs while the proxy starts and the downloads restore; the scan waits for it below.
+      # The merge runs while the proxy starts; the scan waits for it below.
       - name: Merge shard coverage
         id: merge
         if: needs.select.outputs.scope != 'none'
@@ -1565,7 +1565,7 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/combine.log" 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
 
-      # Builds beside the cache restores and the scan, outside the scanned tree; the wait after the scan holds its result.
+      # Builds beside the scan, outside the scanned tree; the wait after the scan holds its result.
       - name: Build the test dependency manifest
         id: manifest
         if: needs.select.outputs.scope == 'full'
@@ -1595,9 +1595,6 @@ jobs:
           python .github/coverage/proxy.py > sonar-proxy.log 2>&1 &
           echo "pid=$!" >> "$GITHUB_OUTPUT"
           bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar status" -- curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/system/status
-          version=$(bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" "Sonar version" -- curl --fail --silent --show-error --max-time 10 http://127.0.0.1:9000/api/server/version)
-          test -n "$version"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Hold the Delivery L2 binding
         if: success() && steps.proxy.outcome == 'success'
@@ -1614,21 +1611,6 @@ jobs:
             exit 1
           fi
           echo "Project agentihooks is bound to Delivery L2"
-
-      - name: Restore Sonar downloads
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.sonar/cache
-            ${{ runner.tool_cache }}/sonar-scanner-cli
-          key: sonar-${{ runner.os }}-${{ runner.arch }}-${{ env.SONAR_SCANNER_VERSION }}-${{ steps.proxy.outputs.version }}
-
-      # Its own entry, since a changed path list gives a cache a new version that only a dev push that scans can save.
-      - name: Restore the SonarJS Node runtime
-        uses: actions/cache@v4
-        with:
-          path: ~/.sonar/js/node-runtime
-          key: sonar-node-${{ runner.os }}-${{ runner.arch }}-${{ steps.proxy.outputs.version }}
 
       # Sonar names a branch analysis after the ref, so a queue run would open a throwaway gh-readonly-queue branch.
       - name: Name the queued pull request
@@ -1692,6 +1674,7 @@ jobs:
             cp -a "$RUNNER_TEMP/sonar-scanner-$SONAR_SCANNER_VERSION-linux-x64/." "$scanner/"
           fi
           read -ra extra <<< "$ARGS"
+          [[ ! -x "${SONAR_NODE:-}" ]] || extra+=("-Dsonar.nodejs.executable=$SONAR_NODE")
           threads=$(python "$GITHUB_WORKSPACE/scripts/ci_cpu_quota.py")
           bash "$GITHUB_WORKSPACE/.github/coverage/sonar-retry.sh" --unless .scannerwork/report-task.txt "SonarQube Scan" -- "$scanner/bin/sonar-scanner" -Dsonar.projectBaseDir=. -Dsonar.python.analysis.threads="$threads" "${extra[@]}"
           [[ ! -s "$RUNNER_TEMP/sonar-gc.log" ]] || awk '/Pause/ { n++; sub(/ms$/, "", $NF); t += $NF } END { printf "GC pauses %d, %.0f ms\n", n, t }' "$RUNNER_TEMP/sonar-gc.log"
@@ -2228,6 +2211,7 @@ jobs:
           repositories: ${{ github.event.repository.name }}
           permission-actions: write
           permission-contents: read
+          permission-pull-requests: read
 
       - name: Watch for the first failed graded job
         id: watch
@@ -2241,7 +2225,8 @@ jobs:
             if queue_head=$(gh api "repos/$GITHUB_REPOSITORY/git/matching-refs/${GITHUB_REF#refs/}" --jq ".[] | select(.ref == \"$GITHUB_REF\") | .object.sha"); then
               queue_misses=0
               if [[ "$queue_head" != "$GITHUB_SHA" ]]; then
-                echo 'failed=queue group is no longer current' >> "$GITHUB_OUTPUT"
+                record=$(python3 -m scripts.ci_queue_rebuild "$queue_head") || record="record unavailable"
+                echo "failed=queue group is no longer current ($record)" >> "$GITHUB_OUTPUT"
                 exit 0
               fi
             else
@@ -2588,6 +2573,7 @@ jobs:
       shards: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.shards }}
       stats_parts: ${{ steps.reuse.outputs.reused == 'true' && '[0]' || steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
+      browser: ${{ steps.plan.outputs.browser }}
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
     steps:
@@ -2650,6 +2636,16 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
 
+      - name: Upload planned mutation test selection
+        if: steps.reuse.outputs.reused != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-selection
+          path: .mutation-selection.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
+
       - name: Grade the empty change set
         if: steps.reuse.outputs.reused != 'true' && steps.plan.outputs.changed == '0'
         env:
@@ -2700,16 +2696,15 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Select mutation tests before browser setup
+      - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        id: selection
-        env:
-          BASES: ${{ needs.mutation-plan.outputs.bases }}
-        run: python -m scripts.ci_mutation.browser --bases "$BASES"
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
 
       - name: Install the browser that page tests drive
         id: browser
-        if: steps.selection.outputs.browser == 'true'
+        if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
@@ -2783,16 +2778,15 @@ jobs:
         if: needs.mutation-plan.outputs.forwarded != 'true'
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
-      - name: Select mutation tests before browser setup
+      - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        id: selection
-        env:
-          BASES: ${{ needs.mutation-plan.outputs.bases }}
-        run: python -m scripts.ci_mutation.browser --bases "$BASES"
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
 
       - name: Install the browser that page tests drive
         id: browser
-        if: steps.selection.outputs.browser == 'true'
+        if: needs.mutation-plan.outputs.browser == 'true'
         timeout-minutes: 6
         uses: ./.github/actions/browser-cache
 
@@ -2833,6 +2827,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mutation-report-${{ matrix.shard }}
-          path: .mutation-gate/
+          path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
           include-hidden-files: true
           retention-days: 7

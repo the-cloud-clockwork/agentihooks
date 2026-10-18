@@ -239,6 +239,12 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
     }
+    recorder_path = _ROOT / ".github/workflows/count-record.yml"
+    if recorder_path.exists():
+        recorder = yaml.safe_load(recorder_path.read_text())["jobs"]["count-record"]
+        assert "count-record" not in jobs
+        jobs["count-record"] = recorder
+        callers["count-record"] = recorder["steps"]
     assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
@@ -388,16 +394,15 @@ def test_mutation_job_installs_chromium_before_mutating():
 def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [step.get("name") for step in steps]
-    select = names.index("Select mutation tests before browser setup")
+    assert "Select mutation tests before browser setup" not in names
     install = names.index("Install the browser that page tests drive")
-    assert select < install
-    assert steps[select]["id"] == "selection"
-    assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
-    assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[install]["if"] == "needs.mutation-plan.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 6
     job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+    selection = next(step for step in steps if step.get("name") == "Download planned mutation test selection")
+    assert selection["with"]["name"] == "mutation-selection"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
@@ -546,7 +551,11 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
     python = binary / "python"
     python.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\n'
-        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\nexit "$FLOOR_EXIT"\n'
+        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\n'
+        'if [[ -n "${TEST_COUNT_HEAD_COLLECTION:-}" ]]; then\n'
+        '  [[ "$COLLECTION_EXIT" == 0 ]] || exit "$COLLECTION_EXIT"\n'
+        '  printf "[]" > "$TEST_COUNT_HEAD_COLLECTION"\n'
+        'fi\nexit "$FLOOR_EXIT"\n'
     )
     python.chmod(0o755)
     step = next(
@@ -564,12 +573,16 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
             CALLS=str(commands),
             COLLECTION_EXIT=str(collection),
             FLOOR_EXIT=str(floor),
+            TEST_COUNT_HEAD_COLLECTION=(
+                str(tmp_path / "collected.json") if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ""
+            ),
         ),
         capture_output=True,
         text=True,
     )
     assert (outcome.returncode == 0) == (collection == floor == 0)
-    assert sorted(commands.read_text().splitlines()) == ["-c", "-m"]
+    expected = ["-m"] if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ["-c", "-m"]
+    assert sorted(commands.read_text().splitlines()) == expected
 
 
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
@@ -1114,6 +1127,9 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
+    assert artifact["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
@@ -1153,10 +1169,13 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     }
     assert "permissions" not in plan
     assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
+    assert plan["outputs"]["browser"] == "${{ steps.plan.outputs.browser }}"
     for job in (mutation, jobs["mutation-stats"]):
-        select = next(step for step in job["steps"] if step.get("id") == "selection")
-        assert select["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
-        assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+        selection = next(
+            step for step in job["steps"] if step.get("name") == "Download planned mutation test selection"
+        )
+        assert selection["with"]["name"] == "mutation-selection"
+        assert not any(step.get("id") == "selection" for step in job["steps"])
     checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
@@ -1268,7 +1287,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert install["if"] == "steps.reuse.outputs.reused != 'true'"
     skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
     unguarded = (
-        "steps.selection.outputs.browser == 'true'",
+        "needs.mutation-plan.outputs.browser == 'true'",
         "failure() && steps.browser.outcome == 'failure'",
         "failure()",
         f"github.event_name == 'pull_request' && {skipped}",

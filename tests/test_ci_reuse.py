@@ -260,6 +260,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     forms = (
         ({"selected": True}, {}, {"queue_tier": True}, {"queue_tier": True, "promotion": True})
         if "durations" in workflow["jobs"]
@@ -973,6 +974,23 @@ def test_consolidated_gate_requires_the_shared_admission(event, promotion, admis
         needs["select"]["result"] = admission
     result = _gate(ci_reuse.gate_steps(queue_tier=True, promotion=promotion, consolidated=True), needs, event)
     assert (result.returncode == 0) == (admission == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_documentation_gate_requires_a_successful_build_on_pull_requests(status):
+    from scripts import ci_reuse
+
+    required = {"select", "test-count", "lint", "semgrep", "sonar"}
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["docs"] = {"result": status}
+    result = _gate(
+        ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True),
+        needs,
+        event="pull_request",
+    )
+    assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
 
 
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():

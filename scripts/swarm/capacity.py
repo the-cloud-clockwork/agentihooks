@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
-from scripts.routing import claude_api, codex_api, place
-from scripts.routing.slots import API, SUBSCRIPTION
+from scripts.routing import claude_api, codex_api, master_account, place
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
@@ -45,11 +45,35 @@ def _state(cap: int | None) -> str:
     return "UNKNOWN" if cap is None else "CLOSED" if cap == 0 else "OPEN"
 
 
+def _master_snapshot(environ: dict, now: float) -> dict[str, tuple[float, balancer.ProbeResult]]:
+    from redis.exceptions import RedisError
+
+    from hooks.context import quota_usage
+
+    try:
+        master = master_account.load(environ).get("claude")
+    except (OSError, RedisError):
+        return {}
+    if master is None or master.kind != INTERACTIVE:
+        return {}
+    found = quota_usage.account_snapshot(master.slug, now)
+    if found is None:
+        return {}
+    at, limits = found
+    five, week = (
+        balancer.QuotaWindow(window.get("used_percentage"), window.get("resets_at"))
+        for window in (limits.get("five_hour") or {}, limits.get("seven_day") or {})
+    )
+    state, margin = balancer._state("allowed", five, week)
+    return {master.slug: (at, balancer.ProbeResult(master.slug, "allowed", state, margin, five, week))}
+
+
 def _claude(environ: dict, now: float) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     fresh, _ = tokens.results(environ, now)
     observed.update({result.account: (now, result) for result in fresh})
+    observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
     routed = set(account_sessions.token_accounts(environ).values())
     rows = []
@@ -182,10 +206,7 @@ def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
         return rows
     return [
         replace(row, state=_state(0), cap=0, reserved=held.reason, unreserved_cap=row.cap)
-        if row.harness == held.harness
-        and row.kind != API
-        and row.week_left is not None
-        and held.closes(row.name, 100 - row.week_left)
+        if held.closes_row(row.harness, row.kind, row.name, row.week_left)
         else row
         for row in rows
     ]

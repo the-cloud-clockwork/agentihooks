@@ -101,6 +101,24 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
             assert step["if"] == gated, step
 
 
+def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_module_changes():
+    steps, names = _steps(_workflow()["jobs"]["plan"])
+    find_at = names.index("Find a changed test module")
+    find = steps[find_at]
+    assert find_at == 2
+    assert find["id"] == "suite"
+    assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
+    assert find["run"].startswith('files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n')
+    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
+    run_at = names.index("Run the suite speed contracts")
+    assert run_at < names.index("Record the revisions the report grades")
+    assert run_at < names.index("Reuse a green report when this head only adds tests to it")
+    changed = "steps.suite.outputs.changed == 'true'"
+    assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
+    assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
+    assert not any(step.get("continue-on-error") for step in steps)
+
+
 def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
     plan = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["mutation-plan"]
     steps, names = _steps(plan)
@@ -126,6 +144,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
         "shards": "${{ steps.plan.outputs.shards }}",
         "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
         "bases": "${{ steps.plan.outputs.bases }}",
+        "browser": "${{ steps.plan.outputs.browser }}",
         "changed": "${{ steps.plan.outputs.changed }}",
         "graded": "${{ steps.plan.conclusion == 'success' }}",
         "open": "${{ steps.open.outputs.open }}",
@@ -178,11 +197,13 @@ def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget(
     job = _workflow()["jobs"]["stats"]
     assert job["timeout-minutes"] == 26
     steps, names = _steps(job)
-    select = steps[names.index("Select mutation tests before browser setup")]
     collect = steps[names.index("Collect one stats part for every mutation shard")]
-    for step in (select, collect):
-        assert step["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
-    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+    assert collect["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    selection = steps[names.index("Download planned mutation test selection")]
+    assert selection["with"]["name"] == "mutation-selection"
+    assert "Select mutation tests before browser setup" not in names
+    browser = steps[names.index("Install the browser that page tests drive")]
+    assert browser["if"] == "needs.plan.outputs.browser == 'true'"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
     assert collect["run"] == (
@@ -214,7 +235,9 @@ def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_req
     assert names.index("Install the browser that page tests drive") < names.index(mutate["name"])
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-shard-${{ matrix.shard }}"
-    assert steps[-1]["with"]["path"] == ".mutation-gate/"
+    assert steps[-1]["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_single_shard_collection_preserves_both_supported_workflow_states():

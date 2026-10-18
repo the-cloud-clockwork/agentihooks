@@ -169,6 +169,35 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     setup.herdr.spawn.assert_not_called()
 
 
+def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setup):
+    from scripts.hive.placement import NO_UI_HIVE, Wait
+    from scripts.swarm.controller import FencedRuntime
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    for hive in ("first", "second"):
+        write_hive(setup, id=hive, ui="yes", roles=["master"])
+    pinned = {"id": "master", "hive": "second"}
+    assert setup.launcher.select(setup.config, "master", {"id": "master"}).hive == "first"
+    assert setup.launcher.select(setup.config, "master", pinned).hive == "second"
+    assert setup.launcher.select(setup.config, "master", {"id": "master", "hive": "gone"}) == Wait(NO_UI_HIVE)
+
+    fenced = FencedRuntime(
+        setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
+    )
+    assert fenced.placement_refusal("master", pinned) == ""
+    assert fenced.placement_refusal("master", {"id": "master", "hive": "gone"}) == NO_UI_HIVE
+    fenced.runtime.spawn = Mock(return_value="placed on the hive")
+    fenced.runtime.original_runtime = Mock()
+    assert fenced.spawn(setup.config, "master", "name", pinned) == "placed on the hive"
+    fenced.runtime.spawn.assert_called_once_with(
+        setup.config, "master", "name", {**pinned, "controller_epoch": setup.held.epoch}
+    )
+    fenced.runtime.original_runtime.spawn.assert_not_called()
+
+
 def request_for(setup, name=None, lane="eng", route="subscription"):
     from scripts.swarm.store import AgentRecord
     from scripts.swarm_v2.runtime.base import SpawnRequest
