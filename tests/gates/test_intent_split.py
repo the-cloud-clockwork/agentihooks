@@ -57,6 +57,12 @@ def test_a_labelled_split_is_judged_by_its_half_without_plan_lines(planned, foll
     assert "plan_chunk" not in state
 
 
+def test_a_labelled_half_reads_no_plan_chunk(planned):  # noqa: F811
+    doc = split(planned)
+    task = {**doc["tasks"][0], "plan_lines": "", "split": ["compatibility", "repair"]}
+    assert intent._plan_chunk(doc, task) == {}
+
+
 @pytest.mark.parametrize("source", ["task", "phase"])
 def test_a_split_task_keeps_its_half_when_the_plan_is_linked(planned, source):  # noqa: F811
     doc = split(planned)
