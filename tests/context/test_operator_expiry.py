@@ -34,6 +34,9 @@ def test_operator_on_expires_without_another_prompt_and_notifies_only_its_sessio
     restarted = Scheduler(clocked_scheduler.redis)
     assert restarted.run_due(now=400) == 1
     assert not operator_mode.present("pane", now=400)
+    state = operator_mode._load("pane")
+    assert state["on"] is False
+    assert state["turn_at"] is None
     assert operator_mode.present("other", now=400)
     notices = InboxStore(clocked_scheduler.redis).inbox("pane")
     assert [item.text for item in notices] == [
@@ -57,6 +60,16 @@ def test_a_typed_prompt_restarts_or_cancels_the_session_timer(clocked_scheduler,
     assert clocked_scheduler.run_due(now=500) == fires
     assert not operator_mode.present("pane", now=500)
     assert len(InboxStore(clocked_scheduler.redis).inbox("pane")) == fires
+
+
+def test_operator_off_without_a_timer_keeps_the_session_off(clocked_scheduler):
+    from scripts.inbox.store import InboxStore
+
+    operator_mode.observe("pane", "operator off", True, now=100)
+    assert not operator_mode.present("pane", now=100)
+    assert "timer_id" not in operator_mode._load("pane")
+    assert clocked_scheduler.run_due(now=400) == 0
+    assert InboxStore(clocked_scheduler.redis).inbox("pane") == []
 
 
 @pytest.mark.parametrize("seconds", [60, 600])
