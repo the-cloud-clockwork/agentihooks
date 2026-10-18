@@ -1,3 +1,4 @@
+import io
 import json
 import threading
 import time
@@ -100,7 +101,7 @@ def test_reader_keeps_the_newest_records_when_its_bound_is_reached(now):
     for wall in range(1, 6):
         now[0] += 1.0
         request_metrics.record("POST", OPERATIONS, float(wall), 0.0, 0.0)
-    result = request_metrics.records(1.0, limit=2)
+    result = request_metrics.records(1.0, None, limit=2)
     assert result["truncated"] is True
     assert result["matched"] == 5
     assert [row["wall_seconds"] for row in result["routes"][0]["records"]] == [4.0, 5.0]
@@ -114,7 +115,7 @@ def test_clean_reload_keeps_every_record_readable(tmp_path, monkeypatch, now):
     request_metrics.record("DELETE", TASKS, 1.12, 0.25, 0.5)
     request_metrics.persist(stopped=True)
     reload(monkeypatch, now, path, 5.0)
-    result = request_metrics.records(1.0, limit=100)
+    result = request_metrics.records(1.0, None, limit=100)
     assert result["coverage"]["complete"] is True
     assert result["coverage"]["lost"] == []
     assert result["coverage"]["held_since"] == START - 3600.0
@@ -138,18 +139,18 @@ def test_crash_names_the_exact_unflushed_span(tmp_path, monkeypatch, now):
     request_metrics.record("POST", OPERATIONS, 2.0, 0.0, 0.0)
     reload(monkeypatch, now, path, 30.0)
     restarted = now[0]
-    result = request_metrics.records(1.0, limit=100)
+    result = request_metrics.records(1.0, None, limit=100)
     assert result["coverage"]["complete"] is False
     assert result["coverage"]["lost"] == [{"start": flushed, "end": restarted}]
     assert [row["wall_seconds"] for row in result["routes"][0]["records"]] == [1.0]
     request_metrics.record("POST", OPERATIONS, 3.0, 0.0, 0.0)
     request_metrics.persist(stopped=True)
     reload(monkeypatch, now, path, 1.0)
-    again = request_metrics.records(1.0, limit=100)
+    again = request_metrics.records(1.0, None, limit=100)
     assert again["coverage"]["lost"] == [{"start": flushed, "end": restarted}]
     assert [row["wall_seconds"] for row in again["routes"][0]["records"]] == [1.0, 3.0]
     now[0] += 3600.0
-    later = request_metrics.records(0.5, limit=100)
+    later = request_metrics.records(0.5, None, limit=100)
     assert later["coverage"]["complete"] is True
     assert later["coverage"]["lost"] == []
 
@@ -189,12 +190,34 @@ def test_journal_rewrites_when_appends_exceed_capacity(tmp_path, monkeypatch, no
 def test_corrupt_journal_lines_are_skipped(tmp_path, monkeypatch, now):
     monkeypatch.setattr(request_metrics, "STARTED_AT", START)
     path = tmp_path / "metrics.jsonl"
+    corrupt = [
+        "not json",
+        "{}",
+        "[]",
+        '[["start"], 1.0]',
+        '["begin", 1.0]',
+        f'["start", {START - 20.0}, 1.0]',
+        f'["s", {START - 4.0}, "POST", 7, 1.0, 0.0, 0.0]',
+        f'["s", {START - 4.0}, "POST", "{OPERATIONS}", "slow", 0.0, 0.0]',
+        '["flush", NaN]',
+        '["flush", "later"]',
+        f'["stop", {START - 3.0}, 1.0]',
+    ]
     path.write_text(
-        f'["start", {START - 10.0}]\nnot json\n["s", {START - 5.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n'
+        "\n".join(
+            [
+                f'["start", {START - 10.0}]',
+                *corrupt,
+                f'["s", {START - 5.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]',
+            ]
+        )
+        + "\n"
     )
     request_metrics.restore(path)
     assert [row[3] for row in request_metrics.SAMPLES] == [1.0]
-    assert request_metrics.report(1.0)["coverage"]["lost"] == [{"start": START - 5.0, "end": START}]
+    coverage = request_metrics.report(1.0)["coverage"]
+    assert coverage["lost"] == [{"start": START - 5.0, "end": START}]
+    assert coverage["held_since"] == START - 10.0
 
 
 def test_reload_persists_a_stop_before_exec(tmp_path, now):
@@ -221,3 +244,44 @@ def test_endpoint_refuses_bad_reader_queries(now, metrics_url, query):
     with pytest.raises(HTTPError) as refused:
         urlopen(f"{metrics_url}/api/v1/metrics?hours=1&{query}")
     assert refused.value.code == 400
+
+
+@pytest.mark.parametrize(
+    ("args", "query"),
+    [
+        (["--writes"], "hours=24.0&view=writes&limit=1000"),
+        (["--end", "5"], "hours=24.0&end=5.0"),
+        (["--writes", "--limit", "10000", "--hours", "1"], "hours=1.0&view=writes&limit=10000"),
+    ],
+)
+def test_command_builds_the_reader_query(monkeypatch, capsys, args, query):
+    calls = []
+
+    def read(url, timeout):
+        calls.append((url, timeout))
+        return io.StringIO("{}")
+
+    monkeypatch.setattr(request_metrics, "urlopen", read)
+    request_metrics.main([*args, "--url", "http://example:1"])
+    assert calls == [(f"http://example:1/api/v1/metrics?{query}", 10)]
+
+
+@pytest.mark.parametrize(
+    ("args", "message"),
+    [
+        (["--end", "nan"], "end must be a finite epoch time"),
+        (["--limit", "0"], "limit must be between 1 and 10000"),
+        (["--limit", "10001"], "limit must be between 1 and 10000"),
+    ],
+)
+def test_command_refuses_bad_reader_arguments(monkeypatch, capsys, args, message):
+    monkeypatch.setattr(request_metrics, "urlopen", lambda *args, **kwargs: pytest.fail("no request"))
+    with pytest.raises(SystemExit):
+        request_metrics.main(args)
+    assert capsys.readouterr().err.splitlines()[-1].endswith(f"error: {message}")
+
+
+def test_server_keeps_serving_when_the_journal_cannot_be_read(tmp_path, now, capsys):
+    server.metrics_journal(request_metrics.restore, tmp_path)
+    assert request_metrics.JOURNAL is None
+    assert capsys.readouterr().err.startswith("request metrics journal: ")
