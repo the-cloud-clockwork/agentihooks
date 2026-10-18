@@ -8,6 +8,7 @@ import json
 import math
 import os
 import socket
+import statistics
 import subprocess
 import sys
 import threading
@@ -39,6 +40,10 @@ READS_PER_SECOND = 1.0
 WRITE_P95_S = 2.0
 CPU_CORES = 1.0
 CPU_WINDOW_S = 10
+RESOURCE_WARMUP_S = 20
+RESOURCE_WINDOW_S = 60
+THREAD_GROWTH = 8
+RSS_GROWTH_KIB = 65_536
 MIN_WRITES = 0.9
 SERVER_WAIT_S = 60.0
 ALERT_QUIET_MS = 3_600_000
@@ -47,6 +52,10 @@ BUDGETS = {
     "WRITE_P95_S": min,
     "CPU_CORES": min,
     "CPU_WINDOW_S": min,
+    "RESOURCE_WARMUP_S": min,
+    "RESOURCE_WINDOW_S": max,
+    "THREAD_GROWTH": min,
+    "RSS_GROWTH_KIB": min,
     "LEDGER_BYTES": max,
     "CLIENTS": max,
     "LIVE_PEAK_WRITES_PER_MINUTE": max,
@@ -152,6 +161,31 @@ def p95_or_none(samples: list[float]) -> float | None:
 def cpu_seconds(pid: int) -> float:
     fields = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()
     return (int(fields[11]) + int(fields[12])) / os.sysconf("SC_CLK_TCK")
+
+
+def server_resources(pid: int) -> tuple[int, int]:
+    fields = dict(line.split(":", 1) for line in Path(f"/proc/{pid}/status").read_text().splitlines())
+    return int(fields["Threads"]), int(fields["VmRSS"].split()[0])
+
+
+def resource_verdict(samples: list[tuple[float, int, int]]) -> list[str]:
+    if not samples:
+        return [f"server resource sampling did not cover {RESOURCE_WINDOW_S}s after warmup"]
+    warmed = [sample for sample in samples if sample[0] >= samples[0][0] + RESOURCE_WARMUP_S]
+    if len(warmed) < 3 or warmed[-1][0] - warmed[0][0] < RESOURCE_WINDOW_S:
+        return [f"server resource sampling did not cover {RESOURCE_WINDOW_S}s after warmup"]
+    width = (warmed[-1][0] - warmed[0][0]) / 3
+    windows = [[sample for sample in warmed if min(int((sample[0] - warmed[0][0]) / width), 2) == n] for n in range(3)]
+    if not all(windows):
+        return ["server resource sampling missed a growth window"]
+    problems = []
+    for index, name, limit in ((1, "threads", THREAD_GROWTH), (2, "RSS", RSS_GROWTH_KIB)):
+        first, middle, last = [statistics.median(sample[index] for sample in window) for window in windows]
+        if first < middle < last and last - first > limit:
+            problems.append(
+                f"server {name} kept growing: medians {first:g}, {middle:g}, {last:g}; growth budget {limit}"
+            )
+    return problems
 
 
 def write_every() -> float:
@@ -282,17 +316,20 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
 
 def sample_cpu(pid: int, deadline: float, results: dict) -> None:
     try:
-        while time.monotonic() < deadline:
-            results["cpu"].append((time.monotonic(), cpu_seconds(pid)))
+        while True:
+            at = time.monotonic()
+            results["cpu"].append((at, cpu_seconds(pid)))
+            results["resources"].append((at, *server_resources(pid)))
+            if at >= deadline:
+                break
             time.sleep(1)
-        results["cpu"].append((time.monotonic(), cpu_seconds(pid)))
-    except Exception as exc:  # a lost sample leaves the CPU budget unproven
-        results["errors"].append(f"cpu sampler: {type(exc).__name__}: {exc}")
+    except Exception as exc:
+        results["errors"].append(f"server sampler: {type(exc).__name__}: {exc}")
 
 
 def load(port: int, token: str, pid: int, seconds: float) -> dict:
     base = f"http://127.0.0.1:{port}"
-    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": []}
+    results = {"writes": [], "reads": [], "item_reads": [], "errors": [], "cpu": [], "resources": []}
     apis = []
     for n in range(CLIENTS):
         name = f"ci@ab0000-{n:04d}"
@@ -337,6 +374,7 @@ def run(folder: Path) -> tuple[list[str], float | None]:
     writes, cores = results["writes"], busiest_window(results["cpu"])
     expected = CLIENTS * math.ceil(seconds / write_every())
     problems = verdict(writes, expected, cores, results["errors"])
+    problems.extend(resource_verdict(results["resources"]))
     item_reads, expected_reads = results["item_reads"], CLIENTS * math.ceil(seconds * READS_PER_SECOND)
     if len(item_reads) < MIN_WRITES * expected_reads:
         problems.append(f"{len(item_reads)} single resource reads completed of {expected_reads} expected")
@@ -360,7 +398,13 @@ def run(folder: Path) -> tuple[list[str], float | None]:
                 "item_read_p95_s": round(p95(item_reads), 3) if item_reads else None,
                 "busiest_cores": None if cores is None else round(cores, 3),
                 "errors": len(results["errors"]),
-                "budget": {"write_p95_s": WRITE_P95_S, "cores": CPU_CORES},
+                "resources": results["resources"],
+                "budget": {
+                    "write_p95_s": WRITE_P95_S,
+                    "cores": CPU_CORES,
+                    "thread_growth": THREAD_GROWTH,
+                    "rss_growth_kib": RSS_GROWTH_KIB,
+                },
             }
         ),
         flush=True,
@@ -394,6 +438,9 @@ def budgets(source: str) -> dict:
         and isinstance(node.targets[0], ast.Name)
         and node.targets[0].id in BUDGETS
     }
+    legacy = {"RESOURCE_WARMUP_S": 20, "RESOURCE_WINDOW_S": 60, "THREAD_GROWTH": 8, "RSS_GROWTH_KIB": 65_536}
+    if not set(legacy).intersection(found):
+        found.update(legacy)
     if missing := sorted(set(BUDGETS) - set(found)):
         sys.exit(f"the base gate assigns no {', '.join(missing)}")
     return found

@@ -26,7 +26,19 @@ ORDER = (
     "edits",
     "notices",
 )
-ORDER += ("outline", "folds", "layout", "chat", "lifecycle", "swarm", "architecture", "controls", "events", "main")
+ORDER += (
+    "outline",
+    "folds",
+    "layout",
+    "chat",
+    "lifecycle",
+    "swarm",
+    "hives",
+    "architecture",
+    "controls",
+    "events",
+    "main",
+)
 
 
 def serve_modules(target, ledger=None, swarm=None):

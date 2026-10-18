@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_fence__mutmut_68:09ff8878abe2ae6cf7d861267a42bac6e07cc9b06be10f8fcec2b120bb2018e2": {
+    "reader": "Standards",
+    "reason": "SQLite SQL keywords, identifiers and trigger names are case insensitive; changed error message literals remain unchanged."
+  }
+}

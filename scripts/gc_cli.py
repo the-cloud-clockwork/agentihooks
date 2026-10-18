@@ -28,8 +28,12 @@ def _parser() -> argparse.ArgumentParser:
     gc.add_argument("--json", action="store_true", help="Print the full report as JSON")
     gc.add_argument("--path", default="", help="Only report findings under this path")
     gc.add_argument("--enforce", action="store_true", help="Act on findings that are due: remove, snapshot, archive")
-    gc.add_argument("--install-timer", action="store_true", help="Install and enable the hourly systemd user timer")
-    gc.add_argument("--remove-timer", action="store_true", help="Disable and remove the systemd user timer")
+    gc.add_argument(
+        "--install-timer", action="store_true", help="Schedule the hourly sweep on the agentihooks scheduler"
+    )
+    gc.add_argument(
+        "--remove-timer", action="store_true", help="Remove the hourly sweep from the agentihooks scheduler"
+    )
     lease = sub.add_parser("lease", help="Record the calling agent session as owner of a worktree or scratch dir")
     lease.add_argument("path")
     lease.add_argument("--kind", choices=("worktree", "ephemeral", "scratch"), default="worktree")

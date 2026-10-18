@@ -297,8 +297,8 @@ def test_a_tick_with_pending_items_never_types_into_the_master_pane(inbox, harne
 def test_a_claude_pane_takes_its_items_through_the_inbox_channel_never_a_typed_wake(inbox):
     claude = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", harness="claude")
     codex = AgentRecord("sw-eng-2", "eng", "t2", pane_id="p2", harness="codex")
-    item = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
-    other = inbox.send(MASTER_NAME, "sw-eng-2", "review mine")
+    item = inbox.send("sw-eng-4", "sw-eng-1", "review my diff")
+    other = inbox.send("sw-eng-4", "sw-eng-2", "review mine")
     herdr = FakeHerdr({"p1": "idle", "p2": "idle"})
     run(inbox, herdr, FakeLedger(), sent_at(item) + 1, [claude, codex, AGENTS[1]])
     assert herdr.prompts == [("p2", wake.WAKE_TEXT)]
@@ -353,6 +353,48 @@ SEATED = [
     AgentRecord("sw-eng-4", "eng", "t2", pane_id="p4", seat="eng-2@sw"),
     AgentRecord(MASTER_NAME, MASTER, MASTER, pane_id="pm", seat="master@sw"),
 ]
+
+
+def no_wake_session(monkeypatch):
+    monkeypatch.setattr(
+        "scripts.inbox.addresses.get_active_sessions", lambda **kwargs: {"desk": {"name": "operator-desk"}}
+    )
+
+
+def assert_raised_to_the_operator_only(inbox, item, ledger):
+    assert inbox.inbox("master@sw") == [] and inbox.inbox(MASTER_NAME) == []
+    assert events(inbox, item.id) == ["escalated_operator"] and len(ledger.followups) == 1
+
+
+@pytest.mark.parametrize("agents", [AGENTS, SEATED], ids=["unseated", "seat never occupied"])
+def test_the_masters_own_message_nobody_reads_goes_to_the_operator_never_back_to_the_master(inbox, monkeypatch, agents):
+    no_wake_session(monkeypatch)
+    item = inbox.send(MASTER_NAME, "operator-desk", "need a decision")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, agents)
+    assert_raised_to_the_operator_only(inbox, item, ledger)
+
+
+@pytest.mark.parametrize("sender", [MASTER_NAME, "sw-master-0"])
+def test_a_master_seat_message_nobody_reads_goes_to_the_operator_never_back_to_its_seat(inbox, monkeypatch, sender):
+    no_wake_session(monkeypatch)
+    inbox.seats.occupy("master@sw", "sw-master-0", at=1)
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=2)
+    earlier = AgentRecord("sw-master-0", "eng", "t9", seat="eng-3@sw")
+    item = inbox.send(sender, "operator-desk", "need a decision")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, [*SEATED, earlier])
+    assert_raised_to_the_operator_only(inbox, item, ledger)
+
+
+def test_an_agent_message_nobody_reads_still_goes_to_its_master_seat(inbox, monkeypatch):
+    no_wake_session(monkeypatch)
+    inbox.seats.occupy("master@sw", MASTER_NAME, at=1)
+    item = inbox.send("sw-eng-1", "operator-desk", "need a decision")
+    ledger = FakeLedger()
+    run(inbox, FakeHerdr({}), ledger, sent_at(item) + W, SEATED)
+    [raised] = inbox.inbox("master@sw")
+    assert item.id in raised.text and events(inbox, item.id) == ["escalated_master"] and ledger.followups == []
 
 
 def test_an_item_for_a_seat_wakes_the_pane_of_its_occupant(inbox):

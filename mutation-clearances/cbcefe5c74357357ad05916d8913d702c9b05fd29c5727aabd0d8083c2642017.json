@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_main__mutmut_53:2ebb7d7a8de7c0341dac5ed09d4c509afa0f4de7c7cb70d18561709c484d2623": {
+    "reader": "Standards",
+    "reason": "The default domain imports the same already loaded ledger_core module object as ledger_server.core and preserves lock and settings identity."
+  }
+}

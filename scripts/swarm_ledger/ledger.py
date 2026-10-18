@@ -128,7 +128,10 @@ AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
+    "contract": (
+        ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_TIMES + ledger_kinds.CONTRACT_FLAGS,
+        "contract.must=M contract.check=C",
+    ),
 }
 
 
@@ -137,8 +140,13 @@ def base():
 
 
 def credentials(slug, service=False):
+    from scripts.swarm_ledger.authority_context import tick_headers
+
     who = Who.from_env()
     if ledger_link.remote():
+        tick = tick_headers(slug)
+        if tick:
+            return tick
         controller = os.environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
         if controller and not who.pinned:
             return {"X-Controller-Credential": controller}
@@ -167,7 +175,9 @@ def replay(slug, ops, agent, service):
 
 
 def derived_token(slug, name):
-    secret = os.environ.get("SWARM_SECRET")
+    from scripts.swarm_ledger.authority_context import secret as trusted_secret
+
+    secret = trusted_secret()
     return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
