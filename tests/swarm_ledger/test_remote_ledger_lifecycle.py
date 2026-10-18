@@ -1,5 +1,8 @@
+import io
+import json
 import os
 import threading
+import urllib.error
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +11,7 @@ from scripts.swarm import lease
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.repository import bin_storage
-from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, core, server
+from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, core, send, server
 from tests.swarm_ledger.test_ledger_authority import cli_ledger as ledger
 from tests.swarm_ledger.test_ledger_authority import live as authority_live
 from tests.swarm_ledger.test_remote_ledger_client import hive as remote_hive
@@ -119,3 +122,41 @@ def test_remote_agent_can_reopen_but_cannot_bin(live, hive, mode):
         assert client.binned(SLUG) is False
         with pytest.raises(LedgerRefused, match="403"):
             client.bin_closed(SLUG, core.now_ms() + 1)
+
+
+@pytest.mark.parametrize(
+    "failure", [OSError("offline"), urllib.error.HTTPError("", 500, "outage", {}, io.BytesIO(b"outage"))]
+)
+def test_remote_lifecycle_outages_use_swarm_errors(live, failure):
+    with (
+        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
+        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": live["admin"]}),
+        patch("urllib.request.urlopen", side_effect=failure),
+        pytest.raises(SwarmError),
+    ):
+        LedgerClient().bin_closed(SLUG, 1)
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {"action": "delete"},
+        {"action": "bin_closed"},
+        {"action": "bin_closed", "closed_at": 0},
+        {"action": "bin_closed", "closed_at": True},
+        {"action": "restore", "closed_at": 1},
+        {"action": "binned", "controller_epoch": "7"},
+    ],
+)
+def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
+    before = bin_storage.entries()
+    status, _, _ = send(
+        live,
+        "POST",
+        f"/api/v1/ledgers/{SLUG}/lifecycle/actions",
+        json.dumps(payload).encode(),
+        **{"X-Ledger-Token": live["admin"]},
+    )
+    assert status == 400
+    assert bin_storage.entries() == before

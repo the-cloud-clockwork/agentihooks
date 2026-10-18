@@ -58,8 +58,6 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
 def lifecycle(server: ModuleType, principal: str, slug: str, payload: dict) -> dict:
     from scripts.swarm_ledger.repository import bin_storage
 
-    if principal:
-        raise APIError(403, "forbidden", "Ledger lifecycle actions need the operator or controller credential")
     schemas.validate(
         {
             "oneOf": [
@@ -86,6 +84,8 @@ def lifecycle(server: ModuleType, principal: str, slug: str, payload: dict) -> d
         },
         payload,
     )
+    if principal and payload["action"] == "bin_closed":
+        raise APIError(403, "forbidden", "Conditional binning needs the operator or controller credential")
     if "controller_epoch" in payload:
         from scripts.swarm.store import SwarmError
 
