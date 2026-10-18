@@ -30,7 +30,7 @@ def health_records(redis, slug):
 def _batched(redis, keys, command):
     found = []
     for start in range(0, len(keys), BATCH):
-        pipe = redis.pipeline(transaction=False)
+        pipe = redis.pipeline()
         for key in keys[start : start + BATCH]:
             command(pipe, key)
         found += pipe.execute()

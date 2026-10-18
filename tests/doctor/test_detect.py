@@ -64,6 +64,18 @@ def test_the_detectors_of_one_pass_run_side_by_side():
     assert detect.collect({"spawn": waits, "health": waits, "ci": waits}) == ([STALE, STALE, STALE], [])
 
 
+def test_every_detector_of_a_wide_pass_runs_at_once():
+    import threading
+
+    met = threading.Barrier(40, timeout=5)
+
+    def waits():
+        met.wait()
+        return [STALE]
+
+    assert detect.collect({f"d{n}": waits for n in range(40)}) == ([STALE] * 40, [])
+
+
 def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
     from scripts.doctor import spawn_read, spawns
 

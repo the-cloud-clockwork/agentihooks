@@ -210,7 +210,7 @@ def record(
 ) -> dict:
     base = Path(home or SWARM_HOME) / slug
     state = registry.load(base / STATE_FILE)
-    with ThreadPoolExecutor(max_workers=1) as pool:
+    with ThreadPoolExecutor() as pool:
         reading = pool.submit(registry.read, slug, agents, get, state, budget.active_seconds, budget.active_page, clock)
         traces, coverage, lost = history(slug, get, base / CACHE_DIR, budget, clock)
         active, failures = reading.result()
