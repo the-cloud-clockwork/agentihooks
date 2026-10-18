@@ -294,17 +294,19 @@ def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path)
     (workspace / "collected.json").write_text(json.dumps([common, first]))
     (other / "collected.json").write_text(json.dumps([common, second]))
     step = next(step for step in steps if step.get("name") == "Deselect the reused tests")
+    env = {
+        **os.environ,
+        "RUNNER_TEMP": str(runner),
+        "GITHUB_WORKSPACE": str(workspace),
+        "GITHUB_EVENT_NAME": "merge_group",
+        "QUEUE_BOTH_VERSIONS": "true",
+        "PYTHON_PATH": sys.executable,
+        "PYTHONPATH": str(root),
+    }
     result = subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         cwd=workspace,
-        env={
-            **os.environ,
-            "RUNNER_TEMP": str(runner),
-            "GITHUB_WORKSPACE": str(workspace),
-            "GITHUB_EVENT_NAME": "merge_group",
-            "PYTHON_PATH": sys.executable,
-            "PYTHONPATH": str(root),
-        },
+        env=env,
         capture_output=True,
         text=True,
     )
@@ -317,3 +319,14 @@ def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path)
     for artifact in ("reused-3.12", "reused-tests-3.12"):
         assert "steps.plan.outputs.reused" in uploads[artifact]["if"]
         assert "merge_group" in uploads[artifact]["if"]
+    (other / "reused.json").unlink()
+    (other / "collected.json").unlink()
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=workspace,
+        env={**env, "QUEUE_BOTH_VERSIONS": "false"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not (other / "reused.json").exists()
