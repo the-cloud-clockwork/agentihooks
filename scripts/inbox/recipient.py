@@ -40,6 +40,6 @@ def _owners(agents, task: str, tasks: list[dict]) -> list[dict]:
         return []
     return [
         {"name": agent.name, "seat": agent.seat, "task": agent.task, "harness": agent.harness}
-        for overlap in _sharing(mine, rows)
+        for overlap in _sharing(mine, rows, agents.values())
         if (agent := agents.get(overlap["claimant"])) and agent.task == overlap["task"]
     ]

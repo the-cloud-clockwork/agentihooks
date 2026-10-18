@@ -842,11 +842,17 @@ def _shared(mine, theirs):
     return sorted({b if _nested(a, b) else a for a, b in pairs if _nested(a, b) or _nested(b, a)})
 
 
-def _sharing(task, rows):
+def _sharing(task, rows, agents):
     mine = task.get("territory") or []
+    owners = {a.task: a.name for a in agents if not _ended(a, rows)}
     running = [t for t in rows.values() if t.get("state") in ACTIVE and t["id"] != task["id"]]
     return [
-        {"task": t["id"], "claimant": t.get("claimed_by") or "", "areas": areas}
+        {
+            "task": t["id"],
+            "claimant": owners.get(t["id"], ""),
+            "areas": areas,
+            **({"checks": t["state"] == "pr"} if t["id"] not in owners else {}),
+        }
         for t in running
         if (areas := _shared(mine, t.get("territory") or []))
     ]
@@ -960,7 +966,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             task["reclaim"] = continuation.resolve(config.repo, task, rows, lives, {}, reclaim)
             store.put_reclaim(slug, name, task["reclaim"])
         task["stack_base"] = _stack_base(task, rows, config.repo)
-        task["overlaps"] = _sharing(task, rows)
+        task["overlaps"] = _sharing(task, rows, [a for a in store.agents(slug) if runtime.reported(a)])
         task["group"] = [
             {key: rows[m][key] for key in ("id", "title", "description")}
             for m in task.get("group_members") or []

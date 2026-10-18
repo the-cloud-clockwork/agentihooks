@@ -66,33 +66,62 @@ def inbox_receivers(store, inbox, slug, items):
     operator, live while its agent runs."""
     from scripts.doctor.inbox import Receiver, reader
     from scripts.doctor.priming import doctor_slug
+    from scripts.inbox.seats import _occupancy
 
     slugs, names = (slug, doctor_slug(slug)), NameRegistry(inbox.redis)
     agents = {a.name: a for s in slugs for a in store.agents(s) if a.state != FINISHED}
+    addresses = sorted({item["address"] for item in items})
+    owners = names.slugs_of(addresses)
+    scoped = SimpleNamespace(slug_of=lambda name: owners[name])
+    reachable = {
+        address for address in addresses if address == OPERATOR or any(of_swarm(address, s, scoped) for s in slugs)
+    }
+    takers = {reader(item) for item in items if item["address"] in reachable}
+    seats = sorted(address for address in reachable | takers if is_seat(address))
+    seat_slugs = sorted({address.split("@", 1)[1] for address in seats})
+    with inbox.redis.pipeline() as pipe:
+        for address in seats:
+            pipe.hgetall(inbox.seats.key(address))
+        for s in seat_slugs:
+            pipe.hgetall(store.key(s, "config"))
+        rows = pipe.execute()
+    occupancies = dict(zip(seats, map(_occupancy, rows[: len(seats)])))
+    configs = dict(zip(seat_slugs, rows[len(seats) :]))
+    held = {address: occupancies[address].occupant if address in occupancies else address for address in addresses}
+    resolved = names.resolve_many(sorted(set(held.values()) | {reader(item) for item in items}))
+    departed = inbox.seats.exits(list(agents))
     found = {}
     for item in items:
         address, taker = item["address"], reader(item)
-        if address != OPERATOR and not any(of_swarm(address, s, names) for s in slugs):
+        if address != OPERATOR and not any(of_swarm(address, s, scoped) for s in slugs):
             found[address] = Receiver(scoped=False)
             continue
-        held = inbox.seats.occupant(address).occupant if is_seat(address) else address
-        for key, name in ((address, held), (taker, taker)):
+        for key, name in ((address, held[address]), (taker, taker)):
             if key and key not in found:
-                agent = agents.get(names.resolve(name))
-                found[key] = _inbox_receiver(store, inbox, key, agent)
+                agent = agents.get(resolved[name])
+                found[key] = _inbox_receiver(key, agent, occupancies.get(key), departed, configs)
     return found
 
 
-def _inbox_receiver(store, inbox, address, agent):
+def _inbox_receiver(address, agent, seat, departed, configs):
     from scripts.doctor.inbox import Receiver
     from scripts.inbox import exits
 
-    if agent and (not is_seat(address) or not inbox.seats.left(agent.name, address)):
+    if agent and (not is_seat(address) or departed[agent.name].get("generation") != seat.generation):
         return Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS, occupant=agent.name, harness=agent.harness)
     if not is_seat(address):
         return Receiver()
-    slug = address.split("@", 1)[1]
-    config = store.config(slug) if store.redis.exists(store.key(slug, "config")) else None
+    raw = configs[address.split("@", 1)[1]]
+    config = (
+        SimpleNamespace(
+            state=raw["state"],
+            max_eng=int(raw["max_eng"]),
+            max_ci=int(raw["max_ci"]),
+            max_plan=int(raw.get("max_plan", 1)),
+        )
+        if raw
+        else None
+    )
     waiting = config is None or (config.state != "stopped" and not exits.no_successor(address, config))
     return Receiver(seat_wait=waiting)
 

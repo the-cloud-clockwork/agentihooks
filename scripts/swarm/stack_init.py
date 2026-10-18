@@ -52,6 +52,11 @@ Paint = Callable[[str, str], str]
 def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentihooks swarm init", description=__doc__)
     parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for every service to be healthy")
+    parser.add_argument(
+        "--prepare-clients",
+        action="store_true",
+        help="verify bundle credentials on existing local Redis and activate clients",
+    )
     return parser
 
 
@@ -161,6 +166,10 @@ def main(argv: list[str]) -> int:
 
 def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable, out: TextIO) -> int:
     args = parser().parse_args(argv)
+    if args.prepare_clients:
+        from scripts.swarm.stack_clients import prepare
+
+        return prepare(stack_home(environ), environ, out)
     paint = painter(out, environ)
     if problem := docker_problem(run):
         failed(out, paint, *problem)

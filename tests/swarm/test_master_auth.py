@@ -105,12 +105,13 @@ def test_master_prefers_a_valid_login_even_after_a_token_handoff(tmp_path, login
 @pytest.mark.parametrize("kind", ["subscription", "api", "interactive"])
 @pytest.mark.parametrize("lane", ["master", "eng"])
 @pytest.mark.parametrize("desired", ["interactive", ""])
-def test_health_reports_only_master_fallback_and_clears_after_move_back(kind, lane, desired):
+@pytest.mark.parametrize("seat", ["master@proof", "master-2@proof", "master-3@proof"])
+def test_health_reports_only_master_fallback_and_clears_after_move_back(kind, lane, desired, seat):
     from scripts.swarm.health.findings import Limits, findings
 
     agent = {
         "name": "agent",
-        "seat": "master@proof",
+        "seat": seat,
         "lane": lane,
         "task": lane,
         "state": "working",
@@ -118,7 +119,7 @@ def test_health_reports_only_master_fallback_and_clears_after_move_back(kind, la
         "desired_route_kind": desired,
     }
     found = [f for f in findings({}, [agent], {}, Limits()) if f.kind == "master-fallback-auth"]
-    if lane == "master" and desired == "interactive" and kind != "interactive":
+    if lane == "master" and seat == "master@proof" and desired == "interactive" and kind != "interactive":
         assert len(found) == 1
         assert found[0].id == "master-fallback-auth/master@proof"
         assert found[0].summary == "master on fallback auth, phone access lost"
@@ -262,7 +263,8 @@ def test_desired_route_survives_storage_outside_the_strict_projection():
         ("eng", "claude", None, None),
     ],
 )
-def test_only_a_claude_master_without_an_ordered_route_desires_the_login(tmp_path, lane, harness, route, desired):
+@pytest.mark.parametrize("seat", ["master@proof", "master-2@proof", "master-3@proof", ""])
+def test_only_a_claude_master_without_an_ordered_route_desires_the_login(tmp_path, lane, harness, route, desired, seat):
     from scripts.routing import native_login
     from scripts.swarm.runtime import HerdrRuntime
     from tests.swarm.profile_fixture import validated
@@ -282,8 +284,9 @@ def test_only_a_claude_master_without_an_ordered_route_desires_the_login(tmp_pat
         lanes={lane: {"agent": harness}},
         autonomy="delegate",
     )
-    task = {"id": lane, "title": "proof", **({"route_kind": route} if route else {})}
-    assert runtime.spawn(config, lane, "agent", task).desired_route_kind == desired
+    task = {"id": lane, "title": "proof", "seat": seat, **({"route_kind": route} if route else {})}
+    expected = "" if lane == "master" and seat in ("master-2@proof", "master-3@proof") else desired
+    assert runtime.spawn(config, lane, "agent", task).desired_route_kind == expected
 
 
 @pytest.mark.parametrize("placed,kept", [("", ""), ("interactive", "interactive"), (None, "interactive")])
@@ -405,6 +408,5 @@ def test_a_resumed_master_keeps_its_desired_route(tmp_path):
 
     runtime, config, agent, _ = _resuming(tmp_path, "c0ffee")
     config.slug = "proof"
-    config.master_claude_login = False
     master = replace(agent, lane="master", task="master", route_kind="subscription", desired_route_kind="interactive")
     assert runtime.resume(config, master, "resume").desired_route_kind == "interactive"
