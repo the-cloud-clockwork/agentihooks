@@ -174,7 +174,7 @@ class InboxStore:
         sender, address = self.names.resolve(sender), self.names.resolve(address)
         home = self.home(address)
         if home != self.world and not self.world:
-            routed = InboxStore(self.redis, persist=self.persist, session_id=self.session_id, world=home)
+            routed = InboxStore(self.redis, persist=self.persist, world=home)
             return routed.send(sender, address, text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(

@@ -90,6 +90,22 @@ def test_a_member_beat_lands_below_its_own_hive_key_and_the_controller_reads_it_
     assert idle.waited(redis, "fixture", name) == 60
 
 
+def test_the_controller_records_a_member_agents_beat_prompt_and_wait_below_its_member(redis, swarm):
+    from scripts.swarm import idle
+
+    name = place(swarm, "m1")
+    join(redis, "m1")
+    idle.beat(redis, "fixture", name, "idle", 5)
+    idle.prompted(redis, "fixture", name, 6)
+    idle.declare_wait(redis, "fixture", name, 100, "checks", 7)
+
+    own = f"{ROOT}:hive:m1:swarm:fixture"
+    assert json.loads(redis.get(f"{own}:heartbeat:{name}")) == {"state": "idle", "at": 5}
+    assert redis.get(f"{own}:prompt:{name}") == "6"
+    assert json.loads(redis.get(f"{own}:wait:{name}"))["reason"] == "checks"
+    assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
+
+
 def test_a_member_knows_its_own_agents_without_reading_member_records(redis, swarm, monkeypatch):
     from scripts.hive import scope
 
@@ -117,6 +133,12 @@ def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm,
     assert redis.get(f"{own}:woke:{name}") == "50"
     assert idle.woke(redis, "fixture", name) == 50
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
+
+
+def test_no_agent_has_a_member_host_while_no_member_has_joined(redis, swarm):
+    from scripts.hive import scope
+
+    assert scope.host(redis, "fixture", place(swarm, "m1")) == ""
 
 
 @pytest.mark.parametrize("hive", ["", "other"])
@@ -213,13 +235,14 @@ def test_a_controller_send_to_an_agent_on_a_member_lands_in_that_members_keys(re
 
     name = place(swarm, "m1")
     join(redis, "m1")
-    inbox = InboxStore(redis)
+    persisted = []
+    inbox = InboxStore(redis, persist=persisted.append)
     item = inbox.send(
         "master@fixture", "eng-1@fixture", "next step", ref="fixture:3:note", fyi=True, task="t2", item_id="given"
     )
 
-    assert inbox.session_id == ""
     assert item.id == "given"
+    assert len(persisted) == 1
     assert not redis.exists(f"{ROOT}:inbox:item:{item.id}")
     stored = InboxStore(redis, world="m1").get("given")
     assert (stored.sender, stored.address, stored.ref, stored.fyi, stored.task) == (
