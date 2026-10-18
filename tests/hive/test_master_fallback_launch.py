@@ -32,7 +32,9 @@ def test_successor_replaces_saved_fallback_auth_with_the_best_login(setup):
     from scripts.swarm import tick
 
     master(setup)
-    envelope = {"launch": {"profile": "master", "harness": "claude", "account": "account"}}
+    envelope = {
+        "launch": {"profile": "master", "harness": "claude", "account": "account", "model": "opus", "effort": "high"}
+    }
     setup.store.put_handoff(setup.config.slug, "master", "continue the master", "master@fixture", envelope)
     task = tick.primed(setup.store, setup.config.slug, "master@fixture", {"id": "master"})
     assert task["handoff_envelope"] == envelope
