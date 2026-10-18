@@ -47,12 +47,14 @@ def test_a_claimable_task_has_no_hold():
 def test_only_claimable_unclaimed_urgent_tasks_raise_a_finding(store):
     from scripts.swarm.health import urgent_hold
 
-    found = doc([
-        task("dependency", state="claimed", branch="engineer-live"),
-        task("waiting", rank="urgent", depends_on=["dependency"]),
-        task("phase", phase="p2", rank="urgent"),
-        task("ready", rank="urgent"),
-    ])
+    found = doc(
+        [
+            task("dependency", state="claimed", branch="engineer-live"),
+            task("waiting", rank="urgent", depends_on=["dependency"]),
+            task("phase", phase="p2", rank="urgent"),
+            task("ready", rank="urgent"),
+        ]
+    )
     urgent_hold.observe(store, SLUG, found, 0)
     urgent_hold.observe(store, SLUG, found, 11 * MINUTE)
     assert [finding.id for finding in urgent_hold.findings(store, SLUG)] == ["urgent-unclaimable/ready"]
