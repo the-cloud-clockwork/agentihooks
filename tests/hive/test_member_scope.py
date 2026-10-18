@@ -310,12 +310,13 @@ def test_a_controller_delivers_a_member_inbox_through_that_members_owner_key(red
     name = place(swarm, "m1")
     join(redis, "m1")
     world = InboxStore(redis, world="m1")
-    world.send("operator", name, "hello")
+    sent = world.send("operator", name, "hello")
     dispatcher = Dispatcher(world)
     owned = f"{ROOT}:hive:m1:inbox:owner:{name}"
 
     dispatcher.own(name, "pump", ttl_s=5)
     assert dispatcher.owner(name) == "pump"
+    assert world.deliver(sent.id, name) is None
     assert dispatcher.renew(name, "pump", ttl_s=50)
     assert redis.ttl(owned) == 50
     [delivery] = dispatcher.reserve(name, "pump")
