@@ -77,6 +77,10 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     calls = []
 
     def launch(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         calls.append(argv)
         return SimpleNamespace(
             returncode=0,

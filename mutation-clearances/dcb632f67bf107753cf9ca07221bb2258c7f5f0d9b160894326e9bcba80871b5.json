@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/runtime.py:scripts.swarm.runtime.xǁHerdrRuntimeǁspawn__mutmut_38:0df240568c2e6a18ed2dbca18d80748f1d07b68a65c6a12d2c9cb799e7c64cf7": {
+    "reader": "standards_reader",
+    "reason": "The uppercase interactive reason is only compared with ALL_FULL, which it never equals, passes through the interactive bypass of _quota_choice unchanged, and agent_choice.choice_kind maps it to other, so the placement is identical."
+  }
+}

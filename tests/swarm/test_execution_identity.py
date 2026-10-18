@@ -497,6 +497,34 @@ def test_execution_records_saved_before_hive_ownership_load_with_an_empty_hive(s
     assert store.agents("fixture")[0].hive == ""
 
 
+def test_desired_route_survives_execution_updates_without_changing_the_legacy_projection(store, agent):
+    current = store.start_execution("fixture", replace(agent, desired_route_kind="interactive"))
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+    assert "desired_route_kind" not in json.loads(store.redis.hget(store.key("fixture", "agents"), current.name))
+    store.put_agent("fixture", replace(current, idle_ticks=2))
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+
+
+def test_desired_route_on_a_local_record_lives_in_its_own_hash(store, agent):
+    master = replace(agent, desired_route_kind="interactive")
+    routes = store.key("fixture", "desired-routes")
+    store.put_agent("fixture", master)
+    assert store.redis.hget(routes, master.name) == "interactive"
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+    store.put_agent("fixture", replace(master, desired_route_kind=""))
+    assert not store.redis.hexists(routes, master.name)
+    assert store.agents("fixture")[0].desired_route_kind == ""
+    store.put_agent("fixture", master)
+    store.drop_agent("fixture", master.name)
+    assert not store.redis.hexists(routes, master.name)
+
+
+def test_a_controller_admission_without_the_route_hash_reads_the_desired_route_from_its_execution(store, agent):
+    current = store.start_execution("fixture", replace(agent, desired_route_kind="interactive"))
+    store.redis.hdel(store.key("fixture", "desired-routes"), current.name)
+    assert store.agents("fixture")[0].desired_route_kind == "interactive"
+
+
 @pytest.mark.parametrize(
     "changes",
     [
