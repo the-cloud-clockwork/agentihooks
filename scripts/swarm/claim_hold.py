@@ -27,7 +27,7 @@ def hold(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
 def verification(task: dict) -> str:
     if task.get("awaiting") != "verify":
         return ""
-    at = (task.get("contract") or {}).get("after_at", "")
+    at = (task.get("contract") or {}).get("after_at")
     if not at or int(at) > time() * 1000:
         return "it waits for its post merge proof window or a master reopen"
     return ""

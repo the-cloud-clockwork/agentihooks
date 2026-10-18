@@ -42,7 +42,9 @@ def test_the_prompt_carries_the_proof_contract():
 
 
 def test_the_prompt_names_post_merge_command_proof():
-    assert "After merge, record --command and --output before swarm done." in build(contract={"after": "yes"})
+    assert prompt.contract_lines({"after": "yes"}) == [
+        "Proof contract. After merge, record --command and --output before swarm done."
+    ]
     assert "After merge, record" not in build(contract={"after": "no"})
 
 

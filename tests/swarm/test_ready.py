@@ -800,6 +800,8 @@ def test_post_merge_verification_waits_for_maturity_or_master_reopen(monkeypatch
     monkeypatch.setattr(claim_hold, "time", lambda: 10)
     task = {"awaiting": "verify", "contract": {"after": "yes", "after_at": "10001"}}
     assert claim_hold.hold(task, {}, {}, {}, "") == "it waits for its post merge proof window or a master reopen"
+    task["contract"].pop("after_at")
+    assert claim_hold.hold(task, {}, {}, {}, "")
     task["contract"]["after_at"] = ""
     assert claim_hold.hold(task, {}, {}, {}, "")
     task["contract"]["after_at"] = "10000"

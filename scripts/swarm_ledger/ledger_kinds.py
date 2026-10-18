@@ -36,7 +36,7 @@ def check(fields):
             or not all(isinstance(v, str) for v in value.values())
         ):
             raise ValueError(f"{key} must be an object of strings with keys among {allowed}")
-    at = fields.get("contract", {}).get("after_at", "")
+    at = fields.get("contract", {}).get("after_at")
     if at and (not at.isascii() or not at.isdigit()):
         raise ValueError("contract after_at must be Unix milliseconds or empty")
     for flag in CONTRACT_FLAGS:
