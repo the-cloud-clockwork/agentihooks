@@ -393,6 +393,8 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
+        if not _tickable(slug):
+            return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
@@ -473,17 +475,12 @@ def cmd_waits(store, args):
             list(pool.map(check, slugs))
 
 
-def _tick_slugs(store):
+def _tickable(slug):
     ledger = LedgerClient()
-    selected = []
-    for slug in store.slugs():
-        try:
-            if ledger.binned(slug) or ledger.closed(slug):
-                continue
-        except LedgerGone:
-            pass
-        selected.append(slug)
-    return selected
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
 
 
 @outage.guard_command
@@ -500,7 +497,7 @@ def cmd_tick(store, args):
             "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
             "and the host timer ticks every 60 seconds"
         )
-    slugs = _tick_slugs(store)
+    slugs = store.slugs()
     if slugs:
         _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL

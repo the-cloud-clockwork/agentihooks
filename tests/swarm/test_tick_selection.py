@@ -1,3 +1,4 @@
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
@@ -6,9 +7,10 @@ from scripts import herdr_gc, operator_env
 from scripts.swarm import cli
 
 
-@pytest.mark.parametrize("excluded", ["binned", "closed"])
-def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch, excluded):
+@pytest.mark.parametrize("excluded", ["binned", "closed", "unavailable", "slow"])
+def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch, excluded, capsys):
     ticked, checked = [], []
+    active_ticked = Event()
 
     def binned(slug):
         checked.append(("binned", slug))
@@ -17,6 +19,10 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
     def closed(slug):
         checked.append(("closed", slug))
         assert not (slug == "retired" and excluded == "binned")
+        if slug == "retired" and excluded == "unavailable":
+            raise RuntimeError("ledger unavailable")
+        if slug == "retired" and excluded == "slow":
+            assert active_ticked.wait(5)
         return slug == "retired"
 
     ledger = SimpleNamespace(binned=binned, closed=closed)
@@ -32,12 +38,14 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
         assert received is store
         assert scheduled is True
         ticked.append(slug)
+        active_ticked.set()
         return []
 
     monkeypatch.setattr(cli, "run_tick", run_tick)
     cli.cmd_tick(store, None)
     assert ticked == ["active"]
-    assert checked == (
+    assert ("retired: RuntimeError: ledger unavailable" in capsys.readouterr().err) is (excluded == "unavailable")
+    assert sorted(checked) == sorted(
         [("binned", "retired"), ("binned", "active"), ("closed", "active")]
         if excluded == "binned"
         else [("binned", "retired"), ("closed", "retired"), ("binned", "active"), ("closed", "active")]
@@ -57,5 +65,5 @@ def test_missing_ledgers_reach_the_existing_tick_diagnostic(monkeypatch, missing
 
     ledger = SimpleNamespace(binned=lambda slug: check("binned", slug), closed=lambda slug: check("closed", slug))
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
-    assert cli._tick_slugs(SimpleNamespace(slugs=lambda: ["missing"])) == ["missing"]
+    assert cli._tickable("missing") is True
     assert checked == (["binned"] if missing_at == "binned" else ["binned", "closed"])
