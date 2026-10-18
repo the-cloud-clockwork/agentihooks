@@ -73,9 +73,16 @@ def _estimates(durations: dict[str, float], collected: list[str]) -> dict[str, f
 
 def _combine(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--plans", nargs=2, required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--plans", nargs=2)
+    source.add_argument("--from-output", type=Path)
     args = parser.parse_args(argv)
-    plan = [leg for fragment in args.plans for leg in json.loads("[" + fragment + "]")]
+    if args.from_output:
+        outputs = dict(line.split("=", 1) for line in args.from_output.read_text().splitlines())
+        fragments = [outputs["queue_311"], outputs["queue_312"]]
+    else:
+        fragments = args.plans
+    plan = [leg for fragment in fragments for leg in json.loads("[" + fragment + "]")]
     if len(plan) > MAX_SHARDS:
         raise SystemExit(f"{len(plan)} queue jobs exceed the pool of {MAX_SHARDS}")
     peak = max(leg["predicted_seconds"] for leg in plan)

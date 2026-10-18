@@ -28,7 +28,6 @@ def pool(label):
 
 
 MOVED = {
-    ("test.yml", "queue-plan"): LIGHT,
     ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
     ("branch-lanes.yml", "grade"): LIGHT,
