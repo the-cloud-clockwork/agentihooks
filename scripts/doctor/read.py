@@ -45,7 +45,8 @@ def inbox_items(inbox, slug):
     raws = dict(zip(ids, _batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id)))))
     grouped = [sorted((_item(raws[item_id], item_id) for item_id in group), key=_order) for group in listed]
     named = sorted({name for group in grouped for item in group for name in (item.address, item.sender)})
-    names = SimpleNamespace(slug_of=NameRegistry(redis).slugs_of(named).__getitem__)
+    slugs = NameRegistry(redis).slugs_of(named)
+    names = SimpleNamespace(slug_of=lambda name: slugs[name])
     items = [
         item
         for group in grouped

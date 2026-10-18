@@ -256,7 +256,6 @@ class NameRegistry:
         return {name: alias or name for name, alias in zip(names, found)}
 
     def slugs_of(self, names):
-        """slug_of for many names in two reads."""
         resolved = self.resolve_many(names)
         parsed = {name: parse(current) for name, current in resolved.items()}
         codes = sorted({found.code for found in parsed.values() if found})
