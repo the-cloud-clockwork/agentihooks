@@ -54,18 +54,21 @@ def matches(root: Path, sources: list[str], text: str) -> list[dict]:
     return found
 
 
+def _is_ancestor(root: Path, older: str, newer: str) -> bool:
+    return not subprocess.run(["git", "merge-base", "--is-ancestor", older, newer], cwd=root, **GIT_OPTIONS).returncode
+
+
 def _delivered_base(root: Path, base: str, head: str) -> str:
     try:
         integrated = git(root, "merge-base", INTEGRATION, head)
     except subprocess.CalledProcessError:
         return base
-    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", base, integrated], cwd=root, **GIT_OPTIONS)
-    if ancestor.returncode:
-        return base
+    if not _is_ancestor(root, base, integrated):
+        return base if _is_ancestor(root, integrated, base) else integrated
     entries = (line.partition("\t") for line in git(root, *HEAD_MOVES).splitlines())
     authored = {commit for commit, _, subject in entries if subject.startswith("commit")}
-    pulled = git(root, "rev-list", f"{base}..{integrated}").split()
-    return base if authored.intersection(pulled) else integrated
+    on_integration = git(root, "rev-list", f"{base}..{integrated}").split()
+    return base if authored.intersection(on_integration) else integrated
 
 
 def collect(root: Path, base: str, context: dict | None = None) -> dict:

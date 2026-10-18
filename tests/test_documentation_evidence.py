@@ -89,6 +89,29 @@ def test_commits_the_session_authored_and_pushed_to_dev_stay_delivered(tmp_path)
     assert documentation_evidence.collect(tmp_path, base)["files"] == ["policy.py"]
 
 
+def test_a_pull_that_merges_dev_onto_local_work_excludes_the_pulled_changes(tmp_path):
+    baseline = repository(tmp_path)
+    git(tmp_path, "update-ref", "refs/remotes/origin/dev", baseline)
+    (tmp_path / "local.py").write_text("class LocalWidget:\n    size = 1\n")
+    git(tmp_path, "add", "local.py")
+    git(tmp_path, "commit", "-qm", "Add local widget")
+    base = git(tmp_path, "rev-parse", "HEAD")
+    git(tmp_path, "checkout", "-q", "-b", "upstream", baseline)
+    (tmp_path / "pulled.py").write_text("class PulledWidget:\n    size = 1\n")
+    git(tmp_path, "add", "pulled.py")
+    git(tmp_path, "commit", "-qm", "Add pulled widget")
+    git(tmp_path, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    git(tmp_path, "checkout", "-q", "-")
+    git(tmp_path, "merge", "-q", "--no-edit", "origin/dev")
+    (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
+    git(tmp_path, "add", "policy.py")
+    git(tmp_path, "commit", "-qm", "Add retry policy")
+    result = documentation_evidence.collect(tmp_path, base)
+    assert "pulled.py" not in result["files"]
+    assert "policy.py" in result["files"]
+    assert "PulledWidget" not in result["changes"]
+
+
 def test_a_session_base_ahead_of_dev_keeps_its_session_base(tmp_path):
     git(tmp_path, "update-ref", "refs/remotes/origin/dev", repository(tmp_path))
     (tmp_path / "local.py").write_text("class LocalWidget:\n    size = 1\n")
