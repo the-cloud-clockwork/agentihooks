@@ -8,6 +8,7 @@ and the gates require formatted code. AGENTIHOOKS_SERENA=false turns the guard o
 
 import re
 import shlex
+from itertools import takewhile
 from pathlib import Path
 
 from hooks.hook_manager import BlockAction
@@ -29,7 +30,11 @@ _SHELL_WRITES = (
     re.compile(r"""\bopen\(\s*""" + _PY + r"""\s*,\s*['"][wa]"""),
     re.compile(r"""Path\(\s*""" + _PY + r"""\s*\)\.write_(?:text|bytes)"""),
 )
-_SHELL_DELETE = re.compile(r"(?:^|[;&|\n(])\s*(?:git\s+)?rm\s([^|;&\n]*)")
+_SHELL_DELETE = re.compile(
+    r"(?:^|[;&|\n(])\s*(?:(?:sudo|env|nohup|xargs)(?:\s+\S+)*?\s+)?(?:git\s+(?:-C\s+(\S+)\s+)?)?rm\s([^|;&\n]*)"
+)
+_FIND_DELETE = re.compile(r"\bfind\s([^|;&\n]*?)\s-(?:delete|exec(?:dir)?\s+(?:git\s+)?rm)\b")
+_XARGS_RM = re.compile(r"\bxargs\b[^|;&\n]*\brm\b")
 _PATCH_ACTION = re.compile(r"^\*\*\* (Delete File|Add File|Update File|Move to): (.+)$", re.MULTILINE)
 
 
@@ -76,7 +81,7 @@ def _block_foreign_delete(path: Path, root: Path) -> None:
 def _check_files(tool_input: dict, cwd: Path) -> None:
     session = _checkout_root(cwd.resolve())
     deleted = _patch_deletions(tool_input, cwd)
-    for raw in tool_input.get("file_paths") or [tool_input.get("file_path") or ""]:
+    for raw in [raw for raw in tool_input.get("file_paths") or [tool_input.get("file_path")] if raw]:
         path = Path(raw)
         full = path if path.is_absolute() else cwd / path
         if full.resolve() in deleted:
@@ -91,28 +96,50 @@ def _patch_deletions(tool_input: dict, cwd: Path) -> set[Path]:
     if not tool_input.get("file_paths"):
         return set()
     actions: dict[Path, set[str]] = {}
-    for action, target in _PATCH_ACTION.findall(tool_input.get("content") or ""):
+    for action, target in _PATCH_ACTION.findall(str(tool_input.get("content"))):
         actions.setdefault((cwd / Path(target.strip())).resolve(), set()).add(action)
     return {path for path, kinds in actions.items() if kinds == {"Delete File"}}
 
 
+def _foreign_root(target: Path, session: Path | None) -> Path | None:
+    root = _checkout_root(target)
+    if not root or root == session:
+        return None
+    if target.is_dir():
+        return root if any(target.rglob("*.py")) else None
+    return root if target.suffix == ".py" and target.is_file() else None
+
+
 def _check_delete(path: Path, full: Path, session: Path | None) -> None:
-    if full.suffix != ".py" or not full.is_file():
-        return
-    root = _checkout_root(full.resolve())
-    if root and root != session:
+    root = _foreign_root(full.resolve(), session)
+    if root:
         _block_foreign_delete(path, root)
 
 
-def _check_shell_deletes(command: str, base: Path, session: Path | None) -> None:
+def _tokens(text: str) -> list[str]:
+    try:
+        return shlex.split(text)
+    except ValueError:
+        return text.split()
+
+
+def _shell_delete_targets(command: str, base: Path) -> list[tuple[str, Path]]:
+    targets = []
     for match in _SHELL_DELETE.finditer(command):
-        try:
-            tokens = shlex.split(match.group(1))
-        except ValueError:
-            tokens = match.group(1).split()
-        for token in tokens:
-            path = Path(token).expanduser()
-            _check_delete(path, path if path.is_absolute() else base / path, session)
+        where = base / Path(match.group(1).strip("'\"")).expanduser() if match.group(1) else base
+        targets += [(token, where) for token in _tokens(match.group(2))]
+    for match in _FIND_DELETE.finditer(command):
+        starts = takewhile(lambda token: not token.startswith(("-", "(", "!")), _tokens(match.group(1)))
+        targets += [(token, base) for token in [*starts] or ["."]]
+    if _XARGS_RM.search(command):
+        targets += [(token, base) for token in [".", *_tokens(command)]]
+    return targets
+
+
+def _check_shell_deletes(command: str, base: Path, session: Path | None) -> None:
+    for token, where in _shell_delete_targets(command, base):
+        path = Path(token).expanduser()
+        _check_delete(path, path if path.is_absolute() else where / path, session)
 
 
 def check(payload: dict) -> None:
