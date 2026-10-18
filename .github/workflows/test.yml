@@ -1253,13 +1253,12 @@ jobs:
 
       - name: Upload the flake report
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
           path: flakes.jsonl
           if-no-files-found: error
           retention-days: 14
-          overwrite: true
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'

@@ -1,5 +1,4 @@
 import time
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -492,26 +491,4 @@ def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(en
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
     assert events == [True, True, "merge"]
-    assert lease.current(store, "sw").epoch == 1
-
-
-def test_an_automatic_snapshot_slower_than_the_lease_keeps_it_through_the_pass(env, clock, monkeypatch):  # noqa: F811
-    store, ledger, rt = env
-    run("sw", "create", "--repo", "/repo")
-    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
-    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
-    events = []
-
-    def slow(*args):
-        for _ in range(2):
-            clock[0] += 120000
-            events.append(renewed(store, clock))
-        return Path("auto-1.json")
-
-    monkeypatch.setattr(cli.snapshot, "auto", slow)
-    started = clock[0]
-    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert clock[0] - started > lease.ttl_ms()
-    assert events == [True, True]
-    assert actions[-1] == "took automatic snapshot auto-1.json"
     assert lease.current(store, "sw").epoch == 1

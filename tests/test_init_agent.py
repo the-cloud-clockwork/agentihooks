@@ -614,6 +614,18 @@ def test_a_swarm_launcher_pins_its_own_pid(tmp_path):
     assert text.index("AGENTIHOOKS_SWARM_LAUNCHER") < text.index(" claude ")
 
 
+def test_a_swarm_launcher_exports_the_agent_s_ledger_token_and_drops_the_server_secret(tmp_path):
+    (tmp_path / ".env").write_text("PLAIN=1\n")
+    env = {"HOME": str(tmp_path), "AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "derived-one"}
+    text = _launcher_text(tmp_path, env)
+    lines = text.splitlines()
+    assert "export AGENTIHOOKS_LEDGER_AGENT_TOKEN=derived-one" in lines
+    assert "unset SWARM_SECRET" in lines
+    assert text.index("unset SWARM_SECRET") < text.index(" claude ")
+    assert text.index(init_agent.operator_env.SOURCE) < text.index("unset SWARM_SECRET")
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in _launcher_text(tmp_path, {"AGENTIHOOKS_SWARM": "sw"})
+
+
 AGENT_ENV = {
     "AGENTIHOOKS_AGENT_NAME": "engineer@abcdef-0001",
     "AGENTIHOOKS_SWARM": "sw",
