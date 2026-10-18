@@ -98,6 +98,9 @@ class FakeLedger:
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
 
+    def closed(self, slug):
+        return bool(self.state(slug).get("closed_at"))
+
     def rank_task(self, slug, task_id, rank, by, if_owned=False):
         self.ranks.append((task_id, rank, by))
         return {"id": task_id, "rank": rank}

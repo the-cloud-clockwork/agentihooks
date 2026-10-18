@@ -398,6 +398,8 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
+        if not _tickable(slug):
+            return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
@@ -476,6 +478,14 @@ def cmd_waits(store, args):
     if slugs:
         with ThreadPoolExecutor(max_workers=len(slugs)) as pool:
             list(pool.map(check, slugs))
+
+
+def _tickable(slug):
+    ledger = LedgerClient()
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
 
 
 @outage.guard_command

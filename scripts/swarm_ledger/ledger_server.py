@@ -7,7 +7,8 @@ Usage:
   ledger_server.py --stop     stop the detached server
 
 Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
-SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, SWARM_RELOAD=1 for code reload
+SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, LEDGER_TLS_CERT and LEDGER_TLS_KEY to serve
+https (clients trust LEDGER_CA_PEM), SWARM_RELOAD=1 for code reload
 (--ensure sets it unless given), LEDGER_IMPECCABLE_LIVE=1 for the Impeccable live origin on a scratch server.
 Idempotent: --ensure on a running server only prints the URL.
 """
@@ -23,6 +24,7 @@ import os
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -64,12 +66,13 @@ from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
 from scripts.swarm_v2 import front_door, ledger_writer, master_fence  # noqa: E402
 
 HOST, PORT = ledger_link.address()
-BASE = f"http://{HOST}:{PORT}"
+BASE = f"{ledger_link.scheme()}://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
 COMPOSE_WAIT = 180.0
 THREADS_EXHAUSTED = 75
+TLS_HANDSHAKE_S = 10
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
@@ -724,7 +727,15 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+class Handshake(Exception):
+    pass
+
+
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    def handle_error(self, *args):
+        if not isinstance(sys.exc_info()[1], Handshake):
+            super().handle_error(*args)
+
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         try:
             super().process_request(request, client_address)
@@ -733,6 +744,18 @@ class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
+    tls: ssl.SSLContext | None = ledger_link.server_context()
+
+    def setup(self):
+        if self.tls is not None:
+            self.request.settimeout(TLS_HANDSHAKE_S)
+            try:
+                self.request = self.tls.wrap_socket(self.request, server_side=True)
+            except OSError as exc:
+                raise Handshake from exc
+            self.request.settimeout(None)
+        super().setup()
+
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
             sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
