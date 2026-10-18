@@ -13,7 +13,7 @@ from pathlib import Path
 
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
-CREDENTIAL_HEADERS = ("X-Controller-Credential", "X-Hive-Credential", "X-Ledger-Token")
+CREDENTIAL_HEADERS = ("X-Controller-Credential", "X-Hive-Credential", "X-Ledger-Token", "X-Proof-Credential")
 TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM"
 
 
@@ -52,14 +52,16 @@ def server_context(environ=os.environ) -> ssl.SSLContext | None:
 
 def loopback(host: str | None) -> bool:
     try:
-        return ipaddress.ip_address(socket.gethostbyname(host)).is_loopback
-    except (OSError, TypeError, ValueError):
+        found = {info[4][0] for info in socket.getaddrinfo(host, None)}
+    except (OSError, TypeError, UnicodeError):
         return False
+    return bool(found) and all(ipaddress.ip_address(address.split("%")[0]).is_loopback for address in found)
 
 
 def guard(url: str, headers: dict) -> None:
     parts = urllib.parse.urlsplit(url)
-    if parts.scheme == "https" or not any(headers.get(name) for name in CREDENTIAL_HEADERS):
+    sent = {name.lower() for name, value in headers.items() if value}
+    if parts.scheme == "https" or not sent & {name.lower() for name in CREDENTIAL_HEADERS}:
         return
     if not loopback(parts.hostname):
         raise Cleartext(

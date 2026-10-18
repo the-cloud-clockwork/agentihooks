@@ -451,8 +451,9 @@ def upload(slug: str, name: str, path: str, route: str, extra: dict) -> dict:
         },
         method="POST",
     )
+    ledger_link.guard(req.full_url, dict(req.header_items()))
     try:
-        with urllib.request.urlopen(req, timeout=10) as resp:
+        with urllib.request.urlopen(req, timeout=10, **ledger_link.transport()) as resp:
             return json.loads(resp.read())
     except urllib.error.HTTPError as exc:
         sys.exit(f"server refused the file: {exc.code} {exc.read().decode(errors='replace')}")

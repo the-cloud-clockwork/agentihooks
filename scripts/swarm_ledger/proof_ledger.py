@@ -56,13 +56,15 @@ def controller_control(slug: str, owner: dict, request: dict, environ=os.environ
 
 
 def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) -> dict:
+    base = ledger_link.base(environ)
+    ledger_link.guard(base, headers)
     request = urllib.request.Request(
-        f"{ledger_link.base(environ)}/api/v1/proof-ledgers/{slug}/{route}",
+        f"{base}/api/v1/proof-ledgers/{slug}/{route}",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", **headers},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT, **ledger_link.transport(environ)) as response:
             return json.loads(response.read())["data"]
     except urllib.error.HTTPError as exc:
         message = json.loads(exc.read())["error"]["message"]

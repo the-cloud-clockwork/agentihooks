@@ -52,8 +52,11 @@ def credentials(slug):
 def stream(slug, cursor=None, headers=None):
     """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
+    ledger_link.guard(url, headers)
     try:
-        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
+        response = urllib.request.urlopen(
+            urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S, **ledger_link.transport()
+        )
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
             raise Expired from None

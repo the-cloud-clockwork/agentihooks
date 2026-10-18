@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm_ledger import ledger_link, ledger_server, proof_ledger
+from scripts.swarm_ledger import ledger, ledger_link, ledger_server, proof_ledger, watch_ledger
 from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import SLUG, Burst, core, new_ledger
@@ -18,6 +18,8 @@ CREDENTIALS = [
     {"X-Controller-Credential": "controller"},
     {"X-Hive-Credential": "hive", "X-Ledger-Agent": "engineer@323133-0256"},
     {"X-Ledger-Token": "token"},
+    {"X-Proof-Credential": "proof"},
+    {"x-ledger-token": "lower case"},
 ]
 
 
@@ -70,7 +72,9 @@ def test_a_credential_to_a_plain_http_host_off_loopback_is_refused(monkeypatch, 
 
 
 @pytest.mark.parametrize("credentials", CREDENTIALS)
-@pytest.mark.parametrize("base", ["http://127.0.0.1:8765", "http://localhost:8765", "https://ledger.swarm.svc:8765"])
+@pytest.mark.parametrize(
+    "base", ["http://127.0.0.1:8765", "http://localhost:8765", "http://[::1]:8765", "https://ledger.swarm.svc:8765"]
+)
 def test_a_credential_to_loopback_or_https_is_sent(monkeypatch, base, credentials):
     seen = opened(monkeypatch)
 
@@ -91,6 +95,32 @@ def test_the_proof_controller_refuses_its_credential_over_plain_http_off_loopbac
 
     with pytest.raises(ledger_link.Cleartext):
         proof_ledger.call("ledgers", {}, {**environ, "LEDGER_URL": "http://ledger:8765"})
+
+
+def test_proof_controls_refuse_their_credentials_over_plain_http_off_loopback(monkeypatch):
+    monkeypatch.setattr(proof_ledger.urllib.request, "urlopen", pytest.fail)
+    environ = {"AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": "http://ledger:8765"}
+
+    with pytest.raises(ledger_link.Cleartext):
+        proof_ledger._control_call(SLUG, "controls", {}, {"X-Proof-Credential": "proof"}, environ)
+
+
+def test_the_event_stream_refuses_its_credential_over_plain_http_off_loopback(monkeypatch):
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "http://ledger:8765")
+    monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", pytest.fail)
+
+    with pytest.raises(watch_ledger.ledger_link.Cleartext):
+        next(watch_ledger.stream(SLUG, None, {"X-Ledger-Token": "token"}))
+
+
+def test_an_upload_refuses_its_credential_over_plain_http_off_loopback(monkeypatch, tmp_path):
+    (tmp_path / "shot.png").write_bytes(b"png")
+    monkeypatch.setattr(ledger, "base", lambda: "http://ledger:8765")
+    monkeypatch.setattr(ledger, "credentials", lambda slug: {"X-Ledger-Token": "token"})
+    monkeypatch.setattr(ledger.urllib.request, "urlopen", pytest.fail)
+
+    with pytest.raises(SystemExit, match="https"):
+        ledger.upload(SLUG, "engineer@323133-0256", str(tmp_path / "shot.png"), "media", {})
 
 
 def test_the_local_base_is_https_when_the_ledger_serves_tls(tmp_path):

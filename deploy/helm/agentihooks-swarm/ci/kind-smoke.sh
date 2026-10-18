@@ -331,6 +331,7 @@ openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$ledger_host" \
   -keyout "$ledger_tls/tls.key" -out "$ledger_tls/tls.crt" 2>/dev/null
 kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt" --from-file="$ledger_tls/tls.key" \
   --from-file=ca.crt="$ledger_tls/tls.crt"
+rm -rf "$ledger_tls"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 

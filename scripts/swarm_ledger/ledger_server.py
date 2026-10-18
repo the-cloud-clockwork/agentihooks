@@ -68,6 +68,7 @@ LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
 COMPOSE_WAIT = 180.0
 THREADS_EXHAUSTED = 75
+TLS_HANDSHAKE_S = 10
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
@@ -717,6 +718,10 @@ def sample_streams():
 
 
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    def handle_error(self, request, client_address):
+        if not isinstance(sys.exc_info()[1], (ssl.SSLError, TimeoutError)):
+            super().handle_error(request, client_address)
+
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         try:
             super().process_request(request, client_address)
@@ -729,7 +734,9 @@ class Handler(BaseHTTPRequestHandler):
 
     def setup(self):
         if self.tls is not None:
+            self.request.settimeout(TLS_HANDSHAKE_S)
             self.request = self.tls.wrap_socket(self.request, server_side=True)
+            self.request.settimeout(None)
         super().setup()
 
     def log_message(self, fmt, *args):
