@@ -493,12 +493,14 @@ def test_metric_history_read_sees_committed_rows_while_a_writer_holds_the_spool(
         box.db.rollback()
 
 
-def test_metric_history_uses_read_only_uris_when_sqlite_global_uri_support_is_off(box):
+def test_metric_history_uses_read_only_uris_when_sqlite_global_uri_support_is_off(box, monkeypatch):
     import subprocess
     import sys
     import textwrap
 
     box.append(TASKS, [row("old")])
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: box.path)
+    assert metrics_outbox.read_recent("task_moves", NOW) == [row("old")]
     code = textwrap.dedent("""
         import ctypes
         import ctypes.util
