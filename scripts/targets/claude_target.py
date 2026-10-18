@@ -194,10 +194,11 @@ def refresh_every_home(caller: str) -> None:
 
 def _mark_homes(root: Path, keys: list[str]) -> None:
     from hooks.context.rules_refresh import collect_profile_rules, profile_home, write_refresh_marker
+    from scripts.profiles import homes
 
     _i = _install_module()
     for key in keys:
-        home = root / key / "claude"
+        home = root / homes.HOMES / key / homes.CURRENT / "claude"
         rules = collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
         pending = write_refresh_marker(key, rules, home=profile_home(home))["pending_count"]
         print(f"{_i._GREEN}[OK]{_i._RESET} Refresh marker written for profile '{key}' ({pending} sessions).")
