@@ -79,10 +79,14 @@ def test_an_inbox_read_in_small_batches_keeps_every_batch_and_registry_named_age
     to_named = [box.send("operator", named, f"to the named agent {n}").id for n in range(3)]
     from_named = [box.send(named, f"other-{n}", f"from the named agent {n}").id for n in range(3)]
     box.send("operator", other, "not ours")
+    box.deliver(to_named[0], named)
+    box.read(to_named[0], named)
+    box.close(to_named[0], named, "done", "answered in the thread")
     monkeypatch.setattr(read, "BATCH", 2)
     rows = read.inbox_items(box, SLUG)
     assert sorted(row["id"] for row in rows) == sorted(to_named + from_named)
-    assert all(len(row["history"]) == 1 for row in rows)
+    assert {row["id"]: row["history"] for row in rows} == {row["id"]: box.history(row["id"]) for row in rows}
+    assert max(len(row["history"]) for row in rows) >= 3
 
 
 def test_an_inbox_listing_whose_item_is_gone_is_refused(redis):

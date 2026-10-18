@@ -38,8 +38,8 @@ def _batched(redis, keys, command):
 
 
 def inbox_items(inbox, slug):
-    prefix, redis = inbox.key("address", ""), inbox.redis
-    keys = sorted(redis.scan_iter(match=prefix + "*", count=BATCH))
+    redis = inbox.redis
+    keys = sorted(redis.scan_iter(match=inbox.key("address", "*"), count=BATCH))
     listed = _batched(redis, keys, lambda pipe, key: pipe.zrange(key, 0, -1))
     ids = [item_id for group in listed for item_id in group]
     raws = dict(zip(ids, _batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id)))))
