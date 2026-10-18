@@ -1,13 +1,18 @@
 import http.client
 import json
+import logging
 import math
 import re
 import sqlite3
+import time
 import urllib.parse
 import urllib.request
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import dataclass
 from pathlib import Path
+
+from scripts.swarm import timing
 
 URL_ENV = "AGENTIHOOKS_METRICS_URL"
 USER_ENV = "AGENTIHOOKS_METRICS_USER"
@@ -38,6 +43,8 @@ SPOOL = (
     "CREATE TABLE IF NOT EXISTS spool (tbl TEXT NOT NULL, event_id TEXT NOT NULL, ts_ms INTEGER NOT NULL,"
     " row TEXT NOT NULL, shipped INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (tbl, event_id))",
     "CREATE INDEX IF NOT EXISTS spool_pending ON spool (shipped, tbl)",
+    "CREATE INDEX IF NOT EXISTS spool_retention ON spool (shipped, ts_ms) WHERE shipped = 1",
+    "CREATE TABLE IF NOT EXISTS flush_cursor (id INTEGER PRIMARY KEY, tbl TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS tables"
     " (name TEXT PRIMARY KEY, ddl TEXT NOT NULL, widen TEXT NOT NULL, created INTEGER NOT NULL DEFAULT 0)",
 )
@@ -123,6 +130,18 @@ def spool_path():
     return Path.home() / ".agentihooks" / "swarm" / "metrics-outbox.sqlite"
 
 
+def read_recent(name: str, now_ms: int) -> list[dict] | None:
+    try:
+        path = spool_path()
+        if not path.exists():
+            return []
+        with closing(sqlite3.connect(f"{path.as_uri()}?mode=ro", uri=True, timeout=LOCK_TIMEOUT_S)) as db:
+            return [json.loads(row) for (row,) in db.execute(RECENT, (name, now_ms - DAY_MS))]
+    except (sqlite3.Error, OSError, ValueError) as exc:
+        logging.getLogger(__name__).warning("metrics history read failed: %s", exc)
+        return None
+
+
 def post(sink, query, body):
     try:
         request = urllib.request.Request(
@@ -130,7 +149,10 @@ def post(sink, query, body):
             data=body,
             headers={USER_HEADER: sink.user, KEY_HEADER: sink.password},
         )
-        with urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply:
+        with (
+            timing.step("scripts.swarm.metrics_outbox.sink_request"),
+            urllib.request.urlopen(request, timeout=TIMEOUT_S) as reply,
+        ):
             return reply.status == 200
     except (OSError, ValueError, http.client.HTTPException):
         return False
@@ -170,24 +192,39 @@ class Outbox:
             checkpoint(self.db)
 
     def flush(self, now_ms):
-        shipped = 0
-        for name, ddl, widen, created in self.db.execute(WAITING).fetchall():
-            sent, reached = self._ship(name, (ddl, widen), created)
+        until = time.monotonic() + 5
+        previous = self.db.execute("SELECT tbl FROM flush_cursor WHERE id = 1").fetchone()
+        waiting = self.db.execute(WAITING).fetchall()
+        if previous:
+            waiting.sort(key=lambda row: (row[0] <= previous[0], row[0]))
+        shipped, last = 0, None
+        for name, ddl, widen, created in waiting:
+            if time.monotonic() >= until:
+                break
+            sent, reached = self._ship(name, (ddl, widen), created, until)
             shipped += sent
+            last = name
             if not reached:
                 break
-        with self.db:
+        with timing.step("scripts.swarm.metrics_outbox.retention"), self.db:
+            if last is not None:
+                self.db.execute(
+                    "INSERT INTO flush_cursor VALUES (1, ?) ON CONFLICT(id) DO UPDATE SET tbl = excluded.tbl", (last,)
+                )
             self.db.execute(PRUNE, (now_ms - DAY_MS,))
         return shipped
 
-    def _ship(self, name, schema, created):
+    def _ship(self, name, schema, created, until):
         if not created:
-            if not all(self.send(self.sink, statement, b"") for statement in schema):
-                return 0, False
+            for statement in schema:
+                if time.monotonic() >= until or not self.send(self.sink, statement, b""):
+                    return 0, False
             with self.db:
                 self.db.execute(CREATED, (name,))
         shipped = 0
         while batch := self.db.execute(BATCH_ROWS, (name, BATCH)).fetchall():
+            if time.monotonic() >= until:
+                return shipped, False
             body = "\n".join(row for _, row in batch).encode()
             if not self.send(self.sink, f"INSERT INTO {DATABASE}.{name} FORMAT JSONEachRow", body):
                 return shipped, False

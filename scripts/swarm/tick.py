@@ -43,6 +43,7 @@ from scripts.swarm import (
     grouping,
     lane_split,
     launch_check,
+    ledger_events,
     ledger_probe,
     lifetime,
     live_binding,
@@ -971,7 +972,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             continue
         store.count_claim(slug, task["id"])
         after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
-        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after)
+        head = (ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""
+        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after, head=head)
         store.put_agent(slug, launched)
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)

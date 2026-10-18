@@ -1131,9 +1131,17 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply_state(slug, changes, allowed, refusals, ledger_task_duplicates.screen(state, allowed))
 
 
+def metrics_journal(action, *args):
+    try:
+        action(*args)
+    except OSError as exc:
+        sys.stderr.write(f"request metrics journal: {exc}\n")
+
+
 def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
     if code_stamp(code_dirs) == started:
         return False
+    metrics_journal(request_metrics.stop)
     execv(sys.executable, [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"])
     return True
 
@@ -1162,6 +1170,7 @@ def watch_ledgers(interval=2.0):
             except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
                 sys.stderr.write(f"unrelayed replay: {exc}\n")
         sample_streams()
+        metrics_journal(request_metrics.persist)
         time.sleep(interval)
 
 
@@ -1172,6 +1181,7 @@ def serve():
     except ledger_writer.WriterConflict as conflict:
         sys.exit(str(conflict))
     legacy.adopt(stored)
+    metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
     threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
     server.request_queue_size = 128
@@ -1186,6 +1196,7 @@ def serve():
     finally:
         stopped.set()
         server.server_close()
+        metrics_journal(request_metrics.stop)
         writer.release()
 
 
