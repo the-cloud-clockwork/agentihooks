@@ -325,7 +325,7 @@ def test_an_ownerless_overlap_never_requests_a_note_or_claims_to_wait_on_checks(
     task = {
         "id": "t3",
         "title": "Build it",
-        "overlaps": [{"task": "t1", "claimant": "", "waiting": "agent", "areas": ["hooks"]}],
+        "overlaps": [{"task": "t1", "claimant": "", "checks": False, "areas": ["hooks"]}],
     }
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", task)
     assert "Task t1, no live agent; no coordination note needed, shares hooks." in text

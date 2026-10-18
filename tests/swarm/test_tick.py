@@ -2052,7 +2052,7 @@ def test_an_overlap_released_for_checks_has_no_coordination_recipient(store, cla
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert spawned_ids(runtime) == ["t2"]
     overlap = runtime.tasks[0]["overlaps"]
-    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "waiting": "checks"}]
+    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "checks": True}]
     text = prompt.build("sw", "/repo", "eng", runtime.spawned[0][1], runtime.tasks[0])
     assert "Task t1, waiting on checks with no agent; no coordination note needed, shares hooks/x.py." in text
     assert f"claimed by {claimant}" not in text
@@ -2077,7 +2077,7 @@ def test_a_reused_seat_does_not_make_its_new_agent_the_owner_of_an_overlap(store
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["other", "t2"]
     overlap = runtime.tasks[1]["overlaps"]
-    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "waiting": "checks"}]
+    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "checks": True}]
     text = prompt.build("sw", "/repo", "eng", runtime.spawned[1][1], runtime.tasks[1])
     assert "waiting on checks with no agent; no coordination note needed" in text
     assert agent.name not in text and agent.seat not in text

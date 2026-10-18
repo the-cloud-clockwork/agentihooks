@@ -492,7 +492,7 @@ def overlap_lines(task):
             if overlap["claimant"]
             else (
                 "waiting on checks with no agent; no coordination note needed"
-                if overlap["waiting"] == "checks"
+                if overlap["checks"]
                 else "no live agent; no coordination note needed"
             )
         )

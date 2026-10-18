@@ -828,7 +828,7 @@ def _sharing(task, rows, agents):
             "task": t["id"],
             "claimant": owners.get(t["id"], ""),
             "areas": areas,
-            **({"waiting": "checks" if t["state"] == "pr" else "agent"} if t["id"] not in owners else {}),
+            **({"checks": t["state"] == "pr"} if t["id"] not in owners else {}),
         }
         for t in running
         if (areas := _shared(mine, t.get("territory") or []))
