@@ -148,13 +148,13 @@ class SourceRun(FakeRun):
 
 def test_pull_dev_of_the_tool_source_installs_a_newly_declared_dependency(store):
     before = '[project]\ndependencies = ["redis>=5"]\n'
-    run = SourceRun(before, before.replace('"redis>=5"', '"redis>=5", "croniter>=6.2.4,<7"'))
+    run = SourceRun(before, before.replace('"redis>=5"', '"redis>=5", "croniter>=6.2.4,<7", "rich"'))
     ctx = context(store, run, source=Path("/repo"), python="/tool/python")
     line = interventions.apply(ctx, "pull-dev", args())
-    assert run.calls[-1] == ["uv", "pip", "install", "--python", "/tool/python", "croniter>=6.2.4,<7"]
+    assert run.calls[-1] == ["uv", "pip", "install", "--python", "/tool/python", "croniter>=6.2.4,<7", "rich"]
     assert line == (
         "The Doctor pulled dev into the main checkout of the watched swarm. "
-        "It installed croniter>=6.2.4,<7 into the agentihooks tool environment."
+        "It installed croniter>=6.2.4,<7, rich into the agentihooks tool environment."
     )
     assert logged_on_both(ctx)
 

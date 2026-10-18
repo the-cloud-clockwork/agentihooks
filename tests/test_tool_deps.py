@@ -125,14 +125,25 @@ def test_pull_of_another_repository_never_installs_its_dependencies(tmp_path):
 
 def test_call_returns_stdout_and_raises_with_stderr_on_failure():
     assert tool_deps.call([sys.executable, "-c", "print(' out ')"]) == "out"
-    with pytest.raises(RuntimeError, match="boom"):
-        tool_deps.call([sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"])
+    code = "import sys; sys.stdout.write('out'); sys.stderr.write('boom'); sys.exit(3)"
+    with pytest.raises(RuntimeError) as raised:
+        tool_deps.call([sys.executable, "-c", code])
+    assert str(raised.value) == f"{sys.executable} -c {code} failed: boom"
+
+
+def test_call_failing_with_no_stderr_reports_its_stdout():
+    code = "import sys; sys.stdout.write(' only out '); sys.exit(3)"
+    with pytest.raises(RuntimeError) as raised:
+        tool_deps.call([sys.executable, "-c", code])
+    assert str(raised.value) == f"{sys.executable} -c {code} failed: only out"
 
 
 def test_call_reports_a_timeout_as_a_failure(monkeypatch):
     monkeypatch.setattr(tool_deps, "TIMEOUT_SECONDS", 0.2)
-    with pytest.raises(RuntimeError, match=r"timed out after 0\.2 seconds"):
-        tool_deps.call([sys.executable, "-c", "import time; time.sleep(5)"])
+    code = "import time; time.sleep(5)"
+    with pytest.raises(RuntimeError) as raised:
+        tool_deps.call([sys.executable, "-c", code])
+    assert str(raised.value) == f"{sys.executable} -c {code} timed out after 0.2 seconds"
 
 
 def test_install_of_nothing_runs_nothing():

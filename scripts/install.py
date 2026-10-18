@@ -6475,7 +6475,7 @@ def main() -> None:
         "profile",
         help="Render a profile into its own home: render NAME --target claude|codex|copilot [--force] [--out DIR [--bundle DIR]]",
     )
-    sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure|sync")
+    sub.add_parser("deps", help="Check or install the bundle's dev-environment dependencies: check|ensure")
     sub.add_parser("overlay", help="Overlay profiles in the linked bundle: new NAME --wears ROLES | check NAME")
 
     balance_cli.add_parser(sub)

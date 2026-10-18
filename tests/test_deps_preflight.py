@@ -109,12 +109,23 @@ def test_ensure_installs_a_declared_dependency_missing_from_the_tool_environment
     monkeypatch.setattr(tool_deps, "call", lambda argv: calls.append(argv) or "")
     env["write"]([])
     (tmp_path / "pyproject.toml").write_text(
-        '[project]\ndependencies = ["pytest>=7", "agentihooks-absent-dist-for-test>=1"]\n'
+        '[project]\ndependencies = ["pytest>=7", "agentihooks-absent-dist-for-test>=1", "agentihooks-absent-b"]\n'
     )
     assert deps_preflight.ensure() == 0
-    assert calls == [["uv", "pip", "install", "--python", sys.executable, "agentihooks-absent-dist-for-test>=1"]]
+    assert calls == [
+        [
+            "uv",
+            "pip",
+            "install",
+            "--python",
+            sys.executable,
+            "agentihooks-absent-dist-for-test>=1",
+            "agentihooks-absent-b",
+        ]
+    ]
     assert capsys.readouterr().err == (
-        "[agentihooks] deps: installing agentihooks-absent-dist-for-test>=1 into the agentihooks tool environment\n"
+        "[agentihooks] deps: installing agentihooks-absent-dist-for-test>=1, agentihooks-absent-b "
+        "into the agentihooks tool environment\n"
     )
 
 
@@ -152,11 +163,24 @@ def test_sync_pulls_the_tool_source_and_reports_what_it_installed(env, monkeypat
     pulled = []
     monkeypatch.setattr(tool_deps, "call", lambda argv: "dev" if "rev-parse" in argv else "")
     monkeypatch.setattr(
-        tool_deps, "pull", lambda repo, call, python: pulled.append((repo, call, python)) or ["croniter>=6"]
+        tool_deps, "pull", lambda repo, call, python: pulled.append((repo, call, python)) or ["croniter>=6", "rich"]
     )
     assert deps_preflight.main(["sync"]) == 0
     assert pulled == [(str(tool_deps.SOURCE), tool_deps.call, sys.executable)]
-    assert capsys.readouterr().out == "deps sync: installed croniter>=6 into the agentihooks tool environment\n"
+    assert capsys.readouterr().out == "deps sync: installed croniter>=6, rich into the agentihooks tool environment\n"
+
+
+def test_an_unknown_deps_action_is_refused():
+    with pytest.raises(SystemExit):
+        deps_preflight.main(["bogus"])
+
+
+def test_a_missing_declared_dependency_carries_no_check_command(env, tmp_path):
+    env["write"]([])
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["agentihooks-absent-dist-for-test>=1"]\n')
+    assert [(dep.id, dep.check) for dep in deps_preflight.unsatisfied()] == [
+        ("agentihooks-absent-dist-for-test>=1", ())
+    ]
 
 
 def test_sync_with_unchanged_dependencies_says_so(env, monkeypatch, capsys):
