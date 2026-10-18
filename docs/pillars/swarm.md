@@ -218,7 +218,7 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   The front door answers the operator about the backend masters from it.
 - **Intent grouping.** `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (off by default) turns on the classifier. Each
   master keeps its last 15 delivered items; every waiting pool item is compared for intent against each master's
-  items in parallel, using only first lines, the first configured classifier model falling through to the next on failure, one short verdict per master and a cache
+  items in parallel, using only first lines, the first configured API classifier model falling through to the next on a backend failure, one short verdict per master and a cache
   by item id. A match sends the item to that master, so related items reach the same master together. Any
   classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
   round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
