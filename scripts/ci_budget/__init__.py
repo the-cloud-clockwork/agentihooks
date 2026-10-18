@@ -38,7 +38,6 @@ BUDGETS = {
     "helm-kind": 480,
     "gate-required": 60,
     "refresh-durations": 120,
-    "count-record": 180,
     "coverage-baseline": 120,
     "flake-budget": 120,
     "stage-budget": 60,
