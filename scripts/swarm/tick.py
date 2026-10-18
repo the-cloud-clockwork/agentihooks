@@ -599,9 +599,10 @@ def agent_status(agent):
 
 
 def _refusal_due(slug, store, rows, agent, observed, now_ms):
-    if not observed.content_refusal or not _current_owner(agent, rows.get(agent.task, {})):
+    if not observed.content_refusal:
         return False
-    if _operator_at_pane(slug, store, agent, observed, now_ms):
+    row = rows.get(agent.task)
+    if not row or row.get("claimed_by") != agent.name or _operator_at_pane(slug, store, agent, observed, now_ms):
         return False
     return content_refusal.repeated(store, slug, agent, observed)
 
