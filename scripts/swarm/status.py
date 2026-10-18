@@ -87,6 +87,7 @@ def findings(store, slug, config, tasks, events):
                 "error": row["error"],
                 "at": row["at"],
                 "after": row.get("after"),
+                "head": row.get("head"),
             }
             for row in store.launches(slug)
             if row["state"] in ("started", "failed")

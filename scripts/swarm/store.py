@@ -437,7 +437,9 @@ class RedisStore:
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
-    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "") -> None:
+    def record_launch(
+        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str = ""
+    ) -> None:
         row = {
             "agent": agent.name,
             "task": agent.task,
@@ -446,6 +448,7 @@ class RedisStore:
             "error": error,
             "pane_id": agent.pane_id,
             "after": after,
+            "head": head,
         }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
 
