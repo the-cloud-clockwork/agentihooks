@@ -230,6 +230,12 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
+def _canonical(call):
+    import json
+
+    return json.dumps(call, sort_keys=True)
+
+
 def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tmp_path):
     from hooks.observability import agent_trace
     from scripts.doctor import registry, traces_read
@@ -248,7 +254,7 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
     monkeypatch.setattr(traces_read, "SWARM_HOME", tmp_path)
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "agent_trace")
     found = detect.readers(store, ledger, "s", 10**12, environ={})["trace"]()
-    assert sorted(asked, key=repr) == sorted(
+    assert sorted(asked, key=_canonical) == sorted(
         [
             (
                 "traces",
@@ -262,7 +268,7 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
             ),
             ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100}),
         ],
-        key=repr,
+        key=_canonical,
     )
     assert [f.id for f in found] == ["untraced-session/s-master-1", "telemetry-never-exported/s-master-1.1"]
     assert (tmp_path / "s" / traces_read.STATE_FILE).exists()
