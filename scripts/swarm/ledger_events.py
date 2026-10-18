@@ -521,6 +521,10 @@ class Mail:
     def engineer(self, task):
         return self.seats.get(task.get("claimed_by")) or self.owner(f"tasks/{task['id']}")
 
+    def holds(self, address, task):
+        occupant = self.store.seats.occupant(address).occupant
+        return not occupant or self.held.get(occupant) == task["id"]
+
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
     mail, github = Mail(inbox, store, slug, doc), functools.cache(github)
@@ -531,7 +535,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         _events(mail, new_events(store, slug, doc, EVENTS_CURSOR, RELAYED), tasks, raised)
         + _history_gaps(mail)
         + _followups(mail, doc, events, ledger, now_ms)
-        + _pull_requests(mail, tasks.values(), now_ms, github)
+        + _pull_requests(mail, tasks.values(), now_ms, github, ledger)
         + _settle_red_notices(mail, github)
         + _priorities(mail, doc, raised)
     )
@@ -735,7 +739,7 @@ def _priorities(mail, doc, raised):
     return sent
 
 
-def _pull_requests(mail, tasks, now_ms, github):
+def _pull_requests(mail, tasks, now_ms, github, ledger):
     sent = []
     for task in tasks:
         url = task.get("pr_url", "")
@@ -752,13 +756,13 @@ def _pull_requests(mail, tasks, now_ms, github):
                     f"Your pull request {url} merged ten minutes ago and {title} is still in pull request. "
                     f"Finish it: agentihooks swarm {mail.slug} done --pr {url}"
                 )
-                sent += mail.send(f"{url}:merged:engineer", mail.engineer(task), text)
+                sent += _tell_engineer(mail, ledger, task, f"{url}:merged:engineer", text, mail.send)
             if age >= MERGED_MASTER_MS:
                 text = f"{title} on ledger {mail.slug} is still in pull request twenty minutes after {url} merged."
                 sent += mail.send(f"{url}:merged:master", mail.owner(f"tasks/{task['id']}"), text)
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
-            sent += mail.send(f"{url}:closed", mail.engineer(task), text)
+            sent += _tell_engineer(mail, ledger, task, f"{url}:closed", text, mail.send)
         elif (
             found.red
             and not found.gate_passed
@@ -768,5 +772,15 @@ def _pull_requests(mail, tasks, now_ms, github):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )
-            sent += mail.send_red(f"{url}:red:{found.head}", mail.engineer(task), text, url)
+            red = functools.partial(mail.send_red, url=url)
+            sent += _tell_engineer(mail, ledger, task, f"{url}:red:{found.head}", text, red)
     return sent
+
+
+def _tell_engineer(mail, ledger, task, key, text, send):
+    address = mail.engineer(task)
+    if mail.holds(address, task):
+        return send(key, address, text)
+    if mail.once(key, lambda: ledger.comment(mail.slug, task["id"], text, by=SENDER)):
+        return [f"noted on tasks/{task['id']}: {key}"]
+    return []
