@@ -68,6 +68,22 @@ def test_new_wait_keeps_older_group_members_in_its_statistics():
     assert "median 351.0 seconds" in finding.evidence[0]
 
 
+def test_a_short_wait_does_not_hide_a_later_long_wait():
+    [finding] = ci_speed.findings([record([job(300), job(301, identity=12)])], NOW - 2000000, NOW)
+    assert finding.measure == 301
+    assert "1 jobs" in finding.summary
+
+
+def test_an_inactive_label_group_does_not_hide_a_later_active_group():
+    old = job(400)
+    current = job(302, created=-310, identity=12)
+    current["labels"] = ["anton-batch"]
+    [finding] = ci_speed.findings([record([old, current])], NOW - 60000, NOW)
+    assert finding.measure == 302
+    assert "anton-batch" in finding.summary
+    assert "1 jobs" in finding.summary
+
+
 @pytest.mark.parametrize("wait, count", [(299, 0), (300, 0), (301, 1)])
 def test_runner_wait_crosses_only_above_five_minutes(wait, count):
     found = ci_speed.findings([record([job(wait)])], NOW - 2000000, NOW)
@@ -149,7 +165,7 @@ def test_runner_notice_preserves_labels_attempt_and_human_readable_minutes(attem
     queued["labels"] = labels
     extra = {} if attempt is None else {"run_attempt": attempt}
     [finding] = ci_speed.findings([record([queued], **extra)], NOW - 2000000, NOW)
-    suffix = "[]" if not labels else '["anton-oss","self-hosted"]'
+    suffix = "[]" if not labels else '["anton-oss", "self-hosted"]'
     assert finding.subject == f"7-{attempt or 1}-{suffix}"
     assert finding.summary == f"{text} runners waited up to 5.02 minutes for 1 jobs"
     assert finding.evidence == (f"run 7, labels {text}, 1 jobs, longest 301 seconds, median 301.0 seconds",)

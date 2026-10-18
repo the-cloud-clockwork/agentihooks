@@ -20,7 +20,7 @@ def _wait(run, jobs, since_ms, now_ms):
             continue
         labels = tuple(sorted(set(job["labels"])))
         groups.setdefault(labels, []).append(elapsed)
-        if queued or created >= since_ms or started >= since_ms:
+        if queued or started >= since_ms:
             active.add(labels)
     found = []
     for labels, waits in groups.items():
@@ -32,7 +32,7 @@ def _wait(run, jobs, since_ms, now_ms):
         found.append(
             Finding(
                 "ci runner wait",
-                f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(labels, separators=(',', ':'))}",
+                f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(labels)}",
                 f"{text} runners waited up to {longest / 60:.2f} minutes for {len(waits)} jobs",
                 (
                     f"run {run['id']}, labels {text}, {len(waits)} jobs, longest {longest} seconds, median {typical} seconds",
