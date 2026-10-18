@@ -751,6 +751,43 @@ def test_continuation_publishes_back_to_the_recorded_remote_branch(publication):
     assert git(root, "rev-parse", "--abbrev-ref", "@{upstream}") == "origin/predecessor"
 
 
+@pytest.mark.parametrize("cwd", ["worktree", "outside"])
+def test_a_stacked_delivery_republishes_its_pull_request_branch_with_one_push(publication, monkeypatch, cwd):
+    from scripts.swarm import publish
+
+    root = publication.root
+    git(root, "push", "origin", "HEAD:predecessor")
+    pr_url = "https://github.com/example/repo/pull/7"
+    publication.task.update(branch="predecessor", pr_url=pr_url, state="pr")
+    if cwd == "worktree":
+        monkeypatch.chdir(root)
+    pushes = []
+    native = publish.execute
+
+    def counted(argv, where):
+        if argv[:2] == ["git", "push"]:
+            pushes.append(argv)
+        return native(argv, where)
+
+    monkeypatch.setattr(publish, "execute", counted)
+    publish.prepare("swarm", publication.agent, str(publication.repo), publication.ledger)
+    assert publication.task["branch"] == "predecessor"
+    for change in ("after", "again"):
+        (root / "chosen.txt").write_text(change)
+        pushes.clear()
+        result = publish.publish(
+            "swarm", publication.agent, str(publication.repo), publication.ledger, f"Change {change}", ["chosen.txt"]
+        )
+        head = git(root, "rev-parse", "HEAD")
+        assert len(pushes) == 1
+        assert result["branch"] == publication.task["branch"] == "predecessor"
+        assert publication.task["repository_branches"] == {str(publication.repo): "predecessor"}
+        assert publication.task["pr_url"] == pr_url
+        assert git(root, "ls-remote", "origin", "refs/heads/predecessor").split()[0] == head
+        assert git(root, "ls-remote", "origin", "refs/heads/engineer-test") == ""
+    assert git(root, "branch", "--show-current") == "engineer-test"
+
+
 def test_a_restacked_successor_publishes_its_prepared_branch_not_the_parked_one(publication):
     from scripts.swarm import publish
 
