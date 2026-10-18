@@ -111,6 +111,27 @@ def test_an_adopted_folder_matches_through_a_symlink(tmp_path, monkeypatch):
     assert server_compose.adopted(folder, {})
 
 
+def test_adoption_is_read_from_the_agentihooks_home_the_caller_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "default"))
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    folder = tmp_path / "scratch-ledger"
+    stack = tmp_path / "custom" / "swarm-stack"
+    stack.mkdir(parents=True)
+    (stack / ".env").write_text(f"SWARM_ADOPT_LEDGER_DIR={folder}\n")
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path / "custom")}
+    gone = tmp_path / "gone.yaml"
+    assert server_compose.used(folder, environ, {}.get, gone)
+    assert not server_compose.used(folder, {}, {}.get, gone)
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    assert server_compose.start(folder, environ, run) == ""
+    assert calls == [stack_init.compose(stack, "up", "-d", "swarm")]
+
+
 def test_an_adoption_of_another_folder_refuses_rather_than_restoring_the_old_service(tmp_path, monkeypatch):
     folder = shared(tmp_path, monkeypatch)
     elsewhere = tmp_path / "elsewhere"
