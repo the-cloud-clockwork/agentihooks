@@ -1,10 +1,13 @@
 import json
+import shutil
 import subprocess
 import sys
 from pathlib import Path
 
 import pytest
 import yaml
+
+from scripts.ci_mutation import runner
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -22,11 +25,13 @@ def _check(tmp_path, selection):
     if selection is not None:
         (tmp_path / ".mutation-selection.json").write_text(selection)
     output, summary = tmp_path / "output", tmp_path / "summary"
+    path = f"{Path(sys.executable).parent}:/usr/bin:/bin"
+    assert shutil.which("python", path=path)
     result = subprocess.run(
         ["bash", "-e", "-c", _contract()["run"]],
         cwd=tmp_path,
         env={
-            "PATH": f"{Path(sys.executable).parent}:/usr/bin:/bin",
+            "PATH": path,
             "GITHUB_OUTPUT": str(output),
             "GITHUB_STEP_SUMMARY": str(summary),
         },
@@ -53,6 +58,26 @@ def test_a_present_but_malformed_selection_still_fails(tmp_path, selection):
     assert result.returncode != 0
     assert "malformed" in result.stdout + result.stderr
     assert values == {}
+
+
+def test_a_shard_without_a_selection_selects_tests_as_before(tmp_path, monkeypatch):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
+    calls = []
+
+    def select(root, path):
+        calls.append((root, path))
+        return ["tests/test_sample.py"]
+
+    def mutate(root, work, selected, *args):
+        assert selected == {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
+        return {"scripts/sample.py": []}, ""
+
+    monkeypatch.setattr(runner, "select_tests", select)
+    monkeypatch.setattr(runner, "mutate_files", mutate)
+    report = runner.run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "output", 60)
+    assert report["failed"] is False
+    assert calls == [(tmp_path, Path("scripts/sample.py"))]
 
 
 def test_a_well_formed_selection_is_published(tmp_path):
