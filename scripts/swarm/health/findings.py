@@ -64,6 +64,7 @@ class Finding:
     measure: int = 0
     basis: str = dataclasses.field(default="", compare=False)
     links: tuple = ()
+    evidence_identity: tuple | None = None
 
     @property
     def id(self):
@@ -71,7 +72,7 @@ class Finding:
 
     def as_dict(self):
         found = asdict(self)
-        del found["measure"], found["basis"]
+        del found["measure"], found["basis"], found["evidence_identity"]
         if not self.links:
             del found["links"]
         else:
