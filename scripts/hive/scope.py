@@ -27,14 +27,21 @@ def root(world: str) -> str:
 
 def host(redis: "Redis", slug: str, name: str) -> str:
     """The joined member that runs name in slug, '' for any other host; a member recognises only itself."""
-    from scripts.hive.auth import PREFIX
     from scripts.swarm.store import RedisStore
 
-    placed = next((agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name), "")
     own = member()
-    if own:
-        return own if placed == own else ""
-    return placed if placed and redis.exists(f"{PREFIX}:member:{placed}") else ""
+    joined = [own] if own else members(redis)
+    if not joined:
+        return ""
+    placed = next((agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name), "")
+    return placed if placed in joined else ""
+
+
+def members(redis: "Redis") -> list[str]:
+    """The hives in the index that joined as members; a member's own Redis user cannot read the member records."""
+    from scripts.hive.auth import PREFIX
+
+    return [hive for hive in sorted(redis.smembers(registry.INDEX)) if redis.exists(f"{PREFIX}:member:{hive}")]
 
 
 def readings(redis: "Redis", slug: str, name: str) -> str:
