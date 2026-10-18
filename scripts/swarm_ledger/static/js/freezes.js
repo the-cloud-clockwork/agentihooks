@@ -29,13 +29,12 @@ export function ancestors(d, key, seen = new Set()) {
   if (list === "tasks") {
     const task = byId(d.tasks, id);
     if (!task) return [key];
-    if (task.merged_into) {
-      if (task.freeze_ancestry) return task.freeze_ancestry;
-      const target = `tasks/${task.merged_into}`;
-      return [...new Set([key, ...(seen.has(target) ? [] : ancestors(d, target, seen.add(key)))])];
-    }
+    if (task.merged_into && task.freeze_ancestry) return task.freeze_ancestry;
+    seen.add(key);
+    const target = task.merged_into ? `tasks/${task.merged_into}` : "";
     const up = [...(task.slice ? ancestors(d, task.slice) : []),
-      ...(task.phase ? ancestors(d, `phases/${task.phase}`) : [])];
+      ...(task.phase ? ancestors(d, `phases/${task.phase}`) : []),
+      ...(target && !seen.has(target) ? ancestors(d, target, seen) : [])];
     return [key, ...new Set(up)];
   }
   return [key];

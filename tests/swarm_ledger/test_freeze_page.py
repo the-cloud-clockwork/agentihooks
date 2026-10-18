@@ -330,6 +330,19 @@ def test_a_folded_task_without_stored_ancestry_follows_its_merged_target(page):
     assert row_state(tab, "#item-tasks-t2")["frozen"] is False
 
 
+MERGE_CYCLE = {
+    "tasks": [*DOC["tasks"], {**task("t6", "p2"), "merged_into": "t7"}, {**task("t7", "p3"), "merged_into": "t6"}]
+}
+
+
+@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p3")], "bare": True, "doc": MERGE_CYCLE}], indirect=True)
+def test_folded_tasks_merged_into_each_other_render_and_share_their_freezes(page):
+    tab, _ = page
+    assert row_state(tab, "#item-tasks-t6")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t7")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t2")["frozen"] is False
+
+
 BAD_PHASE = {
     "phases": [*DOC["phases"], {**phase("p9", "plans/v2", "Broken"), "depends_on": "p1"}],
     "followups": [{"id": "u1", "text": "Later", "done": False, "comments": []}],
