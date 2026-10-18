@@ -215,7 +215,7 @@ def claim(name: str, pid: int, alive: Callable[[object], bool] = _alive, floor: 
 
 
 def _claim(
-    folder: Path, name: str, pid: int, alive: Callable[[object], bool], floor: int, alone: bool
+    folder: Path, name: str, pid: int, alive: Callable[[object], bool], floor: int, alone: bool = False
 ) -> tuple[int, bool]:
     held = _read(folder / OWNER)
     holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
@@ -290,7 +290,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
     copy = stored(bao)
     with _locked() as folder:
         epoch, shared = _claim(
-            folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, int(copy.get("epoch", 0)), False
+            folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, int(copy.get("epoch", 0))
         )
         target = home() if shared else _rebuild(folder, rendered)
     if environ.get(binding.REPORT):

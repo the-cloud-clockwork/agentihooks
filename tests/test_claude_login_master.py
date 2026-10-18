@@ -116,7 +116,7 @@ def test_master_mode_reports_a_refused_or_failed_store(ah, monkeypatch, capsys):
     assert "OpenBao HTTP 503: sealed" in capsys.readouterr().err
 
 
-def test_the_master_flag_routes_main_to_master_mode(monkeypatch):
+def test_the_master_flag_routes_main_to_master_mode(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(claude_login, "master", lambda *args: seen.append(args) or 0)
     console = _console()
@@ -126,6 +126,7 @@ def test_the_master_flag_routes_main_to_master_mode(monkeypatch):
     with pytest.raises(SystemExit):
         claude_login.main(["--master", "rig"], {}, console=console)
     assert len(seen) == 1
+    assert claude_login.MASTER_SLUG in capsys.readouterr().err
 
 
 def test_without_the_master_flag_the_setup_token_login_is_unchanged(monkeypatch):
