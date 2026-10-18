@@ -9,6 +9,7 @@ from hooks.classifier.questions import Question
 from hooks.classifier.result import Answer
 
 RULES = {
+    "documentation-needed": "hooks.context.documentation:RULE",
     "intent-check": "scripts.gates.intent:RULE",
     "intent-check-plan": "scripts.gates.intent:RULE",
     "intent-check-tests-first": "scripts.gates.intent:RULE",

@@ -112,6 +112,33 @@ def test_back_fill_rebuilds_the_pending_set_from_existing_items(store, monkeypat
     assert store.redis.sismember(store.key("indexed"), "bob")
 
 
+@pytest.mark.parametrize(("conflicts", "attempts", "indexed"), [(1, 2, True), (3, 3, False)])
+def test_back_fill_returns_pending_mail_after_watch_conflicts(store, monkeypatch, conflicts, attempts, indexed):
+    from redis.exceptions import WatchError
+
+    pending = store.send("alice", "bob", "waiting")
+    closed = store.send("alice", "bob", "finished")
+    store.close(closed.id, "bob", "done", "handled the request")
+    store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
+    pipeline = type(store.redis.pipeline())
+    watch = pipeline.watch
+    calls = []
+
+    def racing(pipe, *keys):
+        calls.append(keys)
+        if len(calls) <= conflicts:
+            raise WatchError()
+        return watch(pipe, *keys)
+
+    monkeypatch.setattr(pipeline, "watch", racing)
+
+    assert [item.id for item in store.pending_items("bob")] == [pending.id]
+    assert calls[:attempts] == [(store.key("address", "bob"),)] * attempts
+    assert pending_ids(store, "bob") == ([pending.id] if indexed else [])
+    assert bool(store.redis.sismember(store.key("indexed"), "bob")) is indexed
+    assert store.redis.sismember(store.key("waiting"), "bob")
+
+
 def test_back_fill_runs_once_and_keeps_items_sent_before_it(store, monkeypatch):
     from scripts.inbox import store as inbox_store
 
@@ -266,3 +293,23 @@ def test_back_fill_rebuilds_the_waiting_set_once(store):
     assert waiting(store) == {"bob", "dave"}
     store.redis.srem(store.key("waiting"), "dave")
     assert [i.id for i in store.pending()] == [first.id]
+
+
+def test_waiting_set_rebuild_survives_exhausted_watch_retries(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    pending = store.send("alice", "bob", "waiting")
+    store.pending_items("bob")
+    store.redis.delete(store.key("waiting"), store.key("waiting", "built"))
+    calls = []
+
+    def conflicting_watch(_pipe, *keys):
+        calls.append(keys)
+        raise WatchError()
+
+    monkeypatch.setattr(type(store.redis.pipeline()), "watch", conflicting_watch)
+
+    assert [item.id for item in store.pending()] == [pending.id]
+    assert calls == [(store.key("pending", "bob"),)] * 3
+    assert waiting(store) == {"bob"}
+    assert store.redis.exists(store.key("waiting", "built"))

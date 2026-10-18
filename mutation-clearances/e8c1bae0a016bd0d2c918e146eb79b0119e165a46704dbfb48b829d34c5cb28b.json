@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x_check_prod_lockdown__mutmut_19:1579f400969ebdd2591741bcfeee07abf361cc0e78761ed12428856d73f19db2": {
+    "reader": "standards_reader",
+    "reason": "equivalent for the same reason; an explicit None default and the original empty default take identical resolver paths."
+  }
+}

@@ -1,8 +1,9 @@
 import json
+from unittest.mock import ANY
 
 import pytest
 
-from scripts.gates import intent
+from scripts.gates import intent, lift
 from scripts.gates.verdicts import Verdicts
 from scripts.inbox.store import InboxStore
 from scripts.swarm import cli
@@ -45,12 +46,34 @@ def test_swarm_pr_arms_the_intent_check_and_stamps_the_body(started, capsys, mon
     assert Verdicts("sw", "intent").read("t1") == {"verdict": "pending", "reason": "intent check running", "at": 4242}
 
 
+def test_recording_the_main_pull_keeps_the_tests_first_pull(started):
+    _, ledger, _ = started
+    ledger.rows["t1"]["split"] = ["1-2", "3-4"]
+    first = "https://github.com/o/r/pull/8"
+    assert run("sw", "pr", first, "--half", "1") == 0
+    assert run("sw", "pr", URL, "--half", "2") == 0
+    assert run("sw", "pr", URL, "--half", "2") == 0
+    assert ledger.rows["t1"]["pr_url"] == URL
+    assert ledger.rows["t1"]["split_pulls"] == [first, URL]
+
+
 def test_swarm_pr_with_the_intent_gate_off_arms_nothing(started, capsys, monkeypatch):
     store, _, _ = started
     store.update("sw", gates={"intent": "off"})
     assert run("sw", "pr", URL) == 0
     assert json.loads(capsys.readouterr().out.splitlines()[-1])["intent"] == {"verdict": "off", "body": True}
     assert Verdicts("sw", "intent").read("t1") is None
+
+
+def test_a_new_pull_request_drops_the_task_lift_and_the_same_one_keeps_it(started):
+    path = lift.task_lift_path("sw", "t1", "intent")
+    path.parent.mkdir(parents=True)
+    path.write_text("{}")
+    assert run("sw", "pr", URL) == 0
+    assert not path.exists()
+    path.write_text("{}")
+    assert run("sw", "pr", URL) == 0
+    assert path.exists()
 
 
 @pytest.mark.parametrize("mode", ["enforce", "observe", "off", "coach"])
@@ -124,8 +147,9 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     notice = InboxStore(store.redis).send("swarm", "eng-1@sw", "red checks")
     store.redis.hset(store.key("sw", "red-notices"), notice.id, other)
     Verdicts("sw", "intent-coach").write(
-        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text="k"
     )
+    monkeypatch.setattr(intent, "pr_text", lambda url: "k")
     batches, heads = [], []
 
     def batch(urls, cache=None):
@@ -140,7 +164,7 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     cli.run_tick(store, "sw")
     assert heads == []
     cli.run_tick(store, "sw")
-    assert batches == [{URL, other}, {URL, other}]
+    assert batches == [{URL, other}, {URL, other}, {URL, other}, {URL, other}]
     assert heads == [URL]
 
 
@@ -151,17 +175,18 @@ def test_the_coach_tick_keeps_an_unchanged_head_from_the_ticks_pull_request_read
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
     Verdicts("sw", "intent-coach").write(
-        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text="k"
     )
     from scripts.swarm import ledger_events
 
+    monkeypatch.setattr(intent, "pr_text", lambda url: "k")
     reads, views = [], []
     pull = ledger_events.PullRequest("OPEN", None, None, False, head="h1")
     monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url) or pull)
     monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("a second head read"))
     monkeypatch.setattr(intent, "pr_view", lambda url: views.append(url))
     actions = cli.run_tick(store, "sw")
-    assert (reads, views) == ([URL], [])
+    assert (reads, views) == ([URL, URL], [])
     assert not any("intent check" in action for action in actions)
     assert Verdicts("sw", "intent").read("t1")["head"] == "h1"
 
@@ -235,4 +260,5 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
         "at": 777,
         "phase": "p1",
         "inputs": intent._fingerprint({"phases": ledger.phases}, ledger.rows["t1"]),
+        "persisted_at": ANY,
     }

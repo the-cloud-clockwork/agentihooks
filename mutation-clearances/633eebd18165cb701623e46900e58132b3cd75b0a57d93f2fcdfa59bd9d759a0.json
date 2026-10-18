@@ -1,0 +1,6 @@
+{
+  "scripts/session_exit.py:scripts.session_exit.x_record_exit__mutmut_80:5752ea99b64f19bf5f42b3e709f9186e52846d69fcaa5aab801bd39585841bb6": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "json.dump defaults ensure_ascii=True. Its output is ASCII even for Unicode pane fields, yielding identical bytes with explicit UTF-8 or the supported ASCII-compatible locale encoding."
+  }
+}

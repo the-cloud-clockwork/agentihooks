@@ -4,4 +4,5 @@
 !docker/swarm-node/layout.json
 !docker/swarm-node/ssh/
 !docker/swarm-node/ssh/**
+!scripts/swarm_v2/worker_image.py
 !deploy/helm/agentihooks-swarm/ci/terminal-worker.sh

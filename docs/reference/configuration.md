@@ -236,6 +236,9 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTIHOOKS_HANDOFF_5H_PCT` | `99` | 5-hour used % that triggers the quota policy |
 | `AGENTIHOOKS_HANDOFF_MIN_LEFT` | `20` | Routing left % (tighter of 5h and 7d) a handoff target needs |
 | `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT` | `10` | 7-day left % that makes a spent 5-hour window wait for its reset instead of stopping |
+| `QUOTA_USAGE_INJECTION_ENABLED` | `true` | Inject the [quota usage banner](../pillars/load-balancing.md#quota-usage-banner) on every prompt and on the tool call cadence |
+| `QUOTA_USAGE_TOOL_CALLS` | `5` | Tool calls between quota usage banners |
+| `QUOTA_USAGE_STALE_SEC` | `300` | Age in seconds after which a quota reading is ignored by the banner and the quota policy |
 
 ---
 
@@ -258,6 +261,95 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 | `AGENTICORE_AGENT` | `unknown` | Agent identifier tag. |
 | `AGENT_NAME` | `Agent` | Agent display name for notifications and logs. |
 | `CLAUDE_CODE_MAX_OUTPUT_TOKENS` | -- | Output token limit. Injected into session context if set. |
+
+---
+
+## GitHub CLI Config Pin
+
+gh 2.x moves the operator's login: the gh 2.4.0 binary on the operator's
+machine carries `autoMigrateConfigDir`, recorded in #3502. When
+`XDG_CONFIG_HOME` is set, `GH_CONFIG_DIR` is unset and `$XDG_CONFIG_HOME/gh`
+does not exist, gh renames `~/.config/gh` into `$XDG_CONFIG_HOME/gh` on its
+next run. A proof, render or
+launch that points `XDG_CONFIG_HOME` at a scratch folder then takes the login
+with it, and every other session on the machine loses GitHub until the folder is
+moved back. This happened twice on 15 October: once from a proof wrapper and
+once from the Claude session it had already started
+([#3502](https://github.com/the-cloud-clockwork/agentihooks/issues/3502), fixed by
+[#3505](https://github.com/the-cloud-clockwork/agentihooks/pull/3505)).
+
+AgentiHooks pins `GH_CONFIG_DIR` to the home gh folder whenever
+`XDG_CONFIG_HOME` points away from the home default, so gh reads the operator's
+login in place and never migrates it.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GH_CONFIG_DIR` | -- | Read by gh. AgentiHooks sets it to `$HOME/.config/gh` when `XDG_CONFIG_HOME` is set to anything other than `$HOME/.config` and `GH_CONFIG_DIR` is unset or empty. A value you set is kept. |
+| `XDG_CONFIG_HOME` | -- | Decides whether the pin applies. Unset, or equal to `$HOME/.config`, leaves the environment unchanged. |
+| `CLAUDE_ENV_FILE` | -- | Set by Claude Code for each session. When a hook pins `GH_CONFIG_DIR`, it appends `export GH_CONFIG_DIR=...` to this file once, so the agent's own shell commands inherit the pin. |
+
+### Where the pin applies
+
+| Process | How |
+|---------|-----|
+| Every `agentihooks` CLI command and every `scripts` module | Importing the `scripts` package pins its own environment and every child it starts. |
+| Every hook | The hook process pins its environment after loading `~/.agentihooks/.env` and `~/.agentihooks/*.env`, which may set `XDG_CONFIG_HOME`. |
+| A Claude session's shell | The hook writes the pin to `CLAUDE_ENV_FILE`, which covers a session that was not started by an AgentiHooks launcher. The line is written once; an existing copy is left alone. |
+| Agents opened by `init-agent`, including swarm spawns and handoffs | The launcher script runs the same check in shell before it starts Claude or Codex. |
+
+The pin never stops a hook. If `CLAUDE_ENV_FILE` cannot be read, decoded or
+written, the hook continues without it.
+
+### Isolated proofs you write
+
+A wrapper that sets `XDG_CONFIG_HOME` and runs commands outside AgentiHooks must
+pin gh itself, in every shell and session it starts. The engineer role carries
+this rule.
+
+```bash
+export XDG_CONFIG_HOME="$SCRATCH/config"
+export XDG_STATE_HOME="$SCRATCH/state"
+export XDG_DATA_HOME="$SCRATCH/data"
+export GH_CONFIG_DIR="$HOME/.config/gh"
+```
+
+The same check the launcher writes, for a script that may or may not be isolated:
+
+```bash
+if [ -n "${XDG_CONFIG_HOME:-}" ] && [ "$XDG_CONFIG_HOME" != "$HOME/.config" ]; then
+  export GH_CONFIG_DIR="${GH_CONFIG_DIR:-$HOME/.config/gh}"
+fi
+```
+
+### Limits
+
+- A session started before the pin shipped keeps its old environment. A long
+  lived isolated session runs gh too, for example for pull request status, so it
+  needs the pin as much as a new command does. Restart it.
+- The pin only fills an unset value. A `GH_CONFIG_DIR` pointing elsewhere is
+  used as given.
+- An `XDG_CONFIG_HOME` of `$HOME/.config/`, with a trailing slash, is pinned by
+  the launcher's shell check, which compares text, and left alone by hooks and
+  the CLI, which compare paths. Both outcomes keep the login in place.
+
+### Troubleshooting
+
+Every agent reports gh as logged out at once:
+
+1. Check whether the home folder is gone: `test -d ~/.config/gh && echo present || echo missing`.
+2. Look for a moved copy anywhere under your home folder:
+   `find ~ -maxdepth 8 -type d -name gh -not -path "$HOME/.config/gh"`.
+   Isolated proofs usually put their config folder under `~/scratchpad`. The moved `gh`
+   folder keeps its original modification time; its new parent `config` folder
+   carries the time of the move.
+3. Confirm nothing has recreated the home folder, `test ! -e ~/.config/gh && echo free`,
+   since `mv` would otherwise nest the login inside it. Move it back with
+   `mv <found folder> ~/.config/gh`, then confirm with
+   `gh api user --jq .login`. List the folder rather than reading its files: it
+   holds the login token.
+4. The scratch folder that held the moved copy names the proof or session that
+   set `XDG_CONFIG_HOME`. Add the pin to that wrapper and restart any session it
+   started, which still carries the unpinned environment.
 
 ---
 
@@ -370,5 +462,6 @@ duplicating them into its own environment file.
 | `RETRY_BREAKER_MAX` | `5` | Soft limit -- warn after this many identical failures. |
 | `RETRY_BREAKER_HARD_MAX` | `10` | Hard limit -- block after this many identical failures. |
 | `RETRY_BREAKER_TTL` | `300` | Seconds before a failure fingerprint expires from the counter. |
-| `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` short-circuits branch / PR / release-merge / hotfix / non-main force-push gates session-wide. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |
+| `CONTROLS_BYPASS_ENABLED` | `true` | Enable the controls toggle (bypass mode). Operator phrase `disable controls` lifts branch, non-protected PR, hotfix and non-main force-push gates session-wide. Protected promotion remains CI-only; PyPI publication still requires `release dance`. See [Guardrail 9](/docs/pillars/guardrails/#guardrail-9-controls-toggle-bypass-mode). |
 | `KUBECTL_MUTATION_GUARD_ENABLED` | `true` | HARD-FLOOR live-patching guard. PreToolUse Bash hook that blocks `kubectl exec`/`cp` writes, `kubectl edit`/`patch`/`set`/`scale`/`rollout-restart`/`annotate`/`label`/`drain`/`debug`/`create -f`/`apply -f`/`autoscale`, `helm install`/`upgrade`/`rollback` outside CI, `argocd app sync --local`, SSH-edit, `scp` INTO host, and `docker exec` writes. Does NOT honor bypass mode, hotfix signals, or release-gate signals — code is the source of truth. See CI Manifesto §3.5 and `rules/code-is-source.md`. |
+| `AGENTIHOOKS_SERENA` | `true` | Serena edit guard. PreToolUse hook that blocks a built-in or shell rewrite of Python in a linked worktree, routing it to Serena's symbol tools instead. `false` turns the whole guard off for that session or machine: every edit is let through and no Serena directive is injected; unset or any other value keeps it on. See Development Manifesto §7 and `rules/code-intelligence.md`. |

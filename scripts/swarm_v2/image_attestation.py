@@ -143,7 +143,7 @@ def promote(attestation: dict, digest: str, config: str, tags: list[str], replay
         raise Refused("unqualified image: " + "; ".join(attestation["refusals"]))
     if not DIGEST.fullmatch(digest):
         raise Refused("registry digest is not a sha256 digest")
-    if config != attestation["image_id"]:
+    if config != attestation["image_id"] and digest != attestation["image_id"]:
         raise Refused("registry image is not the tested image")
     return attestation | {
         "digest": digest,

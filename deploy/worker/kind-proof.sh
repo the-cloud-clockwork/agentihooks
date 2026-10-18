@@ -20,9 +20,15 @@ trap cleanup EXIT
 kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s > "$out/cluster.log" 2>&1 &
 cluster_pid=$!
 build_started="$SECONDS"
-docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
-printf 'worker_hive_image_build_seconds=%s\n' "$((SECONDS - build_started))" | tee "$out/build.txt"
+if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev; then
+  worker_base=published
+  docker build -f deploy/worker/Dockerfile -t "$image" .
+else
+  worker_base=rebuilt
+  docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
+  docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
+fi
+printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 wait "$cluster_pid"
 kind load docker-image "$image" --name "$cluster"
 docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && agentihooks hive --help' > "$out/tools.txt"
@@ -136,8 +142,22 @@ assert redis.xlen(orders.commands(hive)) == 0
 print(json.dumps({'scratch_order': order.action, 'ack': ack.status, 'pending': 0}, sort_keys=True))
 PY
 }
+member_id() {
+  local member
+  for _ in {1..60}; do
+    member="$(kubectl exec "$1" -- python3 -c 'import hooks.config; from scripts.hive.scope import member; print(member())')"
+    if [[ -n "$member" ]]; then
+      printf '%s\n' "$member"
+      return
+    fi
+    sleep 1
+  done
+  echo 'pod did not acquire hive membership' >&2
+  return 1
+}
 pod="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
-prove_worker "$pod" | tee "$out/orders.txt"
+member="$(member_id "$pod")"
+prove_worker "$member" | tee "$out/orders.txt"
 kubectl logs "$pod" > "$out/worker.log"
 restarts="$(kubectl get pod "$pod" -o jsonpath='{.status.containerStatuses[0].restartCount}')"
 [[ "$restarts" == 0 ]]
@@ -145,7 +165,9 @@ kubectl delete pod "$pod" --wait --timeout=60s
 kubectl rollout status "deployment/$deployment" --timeout=120s
 replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o jsonpath='{.items[0].metadata.name}')"
 [[ "$replacement" != "$pod" ]]
-prove_worker "$replacement" | tee "$out/replacement.txt"
+replacement_member="$(member_id "$replacement")"
+[[ "$replacement_member" == "$member" ]]
+prove_worker "$replacement_member" | tee "$out/replacement.txt"
 echo 'replacement pod reused durable membership without redeeming the join code again' | tee -a "$out/replacement.txt"
 echo 'worker hive kind registration and scratch order acknowledgement: passed'
 if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then

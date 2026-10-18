@@ -48,6 +48,35 @@ def test_the_server_pid_comes_from_the_ledger_folder(tmp_path):
     assert ledger_host.folder({}).name == "development-ledger"
 
 
+def test_pass_snapshot_reads_the_named_process_without_sleeping(tmp_path, monkeypatch):
+    monkeypatch.setenv("LEDGER_DIR", str(tmp_path))
+    monkeypatch.setattr(ledger_host, "PROC", tmp_path)
+    monkeypatch.setattr(ledger_host.os, "sysconf", lambda name: 100 if name == "SC_CLK_TCK" else 0)
+    assert ledger_host.snapshot() is None
+    (tmp_path / ".server.pid").write_text("4242")
+    assert ledger_host.snapshot() is None
+    write_stat(tmp_path, 4242, 123, 45, system=23)
+    assert ledger_host.snapshot() == {"pid": 4242, "start": 45, "ticks": 123, "hertz": 100}
+    (tmp_path / "4242" / "stat").write_text("invalid")
+    assert ledger_host.snapshot() is None
+
+
+def test_cpu_over_a_pass_requires_the_same_process_and_measured_elapsed_time():
+    before = {"pid": 1, "start": 20, "ticks": 100, "hertz": 100}
+    after = {**before, "ticks": 300}
+    assert ledger_host.cpu_over_pass(before, after, 8) == 25.0
+    assert ledger_host.cpu_over_pass(before, {**after, "ticks": 125}, 0.5) == 50.0
+    assert ledger_host.cpu_over_pass(before, after, 1.0) == 200.0
+    assert ledger_host.cpu_over_pass(before, before, 8) == 0.0
+    assert ledger_host.cpu_over_pass(None, after, 8) is None
+    assert ledger_host.cpu_over_pass(before, None, 8) is None
+    assert ledger_host.cpu_over_pass(before, after, 0) is None
+    assert ledger_host.cpu_over_pass(before, after, -1) is None
+    assert ledger_host.cpu_over_pass(after, before, 8) is None
+    for field in ("pid", "start", "hertz"):
+        assert ledger_host.cpu_over_pass(before, {**after, field: after[field] + 1}, 8) is None
+
+
 def test_the_newest_commit_on_dev_names_its_subject_and_age(tmp_path):
     def git(*args, **env):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True, env=env or None)

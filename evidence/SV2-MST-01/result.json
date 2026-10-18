@@ -71,10 +71,10 @@
       ]
     },
     "output_contract": {
-      "met_by": "Four phases split two and two; a task comment on a phase owned by master-2 reaches master-2 only; unaddressed chat reaches the lead",
+      "met_by": "Four phases split two and two; an operator comment on a phase or an unclaimed task owned by master-2 reaches the front door lead only; unaddressed chat reaches the lead",
       "tests": [
         "tests/test_swarm_v2_master_seats.py::test_four_phases_split_two_and_two_between_two_master_seats",
-        "tests/test_swarm_v2_master_seats.py::test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_that_master"
+        "tests/test_swarm_v2_master_seats.py::test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_the_front_door"
       ]
     },
     "rejection_contract": {
@@ -100,7 +100,7 @@
   ],
   "phase_use": [
     "agentihooks swarm SLUG set masters=N records the seat count the tick reads to launch seats two and up (t315)",
-    "Operator mail, tick items, priorities, pull request notices and task health findings already route by phase owner, so once a master occupies seat two its phases' items reach it with no further change; ledger task t316 (task health findings to the phase owner) is delivered by this change",
+    "Tick items, priorities, pull request notices and task health findings already route by phase owner, so once a master occupies seat two its phases' items reach it with no further change; ledger task t316 (task health findings to the phase owner) is delivered by this change",
     "With no count set every swarm keeps one master at the existing address and routes as before (INV-R11), so nothing the phase already runs is weakened"
   ]
 }

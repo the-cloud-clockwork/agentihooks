@@ -24,8 +24,9 @@ def launched(tmp_path, spec, prompt="Open the task."):
     launcher, prompt_file = init_agent._write_launcher(
         tmp_path, "engineer@abc-0001", prompt, ["-m", "gpt-6.1-sol"], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
     )
-    line = next(line for line in launcher.read_text().splitlines() if "scripts.codex_session" in line)
-    return launcher, prompt_file, shlex.split(line)
+    line = next(line for line in launcher.read_text().splitlines() if line.startswith("setsid -f "))
+    server, _, _ = shlex.split(line)[4].partition("; rm -f ")
+    return launcher, prompt_file, shlex.split(server)
 
 
 def test_the_app_server_branch_runs_the_supervisor_with_the_opening_prompt_file(tmp_path):
@@ -157,3 +158,43 @@ def test_main_hands_the_transport_seat_and_predecessor_to_the_launcher(tmp_path,
     assert capsys.readouterr().err == "agentihooks init-agent: captured\n"
     [spec] = built
     assert (spec.transport, spec.seat, spec.previous_execution) == (init_agent.APP_SERVER, "eng-1@sw", "exe-prev")
+
+
+@pytest.mark.parametrize(("transport", "served"), [("app_server", True), ("legacy", False)])
+def test_main_names_the_pane_as_served_only_on_the_app_server_transport(
+    tmp_path, monkeypatch, capsys, transport, served
+):
+    named = []
+
+    def start(launcher, directory, name, args, agent, environ):
+        init_agent._started_marker(launcher).touch()
+        init_agent._route_report(launcher).write_text("status=routed\naccount=a\n")
+        return ["pane_id=w1:p2"]
+
+    monkeypatch.setattr(init_agent, "_prepare_profile", lambda args, agent, flags, environ: flags)
+    monkeypatch.setattr(init_agent, "_binding_request", lambda args, agent, prompt, environ, flags: prompt)
+    monkeypatch.setattr(init_agent, "_start_herdr", start)
+    monkeypatch.setattr(init_agent, "_name_in_herdr", lambda *args, **kwargs: named.append(kwargs) or [])
+    monkeypatch.setattr(init_agent, "_route_reported", lambda *args: None)
+    monkeypatch.setattr(init_agent, "_binding_result", lambda *args: [])
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda *args, **changes: None)
+    argv = [
+        "--host",
+        "herdr",
+        "--dir",
+        str(tmp_path),
+        "--name",
+        "eng-a",
+        "--agent",
+        "codex",
+        "--profile",
+        "engineer",
+        "--codex-transport",
+        transport,
+        "--seat",
+        "eng-1@sw",
+        "--route-timeout",
+        "0.1",
+    ]
+    assert init_agent.main(argv, {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}) == 0
+    assert named == [{"served": served}]

@@ -1,0 +1,268 @@
+{
+  "events": [
+    {
+      "at": 1792183408045,
+      "pod": "startup-bench/outage-cold",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1792183476000,
+      "message": "pod triggered scale-up: [{ocid1.instancepool.oc1.eu-frankfurt-1.aaaaaaaaovzmqx2g2ifdjg5xpuyqzpqaypb6td5fu4qxdonvyohpmp6jb5sq 0->1 (max: 10)}]",
+      "pod": "startup-bench/outage-cold",
+      "reason": "TriggeredScaleUp"
+    },
+    {
+      "at": 1792183633326,
+      "pod": "startup-bench/outage-cold",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1792183633528,
+      "pod": "startup-bench/outage-cold",
+      "reason": "FailedScheduling"
+    },
+    {
+      "at": 1792183633763,
+      "message": "Successfully assigned startup-bench/outage-cold to anton-oci-6ypnuv65ry4q",
+      "pod": "startup-bench/outage-cold",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1792183634000,
+      "pod": "startup-bench/outage-cold",
+      "reason": "FailedCreatePodSandBox"
+    },
+    {
+      "at": 1792183648000,
+      "message": "Failed to pull image \"127.0.0.1:5000/the-cloud-clockwork/agentihooks-worker:dev\": failed to pull and unpack image \"127.0.0.1:5000/the-cloud-clockwork/agentihooks-worker:dev\": failed to resolve reference \"127.0.0.1:5000/the-cloud-clockwork/agentihooks-worker:dev\": failed to do request: Head \"https://127.0.0.1:5000/v2/the-cloud-clockwork/agentihooks-worker/manifests/dev\": dial tcp 127.0.0.1:5000: connect: connection refused",
+      "pod": "startup-bench/outage-cold",
+      "reason": "Failed"
+    },
+    {
+      "at": 1792183648000,
+      "message": "Error: ErrImagePull",
+      "pod": "startup-bench/outage-cold",
+      "reason": "Failed"
+    },
+    {
+      "at": 1792183648000,
+      "pod": "startup-bench/outage-cold",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1792183649000,
+      "message": "Back-off pulling image \"127.0.0.1:5000/the-cloud-clockwork/agentihooks-worker:dev\"",
+      "pod": "startup-bench/outage-cold",
+      "reason": "BackOff"
+    },
+    {
+      "at": 1792183649000,
+      "message": "Error: ImagePullBackOff",
+      "pod": "startup-bench/outage-cold",
+      "reason": "Failed"
+    },
+    {
+      "at": 1792183760000,
+      "message": "Successfully pulled image \"127.0.0.1:5000/the-cloud-clockwork/agentihooks-worker:dev\" in 23.522s (23.522s including waiting). Image size: 425359520 bytes.",
+      "pod": "startup-bench/outage-cold",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1792183760000,
+      "pod": "startup-bench/outage-cold",
+      "reason": "Started"
+    },
+    {
+      "at": 1792183728000,
+      "pod": "startup-bench/outage-registry",
+      "reason": "Pulling"
+    },
+    {
+      "at": 1792183728518,
+      "message": "Successfully assigned startup-bench/outage-registry to anton-oci-6ypnuv65ry4q",
+      "pod": "startup-bench/outage-registry",
+      "reason": "Scheduled"
+    },
+    {
+      "at": 1792183729000,
+      "message": "Successfully pulled image \"mirror.gcr.io/library/registry:2\" in 1.062s (1.062s including waiting). Image size: 10131312 bytes.",
+      "pod": "startup-bench/outage-registry",
+      "reason": "Pulled"
+    },
+    {
+      "at": 1792183730000,
+      "pod": "startup-bench/outage-registry",
+      "reason": "Started"
+    }
+  ],
+  "inputs": {
+    "activities": "b88612c45fe8f13f53f820085de7e5331b31940ffcf2f33cf747cd02f8b9e040",
+    "events": "ffc2a1bf634843a59121bc665602973cea1b4b31937978f406985c3aa3440aad",
+    "instances": "54ff186f356f9d1c8c1cd5e8c4d1680f11fb87c25fc58bfdeeb997881d4913ce",
+    "nodes": "cfa0418f0c5e26418e94b5fae9026ca07e4be757c51a5ccea53b1e4a22a69dee",
+    "pods": "9260b6f0538eb6d1e148d692762e5f45431797bec8419e0e626095ac8a00d0f5"
+  },
+  "launches": {
+    "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuick54qplgdiwcvgpnezahua6c4bd6vu2xc6ypnuv65ry4q": {
+      "group": "ocid1.instancepool.oc1.eu-frankfurt-1.aaaaaaaaovzmqx2g2ifdjg5xpuyqzpqaypb6td5fu4qxdonvyohpmp6jb5sq",
+      "launched": 1792183435323,
+      "requested": 1792183435323,
+      "source": "new_instance"
+    }
+  },
+  "nodes": {
+    "anton-oci-4cqhuqv5flyq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuic6axo6vvmrmxlbl4cgnmawmx3thrgpvv44cqhuqv5flyq",
+      "ready": 1792168390000
+    },
+    "anton-oci-4guolk7x2o2a": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicsd4xitsnmwxv6iv5sgv2ezqrsjfjbpqs4guolk7x2o2a",
+      "ready": 1792166489000
+    },
+    "anton-oci-6ypnuv65ry4q": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuick54qplgdiwcvgpnezahua6c4bd6vu2xc6ypnuv65ry4q",
+      "ready": 1792183633000
+    },
+    "anton-oci-7icrdbuj7ynq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicl5tdf6xybz5fyj3ipb3gewkxvvvew7r47icrdbuj7ynq",
+      "ready": 1792165749000
+    },
+    "anton-oci-7u4prx652vwq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicmlvwx27zropzqo2rvcugzwjn5ttbdi5w7u4prx652vwq",
+      "ready": 1792168235000
+    },
+    "anton-oci-beaydql4v2ja": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicwngoydenk2pohawab2tw3czhekuceyedbeaydql4v2ja",
+      "ready": 1792120999000
+    },
+    "anton-oci-cwtjo6i4k4uq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicqjdaqfqvcggna277d4pk4jyktxamy4pocwtjo6i4k4uq",
+      "ready": 1792162984000
+    },
+    "anton-oci-d32ixcrhfqfq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicalddvhn6d7v5dikai7avkha44c5yfehmd32ixcrhfqfq",
+      "ready": 1792168394000
+    },
+    "anton-oci-e5v5sr2czfqq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuicx2mtosm4rc2nvbpkdyinsqdtyvxo67vie5v5sr2czfqq",
+      "ready": 1792121005000
+    },
+    "anton-oci-eulosd33iima": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicaiavffmuuubcuiv44mv2n4d7xkylwvuieulosd33iima",
+      "ready": 1792169815000
+    },
+    "anton-oci-f4woz4equdpa": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicukpcflpoqim52umot7wnfdcnlu7mc33hf4woz4equdpa",
+      "ready": 1792168399000
+    },
+    "anton-oci-fgxxbndot6ra": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuic4bedoyjvf6hkgzhcqmyibbjn7hrd4ockfgxxbndot6ra",
+      "ready": 1792162990000
+    },
+    "anton-oci-gmhqr3tt6gma": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuiccdes37xuxm3hz3jeqouegwuorr3pelrjgmhqr3tt6gma",
+      "ready": 1792163450000
+    },
+    "anton-oci-j3273gldhema": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuic3jyv2xyjy7oyf464aunbu55qrbgt2t54j3273gldhema",
+      "ready": 1792163721000
+    },
+    "anton-oci-mpz7v3ooaycq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicxnokvbq6kxmcerx4z2dwv72sftwc55w6mpz7v3ooaycq",
+      "ready": 1792162522000
+    },
+    "anton-oci-ni3qzmnkzzaq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicfndnvb27fj6grnwpo3kgrn4f346swrajni3qzmnkzzaq",
+      "ready": 1792164345000
+    },
+    "anton-oci-o55ks3s7fmtq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuicpyr3mz4xqjbdtdxplmyn4t7bzkc4wvxyo55ks3s7fmtq",
+      "ready": 1792166497000
+    },
+    "anton-oci-rgzrnoqdr25q": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuic5l2brj3m6wdlvvvuqsk2tkqrdb5so7fyrgzrnoqdr25q",
+      "ready": 1792162368000
+    },
+    "anton-oci-so5odm2zgsyq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuicggw7qphgoomuakojdh3rxxi5xxrkdnspso5odm2zgsyq",
+      "ready": 1792164349000
+    },
+    "anton-oci-stdipsrmsrzq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuicvd2zxua6bfcqywmfwqke6ar2mg5x2cn7stdipsrmsrzq",
+      "ready": 1792169817000
+    },
+    "anton-oci-vnrzhzhmmana": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicqyke3o76ptnao7oq7ridfwcrmaq2oop5vnrzhzhmmana",
+      "ready": 1792163172000
+    },
+    "anton-oci-wmo7lpmz72vq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicubcxwgsvantvpq4a7igvdk45t7pxfafrwmo7lpmz72vq",
+      "ready": 1792167228000
+    },
+    "anton-oci-xau6kylwhfdq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuicap4lhfunepvt6qs42xiylgxrxftczen6xau6kylwhfdq",
+      "ready": 1792168396000
+    },
+    "anton-oci-xjlwevni6rvq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljtxppybuiceinvmhm3obyghimccdyogcwqucby6oulxjlwevni6rvq",
+      "ready": 1792167237000
+    },
+    "anton-oci-xp3dly4rc6xq": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljrxppybuici2wztj5t45ai4ygbfcokh2nseszg6bpcxp3dly4rc6xq",
+      "ready": 1792163601000
+    },
+    "anton-oci-yykmcnla32ia": {
+      "instance": "ocid1.instance.oc1.eu-frankfurt-1.antheljsxppybuicifbmh4lc6hqgqgzoscdpwgt52h6yepluyykmcnla32ia",
+      "ready": 1792168390000
+    },
+    "k8s-master": {
+      "instance": "k8s-master",
+      "ready": 1791991566000
+    },
+    "k8s-worker-1": {
+      "instance": "k8s-worker-1",
+      "ready": 1791918865000
+    },
+    "k8s-worker-2": {
+      "instance": "k8s-worker-2",
+      "ready": 1789426122000
+    },
+    "worker-001": {
+      "instance": "worker-001",
+      "ready": 1792120998000
+    }
+  },
+  "pods": {
+    "startup-bench/outage-cold": {
+      "created": 1792183408000,
+      "ready": 1792183761000
+    },
+    "startup-bench/outage-registry": {
+      "created": 1792183728000,
+      "ready": 1792183730000
+    }
+  },
+  "read_at": "2026-10-16T20:49:20Z",
+  "scaled_groups": {
+    "ocid1.instancepool.oc1.eu-frankfurt-1.aaaaaaaagm2hi6zpymdri5j6uux63rfdkje4ukemjzpsdsulpr5yf7kpf6za": [
+      [
+        1792180422000,
+        23
+      ],
+      [
+        1792181435000,
+        25
+      ]
+    ],
+    "ocid1.instancepool.oc1.eu-frankfurt-1.aaaaaaaaovzmqx2g2ifdjg5xpuyqzpqaypb6td5fu4qxdonvyohpmp6jb5sq": [
+      [
+        1792096204000,
+        0
+      ],
+      [
+        1792183414000,
+        0
+      ]
+    ]
+  }
+}

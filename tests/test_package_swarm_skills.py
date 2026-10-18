@@ -12,7 +12,7 @@ world = render_world
 PACKAGE = Path(__file__).resolve().parents[1] / "profiles" / "package"
 ROLES = ("master", "engineer", "cicd", "planner", "qa")
 SWARM_SKILLS = ("handoff", "triage-priorities", "worktree")
-RULES = ("code-intelligence.md", "worktrees.md")
+RULES = ("code-intelligence.md", "delivery-tiers.md", "worktrees.md")
 
 
 def _listed(out: Path) -> list[str]:
@@ -45,7 +45,7 @@ def test_every_role_home_lists_the_swarm_skills_once_with_a_bundle_copy(world, r
     listed = _listed(out)
     assert [listed.count(name) for name in SWARM_SKILLS] == [1, 1, 1]
     persona = (out / "CLAUDE.md").read_text()
-    assert [persona.count(f"<!-- rule: {name} (rule) -->") for name in RULES] == [1, 1]
+    assert [persona.count(f"<!-- rule: {name} (rule) -->") for name in RULES] == [1, 1, 1]
 
 
 @pytest.mark.parametrize("role", ROLES)

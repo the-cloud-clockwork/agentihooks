@@ -15,11 +15,15 @@ def test_shard_graders_check_out_event_base_before_installing():
     steps = _jobs()["shard-check"]["steps"]
     checkout = steps[0]
     assert checkout["uses"] == "actions/checkout@v4"
-    assert checkout["with"]["ref"] == (
+    legacy = (
         "${{ github.event.pull_request.base.ref == 'main' && github.sha || "
         "github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || "
         "github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}"
     )
+    promotion = legacy.replace(
+        "github.event.before ||", "github.event_name == 'push' && github.sha || github.event.before ||"
+    )
+    assert checkout["with"]["ref"] in (legacy, promotion)
     assert checkout["with"]["persist-credentials"] is False
     assert sum(step.get("uses", "").startswith("actions/checkout@") for step in steps) == 1
 
@@ -40,7 +44,16 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     assert upload["if"] == "github.event.pull_request.base.ref != 'main'"
     assert collect["run"].endswith(" --collected collected.json")
     assert "--shard" not in collect["run"]
-    assert jobs["split"]["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
+    versions = jobs["split"]["strategy"]["matrix"]["python-version"]
+    joint = "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
+    assert jobs["test-count"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
+    assert jobs["unit"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
+    assert versions in (["3.11", "3.12"], joint)
+    if versions == joint:
+        artifacts = {step.get("with", {}).get("name"): step for step in split if step.get("uses")}
+        assert artifacts["early-collected-3.12"]["with"]["path"] == "queue-input/3.12"
+        assert artifacts["collected-3.12"]["with"]["path"] == "queue-input/3.12/collected.json"
+        assert artifacts["collected-3.12"]["with"]["if-no-files-found"] == "error"
     assert upload["with"]["name"] == "collected-${{ matrix.python-version }}"
     assert upload["with"]["path"] == "collected.json"
     assert upload["with"]["if-no-files-found"] == "error"
@@ -57,9 +70,9 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     steps = _jobs()["shard-check"]["steps"]
     commands = [step["run"] for step in steps if step.get("run", "").startswith("python -m tests.shard_")]
     assert commands == [
-        "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json",
+        "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
         "python -m tests.shard_check shard-durations/*/durations.json",
-        "python -m tests.shard_budget shard-durations/*/durations.json",
+        "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]
 
 

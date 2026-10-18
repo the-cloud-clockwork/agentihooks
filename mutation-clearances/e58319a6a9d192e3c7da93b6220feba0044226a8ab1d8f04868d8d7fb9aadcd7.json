@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x_write_all__mutmut_11:b8dadd9a89b0c88f671c374ae4c27bd5eaea4d84fde0c0d7fc433288700ae82c": {
+    "reader": "standards-reader round three",
+    "reason": "approved; breaking the completed-write loop reaches the end of the function immediately, returning None. Bare return does the same after identical writes; no cleanup or statements follow the loop."
+  }
+}

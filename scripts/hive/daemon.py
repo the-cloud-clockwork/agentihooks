@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from redis import Redis
 
     from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
@@ -29,28 +30,51 @@ def beat(redis: "Redis", local_id: str) -> None:
     from scripts.hive.orders import Consumer
     from scripts.routing.reservation import LaunchSlots
 
+    consumer = Consumer.local(redis, local_id)
+    fenced = fence(redis, local_id, consumer.runtime)
     processes = account_sessions.local_processes()
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
+    # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
+    member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
     with redis.pipeline() as pipe:
         for field, value in registry._default(local_id).items():
             pipe.hsetnx(key, field, registry._encode(field, value))
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["heartbeat_at"] = str(int(time.time() * 1000))
         pipe.hset(key, mapping=fields)
-        pipe.sadd(registry.INDEX, local_id)
+        if not member:
+            pipe.sadd(registry.INDEX, local_id)
         for field in ("sessions", "quota"):
             pipe.set(f"{key}:{field}", json.dumps(report[field]), ex=TTL_SECONDS)
         pipe.execute()
-    LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
-    consumer = Consumer.local(redis, local_id)
-    consumer.poll()
+    if not member:
+        LaunchSlots(redis).refresh([execution for ids in executions.values() for execution in ids])
+    if not fenced:
+        consumer.poll()
     consumer.poll_commands()
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+
+
+def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
+    """Terminate the superseded executions the controller fenced on this hive; True while any still runs."""
+    from scripts.swarm import master_move
+    from scripts.swarm.store import RedisStore, SwarmError
+
+    store, key = RedisStore(redis), master_move.fenced(local_id)
+    for execution_id, raw in redis.hgetall(key).items():
+        try:
+            agent = store.execution(json.loads(raw)["slug"], execution_id)
+        except SwarmError:
+            redis.hdel(key, execution_id)
+            continue
+        if runtime.terminate(agent).ok:
+            redis.hdel(key, execution_id)
+    return redis.hlen(key) > 0
 
 
 def run(redis: "Redis") -> None:
@@ -172,7 +196,7 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
         )
         quota[f"codex:{account.name}"] = (
             _reading(reading.five_hour, reading.seven_day, reading.observed_at)
-            if reading
+            if reading and not reading.expired
             else _reading(balancer.QuotaWindow(), balancer.QuotaWindow(), None)
         )
     return slots, quota

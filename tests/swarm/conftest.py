@@ -57,3 +57,10 @@ def unchecked_launches(request, monkeypatch):
 
     if not getattr(request.module, "LAUNCH_CHECKED", False):
         monkeypatch.setattr(launch_check, "begin", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True)
+def confirmed_required_checks(monkeypatch):
+    from scripts.swarm import waits
+
+    monkeypatch.setattr(waits, "required_green", lambda target, head: True)

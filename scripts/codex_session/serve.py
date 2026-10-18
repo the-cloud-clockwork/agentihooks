@@ -171,9 +171,25 @@ def main(
         f"endpoint={record.endpoint_ref} state={record.state}",
         flush=True,
     )
+    pump = None
     try:
-        started.process.wait()
+        pump = subprocess.Popen(
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
+            [sys.executable, "-m", "scripts.inbox.codex", spec.slug, record.execution_id],
+            cwd=spec.cwd,
+            env=spec.environ,
+        )
+        while pump.poll() is None:
+            try:
+                started.process.wait(timeout=supervisor.POLL_S)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            return pump.returncode or 3
     finally:
+        if pump is not None:
+            supervisor.stop(pump)
         supervisor.stop(started.process)
         supervisor.finish(store, spec.slug, started, int(time.time() * 1000))
     return started.process.returncode or 0

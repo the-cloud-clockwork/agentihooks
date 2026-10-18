@@ -1,0 +1,6 @@
+{
+  "hooks/context/branch_guard.py:hooks.context.branch_guard.x__check_pr_creation__mutmut_45:a110a103493bea9b1128fb39e677d5ce4d68879ab6465831a808ea4d4db6e3a4": {
+    "reader": "standards_reader",
+    "reason": "equivalent. Current is_controls_disabled discards its compatibility session argument with del session_id before consulting the environment and global owner. Passing None changes no result or side effect. Source evidence: the parent supplied the current symbol body showing that discard and its two remaining return paths."
+  }
+}

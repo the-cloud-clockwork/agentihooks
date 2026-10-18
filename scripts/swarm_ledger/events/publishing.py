@@ -36,9 +36,10 @@ class Publishing:
         return json.loads(self.current(slug).text)
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None
+        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
     ) -> tuple[dict, list]:
-        state, rejected = self.inner.apply_ops(slug, changes=changes, ops=ops, gate=gate)
+        options = {} if copy_state else {"copy_state": False}
+        state, rejected = self.inner.apply_ops(slug, changes=changes, ops=ops, gate=gate, **options)
         self.current(slug)
         return state, rejected
 

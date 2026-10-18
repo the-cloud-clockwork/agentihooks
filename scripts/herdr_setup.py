@@ -95,6 +95,10 @@ def configure() -> int:
         return 1
     before = integration_files()
     failed = [name for name in INTEGRATIONS if subprocess.run([exe, "integration", "install", name]).returncode != 0]
+    from scripts.profiles.render import operator_codex_home
+    from scripts.targets.codex_target import trust_hooks
+
+    trust_hooks(operator_codex_home())
     installed = integration_files()
     changed = [name for name in INTEGRATIONS if installed.get(name) != before.get(name) and name not in failed]
     if changed:

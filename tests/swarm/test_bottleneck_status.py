@@ -81,6 +81,39 @@ def test_queue_wait_never_names_the_top_bottleneck(store):
     assert bottleneck_status.report(store, "sw", NOW)["stage"] == ""
 
 
+@pytest.mark.parametrize(
+    ("launch_seconds", "seat_seconds", "expected"),
+    [(0.0, 0.0, ""), (3600.0, 7200.0, "seat_wait"), (7200.0, 3600.0, "launch_failure"), (1.0, 0.0, "launch_failure")],
+)
+def test_top_bottleneck_uses_positive_task_hours_in_status_and_notices(store, launch_seconds, seat_seconds, expected):
+    detect(store, ("build", 3600.0, "rising"))
+    bottleneck_status.refresh("sw", store, NOW)
+    detect(
+        store,
+        ("queue_wait", 257400.0, "rising"),
+        ("launch_failure", launch_seconds, "falling"),
+        ("seat_wait", seat_seconds, "falling"),
+    )
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert found["stage"] == expected
+    assert found["seconds"] == max(launch_seconds, seat_seconds)
+    lines = bottleneck_status.refresh("sw", store, NOW)
+    assert lines == [bottleneck_status.line(found)]
+    assert lines[0].startswith(f"Top bottleneck {expected.replace('_', ' ') or 'none'};")
+    assert InboxStore(store.redis).pending_mail("master@sw")[-1].text == lines[0]
+
+
+@pytest.mark.parametrize(("seconds", "hours"), [(257400.0, "71.5"), (3600000.0, "1000.0")])
+def test_top_bottleneck_explains_why_the_leading_stage_was_excluded(store, seconds, hours):
+    detect(store, ("queue_wait", seconds, "rising"), ("launch_failure", 0.0, "falling"), ("seat_wait", 0.0, "falling"))
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert bottleneck_status.line(found) == (
+        "Top bottleneck none; trend none; measured 0 minutes ago; last action none recorded;"
+        f" Leading stage queue wait {hours} task hours skipped:"
+        " tasks beyond the seat limit or ready while a seat was free are excluded from bottleneck ranking"
+    )
+
+
 def test_the_waits_add_every_row_of_a_stage_in_exact_hours(store):
     detect(store, ("queue_wait", 3600.0, "rising"), ("queue_wait", 1800.0, "rising"), ("seat_wait", 180.0, "rising"))
     assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
@@ -191,6 +224,20 @@ def test_status_json_and_text_share_the_detectors_stage_trend_and_action(env, mo
     out = capsys.readouterr().out
     assert "top stages in the last 4 hours: seat wait 2.0 task hours (rising)" in out
     assert "Top bottleneck seat wait; trend rising; measured 0 minutes ago; last action Added a seat" in out
+
+
+def test_status_json_and_text_show_the_inbox_outbox_records_set_aside(env, capsys):
+    from scripts.inbox import outbox
+
+    store, _, _ = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "inbox outbox" not in capsys.readouterr().out
+    outbox.home().mkdir(parents=True, exist_ok=True)
+    outbox.skipped_path().write_text('{"reason": "corrupt", "line": "x"}\n')
+    assert status.status_report(store, "sw", {"tasks": []})["outbox"] == {"queued": 0, "retrying": 0, "set_aside": 1}
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "inbox outbox  queued 0  retrying 0  set aside 1\n" in capsys.readouterr().out
 
 
 def test_tick_delivers_new_metric_stage_once_before_status_publication(env, monkeypatch):

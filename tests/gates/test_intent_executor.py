@@ -28,12 +28,20 @@ def hook(tmp_path):
     conditions = bundle / ".claude" / "conditions"
     conditions.mkdir(parents=True)
     home.mkdir()
+    gh = tmp_path / "gh"
+    gh.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        "[[ \"$*\" == 'pr view 12 --json baseRefName --jq .baseRefName' ]] || exit 1\n"
+        "printf 'dev\\n'\n"
+    )
+    gh.chmod(0o755)
     (home / "state.json").write_text(json.dumps({"bundle": {"path": str(bundle)}}))
     (conditions / f"pre-{MATCHER}-intent.py").write_text(SHIM)
     gates = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates"
     env = {
         **os.environ,
         "HOME": str(tmp_path),
+        "PATH": f"{tmp_path}{os.pathsep}{os.environ['PATH']}",
         "PYTHONPATH": str(ROOT),
         "AGENTIHOOKS_HOME": str(home),
         "AGENTIHOOKS_TARGET": "claude",

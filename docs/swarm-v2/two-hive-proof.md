@@ -2,7 +2,7 @@
 
 G10 qualification requires a scratch ledger, two hives and two masters. Each master steers its phases and receives questions and follow ups addressed to its hive. They coordinate through the private masters channel. Unaddressed operator chat reaches the lead master.
 
-The ledger writes that carry hive targets are `agentihooks ledger question add TEXT --hive ID` and `agentihooks ledger followup add TEXT --hive ID`. The stored item retains `hive`; its added event, priority notice, later operator comments and follow up escalation route to the live master owning that hive. Configure ownership with `agentihooks swarm SLUG set hive.ID=SEAT`. Direct inbox writes use `agentihooks msg send SEAT TEXT`, addressed to the owning master seat. There is no direct hive inbox address.
+The ledger writes that carry hive targets are `agentihooks ledger question add TEXT --hive ID` and `agentihooks ledger followup add TEXT --hive ID`. The stored item retains `hive`; its added event, priority notice and follow up escalation route to the live master owning that hive; later operator comments reach the front door lead, which hands them on over the masters channel. Configure ownership with `agentihooks swarm SLUG set hive.ID=SEAT`. Direct inbox writes use `agentihooks msg send SEAT TEXT`, addressed to the owning master seat. There is no direct hive inbox address.
 
 The ledger master fence checks the same owner inside the locked write. A refused master changes no item and posts no decision. Accepted decisions retain their seat and revision. Replaying the same ledger operation leaves one answer and one channel post. Inbox delivery permits one receiver to claim each pending item; a separate priority notice is a distinct notification about that item.
 

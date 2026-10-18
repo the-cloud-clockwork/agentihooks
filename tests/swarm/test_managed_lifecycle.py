@@ -1,4 +1,5 @@
-from dataclasses import replace
+import json
+from dataclasses import asdict, replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -11,6 +12,17 @@ from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, S
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 SLUG = "managed"
+
+
+def _close_only(args):
+    if args[:2] != ["pane", "close"]:
+        raise AssertionError("managed execution must not inspect a pane")
+    return {}
+
+
+def _endpoint(rig, endpoint_ref):
+    moved = replace(rig.record, endpoint_ref=endpoint_ref, state=CONNECTED)
+    rig.store.redis.hset(rig.store.key(SLUG, "codex-transport"), moved.execution_id, json.dumps(asdict(moved)))
 
 
 @pytest.fixture
@@ -59,7 +71,7 @@ def rig(monkeypatch):
     from scripts import terminate_agent
 
     monkeypatch.setattr(terminate_agent, "sessions", lambda: [])
-    herdr = Mock(side_effect=AssertionError("managed execution must not inspect a pane"))
+    herdr = Mock(side_effect=_close_only)
     runner = runtime.HerdrRuntime(herdr=herdr)
     return SimpleNamespace(
         store=store,
@@ -238,7 +250,7 @@ def test_managed_retirement_uses_the_server_start_identity(rig, tmp_path):
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
     assert rig.bindings.get(SLUG, rig.agent.execution_id).active_turn_id == ""
     assert not rig.store.redis.hgetall(rig.store.key(SLUG, "codex-endpoints"))
-    rig.herdr.assert_not_called()
+    assert [call.args[0] for call in rig.herdr.call_args_list] == [["pane", "close", "viewer"]]
 
 
 def test_managed_retire_process_uses_the_server_instead_of_the_launcher(rig):
@@ -288,3 +300,106 @@ def test_an_unrelated_named_session_survives_managed_retirement(rig, monkeypatch
             finally:
                 server.terminate()
                 unrelated.terminate()
+
+
+def test_managed_retirement_closes_every_recorded_viewer_and_removes_the_runtime_home(rig, tmp_path):
+    from scripts.swarm import reaper
+
+    path = supervisor.socket_path(tmp_path / supervisor.RUNTIME_SUBDIR, rig.agent.execution_id)
+    (path.parent / "codex").mkdir()
+    _endpoint(rig, f"unix://{path}")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p9", "t9")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "viewer", "tv")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p5", "t5")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p7", "t7")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p8", "")
+    rig.bindings.add_viewer(SLUG, "exe-other", "w2:p6", "t6")
+    listed = [("viewer", "tv"), ("w2:p5", "t5"), ("w2:p6", "t6"), ("w2:p7", "reused"), ("w2:p8", ""), ("w2:p9", "t9")]
+    panes = {"panes": [{"pane_id": pane, "terminal_id": terminal} for pane, terminal in listed]}
+    rig.herdr.side_effect = lambda args: panes if args == ["pane", "list"] else _close_only(args)
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    assert [call.args[0] for call in rig.herdr.call_args_list] == [
+        ["pane", "list"],
+        ["pane", "close", "viewer"],
+        ["pane", "close", "w2:p5"],
+        ["pane", "close", "w2:p9"],
+    ]
+    assert rig.bindings.viewers(SLUG, rig.agent.execution_id) == {}
+    assert rig.bindings.viewers(SLUG, "exe-other") == {"w2:p6": "t6"}
+    assert not path.parent.exists()
+    assert tmp_path.exists()
+
+
+@pytest.mark.parametrize(("parent", "name"), [("cx", "shared"), ("shared", "own"), ("shared", "shared")])
+def test_managed_retirement_keeps_a_folder_outside_the_endpoint_layout(rig, tmp_path, parent, name):
+    from scripts.swarm import reaper
+
+    own = rig.agent.execution_id.removeprefix(supervisor.EXECUTION_PREFIX)[: supervisor.ENDPOINT_ID_CHARS]
+    foreign = tmp_path / parent / (own if name == "own" else name)
+    foreign.mkdir(parents=True)
+    _endpoint(rig, f"unix://{foreign}/s")
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    assert foreign.exists()
+
+
+def test_a_viewer_pane_that_will_not_close_refuses_the_retirement(rig):
+    from scripts.swarm import reaper
+
+    rig.herdr.side_effect = RuntimeError("herdr is down")
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert not rig.runner.retire(rig.agent)
+    assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "viewer pane viewer: herdr is down"}
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+
+
+def test_a_pane_list_that_fails_refuses_the_retirement(rig):
+    from scripts.swarm import reaper
+
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p5", "t5")
+    rig.herdr.side_effect = RuntimeError("herdr is down")
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert not rig.runner.retire(rig.agent)
+    assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "pane list: herdr is down"}
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+    assert rig.bindings.viewers(SLUG, rig.agent.execution_id) == {"w2:p5": "t5"}
+
+
+def test_a_runtime_home_that_will_not_go_refuses_the_retirement(rig, tmp_path, monkeypatch):
+    from scripts.swarm import reaper
+
+    path = supervisor.socket_path(tmp_path / supervisor.RUNTIME_SUBDIR, rig.agent.execution_id)
+    _endpoint(rig, f"unix://{path}")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p5", "t5")
+    rig.herdr.side_effect = lambda args: {"panes": []} if args == ["pane", "list"] else _close_only(args)
+
+    def busy(directory):
+        raise OSError("busy")
+
+    monkeypatch.setattr(runtime.shutil, "rmtree", busy)
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert not rig.runner.retire(rig.agent)
+    assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "runtime home: busy"}
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
+    assert rig.bindings.viewers(SLUG, rig.agent.execution_id) == {"w2:p5": "t5"}
+
+
+def test_a_viewer_pane_already_gone_does_not_refuse_the_retirement(rig):
+    from scripts.swarm import reaper
+
+    rig.herdr.side_effect = RuntimeError("pane viewer not found")
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+
+
+def test_a_headless_retirement_with_its_runtime_home_already_gone_succeeds(rig, tmp_path):
+    from scripts.swarm import reaper
+
+    directory = rig.agent.execution_id.removeprefix(supervisor.EXECUTION_PREFIX)[: supervisor.ENDPOINT_ID_CHARS]
+    _endpoint(rig, f"unix://{tmp_path}/{supervisor.RUNTIME_SUBDIR}/{directory}/s")
+    headless = replace(rig.agent, pane_id="")
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(headless)
+    rig.herdr.assert_not_called()
+    assert rig.runner.refusal(headless) == {"process": 0, "refusal": "unknown"}

@@ -182,11 +182,14 @@ After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, scans the built image for credentials with
 `docker/swarm-node/scan.sh`, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds the worker stage without cache and starts
-the retained image again. The rebuild reuses the pip wheels and tool binaries of the
-`downloads` stage, each checked against its locked sha256 before use. It
+the retained image again. The rebuild reuses the pip wheels of the `python-downloads`
+stage and the tool binaries of the `tool-downloads` stage, which fetches the locked tools
+concurrently; each is checked against its locked sha256 before use. It
 also bootstraps the fixture profiles in `fixtures/profiles` inside fresh
-containers, runs `claude mcp list`, `codex mcp list`, `claude -p` and `codex
-exec` offline so their SessionStart hooks register the session, proves
+containers, runs `claude mcp list`, `codex mcp list` and `claude -p` offline,
+and replays a fixture SessionStart event through the rendered Codex hook.
+Both hooks must register exactly one session in the proof working directory;
+Codex registration does not depend on an authenticated model request. It proves
 refusals, crash recovery and a profile rollback, and writes the SV2-IMG-02
 evidence. The output contains the build manifest, software
 inventory, profile hashes and package evidence. Production deployment and new

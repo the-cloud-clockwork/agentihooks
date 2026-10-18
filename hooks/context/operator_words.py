@@ -12,6 +12,7 @@ import time
 from contextlib import contextmanager
 from fnmatch import fnmatchcase
 
+from hooks.context import master_coding
 from hooks.context.swarm_heartbeat import is_operator_prompt
 
 TTL_SEC = 3600
@@ -196,13 +197,20 @@ def _opening(name, session):
     return True
 
 
+def _speaker(env, session):
+    seat = master_coding.seat(session)
+    if seat:
+        return seat.get("name"), seat.get("slug"), True
+    return env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_SWARM"), False
+
+
 def heard_prompt(prompt, environ=None, now=None, session=""):
     env = os.environ if environ is None else environ
-    name, slug = env.get("AGENTIHOOKS_AGENT_NAME"), env.get("AGENTIHOOKS_SWARM")
+    name, slug, seated = _speaker(env, session)
     if not name or not is_operator_prompt(prompt, slug):
         return False
     now = time.time() if now is None else now
-    if slug and _opening(name, session):
+    if slug and not seated and _opening(name, session):
         return False
     return record(name, prompt, now, slug)
 
@@ -219,7 +227,8 @@ def heard_answer(payload, environ=None, now=None):
     if payload.get("tool_name") != "AskUserQuestion":
         return False
     env = os.environ if environ is None else environ
-    return record(env.get("AGENTIHOOKS_AGENT_NAME"), _answer_words(payload), now, env.get("AGENTIHOOKS_SWARM"))
+    name, slug, _ = _speaker(env, payload.get("session_id"))
+    return record(name, _answer_words(payload), now, slug)
 
 
 def heard(payload, environ=None, now=None):
@@ -231,6 +240,6 @@ def heard(payload, environ=None, now=None):
 def typed(payload, environ=None, now=None):
     """True when the payload holds the operator's own words: a named session records them, an unnamed one has no launch prompt."""
     env = os.environ if environ is None else environ
-    if env.get("AGENTIHOOKS_AGENT_NAME"):
+    if env.get("AGENTIHOOKS_AGENT_NAME") or master_coding.seat(payload.get("session_id")):
         return heard(payload, env, now)
     return is_operator_prompt(payload.get("prompt", ""), env.get("AGENTIHOOKS_SWARM"))

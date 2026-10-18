@@ -20,6 +20,8 @@ if TYPE_CHECKING:
 HOME = None
 PANE = "provider-error"
 PANE_TTL_S = 24 * 3600
+PANE_SINCE = "provider-error-since"
+HOLD_LIMIT_MS = 30 * 60 * 1000
 PAST_SPANS = 50
 HELD = {"idle with claim": "idle during outage", "stale claim": "stale during outage"}
 
@@ -75,8 +77,22 @@ def lines(slug: str) -> list[str]:
     ]
 
 
-def mark_pane(store: RedisStore, slug: str, name: str, error: str) -> None:
+def mark_pane(store: RedisStore, slug: str, name: str, error: str, now_ms: int) -> None:
     store.redis.set(store.key(slug, PANE, name), error, ex=PANE_TTL_S)
+    since = store.key(slug, PANE_SINCE, name)
+    if error:
+        store.redis.set(since, now_ms, nx=True, ex=PANE_TTL_S)
+    else:
+        store.redis.delete(since)
+
+
+def held_past_limit(store: RedisStore, slug: str, name: str, now_ms: int) -> bool:
+    since = store.redis.get(store.key(slug, PANE_SINCE, name))
+    return since is not None and now_ms - int(since) >= HOLD_LIMIT_MS
+
+
+def clear_pane(store: RedisStore, slug: str, name: str) -> None:
+    store.redis.delete(store.key(slug, PANE, name), store.key(slug, PANE_SINCE, name))
 
 
 def held(store: RedisStore, slug: str, name: str | None) -> str:

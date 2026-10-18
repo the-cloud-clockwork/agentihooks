@@ -76,12 +76,9 @@ def test_qualification_precedes_login_and_publication(workflow):
     order = [
         "Build the candidate",
         "Build the incompatible herdr fixture",
-        "Refuse the incompatible herdr fixture",
-        "Qualify the candidate",
-        "Requalify the candidate independently",
         "Build the planted credential fixture",
-        "Refuse the planted credential fixture",
-        "Scan the candidate for credentials",
+        "Run every qualification and credential scan at once",
+        "Require the independent requalification to match",
         "Log in to the registry",
         "Publish the qualified candidate",
     ]
@@ -90,7 +87,8 @@ def test_qualification_precedes_login_and_publication(workflow):
 
 def test_publication_runs_only_on_dev_pushes_or_an_explicit_dispatch(workflow):
     gate = (
-        "(github.event_name == 'push' || inputs.publish)"
+        "github.event_name == 'release'"
+        " || (github.event_name == 'push' || inputs.publish)"
         " && (github.ref == 'refs/heads/dev' || startsWith(github.ref, 'refs/heads/diffcheck/'))"
     )
 
@@ -120,7 +118,10 @@ def test_the_attestation_is_uploaded_even_after_a_failure(workflow):
 def test_checkout_keeps_no_credential_in_the_repository(workflow):
     [checkout] = [step for step in steps(workflow) if step.get("uses", "").startswith("actions/checkout@")]
 
-    assert checkout["with"] == {"persist-credentials": False}
+    assert checkout["with"] == {
+        "fetch-depth": "${{ github.event_name == 'release' && '0' || '1' }}",
+        "persist-credentials": False,
+    }
 
 
 COMMIT = "c" * 40
@@ -219,7 +220,7 @@ LEAK = json.dumps(
 )
 
 
-def scan(tmp_path, status, report):
+def scan(tmp_path, status, report, args=()):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (bin_dir / "docker").write_text(SCANNER)
@@ -231,7 +232,7 @@ def scan(tmp_path, status, report):
         "REPORT": report,
     }
     done = subprocess.run(
-        ["bash", str(ROOT / "docker/swarm-node/scan.sh"), "candidate:x", str(tmp_path / "out")],
+        ["bash", str(ROOT / "docker/swarm-node/scan.sh"), *(args or ("candidate:x", str(tmp_path / "out")))],
         env=environ,
         cwd=ROOT,
         capture_output=True,
@@ -248,6 +249,19 @@ def test_scan_reads_every_layer_and_the_image_config_for_secrets(tmp_path):
     assert "--scanners secret --image-config-scanners secret --exit-code 1" in log
     assert log.rstrip().endswith("candidate:x")
     assert "no credentials found in candidate:x" in done.stdout
+
+
+def test_scan_prefetches_the_same_pinned_scanner_it_runs(tmp_path):
+    (tmp_path / "pull").mkdir()
+    (tmp_path / "run").mkdir()
+    pulled, pull_log = scan(tmp_path / "pull", 0, "", ("--pull-scanner",))
+    done, run_log = scan(tmp_path / "run", 0, CLEAN)
+
+    assert pulled.returncode == 0, pulled.stderr
+    assert done.returncode == 0, done.stderr
+    scanner = pull_log.split()[-1]
+    assert pull_log.split() == ["pull", "--quiet", scanner]
+    assert f" {scanner} image " in run_log
 
 
 METADATA = "opt/venv/lib/python3.12/site-packages/pyjwt-2.15.1.dist-info/METADATA"
@@ -297,19 +311,20 @@ def test_scan_is_red_when_the_scanner_cannot_finish(tmp_path, status, report):
 
 def test_the_planted_credential_is_generated_at_build_time_and_refused_before_publication(workflow):
     fixture = (ROOT / "tests/contracts/image_manifest/planted-credential/Dockerfile").read_text()
-    refusal = named(workflow, "Refuse the planted credential fixture")["run"]
+    proofs = named(workflow, "Run every qualification and credential scan at once")["run"]
 
     assert not re.search(r"gh[pousr]_[0-9A-Za-z]{36}", fixture)
     assert "'ghs_' +" in fixture and "> /opt/agentihooks/.build-token" in fixture
-    assert 'bash docker/swarm-node/scan.sh "$PLANTED"' in refusal and '"$status" != 1' in refusal
-    assert "grep -qE '^github-app-token (.*/)?opt/agentihooks/\\.build-token$' \"$out/findings.txt\"" in refusal
-    assert named(workflow, "Scan the candidate for credentials")["run"].startswith(
-        'bash docker/swarm-node/scan.sh "$CANDIDATE"'
+    assert 'bash docker/swarm-node/scan.sh "$PLANTED"' in proofs and '"$status" != 1' in proofs
+    assert (
+        "grep -qE '^github-app-token (.*/)?opt/agentihooks/\\.build-token$' \"$out/planted-scan/findings.txt\""
+        in proofs
     )
+    assert 'bash docker/swarm-node/scan.sh "$CANDIDATE" "$out/candidate-scan"' in proofs
     for name in (
         "Build the planted credential fixture",
-        "Refuse the planted credential fixture",
-        "Scan the candidate for credentials",
+        "Run every qualification and credential scan at once",
+        "Require the independent requalification to match",
     ):
         assert not {"if", "continue-on-error"} & named(workflow, name).keys()
 
@@ -321,3 +336,187 @@ def test_the_pull_request_smoke_scans_every_image_it_built():
 
     assert smoke.index('scan.sh" "$image" "$output/credential-scan"') > build
     assert smoke.index('scan.sh" "$rebuild" "$output/credential-scan-rebuild"') > rebuild
+
+
+def test_worker_smoke_runs_independent_proofs_in_parallel_and_compares_every_inventory():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    image = workflow["jobs"]["worker-image"]
+    assert image["strategy"]["matrix"]["proof"] == ["startup", "rebuild", "profiles"]
+    assert image["strategy"]["fail-fast"] is False
+    assert "needs" not in image
+    run = next(step for step in image["steps"] if "smoke.sh" in step.get("run", ""))
+    assert run["env"]["WORKER_PROOF"] == "${{ matrix.proof }}"
+    assert run["run"].endswith(' "$WORKER_PROOF"')
+    upload = next(step for step in image["steps"] if step.get("uses", "").startswith("actions/upload-artifact@"))
+    assert upload["with"]["name"] == "swarm-worker-image-${{ matrix.proof }}"
+    compare = workflow["jobs"]["worker-image-compare"]
+    assert compare["needs"] == ["worker-image"]
+    assert compare["if"] == "always()"
+    assert compare["steps"][0]["env"]["PROOF_STATUS"] == "${{ needs.worker-image.result }}"
+    assert '[[ "$PROOF_STATUS" == success ]]' in compare["steps"][0]["run"]
+    assert any(
+        'smoke.sh "$RUNNER_TEMP/worker-image-evidence" compare "$GITHUB_SHA"' in step.get("run", "")
+        for step in compare["steps"]
+    )
+
+
+def test_worker_smoke_shares_one_versioned_scanner_cache_across_independent_proofs():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    image = workflow["jobs"]["worker-image"]
+    cache = image["env"]["WORKER_SCANNER_CACHE"]
+    assert cache == "${{ github.workspace }}/.worker-scanner-cache"
+    restore = next(step for step in image["steps"] if step.get("uses") == "actions/cache/restore@v4")
+    save = next(step for step in image["steps"] if step.get("uses") == "actions/cache/save@v4")
+    assert restore["with"]["path"] == save["with"]["path"] == "${{ env.WORKER_SCANNER_CACHE }}"
+    assert restore["with"]["key"] == save["with"]["key"]
+    assert "matrix.proof" not in restore["with"]["key"]
+    assert "scan.sh" in restore["with"]["key"]
+    assert "versions.lock" in restore["with"]["key"]
+    assert save["if"] == "success() && matrix.proof == 'startup'"
+    assert restore["with"]["restore-keys"] == restore["with"]["key"].removesuffix("-${{ github.run_id }}")
+    proof = next(step for step in image["steps"] if "smoke.sh" in step.get("run", ""))
+    assert image["steps"].index(restore) < image["steps"].index(proof) < image["steps"].index(save)
+
+
+def test_worker_smoke_reuses_the_candidate_layers_except_in_the_uncached_rebuild():
+    smoke_workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    image_workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-image.yml").read_text())
+    steps = smoke_workflow["jobs"]["worker-image"]["steps"]
+    layers = next(step for step in steps if step.get("id") == "layers")
+    candidate = next(
+        step for step in image_workflow["jobs"]["image"]["steps"] if step.get("name") == "Restore the candidate layers"
+    )
+    proof = next(step for step in steps if "smoke.sh" in step.get("run", ""))
+    smoke = (ROOT / "docker/swarm-node/smoke.sh").read_text()
+
+    assert layers["uses"] == "actions/cache/restore@v4"
+    assert layers["with"] == candidate["with"]
+    assert layers["if"] == "matrix.proof != 'rebuild' && runner.environment == 'self-hosted'"
+    assert all(
+        step["with"]["path"] == "${{ env.WORKER_SCANNER_CACHE }}"
+        for step in steps
+        if step.get("uses") == "actions/cache/save@v4"
+    )
+    assert steps.index(layers) < steps.index(proof)
+    assert proof["env"]["WORKER_LAYERS"] == (
+        "${{ steps.layers.outputs.cache-matched-key && format('{0}/worker-layers', runner.temp) || '' }}"
+    )
+    assert 'build_args+=(--cache-from "type=local,src=$WORKER_LAYERS")' in smoke
+    assert smoke.index("--cache-from") < smoke.index('-t "$image" "$context" > "$output/build.log"')
+
+
+def test_worker_compare_downloads_every_proof_artifact_into_its_proof_folder():
+    workflow = yaml.safe_load((ROOT / ".github/workflows/swarm-node-smoke.yml").read_text())
+    proofs = workflow["jobs"]["worker-image"]["strategy"]["matrix"]["proof"]
+    downloads = [
+        step["with"]
+        for step in workflow["jobs"]["worker-image-compare"]["steps"]
+        if step.get("uses", "").startswith("actions/download-artifact@")
+    ]
+
+    assert [download["name"] for download in downloads] == [f"swarm-worker-image-{proof}" for proof in proofs]
+    assert [download["path"] for download in downloads] == [
+        "${{ runner.temp }}/worker-image-evidence/" + proof for proof in proofs
+    ]
+
+
+PROOF_STUB = """#!/usr/bin/env bash
+set -euo pipefail
+image="$1"
+out="$2"
+mkdir -p "$out" "$BARRIER"
+touch "$BARRIER/$(basename "$0")-$(basename "$out")"
+for _ in $(seq 200); do
+    [[ "$(ls "$BARRIER" | wc -l)" -ge 5 ]] && break
+    sleep 0.1
+done
+[[ "$(ls "$BARRIER" | wc -l)" -ge 5 ]] || { echo "proofs ran one after another" >&2; exit 3; }
+case "$(basename "$0") $image" in
+"qualify.sh incompatible")
+    echo '{"promotable": false, "report": {"worker_image_qualified_targets": 2,
+        "targets": {"herdr": {"qualified": false}}}}' > "$out/attestation.json"
+    exit 1;;
+"scan.sh planted")
+    echo "github-app-token opt/agentihooks/.build-token" > "$out/findings.txt"
+    exit 1;;
+esac
+[[ "$FAIL" != "$(basename "$out")" ]] || { echo "planted failure in $FAIL" >&2; exit 4; }
+echo '{"promotable": true, "report": {}}' > "$out/attestation.json"
+"""
+
+
+def run_proofs(tmp_path, workflow, fail=""):
+    stubs = tmp_path / "docker/swarm-node"
+    stubs.mkdir(parents=True)
+    for name in ("qualify.sh", "scan.sh"):
+        (stubs / name).write_text(PROOF_STUB)
+    environ = os.environ | {
+        "RUNNER_TEMP": str(tmp_path / "runner"),
+        "BARRIER": str(tmp_path / "barrier"),
+        "FAIL": fail,
+        "CANDIDATE": "candidate",
+        "INCOMPATIBLE": "incompatible",
+        "PLANTED": "planted",
+        "GITHUB_SHA": COMMIT,
+    }
+    script = named(workflow, "Run every qualification and credential scan at once")["run"]
+    return subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", script],
+        env=environ,
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+
+def test_every_proof_runs_at_once_and_passes_on_a_qualified_candidate(tmp_path, workflow):
+    done = run_proofs(tmp_path, workflow)
+
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert len(list((tmp_path / "barrier").iterdir())) == 5
+    assert done.stdout.count(" exit 0\n") == 5
+    assert "::error" not in done.stdout
+
+
+@pytest.mark.parametrize(("fail", "proof"), [("repeat", "requalify_candidate"), ("candidate-scan", "scan_candidate")])
+def test_a_failed_proof_fails_the_step_by_name_while_every_other_proof_reports(tmp_path, workflow, fail, proof):
+    done = run_proofs(tmp_path, workflow, fail)
+
+    assert done.returncode == 1
+    assert f"::error title={proof}::{proof} failed with exit 4" in done.stdout
+    assert f"planted failure in {fail}" in done.stdout
+    assert done.stdout.count("::group::") == 5
+    assert f"failed proofs: {proof}" in done.stderr
+
+
+def test_the_candidate_build_reuses_layers_saved_only_after_the_proofs(workflow):
+    names = [step.get("name") for step in steps(workflow)]
+    restore = named(workflow, "Restore the candidate layers")
+    build = named(workflow, "Build the candidate")
+    save = named(workflow, "Save the qualified candidate layers")
+
+    assert restore["uses"] == "actions/cache/restore@v4"
+    assert restore["with"]["path"] == save["with"]["path"] == "${{ runner.temp }}/worker-layers"
+    assert save["uses"] == "actions/cache/save@v4"
+    assert save["with"]["key"] == "${{ steps.layers.outputs.cache-primary-key }}"
+    assert save["if"] == named(workflow, "Keep the qualified candidate layers")["if"]
+    assert save["if"] == "steps.layers.outputs.cache-hit != 'true'"
+    assert '${LAYERS_FROM:+--cache-from "$LAYERS_FROM"}' in build["run"]
+    assert '${LAYERS_TO:+--cache-to "$LAYERS_TO"}' in build["run"]
+    assert "mode=max" in build["env"]["LAYERS_TO"]
+    assert names.index(restore["name"]) < names.index(build["name"])
+    assert names.index("Require the independent requalification to match") < names.index(save["name"])
+
+
+def test_the_layer_cache_is_kept_and_saved_only_after_every_publication_step(workflow):
+    names = [step.get("name") for step in steps(workflow)]
+    published = [
+        "Publish the qualified candidate",
+        "Move the floating dev tag to the published digest",
+        "Tag the release version and move the release tag when it is the newest",
+    ]
+
+    for cache in ("Keep the qualified candidate layers", "Save the qualified candidate layers"):
+        assert max(names.index(name) for name in published) < names.index(cache)
+    assert names.index("Save the qualified candidate layers") < names.index("Upload the attestation")

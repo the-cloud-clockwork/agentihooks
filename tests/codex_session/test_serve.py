@@ -251,13 +251,23 @@ def test_the_opening_prompt_reads_as_utf8_text_with_every_line_ending_as_a_newli
 
 
 def supervised(monkeypatch, wait, returncode=0):
-    process = SimpleNamespace(wait=wait, returncode=returncode)
+    process = SimpleNamespace(wait=lambda timeout=None: wait(), returncode=returncode)
+    pump = SimpleNamespace(poll=lambda: None, returncode=None)
     record = SimpleNamespace(
         execution_id="exe-1", thread_id="thread-1", endpoint_ref="unix:///run/cx/s", state="connected"
     )
     started = SimpleNamespace(record=record, process=process)
-    spec = SimpleNamespace(slug="sw")
-    seen = {"finished": [], "stopped": [], "signals": [], "prepared": [], "connected": [], "launched": []}
+    spec = SimpleNamespace(slug="sw", cwd="/workspace", environ=dict(SWARM_ENV))
+    seen = {
+        "finished": [],
+        "stopped": [],
+        "signals": [],
+        "prepared": [],
+        "connected": [],
+        "launched": [],
+        "pump": pump,
+        "spawns": [],
+    }
 
     def prepare(args, agent_args, environ):
         seen["prepared"].append((args.cwd, agent_args, environ))
@@ -271,6 +281,9 @@ def supervised(monkeypatch, wait, returncode=0):
         seen["launched"].append((store, given, deps))
         return started
 
+    monkeypatch.setattr(
+        serve.subprocess, "Popen", lambda command, **kwargs: seen["spawns"].append((command, kwargs)) or pump
+    )
     monkeypatch.setattr(serve, "prepare", prepare)
     monkeypatch.setattr(serve, "connect", connect)
     monkeypatch.setattr(serve.signal, "signal", lambda signum, handler: seen["signals"].append((signum, handler)))
@@ -295,11 +308,52 @@ def test_main_supervises_the_server_until_it_exits(tmp_path, monkeypatch, capsys
     [(store, spec, deps)] = seen["launched"]
     assert (store, spec.slug, type(deps)) == ("store", "sw", supervisor.Deps)
     assert seen["finished"] == [("store", "sw", started, 1500)]
-    assert seen["stopped"] == [started.process]
+    assert seen["stopped"] == [seen["pump"], started.process]
     assert seen["signals"] == [
         (serve.signal.SIGTERM, serve._exit_on_signal),
         (serve.signal.SIGHUP, serve._exit_on_signal),
     ]
+
+
+@pytest.mark.parametrize(("pump_code", "exit_code"), [(9, 9), (0, 3)])
+def test_an_exited_pump_retires_the_server_and_finishes_the_execution(tmp_path, monkeypatch, pump_code, exit_code):
+    started, seen = supervised(monkeypatch, lambda: pytest.fail("server must not wait without its pump"))
+    seen["pump"].poll = lambda: pump_code
+    seen["pump"].returncode = pump_code
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == exit_code
+    assert seen["stopped"] == [seen["pump"], started.process]
+    assert seen["finished"] == [("store", "sw", started, 1500)]
+
+
+def test_a_failed_pump_spawn_retires_the_server_and_finishes_the_execution(tmp_path, monkeypatch):
+    started, seen = supervised(monkeypatch, lambda: pytest.fail("server must not wait without its pump"))
+
+    def refuse(*args, **kwargs):
+        raise OSError("pump could not start")
+
+    monkeypatch.setattr(serve.subprocess, "Popen", refuse)
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    with pytest.raises(OSError, match="pump could not start"):
+        serve.main(argv, dict(SWARM_ENV))
+    assert seen["stopped"] == [started.process]
+    assert seen["finished"] == [("store", "sw", started, 1500)]
+
+
+def test_a_pump_dying_while_the_server_is_busy_ends_supervision(tmp_path, monkeypatch):
+    started, seen = supervised(monkeypatch, lambda: None)
+
+    def busy(timeout):
+        assert timeout == supervisor.POLL_S
+        seen["pump"].poll = lambda: 7
+        seen["pump"].returncode = 7
+        raise serve.subprocess.TimeoutExpired("server", timeout)
+
+    started.process.wait = busy
+    argv = ["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"]
+    assert serve.main(argv, dict(SWARM_ENV)) == 7
+    assert seen["stopped"] == [seen["pump"], started.process]
+    assert seen["finished"] == [("store", "sw", started, 1500)]
 
 
 def test_main_reads_the_process_arguments_and_environment_and_keeps_given_deps(tmp_path, monkeypatch):
@@ -345,7 +399,7 @@ def test_a_signal_while_supervising_still_stops_the_server_and_finishes_the_reco
     with pytest.raises(SystemExit) as stopped:
         serve.main(argv, dict(SWARM_ENV))
     assert stopped.value.code == 128 + serve.signal.SIGTERM
-    assert seen["stopped"] == [started.process]
+    assert seen["stopped"] == [seen["pump"], started.process]
     assert seen["finished"] == [("store", "sw", started, 1500)]
 
 

@@ -21,7 +21,7 @@ def call(path: str, payload: dict | None, environ) -> dict | None:
         headers={"Content-Type": "application/json", "X-Controller-Credential": credential},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with ledger_link.urlopen(request, TIMEOUT, environ) as response:
             return json.loads(response.read())["data"]
     except urllib.error.HTTPError as exc:
         if exc.code == 404 and payload is None:
@@ -45,6 +45,14 @@ def remove(slug: str, environ=os.environ) -> dict:
     return call(f"proof-ledgers/{slug}/remove", {}, environ)
 
 
+def migrate(slug: str, owner: dict, environ=os.environ) -> dict:
+    return call(f"proof-ledgers/{slug}/migrate", owner, environ)
+
+
+def controller_control(slug: str, owner: dict, request: dict, environ=os.environ) -> dict:
+    return call(f"proof-ledgers/{slug}/controller-controls", {"owner": owner, "request": request}, environ)
+
+
 def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) -> dict:
     request = urllib.request.Request(
         f"{ledger_link.base(environ)}/api/v1/proof-ledgers/{slug}/{route}",
@@ -52,7 +60,7 @@ def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) 
         headers={"Content-Type": "application/json", **headers},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT) as response:
+        with ledger_link.urlopen(request, TIMEOUT, environ) as response:
             return json.loads(response.read())["data"]
     except urllib.error.HTTPError as exc:
         message = json.loads(exc.read())["error"]["message"]
