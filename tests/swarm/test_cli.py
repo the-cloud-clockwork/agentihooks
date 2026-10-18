@@ -1137,7 +1137,7 @@ def test_the_host_tick_reconciles_the_user_services_once_per_pass(monkeypatch):
     monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
     store = _tick_all(monkeypatch, lambda store, slug: [], ["a", "b"])
     assert store.reconciled == ["/installed/bin/agentihooks"]
-    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == []
+    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == ["/installed/bin/agentihooks"]
 
 
 def test_a_failed_service_install_warns_and_lets_the_tick_go_on(monkeypatch, capsys):
@@ -2759,7 +2759,7 @@ def test_the_host_tick_refuses_a_controller_tick_setting(monkeypatch):
         cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
     assert str(error.value) == (
         "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-        "and the host timer ticks every 60 seconds"
+        "and the host scheduler ticks every 60 seconds"
     )
     assert ticked == []
 

@@ -500,11 +500,11 @@ def cmd_tick(store, args):
     if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
         raise SwarmError(
             "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-            "and the host timer ticks every 60 seconds"
+            "and the host scheduler ticks every 60 seconds"
         )
     slugs = store.slugs()
+    _reconcile_services()
     if slugs:
-        _reconcile_services()
         firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
         if tick_stop.run(
             slugs,
