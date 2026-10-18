@@ -368,7 +368,9 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
-    if refusal := ledger_plans.task_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc):
+    if refusal := (
+        ledger_plans.task_refusal(doc, task) or shared_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc)
+    ):
         ctx.refused.append(refusal)
         return False
     tasks.append(task)
@@ -717,7 +719,21 @@ def _set_slice(doc: dict, op: dict, ctx) -> bool:
     except ValueError as exc:
         ctx.refused.append(str(exc))
         return False
+    if fields["plan_slice"] != task.get("plan_slice") and (refusal := shared_refusal(doc, {**task, **fields})):
+        ctx.refused.append(refusal)
+        return False
     return True
+
+
+def shared_refusal(doc: dict, task: dict) -> str:
+    from scripts.swarm_ledger import plan_read
+
+    if not task.get("plan_slice") or not (others := plan_read.sharers(doc, task)):
+        return ""
+    return (
+        f"plan slice {task['plan_slice']} already belongs to open task {', '.join(others)}: give each task its own "
+        "slice anchor, a <!-- slice: name --> line above its own row or section, or group the tasks into one grouped task"
+    )
 
 
 def apply(doc, op, ctx):

@@ -112,6 +112,7 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch, types):
 
     import anyio
     from mcp import ClientSession
+    from mcp.client import stdio as client_stdio
 
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "proof-swarm")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "hp1")
@@ -146,7 +147,7 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch, types):
         yield server_read, to_client
 
     monkeypatch.setattr("playwright.async_api.async_playwright", playwright)
-    monkeypatch.setattr("mcp.client.stdio.stdio_client", transport)
+    monkeypatch.setattr(client_stdio, "stdio_client", transport)
     monkeypatch.setattr("mcp.ClientSession", session)
     monkeypatch.setattr("mcp.server.stdio.stdio_server", stdio)
     async with anyio.create_task_group() as group:
@@ -179,6 +180,7 @@ async def _session_against(monkeypatch, upstream, actions):
 
     import anyio
     from mcp import ClientSession
+    from mcp.client import stdio as client_stdio
 
     launches = []
     to_server, server_read = anyio.create_memory_object_stream(10)
@@ -199,7 +201,7 @@ async def _session_against(monkeypatch, upstream, actions):
         yield server_read, to_client
 
     monkeypatch.setattr("playwright.async_api.async_playwright", playwright)
-    monkeypatch.setattr("mcp.client.stdio.stdio_client", transport)
+    monkeypatch.setattr(client_stdio, "stdio_client", transport)
     monkeypatch.setattr("mcp.ClientSession", lambda read, write, **kwargs: upstream)
     monkeypatch.setattr("mcp.server.stdio.stdio_server", stdio)
     async with anyio.create_task_group() as group:
