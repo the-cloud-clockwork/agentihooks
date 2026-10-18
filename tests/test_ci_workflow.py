@@ -477,7 +477,9 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     collect = jobs["test-count"]
     assert collect["needs"] == jobs["select"]["needs"]
     assert "needs.select" not in collect["if"]
-    assert collect["strategy"]["matrix"] == jobs["split"]["strategy"]["matrix"]
+    assert collect["strategy"]["matrix"] == {"python-version": ["3.11", "3.12"]}
+    joint = "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
+    assert jobs["split"]["strategy"]["matrix"] in (collect["strategy"]["matrix"], {"python-version": joint})
     command = next(
         step["run"] for step in collect["steps"] if step.get("name") == "Hold the base revision's test count"
     )
