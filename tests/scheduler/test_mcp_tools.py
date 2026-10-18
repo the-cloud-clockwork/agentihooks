@@ -39,13 +39,19 @@ class Collector:
 def scheduler(monkeypatch):
     import fakeredis
 
+    from scripts.inbox import cli as inbox_cli
     from scripts.scheduler.core import Scheduler
-    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
     found = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
-    RedisStore(found.redis).create(SwarmConfig("sw", "/repo", 2, 1))
+    store = RedisStore(found.redis)
+    store.create(SwarmConfig("sw", "/repo", 2, 1))
+    for name, lane in (("sw-eng-1", "eng"), ("sw-eng-2", "eng")):
+        store.put_agent("sw", AgentRecord(name, lane, "t"))
     monkeypatch.setattr(commands, "connect", lambda: found)
     monkeypatch.setattr(commands.time, "time", lambda: NOW)
+    monkeypatch.setattr(inbox_cli, "registered_name", lambda: "")
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
     return found
 
@@ -100,11 +106,33 @@ def test_timer_add_needs_delay_or_at(tools, logged, when):
 
 def test_a_tool_without_a_caller_is_refused(tools, monkeypatch):
     monkeypatch.delenv("CLAUDE_CODE_SESSION_ID")
-    monkeypatch.delenv("CLAUDE_SESSION_ID", raising=False)
+    message = "this session has no identity: set AGENTIHOOKS_AGENT_NAME or run inside a Claude Code session"
+    assert tools["timer_add"]("x", delay="5") == {"success": False, "error": message}
+    assert tools["stopwatch_start"]("x", "5") == {"success": False, "error": message}
+    assert tools["cron_add"]("x", "* * * * *") == {"success": False, "error": message}
+
+
+def test_a_shared_server_needs_the_caller_named(tools, monkeypatch):
+    from hooks.mcp import _session
+
+    monkeypatch.setattr(_session, "_ENV_FALLBACK_ALLOWED", False)
     message = "pass session_id: this server cannot tell which session is calling"
     assert tools["timer_add"]("x", delay="5") == {"success": False, "error": message}
     assert tools["stopwatch_start"]("x", "5") == {"success": False, "error": message}
     assert tools["cron_add"]("x", "* * * * *") == {"success": False, "error": message}
+    assert tools["timer_add"]("x", delay="5", session_id="sid-given")["entry"]["owner"] == "sid-given"
+
+
+def test_an_agent_owns_its_schedule_by_name_and_a_swarm_fire_skips_it(tools, scheduler, monkeypatch):
+    from scripts.inbox.store import InboxStore
+
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "sw-eng-1")
+    entry = tools["timer_add"]("stand up", delay="0", target="swarm", name="sw")["entry"]
+    assert entry["owner"] == "sw-eng-1"
+    assert scheduler.run_due(now=NOW) == 1
+    inbox = InboxStore(scheduler.redis)
+    assert inbox.inbox("sw-eng-1") == []
+    assert [(item.sender, item.text) for item in inbox.inbox("sw-eng-2")] == [("sw-eng-1", "stand up")]
 
 
 def test_timer_list_and_cancel(tools):

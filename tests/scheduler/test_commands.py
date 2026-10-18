@@ -264,6 +264,19 @@ def test_a_schedule_for_a_swarm_that_does_not_exist_is_refused(scheduler, swarm)
     assert commands.add_timer(scheduler, OWNER, SwarmSlot("sw"), "x", delay=5, now=100)["state"] == "active"
 
 
+def test_a_schedule_that_cannot_start_is_cancelled_not_left_ready(scheduler, monkeypatch):
+    from scripts.scheduler.core import Entry
+
+    def broken(self, *, now=None):
+        raise RuntimeError("redis went away")
+
+    monkeypatch.setattr(Entry, "start", broken)
+    with pytest.raises(RuntimeError, match="^redis went away$"):
+        commands.add_timer(scheduler, OWNER, BroadcastSlot(), "x", delay=5, now=100)
+    assert [record["state"] for record in scheduler.records()] == ["cancelled"]
+    assert commands.entries(scheduler, "timer") == []
+
+
 def test_a_swarm_target_reaches_each_live_agent_once_but_not_the_owner(scheduler, swarm):
     from scripts.inbox.outbox import stable_id
     from scripts.inbox.store import InboxStore

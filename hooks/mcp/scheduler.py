@@ -7,15 +7,18 @@ seat (the seat address in name) or session (the session name in name). Ids come 
 import json
 
 from hooks.common import log
-from hooks.mcp._session import resolve_session_id
+from hooks.mcp._session import env_fallback_allowed
 from scripts.scheduler import commands
 
 
 def _owner(session_id: str) -> str:
-    owner = resolve_session_id(session_id)
-    if not owner:
+    if session_id:
+        return session_id
+    if not env_fallback_allowed():
         raise commands.CommandError("pass session_id: this server cannot tell which session is calling")
-    return owner
+    from scripts.inbox.cli import identity
+
+    return identity()
 
 
 def _answer(tool: str, action) -> str:

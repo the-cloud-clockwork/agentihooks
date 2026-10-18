@@ -84,8 +84,12 @@ def _reachable(scheduler: Scheduler, slot: Slot) -> None:
 
 def _arm(entry: Entry, slot: Slot, now: float) -> dict:
     signal = entry.limit_reached if entry.record["kind"] == "stopwatch" else entry.timeout
-    signal.connect(slot)
-    entry.start(now=now)
+    try:
+        signal.connect(slot)
+        entry.start(now=now)
+    except Exception:
+        entry.cancel()
+        raise
     return describe(entry.record)
 
 
