@@ -95,7 +95,7 @@ def test_pull_dev_refuses_a_checkout_that_is_not_on_dev(store):
 
 def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_measures(store):
     rows = [
-        {"id": "m", "kind": "tune", "state": "open", "depends_on": ["a", "b", "c", "d", "e", "ghost"]},
+        {"id": "m", "kind": "tune", "state": "open", "depends_on": ["a", "b", "c", "d", "e", "g", "h", "ghost"]},
         {"id": "done-tune", "kind": "tune", "state": "done", "depends_on": ["f"]},
         {"id": "a", "state": "done"},
         {"id": "b", "kind": "ci", "state": "done"},
@@ -103,15 +103,24 @@ def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_
         {"id": "d", "kind": "code", "state": "done", "applied_at": "2026-10-17T01:00:00Z"},
         {"id": "e", "kind": "research", "state": "done"},
         {"id": "f", "kind": "code", "state": "done"},
+        {"id": "g", "kind": "code", "state": "done", "branch_repo": "git@github.com:O/bundle.git"},
+        {"id": "h", "kind": "code", "state": "done", "branch_repo": "https://github.com/o/r"},
     ]
-    ctx = interventions.Context(store, FakeLedger(rows), WATCHED, DOCTOR, FakeRun({"rev-parse": "dev\n"}))
+    run = FakeRun({"rev-parse": "dev\n", "get-url": "git@github.com:O/r.git\n"})
+    ledger = FakeLedger(rows)
+    read = ledger.tasks
+    ledger.tasks = lambda slug: run.calls.append(["ledger-read", slug]) or read(slug)
+    ctx = interventions.Context(store, ledger, WATCHED, DOCTOR, run)
     line = interventions.apply(ctx, "pull-dev", args())
     stamped = [(slug, task, by) for slug, task, _, by in ctx.ledger.updates]
-    assert stamped == [(DOCTOR, "a", f"master@{DOCTOR}"), (DOCTOR, "b", f"master@{DOCTOR}")]
+    assert stamped == [(DOCTOR, t, f"master@{DOCTOR}") for t in ("a", "b", "h")]
     times = {fields["applied_at"] for *_, fields, _ in ctx.ledger.updates}
     assert len(times) == 1 and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", times.pop())
+    pull = ["git", "-C", "/repo", "pull", "--ff-only", "origin", "dev"]
+    assert run.calls.index(["ledger-read", DOCTOR]) < run.calls.index(pull)
+    assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in run.calls
     assert (
-        line == "The Doctor pulled dev into the main checkout of the watched swarm and recorded 2 merged fixes applied."
+        line == "The Doctor pulled dev into the main checkout of the watched swarm and recorded 3 merged fixes applied."
     )
     assert logged_on_both(ctx)
 

@@ -1,3 +1,6 @@
+from scripts.swarm_ledger import ledger_kinds
+
+
 def ready(task: dict, rows: dict) -> bool:
     dependencies = task.get("depends_on") or []
     measured = [dep for dep in dependencies if measures(task, rows.get(dep, {}))]
@@ -8,7 +11,7 @@ def ready(task: dict, rows: dict) -> bool:
 
 
 def measures(task: dict, dependency: dict) -> bool:
-    return task.get("kind") == "tune" and (dependency.get("kind") or "code") in ("code", "ci")
+    return task.get("kind") == "tune" and not ledger_kinds.read_only(dependency)
 
 
 def stackable(task: dict) -> bool:

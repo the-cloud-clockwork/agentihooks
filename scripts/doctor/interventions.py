@@ -12,7 +12,7 @@ from pathlib import Path
 from hooks.observability.trace_flush import start_time
 from scripts.inbox.seats import of_swarm, seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import apply_wait, control_notifications
+from scripts.swarm import apply_wait, control_notifications, stack
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger import server_code
@@ -54,8 +54,9 @@ def pull_dev(ctx, args):
     branch = _call(ctx, ["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
     if branch != "dev":
         raise SwarmError(f"the main checkout {repo} is on {branch}, not dev; the Doctor pulls only into dev")
+    merged = merged_fixes(ctx, repo)
     _call(ctx, ["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
-    stamped = record_applied(ctx)
+    stamped = record_applied(ctx, merged)
     if not stamped:
         return "The Doctor pulled dev into the main checkout of the watched swarm."
     return (
@@ -64,14 +65,23 @@ def pull_dev(ctx, args):
     )
 
 
-def record_applied(ctx):
+def merged_fixes(ctx, repo):
     rows = {t["id"]: t for t in ctx.ledger.tasks(ctx.doctor)}
+    home = stack.repo_key(_call(ctx, ["git", "-C", repo, "remote", "get-url", "origin"]))
     found = (d for t in rows.values() if t.get("state") != "done" for d in apply_wait.unapplied(t, rows))
-    fresh = [d for d in dict.fromkeys(found) if rows.get(d, {}).get("state") == "done"]
+    return [d for d in dict.fromkeys(found) if _pulled_here(rows.get(d, {}), home)]
+
+
+def _pulled_here(row, home):
+    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != home
+    return row.get("state") == "done" and not elsewhere
+
+
+def record_applied(ctx, merged):
     at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    for task_id in fresh:
+    for task_id in merged:
         ctx.ledger.update_task(ctx.doctor, task_id, {apply_wait.FIELD: at}, by=seat_address(ctx.doctor, MASTER))
-    return fresh
+    return merged
 
 
 def _module_files(root, dotted):

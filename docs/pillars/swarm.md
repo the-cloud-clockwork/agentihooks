@@ -1258,7 +1258,7 @@ other dependencies are all done), or is the last task of its phase not yet done,
 Phase order is never used, and ledger order breaks the remaining ties. Capacity placement reads the same order. The
 tick then applies the usual
 rules: lane, phase, open dependencies and live claims still decide whether a task is claimable, so an
-urgent task never skips a dependency that is not done and never takes a task another agent holds. A territory
+urgent task never skips a dependency that is not done and never takes a task another agent holds. A `tune` task never stacks on a `code` or `ci` dependency that is claimed or in pull request: it waits until that dependency is done. In a Doctor swarm it also waits until the dependency carries `applied_at`, which the Doctor's `pull-dev` intervention records on each merged fix an open tune task measures, or `ledger task set <id> applied_at=<UTC time>` records by hand; the dispatcher's queue head reads the same rule. A territory
 another agent holds moves a task back within its rank without blocking it (see
 [Shared areas in the opening prompt](#shared-areas-in-the-opening-prompt)).
 Among open tasks whose territories overlap, the higher rank claims first. The rank is read from the ledger on every
