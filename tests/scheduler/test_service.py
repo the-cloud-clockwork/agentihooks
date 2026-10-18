@@ -249,5 +249,29 @@ def test_domain_defaults_keep_equivalent_redis_endpoints_together(tmp_path, monk
     assert service.runtime_dir({"AGENTIHOOKS_HIVE_ID": "member"}) == default
     assert service.runtime_dir({"AGENTIHOOKS_DEPLOYMENT": "cloud"}) == default
     endpoint = service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://scheduler.invalid"})
+    assert endpoint.name == "ea64452fbe69cb75783b66872df777d82305b62c912ea1d2a82decf5afde3703"
     assert service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://scheduler.invalid:6379/0"}) == endpoint
     assert service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "rediss://scheduler.invalid:6379/0"}) != endpoint
+
+
+def test_supervisor_startup_and_log_use_the_explicit_domain(tmp_path, monkeypatch):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    active = {
+        "AGENTIHOOKS_DEPLOYMENT": "cloud",
+        "AGENTIHOOKS_HIVE_ID": "member",
+        "AGENTIHOOKS_HIVE_REDIS_URL": "redis://scheduler.invalid:6380/2",
+    }
+    spawn = Mock()
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
+    directory = service.runtime_dir(active)
+    with service.machine_lock("startup", environ=active):
+        assert service.ensure_running(active) is False
+    with service.machine_lock("supervisor", environ=active):
+        assert service.ensure_running(active) is False
+    spawn.assert_not_called()
+    assert service.ensure_running(active) is True
+    assert spawn.call_args.kwargs["env"] == active
+    assert spawn.call_args.kwargs["stdout"].name == str(directory / "scheduler.log")
+    assert spawn.call_count == 1

@@ -23,6 +23,7 @@ def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
     with process_timer.Timer(2, redis=redis) as timer:
         entry = timer.entry
         assert entry.record["delay"] == 2
+        assert entry.record["owner"] == "process"
         assert entry.record["state"] == "active"
         assert entry.record["slots"][0]["reference"] == "scripts.scheduler.process_timer:wake"
         assert redis.llen(timer.key) == 0
@@ -63,6 +64,7 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     with process_timer.Timer(3, redis=redis) as timer:
         event = timer.entry.record
+        process_timer.wake(event, "first", redis)
         process_timer.wake(event, "same", redis)
         process_timer.wake(event, "same", redis)
         assert redis.lrange(timer.key, 0, -1) == ["same"]
@@ -93,8 +95,14 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
     import asyncio
 
     started = asyncio.Event()
-    timers = []
+    timers, popped = [], []
     original = process_timer.Timer
+    pop = redis.blpop
+
+    def bounded_pop(key):
+        result = pop(key, timeout=0.2)
+        popped.append(result)
+        return result
 
     def timer(delay):
         result = original(delay, redis=redis)
@@ -102,6 +110,7 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
         started.set()
         return result
 
+    monkeypatch.setattr(redis, "blpop", bounded_pop)
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     monkeypatch.setattr(process_timer, "Timer", timer)
     task = asyncio.create_task(process_timer.async_wait(60))
@@ -109,6 +118,9 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
+    assert len(popped) == 1
+    assert popped[0] is not None
+    assert popped[0][0] == timers[0].key
     assert timers[0].entry.state == "cancelled"
     assert not redis.exists(timers[0].key)
 
@@ -179,6 +191,28 @@ def test_host_scheduler_keys_remain_unchanged_without_member_identity(redis, mon
     assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT")
     assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+
+
+def test_member_identity_does_not_change_host_keys_in_local_or_default_mode(redis, monkeypatch):
+    from hooks._redis import redis_key
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+
+
+def test_simultaneous_process_timers_have_independent_wake_queues(redis, monkeypatch):
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    with process_timer.Timer(0, redis=redis) as first, process_timer.Timer(0, redis=redis) as second:
+        assert first.key != second.key
+        assert first.entry.id != second.entry.id
+        scheduler = Scheduler(redis)
+        scheduler.run_due(now=max(first.entry.record["due"], second.entry.record["due"]))
+        first.wait()
+        assert redis.llen(second.key) == 1
+        second.wait()
 
 
 def test_process_timer_records_are_bounded_across_repeated_waits(redis, monkeypatch):
