@@ -192,8 +192,8 @@ def test_a_node_whose_item_left_the_document_reads_as_open():
         def nodes(self, slug, read, node=None):
             return [{"node": "tasks/gone", "kind": "task", "parent": None, "depth": 0}]
 
-        def read(self, slug, *keys):
-            return {"tasks": []}
+        def current(self, slug):
+            return SimpleNamespace(state={"tasks": []})
 
     assert [row["state"] for row in resources.hierarchy_read(Drifted(), SLUG, "hierarchy", {})["data"]] == ["open"]
 

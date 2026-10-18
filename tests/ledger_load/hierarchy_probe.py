@@ -14,6 +14,8 @@ import pytest
 
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import request_metrics
+from scripts.swarm_ledger.events import Hub
+from scripts.swarm_ledger.events.publishing import Publishing
 from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -73,7 +75,9 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     monkeypatch.setattr("hooks._redis.get_redis", lambda: None)
     monkeypatch.setattr(server.Handler, "log_message", lambda *args: None)
     repo = SQLiteLedgerRepository(tmp_path / "ledger.sqlite3", domain=core)
-    monkeypatch.setattr(server, "repository", repo)
+    monkeypatch.setattr(server, "HUB", Hub())
+    monkeypatch.setattr(server, "served_version", lambda: "hierarchy-proof")
+    monkeypatch.setattr(server, "repository", Publishing(repo, server.publish_snapshot))
     samples = queue.Queue()
     monkeypatch.setattr(request_metrics, "record", lambda method, route, wall, cpu, lock: samples.put(cpu))
     profiler = cProfile.Profile(timer=time.thread_time)
@@ -98,6 +102,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     try:
         state = recorded["state"]
         repo.import_document(SLUG, state, token="hierarchy-proof")
+        server.HUB.open(SLUG, lambda: {"ledger": server.ledger_view(state)})
         observations.append(observe(port, samples, state))
         profiling.set()
         fetch(port, "hierarchy", samples)
