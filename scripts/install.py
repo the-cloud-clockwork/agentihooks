@@ -2202,10 +2202,13 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
     _update_bashrc_block()
 
 
-def _rerender_profile_homes(target: str) -> None:
+def _rerender_profile_homes(target: str, skip: Sequence[str] = ()) -> list[str]:
     from scripts.profiles import render
 
+    done = []
     for name in render.rendered_profiles(target):
+        if name in skip:
+            continue
         profile, overlays = render.split_key(name)
         try:
             render.render(target, profile, force=True, overlays=overlays)
@@ -2213,6 +2216,8 @@ def _rerender_profile_homes(target: str) -> None:
             print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
             continue
         print(f"{_GREEN}[OK]{_RESET} Re-rendered the {name} profile home")
+        done.append(name)
+    return done
 
 
 def _remove_bashrc_block() -> bool:
@@ -5863,6 +5868,20 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print("  No running sessions to notify — marker will GC in 24h.")
     else:
         print("  Each session will consume the refresh on its next UserPromptSubmit.")
+
+    from hooks.context.rules_refresh import collect_profile_rules
+    from scripts.profiles import render
+
+    for target in SUPPORTED_TARGETS:
+        for name in _rerender_profile_homes(target, skip=[profile] if target == "claude" else []):
+            if target != "claude":
+                continue
+            home = render.profile_dir(*render.split_key(name)) / "claude"
+            rules = collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
+            result = write_refresh_marker(name, rules, home=name)
+            print(
+                f"{_GREEN}[OK]{_RESET} Refresh marker written for profile '{name}' ({result['pending_count']} sessions)."
+            )
 
 
 def _cmd_broadcast(args: argparse.Namespace) -> None:

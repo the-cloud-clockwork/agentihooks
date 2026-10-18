@@ -281,7 +281,7 @@ def test_refresh_rules_updates_the_rendered_claude_md(world, monkeypatch):
     assert "ROLE LOCAL OVERRIDE" in payload
 
 
-def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monkeypatch, tmp_path):
+def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monkeypatch, tmp_path, capsys):
     from argparse import Namespace
 
     from hooks.context import rules_refresh
@@ -308,6 +308,13 @@ def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monk
     assert rerendered != master
     assert "MERGED FLEET DOCTRINE" in (rerendered / "CLAUDE.md").read_text()
     assert rules_refresh._load_marker("master")["pending"] == ["s-master"]
+    assert rules_refresh._load_marker("master")["home"] == "master"
+    install = world["install"]
+    out = capsys.readouterr().out
+    assert f"{install._GREEN}[OK]{install._RESET} Refresh marker written for profile 'master' (1 sessions).\n" in out
+    assert "Re-rendered the rb-role profile home" not in out
+    caller_homes = [p for p in (render.rendered_root() / ".homes" / "rb-role").iterdir() if not p.is_symlink()]
+    assert len(caller_homes) == 2
     received = []
     monkeypatch.setattr(rules_refresh, "inject_context", received.append)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))

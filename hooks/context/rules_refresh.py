@@ -39,6 +39,15 @@ def profile_home(home: Path) -> str:
     return home_profile(home) or str(home.resolve())
 
 
+def current_home(home: Path) -> Path:
+    from scripts.profiles.homes import CURRENT
+
+    if home_profile(home) is None:
+        return home
+    latest = home.resolve().parent.parent / CURRENT / home.resolve().name
+    return latest if latest.is_dir() else home
+
+
 def _refresh_dir() -> Path:
     from hooks.config import AGENTIHOOKS_HOME
 
@@ -106,7 +115,7 @@ def _collect_pending_sessions() -> list[str]:
     return pending
 
 
-def write_refresh_marker(profile: str, payload: str) -> dict:
+def write_refresh_marker(profile: str, payload: str, home: str | None = None) -> dict:
     """Write a one-shot refresh marker. Called by `agentihooks refresh-rules` CLI.
 
     Returns a summary dict with the written marker info.
@@ -116,7 +125,7 @@ def write_refresh_marker(profile: str, payload: str) -> dict:
     marker = {
         "ts": _iso_now(),
         "profile": profile,
-        "home": profile_home(claude_home()),
+        "home": home or profile_home(claude_home()),
         "content_hash": content_hash,
         "payload": payload,
         "pending": pending,
@@ -173,6 +182,7 @@ def maybe_inject(session_id: str) -> None:
         if marker.get("home") != profile_home(home):
             log("rules_refresh: other profile home skipped", {"profile": profile, "session_id": session_id})
         else:
+            home = current_home(home)
             rules = collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
             inject_context(rules)
             log(
