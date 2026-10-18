@@ -120,8 +120,9 @@ def publishing_root(repo: str, task: dict, agent: AgentRecord) -> tuple[Path | N
 def pushed_branches(repo: str, task: dict, agent: AgentRecord) -> dict:
     record = {}
     for repository in dict.fromkeys(repository_root(Path(value)) for value in task.get("repositories") or [repo]):
-        root = existing(repository, repository_task(repository, task), agent)
-        if root and stack.pushed(root):
+        scoped = repository_task(repository, task)
+        root = existing(repository, scoped, agent)
+        if root and stack.pushed(root, scoped["branch"]):
             record = branch_record(checkout_fields(root), repository, {**task, **record})
     return record
 
@@ -150,6 +151,19 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
     return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 
 
+def staged_changes(root: Path) -> set[str]:
+    changed = set(git(root, "diff", "--cached", "--name-only", "--no-renames", "-z").split("\0"))
+    merge_head = root / git(root, "rev-parse", "--git-path", "MERGE_HEAD")
+    if merge_head.is_file():
+        for parent in merge_head.read_text().splitlines():
+            on_dev = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", parent, "origin/dev"], cwd=root, capture_output=True
+            )
+            if on_dev.returncode == 0:
+                changed &= set(git(root, "diff", "--cached", "--name-only", "--no-renames", "-z", parent).split("\0"))
+    return changed
+
+
 def selected_files(root: Path, files: list[str]) -> list[str]:
     selected = []
     for name in files:
@@ -157,9 +171,8 @@ def selected_files(root: Path, files: list[str]) -> list[str]:
         if path.is_absolute() or ".." in path.parts or not path.parts or (root / path).is_dir():
             raise SwarmError("publish accepts explicit repository relative file names only")
         selected.append(path.as_posix())
-    changed = git(root, "diff", "--name-only", "-z").split("\0")
-    changed += git(root, "diff", "--cached", "--name-only", "-z").split("\0")
-    unrelated = set(changed) - set(selected) - {""}
+    changed = set(git(root, "diff", "--name-only", "--no-renames", "-z").split("\0")) | staged_changes(root)
+    unrelated = changed - set(selected) - {""}
     if unrelated:
         raise SwarmError(
             f"unrelated tracked changes remain: {', '.join(sorted(unrelated))}; Next: git -C {shlex.quote(str(root))} status --short"
@@ -225,6 +238,27 @@ def native_gate(python: str, root: Path) -> list[str]:
     return [python, "-c", code, str(root / "scripts")]
 
 
+def remote_head(root: Path, branch: str) -> str:
+    listed = git(root, "ls-remote", "origin", f"refs/heads/{branch}")
+    return listed.split()[0] if listed else ""
+
+
+def grade_and_push(root: Path, primary: Path, fields: dict, own: str, head: str) -> None:
+    python = gate_python(primary)
+    source = root / "scripts" / "ci_prepush"
+    if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
+        fields["gate"] = str(source if source.is_dir() else source.with_suffix(".py"))
+        execute(native_gate(python, root), root)
+    else:
+        fields["gate"] = "AgentiHooks touched Python fallback"
+        execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
+    if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
+        raise SwarmError("the committed HEAD has no passing prepush evidence")
+    ref = f"refs/heads/{fields['branch']}"
+    lease = [] if fields["branch"] == own else [f"--force-with-lease={ref}"]
+    git(root, "push", *lease, "-u", "origin", f"HEAD:{ref}")
+
+
 def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, message: str, files: list[str]) -> dict:
     task = task_row(slug, agent, ledger)
     root, primary, scoped = publishing_root(repo, task, agent)
@@ -237,23 +271,17 @@ def publish(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient, mess
     retry = shlex.join(["agentihooks", "swarm", slug, "publish", "--message", message, "--", *files])
     try:
         stage_files(root, selected)
-        if git(root, "diff", "--cached", "--name-only", "-z"):
+        changed = bool(git(root, "diff", "--cached", "--name-only", "-z"))
+        if changed:
             check_build(root)
             git(root, "commit", "-m", message)
         head = git(root, "rev-parse", "HEAD")
-        python = gate_python(primary)
-        source = root / "scripts" / "ci_prepush"
-        if (source / "__main__.py").is_file() or source.with_suffix(".py").is_file():
-            fields["gate"] = str(source if source.is_dir() else source.with_suffix(".py"))
-            execute(native_gate(python, root), root)
+        if changed or remote_head(root, fields["branch"]) != head:
+            grade_and_push(root, primary, fields, own, head)
         else:
-            fields["gate"] = "AgentiHooks touched Python fallback"
-            execute([python, "-I", str(Path(__file__).with_name("publish_gate.py"))], root)
-        if not ci_prepush.passed(root) or git(root, "rev-parse", "HEAD") != head:
-            raise SwarmError("the committed HEAD has no passing prepush evidence")
-        ref = f"refs/heads/{fields['branch']}"
-        lease = [] if fields["branch"] == own else [f"--force-with-lease={ref}"]
-        git(root, "push", *lease, "-u", "origin", f"HEAD:{ref}")
+            fields["unchanged"] = (
+                "no changes in the listed files and the remote branch already points at this head; nothing pushed"
+            )
     except SwarmError as exc:
         detail = str(exc)
         if fields.get("gate") == "AgentiHooks touched Python fallback":

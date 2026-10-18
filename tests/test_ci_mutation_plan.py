@@ -535,6 +535,8 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
 
 
 def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/test_sample.py").write_text("")
     output = tmp_path / "github-output"
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -556,7 +558,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes, selection: (
+        lambda root, changes, selection, manifest: (
             (1601.4, 50, ["tests/test_sample.py"])
             if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
             else None
@@ -580,6 +582,80 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
         "Changed line mutants: 50\nEstimated mutation seconds: 1601, slowest stats bucket: 121\n"
         "Mutation shards: 4\nStats parts: 3\n"
     )
+
+
+@pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
+def test_planning_refuses_an_unmatched_module_before_publishing_statistics(tmp_path, monkeypatch, source, matched):
+    _project(tmp_path, {})
+    (tmp_path / "tests/test_sample.py").unlink()
+    if matched:
+        (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {f"scripts/{source}.py": {2}})
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    if source == "sample" and not matched:
+        with pytest.raises(SystemExit) as refusal:
+            plan.main()
+        assert str(refusal.value) == "scripts/sample.py: not mutated, no matching or importing test modules"
+        assert not output.exists()
+        assert not (tmp_path / ".mutation-selection.json").exists()
+    else:
+        assert plan.main() == 0
+        assert "stats_parts=" in output.read_text()
+
+
+@pytest.mark.parametrize(
+    "imports, grouped, refused",
+    [
+        ("import mcp\n", False, True),
+        ("import mcp\n", True, True),
+        ("def test_sdk():\n    import mcp\n", False, True),
+        ("def test_sdk():\n    import mcp\n", True, False),
+    ],
+)
+def test_planning_checks_selected_test_collection_and_worker_contracts(
+    tmp_path, monkeypatch, imports, grouped, refused
+):
+    from tests import test_collection_imports as contracts
+
+    _project(tmp_path, {})
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    group = 'pytestmark = pytest.mark.xdist_group("mcp-sdk")\n' if grouped else ""
+    (tmp_path / "tests/test_sample.py").write_text("from scripts.sample import f\n" + group + imports)
+    (tmp_path / "tests/test_unrelated.py").write_text("import mcp\n")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    output = tmp_path / "github-output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    if refused:
+        with pytest.raises(SystemExit, match="tests/test_sample.py"):
+            plan.main()
+        assert not output.exists()
+        assert not (tmp_path / ".mutation-selection.json").exists()
+    else:
+        assert plan.main() == 0
+        assert "stats_parts=" in output.read_text()
+
+
+def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
+    from tests import test_collection_imports as contracts
+
+    _project(tmp_path, {})
+    (tmp_path / "tests/__init__.py").write_text("import mcp\n")
+    monkeypatch.setattr(contracts, "_ROOT", tmp_path)
+    monkeypatch.setattr(contracts, "_module_file", contracts._module_file.__wrapped__)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("sys.argv", ["plan"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    with pytest.raises(SystemExit, match="tests/test_sample.py"):
+        plan.main()
 
 
 @pytest.mark.parametrize(
@@ -609,7 +685,7 @@ def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_buc
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.plan.own_bases", lambda root, base, head, graded: [f"{base}@{head}"])
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection: estimated)
+    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection, manifest: estimated)
     assert plan.main() == 0
     assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
     assert output.read_text() == (

@@ -6,6 +6,12 @@ import pytest
 from scripts.ci_mutation.__main__ import main
 
 
+@pytest.fixture(autouse=True)
+def plugin_autoload_restored(monkeypatch):
+    monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "")
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD")
+
+
 def test_cli_uses_requested_revisions_budget_output_and_exit_code(tmp_path, monkeypatch, capsys):
     calls = []
     monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)

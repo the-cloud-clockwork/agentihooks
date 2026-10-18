@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_route__mutmut_31:44e880bd0caa6190c611bc77500cd3e38c0d04311668b49d34f361f479a6133c": {
+    "reader": "Standards",
+    "reason": "An absent key or header still fails authorization through the falsey secret or invalid expiry and returns the same fixed forbidden envelope."
+  }
+}

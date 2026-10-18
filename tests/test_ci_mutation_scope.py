@@ -242,7 +242,11 @@ def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_fr
     from tests.test_ci_hosted_lanes import _evaluate
 
     jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
-    plan = next(step for step in jobs["mutation-plan"]["steps"] if step.get("run", "").endswith('--base "$BASE"'))
+    plan = next(
+        step
+        for step in jobs["mutation-plan"]["steps"]
+        if step.get("run", "").startswith('python -m scripts.ci_mutation.plan --base "$BASE"')
+    )
     assert jobs["mutation-plan"]["steps"][0]["with"]["fetch-depth"] == 0
     git, commit = _repo(tmp_path)
     (tmp_path / "tests").mkdir()

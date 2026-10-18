@@ -12,10 +12,14 @@ DELEGATED_CLIS = {
     "swarm-terminal": "scripts.swarm_v2.herdr.operator_setup",
     "swarm-jump": "scripts.swarm_v2.kubernetes.jump",
     "accounts": "scripts.account_env",
+    "timer": "scripts.scheduler.cli:timer",
+    "stopwatch": "scripts.scheduler.cli:stopwatch",
+    "cron": "scripts.scheduler.cli:cron",
 }
 
 
 def delegated_cli(argv: list[str]) -> Callable[[list[str]], int] | None:
     for name in argv[:1]:
         if name in DELEGATED_CLIS:
-            return importlib.import_module(DELEGATED_CLIS[name]).main
+            module, _, function = DELEGATED_CLIS[name].partition(":")
+            return getattr(importlib.import_module(module), function or "main")

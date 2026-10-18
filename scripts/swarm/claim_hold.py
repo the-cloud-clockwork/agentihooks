@@ -3,6 +3,8 @@
 Every claim filter asks here, so the urgent hold health finding reports exactly what keeps a task from a seat.
 """
 
+from time import time
+
 from scripts.swarm import freeze, phase_state
 from scripts.swarm_ledger import task_dependencies
 
@@ -19,7 +21,16 @@ FOCUS = "a focus elsewhere holds it"
 
 
 def hold(task: dict, rows: dict, doc: dict, graph: dict, fix: str) -> str:
-    return phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows)
+    return verification(task) or phased(task, doc) or frozen(task, doc, graph, fix) or waits(task, rows)
+
+
+def verification(task: dict) -> str:
+    if task.get("awaiting") != "verify":
+        return ""
+    at = (task.get("contract") or {}).get("after_at")
+    if not at or int(at) > time() * 1000:
+        return "it waits for its post merge proof window or a master reopen"
+    return ""
 
 
 def phased(task: dict, doc: dict) -> str:

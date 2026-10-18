@@ -297,7 +297,7 @@ def test_unit_matrix_runs_one_shard_per_split():
 
 
 def test_a_hung_unit_shard_fails_near_twice_the_slowest_shard():
-    slowest_shard_minutes = 186 / 60
+    slowest_shard_minutes = 336 / 60
     unit = _workflow()["jobs"]["unit"]
     steps = {step.get("name"): step for step in unit["steps"]}
     timeout = steps["Run tests"]["timeout-minutes"]
@@ -647,9 +647,17 @@ def _check_stored_durations(nodeids: list[str] | None = None):
     collected, output = (nodeids, "\n".join(nodeids)) if partial else _collected_suite()
     assert collected, output
     stored = json.loads((_ROOT / ".test_durations").read_text())
-    missing = [nodeid for nodeid in collected if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
+    # The queue split drops the tests its run reuses from the durations it hands the shards.
+    reused = json.loads((_ROOT / "reused.json").read_text()) if (_ROOT / "reused.json").exists() else {}
+    tests, files = set(reused.get("tests", ())), set(reused.get("files", ()))
+    judged = [
+        nodeid
+        for nodeid in collected
+        if nodeid.split("::", 1)[0] not in files and re.sub(r"@[^\[\]]*$", "", nodeid) not in tests
+    ]
+    missing = [nodeid for nodeid in judged if re.sub(r"@[^\[\]]*$", "", nodeid) not in stored]
     # A partial run holds every test its change adds, so its missing share is judged against the stored suite.
-    suite = max(len(collected), len(stored)) if partial else len(collected)
+    suite = max(len(judged), len(stored)) if partial else len(judged)
     assert len(missing) * 10 <= suite, (
         f"{len(missing)} of {suite} tests have no stored duration; refresh them with: python -m tests.refresh_durations"
     )
@@ -699,6 +707,26 @@ def test_stored_durations_read_the_split_jobs_collected_suite(tmp_path, monkeypa
     else:
         with pytest.raises(AssertionError, match=f"{missing} of 100 tests"):
             _check_stored_durations(selected_nodeids)
+
+
+@pytest.mark.parametrize(("reused", "unstored"), [(False, 0), (True, 0), (True, 8), (True, 9)])
+def test_stored_durations_skip_the_tests_the_queue_reuses(tmp_path, monkeypatch, reused, unstored):
+    kept = [f"tests/test_probe.py::test_{i}" for i in range(80)]
+    by_test = [f"tests/test_probe.py::test_{i}" for i in range(80, 90)]
+    by_file = [f"tests/test_cached.py::test_{i}" for i in range(10)]
+    (tmp_path / ".test_durations").write_text(json.dumps(dict.fromkeys(kept[unstored:], 0.1)))
+    (tmp_path / "collected.json").write_text(json.dumps(kept + by_test + by_file))
+    if reused:
+        (tmp_path / "reused.json").write_text(json.dumps({"tests": by_test, "files": ["tests/test_cached.py"]}))
+    monkeypatch.setattr(sys.modules[__name__], "_ROOT", tmp_path)
+    if not reused:
+        with pytest.raises(AssertionError, match="20 of 100 tests"):
+            _check_stored_durations()
+    elif unstored > 8:
+        with pytest.raises(AssertionError, match=f"{unstored} of 80 tests"):
+            _check_stored_durations()
+    else:
+        _check_stored_durations()
 
 
 @pytest.mark.parametrize("missing", [0, 1, 2, 3, 10])
@@ -1164,7 +1192,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     )
     step = next(step for step in plan["steps"] if step.get("id") == "plan")
     assert step["if"] == "steps.reuse.outputs.reused != 'true'"
-    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert step["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE" --repository "$GITHUB_REPOSITORY"'
     assert step["env"] == {
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
@@ -1306,6 +1334,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'pull_request' && {skipped}",
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
+        f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
     )
     for job in (stats, mutation):
         assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])
