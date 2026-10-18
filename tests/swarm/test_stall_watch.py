@@ -1343,6 +1343,16 @@ def test_a_push_seen_only_by_the_decision_time_read_restarts_the_red_limit():
     assert _reopened(swarm)
 
 
+def test_the_decision_time_read_keeps_a_working_owner_on_a_conflict():
+    swarm = Swarm(GREEN)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    assert swarm.tick(START + 10 * MINUTE, reread={URL: CONFLICTING}.get) == []
+    swarm.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", state="working", seat="eng-1@sw"))
+    assert swarm.tick(START + 16 * MINUTE, reread={URL: CONFLICTING}.get) == []
+    assert not _reopened(swarm) and swarm.retired == []
+
+
 def test_the_pull_request_view_reads_check_starts_and_the_latest_reopen_or_queue_entry():
     assert "CheckRun{databaseId name conclusion startedAt completedAt" in ledger_events.CONTEXT_NODES
     assert (
