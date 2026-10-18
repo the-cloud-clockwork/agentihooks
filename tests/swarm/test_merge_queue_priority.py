@@ -322,9 +322,7 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))
     queue = FakeQueue()
     prioritize = merge_queue.prioritize
-    monkeypatch.setattr(
-        merge_queue, "prioritize", lambda url, journal: prioritize(url, run=queue.run, journal=journal)
-    )
+    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: prioritize(url, run=queue.run, journal=journal))
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
     records = []
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
