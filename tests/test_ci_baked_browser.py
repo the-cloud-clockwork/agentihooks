@@ -85,3 +85,41 @@ def test_usable_image_browser_skips_cache_restoration_and_duplicate_launch():
     assert launch["env"]["IMAGE_LINKED"] == "${{ steps.image.outputs.linked }}"
     assert "verify.sh" in image["run"]
     assert launch["run"].count("verify.sh") == 1
+
+
+@pytest.mark.parametrize("present,usable", [(True, True), (True, False), (False, False)])
+def test_queue_browser_is_verified_from_the_image_without_installing(tmp_path, present, usable):
+    baked = tmp_path / "baked"
+    if present:
+        baked.mkdir()
+    calls = tmp_path / "calls"
+    python = tmp_path / "python"
+    python.write_text(
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'echo launch >> "$CALLS"\n'
+        '[[ "$*" != *install* ]]\n'
+        '[[ "$(readlink -f "$PLAYWRIGHT_BROWSERS_PATH")" == "$ARC_PLAYWRIGHT_BROWSERS_PATH" ]]\n'
+        '[[ "$USABLE" == true ]]\n'
+    )
+    python.chmod(0o755)
+    target = tmp_path / "workspace" / ".playwright"
+    target.parent.mkdir()
+    result = subprocess.run(
+        ["bash", str(ACTION / "use-image.sh")],
+        env={
+            **os.environ,
+            "PATH": f"{tmp_path}:{os.environ['PATH']}",
+            "ARC_PLAYWRIGHT_BROWSERS_PATH": str(baked),
+            "PLAYWRIGHT_BROWSERS_PATH": str(target),
+            "CALLS": str(calls),
+            "USABLE": str(usable).lower(),
+        },
+        capture_output=True,
+        text=True,
+    )
+    assert (result.returncode == 0) == (present and usable), result.stderr
+    attempts = calls.read_text().splitlines() if calls.exists() else []
+    assert not any("install" in call for call in attempts)
+    assert len(attempts) == int(present)
+    if present:
+        assert target.resolve() == baked

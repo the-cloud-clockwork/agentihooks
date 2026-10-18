@@ -200,6 +200,28 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
+def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
+    workflow = _workflow()
+    assert workflow["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
+    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    for job in ("test-count", "split", "unit"):
+        cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
+        assert "${{ hashFiles('.github/test-constraints.txt') }}" in cache["with"]["key"]
+
+
+def test_queue_browser_setup_cannot_enter_the_downloading_action():
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    install = next(step for step in steps if step.get("uses") == "./.github/actions/browser-cache")
+    assert "github.event_name != 'merge_group'" in install["if"]
+    offline = next(step for step in steps if "use-image.sh" in step.get("run", ""))
+    assert (
+        offline["if"]
+        == "needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name == 'merge_group'"
+    )
+    assert steps.index(offline) < steps.index(next(step for step in steps if step.get("name") == "Run tests"))
+    assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+
+
 def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     callers = {
