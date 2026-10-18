@@ -298,6 +298,10 @@ def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
     )
     assert check(bash(f"printf '%s\\n' 'listed {ledger}/{SLUG}.media' >> {folder}/proof.md"), env(ledger)) is None
     assert check(bash(f"cat >> {folder}/proof.md <<'EOF'\nsearched {ledger} with grep -rn\nEOF"), env(ledger)) is None
+    assert (
+        check(bash(f'echo "read lines 40 to 60 of {PLAN} by plan read" >> {folder}/progress.md'), env(ledger)) is None
+    )
+    assert check({"tool_name": "Bash", "tool_input": {}}, env(ledger)) is None
 
 
 @pytest.mark.parametrize(
@@ -309,6 +313,11 @@ def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
         "bash -c 'grep -rn needle {root}'",
         'echo "$(cat {root}/*/*.md)" >> progress.md',
         "bash <<'EOF'\ngrep -rn needle {root}\nEOF",
+        "ksh <<'EOF'\ngrep -rn needle {root}\nEOF",
+        "ssh localhost <<'EOF'\ngrep -rn needle {root}\nEOF",
+        'flock /dev/null -c "grep -rn needle {root}"',
+        'curl -H "X-Ref: $RUN" https://ci.example/artifacts/plan.md',
+        'grep -rn needle "{root} "',
     ],
 )
 def test_direct_plan_reads_still_refused_beside_quoted_evidence(ledger, command):

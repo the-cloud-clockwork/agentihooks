@@ -12,7 +12,9 @@ GITHUB = re.compile(r"/actions/(?:runs/\d+/)?artifacts/")
 SED_RANGE = re.compile(r"\s*sed\s+-n\s+(['\"]?)([1-9][0-9]*),([1-9][0-9]*)p\1\s+(\S+)\s*")
 FIELDS = {"Read": ("file_path",), "Grep": ("path", "glob"), "Bash": ("command",), "WebFetch": ("url",)}
 COMMAND = "agentihooks plan read"
-INTERPRETERS = {"bash", "sh", "zsh", "dash", "eval", "xargs", "python", "python3", "perl", "node", "ruby"}
+WRITERS = {"echo", "printf"}
+SINKS = WRITERS | {"cat", "tee"}
+SEPARATOR = re.compile(r"[;&|()]+")
 HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1([^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
 
 
@@ -35,8 +37,8 @@ def check(payload: dict, environ: Mapping[str, str] | None = None) -> str | None
 
 
 def _decide(env: Mapping[str, str], slug: str, tool_name: str, tool_input: dict) -> str | None:
-    text = _text(tool_name, tool_input)
-    folder = _names_folder(_operands(tool_name, tool_input, text), _ledger_dir(env))
+    text = _operands(tool_name, tool_input, _text(tool_name, tool_input))
+    folder = _names_folder(text, _ledger_dir(env))
     if not PLAN_ID.search(text) and not folder:
         return None
     plans, window = _plans(env, slug)
@@ -99,14 +101,34 @@ def _text(tool_name: str, tool_input: dict) -> str:
 def _operands(tool_name: str, tool_input: dict, text: str) -> str:
     if tool_name != "Bash":
         return text
+    command = str(tool_input.get("command") or "")
+    bare = HEREDOC.sub(r"\3", command)
     try:
-        words = shlex.split(HEREDOC.sub(r"\3", str(tool_input["command"])))
+        segments = _segments(bare)
     except ValueError:
         return text
-    kept = [word for word in words if not _prose(word)]
-    if any(PurePath(word).name in INTERPRETERS for word in kept):
+    programs = {PurePath(words[0]).name for words in segments if words}
+    if bare != command and not programs <= SINKS:
         return text
-    return " ".join(kept)
+    return " ".join(word for words in segments for word in _arguments(words))
+
+
+def _segments(command: str) -> list[list[str]]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.whitespace_split, lexer.commenters = True, ""
+    segments: list[list[str]] = [[]]
+    for word in lexer:
+        if SEPARATOR.fullmatch(word):
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    return segments
+
+
+def _arguments(words: list[str]) -> list[str]:
+    if not words or PurePath(words[0]).name not in WRITERS:
+        return words
+    return [words[0], *(word for word in words[1:] if not _prose(word))]
 
 
 def _prose(word: str) -> bool:
