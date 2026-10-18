@@ -7,6 +7,9 @@ inputs:
   path:
     description: Cache destination
     required: true
+  fail-on-cache-miss:
+    description: Fail when the required cache cannot be restored
+    required: true
 runs:
   using: composite
   steps:
@@ -19,7 +22,7 @@ runs:
       with:
         path: ${{ inputs.path }}
         key: ${{ inputs.key }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}
     - name: Restore, attempt 2
       id: second
       if: steps.first.outcome == 'failure'
@@ -30,7 +33,7 @@ runs:
       with:
         path: ${{ inputs.path }}
         key: ${{ inputs.key }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}
     - name: Restore, attempt 3
       if: steps.second.outcome == 'failure'
       uses: actions/cache/restore@v4
@@ -39,4 +42,4 @@ runs:
       with:
         path: ${{ inputs.path }}
         key: ${{ inputs.key }}
-        fail-on-cache-miss: true
+        fail-on-cache-miss: ${{ inputs.fail-on-cache-miss }}

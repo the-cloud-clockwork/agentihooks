@@ -1332,6 +1332,7 @@ jobs:
         with:
           path: ~/dev-durations
           key: ${{ needs.select.outputs.key }}
+          fail-on-cache-miss: true
 
       - name: Adopt latest dev durations
         if: needs.select.outputs.key != ''
