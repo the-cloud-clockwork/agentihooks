@@ -24,12 +24,14 @@ def prepare(home: Path, environ: Mapping[str, str], out: TextIO) -> int:
         client = store.redis_client(
             {**environ, "AGENTIHOOKS_DEPLOYMENT": "local", "AGENTIHOOKS_SWARM_REDIS_URL": endpoint}
         )
-        if (
-            client.acl_whoami() != "swarm"
-            or "nopass" in client.acl_getuser("swarm")["flags"]
-            or not client.config_get("aclfile").get("aclfile")
-        ):
-            print("Deploy the persistent named Redis user before activating clients.", file=out)
+        if client.acl_whoami() != "swarm":
+            print("Redis did not authenticate the named swarm user.", file=out)
+            return 1
+        if "nopass" in client.acl_getuser("swarm")["flags"]:
+            print("The named swarm user must require its bundle password.", file=out)
+            return 1
+        if not client.config_get("aclfile").get("aclfile"):
+            print("Deploy the persistent Redis ACL file before activating clients.", file=out)
             return 1
         target = home.parent / "swarm-client.env"
         staged = target.with_suffix(".env.next")
