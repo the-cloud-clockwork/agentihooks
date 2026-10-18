@@ -96,7 +96,7 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
         events.append(seconds)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connection)
     assert events == [(connection, "local"), 15]
@@ -108,7 +108,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     timestamps = iter([100, 103])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(object())
     sleep.assert_called_once_with(12)
@@ -354,7 +354,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     timestamps = iter([100, 116])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(object())
     sleep.assert_called_once_with(0)

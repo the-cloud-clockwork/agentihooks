@@ -281,7 +281,7 @@ def watch_passes(monkeypatch, held, replay, count=6):
     monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
     monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: held)
     monkeypatch.setattr(ledger_server, "replay_unrelayed", lambda: replay(len(passes)))
-    monkeypatch.setattr(ledger_server.time, "sleep", sleep)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", sleep)
     with pytest.raises(Stop):
         ledger_server.watch_ledgers()
 

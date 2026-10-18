@@ -243,7 +243,7 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
         if len(passes) == 31:
             raise StopIteration
 
-    monkeypatch.setattr(server.time, "sleep", tick)
+    monkeypatch.setattr(server, "scheduled_wait", tick)
     with pytest.raises(StopIteration):
         server.watch_ledgers()
     assert sweeps == [0, 15, 30]

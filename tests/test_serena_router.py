@@ -327,3 +327,23 @@ def test_fake_backend_imports_only_the_standard_library():
     modules = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     modules |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
     assert {m.split(".")[0] for m in modules} <= sys.stdlib_module_names
+
+
+async def test_eviction_runs_only_after_a_scheduler_signal(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hooks.serena_router import app
+
+    calls = []
+    pool = type("Pool", (), {"evict_idle": AsyncMock(side_effect=lambda: calls.append("evict"))})()
+
+    async def wait(delay):
+        calls.append(delay)
+        if len(calls) > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(app, "scheduled_wait", wait)
+    with pytest.raises(asyncio.CancelledError):
+        await app._evict_forever(pool)
+    assert calls == [app.EVICT_EVERY_SECONDS, "evict", app.EVICT_EVERY_SECONDS]
+    pool.evict_idle.assert_awaited_once_with()
