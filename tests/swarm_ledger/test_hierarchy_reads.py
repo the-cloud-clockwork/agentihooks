@@ -187,6 +187,28 @@ def test_the_hierarchy_revision_follows_the_rows(repo):
     assert whole != resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1", {})["revision"]
 
 
+def test_a_warm_hierarchy_read_sees_a_task_state_written_by_another_repository(repo, tmp_path):
+    before = resources.hierarchy_read(repo, SLUG, "hierarchy", {})
+    writer = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    _, rejected = writer.apply_ops(
+        SLUG,
+        ops=[
+            {
+                "op": "task_update",
+                "id": "external-state-change",
+                "by": "planner",
+                "item": "tasks/t2",
+                "fields": {"state": "blocked"},
+            }
+        ],
+    )
+    assert rejected == []
+    after = resources.hierarchy_read(repo, SLUG, "hierarchy", {})
+    states = {row["node"]: row["state"] for row in after["data"]}
+    assert states["tasks/t2"] == "blocked"
+    assert after["revision"] != before["revision"]
+
+
 def test_a_node_whose_item_left_the_document_reads_as_open():
     class Drifted:
         def nodes(self, slug, read, node=None):
