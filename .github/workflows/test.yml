@@ -1328,7 +1328,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: needs.select.outputs.key != ''
-        uses: actions/cache/restore@v4
+        uses: ./.github/actions/retry-cache
         with:
           path: ~/dev-durations
           key: ${{ needs.select.outputs.key }}
