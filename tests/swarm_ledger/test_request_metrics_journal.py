@@ -315,12 +315,19 @@ def test_failed_journal_write_keeps_the_rows_for_the_next_pass(tmp_path, monkeyp
 
 
 def test_restore_binds_the_journal_only_after_its_rewrite(tmp_path, monkeypatch, now):
+    path = tmp_path / "metrics.jsonl"
+    path.write_text(f'["start", {START - 7000.0}]\n["s", {START - 10.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n')
+
     def refused(*args):
         raise OSError("read only")
 
     monkeypatch.setattr(request_metrics, "write_lines", refused)
     with pytest.raises(OSError):
-        request_metrics.restore(tmp_path / "metrics.jsonl")
+        request_metrics.restore(path)
     assert request_metrics.JOURNAL is None
+    assert list(request_metrics.SAMPLES) == []
+    coverage = request_metrics.report(2.0)["coverage"]
+    assert coverage["held_since"] == request_metrics.STARTED_AT
+    assert coverage["lost"] == []
     request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
     assert request_metrics.PENDING == []

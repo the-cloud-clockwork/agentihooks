@@ -229,15 +229,18 @@ def restore(path: Path) -> None:
         samples, held, lost = replay(journal_rows(path), STARTED_AT)
         with GUARD:
             floor = time.time() - RETENTION_SECONDS
-            current = list(SAMPLES)
-            SAMPLES.clear()
-            for row in [row for row in samples if row[0] >= floor] + current:
-                hold(row)
-            HELD_SINCE = max(held, floor) if held is not None else None
-            LOST[:] = [span for span in lost if span[1] >= floor]
-            lines = journal_lines(None)
+            kept = [row for row in samples if row[0] >= floor] + list(SAMPLES)
+            spans = [span for span in lost if span[1] >= floor]
+            since = max(held, floor) if held is not None else None
+            lines = [["held", since if since is not None else STARTED_AT], *(["lost", *span] for span in spans)]
+            lines += [["start", STARTED_AT], *(["s", *row] for row in kept[-SAMPLES.maxlen :])]
         write_lines(path, lines, "w")
         with GUARD:
+            SAMPLES.clear()
+            for row in kept:
+                hold(row)
+            LOST[:] = spans
+            HELD_SINCE = since
             PENDING.clear()
             JOURNAL, APPENDED = path, 0
 
