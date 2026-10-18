@@ -324,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
     if failed:
         return 1
     base, head = collected["base"], collected["head"]
+    if output := os.environ.get("TEST_COUNT_HEAD_COLLECTION"):
+        Path(output).write_text(json.dumps(head))
     lost = sorted(set(base) - set(head))
     admitted = {}
     if len(head) < len(base):

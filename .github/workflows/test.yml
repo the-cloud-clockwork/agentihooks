@@ -698,29 +698,24 @@ jobs:
           TEST_COUNT_COLLECTION_CACHE: ${{ runner.temp }}/count-collections
           TEST_COUNT_ENVIRONMENT: ${{ steps.venv.outputs.cache-primary-key }}
           TEST_COUNT_BASE_RECORD: ${{ runner.temp }}/base-record.json
+          TEST_COUNT_HEAD_COLLECTION: ${{ runner.temp }}/collected.json
         run: |
           if [[ ! -f "$RUNNER_TEMP/base/tests/count_floor.py" ]]; then
             echo "::error::The base carries no tests/count_floor.py, so nothing trusted can grade."
             exit 1
           fi
-          python -c 'import json; from pathlib import Path; from tests.duration_coverage import collected_tests; Path("collected.json").write_text(json.dumps(collected_tests(Path.cwd())))' > "$RUNNER_TEMP/collection.log" 2>&1 &
-          collection_pid=$!
-          (
-            cd "$RUNNER_TEMP/base"
-            python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
-          ) &
-          floor_pid=$!
-          status=0
-          wait "$collection_pid" || status=$?
-          wait "$floor_pid" || status=$?
-          cat "$RUNNER_TEMP/collection.log"
-          exit "$status"
+          cd "$RUNNER_TEMP/base"
+          python -m tests.count_floor --base "$RUNNER_TEMP/base" --head "$GITHUB_WORKSPACE"
+          if [[ ! -f "$TEST_COUNT_HEAD_COLLECTION" ]]; then
+            cd "$GITHUB_WORKSPACE"
+            python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))'
+          fi
 
       - name: Upload the early collection
         uses: actions/upload-artifact@v4
         with:
           name: early-collected-${{ matrix.python-version }}
-          path: collected.json
+          path: ${{ runner.temp }}/collected.json
           if-no-files-found: error
           retention-days: 7
           overwrite: true
