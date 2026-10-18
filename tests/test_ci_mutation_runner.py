@@ -379,6 +379,140 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
     assert f"{fixture.split('/')[0]}/" in config["also_copy"]
 
 
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ('(ROOT / "extra/text.txt").read_bytes()', ["text.txt"]),
+        ('(ROOT / "extra/text.txt").exists()', ["text.txt"]),
+        ('(ROOT / "extra/text.txt").is_file()', ["text.txt"]),
+        ('open(ROOT / "extra/text.txt")', ["text.txt"]),
+        ('(ROOT / "extra/text.txt").open()', ["text.txt"]),
+        ('subprocess.check_output(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('subprocess.check_call(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('subprocess.call(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('subprocess.Popen(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('(ROOT / "extra").glob("*.txt")', ["text.txt"]),
+        ('(ROOT / "extra").rglob("*.json")', ["nested/child.json"]),
+        ('(ROOT / "extra").iterdir()', ["bytes.bin", "text.txt", "unused.ignore"]),
+        (
+            'def read(name):\n    return (ROOT / name).read_text()\nread("extra/text.txt")\nread("extra/nested/child.json")',
+            ["nested/child.json", "text.txt"],
+        ),
+        (
+            'import pytest\n@pytest.mark.parametrize("folder", ["extra"])\ndef test_records(folder):\n    return (ROOT / folder).rglob("*.json")',
+            ["nested/child.json"],
+        ),
+    ],
+)
+def test_workspace_discovers_repository_inputs_for_each_selected_read_operation(tmp_path, source, expected):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra/nested").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    for name in ("text.txt", "bytes.bin", "nested/child.json", "unused.ignore"):
+        (root / "extra" / name).write_text(name)
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n" + source + "\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    copied = sorted(
+        path.relative_to(work / "extra").as_posix() for path in (work / "extra").rglob("*") if path.is_file()
+    )
+    assert copied == expected
+
+
+def test_workspace_extra_inputs_preserve_templates_and_exclude_credentials_caches_and_links(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra/.git").mkdir(parents=True)
+    (root / "extra/__pycache__").mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    templates = [".env.dist", ".env.example", ".env.sample", ".env.template"]
+    for name in [*templates, ".env", ".env.local", "cache.pyc", ".git/index", "__pycache__/old.pyc"]:
+        (root / "extra" / name).write_text("fixture")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    (root / "extra/linked.txt").symlink_to(outside)
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        'def test_inputs():\n    return (ROOT / "extra").rglob("*")\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    glob = Path.glob
+    monkeypatch.setattr(Path, "glob", lambda path, pattern: iter(sorted(glob(path, pattern))))
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py::test_inputs"])
+    copied = sorted(
+        path.relative_to(work / "extra").as_posix() for path in (work / "extra").rglob("*") if path.is_file()
+    )
+    assert copied == templates
+
+
+def test_workspace_does_not_enumerate_fixture_directories_outside_the_repository(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "private.txt").write_text("outside")
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        'def test_inputs():\n    return (ROOT / "linked").rglob("*")\n'
+    )
+    scandir = os.scandir
+
+    def scan(path):
+        assert not Path(path).resolve().is_relative_to(outside)
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scan)
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert not (work / "linked").exists()
+
+
+def test_workspace_keeps_generated_configuration_and_handles_probed_path_length_limits(tmp_path):
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra").mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    allowed = "a" * 255
+    (root / "extra" / allowed).write_text("fixture")
+    rejected = "a" * 256
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        '(ROOT / "pyproject.toml").read_text()\n'
+        f'(ROOT / "extra" / {allowed!r}).read_text()\n'
+        f'(ROOT / "extra" / {rejected!r}).exists()\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    assert config["also_copy"][-1] == "extra/"
+    assert "pyproject.toml/" not in config["also_copy"]
+    assert (work / "extra" / allowed).read_text() == "fixture"
+
+
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
