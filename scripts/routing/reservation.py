@@ -255,7 +255,7 @@ class LaunchSlots:
                 counts[slot] = counts.get(slot, 0) + delta
         return counts
 
-    def refresh(self, executions: list[str]) -> None:
+    def refresh(self, executions: list[str], ttl_ms: int = 45000) -> None:
         import json
 
         from scripts.swarm.keyspace import ROOT
@@ -264,4 +264,23 @@ class LaunchSlots:
             key = f"{ROOT}:launch-slot:{execution}"
             raw = self.redis.get(key)
             if raw is not None and json.loads(raw)["state"] == "live":
-                self.redis.pexpire(key, 45000)
+                self.redis.pexpire(key, ttl_ms)
+
+    def refresh_reported(self, now_ms: int) -> None:
+        """Keep each live hive's reported rows of executions placed on that hive alive across two controller ticks,
+        for members, whose Redis users cannot refresh them."""
+        import json
+
+        from scripts.hive import registry
+        from scripts.swarm import lease
+        from scripts.swarm.store import RedisStore
+
+        store = RedisStore(self.redis)
+        placed = {agent.execution_id: agent.hive for slug in store.slugs() for agent in store.agents(slug)}
+        for hive in registry.hives(self.redis):
+            if registry.live(hive, now_ms):
+                report = json.loads(self.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+                reported = [execution for ids in report.get("_executions", {}).values() for execution in ids]
+                self.refresh(
+                    [execution for execution in reported if placed.get(execution) == hive["id"]], 2 * lease.tick_ms()
+                )

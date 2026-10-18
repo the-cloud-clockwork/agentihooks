@@ -530,6 +530,7 @@ def test_a_dropped_agent_prompt_protects_its_pane_under_either_name(env, owner, 
     store.redis = SimpleNamespace(
         get=prompts.get,
         scan_iter=lambda match: (key for key in prompts if fnmatchcase(key, match)),
+        smembers=lambda key: set(),
     )
     owners = herdr_gc.Owners(lambda url: store)
     expected = (herdr_gc.KEEP, "used inside the quiet window") if kept else (herdr_gc.CLOSE, "its agent was retired")

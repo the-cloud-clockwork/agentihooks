@@ -73,8 +73,17 @@ def now_ms():
     return time.time_ns() // 1_000_000
 
 
-def owner_key(recipient):
-    return f"{PREFIX}:owner:{recipient}"
+def prefix(world):
+    from scripts.hive import scope
+
+    return f"{scope.root(world)}:inbox"
+
+
+def owner_key(recipient, world=None):
+    """world is the inbox's hive member; None takes this process's own."""
+    from scripts.hive import scope
+
+    return f"{prefix(scope.member() if world is None else world)}:owner:{recipient}"
 
 
 def owner_ttl_s(environ=None):
@@ -105,7 +114,11 @@ def close_reason(kind, detail=""):
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None, session_id=""):
+    def __init__(self, redis, *, persist=None, session_id="", world=None):
+        """world is the hive member whose keys hold this inbox, '' for the controller's; it defaults to this process's
+        own member."""
+        from scripts.hive import scope
+
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
@@ -113,9 +126,21 @@ class InboxStore:
         self.session_id = session_id
         self.seats = SeatRegistry(redis)
         self.names = NameRegistry(redis)
+        self.world = scope.member() if world is None else world
+        self.prefix = prefix(self.world)
 
     def key(self, *parts):
-        return ":".join((PREFIX, *parts))
+        return ":".join((self.prefix, *parts))
+
+    def home(self, address):
+        """The hive member whose keys hold address's inbox: the member that runs it or its seat's occupant."""
+        from scripts.hive import scope
+
+        if not scope.joined(self.redis):
+            return ""
+        receiver = self.names.resolve(self.seats.occupant(address).occupant if is_seat(address) else address)
+        slug = self.names.slug_of(receiver)
+        return scope.host(self.redis, slug, receiver) if slug else ""
 
     @functools.cached_property
     def pool(self):
@@ -147,6 +172,10 @@ class InboxStore:
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         sender, address = self.names.resolve(sender), self.names.resolve(address)
+        home = self.home(address)
+        if home != self.world and not self.world:
+            routed = InboxStore(self.redis, persist=self.persist, world=home)
+            return routed.send(sender, address, text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
@@ -162,7 +191,7 @@ class InboxStore:
             task=task,
         )
         key = self.key("item", item.id)
-        masters = self.pool.masters_for(sender, address)
+        masters = self.pool.masters_for(sender, address) if home == self.world else []
         with self.redis.pipeline() as pipe:
             if item_id:
                 pipe.watch(key)
@@ -789,7 +818,7 @@ class InboxStore:
             return moved
 
     def _owned(self, pipe, by):
-        key = owner_key(NameRegistry(pipe).resolve(by))
+        key = owner_key(NameRegistry(pipe).resolve(by), self.world)
         pipe.watch(key)
         return pipe.get(key) is not None
 

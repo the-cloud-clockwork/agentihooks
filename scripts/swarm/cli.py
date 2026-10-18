@@ -67,10 +67,11 @@ from scripts.handoff import check as handoff_check
 from scripts.handoff import envelope as handoff_envelope
 from scripts.handoff import transfers
 from scripts.handoff.resolve import Resolver
-from scripts.inbox import exits, outbox, wake
+from scripts.inbox import exits, outbox, relay, wake
 from scripts.inbox.seats import CANON, DEFAULT_MATURITY, MATURITIES, SeatError, is_seat, seat_address
 from scripts.inbox.seats import PREFIX as SEAT_PREFIX
 from scripts.inbox.store import InboxError, InboxStore
+from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import (
     affinity,
     agent_up,
@@ -237,6 +238,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     doc = {}
     try:
         timing.keep()
+        timing.call(relay.relay, store.redis)
+        timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
         outage.providers(store, slug, runtime, now_ms())
         if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
@@ -250,7 +253,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             runtime or routed(herdr=HerdrRuntime()),
             os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL),
         )
-        from scripts.swarm.health import prompt_backlog, spawn_stall
+        from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
         pressured = skip_refused(incidents.host_pressure, store, slug)
         restarted = pressured + timing.call(ledger_watchdog.watch, store, slug, ledger, runtime)
@@ -273,6 +276,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
+            timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
             if actions:
                 doc = timing.call(ledger.state, slug)

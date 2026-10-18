@@ -968,7 +968,7 @@ class HerdrRuntime:
 
     def _retire_managed(self, agent):
         from scripts.codex_session.binding import EXITED, BindingStore
-        from scripts.codex_session.supervisor import execution_directory
+        from scripts.codex_session.supervisor import execution_directory, remove_home
 
         store = connect()
         record = live_binding.transport(store, agent)
@@ -996,7 +996,7 @@ class HerdrRuntime:
         directory = execution_directory(record)
         if directory is not None and directory.exists():
             try:
-                shutil.rmtree(directory)
+                remove_home(directory)
             except OSError as exc:
                 self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"runtime home: {exc}"}
                 return False

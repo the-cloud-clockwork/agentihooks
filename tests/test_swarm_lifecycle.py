@@ -720,3 +720,15 @@ def test_the_swarm_route_hands_a_lifecycle_body_to_its_control(monkeypatch):
         raise lifecycle.Refused(409, STALE)
 
     assert put_swarm(monkeypatch, sent, stale)[1] == [(409, STALE, "text/plain")]
+
+
+def test_the_swarm_route_stops_at_a_refused_request(monkeypatch):
+    replies = []
+    monkeypatch.setattr(
+        ledger_server, "lifecycle_control", lambda *args: pytest.fail("refused request reached control")
+    )
+    handler = SimpleNamespace(
+        exists=lambda slug: True, refused=lambda slug: True, send=lambda *args: replies.append(args)
+    )
+    assert ledger_server.Handler.put_swarm(handler, SLUG) is None
+    assert replies == []

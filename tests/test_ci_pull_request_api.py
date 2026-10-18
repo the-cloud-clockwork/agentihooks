@@ -214,6 +214,8 @@ def test_no_script_a_step_runs_calls_the_api():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     if (ROOT / "scripts/ci_wall_clock.py").exists():
         expected.append("scripts/ci_wall_clock.py")
+    if (ROOT / ".github/actions/browser-cache/use-image.sh").exists():
+        expected.append(".github/actions/browser-cache/use-image.sh")
     routing_contracts = [
         "tests/test_ci_anton_runners.py",
         "tests/test_ci_runner_classes.py",
@@ -222,6 +224,8 @@ def test_no_script_a_step_runs_calls_the_api():
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
+        sorted(expected + ["tests/queue_shards.py"]),
+        sorted(expected + routing_contracts + ["tests/queue_shards.py"]),
     )
     assert {path: count for path, count in calls.items() if count} == {}
 

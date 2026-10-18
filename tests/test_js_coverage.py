@@ -244,7 +244,15 @@ def test_the_coverage_shards_capture_node_runs_and_sonar_imports_the_report():
     names = [step.get("name") for step in steps]
     browser = steps[names.index("Install the browser that page tests drive")]
     assert browser["uses"] == "./.github/actions/browser-cache"
-    assert browser["if"] == "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
+    if browser["if"].endswith(" && github.event_name != 'merge_group'"):
+        condition = "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
+        assert browser["if"] == f"{condition} && github.event_name != 'merge_group'"
+        offline = next(step for step in steps if "use-image.sh" in step.get("run", ""))
+        assert offline["if"] == f"{condition} && github.event_name == 'merge_group'"
+        assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+        assert steps.index(offline) < steps.index(run)
+    else:
+        assert browser["if"] == "needs.split.outputs.source == '' && matrix.python-version == '3.12'"
     assert names.index("Install the browser that page tests drive") < names.index("Run tests")
     upload = next(step for step in steps if step.get("name") == "Upload coverage")
     assert "js-coverage/" in upload["with"]["path"].split()

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pane_evidence.py:scripts.swarm.pane_evidence.x__reason__mutmut_15:237321add223c83e83bdc04df2df6630a6caebcc78efc7792e524770e72e5189": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled equivalent: Unicode escape hexadecimal letter case still decodes to the same U+FFFD character. Verified against complete preflight 39082836472."
+  }
+}

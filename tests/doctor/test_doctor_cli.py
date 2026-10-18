@@ -72,6 +72,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
+    monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, tmp_path
 
