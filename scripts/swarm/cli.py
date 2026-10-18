@@ -1,7 +1,9 @@
 """agentihooks swarm: run a swarm of Claude and Codex agents over a swarm ledger in herdr.
 
 agentihooks swarm list | tick | templates
-agentihooks swarm <id> create --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]
+agentihooks swarm init NAME [--plan FILE] [--content FILE] [--repo DIR]  the one way to create a swarm and its ledger, paused
+agentihooks swarm names check NAME [--plan FILE]                  valid or invalid against the swarm name rule, with suggestions
+agentihooks swarm <id> create --repo DIR [--template NAME]         proof and demo swarms only; init calls it for every other swarm
 agentihooks swarm <id> start | pause | stop [--now] | status
 agentihooks swarm <id> names [--json]                              the swarm code, its herdr space and every agent name it gave
 agentihooks swarm <id> url                                        print the ledger page link (create and start print it last)
@@ -2117,10 +2119,26 @@ def _tick_store():
 
 def main(argv):
     if argv[:1] == ["init"]:
-        from scripts.swarm import stack_init
+        from scripts.swarm import swarm_init
 
-        return stack_init.main(argv[1:])
+        return swarm_init.main(argv[1:])
+    if argv[:2] == ["names", "check"]:
+        from scripts.swarm import swarm_init
+
+        try:
+            return swarm_init.check(argv[2:])
+        except SwarmError as exc:
+            print(f"swarm: {exc}", file=sys.stderr)
+            return 1
     return dispatch(argv)
+
+
+def typed(argv):
+    """The agentihooks swarm command line: create is init's own step, so a typed one names init instead."""
+    if argv[1:2] == ["create"] and not naming.is_code_named_swarm(argv[0]):
+        print(f"swarm: a swarm is created with its ledger by one command: {naming.SWARM_INIT}", file=sys.stderr)
+        return 1
+    return main(argv)
 
 
 def dispatch(argv):

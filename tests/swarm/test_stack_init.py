@@ -2,14 +2,13 @@ import io
 import json
 import stat
 import subprocess
-import sys
 import urllib.error
 import urllib.request
 from pathlib import Path
 
 import pytest
 
-from scripts.swarm import cli, stack_env, stack_init
+from scripts.swarm import stack_env, stack_init
 
 PASSWORD = "pw-test"
 HEALTHY = [
@@ -74,7 +73,7 @@ def home(tmp_path, monkeypatch):
 
 def init(home, docker, argv=(), opener=page, environ=None):
     out = io.StringIO()
-    code = stack_init.init(list(argv), environ or {"AGENTIHOOKS_HOME": str(home)}, docker, opener, out)
+    code = stack_init.init(list(argv), environ or {"AGENTIHOOKS_HOME": str(home)}, docker, opener, out, "demo-swarm")
     return code, out.getvalue()
 
 
@@ -109,8 +108,7 @@ READY = (
     "Next steps:\n"
     "  1. Open the ledger: http://127.0.0.1:8766/\n"
     "  2. Point this shell at the stack: set -a; . {folder}/client.env; set +a\n"
-    "  3. Start a swarm only when you want one: agentihooks swarm <id> create --repo <path>, "
-    "then agentihooks swarm <id> start\n"
+    "  3. Start the swarm only when you want it: agentihooks swarm demo-swarm start\n"
     "Running agentihooks swarm init again is safe: it keeps the password, the ports and the data.\n"
 )
 
@@ -288,29 +286,22 @@ def test_a_page_that_is_not_the_ledger_home_is_reported(home):
 
 def test_colour_on_a_terminal_and_never_with_no_color(home):
     out = Terminal()
-    stack_init.init([], {"AGENTIHOOKS_HOME": str(home)}, Docker(), page, out)
+    stack_init.init([], {"AGENTIHOOKS_HOME": str(home)}, Docker(), page, out, "demo-swarm")
     assert "\033[1;32mSwarm stack ready: redis, swarm and controller are healthy.\033[0m\n" in out.getvalue()
     assert "  1. Open the ledger: \033[36mhttp://127.0.0.1:8766/\033[0m\n" in out.getvalue()
     plain = Terminal()
-    stack_init.init([], {"AGENTIHOOKS_HOME": str(home), "NO_COLOR": "1"}, Docker(), page, plain)
+    stack_init.init([], {"AGENTIHOOKS_HOME": str(home), "NO_COLOR": "1"}, Docker(), page, plain, "demo-swarm")
     assert "\033[" not in plain.getvalue()
 
 
 def test_failures_are_red_on_a_terminal(home, monkeypatch):
     monkeypatch.setattr(stack_init.shutil, "which", lambda name: None)
     out = Terminal()
-    stack_init.init([], {"AGENTIHOOKS_HOME": str(home)}, Docker(), page, out)
+    stack_init.init([], {"AGENTIHOOKS_HOME": str(home)}, Docker(), page, out, "demo-swarm")
     assert out.getvalue() == (
         "\033[1;31mSwarm stack not ready: Docker is not installed.\033[0m\n"
         "  Fix: install Docker Engine with the Compose plugin, then run agentihooks swarm init again.\n"
     )
-
-
-def test_swarm_init_routes_to_the_stack_command(monkeypatch):
-    seen = []
-    monkeypatch.setattr(stack_init, "main", lambda argv: seen.append(argv) or 7)
-    assert cli.main(["init", "--timeout", "9"]) == 7
-    assert seen == [["--timeout", "9"]]
 
 
 def test_timeout_must_be_a_number(home, capsys):
@@ -337,10 +328,3 @@ def test_a_tls_stack_points_the_client_at_its_own_ca(home):
     code, _ = init(home, Docker())
     assert code == 0
     assert (folder / "client.env").read_text().endswith(f"\nSSL_CERT_FILE={folder}/deploy/compose/tls/ca.pem\n")
-
-
-def test_main_runs_init_with_the_process_environment_docker_and_stdout(monkeypatch):
-    seen = []
-    monkeypatch.setattr(stack_init, "init", lambda *args: seen.append(args) or 3)
-    assert stack_init.main(["--timeout", "1"]) == 3
-    assert seen == [(["--timeout", "1"], stack_init.os.environ, subprocess.run, urllib.request.urlopen, sys.stdout)]

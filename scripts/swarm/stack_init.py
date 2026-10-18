@@ -1,14 +1,12 @@
-"""agentihooks swarm init: bring up the local swarm stack with Docker Compose and print the next steps.
+"""The stack step of agentihooks swarm init: bring up the local swarm stack with Docker Compose and print next steps.
 
-It never creates or starts a swarm; the printed commands do that when the operator chooses to.
+It never creates or starts a swarm; swarm init creates it after this step and the operator starts it.
 """
 
 import argparse
 import json
-import os
 import shutil
 import subprocess
-import sys
 import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
@@ -127,16 +125,12 @@ def failed(out: TextIO, paint: Paint, problem: str, fix: str, logs: str = "") ->
         print(f"  Logs: {LOGS} {logs}", file=out)
 
 
-def ready(out: TextIO, paint: Paint, home: Path, base: str) -> None:
+def ready(out: TextIO, paint: Paint, home: Path, base: str, name: str) -> None:
     print(paint("Swarm stack ready: redis, swarm and controller are healthy.", "ready"), file=out)
     print("Next steps:", file=out)
     print(f"  1. Open the ledger: {paint(base + '/', 'link')}", file=out)
     print(f"  2. Point this shell at the stack: set -a; . {home / 'client.env'}; set +a", file=out)
-    print(
-        "  3. Start a swarm only when you want one: agentihooks swarm <id> create --repo <path>, "
-        "then agentihooks swarm <id> start",
-        file=out,
-    )
+    print(f"  3. Start the swarm only when you want it: agentihooks swarm {name} start", file=out)
     print("Running agentihooks swarm init again is safe: it keeps the password, the ports and the data.", file=out)
 
 
@@ -155,11 +149,7 @@ def start(run: Run, home: Path, timeout: int, out: TextIO) -> list[tuple[str, st
     return sick
 
 
-def main(argv: list[str]) -> int:
-    return init(argv, os.environ, subprocess.run, urllib.request.urlopen, sys.stdout)
-
-
-def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable, out: TextIO) -> int:
+def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable, out: TextIO, name: str) -> int:
     args = parser().parse_args(argv)
     paint = painter(out, environ)
     if problem := docker_problem(run):
@@ -180,5 +170,5 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
             out, paint, "the ledger page does not answer", f"{problem}; read the ledger logs with {LOGS} swarm, {AGAIN}"
         )
         return 1
-    ready(out, paint, home, base)
+    ready(out, paint, home, base, name)
     return 0

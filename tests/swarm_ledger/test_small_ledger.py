@@ -84,11 +84,11 @@ class SizeOnCreate(unittest.TestCase):
 
     def test_a_swarm_ledger_needs_no_worker(self):
         with at(T0):
-            out = create("size-swarm", "--size", "swarm")
+            out = create("proof-a1b2c3-size-1", "--size", "swarm")
         self.assertEqual(out["size"], "swarm")
         self.assertNotIn("joined", out)
-        self.assertEqual(state("size-swarm")["size"], "swarm")
-        self.assertEqual(state("size-swarm")["_meta"]["members"], {})
+        self.assertEqual(state("proof-a1b2c3-size-1")["size"], "swarm")
+        self.assertEqual(state("proof-a1b2c3-size-1")["_meta"]["members"], {})
 
     def test_size_set_turns_a_small_ledger_into_a_swarm_ledger(self):
         with at(T0):
@@ -101,12 +101,14 @@ class SizeOnCreate(unittest.TestCase):
     def test_home_shows_each_ledger_size_and_an_unsized_ledger_counts_as_swarm(self):
         with at(T0):
             create("home-small", "--as", "w")
-            create("home-swarm", "--size", "swarm")
+            create("proof-a1b2c3-home-1", "--size", "swarm")
         html_path = core.paths("home-legacy")[0]
         html_path.write_text(legacy_page.render(new_ledger.build_doc(CONTENT, size=None), "home-legacy", 8765))
         core.sync("home-legacy")
         sizes = {s["slug"]: s["size"] for s in server.ledger_summaries()}
-        self.assertEqual((sizes["home-small"], sizes["home-swarm"], sizes["home-legacy"]), ("small", "swarm", "swarm"))
+        self.assertEqual(
+            (sizes["home-small"], sizes["proof-a1b2c3-home-1"], sizes["home-legacy"]), ("small", "swarm", "swarm")
+        )
         home = browser_home(server)
         self.assertIn('<span class="kind">small</span>', home)
         self.assertIn('<span class="kind">swarm</span>', home)
@@ -137,13 +139,13 @@ class Lifecycle(unittest.TestCase):
 
     def test_swarm_and_unsized_ledgers_never_auto_bin(self):
         with at(T0):
-            create("life-swarm", "--size", "swarm")
-            finish("life-swarm")
+            create("proof-a1b2c3-life-1", "--size", "swarm")
+            finish("proof-a1b2c3-life-1")
             html_path = core.paths("life-legacy")[0]
             html_path.write_text(legacy_page.render(new_ledger.build_doc(CONTENT, size=None), "life-legacy", 8765))
             core.sync("life-legacy")
         binned = bin_storage.auto_bin(now=T0 + 400 * DAY_MS)
-        self.assertNotIn("life-swarm", binned)
+        self.assertNotIn("proof-a1b2c3-life-1", binned)
         self.assertNotIn("life-legacy", binned)
 
     def test_an_auto_binned_ledger_is_deleted_thirty_days_later(self):
