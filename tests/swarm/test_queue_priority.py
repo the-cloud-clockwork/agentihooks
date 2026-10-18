@@ -5,10 +5,12 @@ import pytest
 
 from scripts.swarm import cli, merge_queue, queue_priority, queue_record
 from scripts.swarm.store import SwarmError
+from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
 from tests.swarm.test_merge_queue_priority import URL, FakeQueue
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+_fixture = env
 
 
 @pytest.fixture
@@ -118,3 +120,56 @@ def test_github_outage_retains_deferred_request(priority, monkeypatch, capsys):
     ]
     assert p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
     assert p.queue.mutations == []
+
+
+def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch):
+    from tests.swarm.test_delivery import FakeHerdr
+
+    store, ledger, runtime = env
+    assert cli.main(["sw", "create", "--repo", "/repo"]) == 0
+    store.redis.hset(
+        store.key("sw", queue_priority.PENDING),
+        URL,
+        json.dumps({"repo": "o/r", "group_head": "old-group", "run_id": 42, "sender": "master"}),
+    )
+    applied = []
+
+    def rest(path, run):
+        assert path == "repos/o/r/actions/runs/42"
+        return {"status": "completed"}
+
+    def reorder(url, journal):
+        applied.append(url)
+        return {"url": url, "displaced": [], "errors": []}
+
+    monkeypatch.setattr(merge_queue, "rest", rest)
+    monkeypatch.setattr(merge_queue, "prioritize", reorder)
+    actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
+    assert applied == [URL]
+    assert f"applied deferred merge queue priority for {URL}" in actions
+    assert not store.redis.hgetall(store.key("sw", queue_priority.PENDING))
+
+
+def test_missing_run_resolves_original_group_after_queue_advances(priority, monkeypatch, capsys):
+    p = priority
+    responses = [[], [{"id": 42, "status": "completed"}]]
+    reads = []
+
+    def rest(path, run):
+        assert path == "repos/o/r/actions/workflows/test.yml/runs?event=merge_group&head_sha=group-head&per_page=100"
+        reads.append(path)
+        return {"workflow_runs": responses.pop(0)}
+
+    monkeypatch.setattr(merge_queue, "rest", rest)
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    assert json.loads(capsys.readouterr().out)["run_id"] is None
+    p.groups[0]["head"] = "new-group"
+
+    def reorder(url, journal):
+        return {"url": url, "displaced": [], "errors": []}
+
+    monkeypatch.setattr(merge_queue, "prioritize", reorder)
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
+    assert len(reads) == 2
+    assert not responses
+    assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))

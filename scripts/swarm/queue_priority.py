@@ -8,19 +8,22 @@ from scripts.swarm.store import SwarmError
 PENDING = "queue-priority"
 
 
-def blocking(url: str, journal) -> dict | None:
+def blocking(url: str, journal, head: str | None = None) -> dict | None:
     groups = journal.groups()
     if groups is None:
         raise SwarmError("queue priority waits until the head group can be read")
-    if not groups or not groups[0]["head"]:
-        return None
-    head = groups[0]["head"]
+    if head is None:
+        if not groups or not groups[0]["head"]:
+            return None
+        head = groups[0]["head"]
     repo = "/".join(url.split("/")[3:5])
     runs = merge_queue.rest(
         f"repos/{repo}/actions/workflows/test.yml/runs?event=merge_group&head_sha={head}&per_page=100",
         subprocess.run,
     )["workflow_runs"]
     if runs and runs[0]["status"] == "completed":
+        return None
+    if not runs and not any(group["head"] == head for group in groups):
         return None
     return {"repo": repo, "group_head": head, "run_id": runs[0]["id"] if runs else None}
 
@@ -59,7 +62,7 @@ def refresh(store, slug: str, tasks: list[dict]) -> list[str]:
         record = json.loads(raw)
         try:
             if record["run_id"] is None:
-                held = blocking(url, queue_record.Journal(url))
+                held = blocking(url, queue_record.Journal(url), record["group_head"])
                 if held is not None:
                     store.redis.hset(store.key(slug, PENDING), url, json.dumps({**held, "sender": record["sender"]}))
                     continue
