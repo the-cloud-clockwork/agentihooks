@@ -35,6 +35,15 @@ def _toplevel(cwd: Path) -> Path | None:
     return Path(result.stdout.strip()) if result.returncode == 0 else None
 
 
+def _common_dir(cwd: Path) -> str | None:
+    result = subprocess.run(
+        ["git", "-C", str(cwd), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip() if result.returncode == 0 else None
+
+
 def _path(word: str) -> str:
     return os.path.expanduser(os.path.expandvars(word))
 
@@ -92,14 +101,27 @@ def _require_directory(target: Path | None, stage: str) -> Path | None:
 
 
 def _push_directory(cwd: Path, selected: bool) -> Path:
+    from hooks.targets.capabilities import reports_shell_cwd
+
     if selected:
         return cwd
     target, stage = _swarm_cwd(cwd)
+    if target is not None and reports_shell_cwd() and _common_dir(target) != _common_dir(cwd):
+        return cwd
     return _require_directory(target, stage) or cwd
 
 
+def _folder(cwd: Path, folders: list[str]) -> Path:
+    previous = cwd
+    for folder in folders:
+        target = previous if folder == "-" else cwd / _path(folder)
+        if os.path.isdir(target):
+            cwd, previous = target, cwd
+    return cwd
+
+
 def _unpassed(payload: dict) -> Path | None:
-    from hooks.context.shell_commands import commands
+    from hooks.context.shell_commands import located
     from scripts.ci_prepush import passed
 
     tool_input = payload["tool_input"]
@@ -108,16 +130,11 @@ def _unpassed(payload: dict) -> Path | None:
         return None
     cwd = Path(payload.get("cwd") or os.getcwd(), _path(tool_input.get("workdir") or ""))
     selected = bool(tool_input.get("workdir"))
-    for tokens in commands(command):
-        if Path(tokens[0]).name == "cd":
-            target = cwd / _path(next((word for word in tokens[1:] if not word.startswith("-")), "~"))
-            cwd = target if os.path.isdir(target) else cwd
-            selected = True
-            continue
+    for tokens, folders in located(command):
         push = _push(tokens)
         if push is None or _exempt(push[1]):
             continue
-        base = _push_directory(cwd, selected or bool(push[0]))
+        base = _push_directory(_folder(cwd, folders), selected or bool(folders) or bool(push[0]))
         root = _require_directory(_toplevel(base.joinpath(*map(_path, push[0]))), "repository lookup")
         if root and (root / "scripts" / "ci_prepush" / "__init__.py").is_file() and not passed(root):
             return root

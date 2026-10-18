@@ -25,7 +25,7 @@ def codex_only(tmp_path, monkeypatch):
     for key in [k for k in os.environ if k.startswith("AH_CC_TOKEN_")]:
         monkeypatch.delenv(key)
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(capacity, "_claude", lambda environ, now: [])
     monkeypatch.setattr(capacity, "_codex", lambda environ, now, refresh: [codex("cx"), codex("cy", sessions=1)])
     monkeypatch.setattr(plugins, "claude_only", lambda profile: False)
@@ -35,7 +35,7 @@ def codex_only(tmp_path, monkeypatch):
 @pytest.fixture
 def claude_only(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
-    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(
         capacity, "_claude", lambda environ, now: [capacity.Account("claude", "cc", "OPEN", 0, 90, 90, 6)]
     )

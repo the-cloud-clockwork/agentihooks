@@ -86,7 +86,7 @@ def test_spawn_records_the_api_route_kind_from_the_launch_report(tmp_path, accou
         lanes={"master": {"agent": "claude"}},
         autonomy="delegate",
     )
-    placed = runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof"})
+    placed = runtime.spawn(config, "master", "agent", {"id": "master", "title": "proof", "route_kind": "subscription"})
     assert placed.account == account
     assert placed.route_kind == kind
 

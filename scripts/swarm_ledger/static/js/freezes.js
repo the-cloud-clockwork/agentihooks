@@ -29,7 +29,8 @@ export function ancestors(d, key) {
   if (list === "tasks") {
     const task = byId(d.tasks, id);
     if (!task) return [key];
-    const up = [...(task.merged_into ? ancestors(d, `tasks/${task.merged_into}`) : []), ...(task.slice ? ancestors(d, task.slice) : []),
+    if (task.merged_into) return task.freeze_ancestry;
+    const up = [...(task.slice ? ancestors(d, task.slice) : []),
       ...(task.phase ? ancestors(d, `phases/${task.phase}`) : [])];
     return [key, ...new Set(up)];
   }
@@ -71,7 +72,7 @@ export function setFreeze(d, op, at) {
 }
 
 export function clearFreeze(d, op) {
-  d.freezes = d.freezes.filter((r) => r.target !== op.target && (isSelector(op.target) || isSelector(r.target) || !ancestors(d, r.target).includes(op.target)));
+  d.freezes = d.freezes.filter((r) => r.target !== op.target);
 }
 
 export function targetText(d, target) {

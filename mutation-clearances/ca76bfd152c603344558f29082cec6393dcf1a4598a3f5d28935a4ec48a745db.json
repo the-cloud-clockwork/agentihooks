@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/langfuse_read.py:scripts.swarm.langfuse_read.x__name_tls__mutmut_6:1b62fa37eed571b5bfd9ead02cbaedb05ceb9da056a976718acc5feb19e64e71": {
+    "reader": "/root/standards_reader",
+    "reason": "httpx Headers lookups are case insensitive, so reading the HOST spelling returns the same Host value and the SNI name is unchanged."
+  }
+}

@@ -165,6 +165,29 @@ def test_launch_succeeds_only_after_the_terminal_starts_the_launcher(monkeypatch
     assert not list((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.started"))
 
 
+def test_a_session_launch_starts_the_supervised_scheduler(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    calls = []
+    monkeypatch.setattr(service, "ensure_running", lambda environ: calls.append(environ))
+
+    def popen(command, **kwargs):
+        Path(command[-1]).with_suffix(".started").touch()
+
+    assert _launch(monkeypatch, tmp_path, popen) == 0
+    assert len(calls) == 1
+    assert calls[0]["HOME"] == str(tmp_path)
+
+
+def test_a_dry_launch_does_not_start_the_scheduler(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "ensure_running", lambda environ: pytest.fail("dry launch started scheduler"))
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    assert init_agent.main(["--dir", str(tmp_path), "--dry-run"], {"HOME": str(tmp_path)}) == 0
+
+
 def test_launch_reports_when_the_launcher_and_the_harness_started(monkeypatch, tmp_path, capsys):
     def popen(command, **kwargs):
         launcher = Path(command[-1])
@@ -986,6 +1009,40 @@ def test_inbox_channel_puts_the_channel_flags_first_for_claude_only(monkeypatch,
     assert line.endswith("--model opus")
 
 
+@pytest.mark.parametrize("profile_home", [False, True])
+def test_inbox_channel_registers_before_native_startup(monkeypatch, tmp_path, capsys, profile_home):
+    import json
+
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "requested"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["t"]))
+    environ = {"HOME": str(tmp_path), "XDG_RUNTIME_DIR": str(tmp_path / "rt")}
+    config = tmp_path / ".claude.json"
+    if profile_home:
+        native_home = tmp_path / "master"
+        native_home.mkdir()
+        environ["CLAUDE_CONFIG_DIR"] = str(native_home)
+        config = native_home / ".claude.json"
+    config.write_text(json.dumps({"hasCompletedOnboarding": True, "mcpServers": {"existing": {"command": "existing"}}}))
+    argv = ["--dir", str(tmp_path), "--agent", "claude", "--inbox-channel", "--dry-run"]
+    assert init_agent.main(argv, environ) == 0
+    registered = json.loads(config.read_text())
+    assert registered["hasCompletedOnboarding"] is True
+    assert registered["mcpServers"]["existing"] == {"command": "existing"}
+    args = next(line for line in capsys.readouterr().out.splitlines() if line.startswith("claude_args="))
+    inline = shlex.split(args.removeprefix("claude_args="))[0].removeprefix("--mcp-config=")
+    native = registered["mcpServers"]["inbox"]
+    active = json.loads(inline)["mcpServers"]["inbox"]
+    assert native["command"] == active["command"]
+    assert native["args"][:-1] == active["args"][:-1]
+    calls = []
+    from scripts.inbox import channel
+
+    monkeypatch.setattr(channel, "main", lambda active=True: calls.append(active))
+    exec(native["args"][-1])
+    exec(active["args"][-1])
+    assert calls == [False, True]
+
+
 @pytest.mark.parametrize("channel", [True, False])
 def test_a_channel_launch_pins_legacy_mcp_negotiation_before_claude(tmp_path, channel):
     env = {"XDG_RUNTIME_DIR": str(tmp_path)}
@@ -1049,6 +1106,14 @@ def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, 
     session = {"named": "engineer@abc-0001", "unconfirmed": "unset:unconfirmed"}[outcome]
     assert marked == ([("w1:p2", {"K": "v"}, {"session_name": session})] if agent == "codex" and detected else [])
     assert init_agent.CODEX_READY_S == 120.0
+
+
+def test_an_app_server_viewer_gets_no_typed_rename_because_its_server_names_the_thread(monkeypatch):
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited on a served viewer"))
+    monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("typed a rename"))
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda *args, **changes: pytest.fail("marked a session name"))
+    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0, served=True) == ["agent_name=eng-a"]
 
 
 def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch):

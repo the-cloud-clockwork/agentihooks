@@ -4,6 +4,7 @@ import json
 
 from scripts.gates import lift, log
 from scripts.gates.base import Decision
+from scripts.hive import scope
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
 
@@ -52,6 +53,16 @@ def ruling(task, pull, waiting, dependency=False):
     return "idle", ""
 
 
+def between_halves(task, pull):
+    pulls = task.get("split_pulls") or []
+    return (
+        pull is not None
+        and pull.state == "MERGED"
+        and task["pr_url"] in pulls
+        and len(pulls) < len(task.get("split") or [])
+    )
+
+
 def parked_by(store, who, task):
     if not task.get("parked_on"):
         return False
@@ -61,7 +72,7 @@ def parked_by(store, who, task):
 def refusal(owed, slug, task, pull):
     url, block = task.get("pr_url"), f'agentihooks swarm {slug} block "<why>"'
     name_wait = (
-        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr url> | reply <inbox item> | task <id>, or a bare "
+        f"Name the wait: agentihooks swarm {slug} wait --on checks <pr or Actions run url> | reply <inbox item> | task <id>, or a bare "
         f"wait of at most 60 minutes; or block with {block}"
     )
     if owed == "merged":
@@ -119,9 +130,14 @@ class ClaimStop:
         held = idle.wait(store.redis, who.swarm, who.name)
         live = held if held and held["until"] > now else None
         pull = self.github()(url) if url else None
+        if between_halves(task, pull):
+            ledger.update_task(who.swarm, task["id"], {"pr_url": "", "state": "claimed"}, if_state=("pr",))
+            task, pull = {**task, "pr_url": ""}, None
         dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
         owed, checks = ruling(task, pull, live, dependency)
-        if checks and (live or {}).get("on", {}).get("kind") not in KEPT:
+        held_on = (live or {}).get("on", {})
+        run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
+        if checks and held_on.get("kind") not in KEPT and not run_wait:
             on = {"kind": "checks", "target": checks}
             idle.declare_wait(store.redis, who.swarm, who.name, now + CHECKS_WAIT_MS, f"checks on {checks}", now, on=on)
         if not owed:
@@ -171,7 +187,7 @@ class Streak:
 
     def __init__(self, store, slug, name):
         self.store, self.slug, self.name = store, slug, name
-        self.key = store.key(slug, "stop-blocks", name)
+        self.key = f"{scope.readings(store.redis, slug, store.names.resolve(name))}:{slug}:stop-blocks:{name}"
 
     def bump(self, now):
         from scripts.gates.progress import Progress

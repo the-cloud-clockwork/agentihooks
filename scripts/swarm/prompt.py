@@ -14,7 +14,8 @@ from scripts.swarm_v2 import masters
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
     "Running tasks share areas with yours. Coordinate with each claimant through the inbox "
-    '(agentihooks msg send <claimant> "<text>") and merge dev into your branch before your own merge:'
+    '(agentihooks msg send <claimant> "<text>") and merge dev only on a real conflict; '
+    "where the repo has a merge queue, it retests your green head against the newest dev:"
 )
 GROUP_LINE = (
     "Your task leads a group: deliver these grouped tasks too, in the same worktree and one pull request, and name "
@@ -56,10 +57,12 @@ def ledger_read(slug: str) -> str:
 
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
     from scripts.profiles import codex_master
+    from scripts.swarm import capabilities
 
     codex = task.get("harness") == "codex"
+    push = not capabilities.of(task.get("harness"), task.get("transport")).requires_foreground_inbox_wait
     if codex:
-        task = codex_master.handoff(task, slug)
+        task = codex_master.handoff(task, slug, push)
     me = f"agentihooks swarm {slug} --as {name}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     summary = summary_lines(slug)
@@ -89,10 +92,12 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "once.",
         "",
         "Your standing duties:",
-        *([codex_master.waiting(slug)] if codex else []),
+        *([codex_master.waiting(slug, push)] if codex else []),
         *(
             [
-                "When writing a handoff, make its Next action read agentihooks msg inbox and use "
+                "When writing a handoff, make its Next action read agentihooks msg inbox."
+                if push
+                else "When writing a handoff, make its Next action read agentihooks msg inbox and use "
                 f"agentihooks swarm {slug} wait --inbox when no work remains."
             ]
             if codex
@@ -129,6 +134,8 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
             else []
         ),
         plan_review.review_line(me, autonomy),
+        f'- Authorize scope a task\'s description omits with {led} comment tasks/<id> "In scope: <the piece>": '
+        "the plan trace keeps a piece that comment covers.",
         *(
             [
                 f'- Answer an agent\'s question you can decide with {led} answer questions/<id> "<answer>": it is '

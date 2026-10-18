@@ -62,14 +62,24 @@ run when the operator uses one of their trigger phrases.
 |---|---|---|
 | `get-agents-quota` | Show quota left for every agent harness (each Claude account and Codex) and name this session's routed Claude account. | `$get-agents-quota` or "which agent has quota left?" |
 | `terminate-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$terminate-agent engineer-a`; list with `$terminate-agent --list --type any` |
-| `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
-| `run-in-terminal` | Run any command in a directory in a new herdr tab or terminal tab. | `$run-in-terminal "npm test" --dir ~/dev/project` |
+| `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model, only on the operator's typed `open pane`. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
+| `run-in-terminal` | Run any command in a directory in a new herdr tab or terminal tab, only on the operator's typed `open pane`. | `$run-in-terminal "npm test" --dir ~/dev/project` |
 | `take-master` | Make this session, Claude or Codex, the master of a swarm ledger and read the master priming it prints. | `$take-master <slug>` or "you are the master of ledger <slug>" |
 
 The deterministic CLI primitives behind these skills are respectively
 `agentihooks quota` with `agentihooks balance --current`, `agentihooks terminate-agent`,
 `agentihooks init-agent`, and `agentihooks run-in-terminal`. Follow each
 `SKILL.md`; do not reconstruct its process manually.
+
+`init-agent`, `run-in-terminal`, `swarm <slug> master up`, `swarm <slug>
+<profile> up` and every herdr pane split, pane run, tab or workspace creation
+run only when the operator's own prompt this turn, typed
+in your terminal, says `open pane` (or `open a pane`, `open the pane`); a
+PreToolUse guard denies them otherwise; the quota handoff directive's own
+`init-agent --handoff` with its handoff document passes only while the quota
+policy has that handoff due. A step only the operator can do goes to
+Priorities in a swarm or ledger session, or is written in your own terminal as
+a command for him to run. Reading, listing and closing panes stay allowed.
 
 ## Swarm, small ledger or nothing
 
@@ -97,11 +107,11 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 | Steer a swarm | `agentihooks swarm <slug> start\|pause\|stop`, `set max-eng-agents=N max-ci-agents=N compact-limit=N autonomy=manual|assist|delegate|full effort-min=E effort-max=E`; the ledger page swarm panel writes the same ops. Codex is one more account in the session rotation, judged on its week alone with the top band. Every lane agent starts inside the effort range (default medium to xhigh) |
 | Working a ledger | `agentihooks ledger --slug <slug> --as <name> join`, act on every OPERATOR line, then `ack`. In a swarm each operator write arrives as an inbox message at the next tool call and the tick wakes an idle pane, so no Monitor is needed; a ledger without a swarm wakes an idle session only through a `Monitor` on `agentihooks ledger watch <slug> --as <name>` |
 | Work lands, or a blocker appears | `ledger comment phases/<id> "<text>"`, `ledger followup add "<text>"`, `ledger say "<text>"`; plain words for the operator |
-| A question while the operator is away (the question tool is refused unless he typed `operator on`, or typed a prompt in the pane within thirty minutes with no swarm or inbox prompt since) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
+| A question while the operator is away (the question tool and the plan prompt stay refused in every session until he types `operator on` in that pane) | `ledger question add "<text>"`; the tick sends it to the master, who answers it or raises it to the operator |
 | Publish an artifact only when the operator asked for that file: a plan, an image, a logo, an SVG, markdown or JSON he wants to review | `agentihooks ledger --slug <slug> --as <name> artifact <file> "<title in plain words>"` from a task marked artifact requested (`task add --artifact`, `task set <id> artifact=yes`) or with `--request <id of his message>`; anything else is refused. Never publish test runs, logs, review notes or proofs: proofs go on the task proof and the pull request |
 | A planner or the master has an accepted plan | `agentihooks ledger --slug <slug> --as <name> publish-plan <plan file> --phase <phase ids>` before adding its tasks: a GitHub issue where the repo has issues, else a ledger artifact (a plan counts as artifact requested); it links and comments each phase, every task added there carries the link, and a planner's slice is refused while a task lacks it |
 | A swarm agent's task moves | `agentihooks swarm <slug> issue <url>`, `pr <url>`, `block "<why>"`; `ledger leave`, then `swarm <slug> ready <doc>` (the tick merges and closes the task) or `swarm <slug> done --pr <url>` |
-| A swarm agent waits at its prompt on checks, a deploy or a reply | `agentihooks swarm <slug> wait --on checks <pr url>\|reply <inbox item>\|task <id>`, which the tick ends when the thing resolves and tells you; else `wait <minutes> --reason "<what>"`, at most 60. The tick neither nudges nor retires it until the wait ends |
+| A swarm agent waits at its prompt on checks, a deploy or a reply | `agentihooks swarm <slug> wait --on checks <pr or Actions run url>\|reply <inbox item>\|task <id>`, which the tick ends when the thing resolves and tells you; else `wait <minutes> --reason "<what>"`, at most 60. The tick neither nudges nor retires it until the wait ends |
 | A task needs a specialist, such as interface work | `ledger task add --profile frontend` (or `task set <id> profile=frontend`): the tick spawns its claimant with that profile instead of the lane's |
 | A task is not code | `ledger task add --kind ops\|tune\|troubleshoot\|research`; `done` then carries its proof (`--command --output`, `--root-cause --evidence --fix\|--filed`, `--finding`) or the ledger refuses it |
 | HANDOFF PREPARATION at `AGENTIHOOKS_COMPACT_LIMIT` (thousands of tokens, default 600) | Use the handoff skill to write the Handoff v2 body before its twenty five minute deadline or the hard gate `AGENTIHOOKS_HANDOFF_MARGIN` above the limit (default 50), whichever comes first. Submit only the document: `agentihooks swarm <slug> handoff <doc>`, then stop. The runtime supplies the envelope; the seat recap is derived from Done, Stopped at and Next. A successor reads the envelope and ranked Read first list before older recaps, with the swarm culture, latest derived recap and learned notes. A lesson for every later occupant: `agentihooks swarm <slug> learned "<lesson because reason>"` (`--maturity data|note|insight|canon`, default note; canon only by the master or operator, who raise a note with `swarm <slug> promote`). The swarm culture: `swarm <slug> culture set <file>` / `show`. From the hard gate on, PreToolUse denies every other tool call: only reads (read-only shell commands included), writes under `~/scratchpad`, the handoff and learned commands and `ledger` comment, say, leave and ack pass |
@@ -172,12 +182,13 @@ A swarm runs Claude and Codex agents over the tasks of a swarm ledger
 - Only four things on the ledger page fold, each remembering its choice per
   viewer across reloads: the Ledger tab's own sections below Overview; the
   Swarm tab panels below Capacity (Quota, Overlays, Agents, Health, Handoff
-  outcomes, Freezes); the outline categories, with one toggle on top flipping
-  between Expand all and Collapse all; and comment dropdowns, each section with
-  one toggle for its own items flipping between Show all comments and Hide all
-  comments. Nothing else folds: the chat, artifacts, alerts and notifications
-  windows, Stats, Overview, the Swarm control bar and Capacity, HOME and BIN. An outline item with a pending
-  notification carries a plus mark. A fold anywhere else fails its test.
+  outcomes, Freezes, Architecture); the outline categories, with one toggle on
+  top flipping between Expand all and Collapse all; and comment dropdowns,
+  each section with one toggle for its own items flipping between Show all
+  comments and Hide all comments. Nothing else folds: the chat, artifacts,
+  alerts and notifications windows, Stats, Overview, the Swarm control bar and
+  Capacity, HOME and BIN. An outline item with a pending notification carries
+  a plus mark. A fold anywhere else fails its test.
 - Every column in the ledger front end resizes by dragging its header edge
   (arrow keys on the grip too): every table on the ledger page and the HOME and
   BIN columns. Only columns resize this way. Widths are saved in the shared

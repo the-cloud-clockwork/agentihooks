@@ -86,14 +86,18 @@ def _held(state: TreeState, lease: Lease | None, snap: Snapshot) -> str:
     return ""
 
 
-def _idle_verdict(state: TreeState, lease: Lease | None, idle: float) -> tuple[str, str]:
+def _idle_verdict(state: TreeState, lease: Lease | None, idle: float) -> tuple[str, str, bool]:
     if lease and lease.kind == "ephemeral":
-        return ("remove", "throwaway checkout, owner gone") if idle >= CLEAN_IDLE else ("keep", "throwaway, recent")
+        if idle >= CLEAN_IDLE:
+            return "remove", "throwaway checkout, owner gone", False
+        return "keep", "throwaway, recent", False
     if not state.dirty and not state.unpushed:
-        return ("remove", "clean and on a remote") if idle >= CLEAN_IDLE else ("keep", "clean, recent")
+        if lease and lease.holders:
+            return "remove", "clean and on a remote, owner left", True
+        return ("remove", "clean and on a remote", False) if idle >= CLEAN_IDLE else ("keep", "clean, recent", False)
     if idle >= DIRTY_IDLE:
-        return "snapshot", "unique work, owner gone: push to wip/ then remove"
-    return "keep", "unique work, recent"
+        return "snapshot", "unique work, owner gone: push to wip/ then remove", False
+    return "keep", "unique work, recent", False
 
 
 def classify(path: Path, root: Root, snap: Snapshot) -> Finding:
@@ -102,7 +106,9 @@ def classify(path: Path, root: Root, snap: Snapshot) -> Finding:
         return Finding(str(path), root.id, "worktree", "skip", "unreadable worktree")
     lease = read_lease(path, "worktree")
     held = _held(state, lease, snap)
-    action, reason = ("keep", held) if held else _idle_verdict(state, lease, snap.now - state.last_touch)
+    action, reason, immediate = (
+        ("keep", held, False) if held else _idle_verdict(state, lease, snap.now - state.last_touch)
+    )
     if state.busy and held == f"git {state.busy} in progress":
         action = "skip"
-    return Finding(str(path), root.id, "worktree", action, reason, state.last_touch)
+    return Finding(str(path), root.id, "worktree", action, reason, state.last_touch, immediate=immediate)

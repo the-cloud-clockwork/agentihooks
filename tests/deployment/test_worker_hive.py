@@ -53,6 +53,9 @@ def startup(tmp_path, *, joined=False, refused=False):
         "PATH": f"{tools}:{os.environ['PATH']}",
         "AGENTIHOOKS_HOME": str(home),
         "SWARM_HIVE_ID": "worker-pod",
+        "AGENTIHOOKS_HIVE_ID": "worker-member",
+        "AGENTIHOOKS_DEPLOYMENT": "remote",
+        "AGENTIHOOKS_HIVE_REDIS_URL": "redis://localhost:6379/15",
         "HIVE_REPO_ROOT": str(tmp_path / "repos"),
         "HIVE_REPOSITORIES": json.dumps([{"url": str(repo), "name": "checkout", "ref": "dev"}]),
         "HIVE_JOIN_URL": "https://join.example.test",
@@ -70,7 +73,7 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands.splitlines() == [
         "hive join https://join.example.test fixture-code",
-        "hive set worker-pod ui=no ephemeral=yes roles=eng,ci,plan max-agents=1",
+        "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan max-agents=1",
         "hive run",
     ]
     assert (repo / ".git").is_dir()
@@ -81,6 +84,7 @@ def test_mounted_member_skips_join_and_keeps_private_credentials(tmp_path):
     result, commands, home, _ = startup(tmp_path, joined=True)
     assert result.returncode == 0, result.stderr
     assert "hive join" not in commands
+    assert "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan max-agents=1\n" in commands
     assert commands.endswith("hive run\n")
     assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
     assert "fixture member credential" not in result.stdout + result.stderr

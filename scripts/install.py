@@ -88,6 +88,7 @@ def _resolve_claude_home() -> Path:
 
 
 CLAUDE_HOME = _resolve_claude_home()
+ROUTE_LAUNCHERS = {"interactive": "scripts.routing.interactive", "master-login": "scripts.master_claude_login"}
 
 # Persistent state directory for user-level agentihooks configuration.
 # Overridable via AGENTIHOOKS_HOME for per-pod isolation on shared filesystems.
@@ -2204,14 +2205,7 @@ def cmd_init_unified(args: argparse.Namespace) -> None:
 def _rerender_profile_homes(target: str) -> None:
     from scripts.profiles import render
 
-    for name in render.rendered_profiles(target):
-        profile, overlays = render.split_key(name)
-        try:
-            render.render(target, profile, force=True, overlays=overlays)
-        except ValueError as exc:
-            print(f"{_DIM}[--] Profile home {name} kept as it was: {exc}{_RESET}")
-            continue
-        print(f"{_GREEN}[OK]{_RESET} Re-rendered the {name} profile home")
+    render.rerender(target)
 
 
 def _remove_bashrc_block() -> bool:
@@ -5491,10 +5485,8 @@ def cmd_claude(extra_args: list[str]) -> None:
     route_lock = route_lock_path.open("a+", encoding="utf-8")
     fcntl.flock(route_lock, fcntl.LOCK_EX)
     try:
-        if route == "interactive":
-            from scripts.routing import interactive
-
-            return interactive.launch_claude(claude_bin, extra_args, os.environ, report)
+        if route in ROUTE_LAUNCHERS:
+            return import_module(ROUTE_LAUNCHERS[route]).launch_claude(claude_bin, extra_args, os.environ, report)
         decision = (
             forced(os.environ, route)
             if route
@@ -5805,7 +5797,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     """Handle the refresh-rules CLI command — push rules to running sessions."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
     from hooks.context.rules_refresh import _delete_marker, _load_marker, home_profile, write_refresh_marker
-    from scripts.targets.claude_target import refresh_rules
+    from scripts.targets.claude_target import refresh_every_home, refresh_rules
 
     profile = args.profile or home_profile(claude_home()) or _detect_active_profile()
     rules_dir = claude_home() / "rules"
@@ -5864,6 +5856,8 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print("  No running sessions to notify — marker will GC in 24h.")
     else:
         print("  Each session will consume the refresh on its next UserPromptSubmit.")
+
+    refresh_every_home(profile)
 
 
 def _cmd_broadcast(args: argparse.Namespace) -> None:
@@ -6121,7 +6115,7 @@ def _cmd_conditions(args: argparse.Namespace) -> None:
         index = conditions.build_index(entries)
         command = getattr(args, "bash_command", "") or ""
         call = f"{tool} {command!r}" if command else tool
-        for s in [step] if step else list(conditions.STEPS):
+        for s in [s for s in conditions.TOOL_STEPS if not step or s == step]:
             fired = conditions.matching(s, tool, {"command": command} if command else {}, index)
             print(f"\n{s} {call}: {', '.join(e['file'] for e in fired) or 'no conditions fire'}")
 
@@ -6693,7 +6687,7 @@ examples:
         help="Inspect bundle and profile conditions (scripts run on matching tool calls)",
     )
     cond_p.add_argument("action", choices=["list"], help="Conditions action")
-    cond_p.add_argument("--step", choices=["pre", "post", "stop"], help="Only this step")
+    cond_p.add_argument("--step", choices=["pre", "post", "stop", "start"], help="Only this step")
     cond_p.add_argument("--tool", default="", help="Show which conditions fire for this tool name")
     cond_p.add_argument("--command", dest="bash_command", default="", help="Bash command to match with --tool Bash")
 

@@ -8,8 +8,10 @@ the next engineer, who continues from the stored handoff.
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
+from hashlib import sha256
 from pathlib import Path
 
+from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.swarm import claim_order, done_gate, linked_issues, merge_queue, stack, waits
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
@@ -161,6 +163,7 @@ class Pass:
 def merge_pass(run, rows):
     actions = []
     for task_id, row in rows.items():
+        row = dict(row)
         if row.get("awaiting") != AWAITING:
             if row.get("state") == "pr" and row.get("pr_url"):
                 pull = run.github(row["pr_url"])
@@ -210,7 +213,7 @@ def _advance(run, rows, row, found):
 
 
 def _checks(run, row, found, pull):
-    outcome = waits.checks_resolution(found["on"], run.github)
+    outcome = waits.checks_resolution(found["on"], run.github, run.reread)
     if not outcome.startswith(f"checks on {found['url']}"):
         save(run.store, run.slug, row["id"], found)
         return []
@@ -223,7 +226,7 @@ def _checks(run, row, found, pull):
 def _queue(run, row, found):
     task_id, url = row["id"], found["url"]
     try:
-        result = run.queue("queue", url)
+        run.queue("queue", url)
     except SwarmError as exc:
         if str(exc).startswith(REFUSALS):
             found["refusals"] = found.get("refusals", 0) + 1
@@ -233,10 +236,6 @@ def _queue(run, row, found):
             return _reopen(run, row, found, f"could not be queued: {exc}")
         save(run.store, run.slug, task_id, found)
         return [f"could not queue {url} for task {task_id}: {exc}"]
-    if result.get("waiting") == "checks":
-        found["on"] = {"kind": "checks", "target": url, "previous_head": result["previous_head"]}
-        save(run.store, run.slug, task_id, found)
-        return [f"{url} for task {task_id} updated from dev; waiting on its checks again"]
     found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
     save(run.store, run.slug, task_id, found)
     return [f"queued {url} for task {task_id}"]
@@ -258,7 +257,38 @@ def _finish(run, rows, row, found):
     return [f"task {task_id} done, {url} merged", *linked_issues.settle(url, finished, rows), *_remove(found)]
 
 
+def _owners(run, task_id):
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.status import live_agents
+
+    agents = [agent for agent in run.store.agents(run.slug) if agent.task == task_id]
+    live = live_agents(agents, HerdrRuntime())
+    return [agent for agent in agents if agent.state != "finished" or agent in live]
+
+
+def _working_owner(run, row, pull):
+    owners = _owners(run, row["id"])
+    for agent in owners:
+        identity = json.dumps(
+            [run.slug, row["id"], agent.name, agent.execution_id, agent.generation, pull.head, pull.merge_problem]
+        )
+        item_id = sha256(identity.encode()).hexdigest()
+        try:
+            InboxStore(run.store.redis).send(
+                "swarm",
+                agent.name,
+                f"Your pull request {row['pr_url']} {pull.merge_problem}. Restack it onto dev and publish the fix; keep your claim.",
+                task=row["id"],
+                item_id=item_id,
+            )
+        except DuplicateItem:
+            pass
+    return bool(owners)
+
+
 def _unmergeable(run, row, found, pull):
+    if _working_owner(run, row, pull):
+        return []
     if pull.queued:
         try:
             result = run.queue("dequeue", found["url"])
@@ -271,12 +301,22 @@ def _unmergeable(run, row, found, pull):
 
 def _reopen(run, row, found, what):
     task_id, url = row["id"], found["url"]
-    run.ledger.update_task(run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",))
+    if _owners(run, task_id):
+        return []
+    lease_generation = run.store.claim_generation(run.slug, task_id)
+    expected_ready = run.store.redis.hget(run.store.key(run.slug, RECORDS), task_id)
+    expected = {key: row.get(key, "") for key in ("claimed_by", "pr_url", "awaiting")}
+    expected["claim_generation"] = row.get("claim_generation", 0)
+    live = run.ledger.update_task(
+        run.slug, task_id, {"state": "open", "claimed_by": "", "awaiting": FIX}, if_state=("pr",), if_match=expected
+    )
+    generation = expected["claim_generation"] + (row.get("claimed_by") != "")
+    if live.get("state") != "open" or live.get("claimed_by") or live.get("claim_generation", 0) != generation:
+        return []
+    if not run.store.release_ready(run.slug, task_id, found["agent"], lease_generation, expected_ready):
+        return []
     run.ledger.comment(run.slug, task_id, REOPENED.format(url=url, what=what), by="swarm")
-    run.store.release(run.slug, task_id, found["agent"])
-    forget(run.store, run.slug, task_id)
-    removed = _remove(found, "--pushed") if found.get("worktree") else []
-    return [f"task {task_id} reopened, {url} {what}", *removed]
+    return [f"task {task_id} reopened, {url} {what}"]
 
 
 def _remove(found, *flags):

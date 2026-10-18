@@ -17,6 +17,7 @@ ORDER = [
     "quiet",
     "claims",
     "trace-plan",
+    "stall",
     "talk",
 ]
 

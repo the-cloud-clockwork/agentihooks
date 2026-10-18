@@ -4,8 +4,8 @@ When an operator runs `agentihooks refresh-rules`, a marker file is written
 containing the current rule content and a snapshot of session IDs that were
 alive at the time. On each session's next UserPromptSubmit, the hook checks
 the marker; if that session is in the pending list and runs from the profile
-home the marker was rendered from, it receives the rule payload as
-additionalContext. Either way it is removed from the list.
+home the marker was rendered from, it receives the rules collected from its
+own config home as additionalContext. Either way it is removed from the list.
 
 Properties:
 - Running sessions get the one-shot on their next prompt
@@ -37,6 +37,20 @@ def home_profile(home: Path) -> str | None:
 
 def profile_home(home: Path) -> str:
     return home_profile(home) or str(home.resolve())
+
+
+def current_home(home: Path) -> Path:
+    from scripts.profiles.homes import CURRENT
+
+    resolved = home.resolve()
+    if home_profile(resolved) is None:
+        return home
+    latest = resolved.parent.parent / CURRENT / resolved.name
+    return latest if latest.is_dir() else home
+
+
+def home_rules(home: Path) -> str:
+    return collect_profile_rules(home / "rules", home / "CLAUDE.md", home / "CLAUDE.local.md")
 
 
 def _refresh_dir() -> Path:
@@ -106,7 +120,7 @@ def _collect_pending_sessions() -> list[str]:
     return pending
 
 
-def write_refresh_marker(profile: str, payload: str) -> dict:
+def write_refresh_marker(profile: str, payload: str, home: str | None = None) -> dict:
     """Write a one-shot refresh marker. Called by `agentihooks refresh-rules` CLI.
 
     Returns a summary dict with the written marker info.
@@ -116,7 +130,7 @@ def write_refresh_marker(profile: str, payload: str) -> dict:
     marker = {
         "ts": _iso_now(),
         "profile": profile,
-        "home": profile_home(claude_home()),
+        "home": home or profile_home(claude_home()),
         "content_hash": content_hash,
         "payload": payload,
         "pending": pending,
@@ -140,13 +154,13 @@ def write_refresh_marker(profile: str, payload: str) -> dict:
 
 
 def maybe_inject(session_id: str) -> None:
-    """PromptSubmit handler: inject rule payload if this session is pending.
+    """PromptSubmit handler: inject the rules on this session's own config home if it is pending.
 
     - If no marker exists → no-op
     - If marker is expired → delete it, no-op
     - If session_id not in pending → no-op
     - If the session's profile home differs from the marker's → consume without delivery
-    - Otherwise: inject, remove session from pending, save (or delete if last one)
+    - Otherwise: inject its own home's rules, remove session from pending, save (or delete if last one)
     """
     if not session_id:
         return
@@ -169,14 +183,19 @@ def maybe_inject(session_id: str) -> None:
         if session_id not in pending:
             continue
 
-        payload = marker.get("payload", "")
-        if marker.get("home") != profile_home(claude_home()):
+        home = claude_home()
+        if marker.get("home") != profile_home(home):
             log("rules_refresh: other profile home skipped", {"profile": profile, "session_id": session_id})
-        elif payload:
-            inject_context(payload)
+        else:
+            rules = home_rules(current_home(home))
+            inject_context(rules)
             log(
                 "rules_refresh: delivered",
-                {"profile": profile, "session_id": session_id, "content_hash": marker.get("content_hash", "")},
+                {
+                    "profile": profile,
+                    "session_id": session_id,
+                    "content_hash": hashlib.sha256(rules.encode()).hexdigest()[:16],
+                },
             )
 
         # Consume: remove this session from pending

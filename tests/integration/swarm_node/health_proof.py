@@ -3,6 +3,7 @@ import hashlib
 import json
 import subprocess
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 from supervision_proof import docker, ready
@@ -290,25 +291,33 @@ def main():
     private = hashlib.sha256(f"SV2-IMG-04 {args.tested_commit}".encode()).hexdigest()[:32]
     fixture = manifest(args.tested_commit, {"fixture": args.image, "missing_binary": args.missing_binary_image})
     case = "A"
-    try:
-        record(args.output, "a-result.json", case, [positive_run(args.image, private) for _ in range(2)], fixture)
-        case = "B"
-        rejections = [missing_binary_run(args.missing_binary_image, private), private_home_run(args.image, private)]
-        record(args.output, "b-result.json", case, rejections, fixture)
-        case = "C"
-        record(args.output, "c-result.json", case, [recovery_run(args.image, private) for _ in range(2)], fixture)
-        case = "rollback"
-        rehearsal = rollback_run(args.image, private)
-    except Exception as exc:
-        failure = {
-            "package": "SV2-IMG-04",
-            "case": case,
-            "error": repr(exc)[:2000],
-            "seed": private,
-            "fixture_manifest": fixture,
-        }
-        (args.output / "failure.json").write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
-        raise
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        positive = [pool.submit(positive_run, args.image, private) for _ in range(2)]
+        rejected = [
+            pool.submit(missing_binary_run, args.missing_binary_image, private),
+            pool.submit(private_home_run, args.image, private),
+        ]
+        recovery = [pool.submit(recovery_run, args.image, private) for _ in range(2)]
+        rollback = pool.submit(rollback_run, args.image, private)
+        try:
+            record(args.output, "a-result.json", case, [run.result() for run in positive], fixture)
+            case = "B"
+            record(args.output, "b-result.json", case, [run.result() for run in rejected], fixture)
+            case = "C"
+            record(args.output, "c-result.json", case, [run.result() for run in recovery], fixture)
+            case = "rollback"
+            rehearsal = rollback.result()
+        except Exception as exc:
+            failure = {
+                "package": "SV2-IMG-04",
+                "case": case,
+                "error": repr(exc)[:2000],
+                "seed": private,
+                "fixture_manifest": fixture,
+            }
+            (args.output / "failure.json").write_text(json.dumps(failure, indent=2, sort_keys=True) + "\n")
+            pool.shutdown(cancel_futures=True)
+            raise
     versions = json.loads((Path(__file__).resolve().parents[3] / "docker/swarm-node/versions.lock").read_text())
     summary = {
         "package": "SV2-IMG-04",

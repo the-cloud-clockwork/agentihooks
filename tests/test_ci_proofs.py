@@ -56,6 +56,15 @@ def test_a_focused_proof_is_red_unless_every_test_path_is_on_one_line_under_test
     assert result.returncode == code, result.stdout + result.stderr
 
 
+def test_a_focused_proof_sizes_pytest_workers_from_the_cpu_quota():
+    step = next(s for s in _workflow()["jobs"]["tests"]["steps"] if s.get("name") == "Run selected tests")
+    lines = [line.strip() for line in step["run"].splitlines() if "pytest" in line]
+    assert lines == [
+        'workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" '
+        "--dist loadgroup --tb=short"
+    ]
+
+
 @pytest.mark.parametrize(
     "paths", ["tests/missing.py", "tests/missing.py::test_case", "tests/existing.py tests/missing.py"]
 )

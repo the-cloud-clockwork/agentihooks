@@ -12,14 +12,27 @@ cluster="swarm-kind-$(python3 -c 'import uuid; print(uuid.uuid4().hex[:8])')"
 ledger_pod="$release-ledger-0"
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
 ca_dir=""
+prep=""
 route=""
+terminal=""
 
+if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
+  mkdir -p "$KIND_LAYER_CACHE"
+  rm -f "$KIND_LAYER_CACHE/complete"
+fi
 python3 tests/kind_request.py
 
 finish() {
   status=$?
   wait "$build" || true
   wait "$cluster_setup" || true
+  if [[ -n $prep ]]; then
+    wait "$prep" || true
+  fi
+  if [[ -n $terminal ]]; then
+    wait "$terminal" || true
+  fi
+  rm -f "$load_lock"
   if [[ -n $route ]]; then
     wait "$route" || true
   fi
@@ -37,25 +50,48 @@ finish() {
   exit "$status"
 }
 
+layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  if [[ -d $KIND_LAYER_CACHE/$1 ]]; then
+    printf '%s\n' --cache-from "type=local,src=$KIND_LAYER_CACHE/$1"
+  fi
+  if [[ ${KIND_LAYER_CACHE_HIT:-} != true ]]; then
+    printf '%s\n' --cache-to "type=local,dest=$KIND_LAYER_CACHE/$1.next,mode=max"
+  fi
+}
+keep_layers() {
+  if [[ -z ${KIND_LAYER_CACHE:-} ]]; then
+    return
+  fi
+  for name in "$@"; do
+    if [[ -d $KIND_LAYER_CACHE/$name.next ]]; then
+      rm -rf "${KIND_LAYER_CACHE:?}/$name"
+      mv "$KIND_LAYER_CACHE/$name.next" "$KIND_LAYER_CACHE/$name"
+    fi
+  done
+  touch "$KIND_LAYER_CACHE/complete"
+}
 (
   bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/python:3.12-slim-bookworm >/dev/null
-  docker build -q --build-arg IMAGE="$image" --target packages \
+  mapfile -t terminal_layers < <(layers terminal)
+  docker build -q "${terminal_layers[@]}" --build-arg IMAGE="$image" --target packages \
     -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null &
   packages=$!
   trap 'status=$?; wait "$packages" || true; exit "$status"' EXIT
-  docker build -q -t "$image" . >/dev/null
+  mapfile -t swarm_layers < <(layers swarm)
+  docker build -q -t "$image" "${swarm_layers[@]}" . >/dev/null
   printf 'main fixture image built\n'
   printf 'FROM %s\nCOPY . /\n' "$image" \
     | docker build -q -t "$bundle_image" -f - tests/fixtures/swarm_v2/worker-bundle >/dev/null
   wait "$packages"
-  docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
-    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
-  printf 'terminal fixture image built\n'
-  bash scripts/packaging/swarm-image-clients.sh "$image"
+  keep_layers swarm terminal
 ) &
 build=$!
 kind create cluster --name "$cluster" --image "$KIND_NODE_IMAGE" &
 cluster_setup=$!
+load_lock="$(mktemp)"
 trap finish EXIT
 
 helm lint --strict "$chart"
@@ -75,6 +111,19 @@ if [[ $planted != *"the controller container references swarm-worker-terminal as
   printf 'the chart check did not flag a required reference where the values say optional: %s\n' "$planted" >&2
   exit 1
 fi
+ingress=(--set ingress.enabled=true --set ingress.host=ledger.example.test --set 'networkPolicy.ingressFrom[0].podSelector.matchLabels.app=ingress')
+rendered="$(helm template "$release" "$chart" "${ingress[@]}" --set ledger.tls.secretName=swarm-ledger-tls)"
+for annotation in backend-protocol proxy-ssl-verify proxy-ssl-name proxy-ssl-secret; do
+  if [[ $rendered != *"nginx.ingress.kubernetes.io/$annotation:"* ]]; then
+    printf 'the ingress to a TLS ledger lacks %s\n' "$annotation" >&2
+    exit 1
+  fi
+done
+if [[ "$(helm template "$release" "$chart" "${ingress[@]}")" == *backend-protocol* ]]; then
+  printf 'the ingress to a plain http ledger asked for an https backend\n' >&2
+  exit 1
+fi
+printf 'the ingress verifies the TLS ledger certificate and leaves a plain ledger on http\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
 if [[ $rendered != *":dev@$digest"* ]]; then
@@ -280,12 +329,48 @@ kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/her
 kubectl create --dry-run=server --validate=strict -f tests/fixtures/swarm_v2/herdr-terminal-objects.json
 printf 'worker terminal Pod, Secret, Service and NetworkPolicy passed server side strict validation\n'
 wait "$build"
-kind load docker-image "$image" "$bundle_image" "$terminal_image" --name "$cluster"
+(
+  bash scripts/packaging/swarm-image-clients.sh "$image"
+  docker build --progress=plain --build-arg IMAGE="$image" -t "$terminal_image" \
+    -f "$chart/ci/terminal-worker.Dockerfile" . >/dev/null
+  printf 'terminal fixture image built\n'
+  flock "$load_lock" kind load docker-image "$terminal_image" --name "$cluster"
+) &
+terminal=$!
+flock "$load_lock" kind load docker-image "$image" "$bundle_image" --name "$cluster"
 kubectl wait --for=condition=Ready node --all --timeout=120s
 bash "$chart/ci/terminal-route-proof.sh" "$image" &
 route=$!
+ledger_tls="$(mktemp -d)"
+ledger_host="$release-ledger"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$ledger_host" \
+  -addext "subjectAltName=DNS:$ledger_host,DNS:$ledger_host.default,DNS:$ledger_host.default.svc,DNS:$ledger_host.default.svc.cluster.local,DNS:localhost,IP:127.0.0.1" \
+  -keyout "$ledger_tls/tls.key" -out "$ledger_tls/tls.crt" 2>/dev/null
+kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt" --from-file="$ledger_tls/tls.key" \
+  --from-file=ca.crt="$ledger_tls/tls.crt"
+rm -rf "$ledger_tls"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
+
+ca_dir="$(mktemp -d)"
+(
+  signing_key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
+  printf '%s' "$signing_key" | kubectl create secret generic swarm-launch-signing --dry-run=client -o yaml \
+    --from-file=signing-key=/dev/stdin | kubectl apply -f -
+  unset signing_key
+  kubectl create serviceaccount swarm-controller
+  kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,delete,get,list,watch --resource=pods
+  kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=swarm-controller \
+    --serviceaccount=default:swarm-controller
+  python3 -c 'import json, pathlib, sys, yaml; print(json.dumps(yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())["controller"]["workers"]["podPolicy"]))' \
+    "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin \
+    --dry-run=client -o yaml | kubectl apply -f -
+  ssh-keygen -q -t ed25519 -N "" -C "kind user ca" -f "$ca_dir/user_ca"
+  ssh-keygen -q -t ed25519 -N "" -C "kind host ca" -f "$ca_dir/host_ca"
+  kubectl create secret generic swarm-terminal-attach-ca --from-file=user_ca="$ca_dir/user_ca" \
+    --from-file=host_ca="$ca_dir/host_ca"
+) &
+prep=$!
 
 kubectl exec "$ledger_pod" -- env AGENTIHOOKS_DEPLOYMENT=local python -c "from scripts.swarm.store import SwarmConfig, connect; from scripts.swarm_ledger.new_ledger import create; create('$slug', {'title': 'Kind proof', 'phases': [{'title': 'Prove the Helm chart'}]}, 'swarm'); connect().create(SwarmConfig('$slug', '/data', 0, 0, state='paused', load_high=10.0, memory_per_agent_mb=1)); print('ledger and swarm $slug registered, no lease bound')"
 kubectl rollout restart deployment "$release-controller"
@@ -299,38 +384,40 @@ read_lease() {
   kubectl exec "$ledger_pod" -- python -c "import json, dataclasses; from scripts.swarm import lease; from scripts.swarm.store import connect; held = lease.current(connect(), '$slug'); print(json.dumps(dataclasses.asdict(held) if held else {}))"
 }
 owner_of() { python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("owner", ""))' "$1"; }
-expiry_of() { python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("expires_at", 0))' "$1"; }
 
-held=""
-first=""
-for _ in $(seq 180); do
-  held="$(read_lease)" || held="{}"
-  if [[ "$(owner_of "$held")" == "$hive" ]]; then
-    first="$held"
-    break
-  fi
-  sleep 1
-done
-if [[ -z $first ]]; then
-  printf 'the controller never took the lease for %s; last read: %s\n' "$slug" "$held" >&2
-  exit 1
-fi
-printf 'controller lease: %s\n' "$first"
+kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HIVE="$hive" python - <<'LEASE'
+import dataclasses, json, os, sys, time
 
-renewed=""
-for _ in $(seq 180); do
-  held="$(read_lease)" || held="{}"
-  if [[ "$(owner_of "$held")" == "$hive" && "$(expiry_of "$held")" -gt "$(expiry_of "$first")" ]]; then
-    renewed="$held"
-    break
-  fi
-  sleep 1
-done
-if [[ -z $renewed ]]; then
-  printf 'the controller never renewed the lease for %s; last read: %s\n' "$slug" "$held" >&2
-  exit 1
-fi
-printf 'controller lease renewed: %s\n' "$renewed"
+from scripts.swarm import lease
+from scripts.swarm.store import connect
+
+slug, hive = os.environ["SLUG"], os.environ["HIVE"]
+
+
+def await_lease(accept):
+    held = {}
+    deadline = time.monotonic() + 180
+    while time.monotonic() < deadline:
+        try:
+            current = lease.current(connect(), slug)
+        except Exception:
+            current = None
+        held = dataclasses.asdict(current) if current else {}
+        if accept(held):
+            return held, True
+        time.sleep(0.2)
+    return held, False
+
+
+first, taken = await_lease(lambda held: held.get("owner") == hive)
+if not taken:
+    sys.exit(f"the controller never took the lease for {slug}; last read: {json.dumps(first)}")
+print(f"controller lease: {json.dumps(first)}", flush=True)
+renewed, taken = await_lease(lambda held: held.get("owner") == hive and held["expires_at"] > first["expires_at"])
+if not taken:
+    sys.exit(f"the controller never renewed the lease for {slug}; last read: {json.dumps(renewed)}")
+print(f"controller lease renewed: {json.dumps(renewed)}")
+LEASE
 
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $restarts != 0 ]]; then
@@ -363,22 +450,10 @@ if [[ -z $retaken ]]; then
 fi
 printf 'controller restarted by its liveness probe and holds the lease again: %s\n' "$retaken"
 
-signing_key="$(python3 -c 'import secrets; print(secrets.token_hex(32))')"
-printf '%s' "$signing_key" | kubectl create secret generic swarm-launch-signing --dry-run=client -o yaml \
-  --from-file=signing-key=/dev/stdin | kubectl apply -f -
-unset signing_key
-kubectl create serviceaccount swarm-controller
-kubectl create role swarm-controller --namespace swarm-pod-proof --verb=create,delete,get,list,watch --resource=pods
-kubectl create rolebinding swarm-controller --namespace swarm-pod-proof --role=swarm-controller \
-  --serviceaccount=default:swarm-controller
-python3 -c 'import json, pathlib, sys, yaml; print(json.dumps(yaml.safe_load(pathlib.Path(sys.argv[1]).read_text())["controller"]["workers"]["podPolicy"]))' \
-  "$chart/ci/kind-workers.yaml" | kubectl create configmap swarm-pod-policy --from-file=pod-policy.json=/dev/stdin \
-  --dry-run=client -o yaml | kubectl apply -f -
-ca_dir="$(mktemp -d)"
-ssh-keygen -q -t ed25519 -N "" -C "kind user ca" -f "$ca_dir/user_ca"
-ssh-keygen -q -t ed25519 -N "" -C "kind host ca" -f "$ca_dir/host_ca"
-kubectl create secret generic swarm-terminal-attach-ca --from-file=user_ca="$ca_dir/user_ca" \
-  --from-file=host_ca="$ca_dir/host_ca"
+if ! wait "$prep"; then
+  printf 'the controller setup objects for the control API were not created\n' >&2
+  exit 1
+fi
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
@@ -393,6 +468,7 @@ if [[ -z $built ]]; then
   exit 1
 fi
 printf 'the deployed controller built the Kubernetes runtime: %s\n' "$built"
+declare -A probe_jobs
 for probe in startup liveness readiness; do
   wired="$(kubectl get deployment "$release-controller" -o jsonpath="{.spec.template.spec.containers[0].${probe}Probe.exec.command[*]}")"
   want="agentihooks controller live"
@@ -402,11 +478,20 @@ for probe in startup liveness readiness; do
     exit 1
   fi
   read -r -a command <<<"$wired"
-  if ! answer="$(kubectl exec "deployment/$release-controller" -c controller -- "${command[@]}")"; then
-    printf 'the controller %s probe failed: %s\n' "$probe" "$answer" >&2
+  kubectl exec "deployment/$release-controller" -c controller -- "${command[@]}" >"$ca_dir/$probe.answer" &
+  probe_jobs[$probe]=$!
+done
+declare -A probe_status
+for probe in startup liveness readiness; do
+  probe_status[$probe]=0
+  wait "${probe_jobs[$probe]}" || probe_status[$probe]=$?
+done
+for probe in startup liveness readiness; do
+  if [[ ${probe_status[$probe]} != 0 ]]; then
+    printf 'the controller %s probe failed: %s\n' "$probe" "$(<"$ca_dir/$probe.answer")" >&2
     exit 1
   fi
-  printf 'controller %s probe passed: %s\n' "$probe" "$answer"
+  printf 'controller %s probe passed: %s\n' "$probe" "$(<"$ca_dir/$probe.answer")"
 done
 kubectl wait pod "${controller[@]}" --for=condition=Ready --timeout 2m
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
@@ -793,26 +878,43 @@ if [[ $calm != "0" ]]; then
   printf 'the host pressure alert was already active before the simulated pressure\n' >&2
   exit 1
 fi
-kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.store import connect; connect().update('$slug', memory_per_agent_mb=10**9); print('simulated host pressure: one agent now needs more memory than the node has')"
-alert=""
+kubectl exec "$ledger_pod" -- python -c "from scripts.swarm.incidents import PRESSURE_OFF_KEY; from scripts.swarm.store import connect; store = connect(); store.update('$slug', memory_per_agent_mb=10**9); store.redis.delete(store.key('$slug', PRESSURE_OFF_KEY)); print('simulated host pressure: one agent now needs more memory than the node has')"
+pressure=""
 for _ in $(seq 120); do
-  alert="$(kubectl exec "$ledger_pod" -- python -c "import json; from scripts.swarm.store import PREFIX, connect; root = f'{PREFIX}:host:$host:incident:pressure'; redis = connect().redis; print(json.dumps({'incident': redis.hgetall(root), 'mailed': {k: redis.hgetall(k) for k in redis.scan_iter(root + ':mail:*')}}, sort_keys=True))")" || alert=""
-  if [[ $alert == *'"active": "1"'* && $alert == *'"raised": "1"'* ]]; then
+  pressure="$(kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HOST="$host" python - <<'EOF'
+import json
+import os
+
+from scripts.swarm import host_budget, incidents
+from scripts.swarm.store import PREFIX, connect
+
+store = connect()
+off = store.redis.get(store.key(os.environ["SLUG"], incidents.PRESSURE_OFF_KEY))
+if off != host_budget.PRESSURE_OFF:
+    raise SystemExit(0)
+root = f'{PREFIX}:host:{os.environ["HOST"]}:incident:pressure'
+incident = store.redis.hgetall(root)
+mailed = {key: store.redis.hgetall(key) for key in store.redis.scan_iter(root + ":mail:*")}
+assert incident.get("active") != "1", f"controller node pressure incident is active: {incident}"
+assert not mailed, f"controller node pressure incident was mailed: {mailed}"
+print(json.dumps({"off": off, "incident": incident, "mailed": mailed}, sort_keys=True))
+EOF
+)"
+  if [[ -n $pressure ]]; then
     break
   fi
-  alert=""
   sleep 1
 done
-if [[ -z $alert ]]; then
-  printf 'the controller never sent the host pressure alert\n' >&2
+if [[ -z $pressure ]]; then
+  printf 'the controller never recorded the deployed host pressure off reason\n' >&2
   exit 1
 fi
 after="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $after != "$before" ]]; then
-  printf 'the controller restarted while sending the host pressure alert (%s then %s)\n' "$before" "$after" >&2
+  printf 'the controller restarted while recording the host pressure off reason (%s then %s)\n' "$before" "$after" >&2
   exit 1
 fi
-printf 'controller sent the host pressure alert without a restart: %s\n' "$alert"
+printf 'controller recorded the host pressure off reason without an incident, mail or restart: %s\n' "$pressure"
 
 mounted="$(kubectl exec "deployment/$release-controller" -c controller -- sh -c \
   'ls /run/secrets/terminal-ca && stat -L -c "%a %u:%g" "$AGENTIHOOKS_TERMINAL_CA_KEY" && echo "$AGENTIHOOKS_TERMINAL_CA_KEY"')"
@@ -842,6 +944,7 @@ if [[ $kept != *"refused {}"* ]]; then
   exit 1
 fi
 printf 'the controller start pass reached the herdr client and refused nothing\n'
+wait "$terminal"
 bash "$chart/ci/terminal-attach-proof.sh" "$terminal_image" "$release" "$slug"
 wait "$route"
 printf 'Helm chart kind proof passed\n'

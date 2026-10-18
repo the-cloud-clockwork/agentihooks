@@ -69,6 +69,8 @@ def _setup(
     steps = action["runs"]["steps"]
     start = next(i for i, step in enumerate(steps) if step.get("id") == "launch")
     for step in steps[start:]:
+        if "run" not in step:
+            continue
         condition = step.get("if")
         assert condition in (None, READY, HOSTED)
         if condition and output.read_text().strip() == "ready=true":
@@ -113,6 +115,7 @@ def test_failed_browser_recovery_is_red_after_exactly_two_attempts(tmp_path, mon
     assert result.stdout.count("::warning title=Retried browser install::") == 1
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(tmp_path, monkeypatch):
     started = time.monotonic()
     result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=5)
@@ -190,13 +193,27 @@ def test_every_browser_cache_caller_gives_its_step_both_attempts_and_names_that_
 
 def test_cache_uses_installed_playwright_version_and_absolute_browser_folder():
     action = yaml.safe_load((ACTION / "action.yml").read_text())
-    cache = next(step for step in action["runs"]["steps"] if step.get("uses") == "actions/cache@v4")
+    cache = next(step for step in action["runs"]["steps"] if step.get("uses") == "actions/cache/restore@v4")
     assert cache["with"]["path"] == "${{ github.workspace }}/.playwright"
     assert cache["with"]["key"] == ("chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}")
     assert "restore-keys" not in cache["with"]
     stamp = next(step for step in action["runs"]["steps"] if step.get("id") == "version")
     assert "importlib.metadata" in stamp["run"]
     assert 'version("playwright")' in stamp["run"]
+
+
+def test_only_a_dev_push_saves_the_browser_after_installing_it():
+    steps = yaml.safe_load((ACTION / "action.yml").read_text())["runs"]["steps"]
+    uses = [step.get("uses") for step in steps if "uses" in step]
+    assert uses == ["actions/cache/restore@v4", "actions/cache/save@v4"]
+    restore = next(step for step in steps if step.get("uses") == "actions/cache/restore@v4")
+    save = next(step for step in steps if step.get("uses") == "actions/cache/save@v4")
+    assert steps.index(save) == len(steps) - 1
+    assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
+    assert save["if"] == (
+        "steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true'"
+        " && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+    )
 
 
 @pytest.mark.parametrize(

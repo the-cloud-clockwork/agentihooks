@@ -1,22 +1,28 @@
+import ctypes
 import hashlib
 import json
 import os
+import signal
+import subprocess
 import sys
 import time
 import tomllib
 from collections.abc import Callable
+from contextlib import suppress
 from pathlib import Path
 
-from codex_probe import run_codex
-
+from hooks.proc import processes
 from hooks.secrets import redact
-from scripts.swarm_v2 import worker_home
+from scripts.swarm_v2 import supervision_processes, worker_home
 from scripts.targets.codex_hook_trust import trusted_state
 
 SERVERS = {"claude": ["agentihooks", "fixture-claude-mcp"], "codex": ["agentihooks", "fixture-codex-mcp"]}
 TMP = Path("/tmp")
 REGISTRATION_BUDGET_SECONDS = 10.0
 POLL_SECONDS = 0.25
+POLL_HOOK_SECONDS = 0.01
+HOOK_CHILD_SECONDS = 1.0
+PR_SET_CHILD_SUBREAPER = 36
 OUTPUT_LIMIT = 4000
 
 
@@ -50,6 +56,111 @@ def configuration(attempt: Path) -> dict:
 def sessions(home: Path) -> dict:
     registered = json.loads((home / ".agentihooks" / "active-sessions.json").read_text(encoding="utf-8"))
     return {session: entry["cwd"] for session, entry in registered.items()}
+
+
+def first_registration(home: Path, session: str) -> float | None:
+    registry = home / ".agentihooks" / "active-sessions.json"
+    try:
+        before = registry.stat().st_mtime_ns
+        registered = session in json.loads(registry.read_text(encoding="utf-8"))
+        after = registry.stat().st_mtime_ns
+    except (OSError, ValueError):
+        return None
+    return before / 1e9 if registered and before == after else None
+
+
+def reaper(flag: int) -> None:
+    if ctypes.CDLL(None, use_errno=True).prctl(PR_SET_CHILD_SUBREAPER, flag, 0, 0, 0) != 0:
+        raise OSError(ctypes.get_errno(), "PR_SET_CHILD_SUBREAPER failed")
+
+
+def hook_descendants(existing: dict) -> dict:
+    return {
+        pid: item
+        for pid, item in supervision_processes.descendants(os.getpid(), processes()).items()
+        if existing.get(pid) != item.start_time
+    }
+
+
+def surviving_hook_children(existing: dict, seconds: float = HOOK_CHILD_SECONDS) -> list[str]:
+    deadline = time.monotonic() + seconds
+    while True:
+        new = hook_descendants(existing)
+        survivors = {pid: item for pid, item in new.items() if item.state != "Z"}
+        if not survivors or time.monotonic() >= deadline:
+            break
+        time.sleep(POLL_HOOK_SECONDS)
+    supervision_processes.send(survivors, signal.SIGKILL)
+    deadline = time.monotonic() + 1
+    while (children := [pid for pid, item in new.items() if item.ppid == os.getpid()]) and time.monotonic() < deadline:
+        for pid in children:
+            with suppress(ChildProcessError):
+                os.waitpid(pid, os.WNOHANG)
+        time.sleep(POLL_HOOK_SECONDS)
+        new = hook_descendants(existing)
+    return sorted(f"{pid} {' '.join(item.argv) or item.comm}" for pid, item in survivors.items())
+
+
+def codex_session_start(home: Path, tmp: Path | None = None) -> dict:
+    tmp = tmp or home
+    document = json.loads((home / ".codex/hooks.json").read_text(encoding="utf-8"))
+    commands = [hook["command"] for group in document["hooks"]["SessionStart"] for hook in group["hooks"]]
+    assert commands, "the rendered Codex profile has no SessionStart hook"
+    session = "worker-profile-codex"
+    payload = tmp / "codex-run.payload"
+    payload.write_text(
+        json.dumps(
+            {"hook_event_name": "SessionStart", "session_id": session, "cwd": str(Path.cwd()), "source": "startup"}
+        )
+    )
+    existing = {pid: item.start_time for pid, item in supervision_processes.living(os.getpid()).items()}
+    registered_at = None
+    failure = None
+    (tmp / "codex-run.started").write_text(str(time.time_ns()))
+    started = time.monotonic()
+    reaper(1)
+    try:
+        try:
+            with (tmp / "codex-run.txt").open("w") as output:
+                for command in commands:
+                    with payload.open() as stdin:
+                        process = subprocess.Popen(
+                            command,
+                            shell=True,
+                            stdin=stdin,
+                            env=os.environ | {"HOME": str(home), "CODEX_HOME": str(home / ".codex")},
+                            stdout=output,
+                            stderr=subprocess.STDOUT,
+                            start_new_session=True,
+                        )
+                    deadline = time.monotonic() + 60
+                    while process.poll() is None:
+                        registered_at = registered_at or first_registration(home, session)
+                        if time.monotonic() >= deadline:
+                            with suppress(ProcessLookupError):
+                                os.killpg(process.pid, signal.SIGKILL)
+                            process.wait()
+                            raise subprocess.TimeoutExpired(command, 60)
+                        time.sleep(POLL_HOOK_SECONDS)
+                    registered_at = registered_at or first_registration(home, session)
+                    (tmp / "codex-run.exit").write_text(str(process.returncode))
+                    if process.returncode:
+                        raise subprocess.CalledProcessError(process.returncode, command)
+        except BaseException as error:
+            failure = error
+        survivors = surviving_hook_children(existing)
+    finally:
+        reaper(0)
+    if survivors:
+        raise AssertionError(f"Codex hook children outlived registration: {survivors}") from failure
+    if failure is not None:
+        raise failure
+    assert sessions(home) == {session: str(Path.cwd())}
+    return {
+        "registered_at": registered_at,
+        "registration_to_exit_seconds": time.time() - registered_at,
+        "elapsed_seconds": time.monotonic() - started,
+    }
 
 
 def harness(target: str, attempt: Path, tmp: Path = TMP) -> dict:
@@ -117,10 +228,11 @@ def positive(attempt: Path, tmp: Path = TMP) -> dict:
     missing = {t: [s for s in names if s not in listed[t]] for t, names in SERVERS.items()}
     assert record["reused"] is False
     assert not any(missing.values()), (missing, listed)
-    codex = run_codex(attempt / "homes" / "codex", tmp=tmp)
+    codex = codex_session_start(attempt / "homes" / "codex", tmp=tmp)
     diagnostics = diagnose(attempt, tmp)
     return {
         "record": record,
+        "session_start_invocation": {"claude": "native CLI", "codex": "rendered hook replay"},
         "cli_session_start_hook_registrations": {
             target: len(entry["sessions"]) for target, entry in diagnostics["harnesses"].items()
         },
@@ -244,6 +356,8 @@ def main() -> None:
     mode, path = sys.argv[1], Path(sys.argv[2])
     if mode == "snapshot":
         print(json.dumps(snapshot(path)))
+    elif mode == "codex-session-start":
+        codex_session_start(path)
     elif mode == "crash":
         crash(path, sys.argv[3])
     else:

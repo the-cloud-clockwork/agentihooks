@@ -567,10 +567,21 @@ def test_the_server_lease_duration_must_be_a_positive_integer(world, lease_ms):
         ExecutionsAPI(world.grants, world.tasks, lease_ms)
 
 
-def test_the_default_server_lease_is_one_minute(world):
+def test_the_default_server_lease_outlasts_a_controller_handover(world, monkeypatch):
+    from scripts.swarm import lease
     from scripts.swarm_v2.api.executions import ExecutionsAPI
 
-    assert ExecutionsAPI(world.grants, world.tasks).lease_ms == 60_000
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    assert lease.ttl_ms() + lease.tick_ms() == 240_000
+    assert ExecutionsAPI(world.grants, world.tasks).lease_ms == 240_000
+
+
+def test_a_renewed_grant_outlives_the_server_lease():
+    from scripts.swarm_v2 import auth_context
+    from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS
+    from scripts.swarm_v2.worker import lease_renewal
+
+    assert auth_context.DEFAULT_TTL_SECONDS - lease_renewal.CREDENTIAL_SECONDS == DEFAULT_LEASE_MS / 1000
 
 
 @pytest.fixture
@@ -680,9 +691,11 @@ def test_a_pod_worker_keeps_its_lease_past_five_minutes_and_a_controller_failove
 
 def test_an_unrenewed_pod_worker_loses_its_scoped_writes_after_the_admission_lease(world):
     from scripts.swarm.store import SwarmError
+    from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS
 
     _, agent, token, _ = admitted_worker(world)
-    advance(world, 1000 + 61_000)
+    advance(world, 1000 + DEFAULT_LEASE_MS // 2)
+    advance(world, 1000 + DEFAULT_LEASE_MS + 1000)
 
     with pytest.raises(SwarmError, match="^stale_generation$"):
         world.tasks.complete(token, 1, {"outcome": "merged"})

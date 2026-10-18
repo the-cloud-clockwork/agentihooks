@@ -64,6 +64,7 @@ _BUILD_TOOLS = frozenset(
 )
 _TEST_TASK = re.compile(r"^(?:test|tests|coverage|mutation)(?:$|[:_.-])|^.*:test$")
 _PYTHON = re.compile(r"^(?:python[\d.]*|pypy[\d.]*)$")
+_PYTHON_VALUE_OPTIONS = frozenset({"-W", "-X", "-Q", "--check-hash-based-pycs"})
 _PYTHON_TEST = re.compile(
     r"\b(?:pytest|unittest|tox|nox|mutmut|mutatest|mutpy)\b|scripts\.ci_mutation\b(?!\.clearances\b)"
 )
@@ -97,6 +98,20 @@ def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
     return bool(runners.search(source if _LAUNCH.search(source) else code))
 
 
+def _python_script(args: list[str]) -> str | None:
+    value = False
+    for arg in args:
+        if value:
+            value = False
+        elif arg in _PYTHON_VALUE_OPTIONS:
+            value = True
+        elif arg == "-" or arg.startswith(("-m", "-c")):
+            return None
+        elif not arg.startswith("-"):
+            return arg
+    return None
+
+
 def _python_test(args: list[str]) -> bool:
     for index, arg in enumerate(args):
         if arg in {"-m", "-c"}:
@@ -104,13 +119,11 @@ def _python_test(args: list[str]) -> bool:
                 return True
         elif arg.startswith(("-m", "-c")) and _code_runs_tests(arg[2:], _PYTHON_TEST, "#"):
             return True
-    if any(arg.startswith(("-m", "-c")) for arg in args):
-        return False
-    return any(
-        Path(arg).name in _RUNNERS
-        or (Path(arg).name.startswith(("test_", "test-")) and arg.endswith(".py"))
-        or _MUTATION_PATH.search(posixpath.normpath(arg))
-        for arg in args
+    script = _python_script(args)
+    return script is not None and (
+        Path(script).name in _RUNNERS
+        or (Path(script).name.startswith(("test_", "test-")) and script.endswith(".py"))
+        or _MUTATION_PATH.search(posixpath.normpath(script)) is not None
     )
 
 

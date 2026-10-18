@@ -29,9 +29,9 @@ def _live(agents):
     return [a for a in agents if a.state != "finished"]
 
 
-def addresses(slug, event, doc, agents, owners):
+def addresses(slug, event, doc, agents, owners, held):
     live = _live(agents)
-    master = master_address(slug, live)
+    master = masters.lead_of(slug, held)
     if event.get("kind") == SYNC_ORDER:
         return [a.seat or a.name for a in live]
     target = event.get("target", "")
@@ -48,7 +48,7 @@ def addresses(slug, event, doc, agents, owners):
         task_id = target.split("/")[1]
         claimant = next((t.get("claimed_by") for t in doc.get("tasks", []) if t.get("id") == task_id), "")
         found = [a for a in live if claimant and a.name == claimant]
-    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners, masters.live_seats(live), master)]
+    return [a.seat or a.name for a in found] or [masters.route(target, doc, owners, held, master)]
 
 
 def mentioned(event):
@@ -61,8 +61,8 @@ def informed(event, address, master):
     return address != master and mentioned(event) == EVERYONE
 
 
-def master_address(slug, live):
-    return masters.lead_of(slug, masters.live_seats(live))
+def master_address(redis, slug, agents):
+    return masters.lead_of(slug, list(masters.held(redis, slug, agents)))
 
 
 def primed(text, event, address, master):
@@ -90,6 +90,7 @@ def relay(inbox, store, slug, doc, events, line):
     except SwarmError:
         return []
     agents, sent = store.agents(slug), []
+    held = list(masters.held(inbox.redis, slug, agents))
     owners = functools.cache(lambda: masters.MasterSeats(inbox.redis).owners(slug, doc))
     for event in events:
         if event.get("by") != OPERATOR or event.get("kind") in IGNORED_KINDS:
@@ -99,8 +100,8 @@ def relay(inbox, store, slug, doc, events, line):
         if inbox.redis.exists(mark):
             continue
         text = f"On ledger {slug}: {line(event)}"
-        master = master_address(slug, _live(agents))
-        for address in addresses(slug, event, doc, agents, owners):
+        master = masters.lead_of(slug, held)
+        for address in addresses(slug, event, doc, agents, owners, held):
             primer = primed(text, event, address, master)
             fyi = informed(event, address, master)
             item_id = outbox.stable_id(ref, address)

@@ -10,16 +10,27 @@ from tests.test_ci_hosted_lanes import _resolve
 pytestmark = pytest.mark.unit
 
 ROOT = Path(__file__).parents[3]
-UNIT = {"durations", "split", "unit", "shard-check", "test-count", "gate-required"}
+DURATION_JOB = (
+    "durations"
+    if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    else "select"
+)
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"}
 QUEUE = UNIT | {"queue-fail-fast"}
-PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+PULL_REQUEST = (
+    UNIT
+    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+    | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
+)
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
-PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}) | {
+PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
     "queue-fail-fast",
     "reuse",
     "coverage-ratchet",
     "coverage-baseline",
+    "promote",
     "refresh-durations",
+    "count-record",
     "flake-budget",
     "swarm-image",
     "worker-image",
@@ -36,13 +47,16 @@ def enabled(condition, event, needs, base_ref="dev"):
         return condition
     expression = condition.removeprefix("${{").removesuffix("}}").strip()
     expression = expression.replace("&&", " and ").replace("||", " or ").replace("!cancelled()", "not cancelled()")
+    expression = expression.replace("!contains", "not contains").replace("needs.*.result", "results")
     expression = re.sub(r"needs\.([a-z]+(?:-[a-z]+)*)", r'needs["\1"]', expression)
     return bool(
         eval(
             expression,
             {"__builtins__": {}},
             {
-                "github": SimpleNamespace(event_name=event, base_ref=base_ref),
+                "github": SimpleNamespace(event_name=event, base_ref=base_ref, ref="refs/heads/dev"),
+                "contains": lambda values, value: value in values,
+                "results": [need.result for need in needs.values()],
                 "needs": needs,
                 "always": lambda: True,
                 "cancelled": lambda: False,
@@ -71,7 +85,9 @@ def jobs_for(event, base_ref="dev", scope="full"):
                 runs = all(need.result == "success" for need in needs.values())
             completed[name] = SimpleNamespace(
                 result="success" if runs else "skipped",
-                outputs=SimpleNamespace(due="true", reused="false", scope=scope if runs else ""),
+                outputs=SimpleNamespace(
+                    due="true", reused="false", scope=scope if runs else "", analysis="A1" if runs else ""
+                ),
             )
             del pending[name]
             ready = True
@@ -83,6 +99,8 @@ def jobs_for(event, base_ref="dev", scope="full"):
     "event,expected", [("merge_group", QUEUE), ("pull_request", PULL_REQUEST), ("push", PROMOTION)]
 )
 def test_each_event_runs_only_its_tier_jobs(event, expected):
+    if event == "push" and (ROOT / ".github/workflows/count-record.yml").exists():
+        expected = expected - {"count-record"}
     assert jobs_for(event) == expected
 
 
@@ -92,6 +110,20 @@ def test_selected_pull_requests_run_the_selected_leg_instead_of_the_shards():
 
 def test_main_pull_requests_keep_their_nonmutation_checks():
     assert jobs_for("pull_request", "main") == PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation"}
+
+
+def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_promotion_form():
+    from scripts import ci_reuse
+
+    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    assert "queue-baseline" not in jobs
+    assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
+    options = {"consolidated": True} if DURATION_JOB == "select" else {}
+    steps = jobs["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
+    assert steps in [
+        ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary) for summary in (False, True)
+    ]
 
 
 def test_the_queue_keeps_completeness_but_skips_the_shard_time_budget():
@@ -121,9 +153,9 @@ def _concurrency(event, run_id, number=None):
     )
 
 
-def test_two_dev_pushes_share_one_promotion_group_that_cancels_the_older_run():
+def test_dev_pushes_preserve_the_running_promotion_and_replace_only_the_pending_run():
     first, second = _concurrency("push", 1000), _concurrency("push", 1061)
-    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": True}
+    assert first == second == {"group": "promotion-dev", "queue": "single", "cancel-in-progress": False}
 
 
 @pytest.mark.parametrize("event,number", [("merge_group", None), ("pull_request", 7)])

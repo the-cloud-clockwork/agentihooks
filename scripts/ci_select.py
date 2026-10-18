@@ -33,6 +33,9 @@ HARNESS = frozenset(
     }
 )
 CONFTEST = "conftest.py"
+# Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail the queue.
+SUITE_SPEED = "tests/test_suite_speed.py"
+FAKEREDIS = "fakeredis"
 # Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -73,8 +76,27 @@ def selected_tests(root: Path, changed: list[str]) -> set[str]:
             tests.update(select_tests(root, Path(path)))
         else:
             needles.add(Path(path).name)
+    if any(
+        path.startswith(".github/workflows/")
+        or path in {".github/runner-classes.json", "scripts/ci_runner_classes.py", "scripts/ci_runner_trust.py"}
+        for path in changed
+    ):
+        tests.update(
+            {
+                "tests/test_ci_anton_runners.py",
+                "tests/test_ci_runner_classes.py",
+                "tests/test_ci_runner_trust.py",
+            }
+        )
     tests |= naming_tests(root, needles)
-    return {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    if (
+        tests
+        and (root / SUITE_SPEED).is_file()
+        and (any(is_test(path) for path in changed) or any(FAKEREDIS in (root / path).read_text() for path in tests))
+    ):
+        tests.add(SUITE_SPEED)
+    return tests
 
 
 def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, float]:

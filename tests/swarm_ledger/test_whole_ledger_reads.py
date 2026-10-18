@@ -58,7 +58,7 @@ def test_trace_plan_files_its_cut_on_a_ledger_that_changed_since_the_read(live, 
     record, block = trace_plan.run(folder, state, client, who, "observe", home=tmp_path / "home")
     assert (record["verdict"], block) == ("pass", False)
     texts = [row["text"] for row in client._resource(SLUG, "followups", collection=True)]
-    assert texts == ["Other", "Cut from the plan of task t1: a diesel generator"]
+    assert texts == ["Other", "Cut from the plan: a diesel generator"]
 
 
 def test_a_write_against_a_stale_collection_revision_is_still_refused(live):

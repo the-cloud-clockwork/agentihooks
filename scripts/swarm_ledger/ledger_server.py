@@ -7,7 +7,8 @@ Usage:
   ledger_server.py --stop     stop the detached server
 
 Env: LEDGER_DIR (default ~/development-ledger), LEDGER_HOST (127.0.0.1), LEDGER_PORT (8765),
-SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, SWARM_RELOAD=1 for code reload
+SWARM_PUBLIC_URL and SWARM_ALLOWED_HOSTS (comma list) beside loopback, LEDGER_TLS_CERT and LEDGER_TLS_KEY to serve
+https (clients trust LEDGER_CA_PEM), SWARM_RELOAD=1 for code reload
 (--ensure sets it unless given), LEDGER_IMPECCABLE_LIVE=1 for the Impeccable live origin on a scratch server.
 Idempotent: --ensure on a running server only prints the URL.
 """
@@ -23,6 +24,7 @@ import os
 import re
 import signal
 import socket
+import ssl
 import subprocess
 import sys
 import threading
@@ -44,6 +46,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
+from scripts.swarm import freeze  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     ledger_task_duplicates,
     page_policy,
@@ -54,18 +57,22 @@ from scripts.swarm_ledger import (  # noqa: E402
 )
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
-from scripts.swarm_ledger.repository import legacy  # noqa: E402
+from scripts.swarm_ledger.repository import (
+    hierarchy,  # noqa: E402
+    legacy,  # noqa: E402
+)
 from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
-from scripts.swarm_v2 import ledger_writer, master_fence  # noqa: E402
+from scripts.swarm_v2 import front_door, ledger_writer, master_fence  # noqa: E402
 
 HOST, PORT = ledger_link.address()
-BASE = f"http://{HOST}:{PORT}"
+BASE = f"{ledger_link.scheme()}://{HOST}:{PORT}"
 PIDFILE = core.LEDGER_DIR / ".server.pid"
 LOGFILE = core.LEDGER_DIR / ".server.log"
 SERVER_WAIT = 5.0
 COMPOSE_WAIT = 180.0
 THREADS_EXHAUSTED = 75
+TLS_HANDSHAKE_S = 10
 PROBE_FILE = ".healthz"
 FILE_ORIGIN = "null"
 MAX_BODY = 1 << 20
@@ -95,7 +102,12 @@ def served_version():
 def ledger_view(state):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
     meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
-    return {**state, "_meta": meta}
+    graph = hierarchy.project(state)[0]
+    tasks = [
+        {**task, "freeze_ancestry": freeze.ancestry(task, graph)} if task.get("merged_into") else task
+        for task in state.get("tasks", [])
+    ]
+    return {**state, "tasks": tasks, "_meta": meta}
 
 
 def publish_ledger(slug, state):
@@ -103,7 +115,12 @@ def publish_ledger(slug, state):
         HUB.publish(slug, "ledger", ledger_view(state))
 
 
-repository = publishing(stored, publish_ledger)
+def publish_snapshot(slug: str, state: dict) -> None:
+    if HUB.has(slug):
+        HUB.publish_snapshot(slug, "ledger", ledger_view(state))
+
+
+repository = publishing(stored, publish_snapshot)
 
 
 def all_summaries():
@@ -312,6 +329,7 @@ def control_argv(body):
         ("max_eng", "max-eng-agents", MAX_CAP),
         ("max_ci", "max-ci-agents", MAX_CAP),
         ("max_plan", "max-plan-agents", MAX_CAP),
+        ("masters_step", "masters-step", MAX_CAP),
         ("compact_limit", "compact-limit", MAX_COMPACT),
     ):
         value = body.get(key)
@@ -342,7 +360,7 @@ def control_argv(body):
         pairs += overlay_pairs(body["overlays"])
     if not pairs:
         raise ValueError(
-            "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
+            "set needs max_eng, max_ci, max_plan, masters_step, compact_limit, effort_min, effort_max, autonomy, "
             "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
         )
     return ["set", *pairs]
@@ -488,7 +506,14 @@ def lifecycle_control(slug, body, operator):
 
 
 def refresh_quota(slug: str) -> tuple[dict | None, str]:
-    return swarm_control(slug, [], "quota")
+    from scripts.swarm import quota_refresh
+    from scripts.swarm.store import SwarmError
+
+    try:
+        quota_refresh.request(swarm_store(), slug)
+    except SwarmError as exc:
+        return None, str(exc)
+    return swarm_status(slug), ""
 
 
 def relay_to_inbox(slug, state):
@@ -515,7 +540,7 @@ def relay_to_inbox(slug, state):
         inbox = connect()
         store = RedisStore(inbox.redis)
         sent = operator_mail.relay(inbox, store, slug, state, events, watch_ledger.line)
-        addresses = [operator_mail.master_address(slug, []), *masters.live_seats(store.agents(slug))]
+        addresses = [masters.lead_of(slug, []), *masters.held(store.redis, slug, store.agents(slug))]
         chat_receipts.post(repository, inbox, slug, events, addresses)
     except Exception as exc:  # the ledger write stands whatever the inbox does
         sys.stderr.write(f"inbox relay for {slug}: {exc}\n")
@@ -562,8 +587,9 @@ def deliver_alerts(slug, state):
         from scripts.swarm.store import RedisStore
 
         inbox = connect()
-        live = [a for a in RedisStore(inbox.redis).agents(slug) if a.state != "finished"]
-        master = operator_mail.master_address(slug, live)
+        agents = RedisStore(inbox.redis).agents(slug)
+        live = [a for a in agents if a.state != "finished"]
+        master = operator_mail.master_address(inbox.redis, slug, agents)
         addresses = {a.name: a.seat or a.name for a in live}
         alerts = [{**a, "target": addresses.get(a["target"], "master")} for a in fresh]
         sent = ledger_alerts.deliver(inbox, slug, alerts, meta["rev"], master, since=since)
@@ -691,8 +717,8 @@ def workspace_tails(slug, task_id):
 
 
 def write_gate(slug):
-    """Every op write: masters fenced to the items they own, inside the talk budget."""
-    return master_fence.Fence(slug, talk.Budget(slug))
+    """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
+    return master_fence.Fence(slug, front_door.Door(slug, talk.Budget(slug)))
 
 
 def sample_streams():
@@ -708,7 +734,15 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+class Handshake(Exception):
+    pass
+
+
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
+    def handle_error(self, *args):
+        if not isinstance(sys.exc_info()[1], Handshake):
+            super().handle_error(*args)
+
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         try:
             super().process_request(request, client_address)
@@ -717,6 +751,18 @@ class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
+    tls: ssl.SSLContext | None = ledger_link.server_context()
+
+    def setup(self):
+        if self.tls is not None:
+            self.request.settimeout(TLS_HANDSHAKE_S)
+            try:
+                self.request = self.tls.wrap_socket(self.request, server_side=True)
+            except OSError as exc:
+                raise Handshake from exc
+            self.request.settimeout(None)
+        super().setup()
+
     def log_message(self, fmt, *args):
         if self.path.startswith("/api/v1/"):
             sys.stderr.write(f"{time.strftime('%H:%M:%S')} {self.command} {self.path.split('?', 1)[0]}\n")
@@ -760,12 +806,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.headers.get("Origin") not in (None, FILE_ORIGIN, *ALLOWED_ORIGINS):
             return self.send(403, "origin not allowed", "text/plain") or True
         if slug is not None:
-            self.principal = authority.principal(
-                repository.token(slug),
-                slug,
-                self.headers.get("X-Ledger-Token"),
-                self.headers.get("X-Ledger-Agent"),
-            )
+            self.principal = authority.caller(self.headers, repository.token(slug), slug)
             if self.principal is None:
                 return self.send(403, "missing or wrong ledger token", "text/plain") or True
         return False
@@ -1047,7 +1088,7 @@ class Handler(BaseHTTPRequestHandler):
             if swarm_status(slug) is not None:
                 _, error = swarm_control(slug, ["stop", "--now"])
                 reply = {"swarm_error": error} if error else {}
-        elif not ledger_bin.restore(slug):
+        elif not repository.restore(slug):
             return self.send(404, "not in the bin", "text/plain")
         return self.send(200, json.dumps({"binned": sorted(ledger_bin.entries()), **reply}), "application/json")
 
@@ -1097,9 +1138,17 @@ class Handler(BaseHTTPRequestHandler):
         return self.reply_state(slug, changes, allowed, refusals, ledger_task_duplicates.screen(state, allowed))
 
 
+def metrics_journal(action, *args):
+    try:
+        action(*args)
+    except OSError as exc:
+        sys.stderr.write(f"request metrics journal: {exc}\n")
+
+
 def reload_if_changed(started, code_dirs=CODE_DIRS, execv=os.execv):
     if code_stamp(code_dirs) == started:
         return False
+    metrics_journal(request_metrics.stop)
     execv(sys.executable, [sys.executable, str(CODE_DIR / "ledger_server.py"), "--serve"])
     return True
 
@@ -1128,6 +1177,7 @@ def watch_ledgers(interval=2.0):
             except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
                 sys.stderr.write(f"unrelayed replay: {exc}\n")
         sample_streams()
+        metrics_journal(request_metrics.persist)
         time.sleep(interval)
 
 
@@ -1138,6 +1188,7 @@ def serve():
     except ledger_writer.WriterConflict as conflict:
         sys.exit(str(conflict))
     legacy.adopt(stored)
+    metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
     threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
     server.request_queue_size = 128
@@ -1152,6 +1203,7 @@ def serve():
     finally:
         stopped.set()
         server.server_close()
+        metrics_journal(request_metrics.stop)
         writer.release()
 
 

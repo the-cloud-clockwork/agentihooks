@@ -6,6 +6,7 @@ import json
 import re
 import shlex
 import subprocess
+import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from contextvars import copy_context
@@ -15,7 +16,7 @@ from typing import Callable
 
 from hooks.classifier import ClassifierError, code_rules, decide, definitions, runner
 from hooks.classifier.questions import MAX_QUESTIONS
-from scripts.gates import intent_history, log
+from scripts.gates import intent_history, lift, log
 from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
@@ -39,8 +40,13 @@ START, END = "<!-- agentihooks intent -->", "<!-- /agentihooks intent -->"
 MERGE_QUEUE = ["merge", "queue"]
 RELEASES = (["done"], ["ready"])
 PULL = re.compile(r"github\.com/([^/]+)/([^/]+)/pull/(\d+)")
+REPO_FLAGS = ("-R", "--repo")
+VALUE_FLAGS = ("-A", "--author-email", "-b", "--body", "-F", "--body-file", "--match-head-commit", "-t", "--subject")
 SHORT = re.compile(r"(?<![\w./-])([A-Za-z0-9-]+)/([\w.-]+)#(\d+)\b")
 NAMED_LIMIT = 3
+NON_PRODUCTION = ("tests/", "docs/")
+COMPARED = "[.status, [(.files // [])[].filename]]"
+COMPARE_FILES = 300
 DIFF_CHARS, BODY_CHARS = 6000, 1000
 SECTION = re.compile(f"{re.escape(START)}.*?{re.escape(END)}", re.S)
 TESTS_FIRST = f"{PURPOSE}-tests-first"
@@ -65,7 +71,13 @@ def mode_of(config):
 
 
 def _tests_first(body: str) -> bool:
-    return "Task part: tests-first" in body.splitlines()
+    return "Task part: tests-first" in body.splitlines() or bool(
+        re.search(
+            r"(?:^|[.!?]\s+)(?:This tests[- ]first prerequisite\b|Tests[- ]first prerequisite for #\d+\.(?=\s|$))",
+            body,
+            re.MULTILINE,
+        )
+    )
 
 
 def _pr_diff(url: str, run) -> str | None:
@@ -86,11 +98,17 @@ def _same_phase(record, task):
 
 def section(doc, task):
     phase = _phase(doc, task)
+    declared = _declared(task)
+    delivers = f"declared {declared['kind']}: {declared['scope']}" if declared else task["description"]
     return (
         f"{START}\n## Parent intent\n\n**Project:** {doc['overview']}\n\n"
         f"**Phase {phase.get('title', '')}:** {phase.get('description', '')}\n\n"
-        f"**Task {task['id']}, {task['title']}:** {task['description']}\n{END}"
+        f"**Task {task['id']}, {task['title']}:** {delivers}\n{END}"
     )
+
+
+def _declared(task):
+    return (task.get("pull_scopes") or {}).get(task.get("pr_url"))
 
 
 def with_intent(body, text):
@@ -112,7 +130,7 @@ def stamp_body(url, doc, task, run=subprocess.run):
         read = _gh(["gh", "pr", "view", url, "--json", "body"], run)
         if read.returncode:
             return False
-        body = with_intent(json.loads(read.stdout).get("body") or "", section(doc, task))
+        body = with_intent(json.loads(read.stdout).get("body") or "", section(doc, {**task, "pr_url": url}))
         path = f"repos/{owner}/{repo}/pulls/{number}"
         sent = _gh(["gh", "api", "--method", "PATCH", path, "--input", "-"], run, json.dumps({"body": body}))
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -177,6 +195,37 @@ def pr_merged(url: str, run=subprocess.run) -> bool:
 
 def pr_head(url: str, run=subprocess.run) -> str | None:
     return _pr_field(url, "head.sha", run)
+
+
+def production_unchanged(url: str, before: str, after: str, run=subprocess.run) -> bool:
+    found = PULL.search(url)
+    if not found:
+        return False
+    owner, repo, _ = found.groups()
+    compare = ["gh", "api", f"repos/{owner}/{repo}/compare/{before}...{after}", "--jq", COMPARED]
+    try:
+        result = _gh(compare, run)
+        status, files = json.loads(result.stdout) if result.returncode == 0 else (None, [])
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return False
+    return status == "ahead" and len(files) < COMPARE_FILES and all(path.startswith(NON_PRODUCTION) for path in files)
+
+
+def text_key(title: str, body: str | None) -> str:
+    return hashlib.sha256(json.dumps([title, body or ""]).encode()).hexdigest()
+
+
+def pr_text(url: str, run=subprocess.run) -> str | None:
+    found = PULL.search(url)
+    if not found:
+        return None
+    owner, repo, number = found.groups()
+    try:
+        result = _gh(["gh", "api", f"repos/{owner}/{repo}/pulls/{number}", "--jq", "{title, body}"], run)
+        raw = json.loads(result.stdout) if result.returncode == 0 else None
+        return text_key(raw["title"], raw["body"]) if raw else None
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError):
+        return None
 
 
 def pr_view(url, run=subprocess.run):
@@ -286,13 +335,33 @@ def _split_note(task):
 def _plan_chunk(doc, task):
     half = _split_half(task)
     task = {**task, "plan_lines": half[1]} if half else task
-    if not task.get("plan_lines") or task.get("follow_up"):
+    if not task.get("plan_lines") or task.get("follow_up") or _declared(task):
         return {}
     try:
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
-    return plan_read.scoped(doc, task, {"plan_lines": task["plan_lines"], "plan_chunk": text})
+    part = plan_read.scoped(doc, task, {"plan_lines": task["plan_lines"], "plan_chunk": text})
+    if "shared_slice" not in part and isinstance(text, str) and _foreign_slice(doc, task, text):
+        return {}
+    return part
+
+
+def _foreign_slice(doc, task, text):
+    name = task.get("plan_slice")
+    if not name:
+        return False
+    named = re.escape(name)
+    marked = rf"^\s*(?:<!--\s*slice:\s*{named}\s*-->|#+ .*(?<![\w.-]){named}(?![\w.-]).*)$"
+    if not re.search(marked, text, re.M):
+        return True
+    if name == task.get("id"):
+        return False
+    return any(
+        other.get("id") == name or (other.get("plan_slice") == name and other.get("phase") == task.get("phase"))
+        for other in doc.get("tasks", ())
+        if other.get("id") != task.get("id")
+    )
 
 
 def _parent(doc, task):
@@ -302,11 +371,31 @@ def _parent(doc, task):
         "phase": phase.get("title", ""),
         "phase_intent": phase.get("description", ""),
         "task": task["title"],
-        "task_text": task["description"] + _split_note(task),
+        "task_text": _task_text(task),
     }
 
 
+def _task_text(task):
+    declared = _declared(task)
+    if declared is None:
+        return task["description"] + _split_note(task)
+    return (
+        f"This pull request is a declared {declared['kind']} of this task and delivers only: {declared['scope']}. "
+        "The whole task is judged at its final pull request."
+    )
+
+
+def _task_contract(doc, task):
+    phase = _phase(doc, task)
+    if task.get("split") and (
+        task.get("follow_up") or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
+    ):
+        return {**task, "split": [], "plan_lines": ""}
+    return task
+
+
 def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
+    task = _task_contract(doc, task)
     return {
         **_parent(doc, task),
         "pull_request_title": pr["title"],
@@ -322,6 +411,7 @@ def state_of(doc, task, pr, proof_chars=PROOF_CHARS):
 
 
 def plan_state(doc, task, kept):
+    task = _task_contract(doc, task)
     return {
         "stage": "plan",
         **_parent(doc, task),
@@ -621,7 +711,9 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
 def _fingerprint(doc, task):
     phase = _phase(doc, task)
     parent = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
-    return hashlib.sha256(json.dumps([*parent, _plan_chunk(doc, task)]).encode()).hexdigest()
+    declared = _declared(task)
+    inputs = [*parent, _plan_chunk(doc, task), *([declared] if declared else [])]
+    return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 
 
 def _drafted(record):
@@ -649,6 +741,7 @@ class Check:
     home: object = None
     head: Callable | None = None
     named: Callable | None = None
+    text: Callable | None = None
 
     def run(self, doc):
         if self.mode == "off":
@@ -725,8 +818,11 @@ class Check:
             previous
             and previous["head"] == pr.get("head")
             and previous.get("inputs") == inputs
+            and previous.get("text") == text_key(pr["title"], pr["body"])
             and not self._named_moved(previous)
         ):
+            return _Judgment(pr, previous, None, None)
+        if previous and previous.get("inputs") == inputs and lift.head_lifted(self.slug, task["id"], NAME, self.home):
             return _Judgment(pr, previous, None, None)
         pr = self._with_named(task, pr)
         state = intent_history.prepare(state_of(doc, task, pr))
@@ -769,7 +865,11 @@ class Check:
         fixed = bool(previous) and previous["verdict"] == FAIL and previous["head"] != head
         rounds = min(previous["coach_rounds"] + fixed, 2) if previous else 0
         _remember(self.slug, task, self.now_ms, state, answer, self.home)
-        coached = {"coach_rounds": rounds, "head": head, "url": task["pr_url"]} if self.mode == "coach" else {}
+        coached = (
+            {"coach_rounds": rounds, "head": head, "url": task["pr_url"], "text": text_key(pr["title"], pr["body"])}
+            if self.mode == "coach"
+            else {}
+        )
         fields = {
             **_detail(answer),
             "phase": task.get("phase"),
@@ -777,6 +877,7 @@ class Check:
             "inputs": judgment.inputs,
             **_pending(pr),
             **_split_fields(task, task["pr_url"]),
+            "persisted_at": int(time.time() * 1000),
         }
         record = verdicts.write(task["id"], verdict, reason, self.now_ms, **fields)
         self._save_pull(task, {**record, "head": head, "url": task["pr_url"]})
@@ -805,10 +906,17 @@ class Check:
             or not _same_phase(previous, task)
             or previous.get("inputs") != inputs
             or previous["head"] != self.head(task["pr_url"])
+            or self._text_moved(previous, task["pr_url"])
             or self._named_moved(previous)
         ):
             return None
         return previous
+
+    def _text_moved(self, previous, url):
+        if self.text is None:
+            return False
+        current = self.text(url)
+        return current is None or previous.get("text") != current
 
     def _keep(self, task, previous, verdicts):
         verdicts.write(
@@ -819,6 +927,7 @@ class Check:
             coach_rounds=previous["coach_rounds"],
             head=previous["head"],
             phase=task.get("phase"),
+            persisted_at=previous.get("persisted_at"),
             **{"url": task["pr_url"], **_split_fields(task, task["pr_url"])},
         )
 
@@ -883,9 +992,70 @@ def _merge_target(words):
     return next((word for word in operands if PULL.search(word) or word.isdigit()), None)
 
 
+def _unnamed_merge(words):
+    index = program_index(words)
+    return (
+        index is not None
+        and PurePosixPath(words[index]).name == "gh"
+        and words[index + 1 : index + 3] == ["pr", "merge"]
+        and _merge_target(words) is None
+    )
+
+
+def _pull_view(words):
+    rest, branch, repo = iter(words[program_index(words) + 3 :]), [], []
+    for word in rest:
+        if word in REPO_FLAGS:
+            repo = [word, next(rest, "")]
+        elif word.startswith(("--repo=", "-R")):
+            repo = [word]
+        elif word in VALUE_FLAGS:
+            next(rest, None)
+        elif not word.startswith("-") and not branch:
+            branch = [word]
+    return ["gh", "pr", "view", *branch, *repo, "--json", "url", "--jq", ".url"]
+
+
 def _same_pull(target, url):
     named, bound = PULL.search(target), PULL.search(url)
     return bool(bound) and (named.groups() if named else target) == (bound.groups() if named else bound[3])
+
+
+def _queue_target(command):
+    for words in simple_commands(command):
+        index = program_index(words)
+        if PurePosixPath(words[index]).name == "agentihooks":
+            return _merge_target(words)
+    return None
+
+
+def queue_decision(who: Who, state: Verdicts, url: str, mode: str, head: str | None = None) -> Decision:
+    if mode == "off":
+        return Decision()
+    record = state.read(who.task)
+    pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
+    bound = pulls.read(who.task)
+    if bound:
+        urls = [pull for pull in bound["pulls"] if _same_pull(url, pull)]
+        if len(urls) != 1:
+            return Decision.deny("Intent requires a pull request registered on this task.")
+        url = urls[0]
+        record = pulls.read(_pull_subject(who.task, url))
+        if record and record.get("inputs") != bound["inputs"].get(url):
+            return Decision()
+    if not record or record["verdict"] != FAIL:
+        return Decision()
+    judged_url = record.get("url")
+    if not judged_url or not _same_pull(url, judged_url) or not record.get("head"):
+        return Decision()
+    if (head if head is not None else pr_head(judged_url)) != record["head"]:
+        return Decision()
+    text = f"intent check failed for task {who.task}: {record['reason']}. {fix_steps(who.swarm)}"
+    if mode != "enforce":
+        log.append(state.slug, log.Row.of(NAME, mode, who, "Bash", text), state.home)
+    if mode == "coach":
+        print(text, file=sys.stderr)
+    return Decision(allowed=mode != "enforce", reason=text if mode != "observe" else "")
 
 
 def _other_half(command, record):
@@ -917,16 +1087,28 @@ class IntentGate:
         return call.tool == "Bash" and any(word in call.command for word in ("merge", "done", "ready"))
 
     def decide(self, call, who, state, mode="enforce"):
-        commands = [words for words in simple_commands(call.command) if _gated(words)]
-        if not (who.pinned and who.task) or not commands:
+        if not (who.pinned and who.task) or not any(map(_gated, simple_commands(call.command))):
             return Decision()
         record = state.read(who.task)
         pulls = Verdicts(state.slug, f"{NAME}-pulls", state.home)
         bound = pulls.read(who.task)
+        call = self._resolve(call, bound or (record and record.get("split")))
+        if call is None:
+            return Decision.deny(
+                f"task {who.task} is split: name the pull request url in the merge so intent matches it to its "
+                "judged half."
+            )
         if not bound:
-            return self._decide_record(call, who, state, mode, record)
+            return self._decide_unbound(call, who, state, mode, record)
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
         for words in commands:
             single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            queued = _queue_target(single.command)
+            if queued:
+                decision = queue_decision(who, state, queued, mode)
+                if not decision.allowed:
+                    return decision
+                continue
             target = _merge_target(words)
             saved = record
             if target:
@@ -948,12 +1130,41 @@ class IntentGate:
                 return decision
         return Decision()
 
+    def _decide_unbound(self, call, who, state, mode, record):
+        commands = [words for words in simple_commands(call.command) if _gated(words)]
+        for words in commands:
+            single = replace(call, tool_input={**call.tool_input, "command": shlex.join(words)})
+            decision = self._decide_record(single, who, state, mode, record)
+            if not decision.allowed:
+                return decision
+        return decision
+
+    def _resolve(self, call, split):
+        if not split:
+            return call
+        named = [self._named(words, call.cwd) for words in simple_commands(call.command)]
+        if None in named:
+            return None
+        return replace(call, tool_input={**call.tool_input, "command": " && ".join(map(shlex.join, named))})
+
+    def _named(self, words, cwd):
+        if not _unnamed_merge(words):
+            return words
+        try:
+            done = self.run(_pull_view(words), capture_output=True, text=True, timeout=GH_TIMEOUT_SEC, cwd=cwd or None)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        return [*words, done.stdout.strip()] if done.returncode == 0 and PULL.search(done.stdout) else None
+
     def _decide_record(self, call, who, state, mode, record, bound=False):
         if not bound and _other_half(call.command, record):
             return Decision.deny(
                 f"intent for task {who.task} was judged on {record['url']}, not this pull request. Record this half "
                 f"first: agentihooks swarm {who.swarm} pr <pull request url> --half <n>, then wait for its verdict."
             )
+        queued = _queue_target(call.command)
+        if queued:
+            return queue_decision(who, state, queued, mode)
         verdict = record and record["verdict"]
         if mode == "coach" and record and record.get("head"):
             head = pr_head(record["url"])

@@ -125,7 +125,7 @@ def main() -> int:
             f"The selected tests recorded no browser or node coverage under {args.captures}; the page report is empty"
         )
         return 0
-    if missing:
+    if missing and not args.selected:
         print(f"::error::No {' or '.join(missing)} coverage recorded under {args.captures}")
         return 1
     sources = Sources(args.root)

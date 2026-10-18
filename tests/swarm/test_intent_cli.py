@@ -1,4 +1,5 @@
 import json
+from unittest.mock import ANY
 
 import pytest
 
@@ -146,8 +147,9 @@ def test_the_tick_batches_active_tasks_and_red_notices_then_refreshes_the_next_t
     notice = InboxStore(store.redis).send("swarm", "eng-1@sw", "red checks")
     store.redis.hset(store.key("sw", "red-notices"), notice.id, other)
     Verdicts("sw", "intent-coach").write(
-        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text="k"
     )
+    monkeypatch.setattr(intent, "pr_text", lambda url: "k")
     batches, heads = [], []
 
     def batch(urls, cache=None):
@@ -173,10 +175,11 @@ def test_the_coach_tick_keeps_an_unchanged_head_from_the_ticks_pull_request_read
     store.update("sw", gates={"intent": "coach"})
     ledger.rows["t1"].update(state="pr", pr_url=URL, claimed_by=ME)
     Verdicts("sw", "intent-coach").write(
-        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger)
+        "t1", "pass", "ok", 1, coach_rounds=0, head="h1", url=URL, phase="p1", inputs=fingerprint(ledger), text="k"
     )
     from scripts.swarm import ledger_events
 
+    monkeypatch.setattr(intent, "pr_text", lambda url: "k")
     reads, views = [], []
     pull = ledger_events.PullRequest("OPEN", None, None, False, head="h1")
     monkeypatch.setattr(ledger_events, "view", lambda url: reads.append(url) or pull)
@@ -257,4 +260,5 @@ def test_the_tick_stamps_its_own_time_on_the_verdict(started, monkeypatch):
         "at": 777,
         "phase": "p1",
         "inputs": intent._fingerprint({"phases": ledger.phases}, ledger.rows["t1"]),
+        "persisted_at": ANY,
     }

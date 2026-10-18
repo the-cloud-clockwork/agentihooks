@@ -138,6 +138,50 @@ def test_bootstrap_renders_both_targets_into_separate_homes(fixture):
     assert "AH_CC_TOKEN_POOL_A" not in claude_text + codex_text
 
 
+@pytest.mark.parametrize("extension", ["playwright-ext-operator", "Playwright-Ext-Operator"])
+@pytest.mark.parametrize(("browser_role", "role_servers"), [(False, []), (True, ["playwright-cmd"])])
+def test_a_desktop_extension_browser_server_is_left_out_of_the_worker_home(
+    fixture, monkeypatch, browser_role, role_servers, extension
+):
+    from scripts.profiles import browser
+
+    monkeypatch.setattr(browser, "enabled", lambda chain: browser_role)
+    monkeypatch.setattr(browser, "spec", lambda: {"command": "python", "args": ["-m", "scripts.profiles.browser"]})
+    templates, volume = fixture
+    mcp = templates / "fixture-claude" / ".mcp.json"
+    document = json.loads(mcp.read_text())
+    document["mcpServers"][extension] = {
+        "command": "cmd.exe",
+        "args": ["/c", "npx", "@playwright/mcp@latest", "--extension"],
+    }
+    mcp.write_text(json.dumps(document))
+
+    worker_home.bootstrap(request(templates, volume))
+
+    home = volume / "attempt-1" / "homes" / "claude"
+    assert sorted(json.loads((home / ".claude.json").read_text())["mcpServers"]) == sorted(
+        ["agentihooks", "fixture-claude-mcp", *role_servers]
+    )
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_bootstrap_emits_binding_evidence_accepted_by_the_local_inspector(fixture, target):
+    from scripts.profiles import binding
+
+    templates, volume = fixture
+    worker_home.bootstrap(request(templates, volume))
+    home = volume / "attempt-1" / "homes" / target / f".{target}"
+
+    evidence = binding.inspect(home, f"fixture-{target}", target)
+
+    assert evidence["canary"]
+    assert f"--canary {evidence['canary']}" in (home / binding.PERSONAS[target]).read_text()
+    assert evidence["source_blobs"]
+    (home / binding.PERSONAS[target]).write_text("changed mounted persona")
+    with pytest.raises(ValueError, match="mounted persona changed"):
+        binding.inspect(home, f"fixture-{target}", target)
+
+
 @pytest.mark.parametrize("attempt_id", ["attempt-1", "attempt-2"])
 def test_bootstrap_completes_native_claude_onboarding(fixture, attempt_id):
     from scripts.claude_config import claude_json
@@ -982,6 +1026,9 @@ def test_a_bundle_request_renders_the_bundle_chain_global_layer_and_channels(fix
     env = json.loads((home / "settings.json").read_text())["env"]
     assert (env["FIXTURE_BUNDLE_GLOBAL"], env["FIXTURE_FRONTEND"]) == ("1", "1")
     assert "brain" in env["AGENTIHOOKS_BASE_CHANNELS"].split(",")
+    sources = json.loads((home.parent / "claude.sources.json").read_text())
+    assert "# Fixture bundle global persona" in {row["text"] for row in sources if row["layer"] == "doctrine"}
+    assert "# Fixture global rule" in {row["text"] for row in sources if row["layer"] == "rule"}
 
 
 def test_the_request_document_names_the_delivered_bundle(fixture):

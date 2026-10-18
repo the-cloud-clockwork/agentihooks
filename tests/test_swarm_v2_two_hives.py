@@ -137,8 +137,11 @@ def test_operator_comment_routes_to_hive_owner_but_chat_stays_with_lead(world):
         return masters.MasterSeats(world.redis).owners(cases.SLUG, doc)
 
     agents = world.store.agents(cases.SLUG)
-    assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, owners) == [cases.SECOND]
-    assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, owners) == [cases.LEAD]
+    held = list(masters.held(world.redis, cases.SLUG, agents))
+    assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, owners, held) == [
+        cases.SECOND
+    ]
+    assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, owners, held) == [cases.LEAD]
 
 
 @pytest.mark.parametrize("command", ["question", "followup"])
@@ -236,7 +239,7 @@ def test_two_hives_steer_separate_phases_and_coordinate_privately(world, repeat)
     sent = operator_mail.relay(inbox, world.store, cases.SLUG, world.doc(), [event], lambda e: e["text"])
     assert [item.address for item in sent] == [cases.LEAD]
     assert operator_mail.relay(inbox, world.store, cases.SLUG, world.doc(), [event], lambda e: e["text"]) == []
-    assert inbox.mailbox(world.second_name) == []
+    assert [item.sender for item in inbox.mailbox(world.second_name)] == [world.lead_name]
 
 
 @pytest.mark.parametrize("repeat", range(2))

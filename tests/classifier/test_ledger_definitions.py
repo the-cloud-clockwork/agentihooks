@@ -63,11 +63,16 @@ CASES = [
     (
         "trace-plan",
         "cli",
-        {"off_intent": 0.3, "too_big_confidence": 0.7},
-        {"pieces": [{"slot": 2, "number": 3, "what": "a light"}], "sized": [{}]},
+        {"off_intent": 0.3, "covered": 0.7, "too_big_confidence": 0.7},
+        {"pieces": [{"slot": 2, "number": 3, "what": "a light"}], "covers": [], "sized": [{}]},
         {
             "piece_2": YesNo(
-                "Is piece 3, a light, needed to deliver the task?", "the task needs it", "it serves something else"
+                "Is piece 3, a light, needed to deliver the task? "
+                "Registering a CI job added by the task in the runner class table is required "
+                "to deliver that job, even when the task does not name the table. "
+                "Unrelated workflow edits remain out of scope.",
+                "the task needs it",
+                "it serves something else",
             ),
             "size": Score(TRACE_SIZE, SIZES),
         },

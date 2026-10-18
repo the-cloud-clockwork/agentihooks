@@ -35,13 +35,22 @@ def delete(slug, now=None):
     return repository.delete(slug, now)
 
 
+def require_local(slug: str) -> None:
+    from scripts.swarm_ledger import ledger_link
+
+    if ledger_link.remote():
+        raise SystemExit(f"remote ledger clients must use /api/v1/ledgers/{slug}/lifecycle/actions")
+
+
 def restore(slug, now=None):
+    require_local(slug)
     from scripts.swarm_ledger.repository import repository
 
     return repository.restore(slug, now)
 
 
 def bin_closed(slug, closed_at, now=None):
+    require_local(slug)
     from scripts.swarm_ledger.repository import bin_storage
 
     return bin_storage.bin_closed(slug, closed_at, now)

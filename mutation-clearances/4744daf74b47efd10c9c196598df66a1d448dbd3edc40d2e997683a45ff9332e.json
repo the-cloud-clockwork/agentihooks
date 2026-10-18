@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/store.py:scripts.swarm.store.x\u01c1RedisStore\u01c1claim__mutmut_12:fe91cd66f1ecfc7a6a87da9a58ed412801179057a7c69585733d0a3d0bd0e9c8": {
+    "reader": "standards_reader",
+    "reason": "claim requires an absent holder in _if_holder, WATCHes the claim key and confirms GET is None before MULTI. Any intervening write aborts EXEC. Successful EXEC therefore sees an absent key; removing NX or setting it to None or False changes neither lease write, generation increment nor boolean result."
+  }
+}

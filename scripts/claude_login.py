@@ -14,6 +14,7 @@ import termios
 import tty
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from pathlib import Path
 
 from hooks.context.account_sessions import TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv, openbao_step, term_colors
@@ -37,6 +38,9 @@ NO_TOKEN = "no token found (claude setup-token exited {code}); nothing written"
 NO_SLUG = "a slug is required off a terminal"
 CANNOT_RUN = "cannot run {binary}: {reason}"
 SUMMARY = "{name} written to {rc} ({length} chars). run: source {rc}"
+STEP_MASTER = "Sign in to the master claude ai account in the browser; the login stays in {home}"
+MASTER_FAILED = "claude auth login exited {code}; the master login is unchanged"
+STEP_RECOVERY = "Storing the master login recovery copy in OpenBao"
 _write = os.write
 
 
@@ -147,6 +151,7 @@ def _fail(message: str) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("slug", nargs="?")
+    parser.add_argument("--master")
     store = parser.add_mutually_exclusive_group()
     store.add_argument("--openbao", action="store_true", default=None)
     store.add_argument("--no-openbao", dest="openbao", action="store_false")
@@ -179,6 +184,55 @@ def _capture(runner: Callable) -> tuple[int, str]:
     return (code or 1) if failed else 0, token
 
 
+@dataclass(frozen=True)
+class Deps:
+    console: Console
+    opener: Callable | None = None
+    run: Callable = subprocess.run
+    render: Callable[[str], Path] | None = None
+
+
+def _rendered(profile: str) -> Path:
+    from scripts.profiles import render
+
+    render.render_claude(profile)
+    return render.profile_dir(profile) / "claude"
+
+
+def master(swarm: str, openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
+    from scripts import master_claude_login as login
+
+    try:
+        epoch = login.claim(swarm, PROG, os.getpid())
+    except login.LoginRefused as exc:
+        _fail(str(exc))
+        return 1
+    target = login.build(swarm, (deps.render or _rendered)(login.LANE))
+    print(term_colors.blue(STEP_MASTER.format(home=target)))
+    argv = [shutil.which("claude") or "claude", *login.SETTINGS, *login.LOGIN]
+    try:
+        code = deps.run(argv, env=login.child(environ, target)).returncode
+    except OSError as exc:
+        _fail(CANNOT_RUN.format(binary=argv[0], reason=exc.strerror or exc))
+        return 1
+    if code:
+        _fail(MASTER_FAILED.format(code=code))
+        return code
+    try:
+        bao = openbao_step.target(openbao, environ, deps.console, deps.opener)
+    except StoreRefused as exc:
+        _fail(str(exc))
+        return 1
+    if bao is not None:
+        print(term_colors.blue(STEP_RECOVERY))
+        try:
+            login.publish(bao, swarm, target, epoch)
+        except openbao_kv.OpenBaoError as exc:
+            _fail(str(exc))
+            return 1
+    return 0
+
+
 def main(
     args: list[str],
     environ: Mapping[str, str] | None = None,
@@ -190,6 +244,8 @@ def main(
     console = console or Console()
     parser = _parser()
     options = parser.parse_args(args)
+    if options.master:
+        return master(options.master, options.openbao, environ, Deps(console=console, opener=opener))
     raw = _raw_slug(options.slug, console, parser)
     if raw is None:
         return 2

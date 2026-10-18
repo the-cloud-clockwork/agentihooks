@@ -64,18 +64,6 @@ def author(op, ctx) -> tuple[str, str] | None:
     return (by, words) if words else None
 
 
-def under(doc: dict, target: str) -> set:
-    below = {}
-    for node, (_, link, _) in project(doc)[0].items():
-        below.setdefault(link, []).append(node)
-    for task in doc.get("tasks", []):
-        below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
-    found = [target]
-    for parent in found:
-        found += [node for node in below.get(parent, []) if node not in found]
-    return set(found)
-
-
 def _set(doc, op, ctx, by, words):
     target = op["target"]
     if not selector(target) and target not in project(doc)[0]:
@@ -92,11 +80,10 @@ def _set(doc, op, ctx, by, words):
 
 def _clear(doc, op, ctx, by):
     target = op["target"]
-    held = under(doc, target)
     rows = doc.get("freezes", [])
-    gone = [row for row in rows if row["target"] in held]
+    gone = [row for row in rows if row["target"] == target]
     if gone:
-        doc["freezes"] = [row for row in rows if row["target"] not in held]
+        doc["freezes"] = [row for row in rows if row["target"] != target]
         cleared = [row["target"] for row in gone]
         ctx.record(by, "unfrozen", target, id=op["id"], cleared=cleared, reason=op.get("reason", ""))
         ctx.stamp("freezes", by)

@@ -60,6 +60,71 @@ def test_a_publish_appends_a_patch_that_rebuilds_the_new_value():
     assert hub.resource(SLUG, "ledger") == ledger(2, tasks=[{"id": "t1"}])
 
 
+def test_immutable_snapshot_publication_keeps_names_revisions_and_replay():
+    hub = Hub()
+    old = ledger(1, tasks=[{"id": "t1", "title": "first"}])
+    hub.open(SLUG, lambda: {"ledger": old})
+    new = ledger(2, tasks=[{"id": "t1", "title": "second"}])
+    assert hub.publish_snapshot(SLUG, "ledger", new)
+    assert hub.resource(SLUG, "ledger") is new
+    frames = hub.wait(SLUG, 0, 0)
+    assert len(frames) == 1
+    assert frames[0][2] == "ledger"
+    assert frames[0][3]["rev"] == 2
+    assert apply(old, frames[0][3]["patch"]) == new
+    assert not hub.publish_snapshot(SLUG, "ledger", old)
+    assert not hub.publish_snapshot(SLUG, "ledger", new)
+    assert hub.channels[SLUG].seq == 1
+
+
+def test_immutable_snapshot_baseline_and_unwatched_resources():
+    hub = Hub()
+    state = ledger(1)
+    assert not hub.publish_snapshot(SLUG, "ledger", state)
+    assert not hub.has(SLUG)
+    hub.open(SLUG, lambda: {"ledger": state})
+    other = {"config": {"state": "running"}}
+    assert not hub.publish_snapshot(SLUG, "swarm", other)
+    assert hub.resource(SLUG, "swarm") is other
+    assert hub.channels[SLUG].seq == 0
+
+
+@pytest.mark.parametrize("change", ["metadata", "equivalent", "copy", "append", "reorder", "no_ids"])
+def test_snapshot_comparison_work_is_bounded_by_changed_structure(change, monkeypatch):
+    shared = [{"id": str(index), "values": list(range(64))} for index in range(32)]
+    if change == "no_ids":
+        shared = [list(range(64)) for _ in range(32)]
+    tasks = shared
+    if change == "copy":
+        tasks = list(shared)
+    elif change in {"append", "no_ids"}:
+        tasks = [*shared, {"id": "added", "values": []}]
+    elif change == "reorder":
+        tasks = list(reversed(shared))
+    old, new = ledger(1, tasks=shared), ledger(1 if change == "equivalent" else 2, tasks=tasks)
+    hub = Hub()
+    hub.open(SLUG, lambda: {"ledger": ledger(0)})
+    hub.publish_snapshot(SLUG, "ledger", old)
+    calls = 0
+    original = events_hub.patch.same
+
+    def counted(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(events_hub.patch, "same", counted)
+    assert hub.publish_snapshot(SLUG, "ledger", new) is (change != "equivalent")
+    budget = (
+        20 if change in {"metadata", "equivalent"} else len(shared) * (3 if change in {"append", "reorder"} else 1) + 20
+    )
+    assert calls <= budget
+    frames = hub.wait(SLUG, 1, 0)
+    assert len(frames) == (0 if change == "equivalent" else 1)
+    if frames:
+        assert apply(old, frames[0][3]["patch"]) == new
+
+
 def test_publishing_an_unchanged_value_or_an_unwatched_ledger_adds_nothing():
     hub = Hub()
     assert not hub.publish(SLUG, "ledger", ledger(1))
@@ -133,11 +198,11 @@ def test_a_publish_builds_its_patch_while_holding_the_channel_lock(monkeypatch):
         if got:
             hub.changed.release()
 
-    def diff(old, new):
+    def diff(old, new, **options):
         other = threading.Thread(target=try_lock)
         other.start()
         other.join()
-        return real_diff(old, new)
+        return real_diff(old, new, **options)
 
     monkeypatch.setattr(events_hub.patch, "diff", diff)
     hub.publish(SLUG, "ledger", ledger(2))
@@ -221,6 +286,7 @@ def test_a_cursor_older_than_retention_is_expired_and_the_oldest_kept_one_replay
     assert hub.open(SLUG, None, Hub.cursor(channel, 11)) == (11, [channel.log[-1]])
 
 
+@pytest.mark.wall_clock
 def test_wait_returns_nothing_after_its_timeout():
     hub = Hub()
     opened(hub)

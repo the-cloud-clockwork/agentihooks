@@ -274,6 +274,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--force-shared", action="store_true", help="Allow terminating a process shared by multiple UUIDs"
     )
+    parser.add_argument("--stand-down", action="store_true")
+    parser.add_argument("--swarm")
     parser.add_argument("--term-timeout", type=float, default=3.0)
     parser.add_argument("--keep-pane", action="store_true", help="Leave the agent's herdr pane open")
     parser.add_argument("--json", action="store_true")
@@ -293,6 +295,14 @@ def main(argv: list[str] | None = None) -> int:
     if not args.selector:
         print("terminate-agent: selector is required unless --list is used", file=sys.stderr)
         return 2
+    if args.stand_down and args.type == "claude":
+        print("terminate-agent: --stand-down stops Codex conversations only, not --type claude", file=sys.stderr)
+        return 2
+    if args.stand_down:
+        from scripts.codex_session import stand_down
+
+        codex = [item for item in items if item.target == "codex"]
+        return stand_down.run(args.selector, args.swarm, args.dry_run, codex, args.json)
     try:
         selected = resolve(items, args.selector, args.type)
         members = validate(selected, items, force_shared=args.force_shared)

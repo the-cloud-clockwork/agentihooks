@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import time
 from pathlib import Path
 
 import yaml
@@ -15,6 +16,8 @@ RUNNER_LOSS = re.compile(
     r"|The job was not acquired by Runner"
 )
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
+EXIT_POLLS = 60
+EXIT_POLL_SECONDS = 30
 
 
 def base_name(job_name: str) -> str:
@@ -35,7 +38,7 @@ def dependents(workflow: dict, root: str = SHARD) -> set[str]:
 
 
 def decide(run: dict, failed: list[dict], workflow: dict) -> tuple[bool, str]:
-    if run.get("event") != "merge_group" or run.get("conclusion") != "failure":
+    if run.get("event") != "merge_group" or run.get("conclusion") not in ("failure", "cancelled"):
         return False, "not a failed merge group run"
     if run.get("run_attempt") != 1:
         return False, f"attempt {run.get('run_attempt')} already ran"
@@ -60,13 +63,17 @@ def failed_jobs(repo: str, run_id: int) -> list[dict]:
     jobs = json.loads(_api(f"repos/{repo}/actions/runs/{run_id}/jobs?filter=latest&per_page=100"))
     failed = []
     for job in jobs["jobs"]:
-        if job["conclusion"] != "failure":
+        shard = base_name(job["name"]) == SHARD
+        if job["conclusion"] != "failure" and not (shard and job["conclusion"] == "cancelled"):
             continue
         notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job['id']}/annotations"))]
-        if base_name(job["name"]) == SHARD:
-            log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs")
+        if shard:
+            log = _api(f"repos/{repo}/actions/jobs/{job['id']}/logs", "--allow-escape-sequences")
             notes += [line for line in log.splitlines() if "##[error]" in line]
-        failed.append({"name": job["name"], "text": "\n".join(notes)})
+        text = "\n".join(notes)
+        if job["conclusion"] == "cancelled" and not RUNNER_LOSS.search(text):
+            continue
+        failed.append({"name": job["name"], "text": text})
     unlisted = jobs["total_count"] - len(jobs["jobs"])
     if unlisted > 0:
         failed.append({"name": f"{unlisted} unlisted jobs", "text": ""})
@@ -82,11 +89,10 @@ def requeue(pull: dict) -> tuple[bool, str]:
     if pull.get("state") != "OPEN" or pull.get("isInMergeQueue"):
         return False, "pull request is not open outside the queue"
     head_at = pull["commits"]["nodes"][-1]["commit"]["committedDate"]
-    removals = [
-        event
-        for event in pull["timelineItems"]["nodes"]
-        if event["reason"] == "failed_checks" and event["createdAt"] >= head_at
-    ]
+    since_head = [event for event in pull["timelineItems"]["nodes"] if event["createdAt"] >= head_at]
+    if since_head and since_head[-1]["reason"] != "failed_checks":
+        return False, f"head last left the queue for {since_head[-1]['reason']}"
+    removals = [event for event in since_head if event["reason"] == "failed_checks"]
     if len(removals) > 1:
         return False, f"head already left the queue {len(removals)} times on failed checks"
     return True, "first failed checks removal of this head"
@@ -96,11 +102,21 @@ def pull_state(repo: str, number: int) -> dict:
     owner, name = repo.split("/")
     query = (
         f'query{{repository(owner:"{owner}",name:"{name}"){{pullRequest(number:{number}){{'
-        "id state isInMergeQueue commits(last:1){nodes{commit{committedDate}}} "
+        "id state isInMergeQueue commits(last:1){nodes{commit{oid committedDate}}} "
         "timelineItems(last:100,itemTypes:[REMOVED_FROM_MERGE_QUEUE_EVENT])"
         "{nodes{... on RemovedFromMergeQueueEvent{createdAt reason}}}}}}"
     )
     return json.loads(_api("graphql", "-f", f"query={query}"))["data"]["repository"]["pullRequest"]
+
+
+def pull_after_exit(repo: str, number: int) -> dict:
+    pull = pull_state(repo, number)
+    for _ in range(EXIT_POLLS):
+        if not pull.get("isInMergeQueue"):
+            return pull
+        time.sleep(EXIT_POLL_SECONDS)
+        pull = pull_state(repo, number)
+    return pull
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -113,13 +129,17 @@ def main(argv: list[str] | None = None) -> int:
     number = pull_number(run)
     if retry and number is None:
         retry, reason = False, f"no pull request in queue branch {run.get('head_branch')}"
+    node = head = ""
     if retry:
-        allowed, why = requeue(pull_state(args.repo, number))
+        pull = pull_after_exit(args.repo, number)
+        allowed, why = requeue(pull)
         retry, reason = allowed, f"{reason}; {why}"
+        if retry:
+            node, head = pull["id"], pull["commits"]["nodes"][-1]["commit"]["oid"]
     print(json.dumps({"run": args.run_id, "pull": number, "requeue": retry, "reason": reason}))
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as handle:
-            handle.write(f"requeue={str(retry).lower()}\npull={number or ''}\n")
+            handle.write(f"requeue={str(retry).lower()}\npull={number or ''}\nnode={node}\nhead={head}\n")
     return 0
 
 

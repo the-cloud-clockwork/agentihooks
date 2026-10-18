@@ -1,11 +1,14 @@
 """Derive conservative worker resource profiles from measured workload runs and gate their promotion."""
 
+import hashlib
 import json
 import math
 import os
 from collections.abc import Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+from scripts.swarm_v2.runtime.commands import Principal, Role
 
 CLASSES = ("general", "browser", "compiler", "memory")
 IDLE = "idle"
@@ -158,6 +161,8 @@ def derive(measured: dict, nodes: Sequence[dict], policy: Policy) -> dict:
         "host": measured["host"],
         "tools": measured["tools"],
         "policy": asdict(policy),
+        "runs_digest": hashlib.sha256(json.dumps(measured["runs"], sort_keys=True).encode()).hexdigest(),
+        "evidence": json.loads(json.dumps({"measurements": measured, "nodes": nodes})),
         "profiles": built,
         "refused": refused,
         "coexistence": coexistence(built, nodes) if nodes else "unmeasured: no node capacity was recorded",
@@ -229,11 +234,35 @@ def _install(path: Path, report: dict) -> None:
     staged.replace(path)
 
 
-def accept(path: Path, candidate: dict, policy: Policy, requalified_by: str) -> dict:
+def _rederived(candidate: dict) -> dict | None:
+    try:
+        evidence = candidate["evidence"]
+        report = derive(evidence["measurements"], evidence["nodes"], Policy(**candidate["policy"]))
+    except (KeyError, TypeError, ValueError, ClaimRefused):
+        return None
+    return report if _canonical(report) == _canonical(candidate) else None
+
+
+def accept(
+    path: Path, candidate: dict, policy: Policy, requalified_by: str, *, reviewer: Principal | None = None
+) -> dict:
     """Install candidate when promote allows it, keeping the report it replaces for rollback."""
     current = json.loads(path.read_text()) if path.exists() else None
-    outcome = promote(current, candidate, policy, requalified_by)
+    authorized = (
+        isinstance(reviewer, Principal) and reviewer.role is Role.OPERATOR and reviewer.name == requalified_by.strip()
+    )
+    outcome = promote(current, candidate, policy, requalified_by if authorized else "")
     if outcome["decision"] in INSTALLS:
+        verified = _rederived(candidate)
+        if verified is None:
+            return {
+                "decision": "refused",
+                "accepted": current,
+                "changes": {"evidence": "candidate does not match its recorded runs"},
+            }
+        outcome["accepted"] = (
+            {**verified, REVIEWER: reviewer.name} if outcome["decision"] == "requalified" else verified
+        )
         if current is not None:
             _install(_previous(path), current)
         _install(path, outcome["accepted"])

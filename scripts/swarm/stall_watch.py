@@ -1,6 +1,6 @@
 """Stall watchdog: each tick holds every open swarm pull request and every lane against a limit.
 
-A pull request left green and unqueued, red with no push, without a live owner, or unmergeable reopens its task for
+In enforce mode, a pull request left green and unqueued, red with no push, without a live owner, or unmergeable reopens its task for
 the next engineer, who continues from the stored handoff and branch. A ready task left unclaimed while its lane is full
 and accounts show free seats only raises the alert. Every alert reaches the master's inbox and the health findings;
 one still open two more limits later reaches the operator's Priorities and ntfy.
@@ -13,9 +13,11 @@ import urllib.request
 from collections.abc import Callable
 from dataclasses import dataclass, fields
 
+from scripts.gates.base import Who
+from scripts.gates.enforcement import STALL_WATCH
 from scripts.inbox import exits
 from scripts.inbox.store import CLOSED, InboxError, InboxStore
-from scripts.swarm import capacity, outage, ready, waits
+from scripts.swarm import capacity, idle, outage, ready, waits
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.ledger_events import Mail
 
@@ -98,6 +100,7 @@ class Watch:
     now_ms: int
     environ: dict | None = None
     post: Callable = ntfy
+    released: Callable = lambda task: True
 
 
 def _key(watch, name):
@@ -114,8 +117,7 @@ def stall_pass(watch, doc):
     if gone:
         watch.store.redis.srem(_key(watch, QUEUED), *gone)
     for task in held:
-        found = ready.record(watch.store, watch.slug, task["id"]) if ready.awaiting(task) else None
-        if found and waits.dependency(found.get("dependency", {}), task, rows, watch.view):
+        if _waiting(watch, task, rows):
             continue
         actions += _pull_request(watch, mail, task, limit, marks, seen)
     actions += _unclaimed(watch, mail, rows, limit, marks, seen)
@@ -125,6 +127,18 @@ def stall_pass(watch, doc):
     return actions + _escalate(watch, rows)
 
 
+def _waiting(watch, task, rows):
+    tid, owner = task["id"], task.get("claimed_by")
+    if not watch.released(task):
+        return True
+    if any(dep != tid and rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
+        return True
+    found = ready.record(watch.store, watch.slug, tid) if ready.awaiting(task) else None
+    declared = idle.wait(watch.store.redis, watch.slug, owner) if owner else None
+    held = ((found or {}).get("dependency"), (declared or {}).get("on"))
+    return any(on and waits.dependency(on, task, rows, watch.view) for on in held)
+
+
 def _minutes(watch, since):
     return (watch.now_ms - since - outage.paused_ms(watch.slug, since, watch.now_ms)) // MINUTE_MS
 
@@ -132,6 +146,11 @@ def _minutes(watch, since):
 def _since(watch, marks, seen, mark):
     seen[mark] = int(marks.get(mark, watch.now_ms))
     return seen[mark]
+
+
+def _woken(watch, task):
+    owner = task.get("claimed_by")
+    return idle.woke(watch.store.redis, watch.slug, owner) if owner else 0
 
 
 def _stall(watch, task, pull, marks, seen, agent):
@@ -176,7 +195,7 @@ def _pull_request(watch, mail, task, limit, marks, seen):
     if case is None:
         return []
     if case != "owner":
-        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0)
+        since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0, _woken(watch, task))
     minutes = _minutes(watch, since)
     if minutes < getattr(limit, case):
         return []
@@ -194,6 +213,8 @@ def _reopen(watch, mail, task, case, minutes, limit):
     if outage.held(watch.store, watch.slug, owner or None):
         return []
     agent = next((a for a in watch.store.agents(watch.slug) if a.name == owner and a.state != FINISHED), None)
+    if not _may_reopen(watch, task, agent, case, minutes):
+        return _alert(watch, mail, task, case, minutes, ALERTED, limit)
     if agent is not None and agent.name in watch.live and not watch.retire(agent):
         return [f"could not retire {owner} for stalled task {tid}, retrying next tick"]
     reopened = watch.ledger.update_task(
@@ -201,6 +222,7 @@ def _reopen(watch, mail, task, case, minutes, limit):
     )
     if reopened.get("state") != "open" or reopened.get("claimed_by"):
         return []
+    watch.store.mark_restart(watch.slug, tid, "watchdog")
     if owner:
         watch.store.release(watch.slug, tid, owner)
     if agent is not None:
@@ -211,6 +233,15 @@ def _reopen(watch, mail, task, case, minutes, limit):
     text = COMMENT.format(action=REOPENED, pr=task["pr_url"], case=CASES[case], minutes=minutes)
     watch.ledger.comment(watch.slug, tid, text, by=SENDER)
     return _alert(watch, mail, task, case, minutes, REOPENED, limit)
+
+
+def _may_reopen(watch, task, agent, case, minutes):
+    who = Who(name=task.get("claimed_by") or "", swarm=watch.slug, task=task["id"])
+    reason = f"{CASES[case]} for {minutes} minutes"
+    allowed = STALL_WATCH.allows(watch.store, who, "reopen", reason, watch.now_ms)
+    if agent is not None and agent.name in watch.live:
+        allowed = STALL_WATCH.allows(watch.store, who, "stop", reason, watch.now_ms) and allowed
+    return allowed
 
 
 def _earlier(inbox, raw):

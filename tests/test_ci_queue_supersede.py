@@ -70,7 +70,11 @@ def _workflow():
 
 
 def _step():
-    [step] = [step for step in _workflow()["jobs"]["durations"]["steps"] if step.get("name") == STEP]
+    [step] = [
+        step
+        for step in _workflow()["jobs"].get("durations", _workflow()["jobs"]["select"])["steps"]
+        if step.get("name") == STEP
+    ]
     return step
 
 
@@ -108,9 +112,7 @@ def _run(tmp_path, ref="refs/heads/" + OWN, live=LIVE, **env):
 
 def test_the_workflow_concurrency_stays_unchanged():
     concurrency = _workflow()["concurrency"]
-    assert (
-        concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' || github.event_name == 'push' }}"
-    )
+    assert concurrency["cancel-in-progress"] == "${{ github.event_name == 'pull_request' }}"
     assert concurrency["queue"] == "${{ github.event_name == 'workflow_dispatch' && 'max' || 'single' }}"
     assert concurrency["group"].endswith(
         "|| format('tests-{0}-{1}', github.event_name, github.event.pull_request.number || github.run_id) }}"
@@ -136,7 +138,7 @@ def test_the_sweep_runs_on_merge_group_runs_from_trusted_queue_actors(github, ru
 
 
 def test_the_sweep_runs_on_the_app_token_minted_to_cancel():
-    job = _workflow()["jobs"]["durations"]
+    job = _workflow()["jobs"].get("durations", _workflow()["jobs"]["select"])
     names = [step.get("name") for step in job["steps"]]
     mint = job["steps"][names.index("Mint the tcc main ci App token")]
     assert names.index(STEP) == names.index("Mint the tcc main ci App token") + 1

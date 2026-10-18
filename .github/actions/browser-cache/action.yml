@@ -35,7 +35,7 @@ runs:
     - name: Restore Chromium
       if: steps.image.outputs.linked != 'true'
       id: cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/.playwright
         key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
@@ -75,3 +75,9 @@ runs:
           [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once."
         done
         exit 1
+    - name: Save Chromium from dev
+      if: steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/.playwright
+        key: ${{ steps.cache.outputs.cache-primary-key }}

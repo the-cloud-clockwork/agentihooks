@@ -116,7 +116,8 @@ def test_empty_page_set_names_all_cap_fields():
     with pytest.raises(ValueError) as caught:
         ledger_server.control_argv({"action": "set"})
     assert (
-        str(caught.value) == "set needs max_eng, max_ci, max_plan, compact_limit, effort_min, effort_max, autonomy, "
+        str(caught.value)
+        == "set needs max_eng, max_ci, max_plan, masters_step, compact_limit, effort_min, effort_max, autonomy, "
         "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
     )
 

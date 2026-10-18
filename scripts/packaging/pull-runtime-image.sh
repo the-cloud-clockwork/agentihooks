@@ -5,8 +5,14 @@ image="$1"
 shift
 docker_host="${DOCKER_HOST:-unix:///var/run/docker.sock}"
 attempts=3
+limit="${PULL_ATTEMPT_SECONDS:-120}"
+if [[ ${SWARM_SMOKE_RUNTIME_IMAGES_READY:-} == true &&
+      ( "$image" == mirror.gcr.io/library/redis:7 || "$image" == mirror.gcr.io/library/redis:7-alpine ) ]] &&
+   [[ "$(timeout "$limit" docker --host "$docker_host" image inspect --format '{{.Architecture}}' "$image" 2>/dev/null)" == amd64 ]]; then
+  exit 0
+fi
 acquire() {
-  digest="$(docker manifest inspect "$@" "$image" | python3 -c '
+  manifest="$(timeout "$limit" docker manifest inspect "$@" "$image")" && digest="$(python3 -c '
 import json
 import sys
 
@@ -14,7 +20,7 @@ index = json.load(sys.stdin)
 print(next(manifest["digest"] for manifest in index["manifests"]
            if manifest.get("platform", {}).get("os") == "linux"
            and manifest["platform"].get("architecture") == "amd64"))
-')" && docker --host "$docker_host" pull "$image@$digest"
+' <<<"$manifest")" && timeout "$limit" docker --host "$docker_host" pull "$image@$digest"
 }
 for attempt in $(seq "$attempts"); do
   if acquire "$@"; then

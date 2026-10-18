@@ -46,6 +46,7 @@ class BlockAction(Exception):
 
 _OTEL_SECRET_DETECTED = "agentihooks.guardrail.secret_detected"
 _UNSET = "<unset>"
+_QUESTION_CHECK_FAILED = "The question tool is off: the operator presence check failed. Keep working without it."
 
 
 # Heavy imports are lazy-loaded in functions that need them:
@@ -307,6 +308,24 @@ def notify_on_error(transcript_path: str) -> None:
 # =============================================================================
 
 
+def _run_start_conditions(payload: dict) -> None:
+    try:
+        from hooks.context import conditions
+        from hooks.targets.capabilities import can_inject_context
+
+        if not can_inject_context("SessionStart"):
+            return
+        effect = conditions.start_effect(payload)
+        if not effect:
+            return
+        from hooks.common import inject_context
+
+        for ctx in effect.contexts:
+            inject_context(ctx)
+    except Exception as e:
+        log("conditions session_start failed", {"error": str(e)})
+
+
 def on_session_start(payload: dict) -> None:
     """Handle SessionStart event."""
     session_id = payload.get("session_id", "")
@@ -316,6 +335,7 @@ def on_session_start(payload: dict) -> None:
     from hooks.lifecycle.guard import session_event
 
     session_event()
+    _run_start_conditions(payload)
     try:
         from hooks.lifecycle.deps_kick import kick as deps_kick
 
@@ -855,9 +875,11 @@ def on_user_prompt_submit(payload: dict) -> None:
             contains_pr_signal,
             contains_release_signal,
         )
+        from hooks.context.pane_guard import observe_pane_signal
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
+        observe_pane_signal(session_id, prompt, typed)
         if prompt and typed:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
@@ -1077,6 +1099,15 @@ def _swarm_outcome(payload: dict) -> None:
         log("swarm outcome record failed", {"error": str(e)})
 
 
+def _master_login_checkpoint() -> None:
+    try:
+        from scripts import master_claude_login
+
+        master_claude_login.checkpoint(os.environ)
+    except Exception as e:
+        log("master login checkpoint failed", {"error": str(e)})
+
+
 def _swarm_ledger(payload: dict) -> None:
     try:
         from hooks.context.swarm_ledger import run
@@ -1139,7 +1170,7 @@ def _operator_question(payload: dict) -> str:
         return operator_mode.question_block(payload.get("tool_name"), payload.get("session_id"))
     except Exception as e:
         log("operator question check failed", {"error": str(e)})
-        return ""
+        return _QUESTION_CHECK_FAILED if payload.get("tool_name") == "AskUserQuestion" else ""
 
 
 def _operator_reminder(payload: dict) -> None:
@@ -1249,10 +1280,12 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
 
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
+    from hooks.context.pane_guard import check_panes
     from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
     check_github_watch(payload)
+    check_panes(payload)
     if payload.get("tool_name") != "Bash":
         return
     try:
@@ -2165,6 +2198,19 @@ def on_post_tool_use(payload: dict) -> None:
     _trace_mark("post_tool_use_done", tool_name, _trace_session_id)
 
 
+def _link_codex_rollout(transcript_path: str) -> None:
+    from hooks.targets import is_codex
+
+    if not is_codex():
+        return
+    try:
+        from scripts import codex_rollouts
+
+        codex_rollouts.link_current(transcript_path)
+    except Exception as e:
+        log("codex rollout link failed", {"error": str(e)})
+
+
 def on_stop(payload: dict) -> None:
     """Handle Stop event."""
     _stop_block = None
@@ -2180,10 +2226,12 @@ def on_stop(payload: dict) -> None:
     session_id = payload.get("session_id", "")
     transcript_path = payload.get("transcript_path", "")
     _confirm_inbox(session_id)
+    _link_codex_rollout(transcript_path)
 
     # Parse transcript to get metrics (Claude Code doesn't include these in hook payload)
     metrics = parse_transcript_metrics(transcript_path) if transcript_path else {}
     _swarm_heartbeat("idle", payload=payload)
+    _master_login_checkpoint()
     log(
         "Claude stopped",
         {
@@ -2531,6 +2579,12 @@ def on_status_line(payload: dict) -> None:
 def on_notification(payload: dict) -> None:
     """Handle Notification event."""
     log("Notification", payload)
+    try:
+        from scripts.swarm import remote_control
+
+        remote_control.on_notification(payload)
+    except Exception as e:
+        log("remote control notice failed", {"error": str(e)})
 
 
 def on_pre_compact(payload: dict) -> None:
@@ -2559,12 +2613,14 @@ def on_permission_request(payload: dict) -> None:
     """Handle PermissionRequest event."""
     tool_name = payload.get("tool_name", "unknown")
     log(f"Permission requested: {tool_name}", {"tool": tool_name})
-    from hooks.context import master_coding, planner_plan
+    from hooks.context import master_coding, operator_mode, planner_plan
 
     if planner_plan.accepts(tool_name):
         print(json.dumps(planner_plan.grant(payload.get("tool_input") or {})))
     elif master_coding.asks_operator(tool_name, payload.get("session_id")):
         return
+    elif tool_name in master_coding.PERMISSION_TOOLS:
+        emit_permission_decision("PermissionRequest", "deny", operator_mode.PROMPT_REFUSAL.format(tool=tool_name))
     elif os.environ.get("AGENTIHOOKS_SWARM"):
         emit_permission_decision(
             "PermissionRequest",
