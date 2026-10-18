@@ -824,19 +824,17 @@ jobs:
           key: ${{ needs.select.outputs.key }}
           fail-on-cache-miss: true
 
-      - name: Use recent slow measurements for the queue
-        if: github.event_name == 'merge_group'
-        run: |
-          for suffix in '' -3.11 -3.12; do
-            measured="$HOME/dev-durations/.test_durations-slowest$suffix"
-            [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
-          done
-
       - name: Adopt latest dev durations
         if: needs.select.outputs.source == ''
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: |-
+          if [[ "$GITHUB_EVENT_NAME" == merge_group ]]; then
+            for suffix in '' -3.11 -3.12; do
+              measured="$HOME/dev-durations/.test_durations-slowest$suffix"
+              [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
+            done
+          fi
           collection=()
           if [[ "$GITHUB_EVENT_NAME" != push ]]; then
             collection=(--collection collected.json)
