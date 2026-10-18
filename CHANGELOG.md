@@ -56,6 +56,8 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Fixed
 
+- Test count collection failures print each failing module and its exception in CI job logs.
+
 - `terminate-agent --stand-down` reports a Redis error with whether the
   conversation is fenced, names a process with unregistered conversations as
   unknown and refuses to fence a conversation that exited after its plan.

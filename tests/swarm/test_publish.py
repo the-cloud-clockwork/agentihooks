@@ -587,6 +587,79 @@ def test_failed_gate_never_pushes_and_can_retry_the_committed_head(publication, 
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
 
 
+def counted_pushes(publish, monkeypatch):
+    pushes = []
+    native = publish.execute
+
+    def counted(argv, where):
+        if argv[:2] == ["git", "push"]:
+            pushes.append(argv)
+        return native(argv, where)
+
+    monkeypatch.setattr(publish, "execute", counted)
+    return pushes
+
+
+@pytest.mark.parametrize("files", [[], ["chosen.txt"]])
+def test_an_unchanged_publish_to_a_matching_remote_makes_no_commit_gate_or_push(publication, monkeypatch, files):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    head = git(root, "rev-parse", "HEAD")
+    (root / ".git-gate-head").unlink()
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", files
+    )
+    assert pushes == []
+    assert git(root, "rev-parse", "HEAD") == head
+    assert not (root / ".git-gate-head").exists()
+    assert result["head"] == head
+    assert (
+        result["unchanged"]
+        == "no changes in the listed files and the remote branch already points at this head; nothing pushed"
+    )
+    assert "gate" not in result
+
+
+def test_an_unchanged_publish_still_pushes_a_branch_the_remote_is_behind(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    git(root, "commit", "--allow-empty", "-qm", "Local only")
+    head = git(root, "rev-parse", "HEAD")
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    assert len(pushes) == 1
+    assert "unchanged" not in result
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
+def test_an_unchanged_publish_still_pushes_a_branch_the_remote_lacks(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    git(root, "push", "origin", "--delete", "engineer-test")
+    head = git(root, "rev-parse", "HEAD")
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", [])
+    assert pushes == [["git", "push", "-u", "origin", "HEAD:refs/heads/engineer-test"]]
+    assert "unchanged" not in result
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+    assert publish.remote_head(root, "engineer-absent") == ""
+
+
 def fake_python(path, log, ruff):
     import sys
 

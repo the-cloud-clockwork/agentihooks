@@ -322,12 +322,21 @@ def test_a_renamed_test_keeps_the_floor(tmp_path):
 
 @pytest.mark.parametrize("side", ["base", "head"])
 def test_a_collection_error_on_either_side_is_red(tmp_path, side):
-    broken = {"test_a.py": SUITE, "test_x.py": "import not_a_module_anywhere\n"}
+    broken = {
+        "test_a.py": SUITE,
+        "test_x.py": "import not_a_module_anywhere\n",
+        "test_y.py": "raise RuntimeError('another collection exception')\n",
+    }
     sides = {"base": {"test_a.py": SUITE}, "head": {"test_a.py": SUITE}}
     sides[side] = broken
     result = _floor(tmp_path, sides["base"], sides["head"])
     assert result.returncode == 1
     assert f"::error::Collecting the {side} tests failed" in result.stdout
+    output = result.stdout + result.stderr
+    assert "tests/test_x.py" in output
+    assert "ModuleNotFoundError: No module named 'not_a_module_anywhere'" in output
+    assert "tests/test_y.py" in output
+    assert "RuntimeError: another collection exception" in output
 
 
 SUBJECT = "def subject():\n    return 1\n"

@@ -73,6 +73,7 @@ def sections():
 
 SWARM_PANELS = {
     "quota-fold",
+    "hives-fold",
     "overlays-fold",
     "agents-fold",
     "health-fold",
