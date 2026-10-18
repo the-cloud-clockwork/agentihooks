@@ -35,6 +35,16 @@ def record(jobs, event="push", identity=7, **extra):
     }
 
 
+def test_waiting_shards_share_one_finding_with_full_group_statistics():
+    jobs = [job(wait, identity=n) for n, wait in enumerate([301, 310, 320, 330, 340, 350, 360, 400])]
+    [finding] = ci_speed.findings([record(jobs)], NOW - 2000000, NOW)
+    assert finding.measure == 400
+    assert "8 jobs" in finding.summary
+    assert "longest 400 seconds" in finding.evidence[0]
+    assert "median 335.0 seconds" in finding.evidence[0]
+    assert "anton-oss" in finding.evidence[0]
+
+
 @pytest.mark.parametrize("wait, count", [(299, 0), (300, 0), (301, 1)])
 def test_runner_wait_crosses_only_above_five_minutes(wait, count):
     found = ci_speed.findings([record([job(wait)])], NOW - 2000000, NOW)
