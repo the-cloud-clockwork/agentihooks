@@ -94,6 +94,7 @@ class PullRequest:
     checks_pending: bool = False
     checks_passed: bool = False
     stale_red: bool = False
+    required_pending: bool = False
 
 
 def iso_ms(text):
@@ -139,12 +140,6 @@ def pull_request(raw):
         pushes = [iso_ms(commits[-1]["committedDate"])]
     unpassed_gate = _unpassed_gate(raw.get("gated"), checks, results, running)
     failing = any(result in RED for result in results)
-    restarted = _restarted(raw)
-    stale_red = (
-        failing
-        and restarted is not None
-        and all(_started(check) is not None and _started(check) < restarted for check in _red(checks, results))
-    )
     return PullRequest(
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
@@ -174,7 +169,18 @@ def pull_request(raw):
         any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
         any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
-        stale_red,
+        _stale_red(raw, checks, results),
+        any(result in PENDING for result in results),
+    )
+
+
+def _stale_red(raw, checks, results):
+    restarted = _restarted(raw)
+    reds = [check for check, result in zip(checks, results) if result in RED]
+    return (
+        bool(reds)
+        and restarted is not None
+        and all(_started(check) is not None and _started(check) < restarted for check in reds)
     )
 
 
@@ -186,10 +192,6 @@ def _restarted(raw):
 def _started(check):
     started = check.get("startedAt") or check.get("createdAt")
     return iso_ms(started) if started else None
-
-
-def _red(checks, results):
-    return [check for check, result in zip(checks, results) if result in RED]
 
 
 def _read_head(head, commits):

@@ -1197,7 +1197,7 @@ def test_a_release_hold_keeps_every_stall_rule_until_a_newer_release_exists(pull
     assert _reopened(swarm)
 
 
-REFRESHING = replace(RUNNING, pushed_at=START + MINUTE, checks_pending=True)
+REFRESHING = replace(RUNNING, pushed_at=START + MINUTE, checks_pending=True, required_pending=True)
 RESTARTED_AT = "1970-01-01T02:50:00Z"
 
 
@@ -1307,6 +1307,38 @@ def test_a_red_check_without_a_start_time_is_never_stale():
     status = {"context": "sonar", "state": "FAILURE", "createdAt": "1970-01-01T02:45:00Z"}
     assert ledger_events.pull_request({**raw, "statusCheckRollup": [status]}).stale_red is True
     assert ledger_events.pull_request({"state": "OPEN", "statusCheckRollup": [status]}).stale_red is False
+
+
+def test_a_stale_red_run_beside_fresh_passing_runs_is_stale_and_pending_required_checks_are_read():
+    fresh = {"name": "Lint", "conclusion": "SUCCESS", "startedAt": "1970-01-01T02:51:00Z"}
+    stale = {"name": "Tests", "conclusion": "FAILURE", "startedAt": "1970-01-01T02:45:00Z"}
+    running = {"name": "Build", "conclusion": None, "startedAt": "1970-01-01T02:52:00Z"}
+    raw = {"state": "OPEN", "timelineItems": {"nodes": [{"createdAt": RESTARTED_AT}]}}
+    pull = ledger_events.pull_request({**raw, "statusCheckRollup": [stale, fresh]})
+    assert pull.red and pull.stale_red and not pull.required_pending
+    optional = {**running, "isRequired": False}
+    assert ledger_events.pull_request({**raw, "statusCheckRollup": [fresh, running]}).required_pending is True
+    optional_pull = ledger_events.pull_request({**raw, "statusCheckRollup": [{**fresh, "isRequired": True}, optional]})
+    assert optional_pull.checks_pending and not optional_pull.required_pending
+
+
+def test_only_pending_optional_checks_never_hold_a_dropped_pull_request():
+    swarm = Swarm(QUEUED)
+    _idle_owner(swarm)
+    swarm.tick(START)
+    swarm.pulls[URL] = replace(GREEN, checks_pending=True)
+    swarm.tick(START + MINUTE)
+    swarm.tick(START + 6 * MINUTE)
+    assert _reopened(swarm) and swarm.retired == [OWNER]
+
+
+def test_a_push_seen_only_by_the_decision_time_read_restarts_the_red_limit():
+    swarm = Swarm(RED)
+    pushed = replace(RED, pushed_at=START + 19 * MINUTE)
+    assert swarm.tick(START + 20 * MINUTE, reread={URL: pushed}.get) == []
+    assert not _reopened(swarm) and swarm.retired == []
+    swarm.tick(START + 34 * MINUTE, reread={URL: pushed}.get)
+    assert _reopened(swarm)
 
 
 def test_the_pull_request_view_reads_check_starts_and_the_latest_reopen_or_queue_entry():
