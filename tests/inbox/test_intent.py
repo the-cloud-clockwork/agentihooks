@@ -96,16 +96,28 @@ def test_a_classifier_timeout_falls_back_to_round_robin_without_holding_the_item
         return 0.9
 
     _decider(grouping, slow)
-    started = time.monotonic()
     try:
         items = [inbox.send("swarm", FRONT, text) for text in ("deploy one", "deploy two", "deploy three")]
+    finally:
+        release.set()
+    assert [inbox.get(i.id).address for i in items] == [FRONT, SECOND, FRONT]
+    assert [inbox.get(i.id).state for i in items] == ["pending"] * 3
+    assert swarm.redis.exists(f"{pool.PREFIX}:sw") == 0
+
+
+@pytest.mark.wall_clock
+def test_a_slow_classifier_holds_a_send_only_until_its_deadline(swarm, inbox, grouping):
+    release = threading.Event()
+    grouping.setenv(intent.TIMEOUT_ENV, "0.05")
+    _decider(grouping, lambda new, recent: release.wait(5))
+    swarm.redis.rpush(f"{pool.PREFIX}:sw:recent:{SECOND}", "deploy one")
+    started = time.monotonic()
+    try:
+        inbox.send("swarm", FRONT, "deploy two")
         elapsed = time.monotonic() - started
     finally:
         release.set()
     assert elapsed < 2
-    assert [inbox.get(i.id).address for i in items] == [FRONT, SECOND, FRONT]
-    assert [inbox.get(i.id).state for i in items] == ["pending"] * 3
-    assert swarm.redis.exists(f"{pool.PREFIX}:sw") == 0
 
 
 def test_a_classifier_error_falls_back_to_round_robin(swarm, inbox, grouping):
