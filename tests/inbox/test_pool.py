@@ -450,7 +450,7 @@ def test_claims_give_up_after_repeated_contention(swarm, inbox, held, monkeypatc
     held.undo()
     calls = []
 
-    def contended(self, slug, live):
+    def contended(self, slug, live, routed):
         calls.append(slug)
         raise WatchError
 

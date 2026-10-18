@@ -2719,6 +2719,7 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
     monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
     counts = {}

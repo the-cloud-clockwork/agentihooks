@@ -19,7 +19,7 @@ REFUSED = "not listening yet"
 def probe(base: str, urlopen: Callable = urllib.request.urlopen) -> str:
     request = urllib.request.Request(f"{base}/healthz", data=b"")
     try:
-        with urlopen(request, timeout=WRITE_TIMEOUT_S) as reply:
+        with urlopen(request, timeout=WRITE_TIMEOUT_S, **ledger_link.transport()) as reply:
             reply.read()
     except urllib.error.URLError as exc:
         return REFUSED if isinstance(exc.reason, ConnectionRefusedError) else str(exc)

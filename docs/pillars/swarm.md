@@ -85,6 +85,77 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Interactive masters and Remote Control
+
+Claude masters prefer a valid native claude.ai login at launch and handoff;
+workers retain their token and API routing. Declare the master account and
+optional tier with `agentihooks balance master-account` as described under
+[reserved headroom](load-balancing.md#master-accounts-and-reserved-headroom).
+The declaration alone neither signs in nor enables Remote Control.
+
+For the lead Claude master to appear in the Claude app, the operator enables
+the optional master login and signs in from their own terminal:
+
+```bash
+agentihooks swarm <id> set master-claude-login=on
+agentihooks claude login --master <id>
+```
+
+`master-claude-login` defaults to off. When on, the front door master uses its
+private Claude config home, forces `claudeai` login and receives
+`--remote-control "master · <id>"`. Workers do not receive this login or the
+Remote Control flags. A failed private login, conflicting declared master
+account, live login holder or missing worker quota tokens refuses this route;
+it does not silently replace the selected private login. See
+[Master claude ai login](../reference/account-login.md#master-claude-ai-login)
+for isolation, ownership and recovery.
+
+Remote Control connects to the same running local conversation from
+[claude.ai/code](https://claude.ai/code) or the Claude mobile app. Sign in on
+the device with the same account and organization as the master. The local
+Claude process must remain running and have network access. According to the
+[Claude Code Remote Control requirements](https://code.claude.com/docs/en/remote-control#requirements):
+
+- A Pro, Max, Team or Enterprise subscription and a native claude.ai login are
+  required. Team and Enterprise also need the organization owner to enable
+  Remote Control. A routed setup token or API key does not supply this login.
+- Bedrock, Google Cloud and Foundry routes, a custom `ANTHROPIC_BASE_URL`, and
+  enterprise Claude apps gateways block Remote Control.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK` blocks it.
+  Organizations requiring Trusted Devices also require device enrollment and
+  a recent sign-in. Consult the upstream requirements for version restrictions
+  when telemetry is disabled.
+- The launch directory must be trusted. AgentiHooks normally establishes
+  trust before launch; an untrusted noninteractive launch cannot answer the
+  native trust prompt.
+
+Outside the explicitly enabled private login route, a Claude master tries its
+valid interactive login first. If that is unavailable, it falls back to normal
+subscription token placement and configured API capacity under the
+[live share rules](load-balancing.md#live-share-weight). With the default API
+weight of zero, the order is interactive login, token pool, then API overflow;
+a nonzero weight can select API capacity earlier. If no permitted account has
+room, launch fails. A fallback master may use the headroom reserved against
+workers, but cannot bypass a spent or otherwise ineligible account. Its desired
+interactive route is retained: the next handoff or recycle checks login again
+and returns to it when available, rather than changing credentials in the
+running process.
+
+Inspect `agentihooks swarm <id> status` and the ledger master card for the
+recorded launch decision:
+
+| Status or finding | Meaning |
+|---|---|
+| `Remote Control: on (master · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
+| `Remote Control: off (flag)` | The master login option is off. |
+| `Remote Control: off (fallback auth)` | The master uses subscription token authentication. |
+| `Remote Control: off (gateway)` | The master uses the API route. |
+| `master-fallback-auth/<seat>` | An active master wanted interactive authentication but runs on fallback auth: phone access is lost. Returning to interactive auth removes this finding. |
+| `master-rc/<seat>` | A Remote Control failure notification was recorded since this master started: phone access is lost even if the launch decision was on. A `Remote Control back on` notification clears the recorded failure. |
+
+Codex masters have no Claude Remote Control decision. These findings report
+lost access; they do not stop the master or change its authentication.
+
 ### Master outage and promotion
 
 When a swarm has had no live master (none whose hook reported) for `AGENTIHOOKS_MASTER_DOWN_MINUTES` (default 5),
@@ -222,6 +293,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
+| `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. |
+| `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
@@ -1017,6 +1090,18 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Staged and prerequisite pull requests
+
+A task that lands in stages, or registers a prerequisite pull request before its own, declares the scope each such pull request delivers when it records it:
+
+```bash
+agentihooks swarm <id> pr <prerequisite-pull-request-url> --prerequisite "tests that accept both gate states"
+agentihooks swarm <id> pr <stage-pull-request-url> --stage "the ledger field and its validation"
+agentihooks swarm <id> pr <final-pull-request-url>
+```
+
+The task keeps each declaration in `pull_scopes`, a map from the pull request URL to its kind, `stage` or `prerequisite`, and its nonempty scope. The intent check grades a declared pull request against its declared scope alone, without the whole task text or the task's plan lines, and the parent intent stamped on its body names that scope in place of the task text. A declaration needs a GitHub pull request URL. A changed declaration is judged again. A pull request recorded without `--stage` or `--prerequisite` is the task's final pull request and is graded against the whole task contract; recording a declared pull request again without either option drops its declaration. A blank scope is refused, and one pull request declares one kind.
 
 ### Stalled activity findings
 

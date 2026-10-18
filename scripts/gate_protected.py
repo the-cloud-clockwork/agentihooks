@@ -66,13 +66,18 @@ def _aggregator_problems(
     return problems + [
         f"The head's {GATE} changes its {field}; the protected branch grades with its own."
         for field in fields
-        if base_job.get(field) != head_job.get(field)
+        if (
+            base_job.get(field) != head_job.get(field)
+            or field == "steps"
+            and base_id == "gate-required"
+            and "docs" in ci_wiring.needs_of(head_job)
+        )
         and not (
             field == "steps"
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                ci_reuse.gate_steps(**form, summary=summary)
+                ci_reuse.gate_steps(**form, summary=summary, docs="docs" in ci_wiring.needs_of(head_job))
                 for form in (
                     {},
                     {"selected": True},

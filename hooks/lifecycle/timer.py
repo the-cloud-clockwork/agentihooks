@@ -55,6 +55,12 @@ def installed() -> bool:
 
 
 def install_timer(python: str, root: str) -> str:
+    from hooks.lifecycle.maintenance import setup
+
+    return "\n  ".join([_enable_timer(python, root), *setup()])
+
+
+def _enable_timer(python: str, root: str) -> str:
     service, timer = render(python, root)
     folder = unit_dir()
     folder.mkdir(parents=True, exist_ok=True)

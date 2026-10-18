@@ -68,6 +68,12 @@ spec:
               value: {{ $port | quote }}
             - name: LEDGER_DIR
               value: /data
+            {{- if .Values.ledger.tls.secretName }}
+            - name: LEDGER_TLS_CERT
+              value: /run/ledger-tls/tls.crt
+            - name: LEDGER_TLS_KEY
+              value: /run/ledger-tls/tls.key
+            {{- end }}
             - name: SWARM_RELOAD
               value: "0"
             - name: SWARM_PUBLIC_URL
@@ -88,8 +94,22 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /data
+            {{- if .Values.ledger.tls.secretName }}
+            - name: ledger-tls
+              mountPath: /run/ledger-tls
+              readOnly: true
+            {{- end }}
           resources:
             {{- toYaml .Values.ledger.resources | nindent 12 }}
+      {{- with .Values.ledger.tls.secretName }}
+      volumes:
+        - name: ledger-tls
+          secret:
+            secretName: {{ . | quote }}
+            items:
+              - {key: tls.crt, path: tls.crt}
+              - {key: tls.key, path: tls.key}
+      {{- end }}
   volumeClaimTemplates:
     - metadata:
         name: data
