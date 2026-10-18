@@ -32,6 +32,7 @@ ORDER += (
     "layout",
     "chat",
     "lifecycle",
+    "roles",
     "swarm",
     "hives",
     "architecture",
