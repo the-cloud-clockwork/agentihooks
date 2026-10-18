@@ -164,6 +164,12 @@ class Scheduler:
             raise ValueError("limit must not be negative")
         return self._new(Schedule("stopwatch", owner, payload, now + limit, limit))
 
+    def interval(self, *, owner: str, payload: str, every: float, now: float | None = None) -> Entry:
+        now = time.time() if now is None else now
+        if every <= 0:
+            raise ValueError("an interval must be positive")
+        return self._new(Schedule("interval", owner, payload, now + every, every))
+
     def cron(
         self, *, owner: str, payload: str, expression: str, timezone: str = "UTC", now: float | None = None
     ) -> Entry:
@@ -249,6 +255,9 @@ class Scheduler:
         if entry["kind"] == "cron":
             entry["state"] = "active"
             entry["due"] = next_due(entry["expression"], entry["timezone"], now)
+        elif entry["kind"] == "interval":
+            entry["state"] = "active"
+            entry["due"] = now + entry["delay"]
         entry.pop("pending")
 
     def run_due(self, *, now: float | None = None) -> int:
