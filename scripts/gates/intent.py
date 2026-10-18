@@ -341,7 +341,9 @@ def _plan_chunk(doc, task):
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
-    part = plan_read.scoped(doc, task, {"plan_lines": task["plan_lines"], "plan_chunk": text})
+    part = {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    if task.get("plan_slice") != task.get("id"):
+        part = plan_read.scoped(doc, task, part)
     if "shared_slice" not in part and isinstance(text, str) and _foreign_slice(doc, task, text):
         return {}
     return part
