@@ -267,14 +267,18 @@ def test_app_bounds_idle_sessions():
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
 
 
-async def _listed_over_http(router, path: str) -> set[str]:
+async def _listed_over_http(router, path: str, monkeypatch) -> set[str]:
     import json
 
     import httpx
 
-    from hooks.serena_router.app import build_app
+    from hooks.serena_router import app as router_app
 
-    app = build_app(*router)
+    async def wait(_delay):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(router_app, "scheduled_wait", wait)
+    app = router_app.build_app(*router)
     headers = {"Accept": "application/json, text/event-stream"}
     init = {
         "jsonrpc": "2.0",
@@ -301,15 +305,17 @@ async def test_default_listing_hides_the_opt_in_tools(router):
     assert not names & OPT_IN
 
 
-async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router):
-    names = await _listed_over_http(router, "/mcp")
+async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router, monkeypatch):
+    names = await _listed_over_http(router, "/mcp", monkeypatch)
     assert "find_symbol" in names
     assert not names & OPT_IN
 
 
-async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router):
-    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern") >= OPT_IN | {"find_symbol"}
-    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file") == {"search_for_pattern"}
+async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router, monkeypatch):
+    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern", monkeypatch) >= OPT_IN | {
+        "find_symbol"
+    }
+    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file", monkeypatch) == {"search_for_pattern"}
 
 
 def test_listed_ignores_names_outside_the_opt_in_set():
