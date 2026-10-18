@@ -78,13 +78,27 @@ def test_a_member_beat_lands_below_its_own_hive_key_and_the_controller_reads_it_
         idle.declare_wait(redis, "fixture", name, 100, "checks", 7)
         assert idle.heartbeat(redis, "fixture", name) == {"state": "working", "at": 5}
 
-    assert redis.exists(f"{ROOT}:hive:m1:swarm:fixture:heartbeat:{name}")
+    assert redis.ttl(f"{ROOT}:hive:m1:swarm:fixture:heartbeat:{name}") == idle.BEAT_TTL_S
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
     assert idle.heartbeat(redis, "fixture", name) == {"state": "working", "at": 5}
     assert idle.last_prompt(redis, "fixture", name) == 6
     assert idle.wait(redis, "fixture", name)["reason"] == "checks"
     assert idle.waited(redis, "fixture", name) == 100
     assert [entry["at"] for entry in idle.wait_history(redis, "fixture", name)] == [7]
+    idle.end_wait(redis, "fixture", name, 60)
+    assert idle.wait(redis, "fixture", name) is None
+    assert idle.waited(redis, "fixture", name) == 60
+
+
+def test_a_member_knows_its_own_agents_without_reading_member_records(redis, swarm, monkeypatch):
+    from scripts.hive import scope
+
+    mine, other = place(swarm, "m1"), place(swarm, "m2", seat="eng-2@fixture")
+    as_member(monkeypatch)
+    monkeypatch.setattr(scope, "members", lambda client: pytest.fail("a member read the member records"))
+
+    assert scope.host(redis, "fixture", mine) == "m1"
+    assert scope.host(redis, "fixture", other) == ""
 
 
 def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm, monkeypatch):
@@ -108,6 +122,7 @@ def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm,
 def test_an_agent_on_the_controller_or_an_unjoined_hive_keeps_the_shared_readings(redis, swarm, hive):
     from scripts.swarm import idle
 
+    join(redis, "m1")
     name = place(swarm, hive)
     idle.beat(redis, "fixture", name, "idle", 9)
 
@@ -168,17 +183,24 @@ def test_a_member_send_waits_in_its_own_keys_until_the_controller_relays_it(redi
     join(redis, "m1")
     with monkeypatch.context() as member:
         as_member(member)
-        item = InboxStore(redis).send(name, "master@fixture", "done")
-        forged = InboxStore(redis).send("operator", "master@fixture", "forged")
+        inbox = InboxStore(redis)
+        forged = inbox.send("operator", "master@fixture", "forged")
+        own = inbox.send("operator", name, "for my own agent")
+        item = inbox.send(name, "master@fixture", "done", ref="fixture:7:note", fyi=True, task="t1")
         assert not redis.keys(f"{ROOT}:inbox:*")
 
-    assert relay.relay(redis) == [item.id]
+    with monkeypatch.context() as member:
+        as_member(member)
+        assert relay.relay(redis) == [item.id]
+    relayed = InboxStore(redis).get(item.id)
     assert [mail.id for mail in InboxStore(redis).open_items("master@fixture")] == [item.id]
-    assert InboxStore(redis).get(item.id).sender == name
+    assert (relayed.sender, relayed.ref, relayed.fyi, relayed.task) == (name, "fixture:7:note", True, "t1")
     world = InboxStore(redis, world="m1")
-    assert world.get(item.id).state == "cancelled"
-    assert world.get(item.id).reason == relay.RELAYED
+    assert (world.get(item.id).state, world.get(item.id).reason) == ("cancelled", relay.RELAYED)
     assert world.get(forged.id).reason == relay.FOREIGN_SENDER
+    assert [entry["by"] for entry in world.history(item.id)][-1] == relay.RELAYER
+    assert [entry["by"] for entry in world.history(forged.id)][-1] == relay.RELAYER
+    assert world.get(own.id).state == "pending"
     assert world.pending_items("master@fixture") == []
     assert relay.relay(redis) == []
 
@@ -188,10 +210,22 @@ def test_a_controller_send_to_an_agent_on_a_member_lands_in_that_members_keys(re
 
     name = place(swarm, "m1")
     join(redis, "m1")
-    item = InboxStore(redis).send("master@fixture", "eng-1@fixture", "next step")
+    inbox = InboxStore(redis)
+    item = inbox.send(
+        "master@fixture", "eng-1@fixture", "next step", ref="fixture:3:note", fyi=True, task="t2", item_id="given"
+    )
 
+    assert inbox.session_id == ""
+    assert item.id == "given"
     assert not redis.exists(f"{ROOT}:inbox:item:{item.id}")
-    assert redis.exists(f"{ROOT}:hive:m1:inbox:item:{item.id}")
+    stored = InboxStore(redis, world="m1").get("given")
+    assert (stored.sender, stored.address, stored.ref, stored.fyi, stored.task) == (
+        "master@fixture",
+        "eng-1@fixture",
+        "fixture:3:note",
+        True,
+        "t2",
+    )
     with monkeypatch.context() as member:
         as_member(member)
         assert [mail.id for mail in InboxStore(redis).pending_mail(name)] == [item.id]

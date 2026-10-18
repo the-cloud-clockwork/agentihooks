@@ -136,9 +136,9 @@ class InboxStore:
         """The hive member whose keys hold address's inbox: the member that runs it or its seat's occupant."""
         from scripts.hive import scope
 
-        receiver = self.seats.occupant(address).occupant if is_seat(address) else address
-        slug = address.split("@", 1)[1] if is_seat(address) else self.names.slug_of(address)
-        return scope.host(self.redis, slug, self.names.resolve(receiver)) if slug and receiver else ""
+        receiver = self.names.resolve(self.seats.occupant(address).occupant if is_seat(address) else address)
+        slug = self.names.slug_of(receiver)
+        return scope.host(self.redis, slug, receiver) if slug else ""
 
     @functools.cached_property
     def pool(self):

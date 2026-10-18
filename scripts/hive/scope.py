@@ -17,7 +17,7 @@ def member(environ: Mapping[str, str] | None = None) -> str:
     from scripts.swarm.store import redis_url
 
     env = os.environ if environ is None else environ
-    own = env.get("AGENTIHOOKS_HIVE_ID", "")
+    own = env.get("AGENTIHOOKS_HIVE_ID")
     return own if own and redis_url(env) == env.get("AGENTIHOOKS_HIVE_REDIS_URL") else ""
 
 
@@ -33,8 +33,8 @@ def host(redis: "Redis", slug: str, name: str) -> str:
     joined = [own] if own else members(redis)
     if not joined:
         return ""
-    placed = next((agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name), "")
-    return placed if placed in joined else ""
+    placed = [agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name and agent.hive in joined]
+    return placed[0] if placed else ""
 
 
 def members(redis: "Redis") -> list[str]:
