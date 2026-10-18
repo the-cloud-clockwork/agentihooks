@@ -122,7 +122,17 @@ def test_concurrent_cleanup_does_not_fail_launch_or_finish(store, server, root, 
 
 
 @pytest.mark.parametrize("action", ["launch", "finish"])
-def test_cleanup_preserves_unique_legacy_rollouts(store, server, root, tmp_path, action):
+@pytest.mark.parametrize(
+    ("legacy_text", "canonical_text", "expected"),
+    [
+        ("base\nnew legacy turn\n", "base\n", "base\nnew legacy turn\n"),
+        ("base\n", "base\nnew canonical turn\n", "base\nnew canonical turn\n"),
+        ("branch a\n", "branch b\n", "branch b\n"),
+    ],
+)
+def test_cleanup_preserves_unique_legacy_rollouts(
+    store, server, root, tmp_path, action, legacy_text, canonical_text, expected
+):
     from tests.codex_session.test_supervisor import other_seat
 
     canonical = tmp_path / "canonical"
@@ -134,9 +144,9 @@ def test_cleanup_preserves_unique_legacy_rollouts(store, server, root, tmp_path,
         (home / name).unlink()
         (home / name).mkdir()
         (home / name / "unique.jsonl").write_text("unique legacy transcript")
-        (home / name / "shared.jsonl").write_text("old snapshot")
+        (home / name / "shared.jsonl").write_text(legacy_text)
         (canonical / name).mkdir()
-        (canonical / name / "shared.jsonl").write_text("newer canonical transcript")
+        (canonical / name / "shared.jsonl").write_text(canonical_text)
     if action == "finish":
         supervisor.stop(first.process)
         supervisor.finish(store, SLUG, first, 5000)
@@ -147,4 +157,6 @@ def test_cleanup_preserves_unique_legacy_rollouts(store, server, root, tmp_path,
     assert not home.exists()
     for name in ("sessions", "archived_sessions"):
         assert (canonical / name / "unique.jsonl").read_text() == "unique legacy transcript"
-        assert (canonical / name / "shared.jsonl").read_text() == "newer canonical transcript"
+        assert (canonical / name / "shared.jsonl").read_text() == expected
+        if legacy_text == "branch a\n":
+            assert sorted(p.read_text() for p in (canonical / name).rglob("shared.jsonl")) == ["branch a\n", "branch b\n"]
