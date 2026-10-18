@@ -13,6 +13,7 @@ from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
 
+from hooks.context import context_recycle
 from scripts.ci_budget import defects as ci_defects
 from scripts.ci_budget import flakes as ci_flakes
 from scripts.doctor import priming
@@ -695,6 +696,8 @@ def _conversations(slug, store, runtime):
         if pane not in found and (local is None or reports.host(agent) or resume.recovery_pending(store, slug, agent)):
             continue
         current = found.get(pane, "")
+        if current:
+            context_recycle.pin_swarm(current, slug, store.config(slug).compact_limit or None)
         if current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)
