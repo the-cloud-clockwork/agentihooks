@@ -63,7 +63,8 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/core.py").write_text(
-        "class Store:\n    def judge(self, value):\n        return value + 1\n\n\ndef other(value):\n    return value - 1\n"
+        "class Store:\n    def judge(self, value):\n        return value + 1\n\n\n"
+        "def other(value):\n    return value - 1\n"
     )
     (tmp_path / "scripts/helper.py").write_text("from scripts.core import Store\n")
     (tmp_path / "tests/test_helper.py").write_text("from scripts import helper\n")
