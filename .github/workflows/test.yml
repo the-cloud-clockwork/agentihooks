@@ -829,12 +829,6 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: |-
-          if [[ "$GITHUB_EVENT_NAME" == merge_group ]]; then
-            for suffix in '' -3.11 -3.12; do
-              measured="$HOME/dev-durations/.test_durations-slowest$suffix"
-              [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
-            done
-          fi
           collection=()
           if [[ "$GITHUB_EVENT_NAME" != push ]]; then
             collection=(--collection collected.json)
@@ -846,7 +840,13 @@ jobs:
         if: github.event_name == 'merge_group'
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
-        run: python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --output "$GITHUB_OUTPUT"
+        run: |
+          for suffix in '' -3.11 -3.12; do
+            measured="$HOME/dev-durations/.test_durations-slowest$suffix"
+            [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
+          done
+          python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collection collected.json --collected collected.json
+          python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --output "$GITHUB_OUTPUT"
 
       - name: Mint the token that reads the dev test record
         id: app-token
