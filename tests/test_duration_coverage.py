@@ -47,7 +47,7 @@ def test_publication_refuses_incomplete_maps_before_writing_any_file(tmp_path, m
     monkeypatch.setattr(
         refresh_durations,
         "ci_medians",
-        lambda folder, version, source, collected: (
+        lambda folder, version, source, collected, slowest=False: (
             dict(list(complete.items())[:89]) if version == incomplete else complete
         ),
     )
