@@ -239,14 +239,18 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
     }
-    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-selected"]
+    assert sorted(set(callers) - {"suite-speed"}) == ["count-record", "split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
         saves = [
             step for step in steps if step.get("uses") == "actions/cache/save@v4" and step["with"]["path"] == "~/venv"
         ]
-        guards = {"unit-selected": "github.event_name == 'pull_request'", "test-count": "github.event_name != 'push'"}
+        guards = {
+            "unit-selected": "github.event_name == 'pull_request'",
+            "suite-speed": "github.event_name == 'pull_request'",
+            "test-count": "github.event_name != 'push'",
+        }
         if name in guards:
             assert guards[name] in jobs[name]["if"]
             assert saves == []
@@ -489,8 +493,100 @@ def test_shards_wait_only_on_the_durations_lookup():
         ["select", "reuse", "admission"],
         ["test-count", "select", "reuse", "admission"],
     )
-    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
+    assert jobs["unit"]["needs"] in (
+        ["split", "select", "reuse", "admission"],
+        ["split", "select", "reuse", "admission", "suite-speed"],
+    )
     assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+
+
+def test_suite_speed_contracts_admit_both_unit_paths_before_any_shard_starts():
+    from tests.contracts.ci_tiers.test_workflow import enabled
+
+    jobs = _workflow()["jobs"]
+    if "suite-speed" not in jobs:
+        assert jobs["unit"]["needs"] in (
+            ["split", "select", "reuse", "admission"],
+            ["split", "select", "reuse", "admission", "suite-speed"],
+        )
+        return
+    early = jobs["suite-speed"]
+    assert early["if"] == "github.event_name == 'pull_request'"
+    assert not early.get("needs")
+    assert early["timeout-minutes"] <= 5
+    run = next(step for step in early["steps"] if step.get("name") == "Run suite speed contracts")
+    assert "python -m pytest tests/test_suite_speed.py" in run["run"]
+    assert "-n 0" in run["run"]
+    assert run["if"] == "steps.changed.outputs.tests == 'true'"
+    for name in ("unit", "unit-selected"):
+        assert "suite-speed" in jobs[name]["needs"]
+        for result in ("failure", "cancelled", "skipped"):
+            needs = {
+                "suite-speed": type("Need", (), {"result": result})(),
+                "select": type(
+                    "Need",
+                    (),
+                    {
+                        "result": "success",
+                        "outputs": type("Outputs", (), {"scope": "full" if name == "unit" else "selected"})(),
+                    },
+                )(),
+            }
+            assert not enabled(jobs[name]["if"], "pull_request", needs)
+    assert "suite-speed" in jobs["gate-required"]["needs"]
+
+
+@pytest.mark.parametrize(
+    "path,due",
+    [
+        ("tests/test_example.py", True),
+        ("tests/doctor/test_example.py", True),
+        ("tests/conftest.py", True),
+        ("tests/helpers.py", True),
+        ("pyproject.toml", True),
+        ("pytest.ini", True),
+        ("setup.cfg", True),
+        ("tox.ini", True),
+        (".github/test-excludes.txt", True),
+        (".github/test-constraints.txt", True),
+        (".github/workflows/test.yml", True),
+        ("hooks/example.py", False),
+        ("docs/example.md", False),
+    ],
+)
+def test_early_suite_speed_selects_changed_tests_and_configuration(tmp_path, path, due):
+    import os
+
+    jobs = _workflow()["jobs"]
+    if "suite-speed" not in jobs:
+        return
+    step = next(step for step in jobs["suite-speed"]["steps"] if step.get("id") == "changed")
+    for args in (
+        ["init", "-q"],
+        ["-c", "user.name=CI", "-c", "user.email=ci@example.com", "commit", "--allow-empty", "-qm", "base"],
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+    base = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=tmp_path, text=True).strip()
+    changed = tmp_path / path
+    changed.parent.mkdir(parents=True, exist_ok=True)
+    changed.write_text("changed")
+    subprocess.run(["git", "add", path], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=CI", "-c", "user.email=ci@example.com", "commit", "-qm", "head"],
+        cwd=tmp_path,
+        check=True,
+        capture_output=True,
+    )
+    output = tmp_path / "output"
+    result = subprocess.run(
+        ["bash", "-eo", "pipefail", "-c", step["run"]],
+        cwd=tmp_path,
+        env=dict(os.environ, BASE=base, HEAD="HEAD", GITHUB_OUTPUT=str(output)),
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert output.read_text().strip() == f"tests={str(due).lower()}"
 
 
 def test_full_suite_collection_starts_beside_selection_and_feeds_split():

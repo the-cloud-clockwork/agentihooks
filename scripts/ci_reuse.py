@@ -77,6 +77,7 @@ def gate_steps(
     consolidated: bool = False,
     summary: bool = False,
     docs: bool = False,
+    suite_speed: bool = False,
 ) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if selected or queue_tier:
@@ -89,6 +90,20 @@ def gate_steps(
         run = run.replace('["durations", "split",', '["select", "split",').replace(
             '["durations", "select",', '["select",'
         )
+    if suite_speed:
+        run = run.replace('"semgrep", "sonar"]', '"semgrep", "sonar", "suite-speed"]')
+        run = run.replace(
+            'or (.key == "unit-selected" and',
+            'or (.key == "suite-speed" and .value.result == "skipped" and $event != "pull_request") or (.key == "unit-selected" and',
+        )
+        run = (
+            "expected=skipped\n"
+            '[[ "${EVENT:-}" != pull_request ]] || expected=success\n'
+            'if ! jq -e --arg expected "$expected" \'."suite-speed".result == $expected\' <<< "$NEEDS"; then\n'
+            '  echo "::error::The early suite speed gate must succeed on pull requests and be skipped on other events."\n'
+            "  exit 1\n"
+            "fi\n"
+        ) + run
     if docs:
         run = run.replace('"lint", "semgrep"', '"lint", "docs", "semgrep"')
     return [
