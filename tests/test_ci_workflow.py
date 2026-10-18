@@ -42,7 +42,14 @@ def test_dev_extra_declares_test_plugin(plugin):
 
 def test_workflow_runs_whole_suite_in_parallel():
     command = _pytest_command()
-    assert command.strip().startswith(("run: workers=$(", "run: start=$SECONDS && status=0 && workers=$("))
+    assert command.strip().startswith(
+        (
+            "run: workers=$(",
+            "run: start=$SECONDS && status=0 && workers=$(",
+            'run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; '
+            "start=$SECONDS && status=0 && workers=$(",
+        )
+    )
     assert "ci_cpu_quota) && python -c " in command
     assert '-n "$workers"' in command
     assert "-n auto" not in command
@@ -69,7 +76,12 @@ def test_unit_shards_measure_no_coverage():
     command = _pytest_command()
     assert "--cov" not in command
     assert "matrix.cov" not in command
-    assert "include" not in _workflow()["jobs"]["unit"]["strategy"]["matrix"]
+    include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
+    assert include in (
+        [],
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
+        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}",
+    )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
 
