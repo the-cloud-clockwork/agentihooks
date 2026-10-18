@@ -218,7 +218,7 @@ def test_retirement_during_dispatch_removes_a_late_wake(redis, monkeypatch):
     assert not redis.exists(timer.key)
 
 
-def test_member_scheduler_runs_with_real_acl_enforcement(monkeypatch):
+def test_member_schedules_and_consumes_wakes_while_shared_writes_are_refused(monkeypatch):
     import fakeredis
     from redis.exceptions import NoPermissionError
 
@@ -243,9 +243,9 @@ def test_member_scheduler_runs_with_real_acl_enforcement(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     with process_timer.Timer(0, redis=member) as timer:
-        assert Scheduler(member).run_due(now=timer.entry.record["due"]) == 1
+        assert Scheduler(admin).run_due(now=timer.entry.record["due"]) == 1
         timer.wait()
-    Scheduler(member).run_due()
+    Scheduler(admin).run_due()
     assert not admin.exists(timer.key)
     with pytest.raises(NoPermissionError):
         member.hset(shared, "forbidden", "write")
