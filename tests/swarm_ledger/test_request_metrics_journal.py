@@ -314,20 +314,44 @@ def test_failed_journal_write_keeps_the_rows_for_the_next_pass(tmp_path, monkeyp
     assert [row["wall_seconds"] for row in result["routes"][0]["records"]] == [1.0]
 
 
-def test_restore_binds_the_journal_only_after_its_rewrite(tmp_path, monkeypatch, now):
+def test_failed_restore_rewrite_is_retried_and_names_a_later_crash(tmp_path, monkeypatch, now, capsys):
     path = tmp_path / "metrics.jsonl"
-    path.write_text(f'["start", {START - 7000.0}]\n["s", {START - 10.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n')
+    path.write_text(
+        f'["start", {START - 7000.0}]\n["s", {START - 10.0}, "POST", "{OPERATIONS}", 1.0, 0.0, 0.0]\n'
+        f'["stop", {START - 5.0}]\n'
+    )
+    real = request_metrics.write_lines
 
     def refused(*args):
         raise OSError("read only")
 
     monkeypatch.setattr(request_metrics, "write_lines", refused)
-    with pytest.raises(OSError):
-        request_metrics.restore(path)
-    assert request_metrics.JOURNAL is None
-    assert list(request_metrics.SAMPLES) == []
-    coverage = request_metrics.report(2.0)["coverage"]
-    assert coverage["held_since"] == request_metrics.STARTED_AT
-    assert coverage["lost"] == []
-    request_metrics.record("POST", OPERATIONS, 1.0, 0.0, 0.0)
-    assert request_metrics.PENDING == []
+    server.metrics_journal(request_metrics.restore, path)
+    assert capsys.readouterr().err == "request metrics journal: read only\n"
+    monkeypatch.setattr(request_metrics, "write_lines", real)
+    now[0] += 1.0
+    request_metrics.record("POST", OPERATIONS, 2.0, 0.0, 0.0)
+    now[0] += 1.0
+    request_metrics.persist()
+    flushed = now[0]
+    reload(monkeypatch, now, path, 60.0)
+    result = request_metrics.records(2.0, None, limit=10)
+    assert [row["wall_seconds"] for row in result["routes"][0]["records"]] == [1.0, 2.0]
+    assert result["coverage"]["lost"] == [{"start": flushed, "end": now[0]}]
+    assert result["coverage"]["held_since"] == START - 7000.0
+
+
+def test_ring_eviction_survives_a_reload(tmp_path, monkeypatch, now):
+    path = tmp_path / "metrics.jsonl"
+    request_metrics.restore(path)
+    for wall in range(70):
+        now[0] += 1.0
+        request_metrics.record("POST", OPERATIONS, float(wall), 0.0, 0.0)
+    evicted = request_metrics.EVICTED_THROUGH
+    assert evicted == START + 6.0
+    request_metrics.persist(stopped=True)
+    reload(monkeypatch, now, path, 1.0)
+    coverage = request_metrics.report(1.0)["coverage"]
+    assert coverage["evicted_through"] == evicted
+    assert coverage["complete"] is False
+    assert len(request_metrics.SAMPLES) == 64

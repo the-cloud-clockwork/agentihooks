@@ -4,4 +4,6 @@
   `--writes`: wall, CPU and lock wait per write, grouped by route, for a fixed
   window ending at `--end`, bounded by `--limit`, with the coverage it holds.
 - The ledger server journals request timings beside its ledgers and restores
-  them after a reload or restart. Coverage names every span a crash lost.
+  them after a reload or restart. Coverage names every span a crash lost and
+  keeps ring evictions across restarts. A request still in flight when a
+  reload executes is not journaled.

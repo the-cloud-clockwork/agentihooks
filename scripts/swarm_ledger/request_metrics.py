@@ -23,7 +23,7 @@ DEFAULT_RECORDS = 1000
 MAX_RECORDS = 10000
 JOURNAL_NAME = ".request-metrics.jsonl"
 WRITES = frozenset(("POST", "PUT", "PATCH", "DELETE"))
-JOURNAL_WIDTHS = {"held": 2, "lost": 3, "start": 2, "flush": 2, "stop": 2, "s": 7}
+JOURNAL_WIDTHS = {"held": 2, "lost": 3, "evicted": 2, "start": 2, "flush": 2, "stop": 2, "s": 7}
 CURRENT = ContextVar("ledger_request_timing", default=None)
 SAMPLES = deque(maxlen=MAX_SAMPLES)
 PENDING = []
@@ -178,13 +178,15 @@ def journal_row(row: object) -> bool:
     )
 
 
-def replay(rows: Iterator[list], started_at: float) -> tuple[list, float | None, list]:
-    samples, held, lost, open_since = [], None, [], None
+def replay(rows: Iterator[list], started_at: float) -> tuple[list, float | None, list, float]:
+    samples, held, lost, open_since, evicted = [], None, [], None, float("-inf")
     for kind, stamp, *rest in rows:
         if kind == "held":
             held = stamp
         elif kind == "lost":
             lost.append((stamp, rest[0]))
+        elif kind == "evicted":
+            evicted = max(evicted, stamp)
         elif kind == "start":
             if open_since is not None:
                 lost.append((open_since, stamp))
@@ -198,7 +200,7 @@ def replay(rows: Iterator[list], started_at: float) -> tuple[list, float | None,
             samples.append((stamp, *rest))
     if open_since is not None:
         lost.append((open_since, started_at))
-    return samples, held, lost
+    return samples, held, lost, evicted
 
 
 def held_since() -> float:
@@ -206,9 +208,13 @@ def held_since() -> float:
 
 
 def journal_lines(flushed: float | None) -> list:
-    lines = [["held", held_since()], *(["lost", *span] for span in LOST), ["start", STARTED_AT]]
+    lines = [["held", held_since()], *(["lost", *span] for span in LOST), *evicted_line(), ["start", STARTED_AT]]
     lines += [["s", *row] for row in SAMPLES]
     return lines + ([["flush", flushed]] if flushed is not None else [])
+
+
+def evicted_line() -> list:
+    return [["evicted", EVICTED_THROUGH]] if math.isfinite(EVICTED_THROUGH) else []
 
 
 def write_lines(path: Path, lines: list, mode: str) -> None:
@@ -223,26 +229,25 @@ def write_lines(path: Path, lines: list, mode: str) -> None:
 
 
 def restore(path: Path) -> None:
-    global JOURNAL, HELD_SINCE, APPENDED
+    global JOURNAL, HELD_SINCE, APPENDED, EVICTED_THROUGH
 
     with JOURNAL_GUARD:
-        samples, held, lost = replay(journal_rows(path), STARTED_AT)
+        samples, held, lost, evicted = replay(journal_rows(path), STARTED_AT)
         with GUARD:
             floor = time.time() - RETENTION_SECONDS
-            kept = [row for row in samples if row[0] >= floor] + list(SAMPLES)
-            spans = [span for span in lost if span[1] >= floor]
-            since = max(held, floor) if held is not None else None
-            lines = [["held", since if since is not None else STARTED_AT], *(["lost", *span] for span in spans)]
-            lines += [["start", STARTED_AT], *(["s", *row] for row in kept[-SAMPLES.maxlen :])]
+            current = list(SAMPLES)
+            SAMPLES.clear()
+            for row in [row for row in samples if row[0] >= floor] + current:
+                hold(row)
+            EVICTED_THROUGH = max(EVICTED_THROUGH, evicted)
+            LOST[:] = [span for span in lost if span[1] >= floor]
+            HELD_SINCE = max(held, floor) if held is not None else None
+            PENDING.clear()
+            JOURNAL, APPENDED = path, SAMPLES.maxlen + 1
+            lines = journal_lines(None)
         write_lines(path, lines, "w")
         with GUARD:
-            SAMPLES.clear()
-            for row in kept:
-                hold(row)
-            LOST[:] = spans
-            HELD_SINCE = since
-            PENDING.clear()
-            JOURNAL, APPENDED = path, 0
+            APPENDED = 0
 
 
 def persist(stopped: bool = False) -> None:
@@ -256,7 +261,7 @@ def persist(stopped: bool = False) -> None:
             if APPENDED + len(PENDING) > SAMPLES.maxlen:
                 lines, mode, APPENDED = journal_lines(now), "w", 0
             else:
-                lines, mode = [["s", *row] for row in PENDING] + [["flush", now]], "a"
+                lines, mode = [["s", *row] for row in PENDING] + evicted_line() + [["flush", now]], "a"
                 APPENDED += len(lines)
             PENDING.clear()
             path = JOURNAL
