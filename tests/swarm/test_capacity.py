@@ -2349,9 +2349,24 @@ def _interactive_master(monkeypatch, tmp_path, sessions):
 
 def test_a_tokenless_master_account_reads_its_session_snapshot(monkeypatch, tmp_path):
     _interactive_master(monkeypatch, tmp_path, {"main": 1})
+    five, week = balancer.QuotaWindow(30.0, 5_000), balancer.QuotaWindow(60.0, 9_000)
+    reading = balancer.ProbeResult("main", "allowed", "NORMAL", 40.0, five, week)
+    assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_000.0, reading)}
     rows = capacity._claude({}, 1_100.0)
     assert rows == [capacity.Account("claude", "main", "CLOSED", 1, 70.0, 40.0, 0, 9_000, five_resets_at=5_000)]
     assert rows[0].observed_at == 1_000.0
+
+
+def test_a_master_snapshot_with_one_window_reads_the_other_as_unknown(monkeypatch, tmp_path):
+    from hooks.context import quota_usage
+
+    _interactive_master(monkeypatch, tmp_path, {"main": 1})
+    monkeypatch.setattr(quota_usage.time, "time", lambda: 1_050.0)
+    limits = {"seven_day": {"used_percentage": 20, "resets_at": 9_000}}
+    quota_usage.record_rate_limits("later", limits, {"AH_ROUTE_INTERACTIVE_main": "1"})
+    week = balancer.QuotaWindow(20.0, 9_000)
+    reading = balancer.ProbeResult("main", "allowed", "UNKNOWN", None, balancer.QuotaWindow(), week)
+    assert capacity._master_snapshot({}, 1_100.0) == {"main": (1_050.0, reading)}
 
 
 def test_a_stale_master_snapshot_keeps_the_unknown_row(monkeypatch, tmp_path):

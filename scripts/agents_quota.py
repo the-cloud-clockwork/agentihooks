@@ -426,12 +426,15 @@ def balance_table(
     current: str = NO_CURRENT,
     observed: dict[str, float] | None = None,
 ) -> str:
+    from scripts.routing import reservation
     from scripts.routing.claude_api import ClaudeApiSource
 
     observed = _observed(results, now, fable) if observed is None else observed
     claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
-    return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
+    table = _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
+    held = [reservation.current(harness, os.environ) for harness in (HARNESSES[:1] if fable else HARNESSES)]
+    return "\n".join([table, *(f"{h.harness} {h.slug}: {h.reason}" for h in held if h and h.reason)])
 
 
 def current_observations(cached: list) -> list:

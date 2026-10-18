@@ -7,8 +7,8 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
-from scripts.routing import claude_api, codex_api, place
-from scripts.routing.slots import API, SUBSCRIPTION
+from scripts.routing import claude_api, codex_api, master_account, place
+from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
@@ -45,11 +45,36 @@ def _state(cap: int | None) -> str:
     return "UNKNOWN" if cap is None else "CLOSED" if cap == 0 else "OPEN"
 
 
+def _master_snapshot(environ: dict, now: float) -> dict[str, tuple[float, balancer.ProbeResult]]:
+    from redis.exceptions import RedisError
+
+    from hooks.context import quota_usage
+
+    try:
+        master = master_account.load(environ).get("claude")
+    except (OSError, RedisError):
+        return {}
+    if master is None or master.kind != INTERACTIVE:
+        return {}
+    found = quota_usage.account_snapshot(master.slug, now)
+    if found is None:
+        return {}
+    at, limits = found
+    five, week = (
+        balancer.QuotaWindow(window.get("used_percentage"), window.get("resets_at"))
+        for window in (limits.get("five_hour") or {}, limits.get("seven_day") or {})
+    )
+    state, margin = balancer._state("allowed", five, week)
+    return {master.slug: (at, balancer.ProbeResult(master.slug, "allowed", state, margin, five, week))}
+
+
 def _claude(environ: dict, now: float) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
     fresh, _ = tokens.results(environ, now)
     observed.update({result.account: (now, result) for result in fresh})
+    snapshot = _master_snapshot(environ, now)
+    observed.update(snapshot)
     counts = account_sessions.sessions_by_account(environ=environ)
     routed = set(account_sessions.token_accounts(environ).values())
     rows = []
@@ -60,6 +85,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
         if token and result.account not in routed:
             continue
         cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
+        cap = 0 if result.account in snapshot else cap
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
