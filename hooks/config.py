@@ -417,6 +417,9 @@ LOG_USE_COLORS = _env_bool("LOG_USE_COLORS", "true")
 # Captures session digest and stores it via MemoryStore
 MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
 
+# The front door master of every swarm launches on the one claude ai master login
+MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
+
 # =============================================================================
 # SECRETS SCANNING MODE
 # =============================================================================

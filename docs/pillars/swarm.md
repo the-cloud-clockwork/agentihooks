@@ -98,13 +98,14 @@ For the lead Claude master to appear in the Claude app, the operator enables
 the optional master login and signs in from their own terminal:
 
 ```bash
-agentihooks swarm <id> set master-claude-login=on
-agentihooks claude login --master <id>
+export AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true
+agentihooks claude login --master
 ```
 
-`master-claude-login` defaults to off. When on, the front door master uses its
-private Claude config home, forces `claudeai` login and receives
-`--remote-control "master · <id>"`. Workers do not receive this login or the
+`AGENTIHOOKS_MASTER_CLAUDE_LOGIN` defaults to off and holds for every swarm on
+the machine. When on, the front door master of each swarm uses the one private
+Claude config home, forces `claudeai` login and receives
+`--remote-control "master · <id>"`. Pool masters and workers do not receive this login or the
 Remote Control flags. A failed private login, conflicting declared master
 account, live login holder or missing worker quota tokens refuses this route;
 it does not silently replace the selected private login. See
@@ -210,7 +211,7 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   every rule.
 - **Front door.** Only `master@<id>`, or the lowest numbered live master while that seat is empty, faces the
   operator: it receives page chat and every operator write, holds Priorities and, with
-  `master-claude-login` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
+  `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
   naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
   master through its herdr pane, or through the front door.
 - **Private channel.** Masters sync with `agentihooks swarm <id> masters-channel say TEXT` and

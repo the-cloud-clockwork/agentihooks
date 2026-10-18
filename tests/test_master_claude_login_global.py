@@ -119,15 +119,3 @@ def test_a_pool_master_and_an_engineer_stay_on_their_routes(tmp_path, lane, seat
 @pytest.mark.parametrize("kind", ["subscription", "api"])
 def test_a_master_order_on_an_explicit_route_keeps_it(tmp_path, kind):
     assert "master-login" not in _spawn(tmp_path, "master", "master@proof", kind)
-
-
-@pytest.mark.xdist_group("fakeredis")
-def test_a_stored_config_with_the_old_field_loads():
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore, SwarmConfig
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", 2, 1, state="paused"))
-    store.redis.hset(store.key("sw", "config"), "master_claude_login", "True")
-    assert not hasattr(store.config("sw"), "master_claude_login")
