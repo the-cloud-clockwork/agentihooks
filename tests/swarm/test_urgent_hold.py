@@ -189,7 +189,7 @@ def test_a_claimed_or_out_of_scope_urgent_task_is_never_reported(store):
         [
             task("a", phase="p2", rank="urgent", state="claimed"),
             task("b", phase="p2", rank="urgent", out_of_scope=True),
-            task("c", phase="p2", rank="urgent", merged_into="d"),
+            task("c", rank="urgent", merged_into="d"),
         ]
     )
     urgent_hold.observe(store, SLUG, found, 0)
