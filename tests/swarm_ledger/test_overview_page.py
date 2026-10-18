@@ -14,7 +14,7 @@ def overview(request, monkeypatch):
     return request.param
 
 
-@pytest.mark.parametrize("overview", [words(300)], indirect=True)
+@pytest.mark.parametrize("overview", [words(300)], indirect=True, ids=["300 words"])
 def test_a_long_overview_shows_its_first_two_hundred_words_and_an_ellipsis(overview, page):  # noqa: F811
     tab, _ = page
     assert tab.locator("#overview").text_content() == words(200) + "…"
@@ -22,7 +22,9 @@ def test_a_long_overview_shows_its_first_two_hundred_words_and_an_ellipsis(overv
     assert tab.locator("#overview-input").input_value() == overview
 
 
-@pytest.mark.parametrize("overview", [words(199), "Short\n\noverview  kept as written"], indirect=True)
+@pytest.mark.parametrize(
+    "overview", [words(199), "Short\n\noverview  kept as written"], indirect=True, ids=["199 words", "spacing"]
+)
 def test_an_overview_under_two_hundred_words_shows_unchanged(overview, page):  # noqa: F811
     tab, _ = page
     assert tab.locator("#overview").text_content() == overview
