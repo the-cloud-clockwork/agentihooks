@@ -507,3 +507,16 @@ def test_the_candidate_build_reuses_layers_saved_only_after_the_proofs(workflow)
     assert "mode=max" in build["env"]["LAYERS_TO"]
     assert names.index(restore["name"]) < names.index(build["name"])
     assert names.index("Require the independent requalification to match") < names.index(save["name"])
+
+
+def test_the_layer_cache_is_kept_and_saved_only_after_every_publication_step(workflow):
+    names = [step.get("name") for step in steps(workflow)]
+    published = [
+        "Publish the qualified candidate",
+        "Move the floating dev tag to the published digest",
+        "Tag the release version and move the release tag when it is the newest",
+    ]
+
+    for cache in ("Keep the qualified candidate layers", "Save the qualified candidate layers"):
+        assert max(names.index(name) for name in published) < names.index(cache)
+    assert names.index("Save the qualified candidate layers") < names.index("Upload the attestation")

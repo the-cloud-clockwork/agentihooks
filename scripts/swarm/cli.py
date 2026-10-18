@@ -9,6 +9,8 @@ agentihooks swarm <id> close [--note TEXT] [--now]                 a live master
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
 agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
+agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
 agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
@@ -93,6 +95,7 @@ from scripts.swarm import (
     ledger_probe,
     ledger_watchdog,
     master_launch,
+    master_move,
     merge_queue,
     metrics,
     naming,
@@ -104,6 +107,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_record,
     ready,
     reaper,
     release_wait,
@@ -162,6 +166,7 @@ SETTABLE = {
     "masters-step": "masters_step",
     "compact-limit": "compact_limit",
     "snapshot-minutes": "snapshot_minutes",
+    "master-move-grace": "master_move_grace",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -353,7 +358,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
                 actions += skip_refused(langfuse.refresh, store, slug, now_ms())
             found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
+                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
             actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
             actions += timing.call(
@@ -393,6 +398,8 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
+        if not _tickable(slug):
+            return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
@@ -473,6 +480,14 @@ def cmd_waits(store, args):
             list(pool.map(check, slugs))
 
 
+def _tickable(slug):
+    ledger = LedgerClient()
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
+
+
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
@@ -531,6 +546,12 @@ def cmd_alerts(store, args):
     from scripts.swarm import alert_intake
 
     alert_intake.serve(store.redis, alert_intake.settings(os.environ), now_ms)
+
+
+def cmd_prober(store, args):
+    from scripts.swarm import command_runner, quota_refresh
+
+    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
 
 
 def cmd_create(store, args):
@@ -732,6 +753,9 @@ def cmd_take_master(store, args):
 
 
 def cmd_master(store, args):
+    if args.action == "move":
+        print(json.dumps(master_move.order(store, args.slug, args.to, now_ms())))
+        return
     runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
@@ -1391,6 +1415,9 @@ def cmd_pr(store, args):
     doc = ledger.state(args.slug)
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
     fields.update(_split_binding(row, args.url, args.half))
+    scoped = _pull_scope(row, args)
+    row.update(scoped)
+    fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     if row.get("pr_url") != args.url:
         lift.drop_task(args.slug, agent.task)
@@ -1419,6 +1446,22 @@ def _split_binding(row, url, half):
     return {"split_pulls": [*pulls, url]}
 
 
+PULL_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
+
+
+def _pull_scope(row, args):
+    scopes = row.get("pull_scopes") or {}
+    kind = "stage" if args.stage is not None else "prerequisite" if args.prerequisite is not None else ""
+    if not kind:
+        return {"pull_scopes": {url: s for url, s in scopes.items() if url != args.url}} if args.url in scopes else {}
+    scope = getattr(args, kind).strip()
+    if not scope:
+        raise SwarmError(f"--{kind} needs the scope this pull request delivers")
+    if not PULL_URL.fullmatch(args.url):
+        raise SwarmError(f"--{kind} needs a GitHub pull request URL, not {args.url}")
+    return {"pull_scopes": {**scopes, args.url: {"kind": kind, "scope": scope}}}
+
+
 def _queue_intent(store, args, agent, head):
     state = intent.Verdicts(args.slug, intent.NAME)
     who = Who(name=agent.name, swarm=args.slug, task=agent.task)
@@ -1432,7 +1475,7 @@ def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
-        result = merge_queue.prioritize(args.url)
+        result = merge_queue.prioritize(args.url, journal=queue_record.Journal(args.url))
         for task in tasks:
             if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
                 InboxStore(store.redis).send(
@@ -1449,10 +1492,13 @@ def cmd_merge(store, args):
             done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
         if args.action == "queue":
             result = merge_queue.operate(
-                args.action, args.url, admit=lambda head: _queue_intent(store, args, agent, head)
+                args.action,
+                args.url,
+                admit=lambda head: _queue_intent(store, args, agent, head),
+                journal=queue_record.Journal(args.url),
             )
         else:
-            result = merge_queue.operate(args.action, args.url)
+            result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
     print(json.dumps(result))
 
 
@@ -1949,7 +1995,9 @@ def build_parser():
     close.add_argument("--now", action="store_true")
     sub.add_parser("take-master").add_argument("--replace", action="store_true")
     sub.add_parser("proof-control").add_argument("--request", required=True)
-    master_up = sub.add_parser("master").add_subparsers(dest="action", required=True).add_parser("up")
+    master_actions = sub.add_parser("master").add_subparsers(dest="action", required=True)
+    master_up = master_actions.add_parser("up")
+    master_actions.add_parser("move").add_argument("--to", required=True)
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
@@ -1989,6 +2037,9 @@ def build_parser():
     pr = sub.add_parser("pr")
     pr.add_argument("url")
     pr.add_argument("--half", type=int, default=0)
+    declared = pr.add_mutually_exclusive_group()
+    declared.add_argument("--stage")
+    declared.add_argument("--prerequisite")
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
     merge.add_argument("url")
@@ -2068,7 +2119,7 @@ def _tick_store():
 
 
 def main(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "prober", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (

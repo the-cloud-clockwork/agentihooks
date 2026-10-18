@@ -17,6 +17,7 @@ TERMINAL = {"queued", "complete"}
 
 WORKER_OPTIONS = {"timeout_sec": 180, "task_name": "documentation-session-end"}
 NO_CHANGES = {"needs_documentation": False, "size": "none", "source": "no changes"}
+UNKNOWN_TASK = {"needs_documentation": False, "size": "none", "source": "no ledger task"}
 TASK_DEFAULTS = {
     "profile": ledger_rank.GENERATED_PROFILE,
     "lane": "eng",
@@ -150,6 +151,10 @@ def _queue(ledger: LedgerClient, row: dict, source: dict, evidence: dict, verdic
 def _finish(path: Path, row: dict) -> None:
     ledger = LedgerClient(service=True) if row["swarm"] else None
     source = ledger.task(row["swarm"], row["task"]) or {} if ledger and row["task"] else {}
+    if ledger and row["task"] and not source:
+        row.update(status="complete", verdict=dict(UNKNOWN_TASK))
+        _write(path, row)
+        return
     root = Path(row["root"])
     if not root.is_dir():
         root = Path(row["repository"])

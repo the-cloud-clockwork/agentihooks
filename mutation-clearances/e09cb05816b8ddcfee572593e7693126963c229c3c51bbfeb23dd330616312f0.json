@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1_ship__mutmut_14:d2312346b7c76afdfde16f61fb4165a8acf29bdf3149c62892668cfc7c18a687": {
+    "reader": "Standards",
+    "reason": "Equivalent through the sole flush caller: this return occurs only after the monotonic deadline expires. Returning reached true instead of false reaches the outer loop deadline check, which exits before another table is attempted. The same shipped count and last attempted table are persisted, and unshipped rows remain pending."
+  }
+}

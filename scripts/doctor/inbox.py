@@ -87,6 +87,7 @@ def past_window(items, now_ms, window_ms, receivers=None):
                 ),
                 f"open past the {plural(window_ms // 1000, 'second')} retry window",
                 minutes,
+                evidence_identity=(item["state"], len(_steps(item, WOKEN)), sum(len(_steps(item, e)) for e in RAISED)),
             )
         )
     return found

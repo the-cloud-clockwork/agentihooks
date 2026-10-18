@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x_pull_targets__mutmut_30:a407c816a337ea1877516a8fa0fec280b0588421b6d2b302be796c97a3c606bf": {
+    "reader": "Standards",
+    "reason": "Acceptable for the complete current call graph: changing returned classification from equality to inequality affects only tuple element2. Both tick_view and pull_rows destructure it as underscore and consume only the URL; target filtering and URL values are unchanged. No current behavior observes this classification."
+  }
+}

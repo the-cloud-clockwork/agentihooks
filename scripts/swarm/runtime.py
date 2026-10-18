@@ -716,6 +716,7 @@ class HerdrRuntime:
             )
         return replace(
             placed,
+            conversation_id=agent.conversation_id,
             model_source=picked.source,
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
@@ -841,6 +842,7 @@ class HerdrRuntime:
             profile_decision={"validation": validated},
             launched_at=launched_at,
             launch_timings=timings,
+            conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
         )
 
     def recover(self, name: str) -> Placed:

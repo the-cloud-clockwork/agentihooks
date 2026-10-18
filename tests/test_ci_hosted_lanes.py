@@ -56,6 +56,10 @@ REQUIRED = ("pull_request", "merge_group", "pull_request_target")
 REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs/heads/task-branch")
 
 
+if (_WORKFLOWS / "count-record.yml").is_file():
+    LANE_USERS = LANE_USERS | {"count-record.yml"}
+
+
 class _Context(dict):
     def __getattr__(self, key):
         value = self.get(key, _Context())
@@ -192,6 +196,13 @@ def test_a_run_on_a_lane_queues_and_is_never_cancelled():
 def test_no_required_run_or_its_callee_ever_reaches_a_lane():
     checked = 0
     for where, block in _blocks():
+        if where == "count-record.yml":
+            recorder = _workflow(where)
+            assert recorder[True] == {"push": {"branches": ["dev"]}}
+            assert set(recorder["jobs"]) == {"count-record"}
+            assert recorder["jobs"]["count-record"]["continue-on-error"] is True
+            assert all("count-record" not in job.get("needs", []) for job in _workflow("test.yml")["jobs"].values())
+            continue
         for github in _contexts(where):
             if github["event_name"] in REQUIRED or (github["event_name"], github["ref"]) == ("push", "refs/heads/dev"):
                 checked += 1

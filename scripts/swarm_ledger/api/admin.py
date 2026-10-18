@@ -50,9 +50,56 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
         server.ledger_bin.delete(slug)
         if server.swarm_status(slug) is not None:
             _, error = server.swarm_control(slug, ["stop", "--now"])
-    elif not server.ledger_bin.restore(slug):
+    elif not server.repository.restore(slug):
         raise APIError(404, "resource_missing", "Ledger is not in the bin")
     return {"slug": slug, "action": payload["action"], **({"swarm_error": error} if error else {})}
+
+
+def lifecycle(server: ModuleType, principal: str, slug: str, payload: dict) -> dict:
+    from scripts.swarm_ledger.repository import bin_storage
+
+    schemas.validate(
+        {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["action", "closed_at"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "action": {"const": "bin_closed"},
+                        "closed_at": {"type": "integer", "minimum": 1},
+                        "controller_epoch": {"type": "integer", "minimum": 1},
+                    },
+                },
+                {
+                    "type": "object",
+                    "required": ["action"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "action": {"enum": ["restore", "binned"]},
+                        "controller_epoch": {"type": "integer", "minimum": 1},
+                    },
+                },
+            ],
+        },
+        payload,
+    )
+    if principal and payload["action"] == "bin_closed":
+        raise APIError(403, "forbidden", "Conditional binning needs the operator or controller credential")
+    if "controller_epoch" in payload:
+        from scripts.swarm.store import SwarmError
+
+        try:
+            server.authority.fence(slug, payload["controller_epoch"])
+        except SwarmError as exc:
+            raise APIError(409, "stale_controller", str(exc)) from None
+    if payload["action"] == "bin_closed":
+        result = bin_storage.bin_closed(slug, payload["closed_at"])
+    elif payload["action"] == "restore":
+        result = bin_storage.restore(slug)
+    else:
+        result = slug in bin_storage.entries()
+    return {"data": result}
 
 
 def control(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:

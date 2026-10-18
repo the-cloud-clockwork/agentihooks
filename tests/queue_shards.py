@@ -1,6 +1,7 @@
 import argparse
 import hashlib
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -131,6 +132,7 @@ def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, required=True)
     parser.add_argument("--collection", type=Path, required=True)
+    parser.add_argument("--reused", type=Path)
     parser.add_argument("--version", required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -138,6 +140,15 @@ def main(argv: list[str] | None = None) -> None:
     measured = json.loads(snapshot.read_text())
     collected = json.loads(args.collection.read_text())
     measured = _estimates(measured, collected)
+    if args.reused and args.reused.is_file():
+        reused = json.loads(args.reused.read_text())
+        tests = set(reused.get("tests", ()))
+        files = set(reused.get("files", ()))
+        measured = {
+            node: seconds
+            for node, seconds in measured.items()
+            if node.split("::", 1)[0] not in files and re.sub(r"@[^\[\]]*$", "", node) not in tests
+        }
     plan = matrix(args.root, {args.version: measured})
     snapshot.write_text(json.dumps(measured, indent=4, sort_keys=True) + "\n")
     (args.root / "durations.sha256").write_text(hashlib.sha256(snapshot.read_bytes()).hexdigest() + "\n")

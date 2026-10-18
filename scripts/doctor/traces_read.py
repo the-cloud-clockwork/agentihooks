@@ -12,6 +12,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -54,14 +55,14 @@ def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) 
     return get
 
 
-def _pages(get, path, params, cap):
+def _pages(get, path, params, cap, deadline, clock):
     rows, page = [], 1
     while True:
         body = get(path, {**params, "page": page, "limit": OBSERVATION_PAGE})
         rows += body["data"]
         if page >= body["meta"]["totalPages"]:
             return rows, True
-        if page >= cap:
+        if page >= cap or clock() >= deadline:
             return rows, False
         page += 1
 
@@ -111,13 +112,14 @@ def _listing(slug, get, budget, deadline, clock):
         return rows, False, [f"trace listing failed: {type(exc).__name__}: {exc}"]
 
 
-def _backfill(get, cache, trace, budget):
+def _backfill(get, cache, trace, budget, deadline, clock):
     try:
-        rows, whole = _pages(get, "observations", {"traceId": trace["id"]}, budget.observation_pages)
+        rows, whole = _pages(get, "observations", {"traceId": trace["id"]}, budget.observation_pages, deadline, clock)
         entry = {"updated_at": trace.get("updatedAt"), "whole": whole, "observations": [_observation(o) for o in rows]}
     except Exception as exc:  # noqa: BLE001
         entry = {"updated_at": trace.get("updatedAt"), "failed": f"{type(exc).__name__}: {exc}"}
-    registry.save(_cache_path(cache, trace["id"]), entry)
+    if entry.get("whole") or entry.get("failed"):
+        registry.save(_cache_path(cache, trace["id"]), entry)
     return entry
 
 
@@ -141,7 +143,7 @@ def history(
     for trace in [] if failures else unread + retried:
         if clock() >= deadline:
             break
-        entries[trace["id"]] = _backfill(get, cache, trace, budget)
+        entries[trace["id"]] = _backfill(get, cache, trace, budget, deadline, clock)
     found = [
         {
             "id": trace["id"],
@@ -149,6 +151,7 @@ def history(
             "session_id": trace.get("sessionId") or "",
             "tags": sorted(trace.get("tags") or []),
             "observations": entries[trace["id"]].get("observations", []),
+            "complete": bool(entries[trace["id"]].get("whole")),
         }
         for trace in listed
     ]
@@ -209,8 +212,10 @@ def record(
 ) -> dict:
     base = Path(home or SWARM_HOME) / slug
     state = registry.load(base / STATE_FILE)
-    active, failures = registry.read(slug, agents, get, state, budget.active_seconds, budget.active_page, clock)
-    traces, coverage, lost = history(slug, get, base / CACHE_DIR, budget, clock)
+    with ThreadPoolExecutor() as pool:
+        reading = pool.submit(registry.read, slug, agents, get, state, budget.active_seconds, budget.active_page, clock)
+        traces, coverage, lost = history(slug, get, base / CACHE_DIR, budget, clock)
+        active, failures = reading.result()
     failures += lost
     empty = _empty_project_failure(slug, get, active, traces, coverage)
     if empty:

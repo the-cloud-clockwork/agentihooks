@@ -127,17 +127,6 @@ jobs:
           jq -S .report "$out/candidate/attestation.json" > "$out/candidate-report.json"
           jq -S .report "$out/repeat/attestation.json" > "$out/repeat-report.json"
           diff "$out/candidate-report.json" "$out/repeat-report.json"
-      - name: Keep the qualified candidate layers
-        if: steps.layers.outputs.cache-hit != 'true'
-        run: |
-          rm -rf "$RUNNER_TEMP/worker-layers"
-          mv "$RUNNER_TEMP/worker-layers-next" "$RUNNER_TEMP/worker-layers"
-      - name: Save the qualified candidate layers
-        if: steps.layers.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
-        with:
-          path: ${{ runner.temp }}/worker-layers
-          key: ${{ steps.layers.outputs.cache-primary-key }}
       - name: Require a release tag on main
         id: main
         if: github.event_name == 'release'
@@ -180,6 +169,17 @@ jobs:
           tags=(--tag "$REPOSITORY:${RELEASE#v}")
           if [[ "$LATEST" == true ]]; then tags+=(--tag "$REPOSITORY:release"); fi
           docker buildx imagetools create "${tags[@]}" "$REPOSITORY@$digest"
+      - name: Keep the qualified candidate layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        run: |
+          rm -rf "$RUNNER_TEMP/worker-layers"
+          mv "$RUNNER_TEMP/worker-layers-next" "$RUNNER_TEMP/worker-layers"
+      - name: Save the qualified candidate layers
+        if: steps.layers.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/worker-layers
+          key: ${{ steps.layers.outputs.cache-primary-key }}
       - name: Upload the attestation
         if: always()
         uses: actions/upload-artifact@v4
