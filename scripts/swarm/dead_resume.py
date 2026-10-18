@@ -24,7 +24,7 @@ def skip_binding(agent: AgentRecord, facts: dict, live: set[str]) -> bool:
 def _owns(store, slug, agent, ledger):
     from scripts.swarm.tick import LEASE_MS
 
-    if next((current for current in store.agents(slug) if current.name == agent.name), None) != agent:
+    if agent not in store.agents(slug):
         return False
     if agent.seat and store.seats.occupant(agent.seat).occupant != agent.name:
         return False

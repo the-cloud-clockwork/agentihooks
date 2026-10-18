@@ -842,7 +842,7 @@ class HerdrRuntime:
             profile_decision={"validation": validated},
             launched_at=launched_at,
             launch_timings=timings,
-            conversation_id=(self.conversations() or {}).get(fields.get("pane_id", ""), ""),
+            conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
         )
 
     def recover(self, name: str) -> Placed:

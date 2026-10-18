@@ -549,7 +549,7 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
     if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
         return [f"resumed {agent.name}"]
-    if next((current for current in store.agents(slug) if current.name == agent.name), None) != agent:
+    if agent not in store.agents(slug):
         return []
     runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
     return [f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent)]

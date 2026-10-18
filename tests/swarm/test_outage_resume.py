@@ -443,7 +443,10 @@ def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
     assert runtime.nudged.count(stuck.name) == 1
 
 
-def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize("conversation", ["fresh-conversation", ""])
+def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(
+    store, tmp_path, monkeypatch, conversation
+):
     from scripts.handoff import transfers
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
@@ -455,7 +458,7 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     native_spawn = runtime.spawn
 
     def spawn(config, lane, name, task):
-        return replace(native_spawn(config, lane, name, task), conversation_id="fresh-conversation")
+        return replace(native_spawn(config, lane, name, task), conversation_id=conversation)
 
     monkeypatch.setattr(runtime, "spawn", spawn)
     launches = len(runtime.spawned)
@@ -470,7 +473,7 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (restarted.pane_id, restarted.conversation_id, restarted.started_at, restarted.idle_ticks) == (
         f"w1:p{launches + 1}",
-        "fresh-conversation",
+        conversation,
         9 * MINUTE,
         0,
     )
