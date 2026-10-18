@@ -29,12 +29,17 @@ def host(redis: "Redis", slug: str, name: str) -> str:
     """The joined member that runs name in slug, '' for any other host; a member recognises only itself."""
     from scripts.swarm.store import RedisStore
 
-    own = member()
-    joined = [own] if own else members(redis)
-    if not joined:
+    hosts = joined(redis)
+    if not hosts:
         return ""
-    placed = [agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name and agent.hive in joined]
+    placed = [agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name and agent.hive in hosts]
     return placed[0] if placed else ""
+
+
+def joined(redis: "Redis") -> list[str]:
+    """The members whose keys this process may find agents below: itself for a member, every joined one otherwise."""
+    own = member()
+    return [own] if own else members(redis)
 
 
 def members(redis: "Redis") -> list[str]:

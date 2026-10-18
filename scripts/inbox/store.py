@@ -136,6 +136,8 @@ class InboxStore:
         """The hive member whose keys hold address's inbox: the member that runs it or its seat's occupant."""
         from scripts.hive import scope
 
+        if not scope.joined(self.redis):
+            return ""
         receiver = self.names.resolve(self.seats.occupant(address).occupant if is_seat(address) else address)
         slug = self.names.slug_of(receiver)
         return scope.host(self.redis, slug, receiver) if slug else ""
