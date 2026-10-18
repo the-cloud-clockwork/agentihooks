@@ -128,7 +128,7 @@ def _tokens(text: str) -> list[str]:
 def _shell_delete_targets(command: str, base: Path) -> list[tuple[str, Path]]:
     targets = []
     for match in _SHELL_DELETE.finditer(command):
-        where = base / Path(match.group(1).strip("'\"")).expanduser() if match.group(1) else base
+        where = base / Path(_tokens(match.group(1))[0]).expanduser() if match.group(1) else base
         targets += [(token, where) for token in _tokens(match.group(2))]
     for match in _FIND_DELETE.finditer(command):
         starts = takewhile(lambda token: not token.startswith(("-", "(", "!")), _tokens(match.group(1)))

@@ -258,6 +258,7 @@ def test_a_file_tool_call_without_a_path_is_allowed(trees):
         "exec rm {root}/pkg/mod.py",
         "time rm {root}/pkg/mod.py",
         "rm {root}/pkg/mod.py; rm build.log",
+        "rm {root}/pkg/mod.py; ls | xargs rm",
         "rm {root}/pkg/mod.py; find . -name '*.log' -delete",
         "cd {root} && find \\( -name '*.py' \\) -delete",
         "cd {root} && find ! -name '*.md' -delete",
@@ -281,6 +282,7 @@ def test_deleting_a_python_file_whose_name_reads_as_a_glob_in_another_worktree_i
     [
         "find . -name '*.py' -delete",
         "find pkg -exec rm {{}} +",
+        "find . -newer {other}/pkg/mod.py -delete",
         "diff {other}/pkg/mod.py pkg/mod.py; ls | xargs rm -f build.log",
         "ls pkg/mod.py | xargs rm",
         "git -C {root} rm pkg/mod.py",
