@@ -262,7 +262,7 @@ def test_a_redis_drop_after_the_store_opens_answers_storage_error(store, monkeyp
         raise redis.ConnectionError("Connection reset by peer")
 
     monkeypatch.setattr(store.redis, "hgetall", drop)
-    assert refusal(request(method, path, payload), store) == (503, "Connection reset by peer")
+    assert refusal(request(method, path, payload), store) == (503, "The swarm store is unreachable")
 
 
 @pytest.mark.parametrize("hive", ["desk", "pod-2.a_b"])

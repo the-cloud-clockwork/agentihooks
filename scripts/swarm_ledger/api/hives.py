@@ -99,6 +99,8 @@ def route(handler: object, server: ModuleType, parts: list, read_body: Callable[
         if handler.command == "PATCH":
             _write(handler, server, store, parts[1], read_body(handler, server))
         data = one(store, parts[1], now_ms) if len(parts) == 2 else view(store, now_ms)
-    except (SwarmError, HiveError, RedisError) as exc:
+    except (SwarmError, HiveError) as exc:
         raise APIError(503, "storage_error", str(exc)) from None
+    except RedisError:
+        raise APIError(503, "storage_error", "The swarm store is unreachable") from None
     return {"data": data, "revision": resources.revision(data)}
