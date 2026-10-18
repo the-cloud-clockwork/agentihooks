@@ -125,10 +125,7 @@ def test_member_heartbeat_timer_uses_its_writable_subtree(redis, monkeypatch, de
         assert timer.key.startswith(expected)
         if deployment != "local":
             writable = [pattern[1:] for pattern in _acl_keys("member") if pattern.startswith("~")]
-            assert all(
-                any(fnmatchcase(key, pattern) for pattern in writable)
-                for key in redis.keys("*")
-            )
+            assert all(any(fnmatchcase(key, pattern) for pattern in writable) for key in redis.keys("*"))
         Scheduler(redis).run_due(now=timer.entry.record["due"])
         timer.wait()
 
