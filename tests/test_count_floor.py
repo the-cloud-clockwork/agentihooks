@@ -73,6 +73,38 @@ def _collection_tree(tmp_path):
     return root
 
 
+@pytest.mark.parametrize("lost", [False, True])
+def test_the_floor_exports_the_same_head_collection_without_collecting_it_again(tmp_path, monkeypatch, lost):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    expected = ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    if lost:
+        (head / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+        expected = ["tests/test_a.py::test_a"]
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == int(lost)
+    assert json.loads(output.read_text()) == expected
+    assert (head / ".collection-runs").read_text() == "x"
+    from tests.duration_coverage import collected_tests
+
+    assert json.loads(output.read_text()) == collected_tests(head)
+
+
+def test_a_failed_head_collection_exports_no_list_for_splitting(tmp_path, monkeypatch):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    (head / "tests" / "test_a.py").write_text("this is invalid python\n")
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == 1
+    assert not output.exists()
+
+
 def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
     from tests.count_floor import collect_all
 

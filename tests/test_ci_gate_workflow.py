@@ -324,6 +324,20 @@ def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_t
     assert jobs["test-count"]["permissions"] == {"contents": "read"}
 
 
+def test_every_dev_head_records_its_count_outside_the_promotion_queue():
+    from scripts.ci_branch_lanes import problems
+
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/count-record.yml").read_text())
+    assert workflow[True] == {"push": {"branches": ["dev"]}}
+    assert problems(workflow) == []
+    assert workflow["concurrency"]["queue"] == "max"
+    assert workflow["concurrency"].get("cancel-in-progress", False) is False
+    assert workflow["permissions"] == {"contents": "read"}
+    assert set(workflow["jobs"]) == {"count-record"}
+    assert "needs" not in workflow["jobs"]["count-record"]
+    assert "count-record" not in _workflow()["jobs"]
+
+
 @pytest.mark.parametrize("answer", ["fail", "none", "branch", "badzip", "match"])
 def test_fetching_the_dev_count_record_never_fails_and_writes_only_a_dev_record(tmp_path, answer):
     runner = tmp_path / "runner"
