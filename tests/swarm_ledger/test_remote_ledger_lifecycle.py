@@ -156,7 +156,7 @@ def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
         "POST",
         f"/api/v1/ledgers/{SLUG}/lifecycle/actions",
         json.dumps(payload).encode(),
-        **{"X-Ledger-Token": live["admin"]},
+        **{"X-Ledger-Token": live["admin"], "Content-Type": "application/json"},
     )
     assert status == 400
     assert bin_storage.entries() == before
