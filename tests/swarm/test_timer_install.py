@@ -172,10 +172,13 @@ def _systemctl(calls, failing=()):
 
 
 def test_a_tick_timer_that_cannot_be_disabled_keeps_its_files_for_a_later_pass(tmp_path, capsys):
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    capsys.readouterr()
     for name in ("agentihooks-swarm.timer", "agentihooks-swarm.service"):
         (tmp_path / name).write_text("[Unit]\n")
     calls = []
     timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls, failing={"disable"}))
+    assert ["systemctl", "--user", "daemon-reload"] not in [argv for argv, _ in calls]
     assert (tmp_path / "agentihooks-swarm.timer").exists()
     assert (tmp_path / "agentihooks-swarm.service").exists()
     assert capsys.readouterr().err == (

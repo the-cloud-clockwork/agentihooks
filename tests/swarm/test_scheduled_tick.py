@@ -79,9 +79,11 @@ def test_ensure_holds_the_registration_lock_and_scopes_keys_per_machine():
 
 def test_the_scheduler_fires_the_tick_holder_every_minute(monkeypatch):
     import time
+    from types import SimpleNamespace
 
     started = []
-    monkeypatch.setattr(scheduled_tick.subprocess, "Popen", lambda argv, **kwargs: started.append((argv, kwargs)))
+    popen = lambda argv, **kwargs: started.append((argv, kwargs))  # noqa: E731
+    monkeypatch.setattr(scheduled_tick, "subprocess", SimpleNamespace(Popen=popen, DEVNULL=subprocess.DEVNULL))
     scheduler = _scheduler()
     monkeypatch.setattr(time, "time", lambda: MINUTE_START)
     scheduled_tick.ensure(scheduler)
