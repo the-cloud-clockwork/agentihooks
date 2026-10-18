@@ -7,6 +7,17 @@ from scripts.scheduler.core import Scheduler
 from scripts.swarm.store import redis_client
 
 
+def blocking_client():
+    from redis import ConnectionPool, Redis
+
+    source = redis_client()
+    pool = source.connection_pool
+    options = {**pool.connection_kwargs, "socket_timeout": None}
+    client = Redis(connection_pool=ConnectionPool(connection_class=pool.connection_class, **options))
+    source.close()
+    return client
+
+
 def wake(event: dict, delivery_id: str, redis) -> None:
     key = json.loads(event["payload"])["key"]
     with redis.pipeline() as pipe:
@@ -18,7 +29,8 @@ def wake(event: dict, delivery_id: str, redis) -> None:
 
 class Timer:
     def __init__(self, delay: float, *, redis=None) -> None:
-        self.redis = redis if redis is not None else redis_client()
+        self.owns_redis = redis is None
+        self.redis = redis if redis is not None else blocking_client()
         scheduler = Scheduler(self.redis)
         self.key = scheduler.key(f"wake:{uuid.uuid4().hex}")
         self.entry = scheduler.timer(owner="process", payload=json.dumps({"key": self.key}), delay=delay)
@@ -33,6 +45,8 @@ class Timer:
     def close(self) -> None:
         self.entry.cancel()
         self.redis.delete(self.key)
+        if self.owns_redis:
+            self.redis.close()
 
     def __enter__(self):
         return self

@@ -46,7 +46,7 @@ def test_interruption_cancels_the_timer_and_cleans_the_wake(redis, monkeypatch):
 
 def test_wait_uses_the_configured_redis_client(redis, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
-    monkeypatch.setattr(process_timer, "redis_client", lambda: redis)
+    monkeypatch.setattr(process_timer, "blocking_client", lambda: redis)
     with process_timer.Timer(0) as timer:
         Scheduler(redis).run_due(now=timer.entry.record["due"])
         timer.wait()

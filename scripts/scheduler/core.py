@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import time
 import uuid
@@ -109,6 +110,12 @@ class Scheduler:
         self.machine = machine or socket.gethostname()
 
     def key(self, suffix: str) -> str:
+        if os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and (
+            member := os.environ.get("AGENTIHOOKS_HIVE_ID")
+        ):
+            from scripts.swarm.keyspace import ROOT
+
+            return f"{ROOT}:hive:{member}:scheduler:{self.machine}:{suffix}"
         return redis_key("scheduler", f"{self.machine}:{suffix}")
 
     def get(self, entry_id: str) -> Entry:
