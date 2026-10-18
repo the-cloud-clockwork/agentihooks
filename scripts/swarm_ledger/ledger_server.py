@@ -717,9 +717,13 @@ def sample_streams():
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
 
+class Handshake(Exception):
+    pass
+
+
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
     def handle_error(self, request, client_address):
-        if not isinstance(sys.exc_info()[1], (ssl.SSLError, TimeoutError)):
+        if not isinstance(sys.exc_info()[1], Handshake):
             super().handle_error(request, client_address)
 
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
@@ -735,7 +739,10 @@ class Handler(BaseHTTPRequestHandler):
     def setup(self):
         if self.tls is not None:
             self.request.settimeout(TLS_HANDSHAKE_S)
-            self.request = self.tls.wrap_socket(self.request, server_side=True)
+            try:
+                self.request = self.tls.wrap_socket(self.request, server_side=True)
+            except OSError as exc:
+                raise Handshake from exc
             self.request.settimeout(None)
         super().setup()
 
