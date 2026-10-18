@@ -41,6 +41,7 @@ def require_local(slug: str) -> None:
     if ledger_link.remote():
         raise SystemExit(f"remote ledger clients must use /api/v1/ledgers/{slug}/lifecycle/actions")
 
+
 def restore(slug, now=None):
     require_local(slug)
     from scripts.swarm_ledger.repository import repository
