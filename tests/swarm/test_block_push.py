@@ -112,6 +112,7 @@ def test_block_checks_the_published_continuation_branch(worktree, capsys, tracki
         ledger.rows["t1"].update({"branch": "stale", "repository_branches": {str(primary): "stale"}})
     if ahead:
         _git(top, "commit", "--allow-empty", "-m", "Unpublished continuation work")
+        _git(top, "push", "origin", BRANCH)
     capsys.readouterr()
     assert block() == (1 if ahead else 0)
     if ahead:
@@ -127,7 +128,7 @@ def test_block_checks_the_published_continuation_branch(worktree, capsys, tracki
 def test_block_checks_the_worktree_of_the_branch_recorded_for_its_repository(worktree, capsys):
     ledger, _, primary, _ = worktree
     top = (primary.parent / "worktrees" / "recorded").resolve()
-    _git(primary, "worktree", "add", "-b", "eng-t1", str(top), "origin/dev")
+    _git(primary, "worktree", "add", "--no-track", "-b", "eng-t1", str(top), "origin/dev")
     _git(top, "commit", "--allow-empty", "-m", "Task work")
     _git(primary, "worktree", "remove", "--force", str(primary.parent / "worktrees" / "repo" / BRANCH))
     ledger.rows["t1"].update({"branch": "stale", "repository_branches": {str(primary): "eng-t1"}})
@@ -198,7 +199,11 @@ def test_block_refuses_when_a_second_task_repository_holds_unpushed_commits(work
 
 @pytest.mark.parametrize(
     ("failing", "says"),
-    [("branch", "cannot read the worktree branch"), ("rev-list", "cannot count the worktree commits")],
+    [
+        ("branch", "cannot read the worktree branch"),
+        ("for-each-ref", "cannot read the worktree upstream"),
+        ("rev-list", "cannot count the worktree commits"),
+    ],
 )
 def test_block_refuses_when_a_worktree_git_read_fails(worktree, capsys, monkeypatch, failing, says):
     real = stack.shell
