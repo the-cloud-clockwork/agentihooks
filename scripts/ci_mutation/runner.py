@@ -61,8 +61,6 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "evidence",
         "observability",
         "docker/swarm-node",
-        "deploy",
-        "mutation-clearances",
         ".agentihooks/conditions",
     ):
         source = root / name
@@ -93,8 +91,6 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "evidence/",
             "observability/",
             "docker/swarm-node/",
-            "deploy/",
-            "mutation-clearances/",
             ".agentihooks/conditions/",
             *root_files,
         ],
