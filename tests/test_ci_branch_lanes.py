@@ -373,4 +373,3 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
     assert lanes.refused(sha, base) == {
         f"{lanes.WORKFLOWS}/replay.yml": ["job replay has no shared hosted lane concurrency group"]
     }
-
