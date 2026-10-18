@@ -7,7 +7,7 @@ parent: Hook System
 # Hook Events
 {: .no_toc }
 
-AgentiHooks registers handlers for all 10 Claude Code hook events. **StatusLine** is not a hook event -- it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
+AgentiHooks registers shared lifecycle handlers for Claude Code and Codex. The examples below use the Claude Code event contract; see the [Codex reference](../reference/CODEX-COMPAT.md) for registration and delivery differences. **StatusLine** is not a hook event -- it is a native Claude Code setting (`"statusLine"` key in `settings.json`) handled by a separate script (`hooks/statusline.py`).
 
 ## Table of contents
 {: .no_toc .text-delta }

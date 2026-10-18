@@ -9,7 +9,7 @@ from pathlib import Path
 
 UNIT = "agentihooks-swarm"
 WAKER = "agentihooks-inbox-waker"
-ALERTS = "agentihooks-alert-intake"
+DROPPED = ("agentihooks-alert-intake.service",)
 PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
@@ -24,15 +24,6 @@ def units(binary):
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm waker\n'
         "Restart=always\nRestartSec=5\n\n"
-        "[Install]\nWantedBy=default.target\n"
-    )
-    alerts = (
-        "[Unit]\nDescription=agentihooks swarm alert intake for Grafana\n\n"
-        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        "EnvironmentFile=-%h/.agentihooks/.env\n"
-        f'ExecStart="{binary}" swarm alerts\n'
-        "Restart=on-failure\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
     prober = (
@@ -61,7 +52,6 @@ def units(binary):
         f"{WAITS}.service": wait_service,
         f"{WAITS}.timer": wait_timer,
         f"{WAKER}.service": waker,
-        f"{ALERTS}.service": alerts,
         f"{PROBER}.service": prober,
     }
 
@@ -130,6 +120,17 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         if not _current(path, text):
             path.write_text(text)
             changed = True
+    for name in DROPPED:
+        if (unit_dir / name).exists():
+            run(
+                ["systemctl", "--user", "disable", "--now", name],
+                capture_output=True,
+                text=True,
+                timeout=30,
+                check=False,
+            )
+            (unit_dir / name).unlink()
+            changed = True
     if changed:
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
     procs = [
@@ -144,7 +145,7 @@ def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
     expected = units(binary)
     current = all(_current(unit_dir / name, text) for name, text in expected.items())
-    if current and not any((unit_dir / name).exists() for name in RETIRED):
+    if current and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED)):
         names = [*_services(expected), f"{WAITS}.timer"]
         enabled = ["systemctl", "--user", "is-enabled", "--quiet"]
         if all(run([*enabled, name], capture_output=True, text=True, timeout=30).returncode == 0 for name in names):

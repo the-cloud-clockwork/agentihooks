@@ -3,6 +3,10 @@ import pytest
 from scripts.doctor import traces_read
 
 
+def _at(raiser, line=1):
+    return f" at {raiser.__code__.co_filename}:{raiser.__code__.co_firstlineno + line}"
+
+
 def _page(rows, page, total):
     return {"data": rows, "meta": {"page": page, "totalPages": total}}
 
@@ -217,7 +221,7 @@ def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path):
 
     rows, coverage, failures = traces_read.history("s", down, tmp_path, traces_read.Budget())
     assert rows == [] and coverage["listed"] is False
-    assert failures == ["trace listing failed: TimeoutError: read timed out"]
+    assert failures == [f"trace listing failed: TimeoutError: read timed out{_at(down)}"]
 
 
 def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path):
@@ -236,7 +240,7 @@ def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(
     rows, coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
     assert failures == []
     assert asked == ["a"]
-    assert coverage["unreadable"] == ["trace a unreadable: TimeoutError: read timed out"]
+    assert coverage["unreadable"] == [f"trace a unreadable: TimeoutError: read timed out{_at(get, 5)}"]
     assert coverage["covered"] == 0 and [len(r["observations"]) for r in rows] == [0, 0, 0]
     asked.clear()
     rows, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
@@ -264,8 +268,8 @@ def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(t
     assert first["reader"]["down_since"] == 1000
     assert first["reader"]["active"] == {"bindings": 1, "read": 0}
     assert first["reader"]["failures"] == [
-        "active read of s-eng-1 failed: ConnectionError: refused",
-        "trace listing failed: ConnectionError: refused",
+        f"active read of s-eng-1 failed: ConnectionError: refused{_at(down)}",
+        f"trace listing failed: ConnectionError: refused{_at(down)}",
     ]
     assert first["active"][0]["read"] is False
     second = traces_read.record("s", [], agents, 2000, down, home=tmp_path)
@@ -304,6 +308,22 @@ def test_the_client_names_the_missing_keys_and_calls_langfuse_with_auth_params_a
         ("https://lf/api/public/traces", {"params": {"page": 1}, "auth": ("pk", "sk"), "timeout": 3}),
         "checked",
     ]
+
+
+def test_each_request_is_capped_under_half_the_active_read_budget(monkeypatch):
+    budget, timeouts = traces_read.Budget(), []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": []}
+
+    monkeypatch.setattr(traces_read.httpx, "get", lambda url, **kw: timeouts.append(kw["timeout"]) or Response())
+    traces_read.client({"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"})("traces", {})
+    assert timeouts == [budget.request_seconds]
+    assert budget.request_seconds < budget.active_seconds / 2
 
 
 def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
@@ -480,7 +500,7 @@ def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path,
         return Project("antoncore")(path, params)
 
     data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
-    assert data["reader"]["failures"] == ["trace listing failed: ConnectionError: refused"]
+    assert data["reader"]["failures"] == [f"trace listing failed: ConnectionError: refused{_at(listing_down, 2)}"]
 
 
 def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):

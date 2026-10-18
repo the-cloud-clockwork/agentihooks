@@ -41,6 +41,17 @@ PATTERNS = {
     "demo_slug": re.compile(r"doctor-demo-\d{20}"),
 }
 SLUG_KINDS = ("plan_slug", "small_slug", "proof_slug", "demo_slug")
+CODE_SWARM_KINDS = ("proof_slug", "demo_slug")
+SWARM_NAME_RE = re.compile(r"[a-z]+(-[a-z]+)?-swarm")
+SWARM_NAME_RULE = (
+    "a swarm name is one or two lowercase words joined by a dash and ending in swarm, such as rig-grade-swarm or "
+    "dating-swarm"
+)
+SUGGESTION_SKIP = frozenset(
+    {"a", "an", "and", "by", "for", "from", "in", "into", "of", "on", "or", "plan", "swarm", "the", "to", "with"}
+)
+SUGGESTION_FALLBACK = ("new", "next", "work", "build")
+SWARM_INIT = "agentihooks swarm init <name> --plan <file> --repo <dir>"
 
 
 class NamingError(RuntimeError):
@@ -189,6 +200,31 @@ def proof_slug(environ, taken=()):
 
 def is_built_slug(slug):
     return any(PATTERNS[kind].fullmatch(slug or "") for kind in SLUG_KINDS)
+
+
+def is_code_named_swarm(slug):
+    return any(PATTERNS[kind].fullmatch(slug) for kind in CODE_SWARM_KINDS)
+
+
+def swarm_name_problem(name, taken=()):
+    """Why NAME cannot name a new swarm; an empty string when it can."""
+    if not name:
+        return "a swarm needs a name"
+    if not SWARM_NAME_RE.fullmatch(name):
+        return f"{name} breaks the swarm name rule"
+    return f"{name} is taken" if name in taken else ""
+
+
+def swarm_name_suggestions(title, taken=(), count=2):
+    """COUNT free swarm names built from the words of a plan title."""
+    words = [word for word in re.findall(r"[a-z]+", str(title).lower()) if word not in SUGGESTION_SKIP]
+    pairs = [f"{first}-{second}" for first, second in zip(words, words[1:])]
+    stems = [*pairs[:1], *words, *pairs[1:], *SUGGESTION_FALLBACK]
+    found = []
+    for name in (f"{stem}-swarm" for stem in stems):
+        if name not in found and not swarm_name_problem(name, taken):
+            found.append(name)
+    return found[:count]
 
 
 def _mint():

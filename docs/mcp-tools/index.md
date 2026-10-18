@@ -6,7 +6,7 @@ has_children: true
 
 # MCP Tools
 
-The AgentiHooks MCP server (`agentihooks`) exposes tools across **4 categories**. The server runs `python -m hooks.mcp` and is registered automatically during `agentihooks init`.
+The AgentiHooks MCP server (`agentihooks`) serves Claude Code and Codex and exposes tools across **4 categories**. The server runs `python -m hooks.mcp` and is registered automatically during `agentihooks init`.
 
 ## Categories
 
