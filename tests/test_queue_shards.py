@@ -294,6 +294,7 @@ def test_joint_queue_reuse_keeps_each_versions_deselection_and_uploads(tmp_path)
     (workspace / "collected.json").write_text(json.dumps([common, first]))
     (other / "collected.json").write_text(json.dumps([common, second]))
     step = next(step for step in steps if step.get("name") == "Deselect the reused tests")
+    assert step["env"]["QUEUE_BOTH_VERSIONS"] == "${{ github.event_name == 'merge_group' }}"
     env = {
         **os.environ,
         "RUNNER_TEMP": str(runner),
