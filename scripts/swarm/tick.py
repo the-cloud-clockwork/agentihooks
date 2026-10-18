@@ -27,12 +27,12 @@ from scripts.inbox import exits, wake
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
-    content_refusal,
     affinity,
     bottleneck_remedy,
     ci_speed,
     claim_hold,
     claim_order,
+    content_refusal,
     continuation,
     control_notifications,
     dead_resume,
