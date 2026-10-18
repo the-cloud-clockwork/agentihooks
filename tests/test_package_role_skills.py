@@ -239,9 +239,9 @@ MASTER_POOL = (
 )
 
 
-def _section(text: str, heading: str) -> str:
+def _section(text: str, heading: str, until: str = "\n## ") -> str:
     start = text.index(heading)
-    end = text.find("\n## ", start + len(heading))
+    end = text.find(until, start + len(heading))
     return text[start : end if end != -1 else len(text)]
 
 
@@ -267,7 +267,7 @@ def test_rendered_claude_and_codex_masters_carry_the_same_master_pool(world):
 
 def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
     docs = ROLES.parents[2] / "docs" / "pillars" / "swarm.md"
-    text = " ".join(_section(docs.read_text(), "### Master pool").split())
+    text = " ".join(_section(docs.read_text(), "### Master pool", "\n### ").split())
     phrases = [phrase.replace("<slug>", "<id>") for phrase in MASTER_POOL]
 
     assert [phrase for phrase in phrases if phrase not in text] == []

@@ -201,12 +201,10 @@ skill. A swarm below one step behaves exactly as a single master swarm.
   retires first: it hands off, and its handoff and open inbox items go to the front door. The front door never retires by
   scaling.
 - **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
-  pool per swarm, first in first out. Each item is claimed by exactly one live master with an atomic claim, in
-  round robin seat order, skipping a master that is gone or draining toward retirement; no item is shown to two
-  masters. An item a master never confirms returns to the pool after
-  `AGENTIHOOKS_INBOX_REDELIVER_S` and goes to the next master with the same id, and a gone master's unconfirmed
-  items return the same way. Items from the operator bypass the pool and go to the front door. With one live master
-  delivery is unchanged.
+  pool per swarm, first in first out, and each is claimed by exactly one live master in round robin seat order,
+  skipping a master that is gone or draining toward retirement. An unconfirmed item goes to the next master with
+  the same id. Items from the operator bypass the pool and go to the front door. Master inbox pool below gives
+  every rule.
 - **Front door.** Only `master@<id>` faces the operator: it receives page chat and every operator write, holds Priorities and, with
   `master-claude-login` on, the claude ai login and Remote Control. A backend master's page chat write is refused
   naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
