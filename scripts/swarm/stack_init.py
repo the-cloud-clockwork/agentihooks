@@ -13,13 +13,12 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TextIO
 
-from scripts.swarm.stack_env import BIND, client_env, settings, write_private
+from scripts.swarm.stack_env import BIND, client_env, read_env, settings, write_private
 
 PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
 SERVICES = ("redis", "swarm", "controller")
 AGAIN = "then run agentihooks swarm init again"
-LOGS = f"docker compose --project-name {PROJECT} logs"
 OUTPUT_LINES = 10
 DOCKER_CHECKS = (
     (
@@ -81,12 +80,20 @@ def materialize(home: Path) -> None:
     (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
+def project(home: Path) -> str:
+    return read_env(home / ".env").get("SWARM_COMPOSE_PROJECT") or PROJECT
+
+
+def logs(home: Path) -> str:
+    return f"docker compose --project-name {project(home)} logs"
+
+
 def compose(home: Path, *args: str) -> list[str]:
     return [
         "docker",
         "compose",
         "--project-name",
-        PROJECT,
+        project(home),
         "--project-directory",
         str(home),
         "--file",
@@ -118,11 +125,11 @@ def page_problem(base: str, opener: Callable) -> str | None:
     return None
 
 
-def failed(out: TextIO, paint: Paint, problem: str, fix: str, logs: str = "") -> None:
+def failed(out: TextIO, paint: Paint, problem: str, fix: str, command: str = "") -> None:
     print(paint(f"Swarm stack not ready: {problem}.", "failed"), file=out)
     print(f"  Fix: {fix}.", file=out)
-    if logs:
-        print(f"  Logs: {LOGS} {logs}", file=out)
+    if command:
+        print(f"  Logs: {command}", file=out)
 
 
 def ready(out: TextIO, paint: Paint, home: Path, base: str, name: str) -> None:
@@ -162,13 +169,12 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
     if sick := start(run, home, args.timeout, out):
         for service, state in sick:
             fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)
-            failed(out, paint, f"{service} is {state}", fix, service)
+            failed(out, paint, f"{service} is {state}", fix, f"{logs(home)} {service}")
         return 1
     base = urllib.parse.urlunsplit(("http", f"{BIND}:{values['SWARM_PORT']}", "", "", ""))
     if problem := page_problem(base, opener):
-        failed(
-            out, paint, "the ledger page does not answer", f"{problem}; read the ledger logs with {LOGS} swarm, {AGAIN}"
-        )
+        fix = f"{problem}; read the ledger logs with {logs(home)} swarm, {AGAIN}"
+        failed(out, paint, "the ledger page does not answer", fix)
         return 1
     ready(out, paint, home, base, name)
     return 0

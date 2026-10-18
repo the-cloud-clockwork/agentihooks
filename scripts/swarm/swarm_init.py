@@ -131,7 +131,7 @@ def init(argv: list[str], environ: Mapping[str, str], run: stack_init.Run, opene
     return 0
 
 
-def check(argv: list[str], out: TextIO = sys.stdout) -> int:
+def check(argv: list[str]) -> int:
     """agentihooks swarm names check NAME [--plan FILE]: valid or invalid, the reason and suggestions."""
     from scripts.swarm import cli
 
@@ -141,10 +141,10 @@ def check(argv: list[str], out: TextIO = sys.stdout) -> int:
     args = checker.parse_args(argv)
     used = taken(cli.connect())
     if problem := naming.swarm_name_problem(args.name, used):
-        print(f"invalid: {problem}", file=out)
-        print(f"  Rule: {naming.SWARM_NAME_RULE}.", file=out)
+        print(f"invalid: {problem}")
+        print(f"  Rule: {naming.SWARM_NAME_RULE}.")
         title = plan_title(args.plan) or args.name.replace("-", " ")
-        print(f"  Try: {' or '.join(naming.swarm_name_suggestions(title, used))}", file=out)
+        print(f"  Try: {' or '.join(naming.swarm_name_suggestions(title, used))}")
         return 1
-    print(f"valid: {args.name}", file=out)
+    print(f"valid: {args.name}")
     return 0

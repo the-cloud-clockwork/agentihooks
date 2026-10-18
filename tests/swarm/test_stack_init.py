@@ -328,3 +328,16 @@ def test_a_tls_stack_points_the_client_at_its_own_ca(home):
     code, _ = init(home, Docker())
     assert code == 0
     assert (folder / "client.env").read_text().endswith(f"\nSSL_CERT_FILE={folder}/deploy/compose/tls/ca.pem\n")
+
+
+def test_a_stack_env_can_name_its_own_compose_project_so_a_second_stack_never_touches_the_first(home):
+    folder = stack(home)
+    folder.mkdir()
+    (folder / ".env").write_text("SWARM_COMPOSE_PROJECT=agentihooks-swarm-proof\n")
+    docker = Docker(rows=HEALTHY[:2])
+    code, out = init(home, docker)
+    assert code == 1
+    assert {call[3] for call in docker.calls if call[1:3] == ["compose", "--project-name"]} == {
+        "agentihooks-swarm-proof"
+    }
+    assert "  Logs: docker compose --project-name agentihooks-swarm-proof logs controller\n" in out
