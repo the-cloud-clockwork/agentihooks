@@ -12,7 +12,7 @@ CAPTURE = Path("tests/fixtures/swarm/codex-content-refusal.txt").read_text()
 from scripts.inbox import wake
 from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, outage
-from tests.swarm.test_tick import FakeLedger
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick import store as store
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -24,7 +24,7 @@ from hooks.context import swarm_heartbeat
 from scripts.handoff import transfers
 from scripts.swarm import content_refusal, pane
 from scripts.swarm.store import SwarmConfig
-from scripts.swarm.tick import tick
+from scripts.swarm.tick import _watch_idle, tick
 from tests.swarm.test_outage_resume import three_owners
 from tests.swarm.test_outage_seat_release import executing
 
@@ -184,10 +184,19 @@ def test_an_old_refusal_without_its_idle_composer_is_not_a_completed_refusal(tai
 def test_only_an_idle_codex_refusal_can_count(store, change):
     agent = replace(AgentRecord("worker", "eng", "t1", harness="codex"), **change)
     store.claim("sw", "t1", agent.name, 60_000)
-    assert content_refusal.repeated(store, "sw", agent, pane.PaneObservation("working", content_refusal=True)) is False
-    assert content_refusal.repeated(store, "sw", agent, pane.PaneObservation("idle")) is False
+    for _ in range(2):
+        idle.begin_turn(store.redis, "sw", agent.name)
+        assert (
+            content_refusal.repeated(store, "sw", agent, pane.PaneObservation("working", content_refusal=True)) is False
+        )
+        assert content_refusal.repeated(store, "sw", agent, pane.PaneObservation("idle")) is False
     if agent.harness != "codex" or agent.lane == "master":
-        assert content_refusal.repeated(store, "sw", agent, pane.PaneObservation("idle", content_refusal=True)) is False
+        for _ in range(2):
+            idle.begin_turn(store.redis, "sw", agent.name)
+            assert (
+                content_refusal.repeated(store, "sw", agent, pane.PaneObservation("idle", content_refusal=True))
+                is False
+            )
 
 
 def test_refusal_receipts_require_current_ownership_and_stay_with_their_task(store):
@@ -228,3 +237,18 @@ def test_prompt_turn_receipts_follow_the_agent_to_its_joined_hive(store):
     assert idle.turn(store.redis, "fixture", name) == "1"
     idle.begin_turn(store.redis, "fixture", name)
     assert idle.turn(store.redis, "fixture", name) == "2"
+
+
+@pytest.mark.parametrize("rows", [{}, {"t1": {"claimed_by": "another-owner", "state": "claimed"}}])
+def test_a_refusal_never_retires_a_seat_without_its_ledger_owner(store, monkeypatch, rows):
+    agent = AgentRecord("worker", "eng", "t1", harness="codex")
+    store.claim("sw", agent.task, agent.name, 60_000)
+    store.put_agent("sw", agent)
+    runtime = FakeRuntime()
+    runtime.live.add(agent.name)
+    monkeypatch.setattr(runtime, "observe", lambda agent: pane.PaneObservation("idle", content_refusal=True))
+    for at in (1000, 2000):
+        idle.begin_turn(store.redis, "sw", agent.name)
+        _watch_idle("sw", store, FakeLedger([]), runtime, rows, agent, at)
+    assert runtime.killed == []
+    assert store.claimant("sw", agent.task) == agent.name
