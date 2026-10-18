@@ -13,11 +13,14 @@ if TYPE_CHECKING:
 def skip_binding(agent: AgentRecord, facts: dict, live: set[str]) -> bool:
     from scripts.hive import reports
 
-    return (agent.name not in facts and agent.state != "retiring") or (
-        facts.get(agent.name, {}).get("process") is False
-        and agent.name not in live
-        and agent.runtime_backend == "local"
-        and not reports.host(agent)
+    return agent.state != "retiring" and (
+        agent.name not in facts
+        or (
+            facts[agent.name].get("process") is False
+            and agent.name not in live
+            and agent.runtime_backend == "local"
+            and not reports.host(agent)
+        )
     )
 
 
