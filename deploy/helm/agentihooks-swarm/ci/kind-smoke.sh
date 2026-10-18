@@ -364,7 +364,7 @@ read_lease() {
 }
 owner_of() { python3 -c 'import json, sys; print(json.loads(sys.argv[1]).get("owner", ""))' "$1"; }
 
-kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HIVE="$hive" python - <<'EOF'
+kubectl exec -i "$ledger_pod" -- env SLUG="$slug" HIVE="$hive" python - <<'LEASE'
 import dataclasses, json, os, sys, time
 
 from scripts.swarm import lease
@@ -393,7 +393,7 @@ renewed, taken = await_lease(lambda held: held.get("owner") == hive and held["ex
 if not taken:
     sys.exit(f"the controller never renewed the lease for {slug}; last read: {json.dumps(renewed)}")
 print(f"controller lease renewed: {json.dumps(renewed)}")
-EOF
+LEASE
 
 restarts="$(kubectl get pods "${controller[@]}" -o jsonpath='{.items[0].status.containerStatuses[0].restartCount}')"
 if [[ $restarts != 0 ]]; then

@@ -180,7 +180,7 @@ def test_controller_setup_runs_beside_the_lease_proof_and_finishes_before_the_up
 
 
 def test_one_exec_waits_for_the_lease_and_its_renewal():
-    watch = SCRIPT[_at("python - <<'EOF'\nimport dataclasses") : _at("pkill -STOP")]
+    watch = SCRIPT[_at("python - <<'LEASE'\nimport dataclasses") : _at("pkill -STOP")]
     assert "controller lease: " in watch
     assert "controller lease renewed: " in watch
     assert 'held["expires_at"] > first["expires_at"]' in watch
