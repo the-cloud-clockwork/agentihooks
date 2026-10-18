@@ -234,7 +234,9 @@ def test_discovery_handshake_matches_protocol_library(monkeypatch, capsys, reque
     assert len(replies[1]["result"]["tools"]) == 13
 
 
-@pytest.mark.parametrize("invalid", [[], {"jsonrpc": "2.0", "id": 0, "method": "initialize"}])
+@pytest.mark.parametrize(
+    "invalid", [[], {"jsonrpc": "2.0", "id": 0, "method": "initialize"}, {"jsonrpc": "2.0", "id": 0, "method": []}]
+)
 def test_invalid_protocol_message_keeps_server_reading(monkeypatch, capsys, invalid):
     from io import StringIO
 
@@ -260,3 +262,51 @@ def test_invalid_protocol_message_keeps_server_reading(monkeypatch, capsys, inva
     assert any("error" in reply for reply in replies)
     assert any(reply.get("id") == "init" and "result" in reply for reply in replies)
     assert {"jsonrpc": "2.0", "id": "ping", "result": {}} in replies
+
+
+def test_first_call_transfers_initialized_session_to_protocol_library(monkeypatch, capsys):
+    from io import StringIO
+
+    from hooks.mcp._stdio import run
+
+    messages = [
+        {
+            "jsonrpc": "2.0",
+            "id": "init",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "contract", "version": "1"},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized"},
+        {"jsonrpc": "2.0", "id": "listing", "method": "tools/list"},
+        {"jsonrpc": "2.0", "id": "call", "method": "tools/call", "params": {"name": "channel_list", "arguments": {}}},
+    ]
+    monkeypatch.setenv("MCP_CATEGORIES", "channels")
+    monkeypatch.delenv("ALLOWED_TOOLS", raising=False)
+    monkeypatch.setattr(sys, "stdin", StringIO("".join(json.dumps(message) + "\n" for message in messages)))
+    run()
+    replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert [reply["id"] for reply in replies].count("init") == 1
+    assert next(reply for reply in replies if reply["id"] == "listing")["result"]["tools"]
+    result = next(reply for reply in replies if reply["id"] == "call")["result"]
+    assert result["isError"] is False
+    assert json.loads(result["content"][0]["text"]) == {
+        "success": True,
+        "channels": {},
+        "global_messages": 0,
+        "total_messages": 0,
+    }
+
+
+def test_hook_entry_point_keeps_its_public_export(monkeypatch):
+    import hooks
+    from hooks.hook_manager import main
+
+    monkeypatch.delattr(hooks, "main", raising=False)
+    assert hooks.main is main
+    assert hooks.__dict__["main"] is main
+    with pytest.raises(AttributeError, match="no attribute 'missing'"):
+        hooks.missing

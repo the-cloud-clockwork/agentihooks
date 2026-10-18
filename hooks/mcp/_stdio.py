@@ -75,6 +75,8 @@ def _method(message):
     if not isinstance(params, dict):
         return None
     method = message.get("method")
+    if not isinstance(method, str):
+        return None
     if method == "notifications/initialized" and "id" not in message:
         return method
     request_id = message.get("id")
