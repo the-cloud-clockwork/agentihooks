@@ -645,6 +645,7 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 .lbl.awaiting-approval { color: var(--warn); }
 #quota-table .lbl.open { color: var(--positive); }
 #quota-table .lbl.closed { color: var(--destructive); }
+#quota-table .lbl.drain { color: var(--warn); }
 .sw-promoted, .sw-transport { display: inline; }
 #agents-table .sw-sub { overflow: hidden; text-overflow: ellipsis; }
 #agents-table .sw-id { display: block; max-width: 100%; }

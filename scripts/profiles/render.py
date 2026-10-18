@@ -307,7 +307,10 @@ def _persona(root: Path, target: str, bundle: Path | None, dirs: list[tuple[str,
     rules = [("rule", n, quarantine.annotate(p.read_text(), sources.source(p))) for n, p in items.items()]
     text = quarantine.passages(build_persona(dirs, chain, bundle, rules, HEADER, FOOTER))
     ending = f"\n\n{FOOTER}\n"
-    return binding.persona(text.removesuffix(ending)) + ending
+    text = binding.persona(text.removesuffix(ending)) + ending
+    if len(text) > 150_000:
+        raise ValueError(f"Profile {root.parent.name} compiled to {len(text)} characters; Claude Code limit is 150000")
+    return text
 
 
 def _read_json(path: Path) -> dict | None:
@@ -588,6 +591,23 @@ def rendered_profiles(target: str) -> list[str]:
         legacy = operator_codex_home().glob("*.config.toml")
         return sorted(homes | {p.name.removesuffix(".config.toml") for p in legacy if _codex_stamp(p)})
     return sorted(config.parent.parent.name for config in rendered_root().glob(f"*/{target}/mcp-config.json"))
+
+
+def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
+    _i = _install_module()
+    done = []
+    for key in rendered_profiles(target):
+        if key in skip:
+            continue
+        name, overlays = split_key(key)
+        try:
+            render(target, name, force=True, overlays=overlays)
+        except ValueError as exc:
+            print(f"{_i._DIM}[--] Profile home {key} kept as it was: {exc}{_i._RESET}")
+            continue
+        print(f"{_i._GREEN}[OK]{_i._RESET} Re-rendered the {key} profile home")
+        done.append(key)
+    return done
 
 
 def _seed_linked_profiles(out: Path) -> None:

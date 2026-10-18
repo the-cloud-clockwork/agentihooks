@@ -42,7 +42,14 @@ def test_dev_extra_declares_test_plugin(plugin):
 
 def test_workflow_runs_whole_suite_in_parallel():
     command = _pytest_command()
-    assert command.strip().startswith(("run: workers=$(", "run: start=$SECONDS && status=0 && workers=$("))
+    assert command.strip().startswith(
+        (
+            "run: workers=$(",
+            "run: start=$SECONDS && status=0 && workers=$(",
+            'run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; '
+            "start=$SECONDS && status=0 && workers=$(",
+        )
+    )
     assert "ci_cpu_quota) && python -c " in command
     assert '-n "$workers"' in command
     assert "-n auto" not in command
@@ -69,7 +76,12 @@ def test_unit_shards_measure_no_coverage():
     command = _pytest_command()
     assert "--cov" not in command
     assert "matrix.cov" not in command
-    assert "include" not in _workflow()["jobs"]["unit"]["strategy"]["matrix"]
+    include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
+    assert include in (
+        [],
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
+        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}",
+    )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
 
@@ -200,12 +212,40 @@ def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
 
 
+def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
+    workflow = _workflow()
+    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    for job in ("test-count", "split", "unit"):
+        assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
+        cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
+        assert "${{ hashFiles('.github/test-constraints.txt') }}" in cache["with"]["key"]
+
+
+def test_queue_browser_setup_cannot_enter_the_downloading_action():
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    install = next(step for step in steps if step.get("uses") == "./.github/actions/browser-cache")
+    assert "github.event_name != 'merge_group'" in install["if"]
+    offline = next(step for step in steps if "use-image.sh" in step.get("run", ""))
+    assert (
+        offline["if"]
+        == "needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name == 'merge_group'"
+    )
+    assert steps.index(offline) < steps.index(next(step for step in steps if step.get("name") == "Run tests"))
+    assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+
+
 def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
     }
-    assert sorted(callers) == ["split", "test-count", "unit", "unit-selected"]
+    recorder_path = _ROOT / ".github/workflows/count-record.yml"
+    if recorder_path.exists():
+        recorder = yaml.safe_load(recorder_path.read_text())["jobs"]["count-record"]
+        assert "count-record" not in jobs
+        jobs["count-record"] = recorder
+        callers["count-record"] = recorder["steps"]
+    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"
@@ -354,16 +394,15 @@ def test_mutation_job_installs_chromium_before_mutating():
 def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     steps = _mutation_workflow()["jobs"]["mutation"]["steps"]
     names = [step.get("name") for step in steps]
-    select = names.index("Select mutation tests before browser setup")
+    assert "Select mutation tests before browser setup" not in names
     install = names.index("Install the browser that page tests drive")
-    assert select < install
-    assert steps[select]["id"] == "selection"
-    assert steps[select]["run"].startswith("python -m scripts.ci_mutation." + "browser ")
-    assert steps[install]["if"] == "steps.selection.outputs.browser == 'true'"
+    assert steps[install]["if"] == "needs.mutation-plan.outputs.browser == 'true'"
     assert steps[install]["id"] == "browser"
     assert steps[install]["timeout-minutes"] == 6
     job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
+    selection = next(step for step in steps if step.get("name") == "Download planned mutation test selection")
+    assert selection["with"]["name"] == "mutation-selection"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
@@ -465,7 +504,9 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     collect = jobs["test-count"]
     assert collect["needs"] == jobs["select"]["needs"]
     assert "needs.select" not in collect["if"]
-    assert collect["strategy"]["matrix"] == jobs["split"]["strategy"]["matrix"]
+    assert collect["strategy"]["matrix"] == {"python-version": ["3.11", "3.12"]}
+    joint = "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
+    assert jobs["split"]["strategy"]["matrix"] in (collect["strategy"]["matrix"], {"python-version": joint})
     command = next(
         step["run"] for step in collect["steps"] if step.get("name") == "Hold the base revision's test count"
     )
@@ -510,7 +551,11 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
     python = binary / "python"
     python.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\n'
-        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\nexit "$FLOOR_EXIT"\n'
+        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\n'
+        'if [[ -n "${TEST_COUNT_HEAD_COLLECTION:-}" ]]; then\n'
+        '  [[ "$COLLECTION_EXIT" == 0 ]] || exit "$COLLECTION_EXIT"\n'
+        '  printf "[]" > "$TEST_COUNT_HEAD_COLLECTION"\n'
+        'fi\nexit "$FLOOR_EXIT"\n'
     )
     python.chmod(0o755)
     step = next(
@@ -528,12 +573,16 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
             CALLS=str(commands),
             COLLECTION_EXIT=str(collection),
             FLOOR_EXIT=str(floor),
+            TEST_COUNT_HEAD_COLLECTION=(
+                str(tmp_path / "collected.json") if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ""
+            ),
         ),
         capture_output=True,
         text=True,
     )
     assert (outcome.returncode == 0) == (collection == floor == 0)
-    assert sorted(commands.read_text().splitlines()) == ["-c", "-m"]
+    expected = ["-m"] if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ["-c", "-m"]
+    assert sorted(commands.read_text().splitlines()) == expected
 
 
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():
@@ -1078,6 +1127,9 @@ def test_mutation_job_runs_independently_and_keeps_its_evidence():
     assert artifact["if"] == "always() && needs.mutation-plan.outputs.forwarded != 'true'"
     assert artifact["with"]["include-hidden-files"] is True
     assert artifact["with"]["name"] == "mutation-report-${{ matrix.shard }}"
+    assert artifact["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
@@ -1117,10 +1169,13 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     }
     assert "permissions" not in plan
     assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
+    assert plan["outputs"]["browser"] == "${{ steps.plan.outputs.browser }}"
     for job in (mutation, jobs["mutation-stats"]):
-        select = next(step for step in job["steps"] if step.get("id") == "selection")
-        assert select["env"] == {"BASES": "${{ needs.mutation-plan.outputs.bases }}"}
-        assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+        selection = next(
+            step for step in job["steps"] if step.get("name") == "Download planned mutation test selection"
+        )
+        assert selection["with"]["name"] == "mutation-selection"
+        assert not any(step.get("id") == "selection" for step in job["steps"])
     checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}
     assert mutation["strategy"] == {
@@ -1232,7 +1287,7 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
     assert install["if"] == "steps.reuse.outputs.reused != 'true'"
     skipped = "needs.mutation-plan.outputs.forwarded != 'true'"
     unguarded = (
-        "steps.selection.outputs.browser == 'true'",
+        "needs.mutation-plan.outputs.browser == 'true'",
         "failure() && steps.browser.outcome == 'failure'",
         "failure()",
         f"github.event_name == 'pull_request' && {skipped}",

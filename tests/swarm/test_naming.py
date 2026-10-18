@@ -316,6 +316,25 @@ def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, capl
     ]
 
 
+def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monkeypatch):
+    store.create(SwarmConfig("other", "/home/x/dev/other", max_eng=1, max_ci=1))
+    mine, theirs = store.next_name("sw", "eng"), store.next_name("other", "ci")
+    store.names.alias("sw-eng-1", mine)
+    orphan = "ci@ffffff-0001"
+    names = ["sw-eng-1", mine, theirs, "sw-ci-2", "stranger", orphan]
+    expected = {name: store.names.slug_of(name) for name in names}
+    reads = []
+    for command in ("get", "hget", "hgetall", "mget", "hmget"):
+        real = getattr(redis, command)
+        monkeypatch.setattr(redis, command, lambda *a, real=real, command=command: reads.append(command) or real(*a))
+    assert naming.NameRegistry(redis).slugs_of(names) == expected
+    assert expected == {"sw-eng-1": "sw", mine: "sw", theirs: "other", "sw-ci-2": "sw", "stranger": "", orphan: ""}
+    assert reads == ["mget", "hmget"]
+    reads.clear()
+    assert naming.NameRegistry(redis).slugs_of(["stranger"]) == {"stranger": ""}
+    assert reads == ["mget"]
+
+
 def test_resolve_names_needs_no_redis(monkeypatch):
     import hooks._redis
 

@@ -6,7 +6,11 @@ questions:
     type: yesno
     each: pieces
     key: "piece_{item[slot]}"
-    instructions: "Is piece {item[number]}, {item[what]}, needed to deliver the task?"
+    instructions: >-
+      Is piece {item[number]}, {item[what]}, needed to deliver the task?
+      Registering a CI job added by the task in the runner class table is required
+      to deliver that job, even when the task does not name the table.
+      Unrelated workflow edits remain out of scope.
     "true": the task needs it
     "false": it serves something else
   - name: covers

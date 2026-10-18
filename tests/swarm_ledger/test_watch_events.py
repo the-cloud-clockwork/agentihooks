@@ -136,18 +136,18 @@ def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkey
         opened.append((request.full_url, dict(request.header_items()), timeout))
         return io.BytesIO(body)
 
-    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "http://h:1")
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "https://h:1")
     monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", urlopen)
     monkeypatch.setattr(watch_ledger, "credentials", lambda slug: {"X-Ledger-Token": f"for {slug}"})
     assert list(watch_ledger.stream(SLUG, "c1")) == [("snapshot", {"é": 1}, "c0"), ("heartbeat", {}, None)]
     assert list(watch_ledger.stream(SLUG, None, {"X-Ledger-Agent": "a"}))[0][2] == "c0"
     assert opened == [
         (
-            f"http://h:1/api/v1/ledgers/{SLUG}/events",
+            f"https://h:1/api/v1/ledgers/{SLUG}/events",
             {"X-ledger-token": f"for {SLUG}", "Accept": "text/event-stream", "Last-event-id": "c1"},
             watch_ledger.STREAM_TIMEOUT_S,
         ),
-        (f"http://h:1/api/v1/ledgers/{SLUG}/events", {"X-ledger-agent": "a", "Accept": "text/event-stream"}, 15.0),
+        (f"https://h:1/api/v1/ledgers/{SLUG}/events", {"X-ledger-agent": "a", "Accept": "text/event-stream"}, 15.0),
     ]
 
 

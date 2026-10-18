@@ -8,6 +8,9 @@ import pytest
 from scripts import master_claude_login as login
 from scripts import openbao_kv
 from scripts.profiles import binding
+from scripts.routing import master_account, reservation
+from scripts.routing.master_account import MasterAccount
+from scripts.routing.settings import FileSettings
 
 OPERATOR_ACCOUNT = {"emailAddress": "operator@example.com"}
 MASTER_ACCOUNT = {"emailAddress": "master@example.com"}
@@ -184,20 +187,115 @@ def test_the_master_account_needs_its_own_login(tmp_path):
         login.account("rig", target, {"AH_CC_TOKEN_w": "x"})
 
 
-def test_the_master_account_must_differ_from_every_worker_token_and_workers_need_tokens(tmp_path):
+def _home(tmp_path):
     target = tmp_path / "home"
     target.mkdir()
     (target / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
     (target / login.CREDENTIALS).write_text("{}")
-    with pytest.raises(
-        login.LoginRefused, match="^the master login account masteratexample_com is also a worker quota token$"
-    ):
-        login.account("rig", target, {"AH_CC_TOKEN_masteratexample_com": "x"})
+    return target
+
+
+def _store(tmp_path):
+    return FileSettings(tmp_path / "routing-settings.json")
+
+
+def _never(environ):
+    pytest.fail("settings opened for a login without a worker token")
+
+
+def _given(store, environ):
+    def store_of(seen):
+        assert seen is environ
+        return store
+
+    return store_of
+
+
+def test_workers_need_tokens_and_a_login_off_every_worker_token_never_declares(tmp_path):
+    target = _home(tmp_path)
     with pytest.raises(
         login.LoginRefused, match="^the master claude ai login needs workers on quota tokens; none is set$"
     ):
-        login.account("rig", target, {"ANTHROPIC_BASE_URL": "https://gateway"})
-    assert login.account("rig", target, {"AH_CC_TOKEN_workeratexample_com": "x"}) == "masteratexample_com"
+        login.account("rig", target, {"ANTHROPIC_BASE_URL": "https://gateway"}, _never)
+    environ = {"AH_CC_TOKEN_workeratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
+    assert login.account("rig", target, environ, _never) == "masteratexample_com"
+
+
+def test_a_login_on_a_worker_token_account_declares_it_master_when_none_is_declared(tmp_path):
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
+    assert login.account("rig", target, environ, _given(store, environ)) == "masteratexample_com"
+    assert master_account.declared(store, environ)["claude"] == MasterAccount("claude", "masteratexample_com")
+    written = [entry for entry in store.history() if entry["key"] == "master-account-claude"]
+    assert [(entry["value"], entry["actor"]) for entry in written] == [("masteratexample_com", "master@a-1")]
+    assert isinstance(written[0]["at"], float) and written[0]["at"] > 0
+
+
+def test_a_login_on_the_declared_master_account_keeps_its_declaration(tmp_path):
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
+    master_account.declare(store, {"claude": ("masteratexample_com", "max")}, environ, "operator", 1.0)
+    written = len(store.history())
+    assert login.account("rig", target, environ, _given(store, environ)) == "masteratexample_com"
+    assert len(store.history()) == written
+    assert master_account.declared(store, environ)["claude"].tier == "max"
+
+
+def test_another_declared_master_account_refuses_naming_both(tmp_path):
+    target, store = _home(tmp_path), _store(tmp_path)
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    master_account.declare(store, {"claude": ("other", None)}, environ, "operator", 1.0)
+    with pytest.raises(
+        login.LoginRefused,
+        match="^the master login account masteratexample_com is a worker quota token "
+        "and the declared claude master account is other$",
+    ):
+        login.account("rig", target, environ, _given(store, environ))
+    assert master_account.declared(store, environ)["claude"].slug == "other"
+
+
+def test_a_declaration_another_login_wrote_first_refuses_naming_both(tmp_path):
+    class Raced(FileSettings):
+        def _claim(self, key, value, entry):
+            self._write(key, "other", {**entry, "value": "other", "actor": "rival"})
+            return super()._claim(key, value, entry)
+
+    target, store = _home(tmp_path), Raced(tmp_path / "routing-settings.json")
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AH_CC_TOKEN_other": "y", "AGENTIHOOKS_AGENT_NAME": "m"}
+    with pytest.raises(
+        login.LoginRefused,
+        match="^the master login account masteratexample_com is a worker quota token "
+        "and the declared claude master account is other$",
+    ):
+        login.account("rig", target, environ, _given(store, environ))
+    assert [entry["actor"] for entry in store.history()] == ["rival"]
+
+
+def test_the_settings_store_follows_the_routing_store(tmp_path, monkeypatch):
+    from scripts.routing import place
+
+    environ, client, opened = {"AGENTIHOOKS_HOME": str(tmp_path)}, object(), []
+    monkeypatch.setattr(place, "_client", lambda seen: client if seen is environ else None)
+    monkeypatch.setattr(login, "open_store", lambda *args: opened.append(args) or "store")
+    assert login.routing_store(environ) == "store"
+    assert opened == [(client, environ)]
+
+
+def test_the_login_claims_the_claude_master_with_its_environment_and_name(tmp_path, monkeypatch):
+    claimed = []
+    monkeypatch.setattr(master_account, "claim", lambda *args: claimed.append(args) or "masteratexample_com")
+    environ = {"AH_CC_TOKEN_masteratexample_com": "x", "AGENTIHOOKS_AGENT_NAME": "master@a-1"}
+    store = _store(tmp_path)
+    login.account("rig", _home(tmp_path), environ, _given(store, environ))
+    ((seen_store, harness, slug, seen_environ, actor, at),) = claimed
+    assert (seen_store, harness, slug, seen_environ, actor) == (
+        store,
+        "claude",
+        "masteratexample_com",
+        environ,
+        "master@a-1",
+    )
+    assert isinstance(at, float) and at > 0
 
 
 def test_the_child_drops_routed_and_api_credentials_and_pins_both_selectors(tmp_path):
@@ -553,3 +651,41 @@ def test_the_stop_hook_checkpoints_the_master_login_and_logs_a_failure(monkeypat
     monkeypatch.setattr(login, "checkpoint", broken)
     hook_manager._master_login_checkpoint()
     assert logged == [("master login checkpoint failed", {"error": "disk full"})]
+
+
+def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceiling(ah, rendered, tmp_path, monkeypatch):
+    from scripts.claude_quota_balancer import ClaudeTokenSource, ProbeResult, QuotaWindow
+
+    _seed(rendered)
+    store = _store(tmp_path)
+    monkeypatch.setattr(login, "routing_store", lambda environ: store)
+    monkeypatch.setattr(openbao_kv, "from_env", lambda environ: None)
+    monkeypatch.chdir(tmp_path)
+    executed = []
+    monkeypatch.setattr(login.os, "execvpe", lambda binary, argv, env: executed.append(env))
+    environ = _environ(rendered, AH_CC_TOKEN_masteratexample_com="x")
+    report = tmp_path / "route"
+    login.launch_claude("/opt/claude", [], environ, str(report))
+    assert report.read_text().splitlines() == ["status=routed", "account=masteratexample_com", "placement=forced"]
+    env = executed[0]
+    assert not any(name.startswith("AH_CC_TOKEN_") for name in env)
+    proc = tmp_path / "proc" / "10"
+    proc.mkdir(parents=True)
+    (proc / "cmdline").write_bytes(b"claude\0")
+    (proc / "comm").write_text("claude\n")
+    (proc / "environ").write_bytes(b"\0".join(f"{k}={v}".encode() for k, v in env.items()) + b"\0")
+    monkeypatch.setattr(master_account, "load", lambda seen: master_account.declared(store, seen))
+    agent = SimpleNamespace(
+        lane="master", state="working", harness="claude", account="masteratexample_com", route_kind="interactive"
+    )
+    swarms = SimpleNamespace(slugs=lambda: ["rig"], agents=lambda slug: [agent])
+    held = reservation.current("claude", environ, store_of=lambda seen: swarms, proc=tmp_path / "proc")
+    assert held == reservation.Reservation("claude", "masteratexample_com", 1)
+    source = ClaudeTokenSource(held=held)
+
+    def week(used, account="masteratexample_com"):
+        return ProbeResult(account, "allowed", "NORMAL", 90, QuotaWindow(10), QuotaWindow(used))
+
+    assert source.cap(week(70.0), 0) == 0
+    assert source.cap(week(69.9), 0) > 0
+    assert source.cap(week(70.0, "workeratexample_com"), 0) > 0

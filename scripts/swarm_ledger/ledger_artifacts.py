@@ -165,7 +165,7 @@ def refusal(doc: dict, op: dict, members: dict) -> str:
     if op["by"] not in members:
         return "join the ledger first and name a task it holds"
     if op["task"] == "master" and member.get("role") == "orchestrator" and lane_of(op["by"]) == "master":
-        return "" if operator_asked(doc, op.get("request")) else REFUSED
+        return "" if op.get("plan") is True or operator_asked(doc, op.get("request")) else REFUSED
     task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
     if op["task"] and task is None:
         return "join the ledger first and name a task it holds"

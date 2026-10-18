@@ -12,6 +12,7 @@ import os
 import sys
 import time
 from collections.abc import Callable, Mapping
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -149,6 +150,7 @@ def history(
             "session_id": trace.get("sessionId") or "",
             "tags": sorted(trace.get("tags") or []),
             "observations": entries[trace["id"]].get("observations", []),
+            "complete": bool(entries[trace["id"]].get("whole")),
         }
         for trace in listed
     ]
@@ -209,8 +211,10 @@ def record(
 ) -> dict:
     base = Path(home or SWARM_HOME) / slug
     state = registry.load(base / STATE_FILE)
-    active, failures = registry.read(slug, agents, get, state, budget.active_seconds, budget.active_page, clock)
-    traces, coverage, lost = history(slug, get, base / CACHE_DIR, budget, clock)
+    with ThreadPoolExecutor() as pool:
+        reading = pool.submit(registry.read, slug, agents, get, state, budget.active_seconds, budget.active_page, clock)
+        traces, coverage, lost = history(slug, get, base / CACHE_DIR, budget, clock)
+        active, failures = reading.result()
     failures += lost
     empty = _empty_project_failure(slug, get, active, traces, coverage)
     if empty:

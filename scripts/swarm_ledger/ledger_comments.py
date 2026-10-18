@@ -5,6 +5,7 @@ Agent text is for the operator: plain words saying what was done or why it was s
 """
 
 import re
+from itertools import groupby
 
 LIMITS = {"comment": 50, "chat": 100, "item": 40, "priority": 20}
 OUTCOMES = ("done", "blocked")
@@ -188,14 +189,18 @@ def audit_item(where, item, task_ids=()):
     rows = []
     if "text" in item and problems(item["text"], "item", task_ids=task_ids):
         rows.append((where, "text", "", problems(item["text"], "item", task_ids=task_ids)))
-    counts = {}
-    for entry in item.get("comments", []):
-        if entry.get("deleted") or entry.get("by") == "operator":
+    counts = []
+    live = (entry for entry in item.get("comments", []) if not entry.get("deleted"))
+    for by, entries in groupby(live, key=lambda entry: entry["by"]):
+        if by == "operator":
             continue
-        counts[entry["by"]] = counts.get(entry["by"], 0) + ("to" not in entry)
-        if problems(entry["text"], "comment", task_ids=task_ids):
-            rows.append((where, entry["id"], entry["by"], problems(entry["text"], "comment", task_ids=task_ids)))
-    rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts.items() if n > 1]
+        count = 0
+        for entry in entries:
+            count += "to" not in entry
+            if problems(entry["text"], "comment", task_ids=task_ids):
+                rows.append((where, entry["id"], by, problems(entry["text"], "comment", task_ids=task_ids)))
+        counts.append((by, count))
+    rows += [(where, "-", by, [f"{n} comments, keep one status"]) for by, n in counts if n > 1]
     return rows
 
 

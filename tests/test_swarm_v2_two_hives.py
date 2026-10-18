@@ -137,8 +137,11 @@ def test_operator_comment_routes_to_hive_owner_but_chat_stays_with_lead(world):
         return masters.MasterSeats(world.redis).owners(cases.SLUG, doc)
 
     agents = world.store.agents(cases.SLUG)
-    assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, owners) == [cases.SECOND]
-    assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, owners) == [cases.LEAD]
+    held = list(masters.held(world.redis, cases.SLUG, agents))
+    assert operator_mail.addresses(cases.SLUG, {"target": "questions/targeted"}, doc, agents, owners, held) == [
+        cases.SECOND
+    ]
+    assert operator_mail.addresses(cases.SLUG, {"target": "chat"}, doc, agents, owners, held) == [cases.LEAD]
 
 
 @pytest.mark.parametrize("command", ["question", "followup"])

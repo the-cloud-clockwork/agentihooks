@@ -98,6 +98,9 @@ class FakeLedger:
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
 
+    def closed(self, slug):
+        return bool(self.state(slug).get("closed_at"))
+
     def rank_task(self, slug, task_id, rank, by, if_owned=False):
         self.ranks.append((task_id, rank, by))
         return {"id": task_id, "rank": rank}
@@ -516,6 +519,27 @@ def test_a_failed_launch_keeps_the_restart_mark_for_the_next_start(store):
     runtime.crash = None
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert sorted((row["state"], row["after"]) for row in store.launches("sw")) == [("failed", ""), ("started", "park")]
+
+
+@pytest.mark.parametrize(
+    ("pr_url", "read", "head"),
+    [
+        ("", "abc123", ""),
+        ("https://github.com/o/r/pull/7", "abc123", "abc123"),
+        ("https://github.com/o/r/pull/7", "", None),
+    ],
+)
+def test_a_started_launch_records_the_pull_request_head_it_started_on(store, monkeypatch, pr_url, read, head):
+    from scripts.swarm import ledger_events
+
+    seen = []
+    monkeypatch.setattr(ledger_events, "head", lambda url: seen.append(url) or read)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    if pr_url:
+        ledger.rows["t1"]["pr_url"] = pr_url
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [(row["state"], row["head"]) for row in store.launches("sw")] == [("started", head)]
+    assert seen == ([pr_url] if pr_url else [])
 
 
 class FailingFor(FakeRuntime):
@@ -1448,6 +1472,19 @@ def test_the_tick_hands_the_ci_budget_pass_its_store_and_clock(store, monkeypatc
     monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or ["updated"])
     assert "updated" in tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
     assert [(args[0], args[2], args[3]) for args in seen] == [("sw", store, 1)]
+
+
+def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
+    from scripts.swarm import pane_evidence
+    from scripts.swarm import tick as module
+
+    seen = []
+    rt = FakeRuntime()
+    monkeypatch.setattr(pane_evidence, "sweep", lambda *args: seen.append(("capture", args)) or ["captured"])
+    monkeypatch.setattr(module, "_recover_master", lambda *args: seen.append(("recover", args)) or ["recovered"])
+    assert tick("sw", store, tasks(("t1", "eng")), rt, 123)[:2] == ["captured", "recovered"]
+    assert seen[0] == ("capture", ("sw", store, rt, 123))
+    assert seen[1][0] == "recover"
 
 
 def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):

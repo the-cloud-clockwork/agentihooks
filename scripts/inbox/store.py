@@ -3,6 +3,7 @@
 History entries are state transitions (a `state` key) or wake and escalation steps (an `event` key).
 """
 
+import functools
 import json
 import os
 import time
@@ -23,9 +24,12 @@ OWNER_TTL_ENV = "AGENTIHOOKS_INBOX_OWNER_TTL_S"
 DEFAULT_OWNER_TTL_S = 30
 REDELIVERED = "redelivered: never confirmed inside the redelivery window"
 REDELIVERER = "inbox"
+RECLAIMED = "returned to the master pool: its master is gone"
 CLOSED = ("done", "blocked", "handed_off", "cancelled")
 CLOSE_KINDS = {"done": "done", "handoff": "handed_off", "blocked": "blocked", "cancel": "cancelled"}
 NEEDS_DETAIL = {"handoff": "the address the work went to", "blocked": "what it is blocked on"}
+POOL_HOLDER = "pool_holder"
+POOL_SKIP = "pool_skip"
 
 
 class InboxError(RuntimeError):
@@ -69,8 +73,17 @@ def now_ms():
     return time.time_ns() // 1_000_000
 
 
-def owner_key(recipient):
-    return f"{PREFIX}:owner:{recipient}"
+def prefix(world):
+    from scripts.hive import scope
+
+    return f"{scope.root(world)}:inbox"
+
+
+def owner_key(recipient, world=None):
+    """world is the inbox's hive member; None takes this process's own."""
+    from scripts.hive import scope
+
+    return f"{prefix(scope.member() if world is None else world)}:owner:{recipient}"
 
 
 def owner_ttl_s(environ=None):
@@ -101,7 +114,11 @@ def close_reason(kind, detail=""):
 
 
 class InboxStore:
-    def __init__(self, redis, *, persist=None, session_id=""):
+    def __init__(self, redis, *, persist=None, session_id="", world=None):
+        """world is the hive member whose keys hold this inbox, '' for the controller's; it defaults to this process's
+        own member."""
+        from scripts.hive import scope
+
         if redis is None:
             raise InboxError("no Redis client; the inbox refuses to run without it")
         self.redis = redis
@@ -109,9 +126,27 @@ class InboxStore:
         self.session_id = session_id
         self.seats = SeatRegistry(redis)
         self.names = NameRegistry(redis)
+        self.world = scope.member() if world is None else world
+        self.prefix = prefix(self.world)
 
     def key(self, *parts):
-        return ":".join((PREFIX, *parts))
+        return ":".join((self.prefix, *parts))
+
+    def home(self, address):
+        """The hive member whose keys hold address's inbox: the member that runs it or its seat's occupant."""
+        from scripts.hive import scope
+
+        if not scope.joined(self.redis):
+            return ""
+        receiver = self.names.resolve(self.seats.occupant(address).occupant if is_seat(address) else address)
+        slug = self.names.slug_of(receiver)
+        return scope.host(self.redis, slug, receiver) if slug else ""
+
+    @functools.cached_property
+    def pool(self):
+        from scripts.inbox.pool import MasterPool
+
+        return MasterPool(self)
 
     def receiver_task(self, address: str) -> str:
         from scripts.inbox.seats import is_seat, master_of
@@ -137,6 +172,10 @@ class InboxStore:
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
         sender, address = self.names.resolve(sender), self.names.resolve(address)
+        home = self.home(address)
+        if home != self.world and not self.world:
+            routed = InboxStore(self.redis, persist=self.persist, world=home)
+            return routed.send(sender, address, text, ref, fyi, task, item_id)
         at = now_ms()
         item = Item(
             item_id or new_item_id(),
@@ -152,6 +191,7 @@ class InboxStore:
             task=task,
         )
         key = self.key("item", item.id)
+        masters = self.pool.masters_for(sender, address) if home == self.world else []
         with self.redis.pipeline() as pipe:
             if item_id:
                 pipe.watch(key)
@@ -160,15 +200,22 @@ class InboxStore:
                 pipe.multi()
             pipe.hset(key, mapping=_fields(item))
             pipe.zadd(self.key("address", address), {item.id: at})
-            pipe.zadd(self.key("pending", address), {item.id: at})
             pipe.zadd(self.key("open", address), {item.id: at})
             pipe.incr(self.key("open-size", address))
-            pipe.sadd(self.key("waiting"), address)
+            if masters:
+                self.pool.stage_add(pipe, item)
+            else:
+                pipe.zadd(self.key("pending", address), {item.id: at})
+                pipe.sadd(self.key("waiting"), address)
             pipe.rpush(self.key("history", item.id), _entry("pending", sender, "", at))
             if self.persist is not None:
                 self.persist(pipe)
             pipe.publish(NOTIFY, address)
             pipe.execute()
+        if masters:
+            from scripts.inbox.pool import slug_of
+
+            self.pool.distribute(slug_of(address))
         return item
 
     def get(self, item_id):
@@ -313,6 +360,7 @@ class InboxStore:
             keys += [self.key(kind, address) for kind in ("address", "pending", "open", "open-size", "sequence")]
             keys += [self.key(kind, item_id) for item_id in ids for kind in ("item", "history")]
             keys += [key for key in (self.key("entry", item_id) for item_id in ids) if self.redis.exists(key)]
+            keys += self.pool.keys_of(address)
         members = {
             self.key(shared): [a for a in addresses if self.redis.sismember(self.key(shared), a)]
             for shared in ("waiting", "indexed", "open-indexed")
@@ -375,6 +423,7 @@ class InboxStore:
             pending = self.key("pending", item.address)
             pipe.watch(pending)
             last = pipe.zscore(pending, item_id) is not None and pipe.zcard(pending) == 1
+            pooled = self.pool.holds(pipe, item)
             moved = replace(
                 item,
                 address=address or item.address,
@@ -384,6 +433,10 @@ class InboxStore:
             )
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
+            if moved.address != item.address:
+                pipe.hdel(key, POOL_HOLDER, POOL_SKIP)
+            if pooled:
+                self.pool.stage_remove(pipe, item)
             if moved.state in CLOSED or moved.address != item.address:
                 pipe.zrem(self.key("open", item.address), item_id)
             pipe.zrem(self.key("delivered"), item_id)
@@ -391,18 +444,72 @@ class InboxStore:
             if last:
                 pipe.srem(self.key("waiting"), item.address)
             if address:
-                pipe.zrem(self.key("address", item.address), item_id)
-                pipe.zadd(self.key("address", address), {item_id: item.created_at})
-                pipe.zadd(self.key("pending", address), {item_id: item.created_at})
-                pipe.zadd(self.key("open", address), {item_id: item.created_at})
-                if address != item.address:
-                    pipe.decr(self.key("open-size", item.address))
-                    pipe.incr(self.key("open-size", address))
-                pipe.sadd(self.key("waiting"), address)
-                pipe.publish(NOTIFY, address)
+                self.stage_pending(pipe, item, address)
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
             pipe.execute()
             return moved
+
+    def _move_address(self, pipe, item, address):
+        """pipe is in MULTI: move item's address and open entries, and the open counts, to address."""
+        pipe.zrem(self.key("address", item.address), item.id)
+        pipe.zadd(self.key("address", address), {item.id: item.created_at})
+        pipe.zadd(self.key("open", address), {item.id: item.created_at})
+        if address != item.address:
+            pipe.zrem(self.key("open", item.address), item.id)
+            pipe.decr(self.key("open-size", item.address))
+            pipe.incr(self.key("open-size", address))
+
+    def stage_pending(self, pipe, item, address):
+        """pipe is in MULTI: index item pending at address, moving its address entry and open count there."""
+        self._move_address(pipe, item, address)
+        pipe.zadd(self.key("pending", address), {item.id: item.created_at})
+        pipe.sadd(self.key("waiting"), address)
+        pipe.publish(NOTIFY, address)
+
+    def stage_claim(self, pipe, item, address, by):
+        """pipe is in MULTI: hand a pool item to the master seat at address, pending there, its holder recorded."""
+        reason = f"claimed from the master pool by {address}"
+        moved = replace(item, address=address, updated_at=now_ms(), reason=reason)
+        key = self.key("item", item.id)
+        pipe.hset(key, mapping={**_fields(moved), POOL_HOLDER: address})
+        pipe.hdel(key, POOL_SKIP)
+        self.stage_pending(pipe, item, address)
+        pipe.rpush(self.key("history", item.id), _entry("pending", by, reason, moved.updated_at))
+        return moved
+
+    def _stage_pool_return(self, pipe, item, moved, holder):
+        """pipe is in MULTI: an item its holder never confirmed waits in the pool again, passing that holder over."""
+        front = master_of(item.address)
+        back = replace(moved, address=front)
+        key = self.key("item", item.id)
+        pipe.hset(key, mapping={**_fields(back), POOL_SKIP: holder})
+        pipe.hdel(key, POOL_HOLDER)
+        pipe.zrem(self.key("pending", item.address), item.id)
+        self._move_address(pipe, item, front)
+        self.pool.stage_add(pipe, back)
+        return back
+
+    def return_to_pool(self, item_id, holder):
+        """A pool item still pending at the seat of a master that is gone goes back to the pool; None when it moved
+        meanwhile, for the next distribution to retry."""
+        from redis.exceptions import WatchError
+
+        key = self.key("item", item_id)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key)
+                raw = pipe.hgetall(key)
+                if not raw or (raw["state"], raw["address"], raw.get(POOL_HOLDER)) != ("pending", holder, holder):
+                    return None
+                item = _item(raw, item_id)
+                moved = replace(item, updated_at=now_ms(), reason=RECLAIMED)
+                pipe.multi()
+                moved = self._stage_pool_return(pipe, item, moved, holder)
+                pipe.rpush(self.key("history", item_id), _entry("pending", REDELIVERER, RECLAIMED, moved.updated_at))
+                pipe.execute()
+                return moved
+            except WatchError:
+                return None
 
     def reply(self, item_id: str, replier: str, text: str, fyi: bool = False, answer_id: str = "") -> Item:
         from redis.exceptions import WatchError
@@ -533,7 +640,9 @@ class InboxStore:
             built, stale = pipe.execute()
         if not built:
             self._build_delivered(cutoff)
-        return [item for item_id in stale if (item := self.requeue(item_id, REDELIVERER, REDELIVERED, cutoff))]
+        moved = [item for item_id in stale if (item := self.requeue(item_id, REDELIVERER, REDELIVERED, cutoff))]
+        self.pool.distribute_all()
+        return moved
 
     def _build_delivered(self, since):
         """Index the items a store without the delivered index left delivered after since; older ones stay as they are."""
@@ -562,6 +671,7 @@ class InboxStore:
             raw = pipe.hgetall(key)
             if raw and raw["state"] == "delivered" and before is not None and int(raw["updated_at"]) > before:
                 return None
+            pooled = self.pool.takes_back(raw.get(POOL_HOLDER))
             pipe.multi()
             pipe.zrem(self.key("delivered"), item_id)
             if not raw or raw["state"] != "delivered":
@@ -569,11 +679,14 @@ class InboxStore:
                 return None
             item = _item(raw, item_id)
             moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
-            pipe.hset(key, mapping=_fields(moved))
-            pipe.zadd(self.key("pending", item.address), {item_id: item.created_at})
-            pipe.sadd(self.key("waiting"), item.address)
+            if pooled:
+                moved = self._stage_pool_return(pipe, item, moved, raw[POOL_HOLDER])
+            else:
+                pipe.hset(key, mapping=_fields(moved))
+                pipe.zadd(self.key("pending", item.address), {item_id: item.created_at})
+                pipe.sadd(self.key("waiting"), item.address)
+                pipe.publish(NOTIFY, item.address)
             pipe.rpush(self.key("history", item_id), _entry("pending", by, reason, moved.updated_at))
-            pipe.publish(NOTIFY, item.address)
             pipe.execute()
             return moved
 
@@ -636,7 +749,8 @@ class InboxStore:
             if ids:
                 pipe.watch(*(self.key("item", item_id) for item_id in ids))
             items = [_item(pipe.hgetall(self.key("item", item_id)), item_id) for item_id in ids]
-            pending = {item.id: item.created_at for item in items if item.state == "pending"}
+            pooled = self.pool.waiting(pipe, address)
+            pending = {item.id: item.created_at for item in items if item.state == "pending" and item.id not in pooled}
             pipe.multi()
             if pending:
                 pipe.zadd(self.key("pending", address), pending)
@@ -690,6 +804,8 @@ class InboxStore:
                 raise InboxError("done needs an outcome naming where the work went")
             if item.state == state:
                 return item
+            if state not in CLOSED and self.pool.holds(pipe, item):
+                raise InboxError(f"message {item_id} waits in the master pool for the next master")
             if state == "delivered" and (self._owned(pipe, by) or self._reserved(pipe, item_id)):
                 return None
             moved = replace(item, state=state, updated_at=now_ms(), reason=reason)
@@ -702,7 +818,7 @@ class InboxStore:
             return moved
 
     def _owned(self, pipe, by):
-        key = owner_key(NameRegistry(pipe).resolve(by))
+        key = owner_key(NameRegistry(pipe).resolve(by), self.world)
         pipe.watch(key)
         return pipe.get(key) is not None
 
@@ -726,6 +842,7 @@ class InboxStore:
         pipe.hset(self.key("item", item.id), mapping=_fields(moved))
         if moved.state in CLOSED:
             pipe.zrem(self.key("open", item.address), item.id)
+            self.pool.stage_remove(pipe, item)
         if moved.state == "delivered" and indexed:
             pipe.zadd(self.key("delivered"), {item.id: moved.updated_at})
         else:

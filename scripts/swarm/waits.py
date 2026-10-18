@@ -11,6 +11,7 @@ from collections.abc import Callable
 
 from scripts.gates import intent
 from scripts.gates.verdicts import Verdicts
+from scripts.hive import scope
 from scripts.inbox.store import CLOSED, InboxError
 from scripts.swarm import idle, merge_queue, mutation_wait
 from scripts.swarm.store import SwarmError
@@ -80,16 +81,18 @@ def required_green(target, head):
 
 
 def _save_wait(redis, slug, name, previous, held, outcome, now_ms):
-    key = idle.key(slug, "wait", name)
+    prefix = scope.readings(redis, slug, name)
+    key = idle.key(slug, "wait", name, prefix)
 
     def update(pipe):
         if pipe.get(key) != previous:
             return False
         pipe.multi()
         if outcome:
-            idle.remember_wait(pipe, slug, name, json.loads(previous), now_ms)
+            idle.remember_wait(pipe, slug, name, json.loads(previous), now_ms, prefix)
             pipe.delete(key)
-            pipe.set(idle.key(slug, "waited", name), now_ms, ex=idle.BEAT_TTL_S)
+            pipe.set(idle.key(slug, "waited", name, prefix), now_ms, ex=idle.BEAT_TTL_S)
+            pipe.set(idle.key(slug, "woke", name, prefix), now_ms, ex=idle.BEAT_TTL_S)
         else:
             pipe.set(key, json.dumps(held), keepttl=True)
         return True

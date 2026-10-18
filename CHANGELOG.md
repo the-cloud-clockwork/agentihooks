@@ -26,6 +26,9 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 
 ### Changed
 
+- New swarm enforcements default to log only. The stall watchdog logs would-be
+  stops and reopens while retaining alerts; set `stall-gate=deny` after
+  checking those actions against reality to enforce them.
 - Merge queue unit shards restore the Codex CLI from a cache seeded on `main`
   instead of downloading it on every queue run.
 - Terminal and worker image tool downloads retry server errors and timeouts

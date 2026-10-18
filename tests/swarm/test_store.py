@@ -240,7 +240,16 @@ def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
         {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
         {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
-        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": "", "pane_id": "", "after": ""},
+        {
+            "agent": "waiting",
+            "task": "t3",
+            "at": 4,
+            "state": "pending",
+            "error": "",
+            "pane_id": "",
+            "after": "",
+            "head": "",
+        },
     ]
 
 

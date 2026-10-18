@@ -63,7 +63,8 @@ def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
         from . import architecture
 
         return architecture.view(os.environ)
-    return resources.read(server.repository.current(slug).state, path, query)
+    entry = server.repository.current(slug)
+    return resources.read(entry.state, path, query, entry.views)
 
 
 def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
@@ -132,6 +133,8 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
     if path in ("uploads/media", "uploads/artifacts"):
         return admin.upload(handler, server, slug, path)
     payload = body(handler, server)
+    if path == "lifecycle/actions":
+        return admin.lifecycle(server, principal, slug, payload)
     if path == "swarm/actions":
         return admin.control(server, slug, principal, payload)
     if path in ("export", "swarm/export"):

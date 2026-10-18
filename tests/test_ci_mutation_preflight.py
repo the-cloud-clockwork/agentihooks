@@ -34,8 +34,21 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     jobs = _workflow()["jobs"]
     assert "pull-request" not in jobs
     plan = jobs["plan"]
-    assert "needs" not in plan
-    assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
+    if "capacity" in jobs:
+        assert plan["needs"] == "capacity"
+        assert plan["if"] == (
+            "${{ !cancelled() && (needs.capacity.result == 'success' || needs.capacity.result == 'skipped')"
+            " && (github.event_name != 'push' || !github.event.deleted) }}"
+        )
+        assert "secrets." not in str(plan)
+        capacity = jobs["capacity"]
+        assert [step.get("id") for step in capacity["steps"]] == ["capacity-token", "capacity"]
+        assert capacity["steps"][0]["uses"] == "actions/create-github-app-token@v3.2.0"
+        assert capacity["steps"][1]["run"].startswith("gh api ")
+        assert "checkout" not in str(capacity)
+    else:
+        assert "needs" not in plan
+        assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
     assert plan["outputs"]["graded"] == "${{ steps.plan.conclusion == 'success' }}"
     step = plan["steps"][0]
     assert step["id"] == "open"
@@ -79,7 +92,31 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     gated = "steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'"
     assert steps[upload_at + 1 :]
     for step in steps[upload_at + 1 :]:
-        assert step["if"] == gated, step
+        if step.get("id") in {"capacity-token", "lanes"}:
+            assert (
+                step["if"]
+                == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
+            )
+        else:
+            assert step["if"] == gated, step
+
+
+def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_module_changes():
+    steps, names = _steps(_workflow()["jobs"]["plan"])
+    find_at = names.index("Find a changed test module")
+    find = steps[find_at]
+    assert find_at == 2
+    assert find["id"] == "suite"
+    assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
+    assert find["run"].startswith('files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n')
+    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
+    run_at = names.index("Run the suite speed contracts")
+    assert run_at < names.index("Record the revisions the report grades")
+    assert run_at < names.index("Reuse a green report when this head only adds tests to it")
+    changed = "steps.suite.outputs.changed == 'true'"
+    assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
+    assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
+    assert not any(step.get("continue-on-error") for step in steps)
 
 
 def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
@@ -99,10 +136,15 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
     jobs = _workflow()["jobs"]
     plan = jobs["plan"]
     assert plan["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-    assert plan["outputs"] == {
+    outputs = dict(plan["outputs"])
+    if "stats_lane" in outputs:
+        assert outputs.pop("stats_lane") == "${{ steps.lanes.outputs.lane }}"
+        assert outputs.pop("batch_ceiling") == "${{ steps.lanes.outputs.ceiling }}"
+    assert outputs == {
         "shards": "${{ steps.plan.outputs.shards }}",
         "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
         "bases": "${{ steps.plan.outputs.bases }}",
+        "browser": "${{ steps.plan.outputs.browser }}",
         "changed": "${{ steps.plan.outputs.changed }}",
         "graded": "${{ steps.plan.conclusion == 'success' }}",
         "open": "${{ steps.open.outputs.open }}",
@@ -155,11 +197,13 @@ def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget(
     job = _workflow()["jobs"]["stats"]
     assert job["timeout-minutes"] == 26
     steps, names = _steps(job)
-    select = steps[names.index("Select mutation tests before browser setup")]
     collect = steps[names.index("Collect one stats part for every mutation shard")]
-    for step in (select, collect):
-        assert step["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
-    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+    assert collect["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    selection = steps[names.index("Download planned mutation test selection")]
+    assert selection["with"]["name"] == "mutation-selection"
+    assert "Select mutation tests before browser setup" not in names
+    browser = steps[names.index("Install the browser that page tests drive")]
+    assert browser["if"] == "needs.plan.outputs.browser == 'true'"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
     assert collect["run"] == (
@@ -191,7 +235,9 @@ def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_req
     assert names.index("Install the browser that page tests drive") < names.index(mutate["name"])
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-shard-${{ matrix.shard }}"
-    assert steps[-1]["with"]["path"] == ".mutation-gate/"
+    assert steps[-1]["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_single_shard_collection_preserves_both_supported_workflow_states():

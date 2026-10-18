@@ -161,10 +161,10 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/ci_gate_summary.py",
         "scripts/ci_input_key.py",
         "scripts/ci_mutation/__main__.py",
-        "scripts/ci_mutation/browser.py",
         "scripts/ci_mutation/plan.py",
         "scripts/ci_mutation/reuse.py",
         "scripts/ci_queue_fail_fast.py",
+        "scripts/ci_queue_rebuild.py",
         "scripts/ci_release.sh",
         "scripts/ci_semgrep.py",
         "scripts/ci_wiring.py",
@@ -206,6 +206,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/flake_ledger.py",
         "tests/routing/test_codex_api.py",
         "tests/shards.py",
+        "tests/test_suite_speed.py",
         "scripts/ci_reuse.py",
         "scripts/ci_runner_classes.py",
     ]
@@ -213,6 +214,8 @@ def test_no_script_a_step_runs_calls_the_api():
         expected.extend(("scripts/ci_runner_trust.py", "scripts/gate_protected.py"))
     if (ROOT / "scripts/ci_wall_clock.py").exists():
         expected.append("scripts/ci_wall_clock.py")
+    if (ROOT / ".github/actions/browser-cache/use-image.sh").exists():
+        expected.append(".github/actions/browser-cache/use-image.sh")
     routing_contracts = [
         "tests/test_ci_anton_runners.py",
         "tests/test_ci_runner_classes.py",
@@ -221,6 +224,8 @@ def test_no_script_a_step_runs_calls_the_api():
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
+        sorted(expected + ["tests/queue_shards.py"]),
+        sorted(expected + routing_contracts + ["tests/queue_shards.py"]),
     )
     assert {path: count for path, count in calls.items() if count} == {}
 

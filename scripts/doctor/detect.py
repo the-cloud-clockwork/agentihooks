@@ -1,9 +1,12 @@
 """Every Doctor detector over the watched swarm: one list of findings, and a line for each detector that failed."""
 
+import contextvars
 import os
 import re
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from functools import cache
+from threading import Lock
 
 from hooks.context import context_recycle
 from scripts.doctor import (
@@ -45,10 +48,8 @@ def _inbox(store, mail, slug, now_ms, env, items):
     return inbox.findings(items, now_ms, wake.window_ms(env), read.inbox_receivers(store, mail, slug, items))
 
 
-def _traces(store, ledger, slug, now_ms, env):
-    record = traces_read.record(
-        slug, ledger.tasks(slug), [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env)
-    )
+def _traces(store, tasks, slug, now_ms, env):
+    record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env))
     record["waits"] = {
         name: idle.wait_history(store.redis, slug, name)
         for name in {traces._agent(trace) for trace in record["traces"]}
@@ -64,13 +65,29 @@ def _overruns(store, slug):
     )
 
 
+def _once(load):
+    lock = Lock()
+    kept = cache(load)
+
+    def shared():
+        with lock:
+            return kept()
+
+    return shared
+
+
+def _ci(store, tasks, now_ms):
+    pulls = open_pulls(tasks)
+    with ThreadPoolExecutor() as pool:
+        records = list(pool.map(lambda pull: ci_read.pull_request(*pull, cache=store.redis), pulls))
+    return [f for record in records for f in ci.findings(record, now_ms)]
+
+
 def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetry=True):
     env = os.environ if environ is None else environ
     mail = InboxStore(store.redis)
-
-    @cache
-    def items():
-        return read.inbox_items(mail, slug)
+    items = _once(lambda: read.inbox_items(mail, slug))
+    tasks = _once(lambda: ledger.tasks(slug))
 
     found = {
         "runtime storage": lambda: runtime.findings(now_ms, env),
@@ -85,22 +102,28 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
             [asdict(a) for a in store.agents(slug)], activity.first_events(slug), now_ms
         ),
         "context overrun": lambda: _overruns(store, slug),
-        "ci": lambda: [
-            f
-            for repo, number in open_pulls(ledger.tasks(slug))
-            for f in ci.findings(ci_read.pull_request(repo, number, cache=store.redis), now_ms)
-        ],
-        "trace": lambda: _traces(store, ledger, slug, now_ms, env),
+        "ci": lambda: _ci(store, tasks(), now_ms),
+        "trace": lambda: _traces(store, tasks(), slug, now_ms, env),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
 
 
+def _timed(name, detect):
+    with timing.step(f"doctor.{name}"):
+        return detect()
+
+
 def collect(found_by):
     found, failed = [], []
-    for name, detect in found_by.items():
+    if not found_by:
+        return found, failed
+    with ThreadPoolExecutor(max_workers=len(found_by)) as pool:
+        running = {
+            name: pool.submit(contextvars.copy_context().run, _timed, name, detect) for name, detect in found_by.items()
+        }
+    for name, future in running.items():
         try:
-            with timing.step(f"doctor.{name}"):
-                found += detect()
+            found += future.result()
         except Exception as exc:
             failed.append(f"the {name} detector failed: {type(exc).__name__}: {exc}")
     return found, failed

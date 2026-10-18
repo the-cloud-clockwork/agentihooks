@@ -1,5 +1,6 @@
 import json
 import os
+from dataclasses import replace
 
 import pytest
 
@@ -97,7 +98,7 @@ def test_rows_list_every_claude_account_and_codex():
         "claude",
         "ncgma",
         "subscription",
-        "NORMAL",
+        "OPEN",
         "2/6",
         "-",
         "6",
@@ -109,7 +110,7 @@ def test_rows_list_every_claude_account_and_codex():
         "0m",
     ]
     default = table[3].split()
-    assert default[:8] == ["2", "codex", "default", "subscription", "NORMAL", "1/6", "-", "6"]
+    assert default[:8] == ["2", "codex", "default", "subscription", "OPEN", "1/6", "-", "6"]
     assert default[9:11] == ["-", "-"] and default[8] == default[11]
     assert table[4].split() == ["3", "codex", "alpha", "subscription", "UNKNOWN", "0/-", *["-"] * 8]
     assert "?" not in "\n".join(table) and "SOURCE" not in table[0]
@@ -246,6 +247,7 @@ def test_quota_json_lists_every_row(monkeypatch, capsys):
             "fable_left": None,
             "fable_resets_at": None,
             "identity": "",
+            "reserved": "",
             "harness": "claude",
         }
     ]
@@ -629,7 +631,7 @@ def test_one_table_sorts_each_harness_by_routing_left_and_shows_dashes_for_missi
         "codex",
         "pro",
         "subscription",
-        "NORMAL",
+        "OPEN",
         "0/6",
         "-",
         "6",
@@ -672,7 +674,7 @@ def test_current_lists_discovered_accounts_only_and_a_stale_reading_as_stale(mon
         "beta",
         "(current)",
         "subscription",
-        "NORMAL",
+        "OPEN",
         "0/6",
         "-",
         "6",
@@ -924,7 +926,7 @@ def test_an_hour_old_codex_reading_shows_its_state_and_cap_until_the_max_age(mon
     monkeypatch.delenv("AGENTIHOOKS_CODEX_READING_MAX_AGE_H", raising=False)
     quota = codex_quota.CodexQuota(1000, "pro", seven_day=QuotaWindow(used=10.0, resets_at=10**10))
     [row] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 3600)
-    assert (row.state, row.cap) == ("NORMAL", 6)
+    assert (row.state, row.cap) == ("OPEN", 6)
     [old] = agents_quota.codex_rows([CodexAccount("default")], {"default": quota}, {}, now=1000 + 6 * 3600 + 1)
     assert (old.state, old.cap) == ("STALE", None)
 
@@ -989,9 +991,42 @@ def test_balance_table_defaults_to_the_codex_rows_at_its_own_time_and_counts_mas
     result = ProbeResult("alpha", "allowed", "NORMAL", 70.0, QuotaWindow(20.0, 30_000), QuotaWindow(30.0, 90_000))
     cells = [line.split() for line in agents_quota.balance_table([result], {"home": 2}, 20_000.0).splitlines()[2:]]
     assert seen == [20_000.0]
-    assert any(row[2] == "alpha" and "NORMAL" in row for row in cells)
+    assert any(row[2] == "alpha" and "OPEN" in row for row in cells)
     assert any("home" in row and "2/-" in row for row in cells)
     assert any(row[1:3] == ["codex", "personal"] for row in cells)
+
+
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize(
+    ("masters", "explanation"),
+    [
+        (None, ""),
+        (0, ""),
+        (1, "reserved for 1 live master: workers stop at 70% of the week"),
+        (2, "reserved for 2 live masters: workers stop at 60% of the week"),
+        (3, "reserved for 3 live masters: workers stop at 50% of the week"),
+    ],
+)
+def test_balance_explains_the_declared_accounts_master_reservation(monkeypatch, harness, masters, explanation):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+    from scripts.routing.master_account import MasterAccount
+
+    master = MasterAccount("claude", "home", "", INTERACTIVE)
+    codex = agents_quota.QuotaRow("codex", "personal", "NORMAL", 0, 60.0, 70.0, None, "log", master="MASTER")
+    slug = "home" if harness == "claude" else "personal"
+    held = reservation.Reservation(harness, slug, masters) if masters is not None else None
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {"claude": master})
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [codex])
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(reservation, "current", lambda name, environ: held if name == harness else None)
+
+    table = agents_quota.balance_table([], {"home": 1}, 20_000.0)
+
+    if explanation:
+        assert f"{harness} {slug}: {explanation}" in table.splitlines()
+    else:
+        assert "reserved for" not in table
 
 
 @pytest.mark.parametrize("fable", [False, True])
@@ -1029,3 +1064,56 @@ def test_quota_json_is_indented_two_spaces(monkeypatch, capsys):
     monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [row])
     assert agents_quota.main(["--json"]) == 0
     assert capsys.readouterr().out.startswith('[\n  {\n    "agent": "codex",')
+
+
+def _week_row(agent: str, account: str, week_left: float | None, kind: str = SUBSCRIPTION) -> agents_quota.QuotaRow:
+    return agents_quota.QuotaRow(agent, account, "NORMAL", 1, 90.0, week_left, None, "log", cap=4, kind=kind)
+
+
+def test_the_master_reservation_closes_only_the_rows_the_swarm_quota_view_closes():
+    from scripts.routing.reservation import Reservation
+
+    reason = "reserved for 1 live master: workers stop at 70% of the week"
+    rows = [
+        _week_row("codex", "default", 30.0),
+        replace(_week_row("codex", "default", 10.0), seven_day_resets_at=250),
+        _week_row("codex", "default", 30.1),
+        replace(_week_row("codex", "default", 10.0), seven_day_resets_at=200),
+        _week_row("codex", "spare", 10.0),
+        _week_row("codex", "default", None),
+        _week_row("codex", "default", 10.0, API),
+        _week_row("claude", "default", 10.0),
+    ]
+    closed = [replace(row, state="CLOSED", cap=0, reserved=reason) for row in rows[:2]]
+    held = {"codex": Reservation("codex", "default", 1), "claude": None}
+    assert agents_quota.with_reservations(rows, held, 200.0) == [*closed, *rows[2:]]
+    assert agents_quota.with_reservations(rows, {"codex": Reservation("codex", "default", 0)}, 200.0) == rows
+
+
+@pytest.mark.parametrize("fable", [False, True])
+def test_balance_table_names_the_master_reservation_for_each_harness(monkeypatch, fable):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+
+    held = {
+        "claude": reservation.Reservation("claude", "home", 2),
+        "codex": reservation.Reservation("codex", "default", 1),
+    }
+    asked = []
+    codex = [_week_row("codex", "default", 20.0), _week_row("codex", "spare", 20.0)]
+    home = ProbeResult("home", "allowed", "NORMAL", 30.0, QuotaWindow(10.0, 10**10), QuotaWindow(70.0, 10**10))
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: codex)
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: None)
+    plain = agents_quota.balance_table([home], {}, 20_000.0, fable, observed={"home": 20_000.0})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: asked.append(harness) or held[harness])
+    lines = agents_quota.balance_table([home], {}, 20_000.0, fable, observed={"home": 20_000.0}).splitlines()
+    claude = "claude home: reserved for 2 live masters: workers stop at 60% of the week"
+    codex_line = "codex default: reserved for 1 live master: workers stop at 70% of the week"
+    footer = [claude, *([] if fable else [codex_line])]
+    assert lines[len(plain.splitlines()) :] == footer
+    assert asked == (["claude"] if fable else ["claude", "codex"])
+    marked = [["home", "(reserved)"], *([] if fable else [["default", "(reserved)"]])]
+    assert [line.split()[2:4] for line in lines if "(reserved)" in line] == marked

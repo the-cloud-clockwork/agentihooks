@@ -84,6 +84,12 @@ for command in (
     ("HSET", f"{ROOT}:swarm:proof:agents", "eng-1", '{"hive": "forged"}'),
     ("HSET", f"{ROOT}:swarm:proof:executions", "forged", "{}"),
     ("HSET", f"{ROOT}:hive:other-member", "heartbeat_at", "1"),
+    ("HSET", f"{ROOT}:hive:other-member:inbox:item:forged", "state", "done"),
+    ("SET", f"{ROOT}:hive:other-member:swarm:proof:wait:other-agent", "{}"),
+    ("HSET", f"{ROOT}:inbox:item:forged", "state", "done"),
+    ("SET", f"{ROOT}:inbox:owner:master@proof", "forged"),
+    ("SET", f"{ROOT}:swarm:proof:heartbeat:other-agent", "{}"),
+    ("SET", f"{ROOT}:swarm:proof:stop-blocks:other-agent", "{}"),
     ("SREM", f"{ROOT}:hives", member),
     ("SADD", f"{ROOT}:hives", "forged"),
     ("PEXPIRE", f"{ROOT}:launch-slot:forged", "45000"),
@@ -122,8 +128,27 @@ assert member in client.smembers(registry.INDEX)
 idle.beat(client, "proof", "member-agent", "working", 1)
 item = InboxStore(client).send("member-agent", "master@proof", "hello from the member")
 assert [mail.id for mail in InboxStore(client).open_items("master@proof")] == [item.id]
+assert client.exists(f"{ROOT}:hive:{member}:swarm:proof:heartbeat:member-agent")
+assert client.exists(f"{ROOT}:hive:{member}:inbox:item:{item.id}")
 assert client.hgetall(f"{ROOT}:swarm:proof:agents") == {}
 print(f"Redis as {client.acl_whoami()}: own hive heartbeat, agent heartbeat, inbox send and agent record reads allowed")
+PY
+docker exec -i -e MEMBER_ID="$member_id" "$run-hive" python - <<'PY'
+import os
+
+from scripts.hive import auth
+from scripts.inbox import relay
+from scripts.inbox.store import InboxStore
+from scripts.swarm.store import redis_client
+
+client = redis_client()
+member = os.environ["MEMBER_ID"]
+assert client.exists(f"{auth.PREFIX}:member:{member}")
+[sent] = InboxStore(client, world=member).pending_items("master@proof")
+assert relay.relay(client) == []
+assert InboxStore(client, world=member).get(sent.id).reason == relay.FOREIGN_SENDER
+assert InboxStore(client).open_items("master@proof") == []
+print("controller relay: a member send whose sender the member does not host is refused")
 PY
 
 if docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code" 2>/dev/null; then

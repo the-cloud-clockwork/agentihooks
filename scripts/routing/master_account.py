@@ -50,6 +50,11 @@ def declare(
         store.set(f"master-tier-{harness}", tier, actor, now)
 
 
+def claim(store: SettingsStore, harness: str, slug: str, environ: Mapping[str, str], actor: str, now: float) -> str:
+    check(harness, slug, environ)
+    return str(store.claim(f"master-account-{harness}", slug, actor, now))
+
+
 def clear(store: SettingsStore, harnesses: Iterable[str], actor: str, now: float) -> None:
     for harness in harnesses:
         store.set(f"master-account-{harness}", None, actor, now)

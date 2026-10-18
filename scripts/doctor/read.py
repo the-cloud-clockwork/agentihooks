@@ -4,11 +4,14 @@ import json
 import re
 from dataclasses import asdict
 from pathlib import Path
+from types import SimpleNamespace
 
 from scripts.inbox.seats import is_seat, of_swarm
+from scripts.inbox.store import _item, _order
 from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import MASTER, PREFIX
 
+BATCH = 1000
 MINUTE_MS = 60_000
 FINISHED = "finished"
 OPERATOR = "operator"
@@ -24,14 +27,38 @@ def health_records(redis, slug):
     return {finding_id: json.loads(record) for finding_id, record in raw.items()}
 
 
+def _batched(redis, keys, command):
+    found = []
+    for start in range(0, len(keys), BATCH):
+        pipe = redis.pipeline()
+        for key in keys[start : start + BATCH]:
+            command(pipe, key)
+        found += pipe.execute()
+    return found
+
+
 def inbox_items(inbox, slug):
-    prefix = inbox.key("address", "")
-    rows, names = [], NameRegistry(inbox.redis)
-    for key in sorted(inbox.redis.scan_iter(match=prefix + "*")):
-        for item in inbox.inbox(key[len(prefix) :]):
-            if of_swarm(item.address, slug, names) or of_swarm(item.sender, slug, names):
-                rows.append({**asdict(item), "history": inbox.history(item.id)})
-    return rows
+    redis = inbox.redis
+    keys = sorted(redis.scan_iter(match=inbox.key("address", "*"), count=BATCH))
+    listed = _batched(redis, keys, lambda pipe, key: pipe.zrange(key, 0, -1))
+    ids = [item_id for group in listed for item_id in group]
+    raws = dict(zip(ids, _batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id)))))
+    grouped = [sorted((_item(raws[item_id], item_id) for item_id in group), key=_order) for group in listed]
+    named = sorted({name for group in grouped for item in group for name in (item.address, item.sender)})
+    slugs = NameRegistry(redis).slugs_of(named)
+    names = SimpleNamespace(slug_of=lambda name: slugs[name])
+    items = [
+        item
+        for group in grouped
+        for item in group
+        if of_swarm(item.address, slug, names) or of_swarm(item.sender, slug, names)
+    ]
+    histories = _batched(
+        redis, [item.id for item in items], lambda pipe, item_id: pipe.lrange(inbox.key("history", item_id), 0, -1)
+    )
+    return [
+        {**asdict(item), "history": [json.loads(entry) for entry in history]} for item, history in zip(items, histories)
+    ]
 
 
 def inbox_receivers(store, inbox, slug, items):
@@ -52,8 +79,22 @@ def inbox_receivers(store, inbox, slug, items):
         for key, name in ((address, held), (taker, taker)):
             if key and key not in found:
                 agent = agents.get(names.resolve(name))
-                found[key] = Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS) if agent else Receiver()
+                found[key] = _inbox_receiver(store, inbox, key, agent)
     return found
+
+
+def _inbox_receiver(store, inbox, address, agent):
+    from scripts.doctor.inbox import Receiver
+    from scripts.inbox import exits
+
+    if agent and (not is_seat(address) or not inbox.seats.left(agent.name, address)):
+        return Receiver(live=True, quiet_ms=agent.idle_ticks * MINUTE_MS, occupant=agent.name, harness=agent.harness)
+    if not is_seat(address):
+        return Receiver()
+    slug = address.split("@", 1)[1]
+    config = store.config(slug) if store.redis.exists(store.key(slug, "config")) else None
+    waiting = config is None or (config.state != "stopped" and not exits.no_successor(address, config))
+    return Receiver(seat_wait=waiting)
 
 
 def _handoff(prompt):

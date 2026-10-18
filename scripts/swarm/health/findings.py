@@ -8,6 +8,7 @@ import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts import quota_state
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
@@ -50,7 +51,7 @@ class Limits:
     master_watch_ratio: int = 15
     cooldown_minutes: int = 60
     drain_minutes: int = 10
-    drain_left: int = 10
+    drain_left: int = quota_state.DRAIN_LEFT
 
 
 @dataclass(frozen=True)
@@ -100,6 +101,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *waiting_on_input(agents, tasks),
         *stalled(agents, limits),
         *master_rc(agents),
+        *master_fallback_auth(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -246,12 +248,15 @@ def proof_loops(
 
 
 def _lives(events: list[dict]) -> tuple[Counter, Counter]:
-    starts, reruns = Counter(), Counter()
+    starts, reruns, heads = Counter(), Counter(), {}
     for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
         tid = _task_id(e["target"])
-        if starts[tid] and not e.get("after"):
+        head, last = e.get("head"), heads.get(tid)
+        moved = head is not None and last is not None and head != last
+        if starts[tid] and not e.get("after") and not moved:
             reruns[tid] += 1
         starts[tid] += 1
+        heads[tid] = head
     return starts, reruns
 
 
@@ -349,6 +354,29 @@ def master_rc(agents: list[dict]) -> list[Finding]:
                 "Remote Control failed on the master, phone access lost",
                 (f"notice: {failed['message']}", f"agent {agent['name']}"),
                 "a Remote Control failure notice since the master started",
+                1,
+            )
+        )
+    return found
+
+
+def master_fallback_auth(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if (
+            agent.get("lane") != "master"
+            or agent.get("desired_route_kind") != "interactive"
+            or agent.get("route_kind") == "interactive"
+            or agent.get("state") == "finished"
+        ):
+            continue
+        found.append(
+            Finding(
+                "master-fallback-auth",
+                agent.get("seat") or agent["name"],
+                "master on fallback auth, phone access lost",
+                (f"route: {agent.get('route_kind', 'subscription')}", f"agent {agent['name']}"),
+                "the master desires interactive authentication but runs on fallback authentication",
                 1,
             )
         )

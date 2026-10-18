@@ -20,9 +20,15 @@ trap cleanup EXIT
 kind create cluster --name "$cluster" --image mirror.gcr.io/kindest/node:v1.37.0 --wait 120s > "$out/cluster.log" 2>&1 &
 cluster_pid=$!
 build_started="$SECONDS"
-docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
-docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
-printf 'worker_hive_image_build_seconds=%s\n' "$((SECONDS - build_started))" | tee "$out/build.txt"
+if bash deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev; then
+  worker_base=published
+  docker build -f deploy/worker/Dockerfile -t "$image" .
+else
+  worker_base=rebuilt
+  docker build -f docker/swarm-node/Dockerfile -t local/worker-base:dev .
+  docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
+fi
+printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
 wait "$cluster_pid"
 kind load docker-image "$image" --name "$cluster"
 docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && agentihooks hive --help' > "$out/tools.txt"

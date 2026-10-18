@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, ledger_events, outage, ready, stall_watch
+from scripts.swarm import idle, ledger_events, outage, ready, release_wait, stall_watch, waits
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.stall_watch import ALERTED, REOPENED
@@ -58,6 +58,7 @@ class Swarm:
         import fakeredis
 
         self.store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+        self.store.create(SwarmConfig(SLUG, "/repo", 1, 1, gates={"stall": "enforce"}))
         self.ledger = Ledger(
             [{"id": "t1", "state": "pr", "pr_url": URL, "claimed_by": OWNER, "branch": "b1", **(task or {})}]
         )
@@ -69,7 +70,7 @@ class Swarm:
         self.store.put_agent(SLUG, AgentRecord(OWNER, "eng", "t1", seat="eng-1@sw"))
         self.store.redis.set(self.store.key(SLUG, "claim", "t1"), OWNER)
 
-    def tick(self, at, doc=None):
+    def tick(self, at, doc=None, **extra):
         watch = stall_watch.Watch(
             self.store,
             SLUG,
@@ -83,6 +84,7 @@ class Swarm:
             lambda url, title, text, env: (
                 self.posted.append((url, title, text)) or self.envs.append(env) or self.refusal
             ),
+            **extra,
         )
         return stall_watch.stall_pass(watch, doc or self.ledger.state(SLUG))
 
@@ -753,7 +755,7 @@ def test_many_ready_tasks_send_one_lane_alert_with_the_ready_count():
 def test_an_operator_capped_lane_never_alerts_about_unclaimed_tasks():
     swarm = Swarm(RUNNING)
     _full_lane(swarm)
-    swarm.store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual"))
+    swarm.store.update(SLUG, max_eng=1, max_ci=0, max_plan=0, scaling="manual")
     assert swarm.tick(START) == []
     assert swarm.tick(START + 180 * MINUTE) == []
     assert swarm.inbox() == []
@@ -765,7 +767,7 @@ def test_an_existing_lane_alert_never_escalates_after_manual_caps_apply():
     swarm.tick(START)
     swarm.tick(START + 15 * MINUTE)
     [item] = swarm.inbox()
-    swarm.store.create(SwarmConfig(SLUG, "/repo", max_eng=1, max_ci=0, max_plan=0, scaling="manual"))
+    swarm.store.update(SLUG, max_eng=1, max_ci=0, max_plan=0, scaling="manual")
     assert swarm.tick(START + 45 * MINUTE) == []
     assert swarm.ledger.priorities == []
     assert swarm.posted == []
@@ -963,6 +965,108 @@ def test_each_alert_row_is_judged_on_its_own():
     assert [item for item, _ in swarm.ledger.priorities] == ["tasks/t9"]
 
 
+@pytest.mark.parametrize("mode", [None, "observe", "off", "enforce"])
+def test_the_watchdog_mode_controls_mutations_and_keeps_alerts(mode):
+    from scripts.gates import log
+
+    swarm = Swarm(GREEN, environ={"AGENTIHOOKS_GATE_STALL": "enforce"})
+    swarm.store.update(SLUG, gates={} if mode is None else {"stall": mode})
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    [item] = swarm.inbox()
+    assert item.text == _alert(case="green", minutes=10, wait=20, action=REOPENED if mode == "enforce" else ALERTED)
+    rows = log.recent(SLUG)
+    if mode == "enforce":
+        assert swarm.retired == [OWNER] and _reopened(swarm)
+        assert [(row["kind"], row["tool"]) for row in rows] == [("deny", "reopen"), ("deny", "stop")]
+    else:
+        assert swarm.retired == [] and not _reopened(swarm)
+        assert swarm.ledger.updates == [] and swarm.ledger.comments == []
+        assert swarm.ledger.task(SLUG, "t1")["claimed_by"] == OWNER
+        assert swarm.store.claimant(SLUG, "t1") == OWNER
+        assert [agent.name for agent in swarm.store.agents(SLUG)] == [OWNER]
+        expected = [] if mode == "off" else [("observe", "reopen"), ("observe", "stop")]
+        assert [(row["kind"], row["tool"]) for row in rows] == expected
+        if rows:
+            assert all(row["gate"] == "stall" and row["agent"] == OWNER and row["task"] == "t1" for row in rows)
+            assert all(row["reason"] == "green and not queued for 10 minutes" for row in rows)
+            assert all(row["at"] == START + 10 * MINUTE for row in rows)
+        swarm.tick(START + 30 * MINUTE)
+        assert len(swarm.ledger.priorities) == 1 and len(swarm.posted) == 1
+
+
+def test_five_live_watchdog_candidates_remain_claimed_for_an_hour_by_default():
+    from scripts.gates import log
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={})
+    for index in range(2, 6):
+        tid, owner = f"t{index}", f"worker-{index}"
+        swarm.ledger.rows[tid] = {"id": tid, "state": "pr", "pr_url": URL, "claimed_by": owner}
+        swarm.store.put_agent(SLUG, AgentRecord(owner, "eng", tid, seat=f"eng-{index}@sw"))
+        swarm.store.redis.set(swarm.store.key(SLUG, "claim", tid), owner)
+        swarm.live.add(owner)
+    swarm.tick(START)
+    for minutes in range(10, 61, 10):
+        swarm.tick(START + minutes * MINUTE)
+    assert swarm.retired == []
+    assert swarm.ledger.updates == []
+    assert all(task["state"] == "pr" for task in swarm.ledger.rows.values())
+    assert len(swarm.store.agents(SLUG)) == 5
+    assert all(swarm.store.claimant(SLUG, tid) == task["claimed_by"] for tid, task in swarm.ledger.rows.items())
+    rows = log.recent(SLUG, limit=None)
+    assert len(rows) == 60
+    assert sum(row["tool"] == "stop" for row in rows) == 30
+    assert sum(row["tool"] == "reopen" for row in rows) == 30
+    assert all(row["kind"] == "observe" for row in rows)
+    assert len(swarm.inbox()) == 5
+
+
+@pytest.mark.parametrize("owner", ["", None])
+def test_an_ownerless_stall_logs_only_a_reopen_without_retiring_another_agent(owner):
+    from scripts.gates import log
+
+    swarm = Swarm(RED, task={"claimed_by": owner})
+    swarm.store.update(SLUG, gates={})
+    swarm.tick(START)
+    swarm.tick(START + 15 * MINUTE)
+    assert swarm.retired == [] and swarm.ledger.updates == []
+    [row] = log.recent(SLUG)
+    assert (row["gate"], row["kind"], row["agent"], row["task"], row["tool"]) == (
+        "stall",
+        "observe",
+        "",
+        "t1",
+        "reopen",
+    )
+    assert [agent.name for agent in swarm.store.agents(SLUG)] == [OWNER]
+
+
+@pytest.mark.parametrize("first, second", [("enforce", "observe"), ("observe", "enforce")])
+def test_a_mode_change_between_logged_actions_never_retires_or_reopens(first, second, monkeypatch):
+    from scripts.gates import log
+
+    swarm = Swarm(GREEN)
+    swarm.store.update(SLUG, gates={"stall": first})
+    append = log.append
+
+    def change_mode(slug, row, home=None):
+        assert slug == SLUG
+        append(slug, row, home)
+        if row.tool == "reopen":
+            swarm.store.update(SLUG, gates={"stall": second})
+
+    monkeypatch.setattr(log, "append", change_mode)
+    swarm.tick(START)
+    swarm.tick(START + 10 * MINUTE)
+    assert swarm.retired == [] and swarm.ledger.updates == []
+    assert swarm.store.claimant(SLUG, "t1") == OWNER
+    assert [(row["kind"], row["tool"]) for row in log.recent(SLUG)] == [
+        ("deny" if first == "enforce" else "observe", "reopen"),
+        ("deny" if second == "enforce" else "observe", "stop"),
+    ]
+
+
 RULES = [(GREEN, True, 10), (RED, True, 15), (RUNNING, False, 10), (CONFLICTING, False, 5)]
 
 
@@ -1044,4 +1148,50 @@ def test_a_wait_on_its_own_pull_request_or_by_another_agent_does_not_hold_a_stal
     swarm.ledger.rows["fix"] = {"id": "fix", "state": "claimed"}
     _wait(swarm, on, name)
     swarm.tick(START + 15 * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.parametrize(("pull", "limit"), [(GREEN, 10), (RED, 15)])
+def test_a_wait_the_tick_ended_gives_its_owner_the_full_limit_from_the_wake(pull, limit):
+    swarm = Swarm(pull)
+    inbox = InboxStore(swarm.store.redis)
+    asked = inbox.send("master@sw", OWNER, "review this").id
+    _wait(swarm, {"kind": "reply", "target": asked})
+    assert swarm.tick(START) == []
+    woke = START + 2 * limit * MINUTE
+    inbox.close(asked, OWNER, "done", "answered")
+    rows = {t["id"]: t for t in swarm.ledger.state(SLUG)["tasks"]}
+    assert waits.end_pass(swarm.store, SLUG, rows, inbox, swarm.pulls.get, woke, swarm.pulls.get)
+    assert 0 < swarm.store.redis.ttl(idle.key(SLUG, "woke", OWNER)) <= idle.BEAT_TTL_S
+    idle.declare_wait(
+        swarm.store.redis, SLUG, OWNER, woke + 600 * MINUTE, "queued", woke, on={"kind": "merge", "target": URL}
+    )
+    assert swarm.tick(woke) == [] and swarm.tick(woke + (limit - 1) * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == []
+    swarm.tick(woke + limit * MINUTE)
+    assert _reopened(swarm)
+
+
+def test_a_wait_the_owner_ends_itself_moves_no_stall_clock():
+    swarm = Swarm(GREEN)
+    assert swarm.tick(START) == []
+    idle.end_wait(swarm.store.redis, SLUG, OWNER, START + 9 * MINUTE)
+    assert idle.woke(swarm.store.redis, SLUG, OWNER) == 0
+    swarm.tick(START + 10 * MINUTE)
+    assert _reopened(swarm)
+
+
+@pytest.mark.parametrize(("pull", "live", "limit"), RULES)
+def test_a_release_hold_keeps_every_stall_rule_until_a_newer_release_exists(pull, live, limit):
+    swarm = Swarm(pull, task={release_wait.FIELD: "v2.17.3"}, live=live)
+    tags = ["v2.17.3"]
+
+    def tick(at):
+        return swarm.tick(at, released=lambda task: release_wait.newer(tags, task[release_wait.FIELD]))
+
+    assert tick(START) == [] and tick(START + 6 * limit * MINUTE) == []
+    assert not _reopened(swarm) and swarm.retired == [] and swarm.inbox() == []
+    tags.append("v2.17.4")
+    tick(START + 7 * limit * MINUTE)
+    tick(START + 8 * limit * MINUTE)
     assert _reopened(swarm)

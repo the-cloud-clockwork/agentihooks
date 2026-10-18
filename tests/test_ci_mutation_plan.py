@@ -556,7 +556,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes: (
+        lambda root, changes, selection: (
             (1601.4, 50, ["tests/test_sample.py"])
             if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
             else None
@@ -568,10 +568,13 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
             (3, 120.6) if (root, tests, target, limit) == (tmp_path, ["tests/test_sample.py"], 100, 4) else None
         ),
     )
+    monkeypatch.setattr("scripts.ci_mutation.plan.needs_browser", lambda root, tests: False)
     monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
     assert plan.main() == 0
     assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
-    assert output.read_text() == "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\n"
+    assert output.read_text() == (
+        "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"
+    )
     assert capsys.readouterr().out == (
         "Mutation bases: earlier merged\n"
         "Changed line mutants: 50\nEstimated mutation seconds: 1601, slowest stats bucket: 121\n"
@@ -606,7 +609,70 @@ def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_buc
 
     monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
     monkeypatch.setattr("scripts.ci_mutation.plan.own_bases", lambda root, base, head, graded: [f"{base}@{head}"])
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes: estimated)
+    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection: estimated)
     assert plan.main() == 0
     assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
-    assert output.read_text() == f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\nchanged=0\n"
+    assert output.read_text() == (
+        f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\nchanged=0\nbrowser=false\n"
+    )
+
+
+@pytest.mark.parametrize(
+    ("ceiling", "shards", "run_id", "expected"),
+    [
+        (1, 1, 1000, (1, 0)),
+        (30, 3, 1000, (10, 0)),
+        (30, 5, 1001, (6, 5)),
+        (10, 3, 1002, (3, 0)),
+        (31, 3, 1009, (10, 9)),
+        (2, 3, 1000, (1, 0)),
+    ],
+)
+def test_mutation_lanes_follow_batch_capacity_and_actual_stage_width(ceiling, shards, run_id, expected):
+    from scripts.ci_mutation.lanes import allocation
+
+    assert allocation(ceiling, shards, run_id) == expected
+
+
+@pytest.mark.parametrize(("ceiling", "shards"), [(0, 3), (-1, 3), (30, 0), (30, -1)])
+def test_mutation_lanes_reject_missing_capacity_or_stage_width(ceiling, shards):
+    from scripts.ci_mutation.lanes import allocation
+
+    with pytest.raises(ValueError, match="^Batch ceiling and stage width must be positive$"):
+        allocation(ceiling, shards, 1000)
+
+
+def test_mutation_lanes_read_the_authoritative_public_batch_ceiling(tmp_path, monkeypatch, capsys):
+    from scripts.ci_mutation.lanes import main
+
+    values = tmp_path / "values.yaml"
+    values.write_text("gha-runner-scale-set:\n  maxRunners: 30\n")
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr("sys.argv", ["lanes", "--values", str(values), "--shards", "[0, 1, 2]", "--run-id", "1009"])
+    assert main() == 0
+    assert output.read_text() == "ceiling=30\nlanes=10\nlane=9\n"
+    assert capsys.readouterr().out == "ceiling=30\nlanes=10\nlane=9\n"
+
+
+def test_mutation_lanes_reuse_the_same_ceiling_after_refining_shards(tmp_path, monkeypatch):
+    from scripts.ci_mutation.lanes import main
+
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    monkeypatch.setattr("sys.argv", ["lanes", "--ceiling", "30", "--shards", "[0, 1, 2, 3, 4]", "--run-id", "1009"])
+    assert main() == 0
+    assert output.read_text() == "ceiling=30\nlanes=6\nlane=1\n"
+
+
+@pytest.mark.parametrize("missing", ["--ceiling", "--shards", "--run-id"])
+def test_mutation_lane_cli_requires_capacity_width_and_run(missing, monkeypatch):
+    from scripts.ci_mutation.lanes import main
+
+    arguments = {"--ceiling": "30", "--shards": "[0, 1, 2]", "--run-id": "1009"}
+    monkeypatch.setattr(
+        "sys.argv", ["lanes", *(value for pair in arguments.items() if pair[0] != missing for value in pair)]
+    )
+    with pytest.raises(SystemExit) as error:
+        main()
+    assert error.value.code == 2

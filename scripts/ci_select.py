@@ -33,6 +33,9 @@ HARNESS = frozenset(
     }
 )
 CONFTEST = "conftest.py"
+# Only the full suite ran these checks, so a new or edited test module could pass its own tier and fail the queue.
+SUITE_SPEED = "tests/test_suite_speed.py"
+FAKEREDIS = "fakeredis"
 # Stored test seconds one leg runs inside the unit step timeout; a full shard holds about 157 and runs in 217.
 LEG_SECONDS = 180.0
 UNKNOWN_SECONDS = 10.0
@@ -86,7 +89,14 @@ def selected_tests(root: Path, changed: list[str]) -> set[str]:
             }
         )
     tests |= naming_tests(root, needles)
-    return {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    tests = {path for path in tests if SAFE.fullmatch(path) and (root / path).is_file()}
+    if (
+        tests
+        and (root / SUITE_SPEED).is_file()
+        and (any(is_test(path) for path in changed) or any(FAKEREDIS in (root / path).read_text() for path in tests))
+    ):
+        tests.add(SUITE_SPEED)
+    return tests
 
 
 def file_seconds(durations: dict[str, float], files: set[str]) -> dict[str, float]:

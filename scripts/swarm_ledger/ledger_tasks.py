@@ -47,6 +47,7 @@ UPDATABLE = (
     "slice",
     "follow_up",
     "split_pulls",
+    "pull_scopes",
     "after_release",
     "recovery",
 )
@@ -60,7 +61,9 @@ OVERLAY_CAP = 3
 BRANCH_RE = re.compile(r"^(?!-)\S*$")
 COMMIT_RE = re.compile(r"^([0-9a-f]{7,64})?$")
 RELEASE_RE = re.compile(r"^(v?\d+\.\d+\.\d+)?$")
-OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches")
+OBJECT_FIELDS = ("contract", "proof", "recovery", "repository_branches", "pull_scopes")
+PULL_SCOPE_KINDS = ("stage", "prerequisite")
+PULL_URL_RE = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
 URL_FIELDS = ("issue_url", "pr_url", "plan_url")
 URL_RE = re.compile(r"^https?://[^\s]+$")
 OPS = ("task_add", "task_update")
@@ -230,8 +233,25 @@ def check_repository_branches(fields: dict) -> None:
         raise ValueError("repository_branches must map absolute local repository paths to branch names")
 
 
+def check_pull_scopes(fields: dict) -> None:
+    scopes = fields.get("pull_scopes", {})
+    if not isinstance(scopes, dict) or not all(
+        PULL_URL_RE.fullmatch(url)
+        and isinstance(declared, dict)
+        and set(declared) == {"kind", "scope"}
+        and declared["kind"] in PULL_SCOPE_KINDS
+        and isinstance(declared["scope"], str)
+        and declared["scope"].strip()
+        for url, declared in scopes.items()
+    ):
+        raise ValueError(
+            "pull_scopes must map pull request URLs to a kind, stage or prerequisite, and a nonempty scope"
+        )
+
+
 def check_lists(fields):
     check_repository_branches(fields)
+    check_pull_scopes(fields)
     for key in LIST_FIELDS:
         value = fields.get(key, [])
         if not isinstance(value, list) or not all(isinstance(v, str) and v.strip() for v in value):
@@ -348,7 +368,7 @@ def _add(doc, op, ctx):
             ctx.refused.append(str(exc))
             return False
         task["plan_slice"] = op["plan_slice"]
-    if refusal := ledger_plans.task_refusal(doc, task):
+    if refusal := ledger_plans.task_refusal(doc, task) or ledger_rank.urgent_refusal(task, doc):
         ctx.refused.append(refusal)
         return False
     tasks.append(task)
@@ -427,7 +447,15 @@ def update_refusal(doc: dict, op: dict, meta: dict | None = None) -> str:
     if phase is not None and phase not in {p["id"] for p in doc["phases"]}:
         return f"phase {phase} is not on this ledger: name one of its phase ids"
     task = next((t for t in doc["tasks"] if t["id"] == op["item"].split("/")[1]), {})
-    return park_refusal(op, task)
+    return park_refusal(op, task) or urgent_update_refusal(op, task, doc)
+
+
+def urgent_update_refusal(op: dict, task: dict, doc: dict) -> str:
+    fields = op["fields"]
+    if "rank" not in fields and "phase" not in fields:
+        return ""
+    rank = fields.get("rank", task.get("rank"))
+    return ledger_rank.urgent_refusal({**task, **fields, "rank": ledger_rank.ALIASES.get(rank, rank)}, doc)
 
 
 def park_refusal(op: dict, task: dict) -> str:
@@ -568,6 +596,9 @@ def _relay_rank(doc, op, ctx):
     rank, words = ledger_rank.canonical(op["fields"]["rank"]), relayed(op, ctx.meta)
     if task is None or not ledger_rank.quoted(rank, words):
         ctx.refused.append(UNRELAYED)
+        return False
+    if refusal := ledger_rank.urgent_refusal({**task, "rank": rank}, doc):
+        ctx.refused.append(refusal)
         return False
     task["rank"] = rank
     ctx.stamp(f"{op['item']}/rank", ledger_rank.OPERATOR)

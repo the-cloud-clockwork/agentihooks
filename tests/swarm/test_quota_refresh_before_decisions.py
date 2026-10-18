@@ -80,4 +80,4 @@ def test_a_fresh_codex_reading_past_the_drain_line_still_drains_and_warns(monkey
     monkeypatch.setattr(capacity.account_sessions, "codex_sessions_by_account", lambda: {})
     monkeypatch.setattr(capacity, "_api", lambda *args: [])
     [row] = capacity._codex({"AH_CX_TOKEN_alpha": "fake-alpha"}, NOW, False)
-    assert _decisions(row) == ("OPEN", 5.0, NOW - 60, True, "week", "routing 5% left, read 1m ago")
+    assert _decisions(row) == ("DRAIN", 5.0, NOW - 60, True, "week", "routing 5% left, read 1m ago")
