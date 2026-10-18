@@ -277,7 +277,7 @@ class Consumer:
             pane_id=placed.pane_id,
             model=placed.model,
             effort=placed.effort,
-            profile_decision=placed.profile_decision,
+            profile_decision={**agent.profile_decision, **placed.profile_decision},
         )
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")
