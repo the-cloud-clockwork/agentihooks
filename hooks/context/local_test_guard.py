@@ -1,3 +1,4 @@
+import ast
 import os
 import posixpath
 import re
@@ -79,6 +80,10 @@ _LAUNCH = re.compile(
     r"|\b(?:eval|compile|Function|vm|run_module|run_path|__import__|import_module|child_process)\b"
     r"|\brequire\s*\(\s*[A-Za-z_$]"
 )
+_NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
+_FORMAT_PREFIX = re.compile(r"(?i)(?:^|\W)[rb]?f[rb]?$")
+_READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
+_RUNS_ON_IMPORT = frozenset({"unittest.__main__"})
 _DENY = (
     "BLOCKED: Local test and mutation runs are disabled. Push and open a draft pull request so CI runs the tests. "
     "Set AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true to opt in to local runs."
@@ -89,13 +94,85 @@ def local_tests_allowed() -> bool:
     return os.getenv(ALLOW_LOCAL_TEST_RUN_ENV, _FALSE).lower() == _TRUE
 
 
-def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    code = re.sub(
+def _strip(source: str, comment: str, keep) -> str:
+    return re.sub(
         f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
-        lambda match: match[0] if match["module"] else match["q"],
+        lambda match: match[0] if keep(source, match) else match["q"],
         source,
     )
-    return bool(runners.search(source if _LAUNCH.search(source) else code))
+
+
+def _module_literal(source: str, match: re.Match) -> bool:
+    return bool(match["module"])
+
+
+def _named_literal(source: str, match: re.Match) -> bool:
+    return bool(
+        match["module"]
+        or _NAME_LITERAL.fullmatch(match[0])
+        or _FORMAT_PREFIX.search(source[max(match.start() - 3, 0) : match.start()])
+    )
+
+
+def _launches(source: str, comment: str) -> bool:
+    return bool(_LAUNCH.search(_strip(source, comment, _named_literal)))
+
+
+def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
+    return bool(runners.search(source if _launches(source, comment) else _strip(source, comment, _module_literal)))
+
+
+def _imports(tree: ast.Module) -> list[tuple[str, str]]:
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [(alias.name, alias.asname or alias.name.partition(".")[0]) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            found += [(f"{node.module}.{alias.name}", alias.asname or alias.name) for alias in node.names]
+    return found
+
+
+def _is_reader(call: ast.Call, modules: set[str], functions: set[str]) -> bool:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return func.attr in _READERS and isinstance(func.value, ast.Name) and func.value.id in modules
+    return isinstance(func, ast.Name) and func.id in functions
+
+
+def _read_roots(tree: ast.Module, imports: list[tuple[str, str]]) -> set[int]:
+    modules = {bound for path, bound in imports if path == "inspect"}
+    functions = {bound for path, bound in imports if path.startswith("inspect.") and path[8:] in _READERS}
+    roots = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_reader(node, modules, functions):
+            for arg in node.args:
+                while isinstance(arg, ast.Attribute):
+                    arg = arg.value
+                if isinstance(arg, ast.Name):
+                    roots.add(id(arg))
+    return roots
+
+
+def _reads_runner_source(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except SyntaxError:
+        return False
+    imports = _imports(tree)
+    runners = {bound for path, bound in imports if _PYTHON_TEST.search(path)}
+    if not runners or "*" in runners or any(path in _RUNS_ON_IMPORT for path, _ in imports):
+        return False
+    roots = _read_roots(tree, imports)
+    names = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Name) and (node.id in runners or _PYTHON_TEST.search(node.id))
+    ]
+    return bool(names) and all(id(node) in roots for node in names)
+
+
+def _python_code_runs_tests(code: str) -> bool:
+    return _code_runs_tests(code, _PYTHON_TEST, "#") and (_launches(code, "#") or not _reads_runner_source(code))
 
 
 def _python_script(args: list[str]) -> str | None:
@@ -115,9 +192,9 @@ def _python_script(args: list[str]) -> str | None:
 def _python_test(args: list[str]) -> bool:
     for index, arg in enumerate(args):
         if arg in {"-m", "-c"}:
-            if index + 1 < len(args) and _code_runs_tests(args[index + 1], _PYTHON_TEST, "#"):
+            if index + 1 < len(args) and _python_code_runs_tests(args[index + 1]):
                 return True
-        elif arg.startswith(("-m", "-c")) and _code_runs_tests(arg[2:], _PYTHON_TEST, "#"):
+        elif arg.startswith(("-m", "-c")) and _python_code_runs_tests(arg[2:]):
             return True
     script = _python_script(args)
     return script is not None and (
