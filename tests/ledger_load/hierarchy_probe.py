@@ -23,7 +23,8 @@ SLUG = "hierarchy-cpu-proof"
 
 def fetch(port, path, samples):
     url = f"http://127.0.0.1:{port}/api/v1/ledgers/{SLUG}/{path}"
-    with urllib.request.urlopen(url, timeout=60) as response:
+    request = urllib.request.Request(url, headers={"X-Ledger-Token": "hierarchy-proof"})
+    with urllib.request.urlopen(request, timeout=60) as response:
         body = response.read()
         assert response.status == 200
     used = samples.get(timeout=10)
@@ -96,7 +97,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     observations = []
     try:
         state = recorded["state"]
-        repo.import_document(SLUG, state)
+        repo.import_document(SLUG, state, token="hierarchy-proof")
         observations.append(observe(port, samples, state))
         profiling.set()
         fetch(port, "hierarchy", samples)
@@ -104,7 +105,7 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
         changed = json.loads(json.dumps(state))
         changed["tasks"][0]["state"] = "claimed"
         changed["phases"][0]["done"] = not bool(changed["phases"][0].get("done"))
-        repo.import_document(SLUG, changed)
+        repo.import_document(SLUG, changed, token="hierarchy-proof", replace=True)
         observations.append(observe(port, samples, changed))
         assert observations[0]["outputs"] != observations[1]["outputs"]
     finally:
