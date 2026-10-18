@@ -85,6 +85,77 @@ retired and its successor starts from the document; one that does not is retired
 the tick never held (an empty harness, profile, model, effort or account) is not compared with the live process:
 `swarm status` flags it as a live binding finding, and it never retires the agent.
 
+### Interactive masters and Remote Control
+
+Claude masters prefer a valid native claude.ai login at launch and handoff;
+workers retain their token and API routing. Declare the master account and
+optional tier with `agentihooks balance master-account` as described under
+[reserved headroom](load-balancing.md#master-accounts-and-reserved-headroom).
+The declaration alone neither signs in nor enables Remote Control.
+
+For the lead Claude master to appear in the Claude app, the operator enables
+the optional master login and signs in from their own terminal:
+
+```bash
+agentihooks swarm <id> set master-claude-login=on
+agentihooks claude login --master <id>
+```
+
+`master-claude-login` defaults to off. When on, the front door master uses its
+private Claude config home, forces `claudeai` login and receives
+`--remote-control "master · <id>"`. Workers do not receive this login or the
+Remote Control flags. A failed private login, conflicting declared master
+account, live login holder or missing worker quota tokens refuses this route;
+it does not silently replace the selected private login. See
+[Master claude ai login](../reference/account-login.md#master-claude-ai-login)
+for isolation, ownership and recovery.
+
+Remote Control connects to the same running local conversation from
+[claude.ai/code](https://claude.ai/code) or the Claude mobile app. Sign in on
+the device with the same account and organization as the master. The local
+Claude process must remain running and have network access. According to the
+[Claude Code Remote Control requirements](https://code.claude.com/docs/en/remote-control#requirements):
+
+- A Pro, Max, Team or Enterprise subscription and a native claude.ai login are
+  required. Team and Enterprise also need the organization owner to enable
+  Remote Control. A routed setup token or API key does not supply this login.
+- Bedrock, Google Cloud and Foundry routes, a custom `ANTHROPIC_BASE_URL`, and
+  enterprise Claude apps gateways block Remote Control.
+- `CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC` or `DISABLE_GROWTHBOOK` blocks it.
+  Organizations requiring Trusted Devices also require device enrollment and
+  a recent sign-in. Consult the upstream requirements for version restrictions
+  when telemetry is disabled.
+- The launch directory must be trusted. AgentiHooks normally establishes
+  trust before launch; an untrusted noninteractive launch cannot answer the
+  native trust prompt.
+
+Outside the explicitly enabled private login route, a Claude master tries its
+valid interactive login first. If that is unavailable, it falls back to normal
+subscription token placement and configured API capacity under the
+[live share rules](load-balancing.md#live-share-weight). With the default API
+weight of zero, the order is interactive login, token pool, then API overflow;
+a nonzero weight can select API capacity earlier. If no permitted account has
+room, launch fails. A fallback master may use the headroom reserved against
+workers, but cannot bypass a spent or otherwise ineligible account. Its desired
+interactive route is retained: the next handoff or recycle checks login again
+and returns to it when available, rather than changing credentials in the
+running process.
+
+Inspect `agentihooks swarm <id> status` and the ledger master card for the
+recorded launch decision:
+
+| Status or finding | Meaning |
+|---|---|
+| `Remote Control: on (master · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
+| `Remote Control: off (flag)` | The master login option is off. |
+| `Remote Control: off (fallback auth)` | The master uses subscription token authentication. |
+| `Remote Control: off (gateway)` | The master uses the API route. |
+| `master-fallback-auth/<seat>` | An active master wanted interactive authentication but runs on fallback auth: phone access is lost. Returning to interactive auth removes this finding. |
+| `master-rc/<seat>` | A Remote Control failure notification was recorded since this master started: phone access is lost even if the launch decision was on. A `Remote Control back on` notification clears the recorded failure. |
+
+Codex masters have no Claude Remote Control decision. These findings report
+lost access; they do not stop the master or change its authentication.
+
 ### Master outage and promotion
 
 When a swarm has had no live master (none whose hook reported) for `AGENTIHOOKS_MASTER_DOWN_MINUTES` (default 5),

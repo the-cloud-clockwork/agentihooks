@@ -387,10 +387,15 @@ def _render_live(
     rows: list[QuotaRow], sessions: dict[str, int], now: float, fable: bool = False, current: str = NO_CURRENT
 ) -> str:
     from hooks.context.account_sessions import codex_sessions_by_account
+    from scripts.routing import reservation
 
     live = {"claude": sessions, **({} if fable else {"codex": codex_sessions_by_account()})}
     table = render(rows, int(now), unlisted_sessions(rows, live), fable, current)
     notes = [] if fable else [*codex_router.identity_warnings(os.environ), codex_router.default_distinction(os.environ)]
+    for harness in sorted({row.agent for row in rows if row.master}):
+        held = reservation.current(harness, os.environ)
+        if held and held.reason:
+            notes.append(f"{harness} {held.slug}: {held.reason}")
     return "\n".join([table, *(note for note in notes if note)])
 
 

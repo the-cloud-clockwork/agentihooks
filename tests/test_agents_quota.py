@@ -996,6 +996,39 @@ def test_balance_table_defaults_to_the_codex_rows_at_its_own_time_and_counts_mas
     assert any(row[1:3] == ["codex", "personal"] for row in cells)
 
 
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize(
+    ("masters", "explanation"),
+    [
+        (None, ""),
+        (0, ""),
+        (1, "reserved for 1 live master: workers stop at 70% of the week"),
+        (2, "reserved for 2 live masters: workers stop at 60% of the week"),
+        (3, "reserved for 3 live masters: workers stop at 50% of the week"),
+    ],
+)
+def test_balance_explains_the_declared_accounts_master_reservation(monkeypatch, harness, masters, explanation):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+    from scripts.routing.master_account import MasterAccount
+
+    master = MasterAccount("claude", "home", "", INTERACTIVE)
+    codex = agents_quota.QuotaRow("codex", "personal", "NORMAL", 0, 60.0, 70.0, None, "log", master="MASTER")
+    slug = "home" if harness == "claude" else "personal"
+    held = reservation.Reservation(harness, slug, masters) if masters is not None else None
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {"claude": master})
+    monkeypatch.setattr(agents_quota, "_codex", lambda now: [codex])
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(reservation, "current", lambda name, environ: held if name == harness else None)
+
+    table = agents_quota.balance_table([], {"home": 1}, 20_000.0)
+
+    if explanation:
+        assert f"{harness} {slug}: {explanation}" in table.splitlines()
+    else:
+        assert "reserved for" not in table
+
+
 @pytest.mark.parametrize("fable", [False, True])
 def test_balance_ages_each_claude_row_from_its_router_cache_entry_and_a_live_read_from_now(monkeypatch, fable):
     from hooks.context import account_sessions
