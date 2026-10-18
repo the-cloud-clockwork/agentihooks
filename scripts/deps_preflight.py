@@ -143,11 +143,27 @@ def refresh_codex_wrapper(caller: str) -> None:
         print(f"[agentihooks {caller}] hook wrapper refresh skipped: {exc}", file=sys.stderr)
 
 
+def install_declared(*, quiet: bool) -> None:
+    specs = tool_deps.missing_here()
+    if not specs:
+        return
+    if not quiet:
+        print(
+            f"[agentihooks] deps: installing {', '.join(specs)} into the agentihooks tool environment", file=sys.stderr
+        )
+    try:
+        tool_deps.install(specs, tool_deps.call, sys.executable)
+    except RuntimeError as exc:
+        if not quiet:
+            print(f"[agentihooks] deps: {exc}", file=sys.stderr)
+
+
 def ensure(*, quiet: bool = False) -> int:
     from scripts.skill_links import repair
 
     repair()
     refresh_codex_wrapper("deps")
+    install_declared(quiet=quiet)
     path = manifest_path()
     if path is None or stamp_fresh(path):
         return 0

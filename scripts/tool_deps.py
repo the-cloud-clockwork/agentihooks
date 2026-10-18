@@ -38,10 +38,19 @@ def missing_here() -> list[str]:
 
 
 def call(argv: list[str]) -> str:
-    done = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    try:
+        done = subprocess.run(argv, capture_output=True, text=True, timeout=TIMEOUT_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise RuntimeError(f"{' '.join(argv)} timed out after {exc.timeout} seconds") from exc
     if done.returncode:
         raise RuntimeError(f"{' '.join(argv)} failed: {(done.stderr or done.stdout).strip()}")
     return done.stdout.strip()
+
+
+def install(specs: list[str], run: Callable, python: str) -> list[str]:
+    if specs:
+        run(["uv", "pip", "install", "--python", python, *specs])
+    return specs
 
 
 def _head(repo: str, run: Callable) -> list[str]:
@@ -54,7 +63,4 @@ def pull(repo: str, run: Callable, python: str, source: Path = SOURCE) -> list[s
     run(["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
     if not tracked:
         return []
-    changed = [spec for spec in _head(repo, run) if spec not in before]
-    if changed:
-        run(["uv", "pip", "install", "--python", python, *changed])
-    return changed
+    return install([spec for spec in _head(repo, run) if spec not in before], run, python)

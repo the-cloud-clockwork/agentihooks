@@ -104,6 +104,47 @@ def test_check_passes_when_every_declared_dependency_is_installed(env, tmp_path,
     assert capsys.readouterr().out == "deps: all satisfied\n"
 
 
+def test_ensure_installs_a_declared_dependency_missing_from_the_tool_environment(env, tmp_path, monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(tool_deps, "call", lambda argv: calls.append(argv) or "")
+    (tmp_path / "pyproject.toml").write_text(
+        '[project]\ndependencies = ["pytest>=7", "agentihooks-absent-dist-for-test>=1"]\n'
+    )
+    assert deps_preflight.ensure() == 0
+    assert calls == [["uv", "pip", "install", "--python", sys.executable, "agentihooks-absent-dist-for-test>=1"]]
+    assert capsys.readouterr().err == (
+        "[agentihooks] deps: installing agentihooks-absent-dist-for-test>=1 into the agentihooks tool environment\n"
+    )
+
+
+def test_ensure_reports_a_failed_declared_install_and_keeps_going(env, tmp_path, monkeypatch, capsys):
+    def fail(argv):
+        raise RuntimeError("uv pip install failed: no network")
+
+    monkeypatch.setattr(tool_deps, "call", fail)
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["agentihooks-absent-dist-for-test>=1"]\n')
+    env["write"]([_tool(env)])
+    assert deps_preflight.ensure() == 0
+    assert env["marker"].exists()
+    assert "[agentihooks] deps: uv pip install failed: no network\n" in capsys.readouterr().err
+
+
+def test_ensure_quiet_hides_a_failed_declared_install(env, tmp_path, monkeypatch, capsys):
+    def fail(argv):
+        raise RuntimeError("uv pip install failed: no network")
+
+    monkeypatch.setattr(tool_deps, "call", fail)
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["agentihooks-absent-dist-for-test>=1"]\n')
+    assert deps_preflight.ensure(quiet=True) == 0
+    assert capsys.readouterr().err == ""
+
+
+def test_ensure_with_every_declared_dependency_installed_runs_no_install(env, tmp_path, monkeypatch):
+    monkeypatch.setattr(tool_deps, "call", lambda argv: pytest.fail(f"ran {argv}"))
+    (tmp_path / "pyproject.toml").write_text('[project]\ndependencies = ["pytest>=7"]\n')
+    assert deps_preflight.ensure(quiet=True) == 0
+
+
 def test_sync_pulls_the_tool_source_and_reports_what_it_installed(env, monkeypatch, capsys):
     pulled = []
     monkeypatch.setattr(tool_deps, "call", lambda argv: "dev" if "rev-parse" in argv else "")

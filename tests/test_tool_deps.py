@@ -109,6 +109,16 @@ def test_call_returns_stdout_and_raises_with_stderr_on_failure():
         tool_deps.call([sys.executable, "-c", "import sys; sys.stderr.write('boom'); sys.exit(3)"])
 
 
+def test_call_reports_a_timeout_as_a_failure(monkeypatch):
+    monkeypatch.setattr(tool_deps, "TIMEOUT_SECONDS", 0.2)
+    with pytest.raises(RuntimeError, match=r"timed out after 0\.2 seconds"):
+        tool_deps.call([sys.executable, "-c", "import time; time.sleep(5)"])
+
+
+def test_install_of_nothing_runs_nothing():
+    assert tool_deps.install([], lambda argv: pytest.fail(f"ran {argv}"), "/tool/python") == []
+
+
 def _wheel(folder: Path) -> None:
     files = {
         "fakedep_t442/__init__.py": b"VALUE = 442\n",
