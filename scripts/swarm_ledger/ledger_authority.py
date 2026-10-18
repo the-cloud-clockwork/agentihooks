@@ -6,6 +6,7 @@ binding governs the transport a session selects; any process of the operator's u
 
 import hashlib
 import hmac
+import time
 from functools import lru_cache
 from os import environ
 
@@ -24,6 +25,27 @@ def agent_token(admin, slug, name):
 
 def _same(given, expected):
     return hmac.compare_digest(given.encode(), expected.encode())
+
+
+TICK_TTL = 900
+
+
+def tick_token(secret: str, slug: str, expires: int) -> str:
+    message = f"ledger-tick:{slug}:{expires}".encode()
+    return f"{expires}.{hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()}"
+
+
+def tick_principal(token: str, slug: str) -> str | None:
+    secret = environ.get("SWARM_SECRET")
+    if not secret:
+        return None
+    try:
+        expires = int(token.split(".", 1)[0])
+    except ValueError:
+        return None
+    if not 0 < expires - int(time.time()) <= TICK_TTL:
+        return None
+    return "" if _same(token, tick_token(secret, slug, expires)) else None
 
 
 def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
@@ -49,6 +71,9 @@ def caller(headers, admin: str, slug: str) -> str | None:
     token, agent = headers.get("X-Ledger-Token"), headers.get("X-Ledger-Agent")
     if environ.get("SWARM_AUTH_MODE") != "edge":
         return principal(admin, slug, token, agent)
+    tick = headers.get("X-Ledger-Tick")
+    if tick is not None:
+        return tick_principal(tick, slug)
     if access_operator(headers.get("Cf-Access-Jwt-Assertion")):
         return ""
     if not token or not agent:
