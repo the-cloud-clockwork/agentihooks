@@ -27,6 +27,23 @@ def snapshot(records=(), **extra):
     return {"complete": True, "runs": list(records), "api_calls": 7, "discovered_runs": len(records), **extra}
 
 
+def test_later_waiting_jobs_grow_one_finding_without_another_notice(store, monkeypatch):
+    jobs = [job(0, queued=True, created=-400, identity=11)]
+    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot([record(jobs)]))
+    cli.timer(store, DOCTOR, NOW, False)
+    jobs.append(job(0, queued=True, created=-301, identity=12))
+    jobs[1]["labels"].reverse()
+    cli.timer(store, DOCTOR, NOW + 60000, False)
+    details = store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
+    assert len(details) == 1
+    finding = json.loads(next(iter(details.values())))
+    assert "2 jobs" in finding["summary"]
+    assert "longest 460 seconds" in finding["evidence"][0]
+    assert "median 410.5 seconds" in finding["evidence"][0]
+    for slug in (DOCTOR, WATCHED):
+        assert len(InboxStore(store.redis).inbox(f"master@{slug}")) == 1
+
+
 def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_once(store, monkeypatch):
     calls = []
 
