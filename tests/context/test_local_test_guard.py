@@ -486,3 +486,68 @@ def test_pretool_guard_failure_logs_and_flushes_its_warning(monkeypatch):
     log.assert_any_call("branch_guard check failed", {"error": "offline"})
     assert stderr.getvalue() == "WARNING: branch_guard check failed (offline) — guard bypassed\n"
     assert stderr.flushes == 1
+
+
+SOURCE_INSPECTION = (
+    "/home/iamroot/dev/tcc-ecosystem/.venv/bin/python - <<'PY'\n"
+    "import inspect\n"
+    "import mutmut.__main__ as runner\n"
+    "print(inspect.getsource(runner.copy_also_copy_files))\n"
+    "PY"
+)
+
+ISSUE_BODY_WRITER = (
+    "python3 - <<'PY'\n"
+    "import json\n"
+    "from pathlib import Path\n"
+    "folder = Path('/home/iamroot/.agentihooks/swarm/rig-grade-swarm-doctor/tasks/t402')\n"
+    "body = '''Mutation preparation omits deployment fixtures. Seam: prepare_workspace and the copied mutmut fixture "
+    "inventory. Include deployment templates and subprocess script inputs.\n'''\n"
+    "(folder / 'issue-body.json').write_text(json.dumps({'body': body}))\n"
+    "PY"
+)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        SOURCE_INSPECTION,
+        "python3 -c 'import inspect; from scripts.ci_mutation import selection; print(inspect.getsource(selection))'",
+        "python3 -c 'import inspect, pytest; print(inspect.signature(pytest.main))'",
+        "python3 -c 'from inspect import getsourcefile; from mutmut.__main__ import cli; print(getsourcefile(cli))'",
+        ISSUE_BODY_WRITER,
+    ],
+)
+def test_source_inspection_and_prose_naming_a_runner_pass(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        SOURCE_INSPECTION.removesuffix("PY") + "runner.cli()\nPY",
+        SOURCE_INSPECTION.removesuffix("PY") + "import subprocess\nsubprocess.run(['mutmut', 'run'])\nPY",
+        SOURCE_INSPECTION.removesuffix("PY") + "print(inspect.getsource(runner.cli()))\nPY",
+        "python3 -c 'import inspect; import mutmut.__main__ as runner'",
+        "python3 -c 'import inspect, unittest.__main__ as m; print(inspect.getsource(m))'",
+        "python3 -c 'import inspect; from unittest import __main__ as m; print(inspect.getsource(m))'",
+        "python3 -c 'import inspect, pytest; print(inspect.getsource(pytest)); pytest.main()'",
+        "python3 -c 'import inspect, pytest as p; inspect.getsource(p); p = p.main()'",
+        "python3 -c \"import inspect, importlib; print(inspect.getsource(importlib.import_module('pytest')))\"",
+        "python3 -c \"f'{__import__(\\\"pytest\\\").main()}'\"",
+        ISSUE_BODY_WRITER.removesuffix("PY") + "import subprocess\nsubprocess.run(['mutmut', 'run'])\nPY",
+    ],
+)
+def test_runner_use_beside_an_inspection_is_blocked(command, monkeypatch):
+    from hooks.context.local_test_guard import check_local_tests
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN", raising=False)
+    with pytest.raises(BlockAction, match="draft pull request"):
+        check_local_tests(normalize_payload({"tool_name": "exec", "tool_input": {"cmd": command}}))
