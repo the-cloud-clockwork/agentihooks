@@ -507,11 +507,6 @@ class Mail:
             return [f"told {address}: {key}"]
         return []
 
-    def send_red(self, key, address, text, url):
-        if self.once(key, lambda: self.track_red(self.inbox.send(SENDER, address, text), url)):
-            return [f"told {address}: {key}"]
-        return []
-
     def red_index(self):
         return self.store.key(self.slug, "red-notices")
 
@@ -521,9 +516,13 @@ class Mail:
     def engineer(self, task):
         return self.seats.get(task.get("claimed_by")) or self.owner(f"tasks/{task['id']}")
 
-    def holds(self, address, task):
+    def held_elsewhere(self, address, task):
         occupant = self.store.seats.occupant(address).occupant
-        return occupant in self.seats and self.held.get(occupant) == task["id"]
+        live = occupant in self.seats and occupant != task.get("claimed_by")
+        return live and self.held.get(occupant) != task["id"]
+
+    def task_index(self):
+        return self.store.key(self.slug, "task-notices")
 
 
 def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
@@ -537,6 +536,7 @@ def event_pass(inbox, store, slug, doc, ledger, now_ms, github=view):
         + _followups(mail, doc, events, ledger, now_ms)
         + _pull_requests(mail, tasks.values(), now_ms, github, ledger)
         + _settle_red_notices(mail, github)
+        + _move_task_notices(mail, ledger, tasks)
         + _priorities(mail, doc, raised)
     )
 
@@ -756,13 +756,13 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
                     f"Your pull request {url} merged ten minutes ago and {title} is still in pull request. "
                     f"Finish it: agentihooks swarm {mail.slug} done --pr {url}"
                 )
-                sent += _tell_engineer(mail, ledger, task, f"{url}:merged:engineer", text, mail.send)
+                sent += _tell_engineer(mail, ledger, task, f"{url}:merged:engineer", text)
             if age >= MERGED_MASTER_MS:
                 text = f"{title} on ledger {mail.slug} is still in pull request twenty minutes after {url} merged."
                 sent += mail.send(f"{url}:merged:master", mail.owner(f"tasks/{task['id']}"), text)
         elif found.state == "CLOSED":
             text = f"Your pull request {url} for {title} was closed without merging. Reopen it, open a new one, or block the task."
-            sent += _tell_engineer(mail, ledger, task, f"{url}:closed", text, mail.send)
+            sent += _tell_engineer(mail, ledger, task, f"{url}:closed", text)
         elif (
             found.red
             and not found.gate_passed
@@ -772,15 +772,39 @@ def _pull_requests(mail, tasks, now_ms, github, ledger):
             text = (
                 f"Your pull request {url} for {title} has red checks and no push for twenty minutes. Fix them and push."
             )
-            red = functools.partial(mail.send_red, url=url)
-            sent += _tell_engineer(mail, ledger, task, f"{url}:red:{found.head}", text, red)
+            sent += _tell_engineer(mail, ledger, task, f"{url}:red:{found.head}", text, url)
     return sent
 
 
-def _tell_engineer(mail, ledger, task, key, text, send):
+def _tell_engineer(mail, ledger, task, key, text, url=""):
     seat = mail.seats.get(task.get("claimed_by"))
-    if not seat or mail.holds(seat, task):
-        return send(key, mail.engineer(task), text)
-    if mail.once(key, lambda: ledger.comment(mail.slug, task["id"], text, by=SENDER)):
-        return [f"noted on tasks/{task['id']}: {key}"]
-    return []
+    if seat and mail.held_elsewhere(seat, task):
+        if mail.once(key, lambda: ledger.comment(mail.slug, task["id"], text, by=SENDER)):
+            return [f"noted on tasks/{task['id']}: {key}"]
+        return []
+    address = mail.engineer(task)
+
+    def tell():
+        item = mail.inbox.send(SENDER, address, text)
+        if address == seat:
+            mail.store.redis.hset(mail.task_index(), item.id, task["id"])
+        if url:
+            mail.track_red(item, url)
+
+    return [f"told {address}: {key}"] if mail.once(key, tell) else []
+
+
+def _move_task_notices(mail, ledger, tasks):
+    index, moved = mail.task_index(), []
+    for item_id, task_id in mail.store.redis.hgetall(index).items():
+        if not _open(mail.inbox, item_id):
+            mail.store.redis.hdel(index, item_id)
+            continue
+        item, task = mail.inbox.get(item_id), tasks.get(task_id)
+        if task is None or not mail.held_elsewhere(item.address, task):
+            continue
+        ledger.comment(mail.slug, task_id, item.text, by=SENDER)
+        mail.inbox.close(item_id, SENDER, "done", f"moved onto task {task_id}; {item.address} now holds another task")
+        mail.store.redis.hdel(index, item_id)
+        moved.append(f"moved {item_id} onto tasks/{task_id}")
+    return moved

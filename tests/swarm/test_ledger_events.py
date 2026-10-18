@@ -460,14 +460,21 @@ def _notices():
     ]
 
 
+def task_notices(store):
+    return store.redis.hgetall(store.key("sw", "task-notices"))
+
+
+def reassign_seat(store, task="t2"):
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT, state="finished"))
+    store.put_agent("sw", AgentRecord("sw-eng-2", "eng", task, seat=ENG_SEAT))
+    store.seats.occupy(ENG_SEAT, "sw-eng-2", 2_000)
+
+
 @pytest.mark.parametrize(("pull", "now", "key", "words"), _notices())
-@pytest.mark.parametrize("occupant", ["sw-eng-2", "sw-eng-gone"])
-def test_a_task_notice_for_a_seat_no_live_holder_of_the_task_occupies_goes_onto_the_task(
-    store, pull, now, key, words, occupant
-):
+def test_a_task_notice_for_a_seat_now_holding_another_task_goes_onto_the_task(store, pull, now, key, words):
     ledger = FakeLedger()
     store.put_agent("sw", AgentRecord("sw-eng-2", "eng", "t2", seat=ENG_SEAT))
-    store.seats.occupy(ENG_SEAT, occupant, 1_000)
+    store.seats.occupy(ENG_SEAT, "sw-eng-2", 1_000)
     run(store, recorded(), ledger=ledger)
     told = run(store, in_pr(), now_ms=now, ledger=ledger, github=lambda url: pull)
     again = run(store, in_pr(), now_ms=now + MINUTE, ledger=ledger, github=lambda url: pull)
@@ -483,17 +490,68 @@ def test_a_task_notice_for_a_seat_its_claimant_still_occupies_goes_to_the_seat(s
     ledger = FakeLedger()
     run(store, recorded(), ledger=ledger)
     told = run(store, in_pr(), now_ms=now, ledger=ledger, github=lambda url: pull)
-    (text,) = texts(store, ENG_SEAT)
-    assert words in text and ledger.comments == [] and told == [f"told {ENG_SEAT}: {key}"]
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    assert words in item.text and ledger.comments == [] and told == [f"told {ENG_SEAT}: {key}"]
+    assert task_notices(store) == {item.id: "t1"}
 
 
-def test_a_task_notice_for_a_claimant_no_longer_running_goes_to_the_master(store):
+def test_a_task_notice_for_a_claimant_no_longer_running_goes_to_the_master_unindexed(store):
     closed, ledger = answer("closed_unmerged"), FakeLedger()
-    store.drop_agent("sw", "sw-eng-1")
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", seat=ENG_SEAT, state="finished"))
     run(store, recorded(), ledger=ledger)
     run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
     (text,) = texts(store, MASTER_SEAT)
-    assert "was closed without merging" in text and ledger.comments == []
+    assert "was closed without merging" in text and ledger.comments == [] and task_notices(store) == {}
+
+
+def test_a_seat_notice_moves_onto_its_task_once_the_seat_goes_to_an_agent_on_another_task(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store)
+    told = run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert f"moved {item.id} onto tasks/t1" in told
+    assert ledger.comments == [("sw", "t1", item.text, "swarm")]
+    moved = InboxStore(store.redis).get(item.id)
+    assert moved.state == "done" and task_notices(store) == {}
+    assert (
+        "moved onto task t1; eng-1@sw now holds another task" in InboxStore(store.redis).history(item.id)[-1]["reason"]
+    )
+
+
+def test_a_seat_notice_stays_for_a_successor_on_the_same_task(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store, task="t1")
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert InboxStore(store.redis).get(item.id).state == "pending" and ledger.comments == []
+    assert task_notices(store) == {item.id: "t1"}
+
+
+def test_a_seat_notice_closed_by_its_reader_leaves_the_task_index(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    InboxStore(store.redis).close(item.id, "sw-eng-1", "done", "fixed it")
+    reassign_seat(store)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    assert task_notices(store) == {} and ledger.comments == []
+
+
+def test_a_seat_notice_for_a_task_gone_from_the_ledger_stays_where_it_is(store):
+    closed, ledger = answer("closed_unmerged"), FakeLedger()
+    run(store, recorded(), ledger=ledger)
+    run(store, in_pr(), ledger=ledger, github=lambda url: closed)
+    (item,) = InboxStore(store.redis).inbox(ENG_SEAT)
+    reassign_seat(store)
+    run(store, recorded(tasks=[DONE_T2]), ledger=ledger)
+    assert InboxStore(store.redis).get(item.id).state == "pending" and ledger.comments == []
 
 
 @pytest.mark.parametrize(("gate", "notices"), [("SUCCESS", 0), ("FAILURE", 1)])
