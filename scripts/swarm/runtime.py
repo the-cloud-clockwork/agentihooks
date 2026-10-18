@@ -628,7 +628,9 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = front and master_claude_login.enabled(config, lane, agent)
+        login = task.get("route_kind", "interactive") == "interactive" and master_claude_login.enabled(
+            config.slug, task.get("seat", ""), lane, agent
+        )
         route_kind = "interactive" if login else route_kind
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
@@ -709,7 +711,7 @@ class HerdrRuntime:
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
         front = front_door.holds(config.slug, agent.seat)
-        login = front and master_claude_login.enabled(config, agent.lane, agent.harness)
+        login = master_claude_login.enabled(config.slug, agent.seat, agent.lane, agent.harness)
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if agent.route_kind == "interactive"

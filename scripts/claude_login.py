@@ -41,6 +41,7 @@ SUMMARY = "{name} written to {rc} ({length} chars). run: source {rc}"
 STEP_MASTER = "Sign in to the master claude ai account in the browser; the login stays in {home}"
 MASTER_FAILED = "claude auth login exited {code}; the master login is unchanged"
 STEP_RECOVERY = "Storing the master login recovery copy in OpenBao"
+MASTER_SLUG = "--master takes no slug: the master login is one home for every swarm"
 _write = os.write
 
 
@@ -151,7 +152,7 @@ def _fail(message: str) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog=PROG)
     parser.add_argument("slug", nargs="?")
-    parser.add_argument("--master")
+    parser.add_argument("--master", action="store_true")
     store = parser.add_mutually_exclusive_group()
     store.add_argument("--openbao", action="store_true", default=None)
     store.add_argument("--no-openbao", dest="openbao", action="store_false")
@@ -199,15 +200,15 @@ def _rendered(profile: str) -> Path:
     return render.profile_dir(profile) / "claude"
 
 
-def master(swarm: str, openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
+def master(openbao: bool | None, environ: Mapping[str, str], deps: Deps) -> int:
     from scripts import master_claude_login as login
 
     try:
-        epoch = login.claim(swarm, PROG, os.getpid())
+        epoch = login.claim(PROG, os.getpid(), alone=True)
     except login.LoginRefused as exc:
         _fail(str(exc))
         return 1
-    target = login.build(swarm, (deps.render or _rendered)(login.LANE))
+    target = login.build((deps.render or _rendered)(login.LANE))
     print(term_colors.blue(STEP_MASTER.format(home=target)))
     argv = [shutil.which("claude") or "claude", *login.SETTINGS, *login.LOGIN]
     try:
@@ -226,7 +227,7 @@ def master(swarm: str, openbao: bool | None, environ: Mapping[str, str], deps: D
     if bao is not None:
         print(term_colors.blue(STEP_RECOVERY))
         try:
-            login.publish(bao, swarm, target, epoch)
+            login.publish(bao, target, epoch)
         except openbao_kv.OpenBaoError as exc:
             _fail(str(exc))
             return 1
@@ -244,8 +245,10 @@ def main(
     console = console or Console()
     parser = _parser()
     options = parser.parse_args(args)
+    if options.master and options.slug:
+        parser.error(MASTER_SLUG)
     if options.master:
-        return master(options.master, options.openbao, environ, Deps(console=console, opener=opener))
+        return master(options.openbao, environ, Deps(console=console, opener=opener))
     raw = _raw_slug(options.slug, console, parser)
     if raw is None:
         return 2

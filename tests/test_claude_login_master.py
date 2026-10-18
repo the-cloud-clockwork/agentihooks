@@ -41,28 +41,28 @@ def test_master_mode_runs_the_native_login_in_the_private_home_only(ah, capsys):
         "AH_CC_TOKEN_w": "x",
         "CLAUDE_CONFIG_DIR": "/home/op/.claude",
     }
-    assert claude_login.master("rig", False, environ, _deps(ah, runs)) == 0
+    assert claude_login.master(False, environ, _deps(ah, runs)) == 0
     argv, env = runs[0]
     assert argv == ["/opt/claude", "--settings", '{"forceLoginMethod":"claudeai"}', "auth", "login"]
-    home = str(login.home("rig"))
+    home = str(login.home())
     assert env == {"HOME": "/home/op", "CLAUDE_CONFIG_DIR": home, "CLAUDE_SECURESTORAGE_CONFIG_DIR": home}
-    assert (login.home("rig") / "settings.json").read_text() == "{}"
+    assert (login.home() / "settings.json").read_text() == "{}"
     out = capsys.readouterr().out
     assert f"Sign in to the master claude ai account in the browser; the login stays in {home}" in out
-    owner = json.loads((login.root("rig") / login.OWNER).read_text())
-    assert (owner["owner"], owner["pid"]) == (claude_login.PROG, os.getpid())
+    owner = json.loads((login.root() / login.OWNER).read_text())
+    assert owner["holders"] == {claude_login.PROG: os.getpid()}
 
 
 def test_master_mode_reports_a_failed_login_and_stores_nothing(ah, monkeypatch, capsys):
     monkeypatch.setattr(openbao_step, "target", lambda *_: pytest.fail("no store after a failed login"))
-    assert claude_login.master("rig", True, {}, _deps(ah, [], code=4)) == 4
+    assert claude_login.master(True, {}, _deps(ah, [], code=4)) == 4
     assert "claude auth login exited 4; the master login is unchanged" in capsys.readouterr().err
 
 
-def test_master_mode_refuses_while_another_master_holds_the_login(ah, monkeypatch, capsys):
-    login.claim("rig", "master@a-1", os.getppid())
+def test_master_mode_refuses_while_any_master_holds_the_login(ah, monkeypatch, capsys):
+    login.claim("master@a-1", os.getppid())
     runs = []
-    assert claude_login.master("rig", False, {}, _deps(ah, runs)) == 1
+    assert claude_login.master(False, {}, _deps(ah, runs)) == 1
     assert runs == []
     assert "held by master@a-1, still running" in capsys.readouterr().err
 
@@ -72,14 +72,14 @@ def test_master_mode_reports_a_missing_claude_binary(ah, capsys):
         raise FileNotFoundError(2, "No such file or directory")
 
     deps = claude_login.Deps(console=_console(), run=run, render=lambda profile: ah)
-    assert claude_login.master("rig", False, {}, deps) == 1
+    assert claude_login.master(False, {}, deps) == 1
     assert "cannot run /opt/claude: No such file or directory" in capsys.readouterr().err
 
 
 def test_master_mode_falls_back_to_claude_on_the_path(ah, monkeypatch):
     runs = []
     monkeypatch.setattr(claude_login.shutil, "which", lambda name: None)
-    assert claude_login.master("rig", False, {}, _deps(ah, runs)) == 0
+    assert claude_login.master(False, {}, _deps(ah, runs)) == 0
     assert runs[0][0][0] == "claude"
 
 
@@ -93,9 +93,9 @@ def test_master_mode_stores_the_recovery_copy_when_asked(ah, monkeypatch, capsys
             "bao" if (choice, environ, console, opener) == (True, {"A": "1"}, deps.console, "opener") else None
         ),
     )
-    monkeypatch.setattr(login, "publish", lambda bao, slug, target, epoch: stored.append((bao, slug, target, epoch)))
-    assert claude_login.master("rig", True, {"A": "1"}, deps) == 0
-    assert stored == [("bao", "rig", login.home("rig"), 1)]
+    monkeypatch.setattr(login, "publish", lambda bao, target, epoch: stored.append((bao, target, epoch)))
+    assert claude_login.master(True, {"A": "1"}, deps) == 0
+    assert stored == [("bao", login.home(), 1)]
     assert "Storing the master login recovery copy in OpenBao" in capsys.readouterr().out
 
 
@@ -104,7 +104,7 @@ def test_master_mode_reports_a_refused_or_failed_store(ah, monkeypatch, capsys):
         raise openbao_step.StoreRefused("needs both")
 
     monkeypatch.setattr(openbao_step, "target", refused)
-    assert claude_login.master("rig", True, {}, _deps(ah, [])) == 1
+    assert claude_login.master(True, {}, _deps(ah, [])) == 1
     assert "needs both" in capsys.readouterr().err
 
     def failed(*_):
@@ -112,17 +112,21 @@ def test_master_mode_reports_a_refused_or_failed_store(ah, monkeypatch, capsys):
 
     monkeypatch.setattr(openbao_step, "target", lambda *_: "bao")
     monkeypatch.setattr(login, "publish", failed)
-    assert claude_login.master("rig", True, {}, _deps(ah, [])) == 1
+    assert claude_login.master(True, {}, _deps(ah, [])) == 1
     assert "OpenBao HTTP 503: sealed" in capsys.readouterr().err
 
 
-def test_the_master_flag_routes_main_to_master_mode(monkeypatch):
+def test_the_master_flag_routes_main_to_master_mode(monkeypatch, capsys):
     seen = []
     monkeypatch.setattr(claude_login, "master", lambda *args: seen.append(args) or 0)
     console = _console()
-    assert claude_login.main(["--master", "rig", "--openbao"], {"A": "1"}, console=console, opener="op") == 0
-    swarm, openbao, environ, deps = seen[0]
-    assert (swarm, openbao, environ, deps.console, deps.opener) == ("rig", True, {"A": "1"}, console, "op")
+    assert claude_login.main(["--master", "--openbao"], {"A": "1"}, console=console, opener="op") == 0
+    openbao, environ, deps = seen[0]
+    assert (openbao, environ, deps.console, deps.opener) == (True, {"A": "1"}, console, "op")
+    with pytest.raises(SystemExit):
+        claude_login.main(["--master", "rig"], {}, console=console)
+    assert len(seen) == 1
+    assert claude_login.MASTER_SLUG in capsys.readouterr().err
 
 
 def test_without_the_master_flag_the_setup_token_login_is_unchanged(monkeypatch):
