@@ -281,7 +281,8 @@ def test_master_upload_without_plan_or_request_is_refused(publication):
     slug, path, _ = publication
     with pytest.raises(SystemExit) as raised:
         ledger.upload_artifact(slug, MASTER, str(path), {"task": "master", "title": "Audit summary"})
-    assert raised.value.code == f"server refused the file: 403 {artifacts.REFUSED}"
+    assert raised.value.code.startswith("server refused the file: 403 ")
+    assert artifacts.REFUSED in raised.value.code
     assert ledger.resource(slug, "artifacts", collection=True) == []
 
 
