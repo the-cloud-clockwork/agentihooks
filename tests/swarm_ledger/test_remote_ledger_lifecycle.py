@@ -4,9 +4,11 @@ from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm.ledger_client import LedgerClient
+from scripts.swarm import lease
+from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.repository import bin_storage
-from tests.swarm_ledger.test_ledger_authority import SLUG, core
+from tests.swarm_ledger.test_ledger_authority import SLUG, core, server
 from tests.swarm_ledger.test_ledger_authority import cli_ledger as ledger
 from tests.swarm_ledger.test_ledger_authority import live as authority_live
 
@@ -68,3 +70,28 @@ def test_remote_local_storage_calls_name_the_server_route(mode, operation):
         pytest.raises(SystemExit, match=f"/api/v1/ledgers/{SLUG}/lifecycle/actions"),
     ):
         getattr(ledger_bin, operation)(*args)
+
+
+def test_remote_lifecycle_refusals_use_swarm_errors(live):
+    with (
+        patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
+        patch.object(ledger, "credentials", return_value={"X-Ledger-Token": "wrong-token"}),
+        pytest.raises(LedgerRefused, match="403"),
+    ):
+        LedgerClient().bin_closed(SLUG, 1)
+
+
+def test_displaced_controller_cannot_bin_a_ledger(live):
+    bin_storage.restore(SLUG)
+    token = lease.EPOCH.set(7)
+    try:
+        with (
+            patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}),
+            patch.object(ledger, "credentials", return_value={"X-Ledger-Token": live["admin"]}),
+            patch.object(server.authority, "fence", side_effect=SwarmError("stale controller")),
+            pytest.raises(LedgerRefused, match="stale controller"),
+        ):
+            LedgerClient().bin_closed(SLUG, core.now_ms() + 1)
+    finally:
+        lease.EPOCH.reset(token)
+    assert SLUG not in bin_storage.entries()
