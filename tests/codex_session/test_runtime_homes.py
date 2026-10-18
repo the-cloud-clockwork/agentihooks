@@ -123,17 +123,17 @@ def test_concurrent_cleanup_does_not_fail_launch_or_finish(store, server, root, 
 
 @pytest.mark.parametrize("action", ["launch", "finish"])
 @pytest.mark.parametrize(
-    ("legacy_text", "canonical_text", "expected"),
+    "snapshot",
     [
         ("base\nnew legacy turn\n", "base\n", "base\nnew legacy turn\n"),
         ("base\n", "base\nnew canonical turn\n", "base\nnew canonical turn\n"),
         ("branch a\n", "branch b\n", "branch b\n"),
     ],
 )
-def test_cleanup_preserves_unique_legacy_rollouts(
-    store, server, root, tmp_path, action, legacy_text, canonical_text, expected
-):
+def test_cleanup_preserves_unique_legacy_rollouts(store, server, root, tmp_path, action, snapshot):
     from tests.codex_session.test_supervisor import other_seat
+
+    legacy_text, canonical_text, expected = snapshot
 
     canonical = tmp_path / "canonical"
     canonical.mkdir()
@@ -159,4 +159,7 @@ def test_cleanup_preserves_unique_legacy_rollouts(
         assert (canonical / name / "unique.jsonl").read_text() == "unique legacy transcript"
         assert (canonical / name / "shared.jsonl").read_text() == expected
         if legacy_text == "branch a\n":
-            assert sorted(p.read_text() for p in (canonical / name).rglob("shared.jsonl")) == ["branch a\n", "branch b\n"]
+            assert sorted(p.read_text() for p in (canonical / name).rglob("shared.jsonl")) == [
+                "branch a\n",
+                "branch b\n",
+            ]
