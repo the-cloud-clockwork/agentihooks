@@ -63,6 +63,7 @@ Usage: ledger.py --slug SLUG --as NAME <command> [args]
   task set ID FIELD=VALUE...          set state, claimed_by, issue_url, pr_url, depends_on, territory, kind, rank,
                                       difficulty (S, M or L), artifact (yes or no) or plan_slice of a task;
                                       after_release=vX.Y.Z holds its claim until a newer release tag exists;
+                                      applied_at=YYYY-MM-DDTHH:MM:SSZ records when the Doctor applied a merged fix;
                                       phase moves it to another phase, from the master or a planner;
                                       a move naming no slice drops it, into a phase with a plan as a follow up;
                                       plan_slice computes its plan lines from the published plan;
@@ -147,7 +148,7 @@ def credentials(slug, service=False):
             raise unauthenticated(
                 "a remote ledger client needs a pinned agent identity; the operator credential stays on its host"
             )
-        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or launch_token(slug, who.name)
+        token = os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN") or derived_token(slug, who.name)
         return {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}
     return local_credentials(slug, who.name if who.pinned else "", service)
 
@@ -163,6 +164,11 @@ def replay(slug, ops, agent, service):
     from scripts.swarm_ledger.api.client import ResourceClient
 
     return ResourceClient(base(), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+
+
+def derived_token(slug, name):
+    secret = os.environ.get("SWARM_SECRET")
+    return authority.agent_token(secret, slug, name) if secret else launch_token(slug, name)
 
 
 def launch_token(slug, name):

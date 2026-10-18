@@ -18,6 +18,7 @@ ORDER = [
     "claims",
     "trace-plan",
     "stall",
+    "lane-split",
     "talk",
 ]
 

@@ -52,6 +52,40 @@ def test_a_line_the_base_ran_and_the_head_no_longer_runs_is_lost():
     assert result.lost == {"hooks/a.py": [3]}
 
 
+@pytest.mark.parametrize("head_lines", [199, 200, 500])
+@pytest.mark.parametrize("inserted", [False, True])
+@pytest.mark.parametrize("split", [False, True])
+@pytest.mark.parametrize("missing", [False, True])
+def test_repeated_retained_statements_still_lose_coverage(head_lines, inserted, split, missing):
+    old = "def retained():\n" + "    value = 1\n" * (head_lines - 1 - inserted)
+    new = old.replace("def retained():\n", "def retained():\n    inserted = 0\n") if inserted else old
+    other = "def other():\n    return 2\n"
+    path = "hooks/old.py"
+    target = "hooks/retained.py" if split else path
+    sources = {target: new, "hooks/other.py": other} if split else {target: new}
+    base = _measure("b1", {path: set(range(1, head_lines + 1 - inserted))}, {path: old + other if split else old})
+    covered = set(range(1, head_lines + 1)) - ({100 + inserted} if missing else set())
+    moved = {path: (target, "hooks/other.py")} if split else None
+    result = ratchet.grade({target: covered}, sources.get, iter([base]), moved)
+    assert result.lost == ({path: [100]} if missing else {})
+
+
+@pytest.mark.wall_clock
+def test_long_repeated_line_mapping_fits_the_ratchet_budget(capsys):
+    import sys
+    from time import perf_counter
+
+    old = "    value = 1\n" * 3000
+    new = "    inserted = 0\n" + old
+    started = perf_counter()
+    mapped = ratchet.line_map(old, new)
+    elapsed = perf_counter() - started
+    with capsys.disabled():
+        print(f"Repeated line mapping: lines=3000 seconds={elapsed:.6f} job_budget_seconds=600", file=sys.stderr)
+    assert mapped == {line: line + 1 for line in range(1, 3001)}
+    assert elapsed < 10
+
+
 def test_a_base_line_that_is_no_statement_of_the_base_source_is_never_lost():
     source = 'SCRIPT = """\nconst a = 1;\n"""\n\n\ndef f(x):\n    return x\n'
     base = _measure("b1", {"hooks/a.py": {1, 2, 6, 7}}, {"hooks/a.py": source})

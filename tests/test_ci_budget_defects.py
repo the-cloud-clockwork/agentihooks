@@ -195,7 +195,7 @@ def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_
         8,
         [
             _job("mutation (1)", "01:00", "09:00", 8),
-            _job("docs", "00:00", "16:40", 8),
+            _job("unbudgeted", "00:00", "16:40", 8),
             _job("lint", "00:00", "05:00", 8),
             _job("Gate — Required", "17:00", "17:00", 8),
         ],

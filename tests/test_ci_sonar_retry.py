@@ -174,6 +174,96 @@ def test_a_failure_that_is_not_the_server_fails_at_once_without_the_label(tmp_pa
     assert LABEL not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("code", [500, 502, 503, 599])
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_a_scanner_upload_server_error_recovers_on_one_retry(tmp_path, code, stream):
+    error = f"java.lang.IllegalStateException: Failed to upload report: Error {code} on http://127.0.0.1:9000/api/ce/submit?projectKey=agentihooks : Bad gateway\n"
+    failure = (error, "", 1) if stream == "stdout" else ("", error, 1)
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [failure, ("ANALYSIS SUCCESSFUL\n", "", 0)], "--unless", ".scannerwork/report-task.txt"
+    )
+    assert result.returncode == 0
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+    assert sleeps == [2]
+    assert result.stdout == "ANALYSIS SUCCESSFUL\n"
+    assert "::warning title=Sonar server retry::" in result.stderr
+    assert LABEL not in result.stderr
+    assert summary == ""
+
+
+@pytest.mark.parametrize(
+    "second_error",
+    [
+        "Failed to upload report: Error 502 on http://localhost/api/ce/submit",
+        "Connection reset",
+        "ERROR Quality profile not found",
+        "",
+    ],
+)
+def test_an_upload_retry_never_leads_to_a_third_scan_when_the_failure_changes(tmp_path, second_error):
+    error = "Failed to upload report: Error 502 on http://localhost/api/ce/submit\nConnection reset\n"
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [(error, "", 1), ("", second_error, 8), ("", "", 0)], "--unless", ".scannerwork/report-task.txt"
+    )
+    assert result.returncode == 8
+    assert len(calls) == 2
+    assert sleeps == [2]
+    assert LABEL in result.stderr
+    assert "Sonar server outage (infrastructure)" in summary
+
+
+@pytest.mark.parametrize("seconds, count", [("180", 2), ("1", 1)])
+def test_a_scanner_upload_outage_stays_red_after_one_retry_or_its_budget(tmp_path, seconds, count):
+    error = "Failed to upload report: Error 502 on http://127.0.0.1:9000/api/ce/submit?projectKey=agentihooks : Bad gateway\n"
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [("", error, 7)] * 3, "--unless", ".scannerwork/report-task.txt", seconds=seconds
+    )
+    assert result.returncode == 7
+    assert len(calls) == count
+    assert sleeps == ([2] if count == 2 else [])
+    assert LABEL in result.stderr
+    assert "Sonar server outage (infrastructure)" in result.stderr
+    assert "Sonar server outage (infrastructure)" in summary
+    assert "Error 502" in result.stderr
+    assert "Quality Gate" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        "Failed to upload report: Error 400 on http://localhost/api/ce/submit",
+        "Failed to upload report: Error 404 on http://localhost/api/ce/submit",
+        "Failed to upload report: Error 403 on http://localhost/api/ce/submit",
+        "Failed to upload report: Error 502 on http://localhost/api/other",
+        "Error 502 on http://localhost/api/ce/submit",
+    ],
+)
+def test_other_scanner_errors_are_not_classified_as_an_upload_outage(tmp_path, error):
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [(error, "", 3), ("ANALYSIS SUCCESSFUL", "", 0)], "--unless", ".scannerwork/report-task.txt"
+    )
+    assert result.returncode == 3
+    assert len(calls) == 1
+    assert sleeps == []
+    assert LABEL not in result.stderr
+    assert summary == ""
+
+
+def test_an_accepted_report_prevents_a_retry_even_with_an_upload_server_error(tmp_path):
+    (tmp_path / ".scannerwork").mkdir()
+    (tmp_path / ".scannerwork/report-task.txt").write_text("ceTaskId=T1\n")
+    error = "Failed to upload report: Error 502 on http://localhost/api/ce/submit"
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [(error, "", 4), ("", "", 0)], "--unless", ".scannerwork/report-task.txt"
+    )
+    assert result.returncode == 4
+    assert len(calls) == 1
+    assert sleeps == []
+    assert LABEL not in result.stderr
+    assert summary == ""
+
+
 def test_a_scanner_that_already_submitted_its_report_is_never_run_again(tmp_path):
     (tmp_path / ".scannerwork").mkdir()
     (tmp_path / ".scannerwork/report-task.txt").write_text("ceTaskId=T1\n")

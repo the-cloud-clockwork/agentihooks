@@ -289,6 +289,19 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
     assert len(master_mail(store)) == 0
 
 
+def test_a_tick_on_a_hosted_ledger_never_restarts_a_local_server(store, tmp_path, monkeypatch):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    monkeypatch.setenv("SWARM_URL", "https://swarm.example")
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == []
+    assert host.calls == []
+    monkeypatch.delenv("SWARM_URL")
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == [
+        "restarted the ledger server on new code; three writes took 0.0 seconds, 0.0 seconds and 0.0 seconds"
+    ]
+
+
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):
     host = Host(tmp_path, code=1, stderr="ledger server did not answer on http://127.0.0.1:8765\n")
     assert (

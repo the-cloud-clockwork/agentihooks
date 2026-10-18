@@ -195,7 +195,7 @@ completion. Done when `status` returns the saved `time_left_minutes`.
 Writing for the operator (the server enforces it):
 
 - A comment is the item's status in plain words: what was done, or why it was skipped. One per
-  agent per item: a second `comment` amends the first. A new entry is made only when the operator
+  agent per item: a second `comment` amends the first. A new entry is made at the end when anyone
   commented after yours. Evidence (runs, SHAs, files, proofs) stays in PR bodies and notes.
 - Refused in comments, chat, follow-ups and questions: clock times, dates, commit hashes, run or job
   ids, file names and paths, code identifiers, labels in capitals, dashes, arrows, AI phrasing, more

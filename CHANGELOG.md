@@ -29,6 +29,10 @@ release assembles them into its release notes. See `changelog.d/README.md`.
 - New swarm enforcements default to log only. The stall watchdog logs would-be
   stops and reopens while retaining alerts; set `stall-gate=deny` after
   checking those actions against reality to enforce them.
+- The lane split and the `seat_wait` bottleneck remedy never move a seat into
+  a lane with no ready task, keep lane caps the operator or the master set
+  (every swarm stored before this change counts as set), and default to log
+  only; set `lane-split-gate=deny` to let them move seats.
 - Merge queue unit shards restore the Codex CLI from a cache seeded on `main`
   instead of downloading it on every queue run.
 - Terminal and worker image tool downloads retry server errors and timeouts

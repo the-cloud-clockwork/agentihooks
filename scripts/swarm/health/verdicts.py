@@ -21,6 +21,11 @@ class VerdictStore:
             if finding.basis:
                 record["basis"] = finding.basis
             verdict = record["verdict"]
+            if finding.evidence_identity is not None:
+                record["evidence_identity"] = list(finding.evidence_identity)
+                if verdict and "evidence_identity" not in verdict:
+                    verdict = {**verdict, "evidence_identity": record["evidence_identity"]}
+                    record["verdict"] = verdict
             if verdict and verdict.get("basis", "") != finding.basis:
                 rebase = {"measure": verdict["measure"], "basis": verdict.get("basis", ""), "at": now_ms}
                 verdict = {**verdict, "measure": finding.measure, "basis": finding.basis}
@@ -29,7 +34,8 @@ class VerdictStore:
             show = verdict is None or record["returned"]
             grew = verdict and finding.measure > verdict["measure"]
             if grew and new_evidence:
-                grew = record["evidence"] != verdict.get("evidence", before["evidence"])
+                key = "evidence_identity" if finding.evidence_identity is not None else "evidence"
+                grew = record[key] != verdict.get(key, before.get(key))
             if grew and not show and now_ms >= verdict["at"] + cooldown_ms:
                 record["returned"] = show = True
             if record != before:
@@ -54,6 +60,8 @@ class VerdictStore:
             "measure": record["measure"],
             "evidence": record["evidence"],
         }
+        if "evidence_identity" in record:
+            verdict["evidence_identity"] = record["evidence_identity"]
         if record.get("basis"):
             verdict["basis"] = record["basis"]
         record.update(verdict=verdict, returned=False)

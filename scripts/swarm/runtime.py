@@ -34,7 +34,15 @@ from scripts.swarm import (
     remote_control,
     timing,
 )
-from scripts.swarm.pane import PaneObservation, provider_error, provider_error_id, selection_prompt, typed_input
+from scripts.swarm.pane import (
+    PaneObservation,
+    content_refusal,
+    provider_error,
+    provider_error_id,
+    refusal_input,
+    selection_prompt,
+    typed_input,
+)
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2 import front_door
@@ -48,6 +56,7 @@ PICKED_LANES = ("eng", "ci")
 PLAN_MODE = ["--permission-mode", "plan"]
 REMOTE_PANE = "a remote agent's pane lives on its worker herdr server, never on the local one"
 MANAGED_RESUME = "unsupported resume: a managed Codex execution continues through its supervised server"
+TICK_ONLY = ("SWARM_SECRET", "AGENTIHOOKS_LEDGER_AGENT_TOKEN")
 
 
 def codex_plan_mode(environ):
@@ -70,6 +79,15 @@ def _bin():
 
 def parse_fields(text):
     return dict(line.split("=", 1) for line in text.splitlines() if "=" in line and not line.startswith(" "))
+
+
+def _ledger_token(slug, name):
+    secret = os.environ.get("SWARM_SECRET")
+    if not secret:
+        return {}
+    from scripts.swarm_ledger.ledger_authority import agent_token
+
+    return {"AGENTIHOOKS_LEDGER_AGENT_TOKEN": agent_token(secret, slug, name)}
 
 
 def _set(value):
@@ -716,6 +734,7 @@ class HerdrRuntime:
             )
         return replace(
             placed,
+            conversation_id=agent.conversation_id,
             model_source=picked.source,
             profile_decision={**agent.profile_decision, **placed.profile_decision},
             overlays=agent.overlays,
@@ -793,8 +812,9 @@ class HerdrRuntime:
                 text=True,
                 timeout=SPAWN_TIMEOUT_S,
                 env={
-                    **{key: value for key, value in os.environ.items() if key != PREDECESSOR},
+                    **{key: value for key, value in os.environ.items() if key not in (PREDECESSOR, *TICK_ONLY)},
                     **({PREDECESSOR: predecessor} if predecessor else {}),
+                    **_ledger_token(config.slug, name),
                     "AGENTIHOOKS_SWARM": config.slug,
                     "AGENTIHOOKS_SWARM_LANE": lane,
                     "AGENTIHOOKS_SWARM_TASK": task_id,
@@ -841,6 +861,7 @@ class HerdrRuntime:
             profile_decision={"validation": validated},
             launched_at=launched_at,
             launch_timings=timings,
+            conversation_id=(self.conversations() or {}).get(fields.get("pane_id"), ""),
         )
 
     def recover(self, name: str) -> Placed:
@@ -1114,6 +1135,9 @@ class HerdrRuntime:
         error = provider_error(agent.harness, text)
         error_id = provider_error_id(agent.harness, text)
         title = selection_prompt(text)
+        refusal = content_refusal(agent.harness, text)
+        if state in {"idle", "blocked"} and refusal and not refusal_input(text):
+            return PaneObservation("idle", provider_checked=True, content_refusal=refusal)
         if title or state == "blocked":
             return PaneObservation(
                 "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id

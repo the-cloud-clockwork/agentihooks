@@ -45,6 +45,20 @@ def test_a_new_hive_gets_every_field_and_joins_the_index(redis):
     assert stored["max_agents"] == "3"
 
 
+def test_a_member_updates_its_settings_without_writing_the_controller_index(redis, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "box")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://localhost:6379/15")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://localhost:6379/15")
+    assert registry.update(redis, "box", ["ui=no", "ephemeral=yes", "roles=eng,ci,plan"]) == {
+        **DEFAULT,
+        "ui": "no",
+        "ephemeral": "yes",
+        "roles": ["eng", "ci", "plan"],
+    }
+    assert registry.show(redis, "box")["roles"] == ["eng", "ci", "plan"]
+    assert not redis.exists(registry.INDEX)
+
+
 def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
     registry.update(redis, "box", ["ui=yes", "roles=master,eng", "prefer=master:1,eng:2"])
     redis.hset(f"{registry.ROOT}:hive:box", mapping={"heartbeat_at": "500", "slots": '["a"]', "version": "2.4"})

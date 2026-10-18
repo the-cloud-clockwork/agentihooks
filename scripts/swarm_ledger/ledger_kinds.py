@@ -3,6 +3,7 @@
 import re
 
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research", "plan")
+BRANCHED = ("code", "ci")
 CONTRACT_KEYS = ("must", "check", "judge")
 CONTRACT_FLAGS = ("push",)
 FLAG_VALUES = ("yes", "no")
@@ -19,6 +20,10 @@ NEEDS = {
 
 def kind(task):
     return task.get("kind") or "code"
+
+
+def read_only(task):
+    return kind(task) not in BRANCHED
 
 
 def check(fields):

@@ -45,6 +45,15 @@ jobs:
           scripts/packaging/swarm-smoke.sh
           scripts/packaging/hive-join-smoke.sh
           scripts/packaging/compose-hive-smoke.sh
+      - uses: actions/setup-python@v5
+        if: ${{ !cancelled() }}
+        with:
+          python-version: '3.12'
+      - name: Bring up the local stack twice with swarm init from the installed package
+        if: ${{ !cancelled() }}
+        env:
+          SWARM_SMOKE_RUNTIME_IMAGES_READY: 'true'
+        run: bash scripts/packaging/swarm-init-smoke.sh
       - name: Prove image pulls tolerate an absent attestation
         if: github.event_name == 'workflow_dispatch'
         run: bash scripts/packaging/hive-launch-attestation-proof.sh

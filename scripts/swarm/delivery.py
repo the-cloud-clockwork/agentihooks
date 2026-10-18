@@ -33,15 +33,24 @@ class HerdrMessenger:
     def agent_status(self, agent):
         result = self.herdr(["agent", "get", self.target(agent)])
         found = result.get("agent", result)
-        return found.get("agent_status") or found.get("status") or "unknown"
+        state = found.get("agent_status") or found.get("status") or "unknown"
+        if agent.harness == "codex" and state == "blocked":
+            from scripts.swarm.pane import content_refusal, refusal_input
+
+            capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+            if content_refusal(agent.harness, capture["text"]) and not refusal_input(capture["text"]):
+                return "idle"
+        return state
 
     def prompt(self, agent, text):
         self.herdr(["agent", "prompt", self.target(agent), marked(text)])
 
     def typed_input(self, agent):
-        from scripts.swarm.pane import typed_input
+        from scripts.swarm.pane import content_refusal, refusal_input, typed_input
 
         capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+        if content_refusal(agent.harness, capture["text"]):
+            return refusal_input(capture["text"])
         return typed_input(capture["text"])
 
 

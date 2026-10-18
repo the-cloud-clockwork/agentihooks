@@ -174,6 +174,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/packaging/hive-launch-smoke.sh",
         "scripts/packaging/pull-runtime-image.sh",
         "scripts/packaging/swarm-image-clients.sh",
+        "scripts/packaging/swarm-init-smoke.sh",
         "scripts/packaging/swarm-smoke.sh",
         "scripts/packaging/swarm-smoke-parallel.sh",
         "scripts/size_limits.py",

@@ -255,3 +255,37 @@ def test_parked_on_names_only_tasks_on_the_ledger():
     doc = stacked_ledger()
     applied, ctx = update(doc, {"parked_on": ["t9"]}, [])
     assert applied is False and "parked_on" not in doc["tasks"][1] and ctx.dirty is False
+
+
+APPLIED_REFUSAL = "applied_at must be a UTC time such as 2026-10-18T12:00:00Z, or empty to clear it"
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["2026-10-18", "2026-10-18T12:00Z", "2026-10-18T12:00:00", "x2026-10-18T12:00:00Z", "2026-10-18T12:00:00Zx"],
+)
+def test_an_applied_time_that_is_not_a_utc_time_is_refused(value):
+    with pytest.raises(ValueError) as refused:
+        update(stacked_ledger(), {"applied_at": value}, [])
+    assert str(refused.value) == APPLIED_REFUSAL
+
+
+def test_an_applied_time_that_is_not_a_string_is_refused():
+    with pytest.raises(ValueError) as refused:
+        ledger_tasks.check_applied({"applied_at": 5})
+    assert str(refused.value) == APPLIED_REFUSAL
+
+
+@pytest.mark.parametrize("value", ["2026-10-18T12:00:00Z", ""])
+def test_a_task_records_when_its_fix_was_applied(value):
+    doc = stacked_ledger()
+    applied, ctx = update(doc, {"applied_at": value}, [])
+    assert applied is True and ctx.refused == [] and doc["tasks"][1]["applied_at"] == value
+
+
+@pytest.mark.parametrize("kind", ["tune", "ops", "troubleshoot", "research"])
+def test_a_read_only_task_parks_without_a_branch_or_stacked_base(kind):
+    doc = stacked_ledger()
+    doc["tasks"][1]["kind"] = kind
+    applied, ctx = update(doc, {"parked_on": ["t0"]}, [])
+    assert applied is True and ctx.refused == [] and doc["tasks"][1]["parked_on"] == ["t0"]

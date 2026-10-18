@@ -165,7 +165,7 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.router.placement.backend == "hive"
     assert fenced.has_capacity(setup.config)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    assert fenced.placement_refusal("master", {}) == "the workstation hive spawns master work"
+    assert fenced.placement_refusal("master", {}) == ""
     setup.herdr.spawn.assert_not_called()
 
 
