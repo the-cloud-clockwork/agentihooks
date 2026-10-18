@@ -38,6 +38,26 @@ def test_inbox_items_of_the_swarm_carry_their_history(redis):
     assert [e["state"] for e in rows[kept.id]["history"]] == ["pending", "done"]
 
 
+def test_one_inbox_read_of_a_large_inbox_takes_a_bounded_number_of_round_trips(redis, monkeypatch):
+    from redis.client import Pipeline
+
+    box, sent = InboxStore(redis), []
+    for n in range(100):
+        for k in range(3):
+            sent.append(box.send(f"{SLUG}-eng-{k}", f"other-{n}", f"note {n} {k}").id)
+        box.close(sent[-1], f"other-{n}", "done", "answered in the thread")
+    for n in range(30):
+        box.send("operator", f"stranger-{n}", "not ours")
+    trips = []
+    direct, batched = redis.execute_command, Pipeline.execute
+    monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))
+    monkeypatch.setattr(Pipeline, "execute", lambda pipe, *a, **k: trips.append("pipeline") or batched(pipe, *a, **k))
+    rows = read.inbox_items(box, SLUG)
+    assert sorted(row["id"] for row in rows) == sorted(sent)
+    assert sum(len(row["history"]) for row in rows) == len(sent) + 100
+    assert len(trips) <= 12
+
+
 def test_inbox_receivers_name_who_is_live_how_long_quiet_and_who_sits_outside_the_swarm(redis):
     from scripts.doctor.inbox import Receiver
     from scripts.doctor.priming import doctor_slug

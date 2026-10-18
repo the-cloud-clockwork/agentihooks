@@ -35,14 +35,15 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
     import json
 
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
-    assert [(row["step"], row["phase"], row.get("outcome")) for row in rows] == [
-        ("doctor.spawn", "started", None),
-        ("doctor.spawn", "finished", "error"),
-        ("doctor.health", "started", None),
-        ("doctor.health", "finished", "success"),
-        ("doctor.trace", "started", None),
-        ("doctor.trace", "finished", "success"),
-    ]
+    steps = {}
+    for row in rows:
+        steps.setdefault(row["step"], []).append((row["phase"], row.get("outcome")))
+    assert steps == {
+        "doctor.spawn": [("started", None), ("finished", "error")],
+        "doctor.health": [("started", None), ("finished", "success")],
+        "doctor.trace": [("started", None), ("finished", "success")],
+    }
+    assert len(rows) == 6
     assert all(row["slug"] == "doctor" for row in rows)
     assert all(
         row[key] >= 0
@@ -50,6 +51,18 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
         if row["phase"] == "finished"
         for key in ("wall_s", "own_cpu_s", "reaped_child_cpu_s")
     )
+
+
+def test_the_detectors_of_one_pass_run_side_by_side():
+    import threading
+
+    met = threading.Barrier(3, timeout=5)
+
+    def waits():
+        met.wait()
+        return [STALE]
+
+    assert detect.collect({"spawn": waits, "health": waits, "ci": waits}) == ([STALE, STALE, STALE], [])
 
 
 def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
@@ -155,6 +168,39 @@ def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     late = detect.readers(store, ledger, "s", red + window, environ={})["ci"]()
     assert early == []
     assert [f.id for f in late] == ["red-checks/487"]
+
+
+def test_ci_reads_the_pull_requests_of_one_pass_side_by_side(monkeypatch):
+    import threading
+
+    import fakeredis
+
+    met = threading.Barrier(2, timeout=5)
+
+    def pull_request(repo, number, cache):
+        met.wait()
+        return {"number": number}
+
+    monkeypatch.setattr(detect.ci_read, "pull_request", pull_request)
+    monkeypatch.setattr(detect.ci, "findings", lambda record, now_ms: [record["number"]])
+    tasks = [{"state": "pr", "pr_url": f"https://github.com/o/r/pull/{n}"} for n in (4, 5)]
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
+    assert detect.readers(store, SimpleNamespace(tasks=lambda slug: tasks), "s", 1, environ={})["ci"]() == [4, 5]
+
+
+def test_one_pass_reads_the_watched_tasks_once_for_the_ci_and_trace_detectors(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store, reads = RedisStore(fakeredis.FakeRedis(decode_responses=True)), []
+    ledger = SimpleNamespace(tasks=lambda slug: reads.append(slug) or [])
+    monkeypatch.setattr(detect.traces_read, "record", lambda slug, tasks, agents, now_ms, get: {"traces": []})
+    monkeypatch.setattr(detect.traces, "findings", lambda record, limits: [])
+    found = detect.readers(store, ledger, "sw", 1_000, environ={})
+    assert found["ci"]() == []
+    assert found["trace"]() == []
+    assert reads == ["sw"]
 
 
 def test_the_health_detector_judges_only_what_the_current_health_pass_reports(monkeypatch):
