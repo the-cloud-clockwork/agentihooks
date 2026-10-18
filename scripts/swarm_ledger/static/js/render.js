@@ -290,8 +290,17 @@ export function render(focusKey) {
       $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
       groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
     },
-    renderSync, renderPriorities, renderNotifications, renderAlerts, renderArtifacts, renderChat, renderChatBadge,
-    renderStats, () => renderSwarm(swarm), renderOutline, markToggles,
+    () => { renderSync(); },
+    () => { renderPriorities(); },
+    () => { renderNotifications(); },
+    () => { renderAlerts(); },
+    () => { renderArtifacts(); },
+    () => { renderChat(); },
+    () => { renderChatBadge(); },
+    () => { renderStats(); },
+    () => { renderSwarm(swarm); },
+    () => { renderOutline(); },
+    () => { markToggles(); },
   ];
   for (const section of sections) {
     try {
