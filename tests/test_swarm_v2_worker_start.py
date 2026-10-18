@@ -306,11 +306,8 @@ def test_a_bundle_seat_records_the_delivered_bundle_revision_and_digest(tmp_path
     assert "frontend" not in record["profile_digests"]
 
 
-def test_a_bundle_seat_runs_the_local_browser_server_and_keeps_its_header_references(tmp_path, monkeypatch):
-    from scripts.profiles import browser
-
-    monkeypatch.setattr(browser, "proxy_enabled", lambda chain: True)
-    _, home = bundled(tmp_path, "engineer")
+def test_a_bundle_seat_runs_the_local_browser_server_and_keeps_its_header_references(tmp_path):
+    _, home = bundled(tmp_path, "frontend")
 
     servers = json.loads((home / ".claude.json").read_text())["mcpServers"]
     assert servers["playwright-cmd"]["command"] != "cmd.exe"
