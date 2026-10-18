@@ -28,7 +28,7 @@ def _repository(tmp_path, name):
     _git(primary, "commit", "--allow-empty", "-m", "Initial")
     _git(primary, "push", "-u", "origin", "dev")
     top = tmp_path / "worktrees" / name / BRANCH
-    _git(primary, "worktree", "add", "-b", BRANCH, str(top), "origin/dev")
+    _git(primary, "worktree", "add", "--no-track", "-b", BRANCH, str(top), "origin/dev")
     return origin.resolve(), primary.resolve(), top.resolve()
 
 
@@ -98,6 +98,30 @@ def test_block_records_the_pushed_branch_on_the_task(worktree, monkeypatch):
     assert (row["branch"], row["branch_repo"]) == (BRANCH, str(origin))
     assert row["repository_branches"] == {str(primary): BRANCH}
     assert ("t1", ["branch", "branch_repo", "repository_branches"], AGENT) in writers
+
+
+@pytest.mark.parametrize("tracking", [True, False])
+@pytest.mark.parametrize("ahead", [True, False])
+def test_block_checks_the_published_continuation_branch(worktree, capsys, tracking, ahead):
+    ledger, _, primary, top = worktree
+    _git(top, "commit", "--allow-empty", "-m", "Predecessor work")
+    _git(top, "push", "origin", "HEAD:predecessor")
+    ledger.rows["t1"].update({"branch": "predecessor", "repository_branches": {str(primary): "predecessor"}})
+    if tracking:
+        _git(top, "branch", "--set-upstream-to", "origin/predecessor")
+        ledger.rows["t1"].update({"branch": "stale", "repository_branches": {str(primary): "stale"}})
+    if ahead:
+        _git(top, "commit", "--allow-empty", "-m", "Unpublished continuation work")
+    capsys.readouterr()
+    assert block() == (1 if ahead else 0)
+    if ahead:
+        assert capsys.readouterr().err == (
+            f"swarm: the worktree {top} holds commits origin lacks; "
+            f"push them with git -C {top} push -u origin HEAD:predecessor before blocking\n"
+        )
+        assert ledger.rows["t1"]["state"] != "blocked"
+    else:
+        assert ledger.rows["t1"]["state"] == "blocked"
 
 
 def test_block_checks_the_worktree_of_the_branch_recorded_for_its_repository(worktree, capsys):
