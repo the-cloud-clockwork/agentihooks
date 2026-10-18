@@ -82,9 +82,13 @@ def test_failed_download_retries_the_same_baseline_and_preserves_selection(tmp_p
     assert success, "A transient duration cache download prevented the selected tests from running"
     assert len(calls) == failures + 1
     assert adopt(recovered, "3.12") == STORED
-    assert selection(tmp_path / "before", baseline) == selection(tmp_path / "after", recovered) == (
-        "selected",
-        [["tests/test_heavy1.py", "tests/test_sample.py"], ["tests/test_heavy2.py", "tests/test_heavy3.py"]],
+    assert (
+        selection(tmp_path / "before", baseline)
+        == selection(tmp_path / "after", recovered)
+        == (
+            "selected",
+            [["tests/test_heavy1.py", "tests/test_sample.py"], ["tests/test_heavy2.py", "tests/test_heavy3.py"]],
+        )
     )
     step = next(step for step in selected_job()["steps"] if step.get("name") == "Adopt latest dev durations")
     command = step["run"].replace("python -c", '"$PYTHON" -c').replace("~/dev-durations", '"$RESTORED"')
