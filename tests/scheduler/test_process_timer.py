@@ -18,6 +18,8 @@ def redis():
 
 def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", Mock())
+    close = Mock()
+    monkeypatch.setattr(redis, "close", close)
     with process_timer.Timer(2, redis=redis) as timer:
         entry = timer.entry
         assert entry.record["delay"] == 2
@@ -33,6 +35,7 @@ def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
     assert entry.state == "cancelled"
     assert not redis.exists(timer.key)
     process_timer.service.ensure_running.assert_called_once_with()
+    close.assert_not_called()
 
 
 def test_interruption_cancels_the_timer_and_cleans_the_wake(redis, monkeypatch):

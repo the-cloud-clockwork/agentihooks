@@ -238,3 +238,16 @@ def test_same_domain_refuses_a_second_runner_and_distinct_domains_coexist(tmp_pa
         with service.machine_lock("runner", environ=other_member):
             with service.machine_lock("runner", environ=other_endpoint):
                 assert len({service.runtime_dir(env) for env in (first, other_member, other_endpoint)}) == 3
+
+
+def test_domain_defaults_keep_equivalent_redis_endpoints_together(tmp_path, monkeypatch):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    default = tmp_path / ".cache" / "agentihooks" / "scheduler"
+    assert service.runtime_dir({}) == default
+    assert service.runtime_dir({"AGENTIHOOKS_HIVE_ID": "member"}) == default
+    assert service.runtime_dir({"AGENTIHOOKS_DEPLOYMENT": "cloud"}) == default
+    endpoint = service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://scheduler.invalid"})
+    assert service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://scheduler.invalid:6379/0"}) == endpoint
+    assert service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "rediss://scheduler.invalid:6379/0"}) != endpoint

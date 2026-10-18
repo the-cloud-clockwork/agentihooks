@@ -1017,3 +1017,30 @@ def test_a_missing_owner_record_does_not_stop_the_final_drain(home, tmp_path):
         "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
     )
     assert result == "owner exited"
+
+
+def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from scripts.scheduler import process_timer
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: state.update(alive=False)))
+    timer = MagicMock()
+    timer.return_value.__enter__.return_value.wait.side_effect = lambda: clock.sleep(trace_flush.POLL_SEC)
+    monkeypatch.setattr(process_timer, "Timer", timer)
+    assert (
+        trace_flush.supervise(
+            "session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda owner: state["alive"],
+        )
+        == "owner exited"
+    )
+    timer.assert_called_once_with(trace_flush.POLL_SEC)
