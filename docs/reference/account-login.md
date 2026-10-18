@@ -40,19 +40,29 @@ Claude login does not set the refresh authority flag. Other
 ## Master claude ai login
 
 ```bash
-agentihooks swarm <slug> set master-claude-login=on
-agentihooks claude login --master <slug>
+export AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true
+agentihooks claude login --master
 ```
 
-The swarm setting `master-claude-login` is off by default, and off leaves every
-launch unchanged, including swarms on routed quota tokens or gateway API tokens.
-Turn it on only when the swarm's workers run on quota tokens separate from the
-master's login.
+`AGENTIHOOKS_MASTER_CLAUDE_LOGIN` is one machine wide setting, read through
+the hooks configuration (the environment or an `$AGENTIHOOKS_HOME/*.env`
+file). It is off by default, and off leaves every launch unchanged, including
+swarms on routed quota tokens or gateway API tokens. Turn it on only when the
+workers run on quota tokens separate from the master's login. A swarm config
+saved with the former per swarm `master_claude_login` field loads without it;
+`agentihooks swarm <slug> set` no longer takes `master-claude-login`. The
+former per swarm homes under `$AGENTIHOOKS_HOME/master-claude/<slug>` and
+recovery copies under `secret/agentihooks/master-claude/<slug>` are no longer
+read: run `agentihooks claude login --master` once after the upgrade.
 
-With it on, the swarm's Claude front door master launches on route
-`master-login` from a private home under
-`$AGENTIHOOKS_HOME/master-claude/<slug>/claude`, copied from its rendered master
-profile without the shared credential link. `CLAUDE_CONFIG_DIR` and
+With it on, the Claude front door master of every swarm, seat
+`master@<slug>` (or a master with no seat, which predates seats), launches
+and resumes on route `master-login` from one private home,
+`$AGENTIHOOKS_HOME/master-login/claude`, copied from its rendered master
+profile without the shared credential link. Pool master seats
+(`master-2@<slug>` and up) keep their routed quota tokens, and so does a
+master launched from an order on an explicit subscription or API route; a
+later resume of the front door takes the login. `CLAUDE_CONFIG_DIR` and
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` both point at that home, the session gets
 `--settings {"forceLoginMethod":"claudeai"}`, and its environment drops routed
 OAuth tokens, API keys, custom endpoints and provider selectors. Settings that
@@ -63,15 +73,19 @@ that is also a worker quota token launches as the declared Claude master account
 declared; its live master then holds workers on that account at the reserved
 share of the week. Another account already declared master refuses the launch,
 naming both. The master gets `--remote-control`.
-Engineers, CI agents, planners and Codex masters never take this route.
+Engineers, CI agents, planners, pool masters and Codex masters never take this route.
 
-`agentihooks claude login --master <slug>` runs `claude auth login` once in that
-home. Native Claude is the only refresher of the login. One process holds it at
-a time: a launch refuses while the process that holds it is still running, and
-each claim takes an epoch above the one stored in OpenBao. With `--openbao`, and
+`agentihooks claude login --master` takes no slug and runs `claude auth login`
+once in that home; it refuses while any master or another login command holding
+the home is still running. Native Claude is the only refresher of the login.
+The front door masters of several swarms hold the home at once: a master launch
+refuses while a login command holding the home or another live process under
+the same name is still running, and it rebuilds the home from its rendered profile only when no other live master runs
+on it, otherwise it launches on the home as it is. Each claim takes an epoch
+above the one stored in OpenBao. With `--openbao`, and
 at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,
 the latest grant native Claude saved is copied to
-`secret/agentihooks/master-claude/<slug>` with its owner epoch, never replacing
+`secret/agentihooks/master-claude-login` with its owner epoch, never replacing
 a newer copy; a launch whose home has no login restores it from there.
 
 ## Codex login

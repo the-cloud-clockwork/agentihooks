@@ -6,7 +6,8 @@ import os
 import shutil
 import sys
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 
 from hooks import config as hooks_config
@@ -17,8 +18,6 @@ from scripts.routing import master_account
 from scripts.routing.settings import SettingsStore, open_store
 
 ROUTE = "master-login"
-FIELD = "master_claude_login"
-KEY = "master-claude-login"
 LANE = "master"
 SETTINGS = ["--settings", '{"forceLoginMethod":"claudeai"}']
 LOGIN = ["auth", "login"]
@@ -29,7 +28,7 @@ GRANT = "claudeAiOauth"
 MANIFESTS = ("claude.sources.json", "claude.mounts.json")
 OWNER = "owner.json"
 LOCK = "owner.lock"
-CREDS = "agentihooks/master-claude"
+CREDS = "agentihooks/master-claude-login"
 MANAGED = Path("/etc/claude-code/managed-settings.json")
 SELECTORS = ("CLAUDE_CONFIG_DIR", "CLAUDE_SECURESTORAGE_CONFIG_DIR")
 REINTRODUCED = (
@@ -54,12 +53,12 @@ DROPPED = (
     "DISABLE_GROWTHBOOK",
 )
 PRIVATE_DIR, PRIVATE_FILE = 0o700, 0o600
-NO_LOGIN = "no master claude ai login for swarm {slug}: run agentihooks claude login --master {slug}"
+NO_LOGIN = "no master claude ai login: run agentihooks claude login --master"
 OTHER_MASTER = (
     "the master login account {account} is a worker quota token and the declared claude master account is {master}"
 )
 NO_QUOTA = "the master claude ai login needs workers on quota tokens; none is set"
-HELD = "the master login of swarm {slug} is held by {owner}, still running"
+HELD = "the master login is held by {owner}, still running"
 API_HELPER = "{path} sets apiKeyHelper"
 SETS = "{path} sets {names}"
 FORCED = "{path} sets forceLoginMethod {value}"
@@ -71,20 +70,36 @@ class LoginRefused(RuntimeError):
     pass
 
 
-def enabled(config, lane: str, harness: str) -> bool:
-    return lane == LANE and harness == "claude" and getattr(config, FIELD, None) is True
+def enabled(slug: str, seat: str, lane: str, harness: str) -> bool:
+    from scripts.swarm_v2 import front_door
+
+    return (
+        hooks_config.MASTER_CLAUDE_LOGIN is True
+        and lane == LANE
+        and harness == "claude"
+        and front_door.holds(slug, seat)
+    )
 
 
 def route(login: bool) -> list[str]:
     return ["--route", ROUTE] if login else []
 
 
-def root(slug: str) -> Path:
-    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-claude" / slug
+def root() -> Path:
+    return Path(hooks_config.AGENTIHOOKS_HOME) / "master-login"
 
 
-def home(slug: str) -> Path:
-    return root(slug) / "claude"
+def home() -> Path:
+    return root() / "claude"
+
+
+@contextmanager
+def _locked() -> Iterator[Path]:
+    folder = root()
+    folder.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+    with (folder / LOCK).open("a+") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        yield folder
 
 
 def _read(path: Path) -> dict:
@@ -105,15 +120,22 @@ def _private(target: Path) -> Path | None:
     return path if path.is_file() and not path.is_symlink() else None
 
 
-def build(slug: str, rendered: Path, report: str | None = None) -> Path:
-    target, staging = home(slug), root(slug) / "staging"
-    root(slug).mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
+def build(rendered: Path, report: str | None = None) -> Path:
+    with _locked() as folder:
+        target = _rebuild(folder, rendered)
+    if report:
+        binding.rehome(Path(report), target)
+    return target
+
+
+def _rebuild(folder: Path, rendered: Path) -> Path:
+    target, staging = home(), folder / "staging"
     kept = _private(target)
     grant = kept.read_bytes() if kept else None
     account = _read(target / CONFIG).get(ACCOUNT)
     shutil.rmtree(staging, ignore_errors=True)
     shutil.copytree(
-        rendered, staging, symlinks=True, ignore=lambda folder, _: [CREDENTIALS] if Path(folder) == rendered else []
+        rendered, staging, symlinks=True, ignore=lambda found, _: [CREDENTIALS] if Path(found) == rendered else []
     )
     staging.chmod(PRIVATE_DIR)
     if grant is not None:
@@ -125,11 +147,9 @@ def build(slug: str, rendered: Path, report: str | None = None) -> Path:
     (staging / binding.FILE).write_text(json.dumps({**evidence, "home": str(target.resolve())}) + "\n")
     for name in MANIFESTS:
         if (rendered.parent / name).is_file():
-            shutil.copyfile(rendered.parent / name, root(slug) / name)
+            shutil.copyfile(rendered.parent / name, folder / name)
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
-    if report:
-        binding.rehome(Path(report), target)
     return target
 
 
@@ -164,14 +184,13 @@ def _master(found: str, environ: Mapping[str, str], store: SettingsStore) -> Non
 
 
 def account(
-    slug: str,
     target: Path,
     environ: Mapping[str, str],
     store_of: Callable[[Mapping[str, str]], SettingsStore] | None = None,
 ) -> str:
     email = (_read(target / CONFIG).get(ACCOUNT) or {}).get("emailAddress")
     if not (email and _private(target)):
-        raise LoginRefused(NO_LOGIN.format(slug=slug))
+        raise LoginRefused(NO_LOGIN)
     found = aicode_tokens.slug(email)
     if not any(name.startswith(TOKEN_PREFIX) for name in environ):
         raise LoginRefused(NO_QUOTA)
@@ -190,25 +209,31 @@ def _alive(pid: object) -> bool:
     return isinstance(pid, int) and Path(f"/proc/{pid}").exists()
 
 
-def claim(slug: str, name: str, pid: int, alive: Callable[[object], bool] = _alive, floor: int = 0) -> int:
-    folder = root(slug)
-    folder.mkdir(mode=PRIVATE_DIR, parents=True, exist_ok=True)
-    with (folder / LOCK).open("a+") as lock:
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        held = _read(folder / OWNER)
-        if held.get("pid", pid) != pid and alive(held["pid"]):
-            raise LoginRefused(HELD.format(slug=slug, owner=held.get("owner")))
-        epoch = max(int(held.get("epoch", 0)), floor) + 1
-        _write(folder / OWNER, {"owner": name, "pid": pid, "epoch": epoch})
-    return epoch
+def claim(name: str, pid: int, alive: Callable[[object], bool] = _alive, floor: int = 0, alone: bool = False) -> int:
+    with _locked() as folder:
+        return _claim(folder, name, pid, alive, floor, alone)[0]
 
 
-def publish(bao: openbao_kv.OpenBao, slug: str, target: Path, epoch: int) -> bool:
+def _claim(
+    folder: Path, name: str, pid: int, alive: Callable[[object], bool], floor: int, alone: bool = False
+) -> tuple[int, bool]:
+    held = _read(folder / OWNER)
+    holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
+    others = sorted(owner for owner, found in holders.items() if found != pid)
+    blocker = next((owner for owner in (name, held.get("alone"), *(others if alone else ())) if owner in others), None)
+    if blocker:
+        raise LoginRefused(HELD.format(owner=blocker))
+    epoch = max(int(held.get("epoch", 0)), floor) + 1
+    _write(folder / OWNER, {"holders": {**holders, name: pid}, "epoch": epoch, **({"alone": name} if alone else {})})
+    return epoch, bool(others)
+
+
+def publish(bao: openbao_kv.OpenBao, target: Path, epoch: int) -> bool:
     grant = _read(target / CREDENTIALS).get(GRANT) or {}
     if not grant.get("refreshToken"):
         return False
     generation = int(grant.get("expiresAt", 0))
-    stored, _ = openbao_kv.read(bao, f"{CREDS}/{slug}")
+    stored, _ = openbao_kv.read(bao, CREDS)
     if (int(stored.get("epoch", 0)), int(stored.get("generation", 0))) >= (epoch, generation):
         return False
     entries = {
@@ -217,7 +242,7 @@ def publish(bao: openbao_kv.OpenBao, slug: str, target: Path, epoch: int) -> boo
         "epoch": str(epoch),
         "generation": str(generation),
     }
-    openbao_kv.merge(bao, f"{CREDS}/{slug}", entries)
+    openbao_kv.merge(bao, CREDS, entries)
     return True
 
 
@@ -229,46 +254,50 @@ def restore(stored: Mapping[str, str], target: Path) -> bool:
     return True
 
 
-def stored(bao: openbao_kv.OpenBao | None, slug: str) -> dict[str, str]:
+def stored(bao: openbao_kv.OpenBao | None) -> dict[str, str]:
     if bao is None:
         return {}
     try:
-        return openbao_kv.read(bao, f"{CREDS}/{slug}")[0]
+        return openbao_kv.read(bao, CREDS)[0]
     except openbao_kv.OpenBaoError as exc:
         print(RECOVERY_FAILED.format(error=exc), file=sys.stderr)
         return {}
 
 
-def keep(bao: openbao_kv.OpenBao | None, slug: str, target: Path, epoch: int) -> bool:
+def keep(bao: openbao_kv.OpenBao | None, target: Path, epoch: int) -> bool:
     if bao is None:
         return False
     try:
-        return publish(bao, slug, target, epoch)
+        return publish(bao, target, epoch)
     except openbao_kv.OpenBaoError as exc:
         print(PUBLISH_FAILED.format(error=exc), file=sys.stderr)
         return False
 
 
 def checkpoint(environ: Mapping[str, str]) -> bool:
-    slug = environ.get("AGENTIHOOKS_SWARM")
-    if not slug or environ.get("CLAUDE_CONFIG_DIR") != str(home(slug)):
+    if environ.get("CLAUDE_CONFIG_DIR") != str(home()):
         return False
-    epoch = int(_read(root(slug) / OWNER).get("epoch", 0))
-    return keep(openbao_kv.from_env(environ), slug, home(slug), epoch)
+    epoch = int(_read(root() / OWNER).get("epoch", 0))
+    return keep(openbao_kv.from_env(environ), home(), epoch)
 
 
 def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
-    slug, rendered = environ["AGENTIHOOKS_SWARM"], Path(environ["CLAUDE_CONFIG_DIR"])
+    rendered = Path(environ["CLAUDE_CONFIG_DIR"])
     refused = refusal(rendered, cwd)
     if refused:
         raise LoginRefused(refused)
     bao = openbao_kv.from_env(environ)
-    copy = stored(bao, slug)
-    epoch = claim(slug, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), floor=int(copy.get("epoch", 0)))
-    target = build(slug, rendered, environ.get(binding.REPORT))
+    copy = stored(bao)
+    with _locked() as folder:
+        epoch, shared = _claim(
+            folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, int(copy.get("epoch", 0))
+        )
+        target = home() if shared else _rebuild(folder, rendered)
+    if environ.get(binding.REPORT):
+        binding.rehome(Path(environ[binding.REPORT]), target)
     restore(copy, target)
-    found = account(slug, target, environ)
-    keep(bao, slug, target, epoch)
+    found = account(target, environ)
+    keep(bao, target, epoch)
     return target, found
 
 

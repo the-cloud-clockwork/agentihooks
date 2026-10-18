@@ -128,16 +128,17 @@ def test_master_order_preserves_placement_health_through_the_consumer(setup, rou
 
 @pytest.mark.parametrize("lane", ["master", "eng"])
 @pytest.mark.parametrize("route", ["subscription", "api", "interactive"])
-def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_flag(setup, lane, route):
+def test_a_master_fallback_order_hands_its_route_to_the_runtime_unchanged(setup, lane, route, monkeypatch):
     from dataclasses import replace
     from types import SimpleNamespace
 
+    from hooks import config as hooks_config
     from scripts.hive import orders
     from scripts.swarm import lease, tick
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
     task = master(setup)
-    setup.store.update(setup.config.slug, master_claude_login=True)
+    monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", True)
     write_hive(setup, roles=["master"], ui="yes", interactive={"claude": "account"})
     name = setup.store.next_name(setup.config.slug, lane)
     task.update(seat=f"{lane}@fixture", controller_epoch=setup.held.epoch, route_kind=route)
@@ -171,11 +172,7 @@ def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_fl
     consumer = orders.Consumer(setup.store.redis, "remote", runtime)
     assert consumer.launch(order, admitted, task).status == "live"
     sent = runtime.spawn.call_args.args[0]
-    assert sent.config == replace(
-        request.config,
-        lanes={lane: {"agent": "claude", "role": "master"}},
-        master_claude_login=lane != "master" or route == "interactive",
-    )
+    assert sent.config == replace(request.config, lanes={lane: {"agent": "claude", "role": "master"}})
     assert sent.task["route_kind"] == route
     assert sent.task["launch_assignment"]["account"] == "account"
 
