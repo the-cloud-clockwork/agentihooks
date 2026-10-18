@@ -115,6 +115,7 @@ def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm,
     assert waits._save_wait(redis, "fixture", name, previous, {}, "merged", 50)
     assert not redis.exists(f"{own}:wait:{name}")
     assert redis.get(f"{own}:woke:{name}") == "50"
+    assert idle.woke(redis, "fixture", name) == 50
     assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
 
 
@@ -189,9 +190,7 @@ def test_a_member_send_waits_in_its_own_keys_until_the_controller_relays_it(redi
         item = inbox.send(name, "master@fixture", "done", ref="fixture:7:note", fyi=True, task="t1")
         assert not redis.keys(f"{ROOT}:inbox:*")
 
-    with monkeypatch.context() as member:
-        as_member(member)
-        assert relay.relay(redis) == [item.id]
+    assert relay.relay(redis) == [item.id]
     relayed = InboxStore(redis).get(item.id)
     assert [mail.id for mail in InboxStore(redis).open_items("master@fixture")] == [item.id]
     assert (relayed.sender, relayed.ref, relayed.fyi, relayed.task) == (name, "fixture:7:note", True, "t1")
@@ -277,6 +276,7 @@ def test_a_member_inbox_pools_and_owns_below_its_own_keys(redis, swarm):
 
 
 def test_a_controller_delivers_a_member_inbox_through_that_members_owner_key(redis, swarm):
+    from scripts.inbox import receipts
     from scripts.inbox.dispatch import Dispatcher
     from scripts.inbox.store import InboxStore
 
@@ -293,7 +293,10 @@ def test_a_controller_delivers_a_member_inbox_through_that_members_owner_key(red
     assert redis.ttl(owned) == 50
     [delivery] = dispatcher.reserve(name, "pump")
     assert [recovered.state for recovered in dispatcher.receipts.recover(name, "pump")] == ["rejected"]
-    assert dispatcher.receipts.get(delivery.id).state == "rejected"
+    assert (dispatcher.receipts.get(delivery.id).state, dispatcher.receipts.get(delivery.id).reason) == (
+        "rejected",
+        receipts.RELEASED,
+    )
     assert dispatcher.release(name, "pump")
     assert not redis.exists(owned)
     assert not redis.keys(f"{ROOT}:inbox:*")
