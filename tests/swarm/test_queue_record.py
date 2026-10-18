@@ -155,7 +155,7 @@ def test_one_unreadable_snapshot_records_no_rebuild(tmp_path, monkeypatch):
 def test_the_journal_defaults_to_the_agentihooks_home_under_the_user_home(tmp_path, monkeypatch):
     book = journal(tmp_path, Snapshots(), monkeypatch)
     monkeypatch.delenv("AGENTIHOOKS_HOME")
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(queue_record.Path, "home", lambda: tmp_path)
     record = book.write("queue", URL, "head9", None, None)
     lines = (tmp_path / ".agentihooks" / "merge-queue-events.jsonl").read_text().splitlines()
     assert [json.loads(line) for line in lines] == [record]
