@@ -73,7 +73,9 @@ def test_a_tune_task_waits_for_its_code_dependency_to_be_done(kind, state, eligi
     assert ctx.dirty == eligible
 
 
-@pytest.mark.parametrize(("work_kind", "dep_kind"), [("tune", "tune"), ("tune", "research"), ("tune", "ops"), ("code", "code")])
+@pytest.mark.parametrize(
+    ("work_kind", "dep_kind"), [("tune", "tune"), ("tune", "research"), ("tune", "ops"), ("code", "code")]
+)
 def test_other_kind_pairs_still_stack_on_a_claimed_dependency_branch(work_kind, dep_kind):
     work = {"id": "work", "title": "x", "lane": "eng", "kind": work_kind, "state": "open", "claimed_by": ""}
     dep = {"id": "dep", "state": "claimed", "branch": "feature", "kind": dep_kind}
