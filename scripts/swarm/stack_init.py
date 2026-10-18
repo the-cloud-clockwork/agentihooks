@@ -1,0 +1,184 @@
+"""agentihooks swarm init: bring up the local swarm stack with Docker Compose and print the next steps.
+
+It never creates or starts a swarm; the printed commands do that when the operator chooses to.
+"""
+
+import argparse
+import json
+import os
+import shutil
+import subprocess
+import sys
+import urllib.parse
+import urllib.request
+from collections.abc import Callable, Mapping
+from pathlib import Path
+from typing import TextIO
+
+from scripts.swarm.stack_env import BIND, client_env, settings, write_private
+
+PROJECT = "agentihooks-swarm"
+BUNDLED = Path(__file__).with_name("stack")
+SERVICES = ("redis", "swarm", "controller")
+AGAIN = "then run agentihooks swarm init again"
+LOGS = f"docker compose --project-name {PROJECT} logs"
+OUTPUT_LINES = 10
+DOCKER_CHECKS = (
+    (
+        ["docker", "info", "--format", "{{.ServerVersion}}"],
+        "the Docker daemon is not reachable",
+        f"start Docker, or add your user to the docker group, {AGAIN}",
+    ),
+    (
+        ["docker", "compose", "version", "--short"],
+        "the Docker Compose plugin is missing",
+        f"install Docker Compose v2, the docker compose plugin, {AGAIN}",
+    ),
+)
+FIXES = {
+    "redis": "read its logs; if port {SWARM_REDIS_PORT} is in use, set SWARM_REDIS_PORT in {env} to a free port, "
+    "and keep the password in {env} as it was at the first start, {again}",
+    "swarm": "read its logs; the ledger server needs Redis healthy, and if port {SWARM_PORT} is in use, "
+    "set SWARM_PORT in {env} to a free port, {again}",
+    "controller": "read its logs; the controller starts once Redis and the ledger server are healthy "
+    "and then holds a lease, so fix those first, {again}",
+}
+COLOURS = {"ready": "1;32", "failed": "1;31", "link": "36"}
+
+Run = Callable[..., subprocess.CompletedProcess]
+Paint = Callable[[str, str], str]
+
+
+def parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(prog="agentihooks swarm init", description=__doc__)
+    parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for every service to be healthy")
+    return parser
+
+
+def stack_home(environ: Mapping[str, str]) -> Path:
+    return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "swarm-stack"
+
+
+def painter(stream: TextIO, environ: Mapping[str, str]) -> Paint:
+    if environ.get("NO_COLOR") or not stream.isatty():
+        return lambda text, kind: text
+    return lambda text, kind: f"\033[{COLOURS[kind]}m{text}\033[0m"
+
+
+def docker_problem(run: Run) -> tuple[str, str] | None:
+    if shutil.which("docker") is None:
+        return "Docker is not installed", f"install Docker Engine with the Compose plugin, {AGAIN}"
+    for argv, problem, fix in DOCKER_CHECKS:
+        if run(argv, capture_output=True, text=True).returncode:
+            return problem, fix
+    return None
+
+
+def materialize(home: Path) -> None:
+    for source in BUNDLED.rglob("*"):
+        if source.is_file():
+            target = home / source.relative_to(BUNDLED)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(source, target)
+    (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
+
+
+def compose(home: Path, *args: str) -> list[str]:
+    return [
+        "docker",
+        "compose",
+        "--project-name",
+        PROJECT,
+        "--project-directory",
+        str(home),
+        "--file",
+        str(home / "compose.yaml"),
+        "--env-file",
+        str(home / ".env"),
+        *args,
+    ]
+
+
+def health(run: Run, home: Path) -> tuple[dict[str, str], str]:
+    listing = run(compose(home, "ps", "--all", "--format", "json"), capture_output=True, text=True)
+    if listing.returncode:
+        return {}, listing.stderr
+    text = listing.stdout.strip()
+    rows = json.loads(text) if text.startswith("[") else [json.loads(line) for line in text.splitlines() if line]
+    return {row["Service"]: row.get("Health") or row["State"] for row in rows}, ""
+
+
+def page_problem(base: str, opener: Callable) -> str | None:
+    for route, mark in (("/healthz", b""), ("/", b"<title>HOME</title>")):
+        try:
+            with opener(base + route, timeout=5) as response:
+                body = response.read()
+        except OSError as exc:
+            return f"{base}{route} did not answer ({exc})"
+        if mark not in body:
+            return f"{base}{route} did not serve the ledger home page"
+    return None
+
+
+def failed(out: TextIO, paint: Paint, problem: str, fix: str, logs: str = "") -> None:
+    print(paint(f"Swarm stack not ready: {problem}.", "failed"), file=out)
+    print(f"  Fix: {fix}.", file=out)
+    if logs:
+        print(f"  Logs: {LOGS} {logs}", file=out)
+
+
+def ready(out: TextIO, paint: Paint, home: Path, base: str) -> None:
+    print(paint("Swarm stack ready: redis, swarm and controller are healthy.", "ready"), file=out)
+    print("Next steps:", file=out)
+    print(f"  1. Open the ledger: {paint(base + '/', 'link')}", file=out)
+    print(f"  2. Point this shell at the stack: set -a; . {home / 'client.env'}; set +a", file=out)
+    print(
+        "  3. Start a swarm only when you want one: agentihooks swarm <id> create --repo <path>, "
+        "then agentihooks swarm <id> start",
+        file=out,
+    )
+    print("Running agentihooks swarm init again is safe: it keeps the password, the ports and the data.", file=out)
+
+
+def start(run: Run, home: Path, timeout: int, out: TextIO) -> list[tuple[str, str]]:
+    print("Starting the swarm stack; the first run pulls its images.", file=out)
+    up = compose(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", str(timeout))
+    result = run(up, capture_output=True, text=True)
+    found, failure = health(run, home)
+    absent = "in an unknown state" if failure else "not created"
+    sick = [(service, found.get(service, absent)) for service in SERVICES if found.get(service) != "healthy"]
+    said = [line for part in (result.stderr, failure) for line in part.strip().splitlines()]
+    if sick and said:
+        print("docker compose said:", file=out)
+        for line in said[-OUTPUT_LINES:]:
+            print(f"  {line}", file=out)
+    return sick
+
+
+def main(argv: list[str]) -> int:
+    return init(argv, os.environ, subprocess.run, urllib.request.urlopen, sys.stdout)
+
+
+def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable, out: TextIO) -> int:
+    args = parser().parse_args(argv)
+    paint = painter(out, environ)
+    if problem := docker_problem(run):
+        failed(out, paint, *problem)
+        return 1
+    home = stack_home(environ)
+    materialize(home)
+    values = settings(home / ".env")
+    write_private(home / "client.env", client_env(values, home))
+    if sick := start(run, home, args.timeout, out):
+        for service, state in sick:
+            fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)
+            failed(out, paint, f"{service} is {state}", fix, service)
+        return 1
+    base = urllib.parse.urlunsplit(("http", f"{BIND}:{values['SWARM_PORT']}", "", "", ""))
+    if problem := page_problem(base, opener):
+        failed(
+            out, paint, "the ledger page does not answer", f"{problem}; read the ledger logs with {LOGS} swarm, {AGAIN}"
+        )
+        return 1
+    ready(out, paint, home, base)
+    return 0

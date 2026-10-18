@@ -2122,6 +2122,14 @@ def _tick_store():
 
 
 def main(argv):
+    if argv[:1] == ["init"]:
+        from scripts.swarm import stack_init
+
+        return stack_init.main(argv[1:])
+    return dispatch(argv)
+
+
+def dispatch(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "prober", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
