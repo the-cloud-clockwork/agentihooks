@@ -129,6 +129,32 @@ def test_incomplete_pagination_reports_the_missing_full_count():
     }
 
 
+@pytest.mark.parametrize("target", ["runs", "jobs"])
+def test_pagination_accepts_growing_totals_and_deduplicates_ids(target):
+    from scripts.doctor import ci_speed_read
+
+    calls = []
+    fallback, _ = api([{"id": 999}])
+
+    def run(args, **kwargs):
+        url = urlsplit(args[2])
+        query = parse_qs(url.query)
+        selected = (target == "runs" and "created" in query) or (target == "jobs" and url.path.endswith("/jobs"))
+        if not selected:
+            return fallback(args, **kwargs)
+        page = int(query["page"][0])
+        calls.append(page)
+        rows = [{"id": n} for n in range(100)] if page == 1 else [{"id": 99}, {"id": 100}]
+        field = "workflow_runs" if target == "runs" else "jobs"
+        return SimpleNamespace(stdout=json.dumps({"total_count": 101 if page == 1 else 103, field: rows}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=300)
+    assert result["complete"] is True
+    rows = result["runs"] if target == "runs" else result["runs"][0]["jobs"]
+    assert sorted(row["id"] for row in rows) == list(range(101))
+    assert calls == [1, 2]
+
+
 @pytest.mark.parametrize("elapsed,complete", [(24.5, True), (25, False), (25.5, False)])
 def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, elapsed, complete):
     from scripts.doctor import ci_speed_read
