@@ -428,6 +428,6 @@ def finish(store: RedisStore, slug: str, started: Started, now_ms: int) -> Trans
     bindings.put(slug, record)
     bindings.release(slug, record)
     directory = execution_directory(record)
-    if started.process.poll() is not None and directory is not None:
+    if directory is not None:
         remove_home(directory)
     return record
