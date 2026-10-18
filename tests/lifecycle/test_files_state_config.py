@@ -90,12 +90,16 @@ def test_roots_merge_by_id_and_drop_disabled_or_invalid(tmp_path, monkeypatch):
     assert roots["worktrees"].path == str(tmp_path / "dev" / "worktrees")
 
 
-def test_entries_skip_a_missing_unreadable_or_invalid_file(tmp_path):
+def test_entries_skip_a_missing_directory_or_invalid_file(tmp_path):
     invalid = tmp_path / "invalid.json"
     invalid.write_text("{not json")
     valid = tmp_path / "valid.json"
-    valid.write_text(json.dumps({"roots": [{"id": "extra"}, {"path": "~/x"}]}))
+    roots = [{"id": "extra"}, {"path": "~/x"}, {"id": ""}, {"id": None}, "x", None, 1]
+    valid.write_text(json.dumps({"roots": roots}))
     assert _entries(tmp_path / "missing.json") == []
     assert _entries(tmp_path) == []
     assert _entries(invalid) == []
+    for text in ("null", "[]", "{}"):
+        invalid.write_text(text)
+        assert _entries(invalid) == []
     assert _entries(valid) == [{"id": "extra"}]
