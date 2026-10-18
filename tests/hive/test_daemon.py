@@ -750,6 +750,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                     "provider_error": "",
                     "provider_checked": False,
                     "provider_error_id": "",
+                    "content_refusal": False,
                 },
             }
         },
