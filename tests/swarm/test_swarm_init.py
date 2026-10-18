@@ -13,7 +13,7 @@ from scripts.swarm import cli, naming, swarm_init
 from scripts.swarm_ledger import ledger_creator, new_ledger
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_create_gate import as_lane
-from tests.swarm.test_stack_init import Docker, page
+from tests.swarm.test_stack_init import Docker, compose, page, up
 from tests.swarm.test_stack_init import home as home
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
@@ -107,12 +107,12 @@ def test_init_without_a_valid_name_refuses_with_the_rule_and_two_suggestions(scr
     assert out == f"Swarm not created: {problem}.\n{RULE}  Try: one-way-swarm or one-swarm\n"
 
 
-def test_init_brings_up_the_stack_then_creates_the_paused_swarm_and_its_ledger_in_it(scratch, plan, tmp_path):
+def test_init_brings_up_the_stack_then_creates_the_paused_swarm_and_its_ledger_in_it(scratch, home, plan, tmp_path):
     docker = Stack()
     code, out = init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path), docker=docker)
     assert code == 0
-    steps = [call[-4] for call in docker.calls if "up" in call or "exec" in call]
-    assert steps == ["--no-build", "exec"]
+    started, made = up(home, "300"), compose(home, "exec", "-T", "swarm", "python")
+    assert started in docker.calls and docker.calls.index(started) < docker.calls.index(made)
     doc = new_ledger.repository.get_document("demo-swarm")
     assert (doc["size"], doc["title"], [p["title"] for p in doc["phases"]]) == ("swarm", TITLE, [TITLE])
     assert scratch.config("demo-swarm").state == "paused" and scratch.config("demo-swarm").repo == str(tmp_path)
@@ -202,7 +202,18 @@ def test_names_check_with_the_stack_down_checks_the_rule_only(scratch, capsys):
             return subprocess.CompletedProcess(argv, 1, "", "service swarm is not running")
 
     assert swarm_init.check(["demo-swarm"], os.environ, Down()) == 0
+    assert capsys.readouterr().out == (
+        "valid: demo-swarm; the swarm stack did not answer, so the names it holds were not checked\n"
+    )
+
+
+def test_a_swarm_ledger_left_without_its_swarm_is_free_and_init_finishes_it(scratch, plan, tmp_path, capsys):
+    new_ledger.create("demo-swarm", {"title": "Earlier", "phases": [{"title": "One"}]}, "swarm")
+    assert swarm_init.check(["demo-swarm"], os.environ, Stack()) == 0
     assert capsys.readouterr().out == "valid: demo-swarm\n"
+    assert init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path))[0] == 0
+    assert scratch.slugs() == ["demo-swarm"]
+    assert new_ledger.repository.get_document("demo-swarm")["title"] == "Earlier"
 
 
 def test_a_typed_create_is_refused_and_names_swarm_init(monkeypatch, capsys):

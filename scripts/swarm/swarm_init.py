@@ -36,9 +36,11 @@ else:
 TAKEN = """
 import json
 from scripts.swarm import cli
+from scripts.swarm_ledger import ledger_size
 from scripts.swarm_ledger.repository import repository
 
-print(json.dumps(sorted(set(cli.connect().slugs()) | {row["slug"] for row in repository.list_summaries()})))
+held = {row["slug"] for row in repository.list_summaries() if ledger_size.size_of(row) != "swarm"}
+print(json.dumps(sorted(set(cli.connect().slugs()) | held)))
 """
 
 
@@ -80,13 +82,14 @@ def in_stack(run: stack_init.Run, environ: Mapping[str, str], script: str, order
     return run(argv, input=json.dumps(order), capture_output=True, text=True)
 
 
-def taken(run: stack_init.Run, environ: Mapping[str, str]) -> set[str]:
+def taken(run: stack_init.Run, environ: Mapping[str, str]) -> set[str] | None:
+    """The names the stack holds, or None when it does not answer."""
     done = in_stack(run, environ, TAKEN, {})
-    return set(json.loads(done.stdout)) if done.returncode == 0 else set()
+    return set(json.loads(done.stdout)) if done.returncode == 0 else None
 
 
-def page(environ: Mapping[str, str], name: str) -> str:
-    port = read_env(stack_init.stack_home(environ) / ".env").get("SWARM_PORT", "8765")
+def ledger_page(environ: Mapping[str, str], name: str) -> str:
+    port = read_env(stack_init.stack_home(environ) / ".env")["SWARM_PORT"]
     return f"Ledger page: http://{BIND}:{port}/{name} (open it to follow and steer the work)"
 
 
@@ -111,10 +114,10 @@ def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], 
         if args.repo and repo != found["repo"]:
             return f"{args.name} is taken by the swarm working {found['repo']}", True
         print(json.dumps({"swarm": args.name, "created": False, "repo": found["repo"]}), file=out)
-        print(page(environ, args.name), file=out)
+        print(ledger_page(environ, args.name), file=out)
         return "", False
     for line in lines:
-        print(page(environ, args.name) if line.startswith("Ledger page:") else line, file=out)
+        print(ledger_page(environ, args.name) if line.startswith("Ledger page:") else line, file=out)
     return "", False
 
 
@@ -137,7 +140,7 @@ def init(argv: list[str], environ: Mapping[str, str], run: stack_init.Run, opene
     if problem:
         print(paint(f"Swarm not created: {problem}.", "failed"), file=out)
         if name_taken:
-            rule(out, title, {args.name})
+            rule(out, title, (taken(run, environ) or set()) | {args.name})
         return 1
     print(f"Swarm {args.name} is paused; start it only when you want it: agentihooks swarm {args.name} start", file=out)
     return 0
@@ -150,9 +153,10 @@ def check(argv: list[str], environ: Mapping[str, str] = os.environ, run: stack_i
     checker.add_argument("--plan", help="the plan file whose title seeds the suggestions")
     args = checker.parse_args(argv)
     used = taken(run, environ)
-    if problem := naming.swarm_name_problem(args.name, used):
+    if problem := naming.swarm_name_problem(args.name, used or ()):
         print(f"invalid: {problem}")
-        rule(sys.stdout, plan_title(args.plan) or args.name.replace("-", " "), used)
+        rule(sys.stdout, plan_title(args.plan) or args.name.replace("-", " "), used or ())
         return 1
-    print(f"valid: {args.name}")
+    unchecked = "" if used is not None else "; the swarm stack did not answer, so the names it holds were not checked"
+    print(f"valid: {args.name}{unchecked}")
     return 0
