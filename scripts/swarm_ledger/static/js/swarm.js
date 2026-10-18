@@ -101,22 +101,30 @@ function openFindings(sw) {
   return (sw.findings || []).filter((f) => !f.verdict);
 }
 
+function liveAgents(sw) {
+  return (sw.agents || []).filter((a) => a.state !== "finished");
+}
+
 function liveCaps(sw) {
-  const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
   return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
 }
 
 function laneRoles(sw) {
-  const live = (sw.agents || []).filter((a) => a.state !== "finished"), role = (a) => a.profile || LANE_PROFILES[a.lane];
+  const live = liveAgents(sw), role = (a) => a.profile || LANE_PROFILES[a.lane];
   return LANE_ROLES.map(([lane, lanes, known]) => {
     const agents = live.filter((a) => lanes.includes(a.lane)), names = [...new Set([...known, ...agents.map(role).filter(Boolean)])];
     return [lane, names.map((name) => [name, agents.filter((a) => role(a) === name).length])];
   });
 }
 
-function renderRoles(sw) {
-  $("capacity-unavailable").hidden = !!sw;
+function capacityShown(sw) {
+  $("capacity-unavailable").hidden = !swarmReadError;
+  $("capacity-unavailable").textContent = sw ? "Swarm status could not be read. Showing the last observed state." : "Swarm status could not be read.";
   for (const id of ["capacity-caps", "roles-label", "capacity-roles"]) $(id).hidden = !sw;
+}
+
+function renderRoles(sw) {
   $("capacity-roles").replaceChildren(...(sw ? laneRoles(sw) : []).map(([lane, roles]) => h("div", { class: "sw-role-lane", role: "group", "aria-label": `${lane} roles`, "data-lane": lane },
     h("span", { class: "sw-cap-name", text: lane }),
     ...roles.map(([name, count]) => h("span", { class: "sw-role", "data-role": name }, h("span", { class: "sw-role-name", text: name }), h("span", { class: "sw-role-count", "data-role-count": "", text: String(count) }))))));
@@ -330,6 +338,7 @@ export function renderSwarm(sw) {
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
   renderControls();
+  capacityShown(sw);
   renderRoles(sw);
   titlePause(sw);
   if ($("swarm").hidden) return renderStats();
