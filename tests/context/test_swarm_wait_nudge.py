@@ -143,3 +143,91 @@ def test_the_pre_tool_hook_logs_a_failed_lookup_and_adds_nothing(worker, monkeyp
     monkeypatch.setattr(hook_manager, "log", lambda message, data=None: logged.append((message, data)))
     assert TOLD not in _pre(capsys, _bash("sleep 900"))
     assert ("swarm wait nudge failed", {"error": "redis down"}) in logged
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run watch 123",
+        "gh run watch 123 --interval 60",
+        "gh -R owner/repo run watch 123",
+        "gh --repo owner/repo run watch 123",
+        "gh --hostname github.com run watch 123",
+        "gh -Rowner/repo run watch 123",
+        "gh pr checks 456 --watch",
+        "gh pr checks --watch=true 456",
+        "cd repo && gh run watch 123 | tail -n 1",
+        "gh pr checks 456 --watch; echo done",
+        "bash -lc 'gh run watch 123'",
+        "env DEBUG=api /usr/bin/gh run watch 123",
+    ],
+)
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_the_pre_tool_hook_refuses_independent_github_watches(worker, monkeypatch, capsys, command, target):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", target)
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota") as blocked:
+        _pre(capsys, _bash(command))
+    assert "agentihooks swarm rig wait --on checks <pr url>" in str(blocked.value)
+    assert str(blocked.value) == (
+        "Independent GitHub watches spend the shared GitHub hourly quota. "
+        "Use agentihooks swarm rig wait --on checks <pr url>, "
+        "or wait --on mutation <run url> for Mutation preflight. The swarm tick resolves these waits centrally."
+    )
+
+
+def test_declaring_a_wait_does_not_allow_an_independent_github_watch(worker, capsys):
+    _declare(worker)
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        _pre(capsys, _bash("gh run watch 123"))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "gh run view 123 --json status",
+        "gh pr checks 456",
+        "gh pr checks 456 -w",
+        "gh pr view 456 --json state",
+        "gh api repos/owner/repo/actions/runs/123",
+        "printf '%s' 'gh run watch 123'",
+        "echo 'gh pr checks --watch'",
+        "echo run watch",
+        "gh api repos/owner/repo -f 'body=gh run watch 123'",
+        "gh pr checks 456; echo --watch",
+    ],
+)
+def test_the_pre_tool_hook_keeps_single_github_reads_and_literal_watch_text_allowed(worker, capsys, command):
+    _pre(capsys, _bash(command))
+
+
+@pytest.mark.parametrize("name", ["ci@abc123-0001", "engineer@abc123-0001"])
+def test_each_swarm_worker_lane_is_refused_github_watches(worker, monkeypatch, capsys, name):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        _pre(capsys, _bash("gh run watch 123"))
+
+
+@pytest.mark.parametrize("missing", ["AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"])
+def test_sessions_outside_the_swarm_worker_scope_can_watch(worker, monkeypatch, capsys, missing):
+    monkeypatch.delenv(missing)
+    _pre(capsys, _bash("gh run watch 123"))
+
+
+def test_the_master_can_watch(worker, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@abc123-0001")
+    _pre(capsys, _bash("gh run watch 123"))
+
+
+def test_a_monitor_cannot_start_an_independent_github_watch(worker):
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"command": "gh run watch 123"}})
+
+
+def test_a_monitor_command_alias_cannot_start_an_independent_github_watch(worker):
+    with pytest.raises(hook_manager.BlockAction, match="shared GitHub hourly quota"):
+        nudge.check_github_watch({"tool_name": "Monitor", "tool_input": {"cmd": "gh run watch 123"}})
+
+
+@pytest.mark.parametrize("tool_input", [{}, {"command": ""}, {"command": None, "cmd": ""}])
+def test_empty_monitor_commands_are_allowed(worker, tool_input):
+    assert nudge.check_github_watch({"tool_name": "Monitor", "tool_input": tool_input}) is None

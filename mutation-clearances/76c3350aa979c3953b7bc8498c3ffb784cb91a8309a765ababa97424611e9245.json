@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x_judge__mutmut_31:7032368865c82d7ab1095823e740d5f10e3bf3afe3d1e7ac8b230f1ea974aa47": {
+    "reader": "standards_reader",
+    "reason": "Changes only capitalization in the operator-facing message 'the tests first part may change gate behaviour'. The named shortfall and action remain present, with the same verdict and branch condition; exact typography is not part of the behavior contract."
+  }
+}

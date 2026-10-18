@@ -1,7 +1,10 @@
 import os
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.error import HTTPError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
+
+UPSTREAM_TIMEOUT = 30
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -32,22 +35,34 @@ class SonarProxy(BaseHTTPRequestHandler):
             method=self.command,
         )
         try:
-            response = build_opener(NoRedirect()).open(request, timeout=30)
+            with build_opener(NoRedirect()).open(request, timeout=UPSTREAM_TIMEOUT) as response:
+                status, answer, payload = response.status, response.headers, response.read()
         except HTTPError as error:
             if 300 <= error.code < 400:
                 error.close()
                 self.send_error(502, "Upstream redirects are refused")
                 return
-            response = error
-        with response:
-            payload = response.read()
-            self.send_response(response.status)
-            for name, value in response.headers.items():
-                if name.lower() not in {"connection", "transfer-encoding", "content-length"}:
-                    self.send_header(name, value)
-            self.send_header("Content-Length", str(len(payload)))
-            self.end_headers()
-            self.wfile.write(payload)
+            with error:
+                status, answer, payload = error.code, error.headers, error.read()
+        except OSError as error:
+            status = 504 if "timed out" in str(error) else 502
+            print(
+                f"{self.command} {self.path} got no upstream answer, sent {status}: {error}",
+                file=sys.stderr,
+                flush=True,
+            )
+            self.send_error(status, "No answer from the Sonar server")
+            return
+        if status >= 400:
+            refused_by = " ".join(f"{name}={answer.get(name, '-')}" for name in ("server", "cf-ray", "cf-mitigated"))
+            print(f"{self.command} {self.path} answered {status} {refused_by}", file=sys.stderr, flush=True)
+        self.send_response(status)
+        for name, value in answer.items():
+            if name.lower() not in {"connection", "transfer-encoding", "content-length"}:
+                self.send_header(name, value)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        self.wfile.write(payload)
 
     def log_message(self, format: str, *args) -> None:
         pass

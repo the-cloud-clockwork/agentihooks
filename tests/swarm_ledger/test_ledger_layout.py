@@ -14,8 +14,9 @@ core = layout.core
 
 SAVED = {
     "capacity-box": {"height": 120},
-    "swarm-row-work": {"height": 320, "split": 62.5},
-    "swarm-row-accounts": {"split": 40},
+    "quota-box": {"height": 220},
+    "overlays-box": {"height": 160},
+    "agents-box": {"height": 320},
     "health-box": {"height": 200},
     "handoff-box": {"height": 180},
 }
@@ -91,10 +92,8 @@ def test_a_written_layout_reads_back_for_every_ledger():
     assert layout.read() == SAVED
 
 
-def test_sizes_are_rounded_to_whole_pixels_and_tenths_of_a_percent():
-    assert layout.write({"swarm-row-work": {"height": 320.6, "split": 62.44}}) == {
-        "swarm-row-work": {"height": 321, "split": 62.4}
-    }
+def test_sizes_are_rounded_to_whole_pixels():
+    assert layout.write({"agents-box": {"height": 320.6}}) == {"agents-box": {"height": 321}}
 
 
 def test_an_empty_layout_resets_to_the_defaults():
@@ -126,13 +125,11 @@ def test_an_unreadable_file_reads_as_the_defaults():
         ({"health-box": 100}, "health-box must be an object of sizes"),
         ({"health-box": {}}, "health-box must be an object of sizes"),
         ({"health-box": {"split": 50}}, "health-box takes only height"),
-        ({"swarm-row-work": {"width": 50}}, "swarm-row-work takes only height, split"),
+        ({"quota-box": {"width": 50}}, "quota-box takes only height"),
         ({"health-box": {"height": 47}}, "health-box height must be a number from 48 to 4000"),
         ({"health-box": {"height": 4001}}, "health-box height must be a number from 48 to 4000"),
         ({"health-box": {"height": True}}, "health-box height must be a number from 48 to 4000"),
         ({"health-box": {"height": "100"}}, "health-box height must be a number from 48 to 4000"),
-        ({"swarm-row-work": {"split": 14.9}}, "swarm-row-work split must be a number from 15 to 85"),
-        ({"swarm-row-work": {"split": 85.1}}, "swarm-row-work split must be a number from 15 to 85"),
     ],
 )
 def test_a_layout_out_of_shape_is_refused(body, message):
@@ -142,9 +139,16 @@ def test_a_layout_out_of_shape_is_refused(body, message):
     assert not layout.path().exists()
 
 
-@pytest.mark.parametrize(("key", "value"), [("height", 48), ("height", 4000), ("split", 15), ("split", 85)])
-def test_the_size_limits_are_inclusive(key, value):
-    assert layout.write({"swarm-row-work": {key: value}}) == {"swarm-row-work": {key: value}}
+@pytest.mark.parametrize("value", [48, 4000])
+def test_the_size_limits_are_inclusive(value):
+    assert layout.write({"quota-box": {"height": value}}) == {"quota-box": {"height": value}}
+
+
+def test_read_drops_an_unknown_saved_row_and_keeps_the_known_ones():
+    layout.path().write_text(
+        json.dumps({"swarm-row-work": {"height": 320}, "quota-box": {"height": 200}}), encoding="utf-8"
+    )
+    assert layout.read() == {"quota-box": {"height": 200}}
 
 
 def test_the_route_reads_the_defaults_then_the_saved_layout(port):

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/resume.py:scripts.swarm.resume.x__recover_process__mutmut_5:4607f464c963fb9f4b412b2612a095a28b9072785098aca23679beeee3175734": {
+    "reader": "standards_reader",
+    "reason": "A one argument dict get is defined as get with a None default, the same call as the cleared mutmut_3: blocker receives None, returns no worktree, and the reason is used only for its truthiness in _recover_process and is never returned or stored. The default is unreachable in production because snapshot.worktrees returns every requested name."
+  }
+}

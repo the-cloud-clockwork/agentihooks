@@ -82,6 +82,34 @@ def _headings(entries: list[tuple[int, int, str]], phase: dict) -> list[tuple[in
     return [(n, level) for n, level, title in entries if level and title.casefold() == phase["title"].casefold()]
 
 
+def require_markers(text: str, ranges: dict[str, str]) -> None:
+    entries = [entry for entry in sections(text) if entry[1] or entry[2].strip()]
+    marked = {after[0] for before, after in zip(entries, entries[1:]) if ANCHOR.fullmatch(before[2])}
+    missing = []
+    for lines in ranges.values():
+        start, end = bounds(lines)
+        inside = [entry for entry in entries if start <= entry[0] <= end]
+        levels = [depth for _, depth, _ in inside if depth]
+        missing += [
+            f"{title} on line {n}"
+            for n, depth, title in inside
+            if depth and depth == _task_level(levels) and n not in marked
+        ]
+    if missing:
+        raise ValueError(
+            "plan task sections need a slice marker above each heading, written as "
+            f"<!-- slice: name --> on its own line: {', '.join(missing)}"
+        )
+    named = [anchor for lines in ranges.values() for anchor in slice_anchors(text, lines)]
+    if repeated := sorted({anchor for anchor in named if named.count(anchor) > 1}):
+        raise ValueError(f"each slice marker needs its own name across the plan's phases: {', '.join(repeated)}")
+
+
+def _task_level(levels: list[int]) -> int:
+    top = min(levels)
+    return top + (levels.count(top) == 1)
+
+
 def slice_lines(text: str, name: str, phase_range: str) -> str:
     if not name:
         raise ValueError(f"slice anchor {name} is missing or repeated in its phase")
@@ -137,6 +165,24 @@ def check_phase_ref(doc: dict, phase: dict) -> None:
     ref = phase["plan_ref"]
     if phase_lines(stored_text(ref, doc), [phase])[phase["id"]] != ref["lines"]:
         raise ValueError(f"plan_ref lines for phase {phase['id']} must be the range computed from its plan")
+
+
+def anchors(doc: dict, phase: dict) -> list[str]:
+    ref = phase.get("plan_ref")
+    url = ref["artifact"] if ref else phase.get("plan_url")
+    parts = urlsplit(url).path.split("/") if url else []
+    if len(parts) != 4 or parts[1] != "artifacts":
+        return []
+    try:
+        text = stored_text({"artifact": url, "lines": "1-1"}, doc)
+    except (ValueError, OSError) as exc:
+        raise ValueError(f"phase {phase.get('id')} plan cannot be read: {exc}") from None
+    return slice_anchors(text, ref["lines"] if ref else f"1-{len(text.splitlines())}") if text else []
+
+
+def slice_anchors(text: str, lines: str) -> list[str]:
+    start, end = bounds(lines)
+    return [match[1] for n, _, line in sections(text) if start <= n <= end and (match := ANCHOR.fullmatch(line))]
 
 
 def task_slice(doc: dict, phase: dict, name: str, plan_url: str = "") -> str:

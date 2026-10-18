@@ -264,3 +264,42 @@ def test_claimed_worker_keeps_requested_artifact_behavior(publication, monkeypat
     assert json.loads(capsys.readouterr().out) == {"published": True}
     [row] = ledger.call(slug)["artifacts"]
     assert (row["by"], row["task"]) == (WORKER, "work")
+
+
+@pytest.mark.parametrize("task", ["master", ""])
+def test_page_server_accepts_a_master_plan_without_operator_request(publication, task):
+    slug, path, _ = publication
+    file = ledger.upload_artifact(slug, MASTER, str(path), {"task": task, "title": "Plan", "plan": True})
+    op = {"op": "artifact_add", "id": "plan", "by": MASTER, "task": task, "title": "Plan", "file": file, "plan": True}
+    state = ledger.call(slug, [op])
+    assert state["rejected"] == []
+    [row] = ledger.resource(slug, "artifacts", collection=True)
+    assert (row["by"], row["task"], row["plan"]) == (MASTER, "", True)
+
+
+def test_master_upload_without_plan_or_request_is_refused(publication):
+    slug, path, _ = publication
+    with pytest.raises(SystemExit) as raised:
+        ledger.upload_artifact(slug, MASTER, str(path), {"task": "master", "title": "Audit summary"})
+    assert raised.value.code.startswith("server refused the file: 403 ")
+    assert artifacts.REFUSED in raised.value.code
+    assert ledger.resource(slug, "artifacts", collection=True) == []
+
+
+def test_master_publish_plan_command_publishes_the_plan_artifact(publication, monkeypatch, capsys):
+    slug, path, _ = publication
+    core.sync(slug, ops=[{"op": "phase_add", "id": "add-p1", "by": MASTER, "phase": "p1", "title": "Build"}])
+    monkeypatch.setattr(
+        ledger.ledger_publish,
+        "publish",
+        lambda path, title, repo, artifact, issue_title: (artifact(path, title), "artifact"),
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["ledger", "--slug", slug, "--as", MASTER, "publish-plan", str(path), "--phase", "p1"]
+    )
+    ledger.main()
+    [row] = ledger.resource(slug, "artifacts", collection=True)
+    url = f"{ledger.BASE}/artifacts/{slug}/{row['file']['id']}"
+    assert (row["by"], row["task"], row["plan"]) == (MASTER, "", True)
+    assert json.loads(capsys.readouterr().out) == {"plan_url": url, "published_to": "artifact", "phases": ["p1"]}
+    assert ledger.call(slug)["phases"][0]["plan_url"] == url

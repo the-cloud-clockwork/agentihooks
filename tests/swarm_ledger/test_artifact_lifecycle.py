@@ -114,7 +114,7 @@ class TestCommands:
         file = {"id": "a" * 64 + ".md", "type": "text/markdown", "size": 1}
         with (
             patch.object(ledger, "upload_artifact", return_value=file),
-            patch.object(ledger, "call", return_value=state or {}) as call,
+            patch.object(ledger, "call", side_effect=lambda slug, ops: state or {"applied": [ops[0]["id"]]}) as call,
             patch.object(
                 ledger,
                 "resource",

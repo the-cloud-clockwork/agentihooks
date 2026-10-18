@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/resume.py:scripts.swarm.resume.x__recover_process__mutmut_3:533c48c34f74836696438bdb3be6328f4d5a30178cbb89e396595de07817f79c": {
+    "reader": "standards_reader",
+    "reason": "blocker tests not worktree before any other use, so None and the empty string both return no worktree, the same string. The reason is used only by its truthiness in _recover_process and is never returned or stored, so every input gives identical output."
+  }
+}

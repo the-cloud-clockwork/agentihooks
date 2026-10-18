@@ -1,7 +1,7 @@
 /* The only file in the ledger front end that holds colour values. */
 :root {
   --ink-000: transparent;
-  --ink-950: #010104;
+  --ink-950: #050812;
   --navy-900: #0d1424;
   --steel-060: #0e131b;
   --steel-100: #151c29;
@@ -70,6 +70,7 @@
   --pending: var(--slate-050);
   --selection: var(--blue-700);
   --grip: var(--blue-400);
+  --frozen: var(--blue-300);
 }
 
 main:not(.home) {

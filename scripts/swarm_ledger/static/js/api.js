@@ -15,6 +15,10 @@ export function writeSwarm(body) {
   return fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
 }
 
+export function readModels() {
+  return fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}/models`), { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
 export function uploadImage(file) {
   return fetch(MEDIA_API, { method: "POST", headers: { "X-Ledger-Token": TOKEN }, body: file });
 }
@@ -25,6 +29,14 @@ export function readMetadata() {
 
 export function readWorkspace(taskId) {
   return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
+export function readArchitecture() {
+  return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
+export function writeArchitecture(body) {
+  return fetch(`${API_V1}/architecture/actions`, { method: "POST", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
 }
 
 export function readArtifact(id) {

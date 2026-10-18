@@ -1,0 +1,90 @@
+{
+  "compatibility": "worker-image-sv2-fixture:claude",
+  "nodes": ["worker-a", "worker-b"],
+  "pods": {
+    "oom_killed": {
+      "spec": {"nodeName": "worker-a"},
+      "status": {
+        "phase": "Failed",
+        "containerStatuses": [
+          {"name": "agent", "state": {"terminated": {"reason": "OOMKilled", "exitCode": 137}}}
+        ]
+      }
+    },
+    "evicted": {
+      "spec": {"nodeName": "worker-a"},
+      "status": {"phase": "Failed", "reason": "Evicted", "message": "The node was low on resource: memory."}
+    },
+    "node_unreachable": {
+      "spec": {"nodeName": "worker-a"},
+      "status": {
+        "phase": "Running",
+        "conditions": [{"type": "Ready", "status": "Unknown", "reason": "NodeNotReady"}],
+        "containerStatuses": [{"name": "agent", "state": {"running": {}}}]
+      }
+    },
+    "node_lost": {
+      "spec": {"nodeName": "worker-b"},
+      "status": {"phase": "Unknown", "reason": "NodeLost"}
+    },
+    "image_pull": {
+      "spec": {"nodeName": "worker-b"},
+      "status": {
+        "phase": "Pending",
+        "containerStatuses": [
+          {"name": "agent", "state": {"waiting": {"reason": "ImagePullBackOff", "message": "Back-off pulling image"}}}
+        ]
+      }
+    },
+    "init_image_pull": {
+      "spec": {"nodeName": "worker-b"},
+      "status": {
+        "phase": "Pending",
+        "initContainerStatuses": [{"name": "home", "state": {"waiting": {"reason": "ErrImagePull"}}}]
+      }
+    },
+    "application_exit": {
+      "spec": {"nodeName": "worker-b"},
+      "status": {
+        "phase": "Failed",
+        "containerStatuses": [{"name": "agent", "state": {"terminated": {"reason": "Error", "exitCode": 3}}}]
+      }
+    },
+    "clean_exit": {
+      "spec": {"nodeName": "worker-b"},
+      "status": {
+        "phase": "Succeeded",
+        "containerStatuses": [{"name": "agent", "state": {"terminated": {"reason": "Completed", "exitCode": 0}}}]
+      }
+    },
+    "running": {
+      "spec": {"nodeName": "worker-b"},
+      "status": {
+        "phase": "Running",
+        "conditions": [{"type": "Ready", "status": "True"}],
+        "containerStatuses": [{"name": "agent", "state": {"running": {}}}]
+      }
+    }
+  },
+  "first": {
+    "node": "worker-a",
+    "replacement_node": "worker-b",
+    "native_session": "claude-session-fixture-one",
+    "archive_watermark": 4096,
+    "checkpoints": [
+      {"checkpoint_id": "ckpt-one-1", "sequence": 1, "status": "complete", "compatibility": "worker-image-sv2-fixture:claude"},
+      {"checkpoint_id": "ckpt-one-2", "sequence": 2, "status": "complete", "compatibility": "worker-image-sv2-fixture:claude"},
+      {"checkpoint_id": "ckpt-one-3", "sequence": 3, "status": "partial", "compatibility": "worker-image-sv2-fixture:claude"},
+      {"checkpoint_id": "ckpt-one-4", "sequence": 4, "status": "complete", "compatibility": "worker-image-older:claude"}
+    ]
+  },
+  "second": {
+    "node": "worker-b",
+    "replacement_node": "worker-a",
+    "native_session": "claude-session-fixture-two",
+    "archive_watermark": 128,
+    "checkpoints": [
+      {"checkpoint_id": "ckpt-two-1", "sequence": 1, "status": "complete", "compatibility": "worker-image-sv2-fixture:claude"}
+    ]
+  }
+}

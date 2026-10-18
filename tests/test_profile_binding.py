@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -104,13 +105,62 @@ def test_running_session_validates_the_canary_a_later_render_delivered(tmp_path,
         binding.validate("0" * 24)
 
 
+def test_rehomed_request_validates_against_the_execution_copy(tmp_path, monkeypatch):
+    shared = tmp_path / "engineer" / "codex"
+    shared.mkdir(parents=True)
+    (shared / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (shared.parent / "codex.sources.json").write_text("[]")
+    binding.write(shared, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", shared)
+    launched = json.loads(report.read_text())["rendered"]
+    copy = tmp_path / "execution" / "codex"
+    shutil.copytree(shared, copy)
+    shutil.copyfile(shared.parent / "codex.sources.json", copy.parent / "codex.sources.json")
+    evidence = json.loads((copy / binding.FILE).read_text())
+    (copy / binding.FILE).write_text(json.dumps({**evidence, "home": str(copy.resolve())}) + "\n")
+    env = {"AGENTIHOOKS_PROFILE": "engineer", "CODEX_HOME": str(copy), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "default"))
+
+    binding.rehome(report, copy)
+
+    rendered = json.loads(report.read_text())["rendered"]
+    assert rendered["home"] == str(copy.resolve())
+    assert rendered["canary"] == launched["canary"]
+    assert binding.validate(launched["canary"])["home"] == str(copy.resolve())
+
+
+@pytest.mark.parametrize(
+    ("persona", "stale", "reason"),
+    [
+        ("Other instructions.\n", False, "execution home canary differs from the launch request"),
+        ("Engineer instructions.\n", True, "profile mismatch in rendered binding"),
+    ],
+)
+def test_rehome_refuses_and_marks_an_invalid_execution_copy(tmp_path, persona, stale, reason):
+    shared = tmp_path / "shared" / "codex"
+    copy = tmp_path / "execution" / "codex"
+    for home, text in ((shared, "Engineer instructions.\n"), (copy, persona)):
+        home.mkdir(parents=True)
+        (home / "AGENTS.md").write_text(binding.persona(text))
+        (home.parent / "codex.sources.json").write_text("[]")
+        binding.write(home, "engineer", "codex")
+    if stale:
+        (copy / binding.FILE).write_text((shared / binding.FILE).read_text())
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", shared)
+    launched = json.loads(report.read_text())
+
+    with pytest.raises(ValueError, match=f"^{reason}$"):
+        binding.rehome(report, copy)
+    assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
+
+
 @pytest.mark.parametrize(
     ("source", "target", "message"),
     [
         ("claude", "codex", "Claude cannot transfer to a Codex account"),
         ("codex", "claude", "Codex cannot transfer to a Claude account"),
-        ("codex", "codex", "Codex cannot transfer to a Codex account"),
-        ("codex", "", "Codex cannot transfer to a Claude account"),
         ("", "codex", "Claude cannot transfer to a Codex account"),
         (None, "codex", "Claude cannot transfer to a Codex account"),
     ],
@@ -306,6 +356,24 @@ def test_supported_quota_transfer_preserves_resolved_run_options(monkeypatch):
     ]
     with pytest.raises(ValueError, match="unsupported quota transfer"):
         binding.continuation([], "codex")
+
+
+def test_only_a_master_quota_transfer_continues_with_an_effort_outside_the_swarm_range(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "opus", "AGENTIHOOKS_RUN_EFFORT": "max"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", env, "original"))
+    swarm = {"AGENTIHOOKS_SWARM_EFFORT_RANGE": "medium:high"}
+    master = binding.continuation([], "claude", {**swarm, "AGENTIHOOKS_SWARM_LANE": "master"})
+    assert master == ["--model", "opus", "--effort", "max"]
+    with pytest.raises(ValueError) as error:
+        binding.continuation([], "claude", {**swarm, "AGENTIHOOKS_SWARM_LANE": "eng"})
+    assert str(error.value) == "unsupported quota transfer: saved effort is outside the current swarm range"
+
+
+def test_a_quota_transfer_compares_a_recorded_effort_from_the_other_scale_by_rank(monkeypatch):
+    env = {"AGENTIHOOKS_RUN_MODEL": "sol", "AGENTIHOOKS_RUN_EFFORT": "max"}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "original"))
+    swarm = {"AGENTIHOOKS_SWARM_EFFORT_RANGE": "medium:max", "AGENTIHOOKS_SWARM_LANE": "eng"}
+    assert binding.continuation([], "codex", swarm) == ["-m", "sol", "-c", 'model_reasoning_effort="xhigh"']
 
 
 @pytest.mark.parametrize("lane_agent", ["auto", "codex"])

@@ -151,7 +151,9 @@ class StatsSync(unittest.TestCase):
         state["time_left_minutes"] = 400
         state["_meta"]["time_left"] = {"inputs": {"slots": 1, "ci_minutes": 35}}
         now = core.now_ms()
-        state["_meta"]["events"].append({"kind": "task done", "target": "tasks/closed", "at": now})
+        state["_meta"]["events"].append(
+            {"kind": "task done", "target": "tasks/closed", "at": now, "rev": state["_meta"]["rev"]}
+        )
         storage.import_document(SLUG, state, replace=True)
         reply, rejected = storage.apply_ops(SLUG, ops=[{"op": "stats_sync", "id": "persist"}])
         self.assertEqual(rejected, [])
@@ -185,6 +187,30 @@ class StatsSync(unittest.TestCase):
         self.assertEqual(reply["_meta"]["stats_refresh"]["counts"]["tasks"], {"done": 0, "total": 1})
         self.assertEqual(reply["_meta"]["stats_refresh"]["calculation"]["remaining"], 1)
         self.assertIsNone(reply["_meta"]["stats_refresh"]["calculation"]["minutes"])
+
+    def test_a_tick_write_through_the_api_leaves_a_frozen_chain_out_and_stamps_every_refresh(self):
+        task = {"op": "task_add", "by": "boss", "lane": "eng", "difficulty": "M"}
+        _, rejected = storage.apply_ops(
+            SLUG,
+            ops=[
+                {**task, "id": "n1", "task": "t1", "title": "Held head"},
+                {**task, "id": "n2", "task": "t2", "title": "Held tail", "depends_on": ["t1"]},
+                {**task, "id": "n3", "task": "t3", "title": "Live work"},
+                {"op": "freeze_set", "id": "f1", "verb": "freeze", "target": "tasks/t1", "reason": "hold"},
+            ],
+        )
+        self.assertEqual(rejected, [])
+        tick = {"op": "time_left", "id": "tl1", "by": "swarm", "slots": 1, "ci_minutes": 5}
+        core.check_body({"ops": [tick]})
+        first, rejected = storage.apply_ops(SLUG, ops=[tick])
+        self.assertEqual(rejected, [])
+        calculation = first["_meta"]["time_left"]["calculation"]
+        self.assertEqual((calculation["remaining"], calculation["frozen"], calculation["frozen_work"]), (1, 2, 60))
+        self.assertEqual(first["time_left_minutes"], 30)
+        second, _ = storage.apply_ops(SLUG, ops=[{**tick, "id": "tl2"}])
+        self.assertGreater(second["_meta"]["rev"], first["_meta"]["rev"])
+        self.assertGreaterEqual(second["_meta"]["time_left"]["at"], first["_meta"]["time_left"]["at"])
+        self.assertEqual(second["_meta"]["time_left"]["calculation"]["frozen"], 2)
 
 
 if __name__ == "__main__":

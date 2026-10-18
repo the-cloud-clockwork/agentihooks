@@ -1,6 +1,6 @@
 const view = document.querySelector("main").className;
 const list = document.getElementById("rows");
-const FOLD_KEY = "home-fold", SORT_KEY = "home-sort";
+const SORT_KEY = "home-sort";
 const FIRST = { kind: 1, open: -1, done: -1, swarm: 1, at: -1 };
 const SWARM_RANK = { running: 0, paused: 1, stopping: 1, drained: 2, stopped: 3, closed: 5 };
 const ICONS = {
@@ -63,8 +63,8 @@ function act(cls, act, slug, label, ...kids) {
   return h("button", { class: `act ${cls}`, type: "button", "data-act": act, "data-slug": slug, "aria-label": label }, ...kids);
 }
 
-function ledgerRow(s, cells, controls, lead, attrs) {
-  return h("li", { class: "row", ...attrs }, lead,
+function ledgerRow(s, cells, controls, attrs) {
+  return h("li", { class: "row", ...attrs },
     h("a", { class: "title", href: `/${s.slug}`, "data-tip": s.title, text: s.title }),
     h("span", { class: "kind", text: s.size }), h("span", { class: "ov", "data-tip": s.overview, text: s.overview }),
     ...cells, h("span", { class: "acts" }, ...controls));
@@ -77,15 +77,14 @@ function homeRow(s, now) {
     h("span", { class: `state s-${state || "none"}`, text: state || "no swarm" }), activity(s.updated_at, now)];
   const controls = [s.closed_at ? act("reopen", "reopen", s.slug, `Reopen ${s.title}`, "Reopen") : null,
     act("del", "delete", s.slug, `Move ${s.title} to the bin`, icon("trash"))];
-  const lead = h("button", { class: "fold", type: "button", "aria-expanded": "false", "aria-label": `Show all of ${s.title}`, text: "▸" });
-  return ledgerRow(s, cells, controls, lead, { "data-slug": s.slug, "data-kind": s.size, "data-open": s.open, "data-done": s.done,
+  return ledgerRow(s, cells, controls, { "data-slug": s.slug, "data-kind": s.size, "data-open": s.open, "data-done": s.done,
     "data-swarm": SWARM_RANK[state] ?? 4, "data-at": s.updated_at || 0 });
 }
 
 function binRow(s) {
   const cells = [h("span", { class: "deleted", text: stamp(s.deleted_at) }),
     h("span", { class: "left", text: `${s.days_left} day${s.days_left === 1 ? "" : "s"} left` })];
-  return ledgerRow(s, cells, [act("restore", "restore", s.slug, `Restore ${s.title} to HOME`, icon("restore"), "Restore")], null, {});
+  return ledgerRow(s, cells, [act("restore", "restore", s.slug, `Restore ${s.title} to HOME`, icon("restore"), "Restore")], {});
 }
 
 async function reopenLedger(b) {
@@ -108,16 +107,11 @@ document.addEventListener("click", async (e) => {
   alert(await r.text());
 });
 
-function folding() {
-  const all = document.getElementById("fold-all");
-  if (!all) return;
+function sorting() {
+  if (view !== "home") return;
   const read = (k, f) => { try { return JSON.parse(localStorage.getItem(k) || "null") || f; } catch (e) { return f; } };
   const write = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage blocked: the choice lasts until reload */ } };
   const rows = () => [...list.querySelectorAll("li.row")];
-  const isOpen = (r) => r.classList.contains("open");
-  const fold = (r, open) => { r.classList.toggle("open", open); r.querySelector(".fold").setAttribute("aria-expanded", String(open)); };
-  const label = () => { all.textContent = rows().length && rows().every(isOpen) ? "Collapse all" : "Expand all"; };
-  const remember = () => { const s = read(FOLD_KEY, {}); for (const r of rows()) s[r.dataset.slug] = isOpen(r); write(FOLD_KEY, s); label(); };
   let sort = read(SORT_KEY, {});
   if (!Object.hasOwn(FIRST, sort.key) || ![1, -1].includes(sort.dir)) sort = { key: "at", dir: -1 };
   const value = (r, k) => (k === "kind" ? r.dataset.kind : Number(r.dataset[k]));
@@ -134,28 +128,69 @@ function folding() {
       head.querySelector("i").textContent = on ? (sort.dir > 0 ? "▲" : "▼") : "↕";
     }
   };
-  const saved = read(FOLD_KEY, {});
-  for (const r of rows()) fold(r, saved[r.dataset.slug] === true);
-  label();
   order();
   document.addEventListener("click", (e) => {
-    const b = e.target.closest(".fold,#fold-all,.sort");
-    if (!b) return;
-    if (b.classList.contains("sort")) {
-      const k = b.dataset.sort;
-      sort = sort.key === k ? { key: k, dir: -sort.dir } : { key: k, dir: FIRST[k] };
-      write(SORT_KEY, sort);
-      return order();
-    }
-    if (b === all) {
-      const open = !rows().every(isOpen);
-      for (const r of rows()) fold(r, open);
-    } else {
-      const r = b.closest("li.row");
-      fold(r, !isOpen(r));
-    }
-    remember();
+    const b = e.target.closest(".sort");
+    if (!b || e.target.closest(".col-grip")) return;
+    const k = b.dataset.sort;
+    sort = sort.key === k ? { key: k, dir: -sort.dir } : { key: k, dir: FIRST[k] };
+    write(SORT_KEY, sort);
+    order();
   });
+}
+
+const COLUMN_MIN = 40, COLUMN_STEP = 16;
+let layout = {}, layoutSave = 0;
+
+function heads() {
+  return [...document.querySelectorAll(".row.head > *")];
+}
+
+function applyColumns() {
+  const widths = (layout.columns || {})[view], cells = heads(), panel = document.querySelector(".panel");
+  const sized = Array.isArray(widths) && widths.length === cells.length;
+  panel.classList.toggle("sized-cols", sized);
+  if (sized) panel.style.setProperty("--cols", widths.map((w) => `${w}px`).join(" "));
+  else panel.style.removeProperty("--cols");
+}
+
+function setColumns(widths) {
+  layout = { ...layout, columns: { ...(layout.columns || {}), [view]: widths.map((w) => Math.round(w)) } };
+  applyColumns();
+  clearTimeout(layoutSave);
+  layoutSave = setTimeout(() => {
+    fetch("/api/layout", { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(layout) }).catch(() => {});
+  }, 300);
+}
+
+function columns() {
+  const cells = heads();
+  cells.forEach((cell, i) => {
+    if (i === cells.length - 1) return;
+    const grip = h("span", { class: "col-grip", tabindex: "0", role: "separator", "aria-orientation": "vertical", "aria-label": `Resize the ${cell.textContent.replace(/[↕▲▼]/g, "").trim() || "first"} column` });
+    cell.append(grip);
+  });
+  const measured = () => getComputedStyle(document.querySelector(".row.head")).gridTemplateColumns.split(" ").map(parseFloat);
+  document.addEventListener("pointerdown", (ev) => {
+    const grip = ev.target.closest(".col-grip");
+    if (!grip || ev.button !== 0) return;
+    ev.preventDefault();
+    const index = heads().indexOf(grip.parentElement), start = measured(), x0 = ev.clientX;
+    grip.setPointerCapture(ev.pointerId);
+    grip.classList.add("dragging");
+    const move = (e) => setColumns(start.map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + e.clientX - x0) : w)));
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("lostpointercapture", () => { grip.removeEventListener("pointermove", move); grip.classList.remove("dragging"); }, { once: true });
+  });
+  document.addEventListener("keydown", (ev) => {
+    const grip = ev.target.closest && ev.target.closest(".col-grip");
+    const step = grip && { ArrowLeft: -COLUMN_STEP, ArrowRight: COLUMN_STEP }[ev.key];
+    if (!step) return;
+    ev.preventDefault();
+    const index = heads().indexOf(grip.parentElement);
+    setColumns(measured().map((w, i) => (i === index ? Math.max(COLUMN_MIN, w + step * (ev.shiftKey ? 4 : 1)) : w)));
+  });
+  fetch("/api/layout", { cache: "no-store" }).then((r) => (r.ok ? r.json() : {})).then((saved) => { layout = saved || {}; applyColumns(); }).catch(() => {});
 }
 
 async function start() {
@@ -175,7 +210,8 @@ async function start() {
   } catch (error) {
     list.replaceChildren(h("li", { class: "empty", text: `The ledger list could not be read: ${error.message}` }));
   }
-  folding();
+  sorting();
+  columns();
 }
 
 start();

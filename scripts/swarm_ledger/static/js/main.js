@@ -2,7 +2,8 @@ import { QUOTA_REFRESH_MS } from "./config.js";
 import { $ } from "./dom.js";
 import { flush, loadMetadata, loadSaved, loaded, renderSync, sendSync } from "./sync.js";
 import { showArtifacts } from "./artifacts.js";
-import { editTitle, render, renderStats, saveTitle } from "./render.js";
+import { render, renderStats } from "./render.js";
+import { editOverview, editTitle, saveOverview, saveTitle } from "./edits.js";
 import { clearNotification, clearPriority, showAlerts, showNotifications } from "./notices.js";
 import { foldSections, markOutline, outlineBoxes, reveal, sectionBoxes, showOutline, wireOutline } from "./outline.js";
 import { collapsible, commentBoxes, groupOpen, markToggles, rememberGroup, rememberUnanimous, setAllComments } from "./folds.js";
@@ -10,6 +11,7 @@ import { openHash, startLayout, wireRail, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
+import { loadArchitecture } from "./architecture.js";
 
 function start() {
   loadSaved();
@@ -24,6 +26,13 @@ function start() {
     else if (ev.key === "Escape") { ev.preventDefault(); editTitle(false); }
   });
   $("title-input").addEventListener("input", () => { $("title-error").textContent = ""; });
+  $("overview-edit").addEventListener("click", () => editOverview(true));
+  $("overview-cancel").addEventListener("click", () => editOverview(false));
+  $("overview-form").addEventListener("submit", (ev) => { ev.preventDefault(); saveOverview(); });
+  $("overview-input").addEventListener("keydown", (ev) => {
+    if (ev.key === "Enter" && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); saveOverview(); }
+    else if (ev.key === "Escape") { ev.preventDefault(); editOverview(false); }
+  });
   $("prio-clear-all").addEventListener("click", () => { if (confirm("Clear every priority?")) clearPriority("all"); });
   $("to-top").addEventListener("click", () => $("main-content").scrollTo({ top: 0, behavior: "smooth" }));
   $("bell").addEventListener("click", () => showNotifications($("notif").hidden));
@@ -85,6 +94,7 @@ function start() {
 }
 
 wireSwarm();
+loadArchitecture();
 window.addEventListener("pagehide", () => flush(true));
 document.addEventListener("visibilitychange", () => { if (document.hidden) flush(true); });
 start();

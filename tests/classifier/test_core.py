@@ -260,6 +260,9 @@ def test_decision_log_line_shape(monkeypatch):
         "state_digest",
         "failures",
         "api_down_cached",
+        "definition",
+        "definition_digest",
+        "expected",
     }
     assert line["purpose"] == "model-pick"
     assert line["source"] == "liquid-d1"

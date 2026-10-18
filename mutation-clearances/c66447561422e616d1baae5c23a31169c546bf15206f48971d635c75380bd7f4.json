@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/proofs.py:scripts.swarm_ledger.api.proofs.x_require_controller__mutmut_5:565a65469bf024bbe319882aaf80072c7b0c8c387fb531cd1dd9a22ffa00fa71": {
+    "reader": "standards_reader",
+    "reason": "handler.headers is http.client.HTTPMessage, whose get matches names case-insensitively, so any casing of X-Controller-Credential reads the same credential and changes no output (Development Manifesto 6.2)."
+  }
+}

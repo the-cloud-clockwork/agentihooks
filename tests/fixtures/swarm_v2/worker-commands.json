@@ -1,0 +1,13 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-LDG-05",
+  "credential": "Signed fixture launch grant bound by its registration; never a deployed credential",
+  "poll_interval_ms": 10,
+  "poll_limit": 2,
+  "expires_in_ms": 50,
+  "delivery_delay_ms": 30,
+  "late_delivery_ms": 60,
+  "checkpoint": "refs/checkpoints/fixture-1",
+  "answer": "Use the second plan",
+  "cases": ["a", "b", "c"]
+}

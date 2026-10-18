@@ -11,7 +11,7 @@ TOOLS = {
     "serve": ("ledger_server", []),
     "watch": ("watch_ledger", []),
     "chat": ("chat_ledger", []),
-    "decline": ("ledger_decline", []),
+    "proof": ("proof_ledger", []),
 }
 
 

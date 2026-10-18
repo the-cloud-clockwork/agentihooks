@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_check__mutmut_25:227d1063b8acabbda17646fc57e7554c4b9b758980c22bbda223757136d16019": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: a nonconforming protected loader still appends one problem, preserving the same loader rejection, complete problem count and red exit status. Only diagnostic decoration or case differs; the loader identity remains visible."
+  }
+}

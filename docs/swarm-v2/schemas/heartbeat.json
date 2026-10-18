@@ -20,6 +20,8 @@
     },
     "renewal_sequence": {"type": "integer", "minimum": 0},
     "state": {"enum": ["starting", "working", "waiting", "draining", "stopping"]},
-    "observed_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"}
+    "observed_at": {"$ref": "urn:swarm-v2:common#/$defs/timestamp"},
+    "archive_watermark": {"type": "integer", "minimum": 0, "default": 0},
+    "resources": {"type": "object", "additionalProperties": {"type": "number", "minimum": 0}, "default": {}}
   }
 }

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/hierarchy_backfill.py:scripts.swarm_ledger.hierarchy_backfill.x_backfill__mutmut_13:41e0880396cb6b9ab2b645c3c74b9e2e4ee1c546fe704ae84467e16f43de9775": {
+    "reader": "Standards reader for PR 2308",
+    "reason": "SQLite keywords are case-insensitive, so begin and BEGIN parse to the same statement regardless of the read-only open mode. A python3 3.12.13 / SQLite 3.37.2 probe on an in-memory connection showed both leave in_transaction True with no rows returned."
+  }
+}

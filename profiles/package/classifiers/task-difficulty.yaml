@@ -1,0 +1,19 @@
+version: 1
+purpose: task-difficulty
+fallbacks: cli
+questions:
+  - name: difficulty
+    type: choice
+    instructions: >-
+      Task {id} "{title}": how big is this task by the operator rubric? Judge the work it asks for from the
+      description, kind, profile, territory and phase intent.
+    options:
+      S: "A mundane frontend change: copy, layout, style or a small control on a page, even when grouped with others."
+      M: "Normal agentihooks code or CI work: hooks, scripts, commands, the ledger server, tests or workflows."
+      L: >-
+        Touches infrastructure, collects information, sets configuration or deploys to Kubernetes, possibly
+        together with code.
+thresholds:
+  confidence: 0.6
+rule:
+  type: code

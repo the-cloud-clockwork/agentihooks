@@ -1,0 +1,111 @@
+{
+  "package": "SV2-FSY-02",
+  "dependency": [
+    "SV2-FSY-01"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2414",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2431",
+  "tested_commit": "b22a5468bbebdacda8681d413dbf5b9dbf05c18f",
+  "status": "fixture-qualified",
+  "package_complete": false,
+  "evidence_class": "Local isolated fixture in CI: real git against bare file origins in pytest temporary execution roots laid out by SV2-FSY-01; correct mirror, wrong origin mirror, stale base and four concurrent preparations. Nothing mocked except monkeypatched git failures and timeouts in named refusal tests. Not live rollout proof.",
+  "interfaces": [
+    "scripts.swarm_v2.workspaces.identity(url): normalized, credential free origin identity for https, ssh, git, file and scp origins; credential, query and fragment origins and unsupported schemes raise WorkspaceError",
+    "scripts.swarm_v2.workspaces.prepare(execution, request, reuse=True) -> Workspace: under an exclusive lock in the checkout root, verifies a cached mirror by origin identity, clones into a staging folder beside the mirror, runs an atomic pruning fetch, resolves the base, refuses a base that lacks Request.minimum, names the branch through scripts.swarm.naming, records origin and base atomically before git worktree add; replays the same task generation and fences an older one",
+    "scripts.swarm_v2.workspaces.Request(origin, task, generation, agent, base='dev', minimum='') and Workspace(path, branch, mirror, project, base, base_commit, task, generation, workspace_prepare_seconds)",
+    "scripts.swarm_v2.workspaces.recorded(execution, task) and mirror_path(execution, project, reuse); WorkspaceError for every refusal"
+  ],
+  "supported_versions": {
+    "layout_version": [
+      1
+    ],
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "git": "the git shipped on the ubuntu-latest CI runner; worktree add, fetch --atomic --prune and for-each-ref are required",
+    "origins": "https, ssh, git, file and scp style origins; http and credential bearing origins are refused"
+  },
+  "states": {
+    "observed": "Mirror references, origin configuration, worktree folders and records inside the pytest execution roots",
+    "accepted": "A mirror whose origin identity equals the requested project and a base that contains the required commit",
+    "committed": "The workspace record written atomically under the checkout root before the worktree is added",
+    "externally_verified": "None; no Pod prepares a workspace yet"
+  },
+  "validation": {
+    "red": [
+      "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38057852049 on 1300ff90: tests only commit, workspaces module missing at collection"
+    ],
+    "green": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884 on b22a5468: every unit shard, every mutation shard, sonar and the image and kind jobs passed; earlier green https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063533508 on 0c0e1736",
+    "mutation": "workspaces.py 118 killed, no survivors, no failures, in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884; branch preflights https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38063107153 on 0c0e1736 and https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064415555 on b22a5468 succeeded",
+    "sonar": "Quality gate passed on the pull request analysis in https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+    "review": "Standards and Spec readers ran three rounds and closed; every finding fixed or recorded under remaining_limitations",
+    "local": "No local tests or mutation ran; lint, format and size passed in the pre push gate on every pushed head",
+    "intent": "Intent fix round one added the compatibility check and display label refusals in b22a5468"
+  },
+  "measurements": {
+    "workspace_prepare_seconds": "Workspace.workspace_prepare_seconds, monotonic time from the prepare call to the materialized worktree, saved in the record; the package cases assert it is measured on every preparation",
+    "dimension": "Per preparation, returned on the Workspace"
+  },
+  "rollback_rehearsal": {
+    "action": "prepare with reuse=False ignores the cached mirror and clones fresh beside it under an attempt suffix, so archive references in the old mirror stay valid",
+    "tests": [
+      "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror",
+      "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder"
+    ],
+    "data_safety": "The cached mirror is never deleted or rewritten by a refusal or by disabled reuse; records and worktrees of earlier tasks survive a failed preparation",
+    "observed": {
+      "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+      "outcomes": [
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror unit (3.11, 2) job 114249518730: PASSED at 2026-10-10T15:43:00.6183288Z",
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_clones_fresh_beside_the_cached_mirror unit (3.12, 6) job 114249518770: PASSED at 2026-10-10T15:45:09.2931089Z",
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder unit (3.11, 3) job 114249518796: PASSED at 2026-10-10T15:43:27.1301784Z",
+        "tests/test_swarm_v2_workspaces.py::test_disabled_cache_reuse_ignores_a_wrong_origin_folder unit (3.12, 3) job 114249518858: PASSED at 2026-10-10T15:44:56.3427392Z"
+      ],
+      "result": "With reuse off, a fresh clone landed beside the cached mirror at the fresh base and the cached mirror kept its references; a wrong origin folder at the cached path was ignored rather than reused"
+    }
+  },
+  "scope": {
+    "plan": "Swarm-v2.md SV2-FSY-02, plan lines 3728-3776",
+    "scripts/swarm_v2/workspaces.py": "owned path; clone or fetch a verified repository into the worker local cache, create the task worktree from the fresh base, keep canonical branch naming through scripts.swarm.naming, record base commit and origin identity before the first edit",
+    "tests/test_swarm_v2_workspaces.py and tests/sv2_fsy02_cases.py": "required fixture: correct mirror, wrong origin mirror, stale base and concurrent worktree preparation; cases A, B, C",
+    "evidence/SV2-FSY-02": "evidence record with the pull request and tested commit",
+    "profiles/package/skills/worktree/": "unchanged; the existing development cycle naming and dev base are reused through scripts.swarm.naming"
+  },
+  "remaining_limitations": [
+    "No ssh BatchMode default, because it would override an operator core.sshCommand; a prompt hang is bounded by GIT_TIMEOUT (600 seconds)",
+    "A password stored in a pre-existing mirror's configuration is not rechecked on reuse",
+    "A preparation resumed from its record reports placeholder seconds",
+    "An scp origin with an at sign in a slash free path is refused, which fails closed",
+    "workspace_prepare_seconds values are returned per preparation but not printed by CI, so this record carries no measured figure",
+    "Nothing launches prepare in a live Pod yet; the worker launch package consumes it"
+  ],
+  "cases": {
+    "a": "evidence/SV2-FSY-02/a-result.json",
+    "b": "evidence/SV2-FSY-02/b-result.json",
+    "c": "evidence/SV2-FSY-02/c-result.json",
+    "manifest": "evidence/SV2-FSY-02/manifest.json"
+  },
+  "test_outputs": {
+    "T-SV2-FSY-02-A": "80 of 80 runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+    "T-SV2-FSY-02-B": "88 of 88 runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+    "T-SV2-FSY-02-C": "44 of 44 runs PASSED across the 3.11 and 3.12 shards of https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884"
+  },
+  "completion_evidence": {
+    "line": "record implemented interfaces, supported versions, test outputs, remaining limitations, and the rollback rehearsal",
+    "implemented_interfaces": "interfaces",
+    "supported_versions": "supported_versions",
+    "test_outputs": "test_outputs, with every per test outcome in the a, b and c case files",
+    "remaining_limitations": "remaining_limitations",
+    "rollback_rehearsal": "rollback_rehearsal, with observed outcomes"
+  },
+  "fixture": "World in tests/test_swarm_v2_workspaces.py, per case under pytest tmp_path on an SV2-FSY-01 execution root: correct mirror (bare file origin cloned into the checkout root), wrong origin mirror (another repository at the correct mirror folder), stale base (a base branch lacking the required commit) and concurrent worktree preparation (four tasks prepared from one thread pool)",
+  "compatibility": {
+    "local_path": "wt.sh new from the worktree skill names the branch with agentihooks name worktree (scripts.swarm.naming.worktree) and cuts it from WT_BASE_BRANCH, default dev",
+    "comparison": "branches_and_base_match_the_local_development_cycle: a worker's first and second worktrees for one agent are named exactly as the local path names them (engineer-abc123-0007, then engineer-abc123-0007-2) and the default base is dev, read from wt.sh",
+    "local_skill_changed": false
+  },
+  "authority": {
+    "actor": "Request.agent, the agent name the controller takes from the launch grant; prepare accepts only a name scripts.swarm.naming.parse reads and grants no permission",
+    "refused_labels": "Engineer 7, eng-7@rig-grade-swarm and engineer@ABC123-0007 are refused before any Git I/O in invalid_requests_are_refused_before_any_git_io",
+    "scope": "mirror, worktree and record live under the execution root; two_executions_keep_private_mirrors_and_worktrees"
+  }
+}

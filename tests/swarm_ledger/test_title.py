@@ -63,6 +63,24 @@ class TitleOp(unittest.TestCase):
         self.assertIn(f'href="/{SLUG}"', browser_home(server))
 
 
+class OverviewOp(unittest.TestCase):
+    def setUp(self):
+        make_ledger()
+
+    def test_stores_the_trimmed_overview(self):
+        op = {"op": "overview_set", "id": "overview-1", "text": "  A clearer overview  "}
+        core.check_body({"ops": [op]})
+        state, rejected = core.sync(SLUG, ops=[op])
+        self.assertEqual(rejected, [])
+        self.assertEqual(state["overview"], "A clearer overview")
+        self.assertEqual(state["_meta"]["events"][-1]["kind"], "overview changed")
+
+    def test_refuses_a_non_operator_sender(self):
+        op = {"op": "overview_set", "id": "o-agent", "text": "Agent overview", "by": "swarm-buildout-eng-1"}
+        with self.assertRaises(ValueError):
+            core.check_body({"ops": [op]})
+
+
 class TitleHeader(unittest.TestCase):
     page = page_source()
 
@@ -77,6 +95,12 @@ class TitleHeader(unittest.TestCase):
         self.assertIn('ev.key === "Enter"', self.page)
         self.assertIn('id="title-error"', self.page)
         self.assertIn("document.title = doc.title", self.page)
+
+    def test_page_edits_saves_and_cancels_the_overview(self):
+        self.assertIn('id="overview-edit"', self.page)
+        self.assertLess(self.page.index('id="overview-box"'), self.page.index('id="overview-edit"'))
+        self.assertIn('op: "overview_set"', self.page)
+        self.assertIn('id="overview-input"', self.page)
 
 
 if __name__ == "__main__":

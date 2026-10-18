@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "package": "SV2-FSY-01",
+  "layout_version": 1,
+  "base": "/home/worker/attempts",
+  "roots": {
+    "home": "homes",
+    "runtime": "run",
+    "checkout": "checkouts",
+    "worktree": "worktrees",
+    "spool": "spool",
+    "scratch": "tmp",
+    "seed": "profiles"
+  },
+  "immutable": [
+    "seed"
+  ]
+}

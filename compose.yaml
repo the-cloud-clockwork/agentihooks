@@ -5,7 +5,7 @@ x-swarm-env: &swarm-env
 
 services:
   swarm:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     build: .
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
@@ -26,7 +26,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   controller:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     command:
       - sh
       - -c
@@ -54,7 +54,7 @@ services:
       timeout: 5s
       retries: 3
       start_period: 70s
-      start_interval: 5s
+      start_interval: 1s
     depends_on:
       redis:
         condition: service_healthy
@@ -62,7 +62,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   hive:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     profiles: [join]
     command:
       - agentihooks
@@ -83,12 +83,14 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 30s
+      start_interval: 1s
     depends_on:
       redis:
         condition: service_healthy
     restart: unless-stopped
   redis:
-    image: redis:7
+    image: mirror.gcr.io/library/redis:7
     command: [bash, /compose/start.sh]
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_REDIS_PORT:-6379}:6379"
@@ -106,6 +108,8 @@ services:
       interval: 5s
       timeout: 3s
       retries: 5
+      start_period: 30s
+      start_interval: 1s
     restart: unless-stopped
 volumes:
   swarm-data:

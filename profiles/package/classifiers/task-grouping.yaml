@@ -1,0 +1,14 @@
+version: 1
+purpose: task-grouping
+fallbacks: cli
+questions:
+  - name: group
+    type: yesno
+    each: groups
+    instructions: "Tasks {item}: is this one change surface that one pull request, one review and one browser check cover?"
+    "true": one change surface, one review and one browser check cover every task
+    "false": the tasks need separate changes, reviews or browser checks
+thresholds:
+  confidence: 0.6
+rule:
+  type: code

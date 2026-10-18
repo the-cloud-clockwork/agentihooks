@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_31:9707120c245df1004bcc24a7ea2f610d828030b84f1fd863fa41361bb62a4e5e": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Setting the --previous-execution help to None removes only its --help description; parsing and exit codes are unchanged."
+  }
+}

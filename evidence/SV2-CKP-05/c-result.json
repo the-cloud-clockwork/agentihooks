@@ -1,0 +1,27 @@
+{
+  "assertions": {
+    "accepted_decision_reused": true,
+    "checkpoint_reused": true,
+    "replacement_count": 1,
+    "restore": {
+      "checkpoint_id": "ckpt-one-2",
+      "recovery": "native",
+      "session_id": "claude-session-fixture-one",
+      "watermark": 4096
+    },
+    "rollback": {
+      "automation_paused": true,
+      "awaiting_retained": true,
+      "checkpoint_retained": true
+    }
+  },
+  "case": "C",
+  "evidence_class": "mocked controller with real durable artifacts and native materialization",
+  "independent_fixtures": 2,
+  "input_sha256": {
+    "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
+  },
+  "mocked": true,
+  "package": "SV2-CKP-05",
+  "status": "passed"
+}

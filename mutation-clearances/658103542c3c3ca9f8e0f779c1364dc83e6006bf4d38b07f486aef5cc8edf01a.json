@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/events/patch.py:scripts.swarm_ledger.events.patch.x_list_diff__mutmut_13:308dfc6d303825d131e875dfc16ae62324ca296ab17e361ebcd0d5ebb15028e4": {
+    "reader": "Spec second reader",
+    "reason": "ids_of creates new lists of unique string IDs; identity shortcuts cannot distinguish their string elements, so overlap and list patch are unchanged."
+  }
+}

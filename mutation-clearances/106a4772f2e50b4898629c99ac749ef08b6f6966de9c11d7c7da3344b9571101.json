@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_27:006b9c47c9910343ac4ff65bff11d1df3ec0a7cbc3e023ab63f763915026176b": {
+    "reader": "standards_reader",
+    "reason": "Changes only capitalization in this natural-language classifier criterion: \"Does this part add or update tests for the task's old and new gate states?\". The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

@@ -1,0 +1,269 @@
+{
+  "package": "SV2-FSY-04",
+  "case": "T-SV2-FSY-04-C",
+  "title": "recovery: retrying a completed upload with the same artifact ID returns the committed object without duplication",
+  "tested_commit": "11d056e7ad80ae0bc50c683bfae65f9dc79c517c",
+  "evidence_class": "mocked: a local durable directory under pytest temporary roots and an in memory S3 shaped object store fake with injected truncated uploads, run in CI; no real object store, no Pod and no live rollout proof",
+  "mocked": true,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38071102980",
+  "dimensions": {
+    "fixture": "sv2-fsy-04",
+    "backend": [
+      "local",
+      "object-store"
+    ]
+  },
+  "passed": true,
+  "measurement": {
+    "name": "artifact_upload_verification_failures",
+    "dimensions": {
+      "fixture": "sv2-fsy-04",
+      "backend": [
+        "local",
+        "object-store"
+      ]
+    },
+    "observed_per_backend": {
+      "local": 1,
+      "object-store": 1
+    },
+    "condition": "after one truncated manifest upload through each backend; the earlier verified objects stay readable",
+    "asserted_by": [
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[object-store]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:56.4653358Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[local]",
+        "shard": "unit (3.12, 5)",
+        "output": "PASSED at 2026-10-10T17:23:56.6655475Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[local]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:01.2792177Z"
+      },
+      {
+        "test": "tests/test_swarm_v2_artifacts.py::test_truncated_manifest_upload_publishes_no_manifest[object-store]",
+        "shard": "unit (3.11, 1)",
+        "output": "PASSED at 2026-10-10T17:23:01.3135309Z"
+      }
+    ],
+    "passed": true
+  },
+  "test_counts": {
+    "results": 34,
+    "distinct_tests": 17,
+    "per_python": {
+      "3.11": 17,
+      "3.12": 17
+    }
+  },
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_identical_content_is_stored_once[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.8751919Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_identical_content_is_stored_once[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:54.9395543Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_interrupted_upload_leaves_no_staging[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.0383377Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_interrupted_upload_leaves_no_staging[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.1167300Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retrying_a_completed_upload_returns_the_committed_object_without_writing[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.1813010Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_record_keeps_the_verified_object_and_writes_no_record[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.2465497Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_lost_object_behind_a_record_is_republished_from_matching_content[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.3320314Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_record_keeps_the_verified_object_and_writes_no_record[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.4245574Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retrying_a_completed_upload_returns_the_committed_object_without_writing[local]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.4405643Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_lost_object_behind_a_record_is_republished_from_matching_content[object-store]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.4995807Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcde]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.5045816Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcdeX]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.5075881Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcdeX]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.5727174Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcde]",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:55.6153718Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_local_failed_write_leaves_no_partial_file",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.6975305Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_local_keys_skip_partials_and_missing_prefixes",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:56.7777392Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_package_acceptance_cases_pass",
+      "job": "114268765996",
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T17:23:57.5392300Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_identical_content_is_stored_once[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.4773752Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_identical_content_is_stored_once[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5148246Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_interrupted_upload_leaves_no_staging[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5402501Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_interrupted_upload_leaves_no_staging[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.5709478Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_record_keeps_the_verified_object_and_writes_no_record[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.6414226Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retrying_a_completed_upload_returns_the_committed_object_without_writing[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.6659006Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_truncated_record_keeps_the_verified_object_and_writes_no_record[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.6935882Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_retrying_a_completed_upload_returns_the_committed_object_without_writing[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.6980248Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_lost_object_behind_a_record_is_republished_from_matching_content[local]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7130770Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_lost_object_behind_a_record_is_republished_from_matching_content[object-store]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7538957Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcde]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7608693Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcdeX]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7744803Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[local-artifact body: 0123456789abcdeX]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.7909387Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_damaged_object_is_corrupt_unreadable_and_repaired_by_put[object-store-artifact body: 0123456789abcde]",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:00.8210127Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_local_failed_write_leaves_no_partial_file",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.3628020Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_local_keys_skip_partials_and_missing_prefixes",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.3738819Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_artifacts.py::test_package_acceptance_cases_pass",
+      "job": "114268766014",
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T17:23:01.7241717Z"
+    }
+  ]
+}

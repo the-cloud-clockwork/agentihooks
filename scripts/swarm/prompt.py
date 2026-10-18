@@ -1,20 +1,21 @@
 """The opening prompt of a swarm agent: one task, one life; or the master, who stays for the life of the swarm."""
 
 import json
-import os
 
 from scripts.doctor import priming
 from scripts.handoff.check import section
 from scripts.inbox.seats import MATURITIES
 from scripts.swarm import naming, plan_review
 from scripts.swarm.health.verdicts import VERDICTS
-from scripts.swarm.store import ASSIST, DELEGATE, FULL, MANUAL, MASTER
+from scripts.swarm.store import ASSIST, DELEGATE, DISPATCH, FULL, MANUAL, MASTER
 from scripts.swarm_ledger import ledger_close, ledger_kinds, plan_read
+from scripts.swarm_v2 import masters
 
 CLOSES = "The swarm then closes this session; stop working."
 OVERLAP_LINE = (
     "Running tasks share areas with yours. Coordinate with each claimant through the inbox "
-    '(agentihooks msg send <claimant> "<text>") and merge dev into your branch before your own merge:'
+    '(agentihooks msg send <claimant> "<text>") and merge dev only on a real conflict; '
+    "where the repo has a merge queue, it retests your green head against the newest dev:"
 )
 GROUP_LINE = (
     "Your task leads a group: deliver these grouped tasks too, in the same worktree and one pull request, and name "
@@ -56,10 +57,12 @@ def ledger_read(slug: str) -> str:
 
 def build_master(slug, repo, name, task, autonomy=DELEGATE):
     from scripts.profiles import codex_master
+    from scripts.swarm import capabilities
 
     codex = task.get("harness") == "codex"
+    push = not capabilities.of(task.get("harness"), task.get("transport")).requires_foreground_inbox_wait
     if codex:
-        task = codex_master.handoff(task, slug)
+        task = codex_master.handoff(task, slug, push)
     me = f"agentihooks swarm {slug} --as {name}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     summary = summary_lines(slug)
@@ -69,6 +72,7 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "You troubleshoot with read only diagnostics, plan with the operator and configure the swarm, the ledger "
         "and the operator's environment with him through the agentihooks commands and tools. You never edit code or config "
         "files in a repository, commit, merge or claim a task: engineers do that.",
+        *masters.seat_lines(slug, task),
     ]
     lines += [
         *priming_lines(task),
@@ -88,10 +92,12 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "once.",
         "",
         "Your standing duties:",
-        *([codex_master.waiting(slug)] if codex else []),
+        *([codex_master.waiting(slug, push)] if codex else []),
         *(
             [
-                "When writing a handoff, make its Next action read agentihooks msg inbox and use "
+                "When writing a handoff, make its Next action read agentihooks msg inbox."
+                if push
+                else "When writing a handoff, make its Next action read agentihooks msg inbox and use "
                 f"agentihooks swarm {slug} wait --inbox when no work remains."
             ]
             if codex
@@ -103,8 +109,9 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
         "types in this pane here.",
         "- A message that needs no work, such as a thanks, a confirmation or a reply that asks for nothing, carries "
         '--fyi: agentihooks msg send <address> --fyi "<text>", agentihooks msg reply <id> --fyi "<text>" or '
-        f'{me} say "<text>" --to <agent name> --fyi. Its receiver closes it done with nothing more to name; a '
-        "work item without --fyi closes with where the work went.",
+        f'{me} say "<text>" --to <agent name> --fyi. Information closes on read or confirmed receipt. '
+        "After handling a confirmed work item, explicitly reply or close it with where the work went; "
+        "keep unresolved work and proof checks open.",
         f'- Keep the ledger current: {led} phase <phase id> done|open, {led} comment phases/<phase id> "<status>", '
         f'{led} followup add "<text>", and {led} time-left "<duration>" whenever progress or blockers change it.',
         f"- {waiting_line(led)}",
@@ -127,6 +134,8 @@ def build_master(slug, repo, name, task, autonomy=DELEGATE):
             else []
         ),
         plan_review.review_line(me, autonomy),
+        f'- Authorize scope a task\'s description omits with {led} comment tasks/<id> "In scope: <the piece>": '
+        "the plan trace keeps a piece that comment covers.",
         *(
             [
                 f'- Answer an agent\'s question you can decide with {led} answer questions/<id> "<answer>": it is '
@@ -171,10 +180,9 @@ def peer_lines(peer):
 
 
 def summary_lines(slug):
-    from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm import ledger_read
 
-    overview = str((read_ledger(ledger_folder(os.environ), slug, "overview") or {}).get("overview"))
+    overview = str(ledger_read.parts(slug, "overview").get("overview"))
     _, marker, summary = overview.partition(ledger_close.MARK)
     if not marker:
         return []
@@ -232,9 +240,41 @@ def operator_plan_steps(slug, led, leave):
     ]
 
 
+def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str = DELEGATE) -> str:
+    from scripts.swarm import dispatch_seat
+
+    me = f"agentihooks swarm {slug}"
+    led = f"agentihooks ledger --slug {slug} --as {name}"
+    lines = [
+        f"You are {name}, the dispatcher of swarm {slug}, working beside its master in the repo {repo}. "
+        f"The swarm runs at {autonomy} autonomy.",
+        "The tick woke you because its deterministic passes could not settle these triggers:",
+        *(dispatch_seat.line(trigger) for trigger in task.get("triggers", [])),
+        *priming_lines(task),
+        "",
+        f"Before anything else, run once: {led} join. Then read the ledger with {ledger_read(slug)} and each trigger's "
+        "item in it.",
+        "Settle each trigger within the swarm's autonomy with the agentihooks commands, the classifiers and read only sub "
+        f'agents: comment on its item with {led} comment <item> "<text>", close a decided follow up, rank a task, and '
+        f"clear the priority once it is resolved with {led} priority clear <priority id>.",
+        "For a decision only the operator can make, tell the master and hand its priority to the operator with "
+        f'{led} priority add <item> "<the ask in plain words>": it stays in his Priorities and no longer counts as your '
+        "trigger. Never ask the operator yourself. You never edit code or config files, commit, merge or claim a task.",
+        f'After each trigger, tell the master what you did: agentihooks msg send {MASTER}@{slug} "<plain words>".',
+        'New triggers arrive as inbox messages: answer one with agentihooks msg reply <id> "<text>", or close it with '
+        'agentihooks msg close <id> done "<where the work went>".',
+        f'While you wait on a trigger, declare it: {me} wait 30 --reason "<what you wait on>".',
+        f"When every trigger is closed, run {led} leave, then {me} done and stop: the swarm ends your session.",
+        "Write ledger comments and messages in plain words: no ids, paths, hashes or dashes.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
     if lane == MASTER:
         return build_master(slug, repo, name, task, autonomy)
+    if lane == DISPATCH:
+        return build_dispatcher(slug, repo, name, task, autonomy)
     me = f"agentihooks swarm {slug}"
     led = f"agentihooks ledger --slug {slug} --as {name}"
     phase = task.get("phase") or "<phase id>"
@@ -289,7 +329,9 @@ def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
         "",
         f'Talk to the swarm and the operator with {me} say "<text>" (add --to <agent name>, eng or ci). '
         'Messages for you arrive in this session as inbox messages: answer one with agentihooks msg reply <id> "<text>". '
-        "Add --fyi after the id or address of a thanks or confirmation that needs no work. "
+        "Mark status reports with --fyi when they request no receiver action; information closes on receipt. "
+        "After handling confirmed work, explicitly reply or close it with an outcome. "
+        "Keep unresolved work and proof checks open. "
         "Write chat and comments in plain words for the operator: no ids, "
         "paths, hashes or dashes.",
         "Other agents work other tasks in parallel. Touch only what your task needs.",
@@ -468,19 +510,20 @@ def code_steps(me, led, name, phase):
         issue_step(me, "the seams"),
         f"2. Create your worktree: wt.sh new {name} (never edit the primary checkout), then call {SERENA}",
         "3. Red test, least code to green.",
-        "4. Gates green (ruff check, ruff format --check and the tests), commit in the worktree; at your first commit "
-        f"push the branch (git push -u origin HEAD) and record it: {me} branch. Then review per the "
+        f'4. Gates green in CI. Publish each change with {me} publish --message "<commit message>" -- <explicit touched files>. '
+        "It resolves your task worktree, commits only those files, runs the committed HEAD prepush gate, then "
+        "pushes and records the branch; fix failures and repeat the same command. Tests run only in CI. "
+        "Then review per the "
         "dev-cycle skill: at most two critic sub agents, Standards and Spec, that never edit and send every finding "
-        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds.",
+        "back to you; fix each finding, the same reader re-reviews, and review closes after three rounds. "
+        f"Start every review round with {me} review; the third round closes review and a fourth is refused.",
         f"5. Push, open the pull request into dev (with Closes #<n> when there is an issue), record it: {me} pr <pr url>",
-        f"6. Wait on the checks with {me} wait --on checks <pr url>: the tick ends the wait and tells you when they "
-        f"resolve, so no Monitor is needed. Queue on green checks with {me} merge queue <pr url>, then "
-        f"{me} wait --on merge <pr url>. Report queue state with {me} merge state <pr url>. "
-        f"Before fixing a queued pull request, dequeue first with {me} merge dequeue <pr url>, then push, "
-        f"then queue again with {me} merge queue <pr url> once checks pass. "
-        "Keep the worktree until the tick confirms merged; a red merge wait means fix the pull request and "
-        "queue it again. After merged, run wt.sh done.",
-        f"7. Leave the crew with {led} leave, then close the task: {me} done --pr <pr url>. {CLOSES}",
+        "6. Once both reviews closed and the pull request is out of draft, write a short Handoff v2 document with "
+        "the handoff skill: what the pull request delivers, how review closed and what a successor fixes if its "
+        f"checks go red. Leave the crew with {led} leave, then release your seat: {me} ready <handoff doc>. The "
+        "swarm watches the checks, queues the pull request on green, waits for the merge, closes the task and "
+        "removes your worktree; red checks reopen the task for the next engineer with your handoff. "
+        f"{CLOSES}",
     ]
 
 
@@ -491,16 +534,13 @@ def reuse_issue_step(me, task):
 
 
 def stacked_steps(me, led, name, task):
-    first, *others = task["stack_base"]
-    ref = _continue_from(task) or f"origin/{first['branch']}"
-    merges = "".join(f" Merge each other open dependency into it: git merge origin/{dep['branch']}." for dep in others)
+    deps = task["stack_base"]
     return [
         "Your task depends on work still open. Build on top of it, push and park; the next engineer finishes it "
         "once its dependency is done:",
-        *(f"Dependency {dep['task']} is still open on branch {dep['branch']}." for dep in task["stack_base"]),
+        *(f"Dependency {dep['task']} is still open on branch {dep['branch']}{_in_repo(dep)}." for dep in deps),
         reuse_issue_step(me, task),
-        f"2. Create your worktree from the dependency branch: wt.sh new {name} --from {ref}, then call {SERENA}"
-        f"{merges}",
+        _stacked_cut(name, task, [dep for dep in deps if not dep.get("repo")]),
         "3. Build what you can on top of the dependency: red test, least code to green. Leave what needs the "
         "dependency finished and name it in your handoff.",
         "4. Gates green on what you built, commit with the issue in the message (Refs #<n>) so the branch points at "
@@ -509,6 +549,25 @@ def stacked_steps(me, led, name, task):
         f"waits on it. Leave the crew with {led} leave, then park: {me} park <doc>. Park comments the branch on the "
         f"issue so they point at each other, and the task waits on its branch. {CLOSES}",
     ]
+
+
+def _in_repo(dep):
+    return f" in repository {dep['repo']}" if dep.get("repo") else ""
+
+
+def _stacked_cut(name, task, local):
+    ref = _continue_from(task) or (f"origin/{local[0]['branch']}" if local else "")
+    if not ref:
+        return (
+            "2. Every open dependency branch lives in another repository, so cut your worktree from dev in your own "
+            f"repository: wt.sh new {name}, then call {SERENA}"
+        )
+    merges = "".join(
+        f" Merge each other open dependency into it: git merge origin/{dep['branch']}." for dep in local[1:]
+    )
+    return (
+        f"2. Create your worktree from the dependency branch: wt.sh new {name} --from {ref}, then call {SERENA}{merges}"
+    )
 
 
 def finish_steps(steps, me, name, task):
@@ -525,8 +584,17 @@ def task_steps(task, me, led, name, phase, autonomy):
     steps = kind_steps(kind, me, led, name, phase, autonomy, task["id"])
     if kind not in STACKED_KINDS:
         return continued(steps, name, task)
-    if task.get("parked_on"):
+    if task.get("parked_on") and _verdict(task).get("continue_from") == "fresh":
+        return [f"Start your worktree fresh from dev: {_verdict(task)['fresh_reason']}.", *steps]
+    if task.get("parked_on") and task.get("branch") and task.get("stacked_base"):
         return finish_steps(steps, me, naming.plain(name), task)
+    if task.get("parked_on"):
+        parked_on = ", ".join(task["parked_on"])
+        return [
+            f"Your task was parked on {parked_on}, but the park lacks a branch or a stacked base: "
+            "start it fresh from dev.",
+            *steps,
+        ]
     if task.get("stack_base"):
         return stacked_steps(me, led, naming.plain(name), task)
     return continued(steps, name, task)
@@ -534,6 +602,7 @@ def task_steps(task, me, led, name, phase, autonomy):
 
 def ci_steps(me, led, name, phase):
     steps = code_steps(me, led, name, phase)
+    steps[2] = f"2. Prepare your task worktree: {me} prepare (never edit the primary checkout), then call {SERENA}"
     steps[3] = (
         "3. Red first on a real run: show the workflow failing or slow, then the least change that turns it green "
         "or fast. Put the run links before and after in the pull request."

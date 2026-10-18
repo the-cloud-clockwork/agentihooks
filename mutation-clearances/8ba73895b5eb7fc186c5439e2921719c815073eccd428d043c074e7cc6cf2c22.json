@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x__guarded__mutmut_13:7915209495f200d541b49518ec6412efce0e08ce51425a58b162b82d004238bf": {
+    "reader": "standards_reader",
+    "reason": "Equivalent rejection: a missing runner-trust job yields None instead of an empty mapping; both differ from the required protected uses mapping, so _guarded returns False before inspecting the condition. An existing job is unchanged."
+  }
+}

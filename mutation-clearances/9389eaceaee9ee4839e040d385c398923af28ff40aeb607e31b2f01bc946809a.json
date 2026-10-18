@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_35:d0ce6fc371674b94be48d3c1edbce8dbc497cdcced4ec8b834ed74308e3d7791": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Setting the --seat help to None changes only the text --help prints for that option; parsing, default and exit code are unchanged."
+  }
+}

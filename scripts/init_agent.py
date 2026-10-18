@@ -7,10 +7,11 @@ import shutil
 import subprocess
 import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import agent_choice, claude_trust, herdr_host, herdr_panes, operator_env
+from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
 from scripts.targets.codex_target import codex_home, restore_hook_order
 
@@ -88,8 +89,13 @@ class AgentSpec:
     channel: bool = False
     overlays: tuple = ()
     bundle_revision: str = ""
+    auth: str = ""
+    transport: str = ""
+    seat: str = ""
+    previous_execution: str = ""
 
 
+APP_SERVER = "app_server"
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
 PREDECESSOR = "AGENTIHOOKS_PREDECESSOR_SESSION"
 SWARM_IDENTITY = (
@@ -131,17 +137,28 @@ def _telemetry_exports(name: str, environ: dict[str, str]) -> str:
 def _swarm_exports(environ: dict[str, str]) -> str:
     if not environ.get("AGENTIHOOKS_SWARM"):
         return ""
-    names = ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_SWARM_LANE", "AGENTIHOOKS_SWARM_TASK", "AGENTIHOOKS_COMPACT_LIMIT")
+    names = (
+        "AGENTIHOOKS_SWARM",
+        "AGENTIHOOKS_SWARM_LANE",
+        "AGENTIHOOKS_SWARM_TASK",
+        "AGENTIHOOKS_COMPACT_LIMIT",
+        "AGENTIHOOKS_LEDGER_AGENT_TOKEN",
+    )
     exports = {name: environ[name] for name in names if environ.get(name)}
     exports["AGENTIHOOKS_LANGFUSE_ENABLED"] = "1"
-    pin = "export AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
+    pin = "unset SWARM_SECRET\nexport AGENTIHOOKS_SWARM_LAUNCHER=$$\n"
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
 
 
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
     keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
     dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
-    return {key: value for key, value in environ.items() if key not in dropped}
+    launch_env = {key: value for key, value in environ.items() if key not in dropped}
+    if launch_env.get("AGENTIHOOKS_SWARM"):
+        gateway = operator_env.values(environ).get("MCP_KEY_GATEWAY")
+        if gateway:
+            launch_env["MCP_KEY_GATEWAY"] = gateway
+    return launch_env
 
 
 def _with_predecessor(environ: dict[str, str], handoff: bool) -> dict[str, str]:
@@ -182,9 +199,12 @@ def _codex_trust_args(directory: Path, environ: dict[str, str]) -> list[str]:
 
 
 MODEL_DEFAULTS = {"claude": "opus", "codex": "gpt-6.1-sol"}
-EFFORT_DEFAULT = "high"
+EFFORT_DEFAULT = "medium"
 AGENT_HELP = "Agent to open; default the harness of the account with a free session and the fewest live sessions"
 LAUNCH_GRACE_S = 3
+STARTED_ROUTES = ("routed", "bare", "direct")
+PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
+CODEX_READY_S = 120.0
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -198,15 +218,48 @@ def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
 
 
 def _handoff_agent(requested: str, environ: dict[str, str], agent_args: list[str]) -> str:
-    source = environ.get("AGENTIHOOKS_TARGET") or "claude"
+    source = environ.get("AGENTIHOOKS_TARGET") or _live_harness()
     target = requested or source
     if _flag_value(agent_args, ("--route",)) == "api":
         return target
-    if requested == "codex" or source == "codex":
+    if "codex" in (requested, source) and target != source:
         raise ValueError(
-            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {(requested or 'claude').capitalize()} account"
+            f"unsupported quota transfer: {source.capitalize()} cannot transfer to a {target.capitalize()} account"
         )
-    return "claude"
+    return "codex" if source == "codex" else "claude"
+
+
+def _live_harness() -> str:
+    from scripts.profiles import binding
+
+    try:
+        return binding.process()[1]
+    except (OSError, ValueError):
+        return "claude"
+
+
+def _handoff_exclude(agent: str, environ: dict[str, str]) -> str:
+    """The account a quota handoff leaves; for Codex it comes from the live process because the
+    operator environment can carry every AH_CX_TOKEN_*, which hides the session's own account."""
+    from hooks.context.account_sessions import UNROUTED, environment_account
+    from scripts.profiles import binding
+
+    if agent == "codex":
+        _, _, _, current = binding.process()
+        return current
+    current = environment_account(environ)
+    return "" if current == UNROUTED else current
+
+
+def _mark_handoff(account: str, resumed: str) -> list[str]:
+    from hooks.context.account_sessions import agent_pid
+    from hooks.context.broadcast import mark_handed_off
+    from hooks.lifecycle import handoff_close
+
+    pid = agent_pid()
+    if resumed:
+        handoff_close.handoff_record(pid, resumed).touch()
+    return mark_handed_off(pid, account)
 
 
 def model_effort(agent: str, agent_args: list[str], environ: dict[str, str]) -> tuple[str, str]:
@@ -244,27 +297,89 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
+def _app_server_command(
+    spec: AgentSpec, report: Path, agent_args: list[str], environ: dict[str, str], directory: Path, opening: Path | None
+) -> list[str]:
+    return [
+        sys.executable,
+        "-m",
+        "scripts.codex_session",
+        "serve",
+        "--cwd",
+        str(directory),
+        "--profile",
+        spec.profile,
+        "--seat",
+        spec.seat,
+        *[f"--overlay={overlay}" for overlay in spec.overlays],
+        *([f"--bundle-revision={spec.bundle_revision}"] if spec.bundle_revision else []),
+        *(["--exclude", spec.exclude] if spec.exclude else []),
+        "--report",
+        str(report),
+        *(["--previous-execution", spec.previous_execution] if spec.previous_execution else []),
+        *(["--resume", spec.resume] if spec.resume else []),
+        *(["--prompt-file", str(opening)] if opening else []),
+        "--",
+        *(["--route", spec.auth] if spec.auth else []),
+        *_codex_otel_args(environ),
+        *_codex_trust_args(directory, environ),
+        *_model_args("codex", agent_args, environ),
+        *agent_args,
+    ]
+
+
+def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str], inputs: list[str]) -> str:
+    """The supervised server removes its own inputs; closing the pane ends only the viewer."""
+    log = launcher.with_name(f"{launcher.stem}.serve.log")
+    viewer = [
+        sys.executable,
+        "-m",
+        "scripts.codex_session",
+        "attach",
+        "--slug",
+        environ.get("AGENTIHOOKS_SWARM") or "",
+        "--agent",
+        name,
+    ]
+    server = shlex.quote(f"{serve}; rm -f {shlex.join(inputs)}")
+    return f"setsid -f sh -c {server} </dev/null >>{shlex.quote(str(log))} 2>&1\n{shlex.join(viewer)}"
+
+
 def _agent_command(
-    spec: AgentSpec, report: Path, name: str, agent_args: list[str], environ: dict[str, str], directory: Path
+    spec: AgentSpec,
+    report: Path,
+    name: str,
+    agent_args: list[str],
+    environ: dict[str, str],
+    directory: Path,
+    opening: Path | None = None,
 ) -> tuple[list[str], str]:
     """(command, line run before it): Claude routes through `agentihooks claude`, Codex through `agentihooks codex`."""
     agentihooks_bin = shutil.which("agentihooks") or str(Path(sys.argv[0]).resolve())
+    if spec.agent == "codex" and spec.transport == APP_SERVER:
+        return _app_server_command(spec, report, agent_args, environ, directory, opening), ""
     if spec.agent == "codex":
         command = [
             agentihooks_bin,
             "codex",
+            *(["--route", spec.auth] if spec.auth else []),
+            *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
             "--agentihooks-report",
             str(report),
-            *(["resume", spec.resume] if spec.resume else []),
             *_codex_otel_args(environ),
             *_codex_trust_args(directory, environ),
-            *_model_args("codex", agent_args, environ),
+            *(_model_args("codex", agent_args, environ) if spec.profile or spec.fallback_bare else []),
             *agent_args,
+            *(["resume", spec.resume] if spec.resume else []),
         ]
-        return _profile_command(command, spec), ""
+        command = _profile_command(command, spec)
+        if environ.get("AGENTIHOOKS_SWARM"):
+            command = [sys.executable, "-m", "scripts.codex_input", "--", *command]
+        return command, ""
     command = [
         agentihooks_bin,
         "claude",
+        *(["--route", spec.auth] if spec.auth else []),
         *(["--agentihooks-exclude", spec.exclude] if spec.exclude else []),
         *(["--agentihooks-fallback-bare"] if spec.fallback_bare else []),
         "--agentihooks-report",
@@ -280,6 +395,14 @@ def _agent_command(
     return _profile_command(command, spec), before
 
 
+def _opening_prompt(prompt: str, path: Path) -> str:
+    if len(prompt.encode("utf-8")) < PROMPT_ARGUMENT_LIMIT:
+        return prompt
+    from scripts.profiles import binding
+
+    return f"{binding.PROMPT}\n\n{OPENING_FILE_INSTRUCTION}{path}"
+
+
 def _write_launcher(
     directory: Path,
     name: str,
@@ -292,7 +415,8 @@ def _write_launcher(
     safe_name = "".join(character if character.isalnum() or character in "._-" else "_" for character in name)
     stamp = f"{time.strftime('%y%m%d-%H%M%S')}-{os.getpid()}"
     launcher = root / f"{safe_name}-{stamp}.sh"
-    prompt_file = root / f"{safe_name}-{stamp}.prompt" if prompt else None
+    app_server = spec.transport == APP_SERVER
+    prompt_file = root / f"{safe_name}-{stamp}.{'opening' if app_server else 'prompt'}" if prompt else None
     if prompt_file is not None:
         prompt_file.write_text(prompt, encoding="utf-8")
         prompt_file.chmod(0o600)
@@ -302,41 +426,86 @@ def _write_launcher(
     environ = {**installed_langfuse_env(spec.agent), **environ}
     langfuse = environ.get("AGENTIHOOKS_LANGFUSE_ENABLED")
     langfuse_export = f"export AGENTIHOOKS_LANGFUSE_ENABLED={shlex.quote(langfuse)}\n" if langfuse is not None else ""
-    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory)
-    if prompt_file is not None:
-        command_text = f'{shlex.join(command)} "$(cat {shlex.quote(str(prompt_file))})"'
-    else:
-        command_text = shlex.join(command)
-    cleanup = [
-        str(launcher),
-        str(_route_report(launcher)),
-        *([str(prompt_file)] if prompt_file is not None else []),
-    ]
+    opening = prompt_file if app_server else None
+    command, before = _agent_command(spec, _route_report(launcher), name, claude_args, environ, directory, opening)
+    identity = environ.get("AGENTIHOOKS_AGENT_NAME", name) if environ.get("AGENTIHOOKS_SWARM") else name
+    from scripts import session_exit
+
+    exit_record = session_exit.path_for(launcher, environ)
+    exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
+    exit_identity = shlex.join([spec.agent, identity])
+    command_text = shlex.join(command)
+    inputs = [*([str(prompt_file)] if prompt_file is not None else []), str(_route_report(launcher))]
+    if app_server:
+        command_text = _viewer_lines(command_text, launcher, name, environ, inputs)
+    if prompt_file is not None and not app_server:
+        opening_prompt = _opening_prompt(prompt, prompt_file)
+        prompt_arg = (
+            f'"$(cat {shlex.quote(str(prompt_file))})"' if opening_prompt == prompt else shlex.quote(opening_prompt)
+        )
+        held = f'set --; [ -n "${{{PROMPT_AFTER_START}:-}}" ] || set -- {prompt_arg}; unset {PROMPT_AFTER_START}; '
+        command_text = f'{held}{command_text} "$@"' if spec.agent == "codex" else f"{command_text} -- {prompt_arg}"
+    cleanup = [str(launcher), *([] if app_server else inputs)]
     shell = environ.get("SHELL") or "/bin/bash"
     launcher.write_text(
         "#!/usr/bin/env bash\n"
         "set -u\n"
+        "set -m\n"
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
         f"{_predecessor_export(environ)}"
+        f"{gh_config.SHELL_PIN}"
+        f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
         "export AGENTIHOOKS_TERMINAL_LAUNCH=1\n"
-        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(name)}\n"
+        f"export AGENTIHOOKS_AGENT_NAME={shlex.quote(identity)}\n"
         f"{_config_home_export(environ) if spec.agent == 'claude' else ''}"
-        f"{_telemetry_exports(name, environ)}"
+        f"{_telemetry_exports(identity, environ)}"
         f"{_swarm_exports(environ)}"
         f"{langfuse_export}"
         f"{_binding_export(environ)}"
         f"sleep {LAUNCH_GRACE_S}\n"
         f"{before}{command_text}\n"
+        "native_status=$?\n"
+        f'{exit_command} "$native_status" {exit_identity}\n'
         f"rm -f {shlex.join(cleanup)}\n"
         f"[ -e {shlex.quote(str(root))}/closing-$$ ] && {{ rm -f {shlex.quote(str(root))}/closing-$$; exit 0; }}\n"
         "unset AGENTIHOOKS_AGENT_NAME\n"
+        "unset AGENTIHOOKS_EXIT_RECORD\n"
         f"exec {shlex.quote(shell)} -l\n",
         encoding="utf-8",
     )
     launcher.chmod(0o700)
     return launcher, prompt_file
+
+
+def _codex_session_choices(session_id: str) -> tuple[str | None, str | None]:
+    from hooks.observability.transcript import iter_complete_records
+    from hooks.targets.normalizer import codex_rollout_path
+
+    model, effort = "", ""
+    if rollout := codex_rollout_path(session_id):
+        for record, _ in iter_complete_records(rollout, 0):
+            if record and record.get("type") == "turn_context":
+                context = record["payload"]
+                model, effort = context.get("model"), context.get("effort")
+    return model, effort
+
+
+def _plain_codex_handoff(flags: list[str], session_id: str) -> list[str]:
+    from scripts.profiles import binding
+    from scripts.select_profile import _native_options
+    from scripts.swarm.launch_model import configured
+
+    _, harness, source, _ = binding.process()
+    if harness != "codex":
+        raise ValueError(f"unsupported quota transfer from {harness} to codex")
+    native = configured("codex", codex_home(source))
+    model, effort, remaining = _native_options("codex", flags)
+    saved_model, saved_effort = _codex_session_choices(session_id)
+    model = model or saved_model or source.get("AGENTIHOOKS_RUN_MODEL") or native.get("model")
+    effort = effort or saved_effort or source.get("AGENTIHOOKS_RUN_EFFORT") or native.get("effort")
+    return [*model_flags("codex", model, effort), *remaining]
 
 
 def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], environ: dict[str, str]) -> list[str]:
@@ -349,6 +518,8 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
         args.overlay = [o for o in environ.get(OVERLAYS, "").split(",") if o]
         args.bundle_revision = environ.get(BUNDLE_REVISION, "")
     if continuing and not args.profile:
+        if agent == "codex" and args.handoff:
+            return _plain_codex_handoff(flags, args.resume)
         raise ValueError("unsupported continuation: original required profile is missing; pass --profile")
     if not args.profile:
         return flags
@@ -392,6 +563,17 @@ def _selection_refused(environ: dict[str, str]) -> bool:
     from scripts.profiles import binding
 
     return bool(environ.get(binding.REPORT)) and binding.refused(Path(environ[binding.REPORT]))
+
+
+def _route_reported(environ: dict[str, str], timeout: float, route: dict) -> None:
+    from scripts.profiles import binding
+
+    status = route.get("status")
+    if not environ.get(binding.REPORT) or status in STARTED_ROUTES or _selection_refused(environ):
+        return
+    if not status:
+        raise ValueError(f"the harness did not report its route within {timeout:g}s")
+    raise ValueError(f"the harness route is {status}: {route.get('error', 'no error given')}")
 
 
 def _binding_export(environ: dict[str, str]) -> str:
@@ -476,6 +658,16 @@ def _launch_command(
     raise RuntimeError(f"unsupported host OS: {system}")
 
 
+def _transport(args: argparse.Namespace, agent: str) -> str:
+    if args.codex_transport != APP_SERVER:
+        return args.codex_transport
+    if agent != "codex":
+        raise ValueError("--codex-transport app_server runs only a Codex agent")
+    if not (args.seat and args.profile):
+        raise ValueError("--codex-transport app_server needs --seat and --profile")
+    return APP_SERVER
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
@@ -521,12 +713,21 @@ def _parser() -> argparse.ArgumentParser:
         default="",
         help=AGENT_HELP,
     )
+    parser.add_argument("--auth", choices=("interactive",), default="", help="Use the declared interactive login")
     parser.add_argument("--profile", default="", help="Role profile for this run")
     parser.add_argument(
         "--overlay", action="append", default=[], help="Overlay the profile wears; repeat for up to three"
     )
     parser.add_argument("--bundle-revision", default="", help="Render the profile only from this bundle commit")
     parser.add_argument("--resume", default="", help="Reopen this conversation id (Claude --resume, Codex resume)")
+    parser.add_argument(
+        "--codex-transport",
+        choices=("legacy", APP_SERVER),
+        default="",
+        help="Codex: run the supervised app-server for this swarm execution instead of the interactive terminal",
+    )
+    parser.add_argument("--seat", default="", help="Codex app-server: the swarm seat this execution occupies")
+    parser.add_argument("--previous-execution", default="", help="Codex app-server: the execution this launch replaces")
     parser.add_argument(
         "--inbox-channel",
         action="store_true",
@@ -556,7 +757,7 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
 
 def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
-    env = {"HERDR_AGENT": agent}
+    env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if _held_prompt(launcher, agent) else {})}
     placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
     herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
@@ -568,12 +769,25 @@ def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, e
     ]
 
 
+def _held_prompt(launcher: Path, agent: str) -> str:
+    """The opening prompt a Codex pane gets after its rename: typed at launch, the rename would wait behind its turn."""
+    prompt_file = launcher.with_suffix(".prompt")
+    return (
+        _opening_prompt(prompt_file.read_bytes().decode(), prompt_file)
+        if agent == "codex" and prompt_file.exists()
+        else ""
+    )
+
+
 CHANNEL_WARNING_MS = 60_000
+PROMPT_ARGUMENT_LIMIT = 131_072
+OPENING_FILE_INSTRUCTION = "Read the complete opening instructions in this file and follow them: "
 
 
-def _inbox_channel_args() -> list[str]:
+def _inbox_channel_args(environ: dict[str, str]) -> list[str]:
     from scripts.inbox import channel
 
+    channel.register(environ)
     return channel.launch_args()
 
 
@@ -581,6 +795,64 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
     from scripts.inbox import channel
 
     return "answered" if herdr_host.answer(pane, channel.WARNING, environ, CHANNEL_WARNING_MS) else "unseen"
+
+
+def _name_in_herdr(
+    pane: str, name: str, agent: str, environ: dict[str, str], opening: str, since: float, served: bool = False
+) -> list[str]:
+    """A served viewer's thread is named by its server before the first turn."""
+    detected = herdr_host.rename_agent(pane, name, environ)
+    named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+    if served:
+        return named
+    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    if detected and agent == "codex":
+        named += _name_codex_session(pane, name, environ, since, ready)
+    if opening:
+        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
+    return named
+
+
+def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
+    """Codex can read busy again right after its rename."""
+    ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    why = herdr_host.busy(pane, environ) if ready else "not-ready"
+    if why:
+        return f"held:{why}"
+    return "sent" if herdr_host.prompt(pane, opening, environ) else "failed"
+
+
+def _names_pane(route: dict, launcher: Path, agent: str) -> bool:
+    """Codex may start after the route wait ends with no report."""
+    return route.get("status") in STARTED_ROUTES or (not route.get("status") and bool(_held_prompt(launcher, agent)))
+
+
+def _name_codex_session(pane: str, name: str, environ: dict[str, str], since: float, ready: bool) -> list[str]:
+    outcome = herdr_host.name_session(pane, name, environ, _codex_named(environ, name, since)) if ready else "not-ready"
+    herdr_panes.mark(pane, environ, session_name=name if outcome == "named" else f"unset:{outcome}")
+    return [f"session_name={name}"] if outcome == "named" else ["session_name=unset", f"session_name_error={outcome}"]
+
+
+def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[], bool]:
+    """Whether Codex's session index holds the name, set at or after the launch."""
+    index = codex_home(environ) / "session_index.jsonl"
+    stamp = time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(since))
+
+    def named() -> bool:
+        try:
+            lines = index.read_bytes().decode().splitlines()
+        except OSError:
+            return False
+        for line in lines:
+            try:
+                row = json.loads(line)
+            except ValueError:
+                continue
+            if isinstance(row, dict) and row.get("thread_name") == name and str(row.get("updated_at", "")) >= stamp:
+                return True
+        return False
+
+    return named
 
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
@@ -598,22 +870,22 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         agent, reason = (
             (_handoff_agent(args.agent, active_env, claude_args), "handoff")
             if args.handoff
-            else agent_choice.choose(args.agent, active_env)
+            else ((args.agent or "claude", "interactive") if args.auth else agent_choice.choose(args.agent, active_env))
         )
         agent = agent or "claude"
         if args.handoff:
-            from hooks.context.account_sessions import UNROUTED, environment_account
-
-            current = environment_account(active_env)
-            exclude = "" if current == UNROUTED else current
+            exclude = _handoff_exclude(agent, active_env)
             if not prompt:
                 raise ValueError("--handoff needs the handoff document as --prompt-file")
         claude_args = _prepare_profile(args, agent, claude_args, active_env)
         claude_args = effort_range.launch_args(agent, claude_args, active_env)
         if not args.dry_run:
+            from scripts.scheduler.service import ensure_running
+
+            ensure_running(active_env)
             prompt = _binding_request(args, agent, prompt, active_env, claude_args)
         channel = args.inbox_channel and agent == "claude"
-        claude_args = [*_inbox_channel_args(), *claude_args] if channel else claude_args
+        claude_args = [*_inbox_channel_args(active_env), *claude_args] if channel else claude_args
         # A handoff must land on another account, so it never falls back to bare Claude.
         launcher, prompt_file = _write_launcher(
             directory,
@@ -630,6 +902,10 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 channel=channel,
                 overlays=tuple(args.overlay),
                 bundle_revision=args.bundle_revision,
+                auth=args.auth,
+                transport=_transport(args, agent),
+                seat=args.seat,
+                previous_execution=args.previous_execution,
             ),
         )
         host, explicit = _select_host(args.host, active_env)
@@ -731,9 +1007,16 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         report.append(f"route_error={route['error']}")
     pane = next((line.split("=", 1)[1] for line in report if line.startswith("pane_id=")), "")
     herdr_panes.mark(pane, active_env, route_status=route.get("status", "pending"))
-    if pane and route.get("status") in ("routed", "bare", "direct"):
-        renamed = herdr_host.rename_agent(pane, name, active_env)
-        report.append(f"agent_name={herdr_host.agent_name(name) if renamed else 'unset'}")
+    if pane and _names_pane(route, launcher, agent):
+        report += _name_in_herdr(
+            pane,
+            name,
+            agent,
+            active_env,
+            _held_prompt(launcher, agent),
+            launcher_at / 1000,
+            served=args.codex_transport == APP_SERVER,
+        )
         if channel:
             report.append(f"channel_warning={_answer_channel_warning(pane, active_env)}")
     if args.handoff and route.get("status") != "routed":
@@ -743,6 +1026,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         )
         return 3
     try:
+        _route_reported(active_env, args.route_timeout, route)
         report += _binding_result(active_env, args.route_timeout, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
@@ -752,10 +1036,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         print("\n".join(report))
         return 0
 
-    from hooks.context.account_sessions import agent_pid
-    from hooks.context.broadcast import mark_handed_off
-
-    marked = mark_handed_off(agent_pid(), route["account"])
+    marked = _mark_handoff(route["account"], args.resume)
     print("\n".join([*report, "handoff=done", f"handed_off_sessions={','.join(marked) or 'none'}"]))
     return 0
 

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/herdr/operator_setup.py:scripts.swarm_v2.herdr.operator_setup.x_place_redis__mutmut_16:cf4d4c2b3c2634aed2c6799117d1588f01b35b983f3df4980d933ab7f9d9a151": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: X is an ASCII letter that urllib.parse.quote never escapes under any safe value, so safe='XXXX' gives the same output as safe='' for every input; the empty safe is what escapes '/', '@', ':' and space, which the placed URL test asserts."
+  }
+}

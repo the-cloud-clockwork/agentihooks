@@ -1,0 +1,6 @@
+{
+  "scripts/session_exit.py:scripts.session_exit.x_record_exit__mutmut_78:a7dc7023c78f066b1421047b51bf8d5f735a6acc134e3d310d6c56259668e107": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "The staging suffix is private and has no reader. Both staging names receive identical bytes and mode and are atomically replaced into the same final record path, leaving identical successful output."
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_5:5cb230013fdc2cb086caf8d35e94d3055531c09809bf73c0390b2fddcba865e1": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in this natural-language classifier criterion: 'The task text and plan describe the later gate change and remain context, '. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

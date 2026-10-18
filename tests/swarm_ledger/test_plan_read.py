@@ -91,11 +91,47 @@ def test_chunk_keeps_the_plan_lines_verbatim():
 
 def test_exact_is_the_range_without_margin_and_refuses_an_empty_one(slug):
     doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
-    ref = doc["phases"][0]["plan_ref"]
-    assert plan_read.exact(doc, ref, "15-17") == numbered(15, 17)
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17"}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
     with pytest.raises(ValueError) as caught:
-        plan_read.exact(doc, ref, "45-46")
+        plan_read.exact(doc, {**task, "plan_lines": "45-46"})
     assert str(caught.value) == "plan lines 45-46 hold no text"
+
+
+ISSUE = "https://github.com/o/r/issues/7"
+
+
+def test_exact_reads_a_swarm_v2_package_slice_from_the_package_plan(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    monkeypatch.setattr(plan_packages, "text", lambda: "".join(f"row {n}\n" for n in range(1, 30)))
+    task = {"phase": "p9", "plan_lines": "3-4", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    assert plan_read.exact({"phases": [{"id": "p9"}]}, task) == "row 3\nrow 4\n"
+
+
+def test_exact_prefers_the_phase_range_over_a_package_slice(slug, monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    monkeypatch.setattr(plan_packages, "text", lambda: "wrong\n" * 50)
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
+def test_exact_reads_the_task_plan_url_when_the_phase_has_no_range(slug):
+    doc = SQLiteLedgerRepository(core.LEDGER_DIR / DATABASE).read(slug, "phases", "artifacts")
+    artifact = doc["phases"][0].pop("plan_ref")["artifact"]
+    task = {"phase": doc["phases"][0]["id"], "plan_lines": "15-17", "plan_url": artifact}
+    assert plan_read.exact(doc, task) == numbered(15, 17)
+
+
+@pytest.mark.parametrize(
+    "task",
+    [{"phase": "nope", "plan_lines": "1-2"}, {"phase": "p9", "plan_lines": "1-2", "plan_url": ISSUE}],
+)
+def test_exact_refuses_a_slice_without_a_readable_plan(task):
+    with pytest.raises(ValueError):
+        plan_read.exact({"phases": [{"id": "p9"}], "artifacts": []}, task)
 
 
 def test_numbered_keeps_the_plan_line_numbers_and_skips_blank_rows():
@@ -251,6 +287,33 @@ def test_linked_appends_each_anchored_section_once_in_link_order():
     assert plan_read.linked(LINKED_PLAN, "3-6") == f"\n{CASE_A}\n{CASE_B}\n{CASE_C}"
 
 
+@pytest.mark.parametrize(
+    ("source", "lines", "margin", "expected"),
+    [
+        ('[A](#a)\n<a id="a"></a>\n### A\nbody\n', "1-1", 3, ""),
+        ('<a id="a"></a>\n### A\nfirst\nlast\n### Work\n[A](#a)\n', "6-6", 2, "\n### A\nfirst\n"),
+        (
+            '[A](#a) [B](#b)\n<a id="a"></a>\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
+            "1-1",
+            0,
+            '\n### A\nsame\n<a id="b"></a>\n#### B\nsame\n',
+        ),
+    ],
+)
+def test_linked_omits_printed_lines_without_dropping_distinct_equal_rows(source, lines, margin, expected):
+    assert plan_read.linked(source, lines, margin=margin) == expected
+
+
+def test_linked_keeps_unprinted_earlier_cases_when_links_are_reversed():
+    source = '[B](#b) [A](#a)\n<a id="a"></a>\n### A\nfirst\n<a id="b"></a>\n### B\nlast\n'
+    assert plan_read.linked(source, "1-1") == "\n### B\nlast\n\n### A\nfirst\n"
+
+
+def test_linked_defaults_to_excluding_only_the_slice():
+    source = '<a id="a"></a>\n### A\n[A](#a)\nbody\n'
+    assert plan_read.linked(source, "3-3") == "\n### A\nbody\n"
+
+
 def test_linked_follows_only_links_inside_the_slice():
     assert plan_read.linked(LINKED_PLAN, "4-4") == f"\n{CASE_A}"
     assert plan_read.linked(LINKED_PLAN, "3-5") == f"\n{CASE_A}\n{CASE_B}"
@@ -294,9 +357,53 @@ def test_task_read_appends_the_linked_cases_after_the_slice(tmp_path, monkeypatc
     SQLiteLedgerRepository(tmp_path / DATABASE).import_document("linked", {**doc, "_meta": {"rev": 1}})
     rows = LINKED_PLAN.splitlines()
     margin = "".join(f"{row}\n" for row in rows[:16])
-    assert run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"}) == f"{margin}\n{CASE_A}\n{CASE_B}\n{CASE_C}"
+    assert (
+        run(capsys, ["--task", "w1"], {"AGENTIHOOKS_SWARM": "linked"})
+        == f"{margin}\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}"
+    )
     assert run(capsys, ["--task", "head"], {"AGENTIHOOKS_SWARM": "linked"}) == "".join(f"{row}\n" for row in rows[:11])
     assert run(capsys, ["--phase", "p1"], {"AGENTIHOOKS_SWARM": "linked"}) == LINKED_PLAN
+
+
+def test_task_read_resolves_its_anchor_after_lines_are_inserted(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
+    original = "<!-- slice: first -->\n### First\nEarlier work\n\n<!-- slice: assigned -->\n### Assigned\nDo assigned work\n\n<!-- slice: later -->\n### Later\nLater work\n"
+    file = ledger_artifacts.store("shifted", "plan.md", original.encode())
+    ref = {"artifact": f"http://127.0.0.1:8765/artifacts/shifted/{file['id']}", "lines": "1-11"}
+    doc = {
+        "artifacts": [{"plan": True, "file": file}],
+        "phases": [{"id": "p1", "plan_ref": ref}],
+        "tasks": [{"id": "assigned", "phase": "p1", "plan_slice": "assigned", "plan_lines": "5-7"}],
+    }
+    SQLiteLedgerRepository(tmp_path / DATABASE).import_document("shifted", {**doc, "_meta": {"rev": 1}})
+    inserted = "".join(f"Inserted row {n}\n" for n in range(30))
+    ledger_artifacts.path_of("shifted", file["id"]).write_text(inserted + original)
+    assert run(capsys, ["--task", "assigned"], {"AGENTIHOOKS_SWARM": "shifted"}) == (
+        "".join(f"Inserted row {n}\n" for n in range(24, 30)) + original
+    )
+
+
+def test_task_read_refuses_a_missing_anchor_instead_of_using_stored_lines(monkeypatch):
+    task = {"id": "assigned", "phase": "p1", "plan_slice": "missing", "plan_lines": "1-1"}
+    doc = {"tasks": [task], "phases": [{"id": "p1", "plan_ref": {"lines": "1-1"}}]}
+    monkeypatch.setattr(plan_read, "_stored", lambda *args: "# Other section\n")
+    with pytest.raises(ValueError, match="slice anchor missing is missing or repeated"):
+        plan_read.read(doc, "missing", "assigned", None)
+
+
+def test_task_read_resolves_a_package_anchor_from_current_text(monkeypatch):
+    from scripts.swarm_ledger import plan_packages
+
+    original = "## 1. One\n## 2. Two\n## 3. Three\n## 4. Packages\n<!-- slice: SV2-CTL-04 -->\n### Assigned\nDo assigned work\n"
+    source = original.replace("## 4. Packages\n", "## 4. Packages\n" + "Earlier row\n" * 30)
+    monkeypatch.setattr(plan_packages, "text", lambda: source)
+    task = {"id": "assigned", "phase": "p9", "plan_lines": "4-6", "plan_slice": "SV2-CTL-04", "plan_url": ISSUE}
+    doc = {"phases": [{"id": "p9"}], "tasks": [task]}
+    assert plan_read.read(doc, "package", "assigned", None) == (
+        "## 1. One\n## 2. Two\n## 3. Three\n\n"
+        + "Earlier row\n" * 10
+        + "<!-- slice: SV2-CTL-04 -->\n### Assigned\nDo assigned work\n"
+    )
 
 
 def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
@@ -304,4 +411,7 @@ def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
 
     plan = "## 1. One\n## 2. Two\n## 3. Three\n" + LINKED_PLAN.replace("# Plan\n", "")
     monkeypatch.setattr(plan_packages, "text", lambda: plan)
-    assert plan_packages.read("5-8").endswith(f"\n{CASE_A}\n{CASE_B}\n{CASE_C}")
+    result = plan_packages.read("5-8")
+    assert result.endswith(f"\n#### Detail\n- a detail\n\n{CASE_B}\n{CASE_C}")
+    assert result.count("### Case A\n") == 1
+    assert result.count("- a body\n") == 1

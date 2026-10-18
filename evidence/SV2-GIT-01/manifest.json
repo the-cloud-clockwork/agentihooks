@@ -1,0 +1,28 @@
+{
+  "tested_commit": "05f2fb2f6235efa1bdb2cafb3dab95477577a0d7",
+  "evidence_class": "mocked fakeredis store, labelled node fixtures and the chart affinity for cases A to C; the worker registration and heartbeat ran live against a deployed controller in a kind cluster",
+  "inputs": {
+    "tests/fixtures/swarm_v2/control-nodes.json": "b8d05e926dd1722cc6cfa084886dd583d2735676f9bf63c82e415300e4a00dca",
+    "deploy/helm/agentihooks-swarm/values.yaml": "170faadd74c409a8c99f71d6699a09926f50dfb02ec7fdecde67833cdb002709",
+    "deploy/helm/agentihooks-swarm/templates/controller.yaml": "ca5dc0cbd4fef104128325e4657363e3d9a6f33e119721dcd049021e31903120",
+    "deploy/helm/agentihooks-swarm/templates/ledger.yaml": "b41b867adbe244785a794c1da449aad34d155327679fd7c6e55b9f477bbe9d67",
+    "deploy/helm/agentihooks-swarm/templates/networkpolicy.yaml": "c11343b6924f305eebde0c06880fabd588ab8edba63cf9351c50da7567635519",
+    "deploy/helm/agentihooks-swarm/ci/kind-smoke.sh": "534f1fc9b2a650ef8a5cd709638324f43f0a0aa1d1b000d711ec7fd343004e6d",
+    "Dockerfile": "69ca8e5b5dbd28d108a551583816570e76eab1ab0912b24a3b59fd745debca1d",
+    "scripts/swarm_v2/control_service.py": "8b96f072e59d7788c0f67328c6c80006729a44866d6efc60ccf6506efd785be0",
+    "scripts/swarm/controller.py": "3488f42d0cf1319a5da73d4c814501ed2d33cb7c658575c2dbff6632d53b9879",
+    "tests/sv2_git01_cases.py": "b9d7577cd12eba498980f25a7339dcaf627293d50b863147f80d9a5953fec524",
+    "tests/test_swarm_v2_control_service.py": "5eb800094734a2c8a84bf281fce6449daaaa86d90c026f54d95e279f753dbbf6",
+    "tests/test_swarm_v2_git01_evidence.py": "1fd4190e61c963f5f68d8f70e6a1c6d637f6b9fd9feaec84ef2277c73503e71b",
+    "tests/test_swarm_chart_placement.py": "6bfa00e2590ceb954efb27fc3533ad076130928e51e886889d9c9b8d48f5395c"
+  },
+  "antoncore": {
+    "tested_commit": "7da7542d73a7f856a7ec053a1f42ce6263bc8978",
+    "inputs": {
+      "k8s/values-overlays/agentihooks-swarm/values.yaml": "b4909d98bfc478eb52f2bf836823cb8ec3816b9fdacd945ea7abd83494a18647",
+      "k8s/manifests/agentihooks-swarm/launch-signing-key.yaml": "40c951469fd114bf13bc6719522a949923c3e16681328f0bc5f6db3477ab0435",
+      "tests/unit/agentihooks_swarm/test_swarm_control.py": "2347607363488708e099c4fea6ac0eb85b9169a193d0fba0d2c6d8d54d8707bf",
+      "tests/unit/agentihooks_swarm/test_swarm_stack.py": "ea8129084726763598303c7d642d29f59d1791e061049f04a08a4e77d9070720"
+    }
+  }
+}

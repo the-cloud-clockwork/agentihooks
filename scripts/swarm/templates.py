@@ -16,7 +16,7 @@ from scripts.swarm_ledger import ledger_kinds
 
 LANES = ("eng", "ci", "plan", "master")
 DEFAULT_CAPS = {"eng": 2, "ci": 1, "plan": 1, "master": 1}
-DEFAULT_PROFILES = {"eng": "engineer", "ci": "cicd", "plan": "planner", "master": "master"}
+DEFAULT_PROFILES = {"eng": "engineer", "ci": "cicd", "plan": "planner", "master": "master", "dispatch": "dispatcher"}
 AUTO = "auto"
 LANE_FIELDS = ("role", "agent", "model", "effort", "kind", "profile")
 LINK_FIELDS = {"from", "to", "kind"}

@@ -22,29 +22,32 @@ from hooks.targets import buffers_single_envelope
 from hooks.targets.capabilities import can_inject_context
 from hooks.targets.capabilities import context_cap_bytes as capability_cap
 
-_buffer: list[str] = []
+_buffer: list[tuple[str, str]] = []
 _forced = False
+_plain = False
 _hook_fields: dict = {}
 _top_fields: dict = {}
 
 
-def force_buffer() -> None:
-    """Buffer on a target that normally prints raw (claude PreToolUse).
+def force_buffer(plain: bool = False) -> None:
+    """Buffer on a target that normally prints raw (claude).
 
     A PreToolUse decision envelope is only parsed when it is the whole of
     stdout, so every context line printed ahead of it would discard it.
+    *plain* flushes as raw stdout instead, for events that inject it as is.
     """
-    global _forced
+    global _forced, _plain
     _forced = True
+    _plain = plain
 
 
 def forced() -> bool:
     return _forced
 
 
-def buffer_context(content: str) -> None:
-    """Queue *content* for the single end-of-process flush (envelope targets)."""
-    _buffer.append(content)
+def buffer_context(content: str, kind: str = "other") -> None:
+    """Queue *content* for the single end-of-process flush, ranked by *kind*."""
+    _buffer.append((kind, content))
 
 
 def has_buffered() -> bool:
@@ -68,11 +71,20 @@ def drain() -> str:
     """
     _hook_fields.clear()
     _top_fields.clear()
-    if not _buffer:
-        return ""
-    content = "\n".join(_buffer)
+    return "\n".join(text for _, text in drain_blocks())
+
+
+def drain_blocks() -> list[tuple[str, str]]:
+    """Return the buffered (kind, content) blocks, and clear the buffer."""
+    blocks = list(_buffer)
     _buffer.clear()
-    return content
+    return blocks
+
+
+def drain_for_block() -> str:
+    """Return the buffered content to fold into a block message; plain stdout context is dropped."""
+    content = drain()
+    return "" if _plain else content
 
 
 def flush(event_name: str) -> None:
@@ -83,13 +95,18 @@ def flush(event_name: str) -> None:
     """
     if not _buffer and not _hook_fields and not _top_fields:
         return
-    content = "\n".join(_buffer)
-    _buffer.clear()
+    from hooks.context.injection_budget import budget_chars, fit
+
+    content = fit(drain_blocks(), budget_chars())
     hook_fields, top_fields = dict(_hook_fields), dict(_top_fields)
     _hook_fields.clear()
     _top_fields.clear()
+    if _forced and _plain:
+        if content:
+            print(content)
+        return
     if not buffers_single_envelope() and not _forced:
-        # Claude path never buffers; guard against misuse.
+        # Nothing forced buffering on this Claude event; print as is.
         if content:
             print(content)
         return

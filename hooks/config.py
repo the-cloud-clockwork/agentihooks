@@ -5,6 +5,8 @@ import re
 import sys
 from pathlib import Path
 
+from scripts import gh_config
+
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
 _VALID_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -294,6 +296,9 @@ def _env_files_fingerprint() -> tuple:
 _load_user_env()
 _load_brain_env()
 _ENV_FINGERPRINT = _env_files_fingerprint()
+# The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
+gh_config.pin(os.environ)
+gh_config.persist(os.environ)
 
 
 def reload_brain_env(force: bool = False) -> dict:
@@ -483,7 +488,10 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
 # Python in a linked worktree is edited through Serena (Development Manifesto §7).
-SERENA_EDIT_GUARD_ENABLED = _env_bool("SERENA_EDIT_GUARD_ENABLED", "true")
+# AGENTIHOOKS_SERENA=false is the one off switch for every session or machine: the
+# guard lets every edit through and injects no Serena directive. Unset or any other
+# value keeps it on.
+SERENA_EDIT_GUARD_ENABLED = os.getenv("AGENTIHOOKS_SERENA", "true") != "false"
 
 # =============================================================================
 # BRAIN ADAPTER
@@ -553,6 +561,8 @@ QUOTA_USAGE_STALE_SEC: int = int(os.getenv("QUOTA_USAGE_STALE_SEC", "300"))
 QUOTA_POLICY_ENABLED = _env_bool("QUOTA_POLICY_ENABLED", "true")
 QUOTA_HANDOFF_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WEEK_PCT", "98"))
 QUOTA_HANDOFF_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_5H_PCT", "99"))
+QUOTA_WARN_WEEK_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WARN_WEEK_PCT", "90"))
+QUOTA_WARN_5H_PCT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_WARN_5H_PCT", "95"))
 QUOTA_HANDOFF_MIN_LEFT: float = float(os.getenv("AGENTIHOOKS_HANDOFF_MIN_LEFT", "20"))
 QUOTA_WAIT_MIN_WEEK_LEFT: float = float(os.getenv("AGENTIHOOKS_WAIT_MIN_WEEK_LEFT", "10"))
 QUOTA_RESERVE_ACCOUNTS: frozenset[str] = frozenset(
@@ -657,6 +667,8 @@ BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
 # envelope headroom.
 BROADCAST_MAX_BYTES_PRETOOL: int = int(os.getenv("BROADCAST_MAX_BYTES_PRETOOL", "0"))
 BROADCAST_MAX_BYTES_PROMPT: int = int(os.getenv("BROADCAST_MAX_BYTES_PROMPT", "0"))
+# Characters one Claude hook event may inject in total; 0 turns the budget off.
+HOOK_INJECTION_MAX_CHARS: int = int(os.getenv("HOOK_INJECTION_MAX_CHARS", "9000"))
 BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
 BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     "BROADCAST_DELIVERY_STATE_FILE",

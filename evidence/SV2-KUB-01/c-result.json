@@ -1,0 +1,73 @@
+{
+  "case": "T-SV2-KUB-01-C",
+  "state": "passed",
+  "evidence_class": "mocked: in process rendering; Kubernetes schema validity comes from the kind job's strict server side dry run of the committed golden Pods, recorded with its run id in result.json",
+  "input_sha256": {
+    "pod-policy.json": "25a857c36e7d1ea9c579b0a285cf746f9f965064a3dfb770a8ae25502605d610",
+    "pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "pod-rendered.json": "ce52d75aaada25368c21fe6fd23ba9fc0092dcd3251d28929aad511c0952e6f7",
+    "pod-rendered-wrong-probes.json": "5720a681392ae68d97579229037f4096f778a454982f4ee7f8ca91ef76fa7faa"
+  },
+  "observed": {
+    "first_digest": "sha256:e67132d845c36b7e9246c1161bdb8aae33b2b4abff8c189f411581ee67d1b8cf",
+    "restarted_digest": "sha256:e67132d845c36b7e9246c1161bdb8aae33b2b4abff8c189f411581ee67d1b8cf",
+    "same_digest": true,
+    "probe_rollback": {
+      "evidence_class": "render level: the wrong and reverted Pods differ only in their probes",
+      "changed": [
+        "spec.containers[0].livenessProbe",
+        "spec.containers[0].readinessProbe",
+        "spec.containers[0].startupProbe"
+      ],
+      "image_unchanged": true,
+      "broken_matches_golden": true,
+      "broken_liveness": {
+        "exec": {
+          "command": [
+            "python",
+            "/opt/swarm-node/health.py",
+            "liveness",
+            "--attempt",
+            "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "--harness",
+            "claude",
+            "--herdr-timeout",
+            "0.001",
+            "--brain-timeout",
+            "2"
+          ]
+        },
+        "initialDelaySeconds": 0,
+        "periodSeconds": 15,
+        "timeoutSeconds": 6,
+        "failureThreshold": 1
+      },
+      "reverted_liveness": {
+        "exec": {
+          "command": [
+            "python",
+            "/opt/swarm-node/health.py",
+            "liveness",
+            "--attempt",
+            "/home/worker/attempts/exe-0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+            "--harness",
+            "claude",
+            "--herdr-timeout",
+            "2",
+            "--brain-timeout",
+            "2"
+          ]
+        },
+        "initialDelaySeconds": 0,
+        "periodSeconds": 15,
+        "timeoutSeconds": 6,
+        "failureThreshold": 4
+      }
+    },
+    "template_rollback": {
+      "existing_version": "kub01-v2",
+      "new_launch_version": "kub01-v1",
+      "image_unchanged": true
+    }
+  }
+}

@@ -7,8 +7,13 @@ import platform
 import re
 import subprocess
 import tarfile
+import time
+import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+
+TOOLS = ("herdr", "claude", "codex")
 
 
 def checksum(path: Path) -> str:
@@ -33,22 +38,55 @@ def load_lock(path: Path, architecture: str) -> dict:
         raise ValueError("unsupported lock schema")
     if architecture not in lock["architectures"]:
         raise ValueError("unsupported architecture")
-    if not re.fullmatch(r"python:[^@]+@sha256:[a-f0-9]{64}", lock["base_image"]):
+    if not re.fullmatch(
+        r"(?:public\.ecr\.aws/docker/library/)?python:[^@]+@sha256:[a-f0-9]{64}",
+        lock["base_image"],
+    ):
         raise ValueError("base image requires a sha256 digest")
     if checksum(path.with_name("requirements.lock")) != lock["requirements_sha256"]:
         raise ValueError("Python requirements checksum mismatch")
-    for name in ("herdr", "claude", "codex"):
+    for name in TOOLS:
         validate_artifact(name, lock["tools"].get(name, {}))
     return lock
 
 
-def install_tools(lock: dict, destination: Path) -> None:
+def fetch(name: str, artifact: dict, cache: Path | None) -> bytes:
+    cached = cache / artifact["sha256"] if cache else None
+    if cached and cached.is_file():
+        payload = cached.read_bytes()
+        if hashlib.sha256(payload).hexdigest() == artifact["sha256"]:
+            return payload
+    for attempt in range(5):
+        try:
+            with urllib.request.urlopen(artifact["url"], timeout=120) as response:
+                payload = response.read()
+            break
+        except (urllib.error.URLError, TimeoutError) as error:
+            if isinstance(error, urllib.error.HTTPError):
+                transient = 500 <= error.code < 600
+            else:
+                transient = isinstance(error, TimeoutError) or isinstance(error.reason, TimeoutError)
+            if not transient or attempt == 4:
+                raise
+            time.sleep(2**attempt)
+    if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
+        raise ValueError(f"artifact checksum mismatch: {name}")
+    if cached:
+        cached.write_bytes(payload)
+    return payload
+
+
+def download_tools(lock: dict, cache: Path | None) -> None:
+    with ThreadPoolExecutor() as pool:
+        futures = [pool.submit(fetch, name, artifact, cache) for name, artifact in lock["tools"].items()]
+    for future in futures:
+        future.result()
+
+
+def install_tools(lock: dict, destination: Path, cache: Path | None = None) -> None:
     binaries = {}
     for name, artifact in lock["tools"].items():
-        with urllib.request.urlopen(artifact["url"], timeout=120) as response:
-            payload = response.read()
-        if hashlib.sha256(payload).hexdigest() != artifact["sha256"]:
-            raise ValueError(f"artifact checksum mismatch: {name}")
+        payload = fetch(name, artifact, cache)
         if "member" in artifact:
             with tarfile.open(fileobj=io.BytesIO(payload), mode="r:gz") as archive:
                 payload = archive.extractfile(artifact["member"]).read()
@@ -126,17 +164,28 @@ def report(path: Path) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("action", choices=("validate", "install", "manifest", "report", "shell-packages"))
+    parser.add_argument("action", choices=("validate", "download", "install", "manifest", "report", "shell-packages"))
     parser.add_argument("--lock", type=Path, default=Path("/opt/swarm-node/versions.lock"))
     parser.add_argument("--architecture", default="amd64")
     parser.add_argument("--base-image")
     parser.add_argument("--source-revision", default="unknown")
+    parser.add_argument("--cache", type=Path)
+    parser.add_argument("--tool", action="append", choices=TOOLS)
+    parser.add_argument("--package", action="append")
     args = parser.parse_args()
     lock = load_lock(args.lock, args.architecture)
     if args.base_image is not None and args.base_image != lock["base_image"]:
         raise ValueError("base image differs from lock")
-    if args.action == "install":
-        install_tools(lock, Path("/usr/local/bin"))
+    if args.tool:
+        lock = {**lock, "tools": {name: lock["tools"][name] for name in args.tool}}
+    if args.package:
+        if unlocked := sorted(set(args.package) - set(lock["shell_packages"])):
+            parser.error(f"--package names packages the lock does not pin: {', '.join(unlocked)}")
+        lock = {**lock, "shell_packages": {name: lock["shell_packages"][name] for name in args.package}}
+    if args.action == "download":
+        download_tools(lock, args.cache)
+    elif args.action == "install":
+        install_tools(lock, Path("/usr/local/bin"), args.cache)
     elif args.action == "manifest":
         write_manifest(args.lock, args.architecture, args.source_revision, Path("/opt/agentihooks/templates"))
     elif args.action == "report":

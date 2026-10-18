@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/deployed.py:scripts.swarm_v2.deployed.x_tick_runtime__mutmut_6:cedcf28af55f24d4b7b667324a809b597b8089690a683abdd24e1df3949479cd": {
+    "reader": "Standards",
+    "reason": "Equivalent: MasterSeats filters owners to generated master seat addresses. Validated ledger slugs exclude @, and generated master seats contain none, so every accepted owner contains exactly one @. partition('@')[0] and rpartition('@')[0] return the identical seat prefix and change no placement output."
+  }
+}

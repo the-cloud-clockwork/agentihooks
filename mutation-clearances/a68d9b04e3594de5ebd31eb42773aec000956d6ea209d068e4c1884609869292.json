@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_78:851e7c9744f596c3bdcecc3402afd555ac7d70593033e1dd305e70e56bdcc2fb": {
+    "reader": "standards_reader",
+    "reason": "Changes only capitalization in this natural-language classifier criterion: 'The diff only prepares compatible tests and changes no gate behaviour.'. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

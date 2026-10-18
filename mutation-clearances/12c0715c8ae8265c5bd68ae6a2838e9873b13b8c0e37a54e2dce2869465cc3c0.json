@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_read__mutmut_15:9436417f651a7adc4c1575df660a23eb96202a20704f69e2cf4494cbd8ae2220": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Spelling variant of utf-8 (same codec) on a capture read; decoded output is identical."
+  }
+}

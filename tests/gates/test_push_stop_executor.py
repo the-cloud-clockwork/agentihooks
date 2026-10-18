@@ -26,7 +26,20 @@ SLUG, ME, SID = "pushexec-2026-01-01", "engineer@abcdef-0001", "sid-push"
 BRANCH = "engineer-abcdef-0001"
 URL = "https://github.com/o/r/pull/7"
 PACKAGE = ".".join(("scripts", "gates"))
-SHIM = f"import runpy\nimport sys\n\nsys.argv = ['gate', 'push-stop']\nrunpy.run_module({PACKAGE!r}, run_name='__main__')\n"
+SHIM = f"""import os
+import runpy
+import sys
+import time
+
+started = time.monotonic()
+sys.argv = ['gate', 'push-stop']
+try:
+    runpy.run_module({PACKAGE!r}, run_name='__main__')
+finally:
+    if os.environ.get('CONDITION_CLOCK'):
+        with open(os.environ['CONDITION_CLOCK'], 'w') as clock:
+            clock.write(f'{{started}} {{time.monotonic()}}')
+"""
 TEMPLATE = (
     "You cannot leave uncommitted or unpushed changes. Commit them now. If the task is done, open the pull request. "
     "If not, update the issue and the pull request and record progress on the ledger."
@@ -152,7 +165,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
 
     rig = type("Rig", (), {})()
     rig.stop, rig.redis, rig.task, rig.ledger_task, rig.cli, rig.rows = stop, client, task, ledger_task, cli, rows
-    rig.commit, rig.remote_head, rig.tree = commit, remote_head, tree
+    rig.commit, rig.remote_head, rig.tree, rig.env = commit, remote_head, tree, env
     try:
         cli("join")
         yield rig
@@ -190,3 +203,38 @@ def test_dirty_work_is_refused_and_a_clean_pushed_worktree_with_its_pull_request
     (rig.tree / "draft").unlink()
     clean = rig.stop()
     assert clean.returncode == 0, clean.stderr
+
+
+def overrun(rig, seconds):
+    rig.cli("task", "set", rig.task, f"pr_url={URL}")
+    gate = rig.tree / "scripts" / "ci_prepush"
+    gate.mkdir(parents=True)
+    (rig.tree / "scripts" / "__init__.py").write_text("")
+    (gate / "__init__.py").write_text("")
+    (gate / "__main__.py").write_text("import time\ntime.sleep(60)\n")
+    git(rig.tree, "add", "scripts")
+    git(rig.tree, "commit", "-m", "gate")
+    rig.env["CONDITIONS_TIMEOUT_SEC"] = str(seconds)
+    clock = rig.tree.parent / "condition-clock"
+    rig.env["CONDITION_CLOCK"] = str(clock)
+    return rig.stop(), clock
+
+
+@pytest.mark.wall_clock
+def test_a_pre_push_gate_that_overruns_is_stopped_by_the_gate_inside_the_stop_condition(rig):
+    seconds = 8
+    done, clock = overrun(rig, seconds)
+    assert done.returncode == 2, (done.stderr, rig.rows())
+    assert "The pre push gate did not finish in " in done.stderr
+    assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
+    assert rig.remote_head() == ""
+    started, finished = map(float, clock.read_text().split())
+    assert finished - started < seconds, "the stop condition process ran past its timeout"
+
+
+def test_a_pre_push_gate_that_overruns_is_stopped_inside_the_stop_condition(rig):
+    done, _ = overrun(rig, 20)
+    assert done.returncode == 2, (done.stderr, rig.rows())
+    assert "The pre push gate did not finish in " in done.stderr
+    assert f" s in {rig.tree}, so the stop hook did not push it." in done.stderr
+    assert rig.remote_head() == ""

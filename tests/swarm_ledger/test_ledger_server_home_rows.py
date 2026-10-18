@@ -105,8 +105,8 @@ def test_unknown_swarm_state_ranks_with_no_swarm(browser):
 def test_exactly_kind_open_done_swarm_and_activity_headers_sort(home_html):
     page = home_html()
     assert re.findall(r'data-sort="(\w+)"', page) == ["kind", "open", "done", "swarm", "at"]
-    assert page.count('class="fold"') == len(LEDGERS)
-    assert 'id="fold-all"' in page
+    assert 'class="fold"' not in page
+    assert 'id="fold-all"' not in page
 
 
 def test_a_ledger_without_activity_sorts_as_oldest(browser):
@@ -115,11 +115,11 @@ def test_a_ledger_without_activity_sorts_as_oldest(browser):
     assert ' data-at="0">' in page
 
 
-def test_the_fold_arrow_names_its_ledger_escaped(browser):
+def test_a_row_title_is_escaped(browser):
     with listed(rows=[{**summaries()[1], "title": "Beta <plan><img src=x>"}]):
         page = rendered_home(server, browser, "home", NOW)
     assert "<img" not in page.split('<ul id="rows">', 1)[1]
-    assert 'aria-label="Show all of Beta &lt;plan&gt;&lt;img src=x&gt;"' in page
+    assert 'data-tip="Beta &lt;plan&gt;&lt;img src=x&gt;"' in page
 
 
 def test_bin_has_no_fold_or_sort_controls(home_html):
@@ -171,10 +171,6 @@ def heights(tab):
     return tab.evaluate("() => [...document.querySelectorAll('li.row')].map((r) => r.getBoundingClientRect().height)")
 
 
-def opened(tab):
-    return tab.evaluate("() => [...document.querySelectorAll('li.row.open')].map((r) => r.dataset.slug).join('')")
-
-
 def test_home_side_margins_are_192_pixels_each_on_a_wide_screen(tab):
     pads = tab.evaluate(
         "() => { const s = getComputedStyle(document.querySelector('main')); return [s.paddingLeft, s.paddingRight]; }"
@@ -182,43 +178,13 @@ def test_home_side_margins_are_192_pixels_each_on_a_wide_screen(tab):
     assert pads == ["192px", "192px"]
 
 
-def test_rows_start_folded_on_one_line_of_equal_height(tab):
-    assert opened(tab) == ""
+def test_rows_render_on_one_line_of_equal_height_with_no_fold_control(tab):
     assert len(set(heights(tab))) == 1
-    assert tab.locator("#fold-all").text_content() == "Expand all"
+    assert tab.locator("#fold-all").count() == 0
+    assert tab.locator("li.row .fold").count() == 0
     assert (
         tab.evaluate("() => getComputedStyle(document.querySelector('li.row[data-slug=a] .ov')).whiteSpace") == "nowrap"
     )
-
-
-def test_the_row_arrow_opens_the_full_title_and_overview_and_closes_it_again(tab):
-    row = tab.locator("li.row[data-slug=a]")
-    folded = row.bounding_box()["height"]
-    row.locator(".fold").click()
-    assert row.locator(".fold").get_attribute("aria-expanded") == "true"
-    assert row.bounding_box()["height"] > folded * 3
-    full = tab.evaluate(
-        "() => { const o = document.querySelector('li.row[data-slug=a] .ov'); return o.scrollWidth <= o.clientWidth; }"
-    )
-    assert full
-    row.locator(".fold").click()
-    assert row.bounding_box()["height"] == folded
-
-
-def test_fold_choices_and_expand_all_are_remembered_across_reloads(tab):
-    tab.locator("li.row[data-slug=b] .fold").click()
-    reload(tab)
-    assert opened(tab) == "b"
-    tab.locator("#fold-all").click()
-    assert len(opened(tab)) == len(LEDGERS)
-    assert tab.locator("#fold-all").text_content() == "Collapse all"
-    reload(tab)
-    assert len(opened(tab)) == len(LEDGERS)
-    assert tab.locator("#fold-all").text_content() == "Collapse all"
-    tab.locator("#fold-all").click()
-    reload(tab)
-    assert opened(tab) == ""
-    assert tab.locator("#fold-all").text_content() == "Expand all"
 
 
 def test_default_order_is_activity_newest_first_and_every_sortable_header_shows_an_arrow(tab):
@@ -263,12 +229,10 @@ def test_a_corrupt_stored_sort_falls_back_to_activity(context):
     assert order(tab) == "gbdaecf"
 
 
-def test_blocked_storage_still_folds_and_sorts(context):
+def test_blocked_storage_still_sorts(context):
     context.add_init_script(BLOCKED_STORAGE)
     tab = opened_page(context)
     assert order(tab) == "gbdaecf"
-    tab.locator("#fold-all").click()
-    assert len(opened(tab)) == len(LEDGERS)
     tab.locator(".sort[data-sort=open]").click()
     assert order(tab) == "bfeagcd"
 
@@ -287,7 +251,7 @@ const fetch = () => new Promise(() => {});
 
 def node_home_rows(rows):
     source = HOME_JS.read_text(encoding="utf-8").removesuffix("start();\n")
-    shown = "rows.map((s) => homeRow(s, NOW)).map((r) => ({ attrs: r.attrs, label: r.kids[0].attrs['aria-label'], title: r.kids[1].textContent }))"
+    shown = "rows.map((s) => homeRow(s, NOW)).map((r) => ({ attrs: r.attrs, tip: r.kids[0].attrs['data-tip'], title: r.kids[0].textContent }))"
     script = f"{NODE_DOM}{source}\nconst NOW = {NOW}; const rows = {json.dumps(rows)};\nconsole.log(JSON.stringify({shown}));"
     return json.loads(subprocess.run(["node", "-e", script], capture_output=True, text=True, check=True).stdout)
 
@@ -304,5 +268,5 @@ def test_rows_carry_the_swarm_rank_and_activity_the_sort_reads():
 
 def test_a_row_names_its_ledger_as_text_never_as_markup():
     [row] = node_home_rows([{**summaries()[1], "title": "Beta <plan><img src=x>"}])
-    assert row["label"] == "Show all of Beta <plan><img src=x>"
+    assert row["tip"] == "Beta <plan><img src=x>"
     assert row["title"] == "Beta <plan><img src=x>"

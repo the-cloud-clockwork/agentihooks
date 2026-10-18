@@ -1,0 +1,15 @@
+version: 1
+purpose: choice
+fallbacks: cli
+questions:
+  - name: verdict
+    type: choice
+    instructions: "{instructions}"
+    options:
+      first: "{first}"
+      second: "{second}"
+thresholds:
+  confidence: 0.6
+rule:
+  type: choice
+  threshold: confidence

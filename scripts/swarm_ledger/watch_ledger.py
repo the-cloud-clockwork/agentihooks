@@ -53,7 +53,7 @@ def stream(slug, cursor=None, headers=None):
     """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
-        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
+        response = ledger_link.urlopen(urllib.request.Request(url, headers=headers), STREAM_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
             raise Expired from None
@@ -90,6 +90,11 @@ class Watch:
         self.state = state
         meta, args = state["_meta"], self.args
         members, tasks = meta.get("members", {}), state.get("tasks", [])
+        if meta.get("events_trimmed", self.since) > self.since:
+            say(
+                f"WARNING ledger history trimmed events after revision {self.since}"
+                f" through revision {meta['events_trimmed']} before this watcher read them"
+            )
         fresh = [
             e
             for e in meta.get("events", [])

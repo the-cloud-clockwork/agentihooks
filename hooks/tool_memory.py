@@ -16,7 +16,7 @@ by scanning the full transcript at session end.
 Environment:
     AGENTICORE_TOOL_MEMORY_PATH   - NDJSON file path (default: ~/.agenticore_tool_memory.ndjson)
     AGENTICORE_TOOL_MEMORY_MAX    - Max entries to keep (default: 100)
-    AGENTICORE_TOOL_MEMORY_SHOW   - Max entries to show on inject (default: 15)
+    AGENTICORE_TOOL_MEMORY_SHOW   - Max entries to show on inject (default: 5)
 
 NDJSON record format:
     {"ts": "ISO8601", "tool": "tool_name", "error": "error text", "input": "input summary", "session": "session_id"}
@@ -24,6 +24,7 @@ NDJSON record format:
 
 import json
 import os
+import re
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -34,7 +35,8 @@ MEMORY_PATH = Path(
     os.environ.get("AGENTICORE_TOOL_MEMORY_PATH", os.path.expanduser("~/.agenticore_tool_memory.ndjson"))
 )
 MAX_ENTRIES = int(os.environ.get("AGENTICORE_TOOL_MEMORY_MAX", "100"))
-MAX_SHOW = int(os.environ.get("AGENTICORE_TOOL_MEMORY_SHOW", "15"))
+MAX_SHOW = int(os.environ.get("AGENTICORE_TOOL_MEMORY_SHOW", "5"))
+ENTRY_CHARS = 160
 
 # ---------------------------------------------------------------------------
 # Error detection
@@ -82,6 +84,11 @@ FALSE_POSITIVE_PATTERNS = [
     "errors finding",
     "finding 0 errors",
 ]
+
+# Codex and Claude shell results carry no exit code.
+_ZERO_COUNT_RE = re.compile(
+    r"(?<![\w.])0 (?:errors?|failed|exceptions?|timeouts?|denied|refused|invalid|unauthorized|forbidden)\b"
+)
 
 # Their success responses echo file content, so any file mentioning "error"
 # or "not found" would read as a failure under string matching.
@@ -149,8 +156,9 @@ def _is_error(tool_result, strict=False):
         if fp in result_str:
             return False, ""
 
+    counted = _ZERO_COUNT_RE.sub("", result_str)
     for pattern in ERROR_PATTERNS:
-        if pattern in result_str:
+        if pattern in counted:
             return True, str(tool_result)[:200]
 
     return False, ""
@@ -395,16 +403,20 @@ def inject_memory(tool_name="", session_id=""):
         tool = e.get("tool", "?")
         error = e.get("error", "?")
         inp = e.get("input", "")
-        line = f"[{ts}] {tool} -- {error}"
+        line = f"{tool}: {error}"
         if inp:
             line += f" (input: {inp})"
+        line = f"- [{ts}] " + " ".join(line.split())
+        if len(line) > ENTRY_CHARS:
+            line = line[: ENTRY_CHARS - 3] + "..."
         lines.append(line)
 
-    # Use inject_banner from common.py — same pattern as all other hooks
-    # This prints to STDOUT (Claude sees it) AND logs to hooks.log for debugging
-    from hooks.common import inject_banner
+    from hooks.common import inject_context
 
-    inject_banner("TOOL MEMORY: Lessons from past sessions", "\n".join(lines))
+    inject_context(
+        "TOOL MEMORY: lessons from past sessions\n" + "\n".join(lines),
+        kind="tool_memory",
+    )
 
     # Mark as seen so we don't inject again for this tool in this session
     if tool_name and session_id:

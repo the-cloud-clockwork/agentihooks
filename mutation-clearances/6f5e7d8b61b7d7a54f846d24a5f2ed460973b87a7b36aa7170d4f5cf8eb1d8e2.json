@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x__guarded__mutmut_27:456813588448c63ca1c0cbbff5fcd40b334cb41f64844121b567aa9e5d4c41d5": {
+    "reader": "standards_reader",
+    "reason": "Equivalent rejection: an absent job if yields the text None or XXXX instead of an empty string. None of these defaults equals or begins with the required GUARD, so _guarded still returns False. An existing if is unchanged."
+  }
+}

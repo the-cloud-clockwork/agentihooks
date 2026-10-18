@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_53:09b1a90e580495af685b17b82646d19981531a42128d775535ad831871d4e002": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in this natural-language classifier criterion: 'The preparatory change preserves existing guarantees.'. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

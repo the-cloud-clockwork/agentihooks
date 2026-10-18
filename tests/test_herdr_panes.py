@@ -104,6 +104,13 @@ def test_a_created_pane_carries_its_terminal_id(tmp_path, monkeypatch):
     assert placed == Placement("w9", "w9:t2", "w9:p4", "term_9")
 
 
+def _terminal_popen(command, **kwargs):
+    """subprocess.Popen is patched for the whole process, so only the terminal launch starts its launcher."""
+    if command[0] != "/usr/bin/terminal":
+        raise OSError(f"unexpected process {command[0]}")
+    Path(command[-1]).with_suffix(".started").touch()
+
+
 def _launch(monkeypatch, tmp_path, *extra, **env_extra):
     monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
@@ -116,9 +123,7 @@ def _launch(monkeypatch, tmp_path, *extra, **env_extra):
         "_launch_command",
         lambda launcher, directory, title, environ: ("linux", ["/usr/bin/terminal", str(launcher)]),
     )
-    monkeypatch.setattr(
-        init_agent.subprocess, "Popen", lambda command, **k: Path(command[-1]).with_suffix(".started").touch()
-    )
+    monkeypatch.setattr(init_agent.subprocess, "Popen", _terminal_popen)
     env = {
         "HOME": str(tmp_path),
         "XDG_RUNTIME_DIR": str(tmp_path / "rt"),
@@ -228,6 +233,8 @@ def test_a_routed_launch_records_its_route_and_launch_time(monkeypatch, tmp_path
 
     before = time.time() * 1000
     monkeypatch.setattr(herdr_host, "rename_agent", lambda pane, name, environ: True)
+    monkeypatch.setattr(herdr_host, "wait_ready", lambda pane, environ, timeout: True)
+    monkeypatch.setattr(herdr_host, "name_session", lambda pane, name, environ, confirmed: "named")
     monkeypatch.setattr(herdr_host, "run", started)
     monkeypatch.setattr(herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")

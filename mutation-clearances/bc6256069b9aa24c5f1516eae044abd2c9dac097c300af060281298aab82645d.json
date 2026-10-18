@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/wake.py:scripts.inbox.wake.x__seat_clock__mutmut_27:8a018f80a00259521bd9a8a530eccb444d85c9db6464b267df0a4b0ea29343df": {
+    "reader": "standards_reader",
+    "reason": "The default is reached only for a never occupied, unrefillable seat; before the retry window decide is not due with since None or 0, and once the window passes addresses.settle_unresolved withdraws the item before decide runs."
+  }
+}

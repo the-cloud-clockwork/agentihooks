@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/api/recovery.py:scripts.swarm_v2.api.recovery.x\u01c1RecoveryAPI\u01c1route__mutmut_25:927e601a448586b26785937decb9940051b5e1a6fbb38eda24f01df799339cd1": {
+    "reader": "standards_reader",
+    "reason": "Omitted agent becomes empty string or None; both yield identical unauthenticated refusal unless the authenticated operator bypasses the name."
+  }
+}

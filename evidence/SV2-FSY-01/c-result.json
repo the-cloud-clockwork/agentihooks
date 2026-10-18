@@ -1,0 +1,65 @@
+{
+  "package": "SV2-FSY-01",
+  "case": "T-SV2-FSY-01-C",
+  "title": "recovery and replay: recreating an attempt under a new base restores the documented paths from metadata; an old node path or unknown layout version stops the launch",
+  "tested_commit": "9698d0aacfa190b7d538aa9b8cdd1a66d29df0df",
+  "evidence_class": "local isolated fixture in CI; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_recreating_an_attempt_restores_paths_from_metadata_on_a_new_node",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.3659033Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_recreating_an_attempt_restores_paths_from_metadata_on_a_new_node",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.9850598Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change0-layout",
+      "job": 114234977195,
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T14:28:55.0405683Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change0-layout",
+      "job": 114234977242,
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T14:30:45.3644304Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change1-layout",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4901065Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_record_naming_an_old_node_path_or_unknown_version_stops_the_launch[change1-layout",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:31.6458566Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_seal_clears_every_write_bit_and_remove_restores_them",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.0724797Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_seal_clears_every_write_bit_and_remove_restores_them",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:16.0247213Z"
+    }
+  ],
+  "execution_path_validation_failures": {
+    "dimension": "per test, read from filesystem.FAILURES before and after the refused call",
+    "asserted": "each refusal test asserts the counter rose by exactly one"
+  },
+  "cleanup": "pytest tmp_path per test; no live resource mutations",
+  "passed": true
+}

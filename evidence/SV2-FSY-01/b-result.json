@@ -1,0 +1,497 @@
+{
+  "package": "SV2-FSY-01",
+  "case": "T-SV2-FSY-01-B",
+  "title": "rejection and containment: a path, profile or archive that resolves outside its execution root is refused before any write",
+  "tested_commit": "9698d0aacfa190b7d538aa9b8cdd1a66d29df0df",
+  "evidence_class": "local isolated fixture in CI; not live rollout proof",
+  "mocked": false,
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059486223",
+  "tests": [
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_relative_escape_is_refused[../../outside/state.json]",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.1551756Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_relative_escape_is_refused[../../outside/state.json]",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.5788097Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_relative_escape_is_refused[../outside]",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4470299Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_relative_escape_is_refused[../outside]",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.7311026Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_relative_escape_is_refused[homes/../../outside]",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.1638224Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_relative_escape_is_refused[homes/../../outside]",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.7687429Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_symlink_escape_is_refused_without_naming_its_target",
+      "job": 114234977165,
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T14:30:33.5690180Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_symlink_escape_is_refused_without_naming_its_target",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9050827Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_profile_that_resolves_outside_its_root_is_refused_before_any_write[absolute",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2069211Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_profile_that_resolves_outside_its_root_is_refused_before_any_write[absolute",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.7547950Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_profile_that_resolves_outside_its_root_is_refused_before_any_write[outside]",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:40.9236285Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_profile_that_resolves_outside_its_root_is_refused_before_any_write[outside]",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9331036Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_seed_name_is_refused",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.1930767Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_seed_name_is_refused",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.7987465Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[absolute",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2262077Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[absolute",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2535589Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[absolute",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.8017510Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[absolute",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.8384487Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[chained",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2769100Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[chained",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.8048058Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[hard",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2439321Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[hard",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.8598084Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[parent",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2900301Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[parent",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.0027087Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[parent",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9500922Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_that_resolves_outside_its_root_is_refused_before_any_write[parent",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.7198476Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_link_the_extractor_leaves_outside_the_root_is_refused_and_staging_removed",
+      "job": 114234977165,
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T14:30:33.5810202Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_link_the_extractor_leaves_outside_the_root_is_refused_and_staging_removed",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9624634Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_past_its_member_or_size_cap_is_refused_before_any_write[1-100]",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2354633Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_past_its_member_or_size_cap_is_refused_before_any_write[1-100]",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.6928059Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_past_its_member_or_size_cap_is_refused_before_any_write[2-9]",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.1990430Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_archive_past_its_member_or_size_cap_is_refused_before_any_write[2-9]",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.6169950Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_extraction_outside_the_root_or_over_existing_files_is_refused",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:40.9473378Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_extraction_outside_the_root_or_over_existing_files_is_refused",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9760867Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change0-layout",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2741726Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change0-layout",
+      "job": 114234977255,
+      "shard": "unit (3.12, 1)",
+      "output": "PASSED at 2026-10-10T14:30:18.8477402Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change1-layout",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4260589Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change1-layout",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.8500420Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change10-layout",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4710659Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change10-layout",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:31.6098302Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change11-layout",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.3259303Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change11-layout",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.7878271Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change2-layout",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4471585Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change2-layout",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.9280929Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change3-layout",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.2994050Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change3-layout",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.8648240Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change4-layout",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4401857Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change4-layout",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:31.6258408Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change5-layout",
+      "job": 114234977195,
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T14:28:54.9701142Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change5-layout",
+      "job": 114234977242,
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T14:30:45.2225303Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change6-layout",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.3101478Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change6-layout",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.9145837Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change7-layout",
+      "job": 114234977165,
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T14:30:33.5061924Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change7-layout",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9714790Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change8-layout",
+      "job": 114234977165,
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T14:30:33.6510260Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change8-layout",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:16.0011104Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change9-layout",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.0059582Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_layout_that_could_leave_its_root_is_refused[change9-layout",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9861119Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[../x]",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4670552Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[../x]",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:31.6175404Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[A]",
+      "job": 114234977195,
+      "shard": "unit (3.11, 4)",
+      "output": "PASSED at 2026-10-10T14:28:54.9741349Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[A]",
+      "job": 114234977242,
+      "shard": "unit (3.12, 4)",
+      "output": "PASSED at 2026-10-10T14:30:45.3226969Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[]",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.0514563Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[]",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:15.9921301Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[a/b]",
+      "job": 114234977165,
+      "shard": "unit (3.12, 2)",
+      "output": "PASSED at 2026-10-10T14:30:33.6389989Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_an_invalid_attempt_is_refused[a/b]",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:16.0035257Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_linked_base_attempt_or_root_is_refused",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.0074467Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_linked_base_attempt_or_root_is_refused",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:16.0033252Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_socket_path_past_the_unix_limit_or_with_a_path_name_is_refused",
+      "job": 114234977133,
+      "shard": "unit (3.11, 1)",
+      "output": "PASSED at 2026-10-10T14:29:24.3089001Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_a_socket_path_past_the_unix_limit_or_with_a_path_name_is_refused",
+      "job": 114234977226,
+      "shard": "unit (3.12, 5)",
+      "output": "PASSED at 2026-10-10T14:30:51.9560453Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_refuses_an_invalid_target[../codex]",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:41.0681708Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_refuses_an_invalid_target[../codex]",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:16.0184247Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_refuses_an_invalid_target[Claude]",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4592132Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_refuses_an_invalid_target[Claude]",
+      "job": 114234977204,
+      "shard": "unit (3.12, 3)",
+      "output": "PASSED at 2026-10-10T14:30:31.8110110Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_refuses_an_invalid_target[]",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:25.4950720Z"
+    },
+    {
+      "test": "tests/test_swarm_v2_filesystem.py::test_environment_refuses_an_invalid_target[]",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:31.6668102Z"
+    },
+    {
+      "test": "tests/test_worker_home.py::test_a_template_link_that_leaves_the_seed_copy_fails_bootstrap_and_removes_the_attempt",
+      "job": 114234977140,
+      "shard": "unit (3.11, 3)",
+      "output": "PASSED at 2026-10-10T14:29:27.4389106Z"
+    },
+    {
+      "test": "tests/test_worker_home.py::test_a_template_link_that_leaves_the_seed_copy_fails_bootstrap_and_removes_the_attempt",
+      "job": 114234977280,
+      "shard": "unit (3.12, 7)",
+      "output": "PASSED at 2026-10-10T14:29:32.4758373Z"
+    },
+    {
+      "test": "tests/test_worker_home.py::test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt",
+      "job": 114234977154,
+      "shard": "unit (3.12, 6)",
+      "output": "PASSED at 2026-10-10T14:29:42.9535332Z"
+    },
+    {
+      "test": "tests/test_worker_home.py::test_a_missing_layout_fails_bootstrap_and_leaves_no_attempt",
+      "job": 114234977205,
+      "shard": "unit (3.11, 2)",
+      "output": "PASSED at 2026-10-10T14:29:19.3391157Z"
+    }
+  ],
+  "execution_path_validation_failures": {
+    "dimension": "per test, read from filesystem.FAILURES before and after the refused call",
+    "asserted": "each refusal test asserts the counter rose by exactly one"
+  },
+  "cleanup": "pytest tmp_path per test; no live resource mutations",
+  "passed": true
+}

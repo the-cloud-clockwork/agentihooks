@@ -1,0 +1,651 @@
+version: 1
+notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
+  the decision log recorded before seeding; its samples are the answers logged for that digest. Expected verdicts were written
+  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule. The two ci
+  probe cases come from the qa profile fix and keep their own notes.
+cases:
+- name: rig-grade-swarm-doctor-t9
+  state:
+    task: t9
+    title: A chat line to the whole swarm gets one answer, from the master
+    description: 'Operator report: when he sends a chat line to the whole swarm from the ledger page, every engineer receives
+      it and any of them may reply, so answers scatter or nobody owns the reply. Seam: the whole swarm chat delivery. Every
+      agent still receives the line for awareness as information only, and the master alone receives it as a work item it
+      must answer; when no master is live, the item waits for the next master and the page says so. Red first: a test that
+      sends a whole swarm line and expects exactly one work item, addressed to the master seat, and information only copies
+      for the rest. Number to move: replies per whole swarm line from agents other than the master, before and after over
+      equal windows. Done when the PR is merged and both counts are pasted.'
+    kind: code
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t9
+    title: A chat line to the whole swarm gets one answer, from the master
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: luna
+    latency_ms: 17301
+    answers:
+      responsibility:
+        type: choice
+        choice: frontend
+        confidence: 0.97
+        probabilities:
+          frontend: 0.97
+          engineer: 0.01
+          qa: 0.01
+          split: 0.005
+          unresolved: 0.005
+  notes: state digest 5f56ec44c11c7170
+- name: rig-grade-swarm-doctor-fx-f0c1c467-code
+  state:
+    task: fx-f0c1c467-code
+    title: Move the number behind the inbox past window finding
+    description: 'Fix the cause shown on the paired cause task and issue 1818. Seams, each with a red test first: on every
+      exit, settle the seat mail the leaving life took, requeuing it for the seat or closing it with a named outcome; a handing
+      off agent never takes mail moved to its own seat. Number to move: open seat notices whose receiver is gone, counted
+      in the watched swarm; before three, target zero. Done when the pull request merges, the Doctor applies it with pull
+      dev and the count reads zero one hour later.'
+    kind: code
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: fx-f0c1c467-code
+    title: Move the number behind the inbox past window finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4951
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.86
+        probabilities:
+          frontend: 0.02
+          engineer: 0.86
+          qa: 0.03
+          split: 0.04
+          unresolved: 0.05
+  notes: state digest 63750887ca953f6c
+- name: rig-grade-swarm-doctor-t5
+  state:
+    task: t5
+    title: Measure open wait ended notices after the settle fix
+    description: 'After measurement for the wait notice settle fix, merged in pull request 1093 and live since about 06:00
+      UTC. Use the count script the fix engineer left in its task work folder. Before: eight delivered backlog findings from
+      thirteen wait ended notices. Change no code; if the count did not fall, file the evidence as a follow up.'
+    kind: tune
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p3
+    phase_intent: 'Apply: Apply each merged fix to the running swarm with the allowed interventions and log it on both ledgers.'
+  params:
+    id: t5
+    title: Measure open wait ended notices after the settle fix
+  expected:
+    responsibility: qa
+  control: false
+  samples:
+  - source: luna
+    latency_ms: 6641
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 1.0
+        probabilities:
+          frontend: 0.0
+          engineer: 0.0
+          qa: 1.0
+          split: 0.0
+          unresolved: 0.0
+  - source: luna
+    latency_ms: 6545
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.96
+        probabilities:
+          frontend: 0.01
+          engineer: 0.02
+          qa: 0.96
+          split: 0.005
+          unresolved: 0.005
+  - source: luna
+    latency_ms: 5587
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.97
+        probabilities:
+          frontend: 0.0
+          engineer: 0.02
+          qa: 0.97
+          split: 0.0
+          unresolved: 0.01
+  notes: state digest 18aba8debe2be76d
+- name: rig-grade-swarm-doctor-fx-29d21c6e-code
+  state:
+    task: fx-29d21c6e-code
+    title: Move the number behind the telemetry stale finding
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. Cause from the paired cause task:
+      the exporter''s paging gives a streamed generation update a new identity when a tool result arrives in the same turn,
+      so more observations count as accepted than land in Langfuse and the stale detector reports them as missing. Seams:
+      (1) a streamed generation keeps its accepted identity across tool results and pages; (2) paging stays bounded; (3) an
+      observation that truly never reaches Langfuse is still reported stale. Red first, from the cause proof''s excess count.
+      Number to move: telemetry stale findings across all agents of the watched swarm, counted with the Doctor telemetry stale
+      detector over an equal window before and after; before two on one Claude engineer in fifteen minutes; target zero.'
+    kind: code
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: fx-29d21c6e-code
+    title: Move the number behind the telemetry stale finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 538
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.5182650462210625
+        probabilities:
+          frontend: 0.060854832602511955
+          engineer: 0.61461203697685
+          qa: 0.019756671555084846
+          split: 0.014454289685665629
+          unresolved: 0.2903221691798877
+  notes: state digest 76fe4a50d007ab49
+- name: rig-grade-swarm-doctor-t58
+  state:
+    task: t58
+    title: Find what ends lane agents without a leave or handoff
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. The watched master saw four lane
+      agents vanish in ten minutes, panes gone, each retired by the tick after a mismatched process, one holding a ready push.
+      Before: the tick journal shows ten retirements after a mismatched process in the two hours to 18:45 UTC, both swarms,
+      three of them masters. Count lane agent lives that ended with no leave, done, park or handoff over a named window, split
+      by the retire reason, and show from the live binding record and the pane what made the process differ. Hypothesis only:
+      the agent process changed under a live session, such as a restart or compaction, and the tick reads that as a dead agent.
+      Read only; never point the shared timer at a worktree.'
+    kind: troubleshoot
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t58
+    title: Find what ends lane agents without a leave or handoff
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 7966
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.62
+        probabilities:
+          frontend: 0.06
+          engineer: 0.62
+          qa: 0.15
+          split: 0.04
+          unresolved: 0.13
+  notes: state digest 369940974fae4a12
+- name: rig-grade-swarm-doctor-t6
+  state:
+    task: t6
+    title: Measure the watched swarm's Codex share after the router fix
+    description: After measurement for the router fix in pull request 1108, live since about 08:00 UTC. Wait until the watched
+      swarm has made ten share picks in six hours, then measure. The measure command can take over two minutes. Change no
+      code; if the share is off by more than two points, file the evidence as a follow up.
+    kind: tune
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p3
+    phase_intent: 'Apply: Apply each merged fix to the running swarm with the allowed interventions and log it on both ledgers.'
+  params:
+    id: t6
+    title: Measure the watched swarm's Codex share after the router fix
+  expected:
+    responsibility: qa
+  control: false
+  samples:
+  - source: luna
+    latency_ms: 16582
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.99
+        probabilities:
+          frontend: 0.0
+          engineer: 0.0
+          qa: 0.99
+          split: 0.0
+          unresolved: 0.01
+  - source: luna
+    latency_ms: 5930
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.93
+        probabilities:
+          frontend: 0.01
+          engineer: 0.04
+          qa: 0.93
+          split: 0.01
+          unresolved: 0.01
+  - source: luna
+    latency_ms: 20196
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.91
+        probabilities:
+          frontend: 0.01
+          engineer: 0.06
+          qa: 0.91
+          split: 0.01
+          unresolved: 0.01
+  notes: state digest 166224957e38eda3
+- name: rig-grade-swarm-rt3
+  state:
+    task: rt3
+    title: A finished agent is always retired, its lane slot freed at once, and a failed retire is flagged
+    description: 'Operator finding, verified by the master. Engineers 0203 and 0230 finished tasks cx2 and cg9 last night
+      yet stayed alive with open idle panes for about twelve hours. Evidence: swarm status listed both as finished; terminate
+      agent refused each name as ambiguous, because the name was shared by the main session, its subagent sessions, a resumed
+      duplicate of 0230 and three Codex app server daemons left in the cx2 proof home. The tick reap retires by name, so every
+      pass logged could not retire and retried, and the lane count includes finished agents, so two of nine engineer slots
+      and their account sessions were held all night. The master terminated all seven processes by exact id. Seams: tick reap
+      and runtime retire, lane busy count, health findings. Required: retire targets the exact launch process recorded at
+      spawn, never the bare name, and ends its whole process group plus processes running from that task''s scratch homes;
+      finished agents never count toward a lane cap; a retire still failing after three ticks is a health finding naming agent,
+      process and refusal, sent to the master; each tick sweeps live processes carrying a swarm agent name with no active
+      record and reaps them. Done when tests plant a shared name, a resumed duplicate and a leftover proof daemon and each
+      is retired, a finished agent frees its slot on the same tick, and a scratch swarm proof shows a finished engineer gone
+      within two ticks.'
+    kind: code
+    territory: []
+    project_intent: 'Borrow what OpenRig does that we lack, while keeping the ledger, quota routing and herdr: durable Claude
+      and Codex messaging, seats, intent, work beyond code, swarm health.'
+    phase: p23
+    phase_intent: 'Correct profiles and continuous observability: Operator top priority for all work tonight: frontend uses
+      frontend, backend and infrastructure use engineer, planning uses planner, and independent stress verification uses qa.
+      Explicit task profiles prevail. Verify actual mounted profiles and classifier decisions at every launch and handoff,
+      not labels alone. Keep continuous correlated logs and Langfuse traces throughout each job and make missing, stale or
+      misattributed telemetry visible. Target project is https://telemetry.example/project Include minimal Langfuse read capability
+      for master and QA, ongoing detector coverage, and an independent QA pass after implementation. Master approves the plan
+      under delegate autonomy.'
+  params:
+    id: rt3
+    title: A finished agent is always retired, its lane slot freed at once, and a failed retire is flagged
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: luna
+    latency_ms: 7318
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 1.0
+        probabilities:
+          frontend: 0.0
+          engineer: 1.0
+          qa: 0.0
+          split: 0.0
+          unresolved: 0.0
+  notes: state digest 7e1b64a4473a7c33; internal names masked for the package
+- name: rig-grade-swarm-doctor-t26
+  state:
+    task: t26
+    title: Measure cache rewrites and profile check failures after the next render
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. Pull requests 1266 and 1282 give
+      each render stamp a fresh profile home and never rewrite a home with live sessions; they merged and are pulled into
+      the main checkout. The task cost number on the old finding cannot move because it is a finished session''s usage. Before:
+      task mp2 paid two whole context cache rewrites, about six hundred eighty thousand tokens, and two running Codex sessions
+      failed their profile check with persona changed since render after a bundle doctrine change. After the first render
+      that changes settings or rules after the merge, run the drops script from the render fix task''s work folder over the
+      five minutes after it, and count running sessions in both swarms that fail their profile check with persona changed
+      in the hour after it. Target zero for both. Do not trigger a render yourself on the shared homes; wait for one with
+      swarm wait.'
+    kind: tune
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t26
+    title: Measure cache rewrites and profile check failures after the next render
+  expected:
+    responsibility: qa
+  control: false
+  samples:
+  - source: luna
+    latency_ms: 4929
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.92
+        probabilities:
+          frontend: 0.01
+          engineer: 0.04
+          qa: 0.92
+          split: 0.01
+          unresolved: 0.02
+  notes: state digest 8aa5aefa0a695176; internal names masked for the package
+- name: rig-grade-swarm-doctor-t74
+  state:
+    task: t74
+    title: Find which required writes make fresh engineers trip the talk budget before any outcome
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. Twice today the watched swarm
+      raised a ceremony finding on a fresh engineer waiting on its first red CI run: eleven talk writes against a budget of
+      ten, before any outcome was possible; its master judged both insufficient evidence. The talk count takes every comment,
+      chat line and follow up from an engineer or CI agent; only a task state, a pull request link, a proof, a push or a pull
+      request open reset it, and swarm progress counts as one. Seams: list each talk write those two engineers made from claim
+      to finding, mark which ones doctrine or a gate required, such as plan, review, blocker or required progress comments.
+      Done when the root cause is shown with those lists and a fix is filed: either required writes stop counting as talk,
+      or the budget starts at the first push.'
+    kind: troubleshoot
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t74
+    title: Find which required writes make fresh engineers trip the talk budget before any outcome
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 5056
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8
+        probabilities:
+          frontend: 0.05
+          engineer: 0.8
+          qa: 0.05
+          split: 0.03
+          unresolved: 0.07
+  notes: state digest e4c9f4bf6b8682d6
+- name: rig-grade-swarm-doctor-t24
+  state:
+    task: t24
+    title: Measure ledger timeouts per hour after the local mutation worker cap
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. Task t22 capped local mutation
+      runs at two workers (pull request 1272, merged 15:27 UTC). Before: the tick journal counted 85 and 87 ledger server
+      timeouts per hour in the two overload hours (local 14 and 16 hundred). Count the same thing, ledger server timeouts
+      per hour from the tick journal, for the first two full hours after 15:27 UTC, with the same command, and record the
+      peak one minute load in each hour. Do not run tests or mutation locally to create load. Done when the before and after
+      counts, the command and its output are on the proof and on the measurement issue for the open Spec follow up.'
+    kind: tune
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t24
+    title: Measure ledger timeouts per hour after the local mutation worker cap
+  expected:
+    responsibility: qa
+  control: false
+  samples:
+  - source: luna
+    latency_ms: 4906
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 1.0
+        probabilities:
+          frontend: 0.0
+          engineer: 0.0
+          qa: 1.0
+          split: 0.0
+          unresolved: 0.0
+  notes: state digest 4bebe05c1453e8b9
+- name: rig-grade-swarm-doctor-fx-bc4622cf-code
+  state:
+    task: fx-bc4622cf-code
+    title: Move the number behind the flaky tests finding
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. The free port readiness test
+      in the ledger server ensure tests failed once and passed on rerun of the same head; cause is on issue 2177. Seams, red
+      test first: the readiness wait runs on a controlled clock and the test observes its sleeps instead of real time; deadline
+      coverage stays, a server that never answers still fails by its deadline. Number to move: failures of this test in fresh
+      CI runs after the merge, counted over twenty runs that execute it, target zero; historical failures do not count. Done
+      when the pull request merges and the count is posted.'
+    kind: code
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: fx-bc4622cf-code
+    title: Move the number behind the flaky tests finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 10446
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8
+        probabilities:
+          frontend: 0.02
+          engineer: 0.8
+          qa: 0.12
+          split: 0.02
+          unresolved: 0.04
+  notes: state digest 0f863d1d744f1396
+- name: rig-grade-swarm-doctor-fx-30373668-cause
+  state:
+    task: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+    description: 'Parent: Doctor Fix proves the cause of verified flaky CI before repair, preserving the watched operator
+      plan. Observed Tests run 37995813007 on head 9a3fb9c8e9ec7ea90c442866a1e62e1e02deaa5e: attempt one job 114041777986
+      failed Run tests in test_sigterm_during_tool_reports_observed_checkpoint[complete-complete]. child.wait(timeout=8) returned
+      75 instead of 0; report reason termination, checkpoint_status incomplete, quiescence clean, agent/exporter/herdr child
+      exits all -15. Attempt two job 114043338065 passed the same case. PR 2246 changes classifier code and is merged; its
+      files do not include this supervision case. Diagnose checkpoint acknowledgement, child readiness and termination timing
+      with controlled CI reproductions; these are hypotheses until proven. Preserve bounded shutdown and the complete versus
+      incomplete exit contract. This differs from the existing ledger watcher SIGTERM timeout. No local tests, mutation, live
+      service repointing or weakening assertions. Done when independent Standards review accepts causal evidence and files
+      the smallest correction on the paired code task.'
+    kind: troubleshoot
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 5617
+    answers:
+      responsibility:
+        type: choice
+        choice: qa
+        confidence: 0.6
+        probabilities:
+          frontend: 0.03
+          engineer: 0.3
+          qa: 0.6
+          split: 0.02
+          unresolved: 0.05
+  notes: state digest bdb21401c2a659b1
+- name: mutation_runner_forms_ci_probe
+  state:
+    task: t85
+    title: Local test guard blocks supported mutation runner forms
+    description: 'Parent: Doctor Fix verifies alleged enforcement gaps before changing the operator''s local run policy. The
+      clearance writer owner confirms that the supported workflow module runners are all refused. It only probed classification
+      of three alternative forms, and has not verified actual execution: a __main__ file path, running the ci_mutation module
+      from the scripts directory, and importlib importing a name built by joining strings. An import alone may be metadata
+      work rather than runner execution. These are hypotheses, not three confirmed escapes. Verify in CI whether each supported
+      environment form actually invokes mutation execution, and whether the unchanged guard refuses it. Do not run a probe,
+      test or mutation on this host. Preserve allowed metadata-only imports and clearance writes. If a real supported runner
+      escape is proven, file the exact input, evidence and smallest separate correction; if none is proven, close with that
+      evidence and change no code. Done when independent Standards review accepts the observed classification and execution
+      facts and any real correction is filed.'
+    kind: troubleshoot
+    territory:
+    - hooks/context
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: t85
+    title: Local test guard blocks supported mutation runner forms
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 228
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.9227264731119427
+  - source: jev-1.13
+    latency_ms: 290
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.99
+  - source: haiku
+    latency_ms: 6346
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.72
+  - source: luna
+    latency_ms: 5110
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
+- name: checkpoint_flake_ci_probe
+  state:
+    task: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+    description: 'Parent: Doctor Fix proves the cause of verified flaky CI before repair, preserving the watched operator
+      plan. Observed Tests run 37995813007 on head 9a3fb9c8e9ec7ea90c442866a1e62e1e02deaa5e: attempt one job 114041777986
+      failed Run tests in test_sigterm_during_tool_reports_observed_checkpoint[complete-complete]. child.wait(timeout=8) returned
+      75 instead of 0; report reason termination, checkpoint_status incomplete, quiescence clean, agent/exporter/herdr child
+      exits all -15. Attempt two job 114043338065 passed the same case. PR 2246 changes classifier code and is merged; its
+      files do not include this supervision case. Diagnose checkpoint acknowledgement, child readiness and termination timing
+      with controlled CI reproductions; these are hypotheses until proven. Preserve bounded shutdown and the complete versus
+      incomplete exit contract. This differs from the existing ledger watcher SIGTERM timeout. No local tests, mutation, live
+      service repointing or weakening assertions. Done when independent Standards review accepts causal evidence and files
+      the smallest correction on the paired code task.'
+    kind: troubleshoot
+    territory: []
+    project_intent: The Doctor crew watches the swarm on the ledger rig-grade-swarm, finds where its agents fall short, fixes
+      the system with proof and applies each fix to the running swarm. Its master and the master of the watched swarm keep
+      each other in sync through the inbox.
+    phase: p2
+    phase_intent: 'Fix: Each finding judged real becomes a task naming the number it must move, measured before and after.'
+  params:
+    id: fx-30373668-cause
+    title: Find the cause of the flaky tests finding
+  expected:
+    responsibility: engineer
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 208
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.8111042701864835
+  - source: jev-1.13
+    latency_ms: 319
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.97
+  - source: pplx-decider-v1-27b
+    latency_ms: 301
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.7353447762834383
+  - source: haiku
+    latency_ms: 6742
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.82
+  - source: luna
+    latency_ms: 5365
+    answers:
+      responsibility:
+        type: choice
+        choice: engineer
+        confidence: 0.98

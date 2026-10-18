@@ -39,6 +39,43 @@ def test_a_code_or_ci_task_closes_only_on_a_merged_pull_request(kind):
     )
 
 
+def test_distributed_outcomes_cannot_use_the_legacy_final_mutation_path(monkeypatch):
+    from scripts.swarm.store import SwarmError
+    from tests.sv2_ctl02_cases import build
+
+    state, authority, controller, clock, start = build(monkeypatch)
+    assert done_gate.require_local(state, authority.slug, "task") is None
+    _, token = start()
+    authority.admit(token, 30_000)
+    with pytest.raises(SwarmError, match="controller outcome"):
+        done_gate.require_local(state, authority.slug, "task")
+
+
+@pytest.mark.parametrize("record", ["task-authority", "claim-journal"])
+def test_either_distributed_record_alone_blocks_legacy_completion(record):
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_merge_queue import swarm_of
+
+    state = swarm_of("eng")
+    state.redis.set(state.key("sw", record, "t1"), "{}")
+    with pytest.raises(SwarmError, match="^distributed final mutations require the controller outcome path$"):
+        done_gate.require_local(state, "sw", "t1")
+
+
+def test_merge_target_requires_the_recorded_task_and_checks_shared_links():
+    from scripts.swarm.store import SwarmError
+    from tests.swarm.test_merge_queue import swarm_of
+
+    state = swarm_of("eng")
+    rows = [{"id": "t1", "pr_url": URL}, {"id": "t2", "pr_url": URL}]
+    assert done_gate.require_target(state, "sw", "t1", URL, rows) is None
+    with pytest.raises(SwarmError, match="^final integration must target this task's recorded pull request$"):
+        done_gate.require_target(state, "sw", "missing", URL, rows)
+    state.redis.set(state.key("sw", "task-authority", "t2"), "{}")
+    with pytest.raises(SwarmError, match="controller outcome"):
+        done_gate.require_target(state, "sw", "t1", URL, rows)
+
+
 def test_a_task_without_a_kind_is_gated_as_code():
     assert done_gate.refusal({"id": "t1"}, "", github("MERGED")) == (
         "a code task is done only with its merged pull request: give --pr <url>"

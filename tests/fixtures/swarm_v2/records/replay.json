@@ -22,7 +22,7 @@
             "architecture_unowned_components": 0
           }
         },
-        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967",
+        "bytes": "bebe718660b34e62be1a9928ac369c06be93bd7d13a90cc30da20d33a2b6eff4",
         "files": [
           "record.json"
         ]
@@ -47,7 +47,7 @@
             "architecture_unowned_components": 0
           }
         },
-        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967",
+        "bytes": "bebe718660b34e62be1a9928ac369c06be93bd7d13a90cc30da20d33a2b6eff4",
         "files": [
           "record.json"
         ]
@@ -57,7 +57,7 @@
           "error": "ArchitectureError",
           "message": "operation fixture-inventory-1 was already recorded with different content"
         },
-        "bytes": "c085d0e4299a3c0d56df66ce44621cdd2c08407350ea76e6f350d97a38733967",
+        "bytes": "bebe718660b34e62be1a9928ac369c06be93bd7d13a90cc30da20d33a2b6eff4",
         "files": [
           "record.json"
         ]
@@ -71,7 +71,7 @@
           ],
           "restored": []
         },
-        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff",
+        "bytes": "a1b51bcad556baf65297d294ccdc113263857d3b69c53b56a0deba8f94b753e2",
         "files": [
           "record.json"
         ]
@@ -85,7 +85,7 @@
           ],
           "restored": []
         },
-        "bytes": "15a72b649b71777bd314b7228de9ca4ffdddc7d9dbc42dfe7a63ecbab244e6ff",
+        "bytes": "a1b51bcad556baf65297d294ccdc113263857d3b69c53b56a0deba8f94b753e2",
         "files": [
           "record.json"
         ]

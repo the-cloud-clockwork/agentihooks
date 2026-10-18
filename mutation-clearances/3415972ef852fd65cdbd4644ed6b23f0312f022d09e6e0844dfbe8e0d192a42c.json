@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_main__mutmut_15:2045462110c10eddc29c8cddbe600998686a32bcaba7d79112ea0e33a320f0df": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "The report/claim input is read with encoding=None, which falls back to the locale; per the repo precedent CI and the worker image run UTF-8, where the read is identical, and the file is ASCII JSON written by reduce."
+  }
+}

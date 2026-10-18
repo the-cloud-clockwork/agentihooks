@@ -4,45 +4,65 @@ import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
 import { closedComments, commentsView, openComments, rememberComment, taskLink, threadView } from "./threads.js";
-import { renderAlerts, renderNotifications, renderPriorities } from "./notices.js";
+import { bottleneckStat, renderAlerts, renderNotifications, renderPriorities, statGrip, statKey } from "./notices.js";
 import { renderOutline } from "./outline.js";
 import { collapsible, markToggles } from "./folds.js";
 import { renderChat, renderChatBadge } from "./chat.js";
 import { inboxPending, renderSwarm, swarm } from "./swarm.js";
 import { readWorkspace } from "./api.js";
 import { firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { frozen, held, ownFreeze, snowflake } from "./freezes.js";
 
-function scopeDot(key, item) {
+function scopeDot(key, item, off) {
   if (item.done) return null;
   const out = !!item.out_of_scope;
-  return h("button", { class: "scope", type: "button", "data-focus": `scope:${key}`, "aria-pressed": String(out),
-    title: out ? "Bring back in scope" : "Mark out of scope", text: "out of scope", on: { click: () => {
+  return h("button", { class: "scope", type: "button", "data-focus": `scope:${key}`, "aria-pressed": String(out), disabled: off ? "" : false,
+    title: out ? "Bring back in scope" : "Mark out of scope", text: "out of scope", on: { click: (ev) => {
+      ev.preventDefault();
       if (out || confirm("Mark this item out of scope?")) toggle(key, !out, "out_of_scope");
     } } });
 }
 
-export function verdictButton(item, verdict, cls, text) {
-  return h("button", { class: `link ${cls}`, type: "button", text, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
+function freezeButton(key) {
+  const own = ownFreeze(doc, key);
+  return h("button", { class: "freeze", type: "button", "data-focus": `freeze:${key}`, "aria-pressed": String(!!own),
+    title: own ? "Lift this freeze" : "Freeze this item and everything under it", text: own ? "unfreeze" : "freeze", on: { click: (ev) => {
+      ev.preventDefault();
+      queue(own ? { op: "freeze_clear", id: newId("freeze"), target: key } : { op: "freeze_set", id: newId("freeze"), verb: "freeze", target: key });
+    } } });
+}
+
+export function verdictButton(item, verdict, cls, text, off) {
+  return h("button", { class: `link ${cls}`, type: "button", text, disabled: off ? "" : false, on: { click: () => queue({ op: "verdict", id: newId("comment"), item, verdict }) } });
 }
 
 function itemActions(key, item) {
-  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, scopeDot(key, item));
-  return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve"), verdictButton(key, "denied", "deny", "Deny"), scopeDot(key, item));
+  const off = frozen(doc, key), freeze = ["phases", "tasks"].includes(key.split("/")[0]) ? freezeButton(key) : null;
+  if (item.done || item.out_of_scope) return h("div", { class: "item-actions" }, freeze, scopeDot(key, item, off));
+  return h("div", { class: "item-actions" }, verdictButton(key, "approved", "approve", "Approve", off), verdictButton(key, "denied", "deny", "Deny", off), freeze, scopeDot(key, item, off));
 }
 
-function itemClass(item) {
-  return "item" + (item.done ? " done" : "") + (item.out_of_scope ? " out" : "");
+function holdClass(key) {
+  return frozen(doc, key) ? " frozen" : held(doc, key) ? " held" : "";
+}
+
+function holdMark(key) {
+  return frozen(doc, key) ? snowflake("Frozen") : held(doc, key) ? snowflake("Held by a focus") : null;
+}
+
+function itemClass(item, key) {
+  return "item" + (item.done ? " done" : "") + (item.out_of_scope ? " out" : "") + (key ? holdClass(key) : "");
 }
 
 function checkRow(list, item, n, titleText, descText) {
   const key = `${list}/${item.id}`;
-  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": titleText, disabled: item.out_of_scope ? "" : false });
+  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": titleText, disabled: item.out_of_scope || frozen(doc, key) ? "" : false });
   box.checked = !!item.done;
   box.addEventListener("change", () => toggle(key, box.checked, "done"));
   const body = h("div", {}, h("div", { class: "text", text: titleText }),
     descText ? h("p", { class: "desc", text: descText }) : null);
   const row = h("div", { class: "row" }, box, n ? h("span", { class: "num", text: `${n}.` }) : null, body, itemActions(key, item));
-  return h("li", { class: itemClass(item), id: `item-${list}-${item.id}` }, row, commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-${list}-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
 function phaseLabel(phase, doc) {
@@ -72,16 +92,54 @@ function phaseReview(phase) {
 
 function phaseRow(item, n) {
   const key = `phases/${item.id}`;
-  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": item.title, disabled: item.out_of_scope ? "" : false });
+  const box = h("input", { type: "checkbox", "data-focus": `check:${key}`, "aria-label": item.title, disabled: item.out_of_scope || frozen(doc, key) ? "" : false });
   box.checked = !!item.done;
   box.addEventListener("change", () => toggle(key, box.checked, "done"));
   const fold = h("details", { class: "phase-fold" },
     h("summary", {}, h("span", { class: "item-title", text: item.title }), h("span", { class: "phase-state", text: phaseLabel(item, doc) })),
-    item.description ? h("p", { class: "desc", text: item.description }) : null, phaseReview(item));
+    item.description ? h("p", { class: "desc", text: item.description }) : null, phaseSlices(item), phaseReview(item));
   fold.open = !closedComments.has(`${key}/row`);
   fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
   const row = h("div", { class: "row" }, box, h("span", { class: "num", text: `${n}.` }), h("div", {}, fold), itemActions(key, item));
-  return h("li", { class: itemClass(item), id: `item-phases-${item.id}` }, row, commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-phases-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
+}
+
+function phaseSlices(phase) {
+  const rows = doc.slices.filter((s) => s.phase === `phases/${phase.id}`);
+  if (!rows.length) return null;
+  const count = (s) => doc.tasks.filter((t) => !t.deleted && t.slice === `slices/${s.id}`).length;
+  return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
+    ...rows.map((s) => h("span", { class: "slice" + holdClass(`slices/${s.id}`), id: `item-slices-${s.id}` }, holdMark(`slices/${s.id}`),
+      h("span", { class: "slice-name", text: `${s.anchor} ${count(s)}` }), freezeButton(`slices/${s.id}`))));
+}
+
+function planGroups() {
+  const known = new Set(doc.plans.map((p) => `plans/${p.id}`));
+  const groups = doc.plans.map((plan) => ({ key: `plans/${plan.id}`, id: `item-plans-${plan.id}`, title: plan.title || plan.id, plan,
+    phases: doc.phases.filter((p) => p.plan === `plans/${plan.id}`) }));
+  const loose = doc.phases.filter((p) => !known.has(p.plan));
+  return loose.length ? [...groups, { key: "unplanned", id: "phases-unplanned", title: "Phases without a plan", phases: loose }] : groups;
+}
+
+function planActions(key, plan) {
+  if (!plan) return null;
+  return h("span", { class: "item-actions plan-actions" }, freezeButton(key), scopeDot(key, plan, frozen(doc, key)));
+}
+
+function planRow({ key, id, title, phases, plan }) {
+  const idOf = (p) => `item-phases-${p.id}`;
+  const fold = h("details", { class: "plan-fold" }, h("summary", {}, plan ? holdMark(key) : null, h("span", { class: "plan-title", text: title }),
+    h("span", { class: "plan-count", text: `${phases.length} ${phases.length === 1 ? "phase" : "phases"}` }), planActions(key, plan)));
+  fold.open = !closedComments.has(`${key}/row`) || phases.some((p) => idOf(p) === wanted.id);
+  fold.addEventListener("toggle", () => rememberComment(`${key}/row`, fold.open));
+  lazy(fold, () => h("ol", { class: "plan-phases" }, ...firstPage(key, phases, idOf).map((p, i) => phaseRow(p, i + 1)),
+    moreButton(key, phases.length, "more phases", render), phases.length ? null : h("li", { class: "empty", text: "None." })));
+  return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, fold);
+}
+
+function phaseList() {
+  if (!doc.plans.length) return listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
+  if (sectionOpen("phases")) $("phases").replaceChildren(...planGroups().map(planRow));
 }
 
 function questionRow(item, n) {
@@ -134,7 +192,7 @@ function taskProof(key, item) {
 
 function rankPick(key, item) {
   const pick = h("select", { class: `rank-pick rank-${taskRank(item)}`, "aria-label": `Queue rank of ${item.title}`, "data-focus": `rank:${key}`,
-    disabled: item.state === "done" ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
+    disabled: item.state === "done" || frozen(doc, key) ? "" : false, on: { change: () => queue({ op: "task_rank", id: newId("rank"), item: key, rank: pick.value }) } },
     ...taskRanks().map((r) => h("option", { value: r, text: r })));
   pick.value = taskRank(item);
   return pick;
@@ -146,12 +204,17 @@ function difficultyLabel(item) {
   return h("span", { class: `difficulty difficulty-${item.difficulty}`, text: `size ${item.difficulty}`, title: `set by ${item.difficulty_source || "operator"}${confidence}` });
 }
 
+function awaitingLabel(item) {
+  const awaiting = item.state === "done" ? "" : (item.awaiting || "").replace(/[_-]+/g, " ");
+  return awaiting ? h("span", { class: "awaiting", text: awaiting }) : null;
+}
+
 function taskRow(item, tasks) {
   const key = `tasks/${item.id}`;
   const waits = taskBlockers(item, tasks || []);
   const link = (url, label) => /^https?:\/\//.test(url || "") ? h("a", { href: url, target: "_blank", rel: "noopener", text: label }) : null;
   const meta = h("div", { class: "task-meta" }, rankPick(key, item), difficultyLabel(item), h("span", { text: item.lane }), item.kind ? h("span", { class: "kind", text: item.kind }) : null,
-    h("span", { text: item.state }),
+    h("span", { text: item.state }), awaitingLabel(item),
     item.phase ? h("span", { text: item.phase }) : null,
     item.claimed_by ? h("span", { class: "claimed", text: `claimed by ${item.claimed_by}` }) : null,
     link(item.plan_url, "plan"), link(item.issue_url, "issue"), link(item.pr_url, "pull request"));
@@ -159,7 +222,7 @@ function taskRow(item, tasks) {
     item.description ? h("p", { class: "desc", text: item.description }) : null, meta,
     waits ? h("p", { class: "desc", text: waits }) : null);
   const row = h("div", { class: "row" }, body, itemActions(key, item));
-  return h("li", { class: itemClass(item), id: `item-tasks-${item.id}` }, row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
+  return h("li", { class: itemClass(item, key), id: `item-tasks-${item.id}` }, holdMark(key), row, taskProof(`${key}/proof`, item), commentsView(key, item.comments));
 }
 
 function taskCounts(tasks) {
@@ -200,13 +263,12 @@ export function render(focusKey) {
   document.title = doc.title;
   $("title").textContent = doc.title;
   $("overview").textContent = doc.overview;
-  $("overview-box").querySelector("summary").textContent = "Overview";
   $("closed-label").textContent = closedText(doc.closed_at);
   $("closed-banner").hidden = !doc.closed_at;
   $("sources-count").textContent = headCount([[doc.sources.length]]);
   listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
   $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
-  listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
+  phaseList();
   $("tasks-count").textContent = taskCounts(doc.tasks);
   groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
   $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
@@ -280,7 +342,8 @@ export function timeLeftInputs(calc) {
   const tiers = Object.entries(calc.tiers).map(([name, tier]) => `${name} ${tier.minutes}m from ${tier.samples} samples`).join(", ");
   const slots = calc.slots === null ? "unobserved slots" : `${calc.slots} slots`;
   const ci = calc.ci_minutes === null ? "no CI median yet" : `CI ${calc.ci_minutes}m a task`;
-  return `Larger of a ${calc.chain}m chain and ${calc.work}m of work over ${slots} · ${calc.remaining} tasks left · ${tiers} · ${ci}`;
+  const held = calc.frozen ? ` · ${calc.frozen} frozen tasks with ${calc.frozen_work}m of work left out` : "";
+  return `Larger of a ${calc.chain}m chain and ${calc.work}m of work over ${slots} · ${calc.remaining} tasks left · ${tiers} · ${ci}${held}`;
 }
 
 export function renderStats() {
@@ -296,43 +359,25 @@ export function renderStats() {
   const last = (meta.events || []).reduce((m, e) => Math.max(m, e.at || 0), 0);
   const pct = total ? Math.round(100 * done / total) : 0;
   const next = phases.find((p) => !p.done), counts = (swarm && swarm.tasks) || {}, figure = (value) => (swarm ? String(value || 0) : "—");
-  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "" }, h("dt", { text: label }), h("dd", {}, value, extra));
-  $("stats").replaceChildren(
-    row("Started", started ? when(started) : "—"),
+  const row = (label, value, extra) => h("div", { class: "stat", title: label === "Time left" ? timeLeftInputs(calc) : undefined, style: gap && label === "Time left" ? "grid-template-columns:75px minmax(0,1fr)" : "", "data-stat": statKey(label) }, h("dt", {}, statGrip(label), label), h("dd", {}, value, extra));
+  $("stats").replaceChildren(row("Started", started ? when(started) : "—"),
     row("Elapsed", elapsed === null ? "—" : span(elapsed)),
     row("Time left", leftText),
     row("Phases", `${done} / ${total} · ${pct}%`, h("div", { class: "bar" }, h("i", { style: `width:${pct}%` }))),
     row("Tasks", `${tasks.filter((t) => t.done || t.state === "done").length} / ${tasks.length}`),
+    row("Follow-ups", `${upsDone} / ${ups.length}`),
+    row("Frozen", calc && calc.frozen !== undefined ? `${calc.frozen} · ${span(calc.frozen_work * 60000)}` : "—"),
+    row("Unfrozen", calc && calc.frozen !== undefined ? String(calc.remaining) : "—"),
     row("Open", figure(counts.open)),
     row("Claimed", figure(counts.claimed)),
-    row("In PR", figure(counts.pr)),
     row("Blocked", figure(counts.blocked)),
+    row("In PR", figure(counts.pr)),
     row("Done today", figure(swarm && swarm.done_today)),
     row("Next phase", next ? next.id : "—"),
-    row("Inbox pending", figure(swarm && inboxPending(swarm))),
-    row("Follow-ups", `${upsDone} / ${ups.length}`),
     ...(out ? [row("Out of scope", String(out))] : []),
+    row("Inbox pending", figure(swarm && inboxPending(swarm))),
     row("Agents · 2 h", String(activeAgents())),
-    row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"));
-}
-
-export function editTitle(on) {
-  $("title-row").hidden = on;
-  $("title-form").hidden = !on;
-  $("title-error").textContent = "";
-  if (!on) return $("title-edit").focus();
-  const box = $("title-input");
-  box.value = doc.title;
-  box.focus();
-  box.select();
-}
-
-export function saveTitle() {
-  const text = $("title-input").value.trim();
-  if (!text) {
-    $("title-error").textContent = "The title cannot be empty";
-    return $("title-input").focus();
-  }
-  editTitle(false);
-  if (text !== doc.title) queue({ op: "title_set", id: newId("title"), text });
+    row("Last activity", last ? `${span(Date.now() - last)} ago` : "—"),
+    bottleneckStat(swarm && swarm.top_bottleneck));
+  document.dispatchEvent(new Event("stats"));
 }

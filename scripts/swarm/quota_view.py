@@ -1,14 +1,13 @@
 """The stored quota capacity decision as swarm status lines and as the ledger page reads it."""
 
+from scripts import quota_freshness, quota_state
 from scripts.routing.slots import API
 from scripts.swarm import capacity
 from scripts.swarm.health.findings import MINUTE_MS
 
 
 def routing_left(account: dict) -> float | None:
-    if account["five_left"] is None or account["week_left"] is None:
-        return None
-    return min(account["five_left"], account["week_left"])
+    return quota_state.routing_left(account["harness"], account["five_left"], account["week_left"])
 
 
 def left_text(value: float | None) -> str:
@@ -32,9 +31,11 @@ def api_share(account: dict, accounts: list[dict]) -> tuple[int, int]:
     return (round(100 * account["sessions"] / total) if total else 0), total
 
 
-def _account_line(row: dict, accounts: list[dict]) -> str:
+def _account_line(row: dict, accounts: list[dict], now_ms: int) -> str:
     if row.get("kind") != API:
         detail = f"routing {left_text(routing_left(row))}"
+        detail += f", {row['reserved']}" if row.get("reserved") else ""
+        detail += f", read {quota_freshness.age(row['observed_at'], now_ms / 1000)} ago" if "observed_at" in row else ""
     else:
         share, total = api_share(row, accounts)
         weight = "no weight" if row.get("weight") is None else f"weight {row['weight']}%"
@@ -49,7 +50,13 @@ def lines(decision: dict, now_ms: int) -> list[str]:
         f"{lane} {decision['effective'][lane]} of {decision['configured'][lane]}" for lane in capacity.LANES
     )
     head = f"quota capacity {caps}, {_changed(decision['at'], now_ms)}, because {decision['reason']}"
-    return [head] + [_account_line(row, decision["accounts"]) for row in decision["accounts"]]
+    host = [host_line(decision["host"])] if "host" in decision else []
+    return [head] + host + [_account_line(row, decision["accounts"], now_ms) for row in decision["accounts"]]
+
+
+def host_line(host: dict) -> str:
+    room = "unknown" if host["room"] is None else host["room"]
+    return f"host room {room}: {host['reason']}"
 
 
 def page(decision: dict) -> dict:

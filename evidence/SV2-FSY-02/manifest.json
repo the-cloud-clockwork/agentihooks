@@ -1,0 +1,17 @@
+{
+  "package": "SV2-FSY-02",
+  "tested_commit": "b22a5468bbebdacda8681d413dbf5b9dbf05c18f",
+  "evidence_class": "local isolated fixture in CI; not live rollout proof",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38064418884",
+  "fixture": "tests/test_swarm_v2_workspaces.py World: a bare file origin, a wrong origin, a work clone and an execution root under pytest tmp_path; correct mirror, wrong origin mirror, stale base and four concurrent preparations",
+  "cleanup": "pytest tmp_path and tempfile folders per test; no live resource mutations",
+  "inputs": {
+    "scripts/swarm_v2/workspaces.py": "c3b0e95ac8838c729bfcb4705a4c06a75d06d5ffe84556aae07cec6c815b08b5",
+    "scripts/swarm_v2/filesystem.py": "dc68198b130f0b94b24e399e246c85f562a95e820e111b28c5f1374da7ebf2e2",
+    "scripts/swarm/naming.py": "43cd728e5f303548a848e7f7ae654f1be6a165493c638cd24c71025255fda7a0",
+    "docker/swarm-node/layout.json": "41fc01753018c5b59967476af90ba7ece797cac9d39a734635759aae2aeaf379",
+    "tests/test_swarm_v2_workspaces.py": "27aea977ebd1c25fc2e5098166700ecbe1c22406f81d8e67bf9a9d01c89610ae",
+    "tests/sv2_fsy02_cases.py": "95a939723ec9173362eb83076fa2a69a1910e195421ffdf986be6f276ee6b28f",
+    "evidence/SV2-FSY-02/generate_case_results.py": "35aa59cebdd9a415c29d952fd700d87964091970192ee89a9290e116fbfbb505"
+  }
+}

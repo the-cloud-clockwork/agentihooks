@@ -207,10 +207,12 @@ case "${cmd}" in
       exit 1
     fi
     if [[ "${PUSHED}" -eq 1 && "${NAME}" != _tmp/* ]]; then
-      REMOTE_HEAD="$(git -C "${REPO}" ls-remote --heads origin "refs/heads/${BR}")" \
-        || die "cannot read remote branch '${BR}' — worktree kept"
-      [[ -n "${REMOTE_HEAD}" && "${REMOTE_HEAD%%[[:space:]]*}" == "$(git -C "${TARGET}" rev-parse HEAD)" ]] \
-        || die "branch '${BR}' is not on origin at the worktree head — worktree kept"
+      git -C "${REPO}" fetch --quiet --prune origin '+refs/heads/*:refs/remotes/origin/*' \
+        || die "cannot read origin branches — worktree kept"
+      REMOTE_HEAD="$(git -C "${REPO}" for-each-ref --format='%(refname)' --contains "$(git -C "${TARGET}" rev-parse HEAD)" refs/remotes/origin/)" \
+        || die "cannot check origin containment — worktree kept"
+      [[ -n "${REMOTE_HEAD}" ]] \
+        || die "branch '${BR}' is not contained in an origin branch — worktree kept"
     elif [[ "${NAME}" != _tmp/* ]]; then
       if command -v gh >/dev/null 2>&1; then
         PR_STATE="$(cd "${REPO}" && gh pr list --head "${BR}" --base "${BASE}" --state all --json state,url --jq '.[0] | if .state == "MERGED" then .state elif .state == "CLOSED" then "CLOSED " + .url else .url end')" \

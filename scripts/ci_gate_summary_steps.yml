@@ -1,0 +1,25 @@
+- uses: actions/checkout@v4
+  if: ${{ always() }}
+  with:
+    ref: ${{ github.sha }}
+    sparse-checkout: scripts/ci_gate_summary.py
+    sparse-checkout-cone-mode: false
+    persist-credentials: false
+
+- name: Download this run's test durations
+  if: ${{ always() }}
+  uses: actions/download-artifact@v4
+  with:
+    pattern: durations-3.*
+    path: test-reports
+
+- name: Download this run's test flakes
+  if: ${{ always() }}
+  uses: actions/download-artifact@v4
+  with:
+    pattern: flakes-3.*
+    path: test-reports
+
+- name: Summarize this run's tests
+  if: ${{ always() }}
+  run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"

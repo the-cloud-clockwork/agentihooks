@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_reduce__mutmut_115:a7022880cf48855c06e6e702c51b162e9e2c19dcb70eb39ce4449fe7c8c66d3c": {
+    "reader": "author, applying the Standards reader for SV2-PRF-02 ruling on the XXXX default in _launches",
+    "reason": "A Pod without a captured log looks up the XXXX default instead of the empty string; log_marks finds no JSON record in XXXX, so both give no marks and the Pod entry is identical."
+  }
+}

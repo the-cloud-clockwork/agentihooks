@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_30:6bff486ed96671aa482b3b9009c0e6bf7571707bd182e470197c7ab6a3a62077": {
+    "reader": "standards_reader",
+    "reason": "Changes only capitalization in this natural-language classifier criterion: 'The preparatory tests deliver this part.'. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

@@ -45,7 +45,7 @@ def browser():
 
 def test_home_reads_logo_agentihooks_home_without_a_ledger_count():
     page = server.index_page()
-    assert f'{WATERMARK}<main class="home">{BRAND}<h1>HOME</h1>{server.FOLD_ALL}</header>' in page
+    assert f'{WATERMARK}<main class="home">{BRAND}<h1>HOME</h1></header>' in page
     assert 'class="total"' not in page
     divider = rule("h1::before")
     assert "width:2px" in divider and "background:var(--signal)" in divider

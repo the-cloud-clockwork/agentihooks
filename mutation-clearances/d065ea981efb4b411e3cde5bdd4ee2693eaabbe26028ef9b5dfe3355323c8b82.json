@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_44:9517861d8c0f15b4c416b6eab6f1477f4caac09b18003cbe5e5b0614d164bfb3": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --seat help text is uppercased, which only --help prints; no parsed value, default or exit code changes."
+  }
+}

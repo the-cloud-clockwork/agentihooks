@@ -73,6 +73,37 @@ def test_gh_error_propagates_instead_of_reporting_healthy():
         ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=unavailable)
 
 
+@pytest.mark.parametrize("current_red", [False, True], ids=["fresh-head-without-checks", "red-current-head"])
+def test_red_checks_use_only_the_current_pull_request_head(current_red):
+    fixture = load("ci")
+    old_sha = fixture["pr"]["head"]["sha"]
+    fresh_sha = "a" * 40
+    old_check = {**fixture["checks"][0], "conclusion": "failure"}
+    fresh_check = {**old_check, "head_sha": fresh_sha}
+    pr = {**fixture["pr"], "head": {**fixture["pr"]["head"], "sha": fresh_sha}}
+    workflow = {**fixture["runs"][0], "head_sha": fresh_sha}
+    root = "repos/the-cloud-clockwork/agentihooks"
+    responses = {
+        f"{root}/pulls/487": json.dumps(pr),
+        f"{root}/commits/{old_sha}/check-runs?per_page=100": json.dumps(old_check),
+        f"{root}/commits/{fresh_sha}/check-runs?per_page=100": json.dumps(fresh_check) if current_red else "",
+        f"{root}/actions/runs?head_sha={fresh_sha}&per_page=100": json.dumps(workflow) if current_red else "",
+    }
+
+    def gh(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, responses[argv[2]], "")
+
+    record = ci_read.pull_request("the-cloud-clockwork/agentihooks", 487, run=gh)
+    found = ci.red_checks(record, 1_791_300_000_000)
+    if current_red:
+        assert record["checks"] == [fresh_check]
+        assert [f.id for f in found] == ["red-checks/487"]
+        assert found[0].measure == 1
+    else:
+        assert record["checks"] == []
+        assert found == []
+
+
 def test_parameter_names_with_spaces_keep_their_identity():
     record = load("ci")
     sha = record["pr"]["head"]["sha"]

@@ -1,0 +1,22 @@
+{
+  "schema_version": "2.0",
+  "package": "SV2-ACC-05",
+  "fixture": "Half-completed handoff, orphan reservation, live worker with lost terminal, and delayed exit event",
+  "account": "fixture",
+  "cap": 4,
+  "ttl_ms": 30000,
+  "handoff_seat": "eng-1@fixture",
+  "orphan_seat": "eng-2@fixture",
+  "terminal_seat": "eng-3@fixture",
+  "machine": {"backend": "kubernetes", "host": "pod-0000000000000000000000000000c005", "namespace": "boot-worker/pid:[4026531836]"},
+  "lost_terminal": {"state": "working", "terminal": "degraded", "failure": "terminal_loss", "confidence": "confirmed"},
+  "lost_worker": {"state": "lost", "terminal": "unobserved", "failure": "worker_loss", "confidence": "partial"},
+  "suspect_worker": {"state": "suspect", "terminal": "unobserved", "failure": "worker_loss", "confidence": "uncertain"},
+  "waiting_worker": {"state": "waiting_quota", "terminal": "reachable", "failure": "provider_wait", "confidence": "confirmed"},
+  "supervisor_exit": {"supervisor": {"reading": "ok", "observed_at": 1.0, "value": "exited"}},
+  "pod_failed": {"kubernetes": {"reading": "ok", "observed_at": 1.0, "value": "Failed"}},
+  "pod_gone": {"kubernetes": {"reading": "not_found", "observed_at": 1.0, "value": ""}},
+  "pod_unreachable": {"kubernetes": {"reading": "unreachable", "observed_at": 1.0, "value": ""}},
+  "pod_running": {"kubernetes": {"reading": "ok", "observed_at": 1.0, "value": "Running"}},
+  "grant": "Signed fixture launch grant, validated on every request; never a deployed credential"
+}

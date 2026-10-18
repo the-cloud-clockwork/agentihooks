@@ -1,0 +1,18 @@
+{
+  "first": {
+    "state": "completed",
+    "transcript_end": 4096,
+    "pending_archive_watermark": 1536,
+    "outcome_ref": "ledger:tasks/fixture-task/outcomes/1",
+    "related_labels": {"swarm.agentihooks.io/seat": "eng-1", "swarm.agentihooks.io/task": "fixture-task"},
+    "service_port": 7681
+  },
+  "second": {
+    "state": "cancelled",
+    "transcript_end": 9000,
+    "pending_archive_watermark": 0,
+    "outcome_ref": "ledger:tasks/fixture-task/outcomes/2",
+    "related_labels": {"swarm.agentihooks.io/seat": "eng-1", "swarm.agentihooks.io/task": "fixture-task"},
+    "service_port": 7682
+  }
+}

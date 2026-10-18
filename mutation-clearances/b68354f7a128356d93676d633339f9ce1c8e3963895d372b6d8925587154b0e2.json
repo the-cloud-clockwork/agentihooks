@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_server.py:scripts.swarm_ledger.ledger_server.x_relay_to_inbox__mutmut_18:8a1938d313d2f00f8cfad0a46d589e3fa6b67b51d589d912115827de651e0bb0": {
+    "reader": "standards_reader",
+    "reason": "events_trimmed is set only when events are trimmed, to a revision of 0 or more; when absent, both negative defaults sit below since, so the comparison is false either way."
+  }
+}

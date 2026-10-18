@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 from types import ModuleType
 from urllib.parse import parse_qs, urlsplit
@@ -24,7 +25,7 @@ def body(handler: object, server: ModuleType) -> dict:
         raise APIError(400, "schema_invalid", "Request body must be a bounded JSON object") from None
 
 
-def dispatch(handler: object, server: ModuleType) -> dict | None:
+def dispatch(handler: object, server: ModuleType) -> dict | str | None:
     if handler.headers.get("Host") not in server.ALLOWED_HOSTS:
         raise APIError(403, "forbidden", "Host not allowed")
     origin = handler.headers.get("Origin")
@@ -38,12 +39,7 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
         raise APIError(404, "ledger_missing", "No such ledger")
     if path == "agent-token" and handler.command == "POST":
         return agent_token(handler, server, slug)
-    principal = server.authority.principal(
-        server.repository.token(slug),
-        slug,
-        handler.headers.get("X-Ledger-Token"),
-        handler.headers.get("X-Ledger-Agent"),
-    )
+    principal = server.authority.caller(handler.headers, server.repository.token(slug), slug)
     if principal is None and server.authority.controller(handler.headers.get("X-Controller-Credential")):
         principal = ""
     if principal is None:
@@ -56,8 +52,19 @@ def dispatch(handler: object, server: ModuleType) -> dict | None:
             return resources.swarm_read(server.swarm_status(slug), path, query)
         if WORKSPACE_RE.fullmatch(path):
             return workspace(server, slug, path.split("/")[1])
-        return resources.read(server.repository.get_document(slug), path, query)
+        return ledger_read(server, slug, path, query)
     return ledger_operation(handler, server, slug, path, principal)
+
+
+def ledger_read(server: ModuleType, slug: str, path: str, query: dict) -> dict:
+    if path.split("/")[0] == "hierarchy":
+        return resources.hierarchy_read(server.repository, slug, path, query)
+    if path == "architecture":
+        from . import architecture
+
+        return architecture.view(os.environ)
+    entry = server.repository.current(slug)
+    return resources.read(entry.state, path, query, entry.views)
 
 
 def agent_token(handler: object, server: ModuleType, slug: str) -> dict:
@@ -111,10 +118,14 @@ def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
             return resources.page(rows, resources.revision(rows), pagination(handler.path))
     if parts == ["bin", "actions"] and handler.command == "POST":
         return admin.bin_action(handler, server, body(handler, server))
+    if parts[0] == "proof-ledgers" and handler.command == "POST":
+        from . import proofs
+
+        return proofs.route(handler, server, parts, body)
     raise APIError(404, "resource_missing", "No such resource")
 
 
-def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, principal: str) -> dict | None:
+def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, principal: str) -> dict | str | None:
     from . import admin, mutations
 
     if handler.command not in ("POST", "PUT"):
@@ -122,6 +133,8 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
     if path in ("uploads/media", "uploads/artifacts"):
         return admin.upload(handler, server, slug, path)
     payload = body(handler, server)
+    if path == "lifecycle/actions":
+        return admin.lifecycle(server, principal, slug, payload)
     if path == "swarm/actions":
         return admin.control(server, slug, principal, payload)
     if path in ("export", "swarm/export"):
@@ -131,12 +144,19 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
             if status is None:
                 raise APIError(404, "swarm_missing", "No swarm for this ledger")
             return {"data": status}
-        state = server.repository.get_document(slug)
-        state["_meta"] = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-        return {"data": state}
+        return server.repository.encoded_view(slug, export_body)
     if path == "operations":
         return mutations.apply(server, slug, principal, payload)
+    if path == "architecture/actions":
+        from . import architecture
+
+        return architecture.act(handler, server, slug, principal, payload, os.environ)
     raise APIError(404, "resource_missing", "No such operation resource")
+
+
+def export_body(state: dict) -> str:
+    meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
+    return json.dumps({"data": {**state, "_meta": meta}}, ensure_ascii=False)
 
 
 def handle(handler: object, server: ModuleType) -> None:
@@ -152,7 +172,8 @@ def handle(handler: object, server: ModuleType) -> None:
     except (OSError, ValueError):
         logging.getLogger(__name__).exception("Ledger API storage failure")
         status, result = 500, APIError(500, "storage_error", "Resource could not be read or written").envelope()
-    return handler.send(status, json.dumps(result, ensure_ascii=False), "application/json")
+    encoded = result if isinstance(result, str) else json.dumps(result, ensure_ascii=False)
+    return handler.send(status, encoded, "application/json")
 
 
 def pagination(url: str) -> dict:

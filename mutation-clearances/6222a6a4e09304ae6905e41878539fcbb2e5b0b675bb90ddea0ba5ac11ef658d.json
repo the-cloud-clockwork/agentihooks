@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_check__mutmut_26:2f3d32c0baa2c1134d7b5a81018dd7be23cd981ef294f611843163587fd88dee": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic only: uppercasing the loader mismatch text preserves its identity and explanation. The same mismatch appends one problem, all selector and actor checks still run, complete problem count is unchanged, and the gate stays red."
+  }
+}

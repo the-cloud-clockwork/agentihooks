@@ -1,64 +1,105 @@
 import argparse
+import ast
 import json
 import math
 import os
 from pathlib import Path
 
-from scripts.ci_mutation.scope import discover_changes, select_tests
-from scripts.ci_mutation.selection import changed_mutations
+from scripts.ci_mutation.browser import needs_browser
+from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
+from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
 
-# Fitted on Tests runs 37890680008 and 37877992114: a mutant costs a pytest start plus a few covering tests.
-MUTANT_SECONDS = 3.0
-TEST_WEIGHT = 5.0
-UNTIMED_TEST_SECONDS = 1.0
+# Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
+MUTANT_SECONDS = 5.6
 WORKERS = 4
 
 
-def mean_test_seconds(durations: dict[str, float], tests: list[str]) -> float:
-    selected = set(tests)
-    timings = [seconds for nodeid, seconds in durations.items() if nodeid.partition("::")[0] in selected]
-    return sum(timings) / len(timings) if timings else UNTIMED_TEST_SECONDS
-
-
-def estimate(root: Path, changes: dict[str, set[int]]) -> tuple[float, int, float]:
-    stored = root / ".test_durations"
-    durations = json.loads(stored.read_text()) if stored.is_file() else {}
-    seconds, mutants, tests = 0.0, 0, set()
+def estimate(
+    root: Path, changes: dict[str, set[int]], selection: dict[str, list[str]] | None = None
+) -> tuple[float, int, list[str]]:
+    mutants, tests = 0, set()
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
+        if selection is not None:
+            selection[path] = chosen
         if not chosen:
+            if any(
+                isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+                for node in ast.walk(ast.parse((root / path).read_text()))
+            ):
+                raise SystemExit(f"{path}: not mutated, no matching or importing test modules")
             continue
         tests.update(chosen)
         _, mutations = changed_mutations(path, (root / path).read_text(), lines)
         # mutmut emits only mutants inside a function or method.
-        count = sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
-        mutants += count
-        seconds += count * (MUTANT_SECONDS + TEST_WEIGHT * mean_test_seconds(durations, chosen))
-    stats = sum(duration for nodeid, duration in durations.items() if nodeid.partition("::")[0] in tests)
-    return seconds, mutants, stats
+        mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
+    return mutants * MUTANT_SECONDS, mutants, sorted(tests)
 
 
-def shard_count(seconds: float, mutants: int, stats: float, target: float, limit: int) -> int:
-    # Every shard repeats the stats run over all selected tests before mutating its share.
-    capacity = max(WORKERS * target - stats, WORKERS * target / 2)
-    return max(1, min(limit, mutants, math.ceil(seconds / capacity)))
+def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
+    return max(1, min(limit, mutants, math.ceil(seconds / (WORKERS * target))))
+
+
+def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
+    seconds = file_seconds(root, tests)
+    buckets = [
+        bucket
+        for index in range(parts)
+        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), WORKERS)
+    ]
+    return max(sum(seconds[path] for path in bucket) for bucket in buckets)
+
+
+def stats_part_count(root: Path, tests: list[str], target: float, limit: int) -> tuple[int, float]:
+    walls = [slowest_bucket(root, tests, parts) for parts in range(1, limit + 1)]
+    # One file never splits, so past the floor another part only adds a job.
+    reachable = max(target, min(walls))
+    parts = next(parts for parts, wall in enumerate(walls, 1) if wall <= reachable)
+    return parts, walls[parts - 1]
+
+
+def validate_tests(root: Path, tests: list[str]) -> None:
+    from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
+
+    for test in tests:
+        path = root / test
+        if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
+            raise SystemExit(f"{test}: loads the MCP SDK while collecting")
+        source = path.read_text()
+        if loads_sdk_when_run(source) and SDK_GROUP not in source:
+            raise SystemExit(f"{test}: loads the MCP SDK without the mcp-sdk worker group")
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base", default="origin/dev")
     parser.add_argument("--head", default="HEAD")
-    parser.add_argument("--target", type=float, default=240)
+    parser.add_argument("--target", type=float, default=120)
+    parser.add_argument("--stats-target", type=float, default=30)
     parser.add_argument("--limit", type=int, default=10)
     args = parser.parse_args()
     root = Path.cwd()
-    seconds, mutants, stats = estimate(root, discover_changes(root, args.base, args.head))
-    count = shard_count(seconds, mutants, stats, args.target, args.limit)
-    print(f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, stats seconds: {stats:.0f}")
-    print(f"Mutation shards: {count}")
+    bases = own_bases(root, args.base, args.head, graded_green)
+    print(f"Mutation bases: {' '.join(bases)}")
+    changes = discover_changes(root, bases, args.head)
+    selection = {}
+    seconds, mutants, tests = estimate(root, changes, selection)
+    validate_tests(root, tests)
+    browser = str(needs_browser(root, tests)).lower()
+    (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
+    count = shard_count(seconds, mutants, args.target, args.limit)
+    parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
+    print(
+        f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, slowest stats bucket: {stats:.0f}"
+    )
+    print(f"Mutation shards: {count}\nStats parts: {parts}")
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as stream:
             stream.write(f"shards={json.dumps(list(range(count)))}\n")
+            stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
+            stream.write(f"bases={','.join(bases)}\n")
+            stream.write(f"changed={len(changes)}\n")
+            stream.write(f"browser={browser}\n")
     return 0
 
 

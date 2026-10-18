@@ -1,0 +1,441 @@
+version: 1
+notes: Seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
+  the decision log recorded before seeding; its samples are the answers logged for that digest. Expected verdicts were written
+  by a separate reader agent that saw only each case state and its question, never the thresholds or the rule.
+cases:
+- name: rig-grade-swarm-vctx3
+  state:
+    task: vctx3
+    title: Pack context within explicit budgets
+    description: 'Swarm v2 work package SV2-CTX-03, tier 7 of 8. Spec: read section SV2-CTX-03 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: agentibrain-kernel. Integration gate: G6. Intended change:
+      Deliver enough useful evidence without overwhelming every agent''s context window. Required fixture: Oversized arc,
+      duplicate lesson texts, conflicting decisions, and a very small token budget. Name SV2-CTX-03 in the pull request. antoncore
+      changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory
+      is the bottleneck.'
+    kind: code
+    profile: engineer
+    territory:
+    - swarm v2 CTX
+    phase_intent: 'Swarm v2, tier 7: scoped active brains: Tier 7 of 8 of Swarm v2, ordered so the swarm can run on Atlas
+      compute first. Project scoped brain feeds, graph retrieval, task context, consultation gates and personal and swarm
+      brains. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md, one section per work package.
+      Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
+  params:
+    id: vctx3
+    title: Pack context within explicit budgets
+  expected:
+    difficulty: M
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4782
+    answers:
+      difficulty:
+        type: choice
+        choice: M
+        confidence: 0.85
+        probabilities:
+          S: 0.02
+          M: 0.85
+          L: 0.13
+  notes: state digest 9d774b7a3a311ca4; internal names masked for the package
+- name: rig-grade-swarm-vcap5
+  state:
+    task: vcap5
+    title: Integrate drain protection and cost-aware scale-down
+    description: 'Swarm v2 work package SV2-CAP-05, tier 5 of 8. Spec: read section SV2-CAP-05 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: antoncore. Integration gate: G10. Intended change: Preserve
+      active work while ensuring idle swarm capacity can disappear. Required fixture: Active task, completed task with stale
+      annotation, real notice simulation, and abrupt node loss. Name SV2-CAP-05 in the pull request. antoncore changes go
+      through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory is the
+      bottleneck.'
+    kind: code
+    profile: engineer
+    territory:
+    - swarm v2 CAP
+    phase_intent: 'Swarm v2, tier 5: scale on Atlas capacity, masters scale: Tier 5 of 8 of Swarm v2, ordered so the swarm
+      can run on Atlas compute first. ASG capacity reuse, checkpoints for Spot, several masters with a private channel, health
+      and controls for a distributed swarm. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md,
+      one section per work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
+  params:
+    id: vcap5
+    title: Integrate drain protection and cost-aware scale-down
+  expected:
+    difficulty: L
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4063
+    answers:
+      difficulty:
+        type: choice
+        choice: L
+        confidence: 0.8
+        probabilities:
+          S: 0.02
+          M: 0.18
+          L: 0.8
+  notes: state digest 61c4748331bab27b; internal names masked for the package
+- name: rig-grade-swarm-tc111
+  state:
+    task: tc111
+    title: Ledger priority, item and stat rows read as separate tiles
+    description: With the palette fill alone the priority, item and stat rows merge into one band. Give them a small gap and
+      side padding in the ledger stylesheet, then the raised bay fill, so each reads as its own tile like the Atlas landing.
+      Browser check at 1920 by 1080 on a scratch ledger. Done when the pull request merges with before and after screenshots
+      on the task proof.
+    kind: code
+    profile: frontend
+    territory: []
+    phase_intent: 'Swarm runtime fixes: Defects the running swarm hits in its own tooling: ledger writes, role guards, launch
+      and evaluation routing, flaky tests that block the required gate, and merge friction. Each fix keeps agents moving without
+      the operator, ships with a test that failed first, and is proven live on the shared ledger or in CI.'
+  params:
+    id: tc111
+    title: Ledger priority, item and stat rows read as separate tiles
+  expected:
+    difficulty: S
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4137
+    answers:
+      difficulty:
+        type: choice
+        choice: S
+        confidence: 0.8
+        probabilities:
+          S: 0.8
+          M: 0.17
+          L: 0.03
+  notes: state digest 33b3901040689046; internal names masked for the package
+- name: rig-grade-swarm-dur10
+  state:
+    task: dur10
+    title: Dispatched Tests runs fall back to the newest passed dev durations
+    description: 'Parent: Swarm runtime fixes keeps CI runs from wasting minutes. A Tests run dispatched on the default base
+      fails its durations job when the newest dev push run has not finished, so a plant dispatch wasted a run. Seam: the durations
+      step reads the newest passed dev push run, never an unfinished one, and stays red when no passed run exists. Red test
+      first. Done when the pull request merges and a dispatch made while a dev push run is still going passes its durations
+      step.'
+    kind: code
+    profile: cicd
+    territory:
+    - .github/workflows/test.yml
+    phase_intent: 'Swarm runtime fixes: Defects the running swarm hits in its own tooling: ledger writes, role guards, launch
+      and evaluation routing, flaky tests that block the required gate, and merge friction. Each fix keeps agents moving without
+      the operator, ships with a test that failed first, and is proven live on the shared ledger or in CI.'
+  params:
+    id: dur10
+    title: Dispatched Tests runs fall back to the newest passed dev durations
+  expected:
+    difficulty: M
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4436
+    answers:
+      difficulty:
+        type: choice
+        choice: M
+        confidence: 0.86
+        probabilities:
+          S: 0.04
+          M: 0.86
+          L: 0.1
+  notes: state digest 4cc4c5dcb2756639
+- name: rig-grade-swarm-vsec1
+  state:
+    task: vsec1
+    title: Create minimal controller and worker RBAC
+    description: 'Swarm v2 work package SV2-SEC-01, tier 3 of 8. Spec: read section SV2-SEC-01 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: antoncore. Integration gate: G3. Intended change: Separate
+      control-board object management from coding-worker permissions. Required fixture: Controller, worker, operator-viewer,
+      and unrelated service-account credentials. Name SV2-SEC-01 in the pull request. antoncore changes go through GitOps,
+      never live patches. Priority: Atlas compute first, because the operator''s workstation memory is the bottleneck.'
+    kind: code
+    profile: engineer
+    territory:
+    - swarm v2 SEC
+    phase_intent: 'Swarm v2, tier 3: worker image, filesystem and isolation: Tier 3 of 8 of Swarm v2, ordered so the swarm
+      can run on Atlas compute first. The worker image, the worker Pod template, private homes and worktrees, scoped credentials
+      and Firecracker microVM isolation. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md,
+      one section per work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
+  params:
+    id: vsec1
+    title: Create minimal controller and worker RBAC
+  expected:
+    difficulty: L
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 13426
+    answers:
+      difficulty:
+        type: choice
+        choice: L
+        confidence: 0.9
+        probabilities:
+          S: 0.02
+          M: 0.08
+          L: 0.9
+  notes: state digest 3a8e2b0050573345; internal names masked for the package
+- name: rig-grade-swarm-tc78
+  state:
+    task: tc78
+    title: HOME move to bin buttons use the ledger tooltip instead of native hover text
+    description: 'Parent: every tooltip on every ledger page opens after one second. After the HOME rows change merged, the
+      master''s browser check at 1920 by 1080 found each HOME row''s move to bin button still sets native hover text reading
+      move to the bin. Move that text into the ledger tooltip script like the row text, keep the accessible label, and extend
+      the tooltip timing test to cover these buttons and the bin page restore and delete buttons if they carry native hover
+      text too. Check by eye on a scratch ledger home at 1920 by 1080. Done when the test passes in CI and the pull request
+      merges.'
+    kind: code
+    profile: frontend
+    territory: []
+    phase_intent: 'Impeccable audit implementation: Address all twenty three audit findings across ledger pages, HOME and
+      BIN through reviewed, dependency ordered tasks. Preserve the accepted home design, operator overrides and the presentation
+      architecture constraints. Recheck each historical finding against current dev, credit existing fixes and give every
+      finding a task or verified resolution. Master reviews the planner slice autonomously.'
+  params:
+    id: tc78
+    title: HOME move to bin buttons use the ledger tooltip instead of native hover text
+  expected:
+    difficulty: S
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 5592
+    answers:
+      difficulty:
+        type: choice
+        choice: S
+        confidence: 0.72
+        probabilities:
+          S: 0.72
+          M: 0.25
+          L: 0.03
+  notes: state digest 754eabbf6c9e0bf7
+- name: rig-grade-swarm-hy8
+  state:
+    task: hy8
+    title: Republishing a revised plan moves its phases to the new plan and reconciles slices and tasks
+    description: 'Parent: plan hierarchy. After hy3 a published plan gives its phases slices, and republishing a revised plan
+      over those phases is refused and leaves an unused plan entry; before it, a revision could be republished, and a planner
+      send back can need one. Change: republishing a revised plan for phases that hold slices of an earlier plan moves those
+      phases to the new plan, maps each existing slice by its anchor, clears slices whose anchor is gone, and names every
+      task whose slice changed or was cleared. No unused plan entry is left on refusal. Done when tests show a revision republish
+      succeeding with mapped and cleared slices, and a refused publish leaving no plan entry.'
+    kind: code
+    profile: engineer
+    territory: []
+    phase_intent: 'Plan hierarchy: Plans, phases, slices and tasks become one dependency graph with parent links, kept in
+      ledger tables beside the document and queried with joins. Old phases are grouped into plans by their plan link, unlinked
+      ones under one standalone plan. Parent intent: the operator''s build order step one, so freeze and the dispatcher can
+      walk the tree.'
+  params:
+    id: hy8
+    title: Republishing a revised plan moves its phases to the new plan and reconciles slices and tasks
+  expected:
+    difficulty: M
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 314
+    answers:
+      difficulty:
+        type: choice
+        choice: M
+        confidence: 0.9627283211404591
+        probabilities:
+          S: 0.003303867656604543
+          M: 0.9751522140936394
+          L: 0.021543918249756155
+  notes: state digest 9e8b0f0a3da29930
+- name: rig-grade-swarm-vprf5
+  state:
+    task: vprf5
+    title: Qualify gate overhead and rollout concurrency
+    description: 'Swarm v2 work package SV2-PRF-05, tier 8 of 8. Spec: read section SV2-PRF-05 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G10. Intended change: Define
+      a safe measured operating envelope for the first distributed release. Required fixture: Small staged cohorts with an
+      intentionally slowed brain and archive backend. Name SV2-PRF-05 in the pull request. antoncore changes go through GitOps,
+      never live patches. Priority: Atlas compute first, because the operator''s workstation memory is the bottleneck.'
+    kind: code
+    profile: engineer
+    territory:
+    - swarm v2 PRF
+    phase_intent: 'Swarm v2, tier 8: validation, migration and release: Tier 8 of 8 of Swarm v2, ordered so the swarm can
+      run on Atlas compute first. Cross repository validation, retention, retiring the old transcript service, runbooks and
+      final acceptance. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md, one section per
+      work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
+  params:
+    id: vprf5
+    title: Qualify gate overhead and rollout concurrency
+  expected:
+    difficulty: M
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 18960
+    answers:
+      difficulty:
+        type: choice
+        choice: L
+        confidence: 0.63
+        probabilities:
+          S: 0.02
+          M: 0.35
+          L: 0.63
+  notes: state digest ce2b8b57957c765b; internal names masked for the package
+- name: rig-grade-swarm-tc105
+  state:
+    task: tc105
+    title: Overlay names line up with the role text in the overlays section
+    description: Two operator fixes in the swarm panel, one pull request. First, in the overlays section the offered overlay
+      name for the engineer row starts further right than the no overlay text in the other rows; align every value cell to
+      the same left edge, following the ui doctrine. Second, remove the commands dropdown that lists every queued page command
+      such as refresh quota and set session cap; the operator never asked for it. A failed command still shows its error where
+      its control was pressed. Browser check at 1920 by 1080 on a scratch ledger with one offered overlay. Done when the pull
+      request merges with the screenshot on the task proof.
+    kind: code
+    profile: frontend
+    territory: []
+    phase_intent: 'Swarm runtime fixes: Defects the running swarm hits in its own tooling: ledger writes, role guards, launch
+      and evaluation routing, flaky tests that block the required gate, and merge friction. Each fix keeps agents moving without
+      the operator, ships with a test that failed first, and is proven live on the shared ledger or in CI.'
+  params:
+    id: tc105
+    title: Overlay names line up with the role text in the overlays section
+  expected:
+    difficulty: S
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4003
+    answers:
+      difficulty:
+        type: choice
+        choice: S
+        confidence: 0.9
+        probabilities:
+          S: 0.9
+          M: 0.09
+          L: 0.01
+  notes: state digest b1ee5533a89cfc04
+- name: rig-grade-swarm-hs1
+  state:
+    task: hs1
+    title: The host budget gates every spawn in every scaling mode
+    description: 'Parent: Host aware scaling, build order step three. The host budget gates every spawn in manual and auto
+      scaling and the master seat too, after the quota seat check, and swarm status names the reason for a held spawn; an
+      unreadable host sample lets spawns pass with the reason host unknown. Seams: manual caps above host room spawn only
+      up to the room, and the rest at the next tick once room returns. Details in your plan chunk.'
+    kind: code
+    profile: engineer
+    territory:
+    - scripts/swarm/host_budget.py
+    - scripts/swarm/capacity.py
+    - scripts/swarm/tick.py
+    phase_intent: 'Host aware scaling: The host budget gates every spawn in manual and auto scaling, and outages or host pressure
+      reach the operator by push and the master by inbox, once per incident. Replaces the held alerts task. Parent intent:
+      build order step three, host limits.'
+  params:
+    id: hs1
+    title: The host budget gates every spawn in every scaling mode
+  expected:
+    difficulty: M
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 11254
+    answers:
+      difficulty:
+        type: choice
+        choice: M
+        confidence: 0.85
+        probabilities:
+          S: 0.05
+          M: 0.85
+          L: 0.1
+  notes: state digest 09f73132ab777609
+- name: rig-grade-swarm-vsec4
+  state:
+    task: vsec4
+    title: Secure operator terminal attachment
+    description: 'Swarm v2 work package SV2-SEC-04, tier 3 of 8. Spec: read section SV2-SEC-04 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: antoncore. Integration gate: G3. Intended change: Give the
+      operator interactive visibility without sharing cluster or host administration credentials. Required fixture: Valid
+      operator certificate, expired certificate, untrusted server, and replaced execution endpoint. Name SV2-SEC-04 in the
+      pull request. antoncore changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s
+      workstation memory is the bottleneck.'
+    kind: code
+    profile: engineer
+    territory:
+    - swarm v2 SEC
+    phase_intent: 'Swarm v2, tier 3: worker image, filesystem and isolation: Tier 3 of 8 of Swarm v2, ordered so the swarm
+      can run on Atlas compute first. The worker image, the worker Pod template, private homes and worktrees, scoped credentials
+      and Firecracker microVM isolation. Spec for every task here: /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md,
+      one section per work package. Authorized repos: agentihooks, agentibrain-kernel, antoncore.'
+  params:
+    id: vsec4
+    title: Secure operator terminal attachment
+  expected:
+    difficulty: L
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 4380
+    answers:
+      difficulty:
+        type: choice
+        choice: L
+        confidence: 0.85
+        probabilities:
+          S: 0.02
+          M: 0.13
+          L: 0.85
+  notes: state digest 981bb36e84787ee2; internal names masked for the package
+- name: rig-grade-swarm-hy7
+  state:
+    task: hy7
+    title: The ledger page groups phases under their plans
+    description: 'Parent: Plan hierarchy. The ledger page Phases section shows each plan as a row holding its phases, and
+      each phase fold lists its slices with task counts, per the mock in the plan. Seams: two plans and a standalone plan
+      render three plan rows in order; every section stays foldable. Checked by eye at 1920 by 1080 on a scratch ledger with
+      the screenshot on the proof. Details in your plan chunk.'
+    kind: code
+    profile: engineer
+    territory:
+    - scripts/swarm_ledger/static/js/render.js
+    - scripts/swarm_ledger/static/js/outline.js
+    - scripts/swarm_ledger/static/css/ledger.css
+    phase_intent: 'Plan hierarchy: Plans, phases, slices and tasks become one dependency graph with parent links, kept in
+      ledger tables beside the document and queried with joins. Old phases are grouped into plans by their plan link, unlinked
+      ones under one standalone plan. Parent intent: the operator''s build order step one, so freeze and the dispatcher can
+      walk the tree.'
+  params:
+    id: hy7
+    title: The ledger page groups phases under their plans
+  expected:
+    difficulty: S
+  control: false
+  samples:
+  - source: haiku
+    latency_ms: 11154
+    answers:
+      difficulty:
+        type: choice
+        choice: S
+        confidence: 0.6
+        probabilities:
+          S: 0.6
+          M: 0.35
+          L: 0.05
+  notes: state digest 125a02723f1c254d

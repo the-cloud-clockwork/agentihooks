@@ -1,0 +1,67 @@
+{
+  "package": "SV2-LDG-01",
+  "dependency": "SV2-CTL-05",
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2163",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2180",
+  "tested_commit": "42a01505c97dde74803aee8ccc17834a5c2be000",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Real ledger HTTP server in process in remote deployment mode, real SQLite ledger repository, fakeredis hive membership, subprocess worker CLI with a read-only home. Live G3 qualification is separate.",
+  "interfaces": [
+    "ledger.call routes remote deployments through remote_call; a transport failure never reads the local repository or starts a ledger server",
+    "ledger.retried(read, attempts) retries outages and 5xx answers for reads (REMOTE_READ_ATTEMPTS 3, pauses 0.5 s then 1 s); writes run once",
+    "ledger.resource and ledger.export use the same bounded retry when remote and build credentials and the client on every attempt",
+    "ledger.Unauthenticated (SystemExit) with 'unauthenticated: <reason>' for a missing launch token, a missing pinned identity, a 401/403 hive credential refusal and a server 403 'Missing or wrong ledger credential'",
+    "ledger.ledger_remote_auth_failures_total() sums ledger.AUTH_FAILURES by reason",
+    "ledger.REQUEST_TIMEOUT 10 s for every remote ResourceClient (request, resource, export, launch token)",
+    "Local deployment keeps the page token lookup and the server autostart"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards in the linked CI run",
+    "server": "Existing ledger HTTP API v1 with hive agent tokens (scripts.hive.auth.issue_agent)",
+    "endpoint": "LEDGER_URL with AGENTIHOOKS_DEPLOYMENT other than local",
+    "credential": "AGENTIHOOKS_LEDGER_AGENT_TOKEN from the launch configuration, or AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL to derive it",
+    "compatibility": "Local mode behaviour is covered by the existing ledger authority and remote client tests"
+  },
+  "states": {
+    "observed": "Worker subprocess stdout and exit code, ledger revision, task comments read from the SQLite repository",
+    "accepted": "Server accepts the hive-token write bound to slug and agent; refuses the same token under another agent label",
+    "committed": "Comment present once in the authoritative SQLite ledger after a lost response and two replays of the same op id",
+    "externally_verified": "Not claimed; live G3 evidence is required at the rollout gate"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37934009539 failed all nine new tests on the tests-only commit ad291bb4",
+    "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936354187 passed on 42a01505",
+    "review": "Standards reader closed in round 3, Spec reader closed in round 2",
+    "local": "No local tests or mutation ran; static prepush passed on 42a01505",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936842869",
+    "unit": "All unit shards passed on 42a01505; each acceptance case passed twice from independent fixture homes"
+  },
+  "measurements": {
+    "ledger_remote_auth_failures_total": {
+      "success": 0,
+      "rejection": 2,
+      "recovery": 0
+    },
+    "dimension": "Per worker process; each acceptance case reads its own subprocess or a before and after delta in process"
+  },
+  "rollback_rehearsal": {
+    "action": "Set AGENTIHOOKS_DEPLOYMENT=local: the page token lookup and server autostart return, LEDGER_URL is ignored",
+    "evidence": {
+      "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/37936842869",
+      "tests": [
+        "test_local_mode_reads_the_page_token_and_ignores_ledger_url (job 113842058392, PASSED 2026-10-09T13:31:41Z)",
+        "test_local_resource_and_export_reads_run_once (job 113842058585, PASSED 2026-10-09T13:33:46Z)"
+      ]
+    },
+    "authoritative_objects": "SQLite ledger repository and its page token; hive membership and agent token records in Redis. Rollback deletes neither."
+  },
+  "failure_evidence": "The first mutation preflight run 37934215314 failed the recovery case with 403 because a remote-mode server refuses HMAC agent tokens; the fixture now derives a hive token. Smallest reproducer: tests/sv2_ldg01_cases.py recovery with an HMAC token.",
+  "remaining_limitations": [
+    "Live G3 deployment evidence is required at the rollout gate; these are mocked fixtures",
+    "The auth failure counter is per process and has no exporter",
+    "A worker given LEDGER_URL without AGENTIHOOKS_DEPLOYMENT still runs local; changing that default is a ledger follow-up for the operator",
+    "The server-not-answering hint in ledger_link.page_line still names the local start command"
+  ]
+}

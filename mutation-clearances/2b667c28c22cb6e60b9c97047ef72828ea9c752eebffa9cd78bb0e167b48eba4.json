@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/outcomes.py:scripts.swarm_v2.outcomes.x\u01c1Outcomes\u01c1_receipt__mutmut_43:442a641e3e0f84d4bb216d9fda07184884d4efaa222efe372aea8a8dad767f65": {
+    "reader": "Standards",
+    "reason": "The check returns the unchanged TaskClaim. TaskAuthority._write returns before its event label is consumed or journalled."
+  }
+}

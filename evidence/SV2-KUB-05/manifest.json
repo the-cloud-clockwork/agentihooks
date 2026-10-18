@@ -1,0 +1,18 @@
+{
+  "tested_commit": "d86134419c0f31473d5a4b5c09d417fed82230eb",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38088189562",
+  "evidence_class": "mocked Redis, fake lease clock, in process API server carrying fixture Pod statuses, in process grant registry and checkpoint list, real AccountCapacity slots in fakeredis; no Kubernetes API server or node",
+  "cases": [
+    "T-SV2-KUB-05-A",
+    "T-SV2-KUB-05-B",
+    "T-SV2-KUB-05-C"
+  ],
+  "inputs": {
+    "tests/fixtures/swarm_v2/pod-failures.json": "13b5e8d94825f40ea87fada359454c47dee84fd4161945eebcdea4e235fff4b4",
+    "tests/fixtures/swarm_v2/pod-policy.json": "fe59695070f986ee8928dcfa9abff5d0a07372f6af03611733a4cdad34772acb",
+    "tests/fixtures/swarm_v2/pod-launch.json": "a3dd9f7083b76f91ac724de6fc3d05d0227424feda9caac8d1c8f50eeede87ae",
+    "tests/sv2_kub05_cases.py": "f68118d9321a22cb55c19b9c501aacae50a233c469f02074d7c6a51b2eb56e06",
+    "tests/test_swarm_v2_kubernetes_failures.py": "558e2c638fb95c56a75f04d554b68eab3062a470076e827a8ec42f95d682a8bf",
+    "scripts/swarm_v2/kubernetes/failures.py": "54f615727d09a59d93b0bde97cbf34f8028533a42ec1327d2273614c920e55e5"
+  }
+}

@@ -18,6 +18,18 @@ nothing, merge nothing. The launch prompt names the swarm `<slug>`, your agent
 `<name>`, the plan task and its phase. Read `steering.md` in the work folder
 first: the project intent, the phase intent and any send back note.
 
+## Plans versus standalone tasks
+
+- A full plan is a plan file a master or planner writes and publishes to the
+  artifacts; every task built from it carries its slice.
+- Follow ups, open questions, operator notes and orders the operator types or
+  gives are standalone tasks with no plan and no slice.
+- A standalone task that a master or planner expands because it grew wide
+  becomes a plan: write and publish the plan with slice markers, then add its
+  tasks with their slices.
+- Small self explanatory changes, such as a style tweak or a loose layout
+  change, stay standalone and never get a plan.
+
 ## Join
 
 - `agentihooks ledger --slug <slug> --as <name> join`, once.
@@ -38,11 +50,12 @@ first: the project intent, the phase intent and any send back note.
 
 ## Slice
 
-1. Write the slice as a markdown plan in the work folder. Use the phase title
-   as its heading and put one unique `<!-- slice: <id> -->` anchor immediately
-   before each task heading. The section ends at the next slice anchor or
-   heading of the same or higher level. Done when every task has an anchor
-   and a section stating its complete scope and proof.
+1. Write the slice as a markdown plan in the work folder. Put each phase under a
+   heading with its exact title, each task section under a heading one level
+   deeper, and one unique `<!-- slice: <id> -->` anchor immediately before each
+   task heading. The section ends at the next slice anchor or heading of the
+   same or higher level. Done when every task has an anchor and a section
+   stating its complete scope and proof.
 2. Publish it before adding tasks:
    `agentihooks ledger --slug <slug> --as <name> publish-plan <file> --phase <phase>`.
    Publication stores a plan artifact and computes the phase range. Done when

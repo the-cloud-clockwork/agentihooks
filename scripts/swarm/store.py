@@ -1,13 +1,14 @@
 """Swarm runtime state in Redis: config, exclusive task claims with a lease, the agent registry and its seats."""
 
 import json
+import os
 import time
 from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from scripts.inbox.seats import SeatMemory, SeatRegistry, SwarmCulture, of_swarm
 from scripts.inbox.store import InboxStore
-from scripts.swarm import effort_range
+from scripts.swarm import default_models, effort_range
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.naming import NameRegistry
@@ -19,16 +20,25 @@ PREFIX = f"{ROOT}:swarm"
 STATES = ("running", "paused", "stopping", "stopped", "drained")
 DEFAULT_URL = "redis://127.0.0.1:6379/0"
 MASTER = "master"
+DISPATCH = "dispatch"
 AUTONOMY = ("manual", "assist", "delegate", "full")
 MANUAL, ASSIST, DELEGATE, FULL = AUTONOMY
 SCALING = ("auto", "manual")
 AUTO_SCALING, MANUAL_SCALING = SCALING
 DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
 DEFAULT_MEMORY_PER_AGENT_MB = 700
+DEFAULT_MASTERS_STEP = 12
+DEFAULT_MASTER_MOVE_GRACE = 300
 MAX_LOAD = 10.0
+CODEX_TRANSPORTS = ("legacy", "app_server")
+LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
 
 
 class SwarmError(RuntimeError):
+    pass
+
+
+class Unreachable(SwarmError):
     pass
 
 
@@ -55,6 +65,16 @@ class SwarmConfig:
     load_high: float = DEFAULT_LOAD_HIGH
     load_low: float = DEFAULT_LOAD_LOW
     memory_per_agent_mb: int = DEFAULT_MEMORY_PER_AGENT_MB
+    lane_shift: int = 0
+    api_url: str = ""
+    claude_model: str = default_models.DEFAULTS["claude"]
+    codex_model: str = default_models.DEFAULTS["codex"]
+    scratch: bool = False
+    codex_inbox_transport: str = LEGACY_TRANSPORT
+    master_claude_login: bool = False
+    masters_step: int = 0
+    caps_pinned: bool = False
+    master_move_grace: int = DEFAULT_MASTER_MOVE_GRACE
 
 
 def scaling_refusal(config):
@@ -102,6 +122,10 @@ class AgentRecord:
     runtime_target: dict = field(default_factory=dict)
     launch_timings: dict = field(default_factory=dict)
     hive: str = ""
+    route_kind: str = "subscription"
+    transport: str = ""
+    remote_control: dict = field(default_factory=dict)
+    desired_route_kind: str = ""
 
 
 class RedisStore:
@@ -128,6 +152,17 @@ class RedisStore:
         return sorted(self.redis.smembers(f"{PREFIX}:index"))
 
     def create(self, config):
+        from scripts.swarm import model_catalog
+
+        changes = {
+            field: default_models.model(config, harness)
+            for harness, field in default_models.FIELDS.items()
+            if default_models.model(config, harness) != default_models.DEFAULTS[harness]
+        }
+        if changes and (
+            refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time()))
+        ):
+            raise SwarmError(refused)
         refused = effort_range.refusal((config.effort_min, config.effort_max), config.lanes) or scaling_refusal(config)
         if refused:
             raise SwarmError(refused)
@@ -163,13 +198,30 @@ class RedisStore:
             float(raw.get("load_high") or DEFAULT_LOAD_HIGH),
             float(raw.get("load_low") or DEFAULT_LOAD_LOW),
             int(raw.get("memory_per_agent_mb") or DEFAULT_MEMORY_PER_AGENT_MB),
+            int(raw.get("lane_shift") or 0),
+            raw.get("api_url", ""),
+            raw.get("claude_model") or default_models.DEFAULTS["claude"],
+            raw.get("codex_model") or default_models.DEFAULTS["codex"],
+            raw.get("scratch") == "True",
+            raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
+            raw.get("master_claude_login") == "True",
+            int(raw.get("masters_step") or 0),
+            raw.get("caps_pinned", "True") == "True",
+            int(raw.get("master_move_grace") or DEFAULT_MASTER_MOVE_GRACE),
         )
 
     def update(self, slug, **changes):
+        from scripts.swarm import model_catalog
+
         if changes.get("state", STATES[0]) not in STATES:
             raise SwarmError(f"state must be one of {STATES}")
         if changes.get("autonomy", DELEGATE) not in AUTONOMY:
             raise SwarmError(f"autonomy must be one of {AUTONOMY}")
+        if changes.get("codex_inbox_transport", LEGACY_TRANSPORT) not in CODEX_TRANSPORTS:
+            raise SwarmError(f"codex inbox transport must be one of {', '.join(CODEX_TRANSPORTS)}")
+        if set(default_models.FIELDS.values()) & changes.keys():
+            if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
+                raise SwarmError(refused)
         previous = self.config(slug)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):
@@ -187,12 +239,60 @@ class RedisStore:
         return self._if_holder(
             self.key(slug, "claim", task),
             None,
-            lambda pipe, key: pipe.set(key, agent, nx=True, px=lease_ms),
+            lambda pipe, key: (pipe.set(key, agent, nx=True, px=lease_ms), pipe.incr(f"{key}:generation")),
             self._claim_guards(slug, task),
         )
 
     def claimant(self, slug, task):
         return self.redis.get(self.key(slug, "claim", task))
+
+    def claim_generation(self, slug: str, task: str) -> int:
+        return int(self.redis.get(f"{self.key(slug, 'claim', task)}:generation") or 0)
+
+    def release_ready(self, slug: str, task: str, agent: str, generation: int, expected_ready: str | None) -> bool:
+        from redis.exceptions import WatchError
+
+        key, ready = self.key(slug, "claim", task), self.key(slug, "ready")
+        guards = self._claim_guards(slug, task)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, f"{key}:generation", ready, *guards)
+                if (
+                    pipe.get(key) not in (None, agent)
+                    or int(pipe.get(f"{key}:generation") or 0) != generation
+                    or pipe.hget(ready, task) != expected_ready
+                    or any(pipe.exists(guard) for guard in guards)
+                ):
+                    return False
+                pipe.multi()
+                pipe.delete(key)
+                pipe.hdel(ready, task)
+                pipe.execute()
+                return True
+            except WatchError:
+                return False
+
+    def ensure_claim(self, slug: str, agent: AgentRecord, lease_ms: int) -> bool:
+        from redis.exceptions import WatchError
+
+        key = self.key(slug, "claim", agent.task)
+        guards = self._claim_guards(slug, agent.task)
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, self.key(slug, "agents"), self.key(slug, "executions"), *guards)
+                current = next((a for a in self.agents(slug) if a.name == agent.name), None)
+                if current != agent or agent.state not in ("starting", "working", "awaiting-decision"):
+                    return False
+                holder = pipe.get(key)
+                if holder not in (None, agent.name) or any(pipe.exists(guard) for guard in guards):
+                    return False
+                pipe.multi()
+                pipe.set(key, agent.name, px=lease_ms)
+                if holder is None:
+                    pipe.incr(f"{key}:generation")
+                return bool(pipe.execute()[0])
+            except WatchError:
+                return False
 
     def refresh(self, slug: str, task: str, agent: str, lease_ms: int) -> bool:
         return self._if_holder(
@@ -307,6 +407,7 @@ class RedisStore:
                 reason = "handed off"
             self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
         self.redis.hdel(self.key(slug, "agents"), name)
+        self.redis.hdel(self.key(slug, "desired-routes"), name)
         self.redis.hdel(self.key(slug, "state-since"), name)
         self.redis.hdel(self.key(slug, "retire-failures"), name)
         self.names.retire(name, ended)
@@ -341,9 +442,36 @@ class RedisStore:
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
-    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "") -> None:
-        row = {"agent": agent.name, "task": agent.task, "at": agent.started_at, "state": state, "error": error}
+    def record_launch(
+        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
+    ) -> None:
+        row = {
+            "agent": agent.name,
+            "task": agent.task,
+            "at": agent.started_at,
+            "state": state,
+            "error": error,
+            "pane_id": agent.pane_id,
+            "after": after,
+            "head": head,
+        }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
+
+    def mark_restart(self, slug: str, task: str, cause: str) -> None:
+        self.redis.hset(self.key(slug, "restart-causes"), task, cause)
+
+    def take_restart(self, slug: str, task: str) -> str:
+        cause = self.redis.hget(self.key(slug, "restart-causes"), task) or ""
+        self.redis.hdel(self.key(slug, "restart-causes"), task)
+        return cause
+
+    def note_launch_pane(self, slug: str, name: str, lines: list[str], reason: str = "") -> None:
+        raw = self.redis.hget(self.key(slug, "launches"), name)
+        if raw is None:
+            return
+        row = json.loads(raw)
+        row = {**row, "error": row["error"] or reason, "pane_lines": lines}
+        self.redis.hset(self.key(slug, "launches"), name, json.dumps(row))
 
     def launches(self, slug: str) -> list[dict]:
         rows = {name: json.loads(raw) for name, raw in self.redis.hgetall(self.key(slug, "launches")).items()}
@@ -465,7 +593,40 @@ def redis_client(environ=None):
 
     import hooks.config  # noqa: F401  loads ~/.agentihooks/*.env, where REDIS_URL lives
 
-    url = redis_url(os.environ if environ is None else environ)
+    environ = os.environ if environ is None else environ
+    url = redis_url(environ)
+    try:
+        return _pinged(redis, url)
+    except redis.AuthenticationError:
+        if url != environ.get("AGENTIHOOKS_HIVE_REDIS_URL"):
+            raise
+    return _hive_recovered(redis, environ, url)
+
+
+def _hive_recovered(redis, environ, refused):
+    from scripts.hive import auth, cli
+
+    # One refresh per host: a second would retire the password the first just saved.
+    with cli.refresh_lock(environ):
+        saved = cli.saved_redis_url(environ)
+        if saved not in (None, refused):
+            try:
+                client = _pinged(redis, saved)
+            except redis.AuthenticationError:
+                pass
+            else:
+                environ["AGENTIHOOKS_HIVE_REDIS_URL"] = saved
+                return client
+        try:
+            cli.refresh_env(environ)
+        except auth.HiveError as exc:
+            raise redis.AuthenticationError(
+                f"the hive Redis credential was refused and the hive refused a refresh ({exc})"
+            ) from exc
+    return _pinged(redis, environ["AGENTIHOOKS_HIVE_REDIS_URL"])
+
+
+def _pinged(redis, url):
     client = redis.Redis.from_url(url, decode_responses=True, socket_connect_timeout=3, socket_timeout=10)
     client.ping()
     return client
@@ -477,4 +638,4 @@ def connect(environ=None):
     try:
         return RedisStore(redis_client(environ))
     except redis.RedisError as exc:
-        raise SwarmError(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc
+        raise Unreachable(f"Redis is unreachable ({exc}); the swarm refuses to run without it") from exc

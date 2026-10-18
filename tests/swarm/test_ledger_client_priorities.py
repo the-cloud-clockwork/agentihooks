@@ -44,3 +44,11 @@ def test_mark_done_sets_the_done_flag(sent):
 def test_answer_as_operator_carries_no_author(sent):
     ledger_client.LedgerClient().answer_as_operator("demo", "questions/q1", "Use the small one.")
     assert without_id(sent) == [("demo", {"op": "add", "thread": "questions/q1/answers", "text": "Use the small one."})]
+
+
+@pytest.mark.parametrize("flag", [{}, {"needs_operator": True}])
+def test_followup_flags_the_item_for_the_operator_only_when_asked(sent, flag):
+    ledger_client.LedgerClient().followup("demo", "Pick a port.", **flag)
+    [(slug, op)] = without_id(sent)
+    op.pop("text")
+    assert (slug, op) == ("demo", {"op": "add_item", "by": "swarm", "list": "followups", **flag})

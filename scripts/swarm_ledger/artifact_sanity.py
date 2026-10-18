@@ -11,6 +11,11 @@ from urllib.parse import urlsplit
 SHELL = Path(__file__).resolve().parent / "shell.html"
 PAGE_URL = "http://127.0.0.1:9/artifact-sanity"
 VIEWPORT = {"width": 1920, "height": 1080}
+FIRST_STATE = """async () => {
+          const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+          await (await import(new URL("sync.js", main))).loaded;
+          return true;
+        }"""
 BASELINE_CH = 90
 WIDTH_FACTOR = 2
 TOKEN_MAX = 40
@@ -221,7 +226,7 @@ def run(browser, files: list[Path]) -> dict[str, list[str]]:
         tab.route("**/static/*/**", lambda route: _asset(route, served))
         tab.route("**/api/v1/ledgers/*/events", lambda route: _events(route, doc))
         tab.goto(PAGE_URL)
-        tab.wait_for_function("() => document.getElementById('status').textContent !== 'loading'")
+        tab.wait_for_function(FIRST_STATE)
         return {path.name: _view(tab, path) for path in files}
     finally:
         tab.close()

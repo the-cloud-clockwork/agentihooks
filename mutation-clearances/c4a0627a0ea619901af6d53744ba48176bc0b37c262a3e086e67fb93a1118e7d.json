@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_sample__mutmut_44:06a5b3dd565f602c81845ba9b82e785f8771d53373eeceafcb374d2d27ed5187": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "Dropping the instance default makes the lookup key None, which never matches a launch key, so launch is None exactly as with the original empty default."
+  }
+}

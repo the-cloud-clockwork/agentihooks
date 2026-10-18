@@ -9,7 +9,9 @@ def run(args) -> None:
     doc = ledger.call(args.slug)
     report = {"updated": [], "missing": []}
     for task in doc.get("tasks", []):
-        if task.get("state") == "done" or task.get("done") or not task.get("plan_url") or task.get("plan_lines"):
+        if task.get("state") == "done" or task.get("done") or task.get("follow_up"):
+            continue
+        if not task.get("plan_url") or task.get("plan_lines"):
             continue
         phase = next((p for p in doc.get("phases", []) if p["id"] == task.get("phase")), {})
         try:

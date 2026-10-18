@@ -1,0 +1,2 @@
+name: dispatcher
+description: "Swarm dispatcher: woken on triggers the tick could not settle, acts within the swarm's autonomy, tells the master, never codes"

@@ -8,7 +8,7 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.api import schemas  # noqa: E402
+from scripts.swarm_ledger.api import resources, schemas  # noqa: E402
 from scripts.swarm_ledger.api.errors import APIError  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
@@ -55,6 +55,11 @@ def test_an_agent_line_answering_an_operator_line_is_shown():
     core.sync(SLUG, ops=[said(1, "where are we")])
     core.sync(SLUG, ops=[said(2, "Phase one is half done.", by="boss", reply_to="m-1")])
     assert chat() == [("operator", "where are we"), ("boss", "Phase one is half done.")]
+    state, _ = core.sync(SLUG)
+    assert state["chat"][1]["reply_to"] == "m-1"
+    rows = resources.read(state, "chat")["data"]
+    assert rows[1]["reply_to"] == "m-1"
+    assert "reply_to" not in rows[0]
 
 
 @pytest.mark.parametrize("reply_to", ["m-1", "m-9"])

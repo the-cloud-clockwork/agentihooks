@@ -49,6 +49,9 @@ def test_answered_line_shape():
         "state_digest": decision_log.state_digest({"task": "t"}),
         "failures": [],
         "api_down_cached": False,
+        "definition": None,
+        "definition_digest": None,
+        "expected": None,
     }
 
 
@@ -66,6 +69,9 @@ def test_unanswered_line_shape():
         "state_digest": decision_log.state_digest("s"),
         "failures": [],
         "api_down_cached": False,
+        "definition": None,
+        "definition_digest": None,
+        "expected": None,
     }
 
 

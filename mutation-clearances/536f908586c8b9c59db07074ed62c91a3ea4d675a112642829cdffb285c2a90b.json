@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x\u01c1IntentGate\u01c1decide__mutmut_96:848dd16dc674efaf85d021aaa5a38031044b1c81ce16cbb14326682fe2e40b45": {
+    "reader": "Standards",
+    "reason": "Omitting bound uses its False default. The additional _other_half check sees only the isolated command, whose explicit merge target was already matched to the saved pull URL; target-free release commands have no target to mismatch. This redundant check cannot change any supported command outcome or gate side effect."
+  }
+}

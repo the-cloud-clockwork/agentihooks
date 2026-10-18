@@ -1,0 +1,6 @@
+{
+  "scripts/ci_runner_trust.py:scripts.ci_runner_trust.x_main__mutmut_34:7082bf6b3fa362bfe9aa59cecb9fa3ad24294965f4576be1e215766d93c7e4b3": {
+    "reader": "standards_reader",
+    "reason": "Presentation only: default JSON separators add legal whitespace to the actors array. The actors= line remains valid one-line JSON with exactly the validated operator, apps and queue names. fromJSON consumes the identical membership array."
+  }
+}

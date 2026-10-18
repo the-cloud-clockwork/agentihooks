@@ -25,7 +25,7 @@ DETERMINISTIC = """(() => {
   Math.random = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
   const folds = "plan-ledger:replay:fold";
   if (!localStorage.getItem(folds)) localStorage.setItem(folds, JSON.stringify(Object.fromEntries(
-    ["overview-box", "notes-box", "questions-box", "phases-box", "followups-box", "stats-box", "art-fold", "chat-fold", "notif-fold", "alert-fold"].map((id) => [id, true]))));
+    ["notes-box", "questions-box", "phases-box", "followups-box"].map((id) => [id, true]))));
   window.__inflight = 0;
   const send = window.fetch;
   window.fetch = function (...args) {

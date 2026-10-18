@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from scripts import agent_choice
 from scripts.handoff import transfers
 from scripts.inbox.seats import seat_address
-from scripts.swarm import affinity, effort_range, launch_check, master_start, model_pick
+from scripts.swarm import affinity, capacity, effort_range, launch_check, master_start, model_pick
 from scripts.swarm.resume import blocker
 from scripts.swarm.snapshot import ledger_source
 from scripts.swarm.store import MASTER, AgentRecord, SwarmError
@@ -61,7 +61,7 @@ def _previous(store, slug):
         for row in history
         if row.get("lane") == MASTER and row["name"] not in names
     ]
-    return max(current + ended, key=lambda p: p.ran_at, default=None)
+    return max(current + ended, key=lambda p: (p.agent.started_at, p.ran_at), default=None)
 
 
 def describe(previous):
@@ -125,14 +125,12 @@ def fill(saved, config):
     """A saved launch with its empty keys filled: master profile, affinity or open seat harness, frontier model."""
     harness = saved.get("harness") or affinity.desired(config) or _open_seat()
     defaults = {"profile": _profile(config)}
-    if harness:
-        pick = model_pick.frontier(harness)
-        defaults |= {
-            "harness": harness,
-            "model": pick.model,
-            "effort": effort_range.clamp(harness, pick.effort, effort_range.of(config)),
-        }
-    return {**defaults, **{key: value for key, value in saved.items() if value}}
+    kept = {key: value for key, value in saved.items() if value}
+    if harness not in effort_range.EFFORTS:
+        return {**defaults, **kept}
+    pick = model_pick.frontier(harness)
+    effort = effort_range.clamp(harness, kept.get("effort", pick.effort), effort_range.bounds(config, MASTER))
+    return {**defaults, "harness": harness, "model": pick.model, **kept, "effort": effort}
 
 
 def _open_seat():
@@ -162,6 +160,7 @@ def _new(store, slug, runtime, at):
         task = _filled(primed(store, slug, record.seat, task), config)
         master_start.begin(store, slug, name, task, at)
         affinity.handed_off(store, slug)
+        capacity.feed_spent(runtime, store, at)
         if reader := getattr(runtime, "quota_capacity", None):
             reader(config, store.agents(slug), at / 1000)
         placed = runtime.spawn(config, MASTER, name, task)
@@ -175,7 +174,8 @@ def _new(store, slug, runtime, at):
             store.redis.delete(store.key(slug, "master-start"))
         raise SwarmError(f"the new master could not start: {exc}") from exc
     affinity.placed(store, slug, placed.harness)
-    record = placed_record(record, placed)
+    occupant = store.execution_occupants(slug).get(record.seat)
+    record = placed_record(occupant if occupant and occupant.name == name else record, placed)
     reported = runtime.reported(record)
     store.put_agent(slug, replace(record, state="working" if reported else "starting"))
     launch_check.begin(store, slug, record, at)

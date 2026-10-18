@@ -442,3 +442,205 @@ class TestHardBlockHalfOpen:
             on_post_tool_result({**payload, "tool_response": {"is_error": True, "content": "ENOENT"}})
         with pytest.raises(BlockAction):
             check_hard_block(payload)
+
+
+_PREPUSH_PASSED = (
+    "ci_prepush: ruff check\nAll checks passed!\nci_prepush: ruff format\n1331 files already formatted\n"
+    "ci_prepush: size limits\n83 units over a limit, 83 on the base allowlist, 0 errors\n"
+    "ci_prepush: every cheap gate passed on e737709622ef; push it."
+)
+_PREPUSH_FAILED = (
+    "ci_prepush: ruff check\nAll checks passed!\nci_prepush: ruff format\n1331 files already formatted\n"
+    "ci_prepush: size limits\n84 units over a limit, 83 on the base allowlist, 1 errors\n"
+    "ci_prepush: size limits failed; fix them, commit and run again before pushing."
+)
+_CODEX_PREPUSH_FAILED = "Exit code: 1\nWall time: 2.1 seconds\nOutput:\n" + _PREPUSH_FAILED
+
+
+class TestNativeShellOutcomes:
+    """Codex sends shell output as a bare string and Claude as a dict, neither with an exit code."""
+
+    _COMMAND = "python -m scripts.ci_prepush"
+
+    def _payload(self, response, session_id):
+        return {
+            "tool_name": "Bash",
+            "tool_input": {"command": self._COMMAND},
+            "tool_response": response,
+            "session_id": session_id,
+        }
+
+    def _count(self, session_id):
+        from hooks.context.retry_breaker import _get_state
+
+        return _get_state(session_id, "bash:python")["count"]
+
+    @pytest.mark.parametrize(
+        "response",
+        [_PREPUSH_PASSED, {"stdout": _PREPUSH_PASSED, "stderr": "", "interrupted": False, "isImage": False}],
+        ids=["codex-string", "claude-dict"],
+    )
+    def test_successful_prepush_never_counts(self, response):
+        from hooks.context.retry_breaker import on_post_tool_result
+
+        with patch.object(_breaker_mod, "_inject_breaker_message") as inject:
+            for _ in range(5):
+                on_post_tool_result(self._payload(response, "prepush-ok"))
+        assert self._count("prepush-ok") == 0
+        assert inject.call_count == 0
+
+    @pytest.mark.parametrize(
+        "summary",
+        ["Tests: 0 failed, 12 passed", "Found 0 errors", "0 exceptions, 0 timeouts, 0 denied", "1.0 errors"],
+    )
+    def test_only_a_zero_count_is_ignored(self, summary):
+        from hooks.tool_memory import _is_error
+
+        assert _is_error(summary)[0] is (summary == "1.0 errors")
+
+    def test_successful_prepush_resets_a_real_failure(self):
+        from hooks.context.retry_breaker import on_post_tool_result
+
+        on_post_tool_result(self._payload(_CODEX_PREPUSH_FAILED, "prepush-reset"))
+        on_post_tool_result(self._payload(_CODEX_PREPUSH_FAILED, "prepush-reset"))
+        assert self._count("prepush-reset") == 2
+        on_post_tool_result(self._payload(_PREPUSH_PASSED, "prepush-reset"))
+        assert self._count("prepush-reset") == 0
+
+    def test_failing_prepush_still_reaches_research_and_hard_stop(self):
+        from hooks.config import RETRY_BREAKER_HARD_MAX, RETRY_BREAKER_MAX
+        from hooks.context.retry_breaker import check_hard_block, on_post_tool_result
+        from hooks.hook_manager import BlockAction
+
+        payload = self._payload(_CODEX_PREPUSH_FAILED, "prepush-fail")
+        with patch.object(_breaker_mod, "_inject_breaker_message") as inject:
+            for _ in range(RETRY_BREAKER_MAX):
+                on_post_tool_result(payload)
+            assert inject.call_count == 1
+            for _ in range(RETRY_BREAKER_HARD_MAX - RETRY_BREAKER_MAX):
+                on_post_tool_result(payload)
+        assert self._count("prepush-fail") == RETRY_BREAKER_HARD_MAX
+        with pytest.raises(BlockAction):
+            check_hard_block(payload)
+
+
+_CI_POLL_OK = '{"run": 38330747254, "status": "completed", "failed": []}'
+
+
+class TestOnlyExitStatusCounts:
+    """A call counts as failed only by its exit status or error field, never by words in its output."""
+
+    def _record(self, response, session_id, **extra):
+        from hooks.context.retry_breaker import _get_state, on_post_tool_result
+
+        payload = {
+            "tool_name": "Bash",
+            "tool_input": {"command": "gh run view 38330747254"},
+            "tool_response": response,
+            "session_id": session_id,
+            **extra,
+        }
+        with patch.object(_breaker_mod, "_inject_breaker_message") as inject:
+            for _ in range(5):
+                on_post_tool_result(payload)
+        return _get_state(session_id, "bash:gh"), inject.call_count
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            {"stdout": _CI_POLL_OK, "stderr": "", "interrupted": False, "isImage": False},
+            {"stdout": "", "stderr": "", "interrupted": False, "isImage": False, "backgroundTaskId": "b1failed"},
+            {"exitCode": 0, "stdout": _CI_POLL_OK},
+            "Process exited with code 0\nOutput:\n" + _CI_POLL_OK,
+            "Process running with session ID 4242\nOutput:\nci_prepush: size limits failed",
+            _CI_POLL_OK,
+            "Chunk ID: 1\nProcess exited with code 0\nOutput:\nExit code: 1",
+            "Process exited with code 0\nExit code: 1",
+            "Process running with session ID 4242\nOutput:\nExit code: 1",
+            "xExit code: 1\nOutput:\nboom",
+            "Chunk ID: 1\nOutput:\nExit code: 1",
+            "log line\nExit code: 1",
+            "Chunk ID: 1\nOutput:\nExit code: 1\nOutput:\nx",
+        ],
+        ids=[
+            "claude-dict",
+            "claude-background",
+            "zero-exit",
+            "codex-exit-zero",
+            "codex-running",
+            "codex-no-status",
+            "exit-line-in-output",
+            "exit-line-without-output-marker",
+            "running-with-exit-line-in-output",
+            "exit-text-mid-line",
+            "exit-line-only-in-output",
+            "exit-line-after-first-line-without-marker",
+            "output-marker-repeated-in-output",
+        ],
+    )
+    def test_a_successful_call_never_counts(self, response):
+        state, injected = self._record(response, "exit-ok")
+        assert state["count"] == 0
+        assert injected == 0
+
+    @pytest.mark.parametrize(
+        ("response", "extra", "error_text"),
+        [
+            ({"exitCode": 1, "stdout": "out", "stderr": "boom"}, {}, "boom"),
+            ({"exit_code": 2, "stdout": "only stdout"}, {}, "only stdout"),
+            ("Exit code: 1\nOutput:\nboom", {}, "Exit code: 1\nOutput:\nboom"),
+            ("Process exited with code 2\nOutput:\nboom", {}, "Process exited with code 2\nOutput:\nboom"),
+            ("Wall time: 1 seconds\nExit code: -1\nOutput:\n", {}, "Wall time: 1 seconds\nExit code: -1\nOutput:\n"),
+            ("Exit code: 3", {}, "Exit code: 3"),
+            (
+                "Chunk ID: 1\nProcess exited with code 2\nOutput:\nx",
+                {},
+                "Chunk ID: 1\nProcess exited with code 2\nOutput:\nx",
+            ),
+            ({"is_error": True, "content": "ENOENT"}, {}, "ENOENT"),
+            ({"resultType": "failure", "textResultForLlm": "denied by server"}, {}, "denied by server"),
+            ({"stdout": "partial"}, {"error": "Command failed with exit code 1"}, "Command failed with exit code 1"),
+        ],
+        ids=[
+            "exit-code",
+            "exit-code-snake",
+            "codex-exit-code",
+            "codex-process-exit",
+            "codex-negative-exit",
+            "codex-bare-exit-line",
+            "codex-exit-after-first-header-line",
+            "is-error",
+            "copilot",
+            "error",
+        ],
+    )
+    def test_a_real_failure_still_counts(self, response, extra, error_text):
+        from hooks.config import RETRY_BREAKER_MAX
+
+        state, injected = self._record(response, "exit-bad", **extra)
+        assert state["count"] == 5
+        assert state["last_error_text"] == error_text
+        assert injected == max(0, 5 - RETRY_BREAKER_MAX + 1)
+
+    def test_a_long_failure_text_is_cut_to_two_hundred_characters(self):
+        state, _ = self._record({"exitCode": 1, "stderr": "x" * 300}, "exit-long")
+        assert state["last_error_text"] == "x" * 200
+
+    def test_an_empty_error_field_is_not_a_failure(self):
+        state, _ = self._record({"exitCode": 0, "stdout": "ok"}, "exit-empty-error", error="")
+        assert state["count"] == 0
+
+    def test_a_tool_other_than_the_shell_is_judged_only_by_its_status_fields(self):
+        from hooks.context.retry_breaker import _get_state, on_post_tool_result
+
+        payload = {
+            "tool_name": "Grep",
+            "tool_input": {"pattern": "x"},
+            "tool_response": "Exit code: 1\nOutput:\nError: ENOENT: no such file or directory",
+            "session_id": "grep-text",
+        }
+        on_post_tool_result(payload)
+        on_post_tool_result(payload)
+        assert _get_state("grep-text", "grep")["count"] == 0
+        on_post_tool_result({**payload, "tool_response": {"is_error": True, "content": "ENOENT"}})
+        assert _get_state("grep-text", "grep")["count"] == 1

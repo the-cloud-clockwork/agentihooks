@@ -1,11 +1,28 @@
+import subprocess
 from dataclasses import replace
 
 import pytest
 
-from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm import stack
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+
+
+def check_update_guards(if_state, if_match):
+    import sys
+    from unittest.mock import patch
+
+    from scripts.swarm_ledger import HERE
+
+    with patch.object(sys, "path", [str(HERE), *sys.path]):
+        from scripts.swarm_ledger import ledger_tasks
+
+        guard = {"if_state": list(if_state)} if if_state else {}
+        if if_match is not None:
+            guard["if_match"] = if_match
+        ledger_tasks.check_guards(guard)
 
 
 class FakeLedger:
@@ -15,27 +32,59 @@ class FakeLedger:
         }
         self.notes = []
         self.swarm_sized = []
+        self.ranks, self.comments = [], []
 
     def tasks(self, slug):
         return list(self.rows.values())
+
+    def task(self, slug, task_id):
+        return self.rows.get(task_id)
 
     def events(self, slug):
         return []
 
     def state(self, slug):
-        log = getattr(self, "log", [])
+        log, tasks = getattr(self, "log", []), self.tasks(slug)
+        stamps = {f"tasks/{t['id']}/rank": {"by": "operator"} for t in tasks if "rank" in t}
         return {
             "overview": "Project intent",
-            "tasks": self.tasks(slug),
+            "tasks": tasks,
             "phases": getattr(self, "phases", []),
-            "_meta": {"rev": len(log), "events": log},
+            "_meta": {"rev": len(log), "events": log, "stamps": getattr(self, "stamps", stamps)},
             "followups": [],
         }
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def hierarchy(self, slug):
+        tasks = self.tasks(slug)
+        return [
+            row
+            for phase in getattr(self, "phases", [])
+            for row in [
+                {"node": f"phases/{phase['id']}", "kind": "phase", "depth": 0, "state": "open"},
+                *(
+                    {
+                        "node": f"tasks/{t['id']}",
+                        "kind": "task",
+                        "depth": 1,
+                        "state": "out_of_scope" if t.get("out_of_scope") else t["state"],
+                    }
+                    for t in tasks
+                    if t.get("phase") == phase["id"]
+                ),
+            ]
+        ]
+
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        check_update_guards(if_state, if_match)
         assert slug == "sw"
         row = self.rows[task_id]
+        if any(
+            row.get(key, 0 if key == "claim_generation" else "") != value for key, value in (if_match or {}).items()
+        ):
+            return dict(row)
         if not if_state or row["state"] in if_state:
+            if "claimed_by" in fields and fields["claimed_by"] != row.get("claimed_by"):
+                row["claim_generation"] = row.get("claim_generation", 0) + 1
             row.update(fields)
         return dict(row)
 
@@ -49,6 +98,16 @@ class FakeLedger:
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
 
+    def closed(self, slug):
+        return bool(self.state(slug).get("closed_at"))
+
+    def rank_task(self, slug, task_id, rank, by, if_owned=False):
+        self.ranks.append((task_id, rank, by))
+        return {"id": task_id, "rank": rank}
+
+    def comment(self, slug, task_id, text, by):
+        self.comments.append((task_id, text, by))
+
 
 class FakeRuntime:
     def __init__(self, fail=False, full=False, crash=None):
@@ -58,6 +117,7 @@ class FakeRuntime:
         self.conversation_ids, self.named, self.closed_spaces, self.typed = {}, [], [], {}
         self.capacity_for = []
         self.homes, self.duplicates, self.refusals, self.reaped = {}, set(), {}, []
+        self.nudge_refusals, self.nudge_calls = {}, []
 
     def has_capacity(self, config):
         self.capacity_for.append(config.slug)
@@ -128,6 +188,8 @@ class FakeRuntime:
 
     def nudge(self, agent, text):
         self.nudged.append(agent.name)
+        self.nudge_calls.append((agent.idle_ticks, text))
+        return self.nudge_refusals.get(agent.name)
 
     def name_pane(self, agent):
         self.named.append(agent.name)
@@ -139,6 +201,15 @@ class FakeRuntime:
     def close_space(self, config):
         self.closed_spaces.append(config.slug)
         return True
+
+    def pane_tail(self, pane_id, lines):
+        return ""
+
+    def launched_pane(self, pane_id, name):
+        return True
+
+    def close_pane(self, pane_id):
+        self.closed.append(pane_id)
 
 
 @pytest.fixture
@@ -180,6 +251,164 @@ def test_a_second_tick_does_not_overspawn(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert len(runtime.spawned) == 2
+
+
+@pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])
+@pytest.mark.parametrize("pr_url, expected", [("", "claimed"), ("https://github.com/o/r/pull/1", "pr")])
+def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger, pr_url, expected):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    ledger.rows["t1"].update(pr_url=pr_url, state=expected)
+    store.release("sw", "t1", owner.name)
+    if lost_ledger:
+        ledger.rows["t1"].update(state="open")
+        if lost_ledger == "missing":
+            ledger.rows["t1"]["claimed_by"] = ""
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert len(runtime.spawned) == 1
+    assert store.claimant("sw", "t1") == owner.name
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert ledger.rows["t1"]["state"] == expected
+    assert store.redis.pttl(store.key("sw", "claim", "t1")) > 0
+
+
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+def test_a_live_owner_recovers_a_missing_claimant_on_an_active_ledger_row(store, state):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    ledger.rows["t1"].update(state=state, claimed_by="")
+    store.release("sw", "t1", owner.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert ledger.rows["t1"]["state"] == state
+    assert store.claimant("sw", "t1") == owner.name
+    assert len(runtime.spawned) == 1
+
+
+def test_a_stale_live_agent_cannot_restore_a_lease_over_the_ledger_successor(store):
+    from scripts.swarm.store import AgentRecord
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    store.release("sw", "t1", owner.name)
+    stale = AgentRecord("a-stale-owner", "eng", "t1", pane_id="old-pane", started_at=100)
+    store.put_agent("sw", stale)
+    runtime.live.add(stale.name)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == owner.name
+    assert store.claimant("sw", "t1") == owner.name
+    assert len(runtime.spawned) == 1
+
+
+def test_a_stale_predecessor_does_not_hold_the_ci_lane_a_successor_owns(store):
+    from scripts.swarm.store import AgentRecord
+
+    store.update("sw", max_eng=0, max_ci=2)
+    ledger = FakeLedger(
+        [
+            {"id": "owned", "lane": "ci", "state": "claimed", "claimed_by": "ci-successor"},
+            {"id": "urgent", "lane": "ci", "rank": "urgent"},
+        ]
+    )
+    runtime = FakeRuntime()
+    for name, seat in [("ci-predecessor", "ci-1@sw"), ("ci-successor", "ci-2@sw")]:
+        store.put_agent("sw", AgentRecord(name, "ci", "owned", seat=seat, started_at=1_000))
+        store.seats.occupy(seat, name, 1_000)
+        runtime.live.add(name)
+    store.claim("sw", "owned", "ci-successor", 60_000)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert [task for _, _, task in runtime.spawned] == ["urgent"]
+    assert ledger.rows["owned"]["claimed_by"] == "ci-successor"
+    assert store.claimant("sw", "owned") == "ci-successor"
+
+
+def test_ownership_repair_keeps_a_newer_ledger_state_and_claim(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    update = ledger.update_task
+
+    def blocked(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        ledger.rows[task_id]["state"] = "blocked"
+        return update(slug, task_id, fields, by, if_state, if_match)
+
+    monkeypatch.setattr(ledger, "update_task", blocked)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert ledger.rows["t1"]["claimed_by"] == ""
+
+
+def test_a_finished_predecessor_cannot_hold_reopened_work_when_retirement_is_stuck(store):
+    from dataclasses import replace
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    owner = next(a for a in store.agents("sw") if a.task == "t1")
+    store.put_agent("sw", replace(owner, state="finished"))
+    store.release("sw", "t1", owner.name)
+    runtime.stuck.add(owner.name)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert len(runtime.spawned) == 2
+    assert ledger.rows["t1"]["claimed_by"] != owner.name
+
+
+def test_a_legacy_live_owner_recovers_without_a_ledger_generation(store):
+    from scripts.swarm.store import AgentRecord
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    store.put_agent("sw", AgentRecord("legacy-owner", "eng", "t1", started_at=1_000))
+    runtime.live.add("legacy-owner")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == "legacy-owner"
+    assert ledger.rows["t1"]["claim_generation"] == 1
+    assert ledger.rows["t1"]["state"] == "claimed"
+    assert runtime.spawned == []
+
+
+def test_an_open_row_with_a_dead_claimant_can_be_claimed_from_its_exact_snapshot(store):
+    ledger = FakeLedger([{"id": "t1", "claimed_by": "gone-owner"}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [task for _, _, task in runtime.spawned] == ["t1"]
+    assert ledger.rows["t1"]["claimed_by"] != "gone-owner"
+
+
+def test_ownership_repair_keeps_a_successor_claim_created_at_the_write_boundary(store, monkeypatch):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state="open", claimed_by="")
+    update = ledger.update_task
+
+    def successor(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
+        ledger.rows[task_id].update(claimed_by="successor", claim_generation=9)
+        return update(slug, task_id, fields, by, if_state, if_match)
+
+    monkeypatch.setattr(ledger, "update_task", successor)
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert ledger.rows["t1"]["claimed_by"] == "successor"
+    assert ledger.rows["t1"]["claim_generation"] == 9
+
+
+@pytest.mark.parametrize("registered", [True, False])
+def test_a_live_owner_that_appears_during_placement_is_never_launched_over(store, monkeypatch, registered):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    from scripts.swarm.store import AgentRecord
+
+    def admitted(*args):
+        if registered:
+            store.put_agent("sw", AgentRecord("existing-owner", "eng", "t1", started_at=1_000))
+        runtime.live.add("existing-owner")
+        ledger.rows["t1"]["claimed_by"] = "existing-owner"
+        return ""
+
+    monkeypatch.setattr("scripts.swarm.tick._held_back", admitted)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert runtime.spawned == []
+    assert ledger.rows["t1"]["claimed_by"] == "existing-owner"
 
 
 def test_a_finished_agent_is_retired_and_replaced_while_work_remains(store):
@@ -263,6 +492,56 @@ def test_failed_launches_do_not_consume_lives_and_preserve_each_error(store, err
     assert [row["state"] for row in store.launches("sw")].count("started") == 1
 
 
+@pytest.mark.parametrize(
+    ("marked", "state_by", "after"),
+    [
+        ("watchdog", "swarm", "watchdog"),
+        ("park", "swarm", "park"),
+        ("", "master@abc123-0001", "master"),
+        ("", "engineer@abc123-0002", ""),
+        ("", "swarm", ""),
+    ],
+)
+def test_a_started_launch_records_why_its_task_was_open(store, marked, state_by, after):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger.stamps = {"tasks/t1/state": {"by": state_by}}
+    if marked:
+        store.mark_restart("sw", "t1", marked)
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [(row["state"], row["after"]) for row in store.launches("sw")] == [("started", after)]
+    assert store.take_restart("sw", "t1") == ""
+
+
+def test_a_failed_launch_keeps_the_restart_mark_for_the_next_start(store):
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=OSError("worktree timer"))
+    store.mark_restart("sw", "t1", "park")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    runtime.crash = None
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert sorted((row["state"], row["after"]) for row in store.launches("sw")) == [("failed", ""), ("started", "park")]
+
+
+@pytest.mark.parametrize(
+    ("pr_url", "read", "head"),
+    [
+        ("", "abc123", ""),
+        ("https://github.com/o/r/pull/7", "abc123", "abc123"),
+        ("https://github.com/o/r/pull/7", "", None),
+    ],
+)
+def test_a_started_launch_records_the_pull_request_head_it_started_on(store, monkeypatch, pr_url, read, head):
+    from scripts.swarm import ledger_events
+
+    seen = []
+    monkeypatch.setattr(ledger_events, "head", lambda url: seen.append(url) or read)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    if pr_url:
+        ledger.rows["t1"]["pr_url"] = pr_url
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [(row["state"], row["head"]) for row in store.launches("sw")] == [("started", head)]
+    assert seen == ([pr_url] if pr_url else [])
+
+
 class FailingFor(FakeRuntime):
     def __init__(self, *failing):
         super().__init__()
@@ -292,6 +571,7 @@ def test_a_task_whose_launch_failed_takes_only_a_slot_left_over(store):
 
 
 def test_rank_precedes_launch_failures_when_selecting_a_lane_task(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger(
         [
@@ -311,21 +591,21 @@ def test_rank_precedes_launch_failures_when_selecting_a_lane_task(store):
 
 
 @pytest.mark.parametrize(
-    ("error", "failure"),
+    ("error", "failure", "launch"),
     [
-        (SpawnError("no claude account has placeable quota seats", "unavailable"), ""),
-        (SpawnError("profile canary timeout", "refused"), "profile canary timeout"),
-        (OSError("worktree timer"), "worktree timer"),
+        (SpawnError("no claude account has placeable quota seats", "unavailable"), "", "waiting"),
+        (SpawnError("profile canary timeout", "refused"), "profile canary timeout", "failed"),
+        (OSError("worktree timer"), "worktree timer", "failed"),
     ],
 )
-def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, failure):
+def test_quota_seat_refusal_does_not_mark_a_task_launch_failure(store, error, failure, launch):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime(crash=error)
     tick("sw", store, ledger, runtime, now_ms=1_000)
     assert store.launch_failure("sw", "t1") == failure
     assert ledger.rows["t1"]["state"] == "open"
     assert store.claimant("sw", "t1") is None
     assert store.claims("sw", "t1") == 0
-    assert [(row["state"], row["error"]) for row in store.launches("sw")] == [("failed", str(error))]
+    assert [(row["state"], row["error"]) for row in store.launches("sw")] == [(launch, str(error))]
 
 
 def test_a_launch_is_pending_while_the_runtime_spawns_it(store):
@@ -475,6 +755,7 @@ def test_a_task_closed_done_during_a_tick_stays_done_and_is_not_claimed_again(st
 
 
 def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
+    store.update("sw", autonomy="assist")
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}, {"id": "t2", "lane": "eng"}]), FakeRuntime()
     for row in ledger.rows.values():
         row["difficulty"] = "M"
@@ -489,6 +770,17 @@ def test_an_open_task_closed_done_during_a_tick_spawns_no_agent(store):
         "task t1 is done on the ledger, not claimed",
         "spawned engineer@a1b2c3-0002 for t2",
     ]
+
+
+def test_a_master_block_during_a_tick_spawns_no_agent(store):
+    ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng"}]), FakeRuntime()
+    ledger.rows["t1"]["difficulty"] = "M"
+    ledger.closing = lambda: ledger.rows["t1"].update(state="blocked", claimed_by="")
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert store.claimant("sw", "t1") is None
+    assert runtime.spawned == []
+    assert workers(store) == []
 
 
 @pytest.mark.parametrize("closed_mid_tick", [True, False])
@@ -519,6 +811,7 @@ def test_a_lost_agents_open_items_follow_the_live_reopen_result(store, closed_mi
 
 @pytest.mark.parametrize("closed_mid_tick", [True, False])
 def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed_mid_tick):
+    store.update("sw", autonomy="assist")
     from scripts.inbox.store import InboxStore
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
@@ -531,7 +824,9 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS - 1, start=2_000)
     if closed_mid_tick:
         ledger.closing = lambda: ledger.rows["t1"].update(state="done", done=True)
+    nudges = len(stale_nudges(store))
     actions = tick("sw", store, ledger, runtime, now_ms=2_000 + IDLE_KILL_TICKS * 60_000)
+    assert nudges == 1 and len(stale_nudges(store, "eng-1@sw") + stale_nudges(store)) == 1
     moved = inbox.get(item.id)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
     if closed_mid_tick:
@@ -545,6 +840,7 @@ def test_a_stalled_agents_open_items_follow_the_live_reopen_result(store, closed
 
 
 def test_a_task_closed_done_during_a_tick_is_not_blocked_by_the_claim_cap(store):
+    store.update("sw", autonomy="assist")
     ledger, runtime = DoneMidTick([{"id": "t1", "lane": "eng", "difficulty": "M"}]), FakeRuntime()
     for _ in range(3):
         store.count_claim("sw", "t1")
@@ -564,6 +860,26 @@ def test_a_claimed_task_without_an_agent_is_reopened(store):
     assert "task t1 had no agent, reopened" in actions
 
 
+def test_a_task_blocked_on_dev_red_is_reopened_once_dev_tests_passes(store, monkeypatch):
+    from scripts.swarm import dev_red
+
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    ledger.comments = []
+    ledger.comment = lambda slug, task, text, by: ledger.comments.append((task, text, by))
+    store.update("sw", state="paused")
+    ledger.rows["t1"].update(state="blocked", claimed_by="engineer@a1b2c3-0009")
+    dev_red.hold(store.redis, "sw", "t1", 41)
+    read = []
+    monkeypatch.setattr(
+        dev_red, "latest", lambda repo, run=None: read.append(repo) or {"id": 42, "conclusion": "success"}
+    )
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert read == ["/repo"]
+    assert (ledger.rows["t1"]["state"], ledger.rows["t1"]["claimed_by"]) == ("open", "")
+    assert ("t1", dev_red.REOPENED, "swarm") in ledger.comments
+    assert "task t1 reopened, dev Tests passed after the red run that blocked it" in actions
+
+
 def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     store.update("sw", state="paused")
@@ -575,8 +891,8 @@ def test_a_task_held_by_a_known_agent_is_not_reopened_as_an_orphan(store):
     assert "task t1 had no agent, reopened" not in actions
 
 
-def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
-    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+def test_an_idle_agent_is_retired_without_a_typed_nudge_and_its_task_reopened(store):
+    from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -584,45 +900,185 @@ def test_an_idle_agent_is_nudged_then_retired_and_its_task_reopened(store):
     store.update("sw", state="paused")
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-        if n + 1 == IDLE_NUDGE_TICKS:
-            assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    assert runtime.nudged == []
     assert runtime.killed == ["engineer@a1b2c3-0001"] and ledger.rows["t1"]["state"] == "open"
 
 
-def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS
+STALE_MS = 10 * 60_000
+IDLER = "engineer@a1b2c3-0001"
 
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+
+def spawned(store, status="idle", runtime=None):
+    ledger, runtime = tasks(("t1", "eng")), runtime or FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.update("sw", state="paused")
-    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
-    runtime.typed["engineer@a1b2c3-0001"] = "wait, before you"
-    for n in range(IDLE_NUDGE_TICKS + 2):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-    assert runtime.nudged == [] and workers(store)[0].idle_ticks == 0
+    runtime.statuses[IDLER] = status
+    return ledger, runtime
+
+
+def stale_nudges(store, name=IDLER):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import stale_nudge
+
+    return [item for item in InboxStore(store.redis).inbox(name) if stale_nudge.is_nudge(item)]
+
+
+def test_an_agent_quiet_past_ten_minutes_gets_one_inbox_nudge_per_window_and_no_typed_prompt(store):
+    ledger, runtime = spawned(store)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + STALE_MS)
+    assert stale_nudges(store) == []
+    actions = tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    [item] = stale_nudges(store)
+    assert f"nudged stale {IDLER} through its inbox as message {item.id}" in actions
+    assert (item.sender, item.task, item.state) == ("swarm", "t1", "pending")
+    tick("sw", store, ledger, runtime, now_ms=2_000 + STALE_MS)
+    assert len(stale_nudges(store)) == 1
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert len(stale_nudges(store)) == 2 and runtime.nudged == []
+
+
+def test_a_pane_reading_working_is_nudged_once_its_heartbeat_is_ten_minutes_old(store):
+    from scripts.swarm import idle
+
+    ledger, runtime = spawned(store, status="working")
+    idle.beat(store.redis, "sw", IDLER, "working", 1_000 + STALE_MS)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + 2 * STALE_MS)
+    assert stale_nudges(store) == []
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert len(stale_nudges(store)) == 1 and runtime.nudged == []
+
+
+def test_a_named_wait_keeps_a_quiet_agent_from_being_nudged(store):
+    from scripts.swarm import idle
+
+    ledger, runtime = spawned(store)
+    idle.declare_wait(store.redis, "sw", IDLER, 1_000 + 3 * STALE_MS, "checks on the pull request", 1_000)
+    tick("sw", store, ledger, runtime, now_ms=1_000 + 2 * STALE_MS)
+    assert stale_nudges(store) == []
+
+
+class ProviderErrorRuntime(FakeRuntime):
+    def observe(self, agent):
+        from scripts.swarm.pane import PaneObservation
+
+        return PaneObservation(self.status(agent), provider_error="model at capacity", provider_checked=True)
+
+
+def test_a_pane_showing_a_provider_error_is_nudged_at_once(store):
+    ledger, runtime = spawned(store, status="working", runtime=ProviderErrorRuntime())
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    [item] = stale_nudges(store)
+    assert "provider error" in item.text and runtime.nudged == []
+
+
+def test_the_master_is_never_nudged_for_being_quiet(store):
+    ledger, runtime = spawned(store)
+    [master] = [a for a in store.agents("sw") if a.lane == MASTER]
+    runtime.statuses[master.name] = "idle"
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert stale_nudges(store, master.name) == [] and len(stale_nudges(store)) == 1
+
+
+def test_an_open_swarm_outage_leaves_the_quiet_agent_to_provider_recovery(store, monkeypatch):
+    from scripts.swarm import outage
+
+    ledger, runtime = spawned(store)
+    record = {"kind": "provider", "started_at": 1_000, "ended_at": None, "evidence": ["provider down"], "past": []}
+    monkeypatch.setattr(outage, "open_records", lambda slug: [record])
+    tick("sw", store, ledger, runtime, now_ms=1_001 + 2 * STALE_MS)
+    assert stale_nudges(store) == [] and runtime.nudged == []
+
+
+@pytest.mark.parametrize(("pending", "expected"), [(True, 0), (False, 1)])
+def test_a_pending_recovery_leaves_the_quiet_agent_to_provider_recovery(store, pending, expected):
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.tick import _stale_nudge
+
+    agent = AgentRecord(IDLER, "eng", "t1", started_at=1_000)
+    actions = _stale_nudge("sw", store, agent, PaneObservation("idle"), pending, 1_001 + STALE_MS)
+    assert len(actions) == len(stale_nudges(store)) == expected
+
+
+def test_a_pending_recovery_blocks_the_nudge_during_the_tick(store, monkeypatch):
+    from scripts.swarm import resume
+
+    ledger, runtime = spawned(store)
+    monkeypatch.setattr(resume, "recovery_pending", lambda *args: True)
+    monkeypatch.setattr(resume, "recover_outages", lambda *args: [])
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == []
+
+
+def test_the_last_idle_tick_before_retirement_still_nudges(store):
+    from dataclasses import replace
+
+    from scripts.swarm.tick import IDLE_KILL_TICKS
+
+    ledger, runtime = spawned(store)
+    agent = store.agents("sw")[0]
+    store.put_agent("sw", replace(agent, idle_ticks=IDLE_KILL_TICKS - 2))
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert len(stale_nudges(store)) == 1
+    assert runtime.killed == []
+
+
+def test_a_nudge_the_routed_runtime_refuses_answers_with_the_router_reason(store):
+    from scripts.swarm.tick import NUDGE
+    from scripts.swarm_v2.runtime.base import Capability
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    herdr = FakeRuntime()
+    runtime = routed_tick_runtime(herdr, LocalHerdrRuntime.capabilities - {Capability.COMMAND})
+    agent = AgentRecord(IDLER, "eng", "t1", pane_id="w1:p1", started_at=1_000)
+    assert runtime.nudge(agent, NUDGE.format(slug="sw")) == "local lacks command" and herdr.nudged == []
+
+
+def routed_tick_runtime(herdr, capabilities=None):
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    local = LocalHerdrRuntime(herdr)
+    local.capabilities = local.capabilities if capabilities is None else capabilities
+    return RoutedRuntime(herdr, RuntimeRouter([local]))
+
+
+def failing_herdr(args):
+    raise RuntimeError("agent_not_found")
+
+
+@pytest.mark.parametrize(("call", "answer"), [(lambda args: {}, None), (failing_herdr, "agent_not_found")])
+def test_a_local_herdr_nudge_answers_by_whether_herdr_delivered_it(store, tmp_path, call, answer):
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm.tick import NUDGE
+
+    herdr = FakeRuntime()
+    herdr.nudge = HerdrRuntime(home=tmp_path, herdr=call).nudge
+    agent = AgentRecord(IDLER, "eng", "t1", pane_id="w1:p1", started_at=1_000)
+    assert routed_tick_runtime(herdr).nudge(agent, NUDGE.format(slug="sw")) == answer
+
+
+def test_the_nudge_is_skipped_while_the_pane_holds_typed_input(store):
+    ledger, runtime = spawned(store)
+    runtime.typed[IDLER] = "wait, before you"
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == [] and workers(store)[0].idle_ticks == 0
     runtime.typed.clear()
-    for n in range(IDLE_NUDGE_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=3_000 + n)
-    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    tick("sw", store, ledger, runtime, now_ms=1_002 + STALE_MS)
+    assert len(stale_nudges(store)) == 1 and runtime.nudged == []
 
 
 def test_the_nudge_is_skipped_inside_the_quiet_window_after_an_operator_prompt(store):
     from scripts.inbox import wake
     from scripts.swarm import idle
-    from scripts.swarm.tick import IDLE_NUDGE_TICKS
 
-    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
-    store.update("sw", state="paused")
-    runtime.statuses["engineer@a1b2c3-0001"] = "idle"
-    idle.prompted(store.redis, "sw", "engineer@a1b2c3-0001", 2_000)
+    ledger, runtime = spawned(store)
     quiet = wake.DEFAULT_QUIET_S * 1000
-    for n in range(IDLE_NUDGE_TICKS + 2):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet - 10 + n)
-    assert runtime.nudged == []
-    for n in range(IDLE_NUDGE_TICKS):
-        tick("sw", store, ledger, runtime, now_ms=2_000 + quiet + n)
-    assert runtime.nudged == ["engineer@a1b2c3-0001"]
+    idle.prompted(store.redis, "sw", IDLER, 1_001 + STALE_MS - quiet + 10)
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS)
+    assert stale_nudges(store) == []
+    tick("sw", store, ledger, runtime, now_ms=1_001 + STALE_MS + 10)
+    assert len(stale_nudges(store)) == 1 and runtime.nudged == []
 
 
 def test_the_nudge_says_to_answer_with_the_swarm_commands_never_in_the_terminal():
@@ -632,6 +1088,7 @@ def test_the_nudge_says_to_answer_with_the_swarm_commands_never_in_the_terminal(
 
 
 def test_each_idle_tick_is_recorded_in_the_gate_log_with_its_time_and_task(store):
+    store.update("sw", autonomy="assist")
     from scripts.gates import log
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
@@ -676,7 +1133,7 @@ def test_a_busy_turn_resets_the_idle_count(store):
     for status in ["idle"] * (IDLE_NUDGE_TICKS - 1) + ["working"] + ["idle"] * (IDLE_NUDGE_TICKS - 1):
         runtime.statuses["engineer@a1b2c3-0001"] = status
         tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.nudged == []
+    assert workers(store)[0].idle_ticks == IDLE_NUDGE_TICKS - 1
 
 
 def test_a_finished_agent_that_will_not_die_stays_registered(store):
@@ -940,14 +1397,15 @@ def test_a_reopened_task_with_a_branch_and_no_earlier_life_is_given_that_branch(
     assert runtime.tasks[-1]["reclaim"] == RECLAIMED
 
 
-def test_a_handed_off_task_keeps_its_handoff_continuation_and_takes_no_reclaim(store, reclaims):
+def test_a_handed_off_task_revalidates_its_handoff_continuation(store, reclaims):
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     store.put_handoff("sw", "t1", "seam 1 green", envelope={"continue_from": "origin/engineer-a1b2c3-0001"})
     store.put_agent("sw", replace(workers(store)[0], state="finished"))
     tick("sw", store, ledger, runtime, now_ms=2_000)
-    assert runtime.tasks[-1]["handoff_envelope"] == {"continue_from": "origin/engineer-a1b2c3-0001"}
-    assert reclaims == [] and "reclaim" not in runtime.tasks[-1]
+    assert runtime.tasks[-1]["handoff_envelope"] == RECLAIMED
+    assert reclaims == [("/repo", ["engineer@a1b2c3-0001"], "engineer-a1b2c3-0001")]
+    assert "reclaim" not in runtime.tasks[-1]
 
 
 def test_a_spawned_agent_keeps_the_model_and_effort_it_was_placed_with(store):
@@ -1005,6 +1463,38 @@ def test_account_reads_and_spawns_hold_the_placement_lock_and_the_rest_does_not(
     tick("sw", store, tasks(("t1", "eng")), runtime, 1)
     assert held == [("sweep", False), ("quota", True), ("master", True), ("eng", True)]
     assert not tick_module.PLACING.locked()
+
+
+def test_the_tick_hands_the_ci_budget_pass_its_store_and_clock(store, monkeypatch):
+    from scripts.ci_budget import defects
+
+    seen = []
+    monkeypatch.setattr(defects, "refresh", lambda *args: seen.append(args) or ["updated"])
+    assert "updated" in tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert [(args[0], args[2], args[3]) for args in seen] == [("sw", store, 1)]
+
+
+def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
+    from scripts.swarm import pane_evidence
+    from scripts.swarm import tick as module
+
+    seen = []
+    rt = FakeRuntime()
+    monkeypatch.setattr(pane_evidence, "sweep", lambda *args: seen.append(("capture", args)) or ["captured"])
+    monkeypatch.setattr(module, "_recover_master", lambda *args: seen.append(("recover", args)) or ["recovered"])
+    assert tick("sw", store, tasks(("t1", "eng")), rt, 123)[:2] == ["captured", "recovered"]
+    assert seen[0] == ("capture", ("sw", store, rt, 123))
+    assert seen[1][0] == "recover"
+
+
+def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):
+    from scripts.ci_budget import flakes
+
+    seen = []
+    monkeypatch.setattr(flakes, "refresh", lambda *args: seen.append(args) or ["filed"])
+    ledger = tasks(("t1", "eng"))
+    assert "filed" in tick("sw", store, ledger, FakeRuntime(), 1)
+    assert [(args[0], args[3], args[4]) for args in seen] == [("sw", ledger, 1)]
 
 
 def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers(store):
@@ -1272,6 +1762,30 @@ def test_a_task_waits_on_an_open_dependency_and_is_claimed_once_it_is_done(store
     assert spawned_ids(runtime) == ["t1", "t2"]
 
 
+def test_a_critical_chain_successor_is_claimed_the_tick_after_its_predecessor_merges_while_other_work_waits(store):
+    store.update("sw", max_eng=1)
+    ledger = FakeLedger(
+        [{"id": "a"}, {"id": "b", "depends_on": ["a"]}, {"id": "c", "depends_on": ["b"]}, {"id": "x"}, {"id": "y"}]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["a"]
+    ledger.rows["a"]["state"] = "done"
+    ledger.rows["x"]["rank"] = "urgent"
+    ledger.rows["y"]["branch"] = "engineer-a1b2c3-0009"
+    ledger.stamps = {"tasks/a/state": {"by": "engineer@a1b2c3-0001", "at": 61_000}, "tasks/x/rank": {"by": "operator"}}
+    actions = tick("sw", store, ledger, runtime, now_ms=121_000)
+    assert spawned_ids(runtime) == ["a", "b"]
+    assert [ledger.rows[t]["state"] for t in ("x", "y", "c")] == ["open", "open", "open"]
+    assert "chain guard claimed task b 60 seconds after task a merged on the critical chain" in actions
+    assert (
+        "b",
+        "The dispatcher's chain guard gave this task the next free eng seat 60 seconds after the task before it "
+        "on the critical chain merged.",
+        "dispatcher",
+    ) in ledger.comments
+
+
 def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_branch(store):
     store.update("sw", max_eng=3)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t0"}, {"id": "t2", "depends_on": ["t1", "t0", "t9"]}, {"id": "t9"}])
@@ -1288,6 +1802,85 @@ def test_a_task_starts_stacked_on_claimed_and_in_pr_dependencies_that_carry_a_br
         {"task": "t0", "branch": "engineer-a1b2c3-0002"},
     ]
     assert runtime.tasks[0]["stack_base"] == []
+
+
+@pytest.mark.parametrize("dependency_state", ["claimed", "pr"])
+def test_retained_pull_waits_for_dependency_merge_before_resuming(store, reclaims, dependency_state):
+    ledger = FakeLedger(
+        [
+            {"id": "t1"},
+            {"id": "t2", "depends_on": ["t1"], "branch": "reviewed-work", "pr_url": "https://github.com/o/r/pull/3"},
+        ]
+    )
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(state=dependency_state, branch="dependency-work")
+
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+
+    assert spawned_ids(runtime) == ["t1"]
+    assert ledger.rows["t2"]["state"] == "open"
+    assert ledger.rows["t2"]["claimed_by"] == ""
+    assert reclaims == []
+    assert store.claimant("sw", "t2") is None
+    assert store.claims("sw", "t2") == 0
+
+    ledger.rows["t1"].update(state="done", done=True)
+    tick("sw", store, ledger, runtime, now_ms=3_000)
+
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert ledger.rows["t2"]["state"] == "pr"
+    assert ledger.rows["t2"]["pr_url"] == "https://github.com/o/r/pull/3"
+    assert reclaims == [("/repo", [], "reviewed-work")]
+    assert runtime.tasks[-1]["stack_base"] == []
+
+
+def test_a_stacked_claim_carries_the_repository_only_of_a_dependency_branch_in_another_repository(store, monkeypatch):
+    asked = []
+    monkeypatch.setattr(
+        stack,
+        "shell",
+        lambda argv: asked.append(argv) or subprocess.CompletedProcess(argv, 0, "git@github.com:O/home.git\n", ""),
+    )
+    store.update("sw", max_eng=3)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t0"}, {"id": "t2", "depends_on": ["t1", "t0"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
+    ledger.rows["t0"].update(branch="engineer-a1b2c3-0002", branch_repo="https://github.com/o/home")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t0", "t2"]
+    assert runtime.tasks[-1]["stack_base"] == [
+        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"},
+        {"task": "t0", "branch": "engineer-a1b2c3-0002"},
+    ]
+    assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in asked
+
+
+def test_a_stacked_claim_names_the_recorded_repository_when_its_own_origin_cannot_be_read(store, monkeypatch):
+    monkeypatch.setattr(stack, "shell", lambda argv: subprocess.CompletedProcess(argv, 128, "", "no origin\n"))
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="https://github.com/o/other")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert runtime.tasks[-1]["stack_base"] == [
+        {"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "https://github.com/o/other"}
+    ]
+
+
+def test_a_stacked_claim_names_the_recorded_repository_when_git_cannot_run(store, monkeypatch):
+    def refuse(argv):
+        raise SwarmError("git -C could not run: no git")
+
+    monkeypatch.setattr(stack, "shell", refuse)
+    ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "depends_on": ["t1"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    ledger.rows["t1"].update(branch="engineer-a1b2c3-0001", branch_repo="XXXX")
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["t1", "t2"]
+    assert runtime.tasks[-1]["stack_base"] == [{"task": "t1", "branch": "engineer-a1b2c3-0001", "repo": "XXXX"}]
 
 
 @pytest.mark.parametrize(
@@ -1356,6 +1949,7 @@ def test_a_reopened_task_with_a_branch_is_claimed_before_fresh_work_even_when_it
 
 
 def test_a_fresh_task_of_a_higher_rank_still_goes_ahead_of_a_resumed_one(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "resumed", "branch": "engineer-a1b2c3-0004"}, {"id": "urgent", "rank": "urgent"}])
     runtime = FakeRuntime()
@@ -1432,7 +2026,7 @@ def test_a_broad_territory_never_stops_a_claim(store):
     ]
 
 
-def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(store):
+def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(store):
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1440,7 +2034,7 @@ def test_an_overlap_with_a_running_task_without_a_claimant_names_no_claimant(sto
     ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open", "out_of_scope": False, "territory": ["hooks"]}
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
-    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": "", "areas": ["hooks"]}]
+    assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": runtime.spawned[0][1], "areas": ["hooks"]}]
 
 
 def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):
@@ -1462,6 +2056,7 @@ def test_a_task_without_territory_is_claimed_alongside_anything(store):
 
 
 def test_an_urgent_ready_task_is_claimed_ahead_of_an_older_normal_one(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2", "rank": "urgent"}])
     runtime = FakeRuntime()
@@ -1489,6 +2084,7 @@ def test_an_urgent_task_sharing_a_territory_an_active_claim_holds_is_still_claim
 
 
 def test_an_urgent_task_wins_a_shared_territory_over_an_earlier_normal_one(store):
+    store.update("sw", autonomy="assist")
     ledger = FakeLedger([{"id": "t1", "territory": ["hooks"]}, {"id": "t2", "rank": "urgent", "territory": ["hooks"]}])
     runtime = FakeRuntime()
     tick("sw", store, ledger, runtime, now_ms=1_000)
@@ -1502,12 +2098,14 @@ def test_an_urgent_overlapping_task_is_claimed_ahead_of_lower_ranked_clear_work(
     tick("sw", store, ledger, runtime, now_ms=1_000)
     ledger.rows["t2"] = {**ledger.rows["t1"], "id": "t2", "state": "open", "claimed_by": "", "rank": "urgent"}
     ledger.rows["t3"] = {**ledger.rows["t2"], "id": "t3", "rank": "low", "territory": ["docs"]}
+    ledger.stamps = {f"tasks/{t}/rank": {"by": "operator"} for t in ("t2", "t3")}
     store.update("sw", max_eng=2)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert spawned_ids(runtime) == ["t1", "t2"]
 
 
 def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=6)
     ledger = FakeLedger(
         [
@@ -1525,11 +2123,12 @@ def test_equal_ranks_keep_ledger_order_and_ranks_order_the_rest(store):
 
 
 def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_depth(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=6)
     ledger = FakeLedger(
         [
             {"id": "shallow", "phase": "p1"},
-            {"id": "deep", "phase": "p2"},
+            {"id": "deep", "title": "deep", "rank": "normal", "phase": "p2"},
             {"id": "w1", "depends_on": ["deep"], "rank": "low", "phase": "p2"},
             {"id": "w2", "depends_on": ["w1"], "rank": "low", "phase": "p2"},
             {"id": "small", "difficulty": "S", "phase": "p3"},
@@ -1542,6 +2141,7 @@ def test_claims_follow_rank_then_the_small_fast_clear_task_then_critical_path_de
 
 
 def test_a_rank_change_applies_on_the_next_tick(store):
+    store.update("sw", autonomy="assist")
     store.update("sw", max_eng=1)
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}, {"id": "t3"}])
     runtime = FakeRuntime()
@@ -1669,7 +2269,7 @@ def test_a_spawned_agent_gets_the_conversation_id_herdr_reports_for_its_pane(sto
     assert _conversations(store) == {"engineer@a1b2c3-0001": "5c90d80c", "master@a1b2c3-0001": "15e33356"}
 
 
-def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(store):
+def test_each_tick_refreshes_the_conversation_id_and_preserves_known_ids(store):
     rt = FakeRuntime()
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}])
     tick("sw", store, ledger, rt, 1000)
@@ -1685,12 +2285,12 @@ def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(sto
     tick("sw", store, ledger, rt, 3000)
     assert _conversations(store) == {
         "engineer@a1b2c3-0001": "resumed",
-        "engineer@a1b2c3-0002": "",
+        "engineer@a1b2c3-0002": "other",
         "master@a1b2c3-0001": "",
     }
     del rt.conversation_ids["w1:p1"]
     tick("sw", store, ledger, rt, 4000)
-    assert _conversations(store)["engineer@a1b2c3-0001"] == ""
+    assert _conversations(store)["engineer@a1b2c3-0001"] == "resumed"
 
 
 def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(store):
@@ -1771,6 +2371,7 @@ def test_an_agent_whose_heartbeat_says_working_is_never_retired_while_its_pane_r
 
 def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(store):
     from scripts.inbox.store import InboxStore
+    from scripts.swarm.stale_nudge import is_nudge
     from scripts.swarm.tick import IDLE_KILL_TICKS
 
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
@@ -1783,7 +2384,8 @@ def test_a_stalled_agents_open_messages_move_to_its_seat_for_the_next_engineer(s
     runtime.statuses["engineer@a1b2c3-0001"] = "idle"
     idle_for(store, ledger, runtime, IDLE_KILL_TICKS, start=2_000)
     assert runtime.killed == ["engineer@a1b2c3-0001"]
-    assert [(i.id, i.state) for i in inbox.inbox("eng-1@sw")] == [(open_item.id, "pending")]
+    seat = [(i.id, i.state) for i in inbox.inbox("eng-1@sw") if not is_nudge(i)]
+    assert seat == [(open_item.id, "pending")] and len(stale_nudges(store, "eng-1@sw")) == 1
     assert [i.id for i in inbox.inbox("engineer@a1b2c3-0001")] == [closed.id]
 
 

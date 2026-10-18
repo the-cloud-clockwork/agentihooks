@@ -310,6 +310,43 @@ def test_only_operator_decisions_refuse_an_agents_write(path, item, decides):
     assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
 
 
+@pytest.mark.parametrize(
+    "by, handed",
+    [
+        ("dispatcher@a1b2c3-0001", True),
+        ("master@a1b2c3-0001", False),
+        ("engineer@a1b2c3-0001", False),
+        ("dispatcher", False),
+        ("ledger", False),
+        (None, False),
+    ],
+)
+def test_a_priority_a_dispatcher_handed_to_the_operator_counts_only_his_writes(by, handed):
+    path = "tasks/t1"
+    row = {"item": path, "by": by}
+    doc = {"tasks": [{"id": "t1", "state": "blocked"}]}
+    assert priority_sweep.handed(row) is handed
+    for agent in ("dispatcher@a1b2c3-0001", "eng-1@sw"):
+        assert priority_sweep._counts(doc, row, priority_sweep.Write(agent, "comment", path, "x")) is not handed
+    assert priority_sweep._counts(doc, row, priority_sweep.Write("operator", "comment", path, "x")) is True
+
+
+def test_operator_only_covers_handed_rows_and_operator_decisions():
+    empty = {"questions": [], "followups": [], "tasks": []}
+    assert priority_sweep.operator_only(empty, {"item": "questions/q1"}) is True
+    assert priority_sweep.operator_only(empty, {"item": "followups/f1"}) is False
+    assert priority_sweep.operator_only(empty, {"item": "tasks/t1", "by": "dispatcher@a1b2c3-0001"}) is True
+    approval = {"tasks": [{"id": "t1", "awaiting": "approval"}]}
+    assert priority_sweep.operator_only(approval, {"item": "tasks/t1", "by": "master@a1b2c3-0001"}) is True
+
+
+def test_a_priority_on_a_collection_the_ledger_lacks_counts_as_gone():
+    rows = [{"id": "pr1", "item": "followups/f1"}]
+    assert list(priority_sweep.sweep({}, rows, lambda url: None)) == [(rows[0], "its item is gone")]
+    assert priority_sweep.operator_only({}, {"item": "questions/q1"}) is True
+    assert priority_sweep.operator_only({}, {"item": "followups/f1"}) is False
+
+
 def test_a_master_relay_without_the_operators_words_never_clears_it(env):
     master = "master@sw-0001"
     core.sync(SLUG, ops=[{"op": "join", "id": "j-m", "by": master, "role": "orchestrator"}])

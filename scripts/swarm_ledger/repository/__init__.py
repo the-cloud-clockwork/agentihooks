@@ -5,17 +5,19 @@ from scripts.swarm_ledger import HERE
 
 sys.path.insert(0, str(HERE))
 
-from .sqlite import SQLiteLedgerRepository
+from .sqlite import Entry, SQLiteLedgerRepository
 
 
 @runtime_checkable
 class LedgerRepository(Protocol):
     def get_document(self, slug: str) -> dict: ...
 
+    def current(self, slug: str) -> Entry: ...
+
     def read(self, slug: str, *keys: str) -> dict: ...
 
     def apply_ops(
-        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None
+        self, slug: str, changes: list | None = None, ops: list | None = None, gate=None, *, copy_state: bool = True
     ) -> tuple[dict, list]: ...
 
     def events_since(self, slug: str, revision: int) -> list: ...

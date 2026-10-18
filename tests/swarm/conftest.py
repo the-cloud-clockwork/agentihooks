@@ -28,9 +28,11 @@ def isolate_classifier(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
-def roomy_host(monkeypatch):
+def roomy_host(monkeypatch, request):
     sample = host_budget.HostSample(load1=0.5, cpus=8, available_mb=64_000, agents=2)
     monkeypatch.setattr(runtime.HerdrRuntime, "host", lambda self: sample)
+    if request.module.__name__.rpartition(".")[2] != "test_host_budget":
+        monkeypatch.setattr(host_budget, "read_host", lambda: sample)
 
 
 @pytest.fixture
@@ -55,3 +57,10 @@ def unchecked_launches(request, monkeypatch):
 
     if not getattr(request.module, "LAUNCH_CHECKED", False):
         monkeypatch.setattr(launch_check, "begin", lambda *args, **kwargs: None)
+
+
+@pytest.fixture(autouse=True)
+def confirmed_required_checks(monkeypatch):
+    from scripts.swarm import waits
+
+    monkeypatch.setattr(waits, "required_green", lambda target, head: True)

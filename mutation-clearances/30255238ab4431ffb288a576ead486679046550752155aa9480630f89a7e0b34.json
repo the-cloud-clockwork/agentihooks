@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/supervision_processes.py:scripts.swarm_v2.supervision_processes.x_descendants__mutmut_7:667cf2a797861c8b2e4438202ebc10e77e50fcf08e62f68ddd60cad15dcce7ed": {
+    "reader": "standards-reader",
+    "reason": "For the supported observed /proc ancestry table, parenthood is acyclic. The traversal owned set always contains root; root cannot have a parent inside its own descendant set, so root is never in found. At every convergence where found is a subset of owned, that subset is necessarily proper because it lacks root. Thus found <= owned and found < owned terminate on the same iteration and return the same descendant mapping. Callers supply the current supervisor PID or its exporter PID, not malformed cyclic process tables. Tables that invent self-parenthood or an ancestry cycle are outside the observed process interface."
+  }
+}

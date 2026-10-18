@@ -205,7 +205,7 @@ def _transcript(session_id: str, record: dict) -> str:
 def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str) -> bool:
     from hooks._async import _worker_env
 
-    env = {**_worker_env(), TRIGGER_ENV: trigger}
+    env = {**_worker_env(), TRIGGER_ENV: trigger, "AGENTIHOOKS_TRACE_FLUSH_ATTEMPT_TIMEOUT_SEC": str(timeout)}
     command = [sys.executable, "-m", "hooks.observability.trace_flush", session_id, transcript_path]
     try:
         return subprocess.run(command, env=env, timeout=timeout).returncode == 0
@@ -217,17 +217,22 @@ def attempt(session_id: str, transcript_path: str, timeout: float, trigger: str)
 def flush_once(session_id: str, transcript_path: str) -> int:
     from hooks.observability.agent_trace import _cursor, export_session
 
+    deadline = time.monotonic() + budget().attempt_timeout * 0.8
     position = None
-    while True:
+    duration = 0.0
+    while time.monotonic() + duration < deadline:
+        started = time.monotonic()
         export_session(session_id, transcript_path)
         state = _cursor(session_id)
+        duration = max(duration, time.monotonic() - started)
         if state.get("pending"):
             return 1
-        if not state.get("overflow"):
+        if not (state.get("overflow") or state.get("deferred_source")):
             return 0
         if state["source"]["accepted_bytes"] == position:
             return 1
         position = state["source"]["accepted_bytes"]
+    return 1
 
 
 def _lock(session_id: str, wait: float, clock: Callable[[], float], sleep: Callable[[float], None]):

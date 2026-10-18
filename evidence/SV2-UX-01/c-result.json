@@ -1,0 +1,19 @@
+{
+  "case": "T-SV2-UX-01-C",
+  "checks": {
+    "no_command_replayed": true,
+    "reload_restores_the_same_cards": true,
+    "store_unchanged_by_reload": true
+  },
+  "evidence_class": "mocked: a fake Redis swarm store holds one published status for a mixed local and Kubernetes swarm and terminal views published after the heartbeat but checked before it; the swarm view the ledger server returns is read at a fixed clock; no ledger server, browser, worker Pod or cluster runs in these cases",
+  "input_sha256": {
+    "ledger-execution-cards.json": "8cd72c41a0adc2f627b7b6fae24279d7f5acb0c5e4f52b1a6375d84b4c939a27"
+  },
+  "ledger_state_projection_errors": 1,
+  "observed": {
+    "cards": 6,
+    "commands": 0
+  },
+  "package": "SV2-UX-01",
+  "state": "passed"
+}

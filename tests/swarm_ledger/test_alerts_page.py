@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -60,7 +60,7 @@ def tab(browser):
     page = context.new_page()
     page.goto(URL)
     page.set_default_timeout(2000)
-    page.wait_for_function("document.getElementById('status').textContent !== 'loading'")
+    loaded(page)
     page.sent = sent
     yield page
     context.close()
@@ -102,10 +102,9 @@ def test_claim_and_close_from_the_panel_send_their_ops(tab):
     assert kinds == [("alert_claim", "al-3-0", None), ("alert_close", "al-3-0", "Trimmed the phase")]
 
 
-def test_the_panel_fold_is_remembered_after_a_reload(tab):
+def test_the_panel_header_does_not_fold_it(tab):
     tab.locator("#alert-fab").click()
-    tab.locator("#alert-fold > summary").click()
-    assert tab.locator("#alert-fold").evaluate("el => el.open") is False
-    tab.reload()
-    tab.locator("#alert-fab").click()
-    assert tab.locator("#alert-fold").evaluate("el => el.open") is False
+    assert tab.locator("#alert-fold").evaluate("el => el.querySelector('summary')") is None
+    tab.locator("#alert-fold .notif-head").click(position={"x": 5, "y": 5})
+    assert tab.locator("#alerts").is_visible()
+    assert tab.evaluate("() => Object.values(localStorage).some((v) => v.includes('alert-fold'))") is False

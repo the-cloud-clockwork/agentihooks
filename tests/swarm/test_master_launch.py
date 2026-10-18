@@ -317,6 +317,28 @@ def test_a_dead_master_still_in_the_registry_is_the_last_master(up):
     assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
 
 
+def test_a_master_launched_later_is_the_last_master_even_when_an_older_one_ended_after_its_launch(up):
+    store, _, _ = up
+    gone_master(store, ended=ENDED + 10)
+    record = AgentRecord(
+        "master@a1b2c3-0009", MASTER, MASTER, harness="claude", conversation_id="c9", started_at=ENDED + 5
+    )
+    store.put_agent("sw", record)
+    assert master_launch.last_master(store, "sw").name == "master@a1b2c3-0009"
+
+
+def test_a_new_master_records_its_launch_on_its_own_record_not_a_stale_seat_execution(up, monkeypatch):
+    store, _, rt = up
+    stale = AgentRecord(store.next_name("sw", MASTER, 5), MASTER, MASTER, seat="master@sw", started_at=5)
+    store.start_execution("sw", stale)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    [(name, _)] = rt.masters
+    found = {a.name: a for a in masters(store)}
+    assert (found[name].pane_id, found[name].state) == ("w1:m1", "working")
+    assert found[stale.name].pane_id == ""
+
+
 def test_a_live_master_present_does_not_stop_a_new_master_and_both_stay_seated(up, monkeypatch):
     store, _, rt = up
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
@@ -339,7 +361,7 @@ def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatc
     launch = {"profile": "master", "harness": "claude", "model": "opus", "effort": "high"}
     assert {k: task["launch_assignment"][k] for k in launch} == launch
     assert {k: task["handoff_envelope"]["launch"][k] for k in launch} == launch
-    assert runtime._transfer(task)["harness"] == "claude"
+    assert runtime.profile_choice.transfer(task)["harness"] == "claude"
 
 
 def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up, monkeypatch):
@@ -354,7 +376,7 @@ def test_an_incomplete_saved_assignment_keeps_what_it_has_and_fills_the_rest(up,
         "profile": "master",
         "harness": "codex",
         "model": "gpt-6.1-sol",
-        "effort": "medium",
+        "effort": "high",
         "account": "acct-3",
     }
 
@@ -527,6 +549,35 @@ def test_fill_takes_every_empty_key_from_a_bare_config(monkeypatch):
 def test_fill_keeps_a_saved_harness_and_picks_its_frontier_model():
     config = SwarmConfig("sw", "/repo", 0, 0, lanes={MASTER: {"agent": "claude"}})
     assert master_launch.fill({"harness": "codex"}, config)["model"] == "gpt-6.1-sol"
+
+
+def test_fill_leaves_a_saved_launch_on_an_unknown_harness_unclamped():
+    saved = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
+    assert master_launch.fill(saved, SwarmConfig("sw", "/repo", 0, 0)) == {"profile": "master", **saved}
+
+
+@pytest.mark.parametrize("bounds", [("medium", "xhigh"), ("low", "medium")])
+@pytest.mark.parametrize("harness", ["claude", "codex"])
+@pytest.mark.parametrize("saved", ["", "low", "medium"])
+def test_fill_never_leaves_a_master_launch_below_high_whatever_the_saved_launch_or_range_says(harness, bounds, saved):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
+    assert master_launch.fill({"harness": harness, "effort": saved}, config)["effort"] == "high"
+
+
+@pytest.mark.parametrize("bounds,launched", [(("medium", "xhigh"), "xhigh"), (("medium", "max"), "max")])
+def test_fill_keeps_a_saved_master_effort_above_high_inside_the_swarm_range(bounds, launched):
+    config = SwarmConfig("sw", "/repo", 0, 0, effort_min=bounds[0], effort_max=bounds[1])
+    assert master_launch.fill({"harness": "claude", "effort": "max"}, config)["effort"] == launched
+
+
+def test_a_master_saved_on_an_unknown_harness_is_refused_cleanly(tmp_path):
+    config = SwarmConfig("sw", "/repo", 0, 0)
+    launch = {"harness": "copilot", "model": "gpt-x", "effort": "max"}
+    task = {"id": MASTER, "handoff": "continue", "handoff_envelope": {"reason": "recycle", "launch": launch}}
+    engine = runtime.HerdrRuntime(home=tmp_path, run=lambda *a, **k: pytest.fail("an unknown harness launched"))
+    with pytest.raises(SpawnError) as error:
+        engine.spawn(config, MASTER, "master@a1b2c3-0001", master_launch._filled(task, config))
+    assert (str(error.value), error.value.status) == ("unsupported handoff harness: copilot", "unsupported")
 
 
 def test_a_partial_handoff_launch_keeps_its_values_and_the_envelope():
@@ -708,10 +759,12 @@ def test_a_new_master_reads_quota_before_it_is_placed(up, monkeypatch):
     monkeypatch.setattr(
         rt, "quota_capacity", lambda config, agents, now: order.append(("quota", config.slug, now)), raising=False
     )
+    monkeypatch.setattr(rt, "quota_spent", lambda counter: order.append(("spent", counter(AT))), raising=False)
+    store.redis.zadd(tick_module.HOST_SPENDS, {"now": AT, "later": AT + 1})
     spawn = rt.spawn
     monkeypatch.setattr(rt, "spawn", lambda *args: order.append("spawn") or spawn(*args))
     direct(store, rt, master_launch.NEW)
-    assert order == [("quota", "sw", AT / 1000), "spawn"]
+    assert order == [("spent", 1), ("quota", "sw", AT / 1000), "spawn"]
 
 
 def quota_master(monkeypatch, tmp_path, observed):

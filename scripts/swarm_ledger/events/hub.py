@@ -1,6 +1,7 @@
 """Per ledger event channels: the latest value of each resource, and a bounded log of the patches between them."""
 
 import collections
+import copy
 import secrets
 import threading
 import time
@@ -83,10 +84,15 @@ class Hub:
                 raise
             with self.changed:
                 for name, value in loaded.items():
-                    channel.resources.setdefault(name, value)
+                    channel.resources.setdefault(name, copy.deepcopy(value))
         with self.changed:
             if cursor is not None:
                 return seq, [entry for entry in channel.log if entry[0] > seq]
+            return self.snapshot(slug)
+
+    def snapshot(self, slug: str) -> tuple[int, list]:
+        with self.changed:
+            channel = self.channels[slug]
             return channel.seq, [(channel.seq, self.cursor(channel, channel.seq), "snapshot", dict(channel.resources))]
 
     def close(self, slug):
@@ -98,20 +104,31 @@ class Hub:
 
     def publish(self, slug, name, value):
         """Record value as the latest copy of a resource and log the patch from the previous copy."""
+        return self._publish(slug, name, value, False)
+
+    def publish_snapshot(self, slug: str, name: str, value: object) -> bool:
+        """The finite JSON generation and all its descendants must remain immutable."""
+        return self._publish(slug, name, value, True)
+
+    def _publish(self, slug, name, value, shared):
         with self.changed:
             channel = self.channels.get(slug)
             if channel is None:
                 return False
             if name not in channel.resources:
-                channel.resources[name] = value
+                channel.resources[name] = value if shared else copy.deepcopy(value)
                 return False
             old = channel.resources[name]
             if name == "ledger" and revision(value) < revision(old):
                 return False
-            change = patch.diff(old, value)
+            change = patch.diff(old, value, shared=True) if shared else patch.diff(old, value)
             if change is None:
                 return False
-            channel.resources[name] = value
+            if shared:
+                channel.resources[name] = value
+            else:
+                change = copy.deepcopy(change)
+                channel.resources[name] = patch.apply(old, change)
             channel.seq += 1
             data = {"patch": change, "rev": revision(value)} if name == "ledger" else {"patch": change}
             channel.log.append((channel.seq, self.cursor(channel, channel.seq), name, data))

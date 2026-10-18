@@ -1,0 +1,680 @@
+version: 1
+notes: Cases seeded from the classifier decision log. Each case state was rebuilt from its ledger and matched to a state digest
+  the decision log recorded before seeding, then given the task's size and rank from its ledger. Params are the Claude band
+  for that size and rank with each option's plain description. Expected verdicts were written by a separate reader agent that
+  saw only each task and its question, never the thresholds or the samples. Samples are one live answer per API backend to
+  the band choice question.
+cases:
+- name: rig-grade-swarm-t58
+  state:
+    title: The master answers agent questions so they leave the operator's Priorities
+    description: 'Ledger answers are operator only, so when the master answers an agent''s question by comment, the question
+      stays unanswered and sits in the operator''s Priorities. Seam: a ledger answer command lets the master answer a question
+      at delegate and full autonomy, recorded as by the master, and the derived priority clears; workers still cannot answer.
+      Done when tests cover master answer accepted, worker answer refused and the priority cleared, and the pull request is
+      merged.'
+    kind: code
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 501
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9681872184423985
+        probabilities:
+          lower: 0.9840936092211993
+          higher: 0.01590639077880068
+  - source: jev-1.13
+    latency_ms: 291
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.98
+        probabilities:
+          lower: 0.99
+          higher: 0.01
+  - source: pplx-decider-v1-27b
+    latency_ms: 325
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8596659422695181
+        probabilities:
+          lower: 0.929832971134759
+          higher: 0.07016702886524098
+  notes:
+    state_digest: 9ab27e2cb7206f5a
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: the task names the answer command, the autonomy rule and the three tests to write
+- name: rig-grade-swarm-cxc0
+  state:
+    title: Commit the Codex Channels plan into resources plans
+    description: 'Spec: section cxc0 of the decoupled swarm runtime plan, lines 419 to 431 of the plan artifact on this phase.
+      Read only those lines, ten lines of margin each side. Done when a sha256sum match of the source against the committed
+      body without the note, pasted, and the pull request merges.'
+    kind: code
+    territory_size: 1
+    difficulty: S
+    rank: urgent
+  params:
+    difficulty: S
+    rank: urgent
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 267
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9751366950006521
+        probabilities:
+          lower: 0.9875683475003261
+          higher: 0.012431652499674001
+  - source: jev-1.13
+    latency_ms: 292
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.98
+        probabilities:
+          lower: 0.99
+          higher: 0.01
+  - source: pplx-decider-v1-27b
+    latency_ms: 326
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9975322537759124
+        probabilities:
+          lower: 0.9987661268879562
+          higher: 0.001233873112043887
+  notes:
+    state_digest: 3665c32f581a8043
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: copies a fixed plan section into the repo and checks it with a sha256sum match
+- name: rig-grade-swarm-doctor-fx-9b243b65-tune
+  state:
+    title: Move the number behind the task cost finding
+    description: 'Issue 1252. An agent launch after a merge that changes the profile render stamp re-renders the shared profile
+      home in place; every live session on it reloads, drops its thinking and writes its whole context to cache again (task
+      mp2 paid this twice, about six hundred eighty thousand tokens). Seams: (1) a launch with a new render stamp gets a fresh
+      profile home; (2) a home that live sessions run on is never rewritten; (3) old homes are removed once no live session
+      uses them. Red first. Measure whole context cache rewrites per live session across one merge, before and after; target
+      zero. The task t20 profile check failures after renders may share this cause: check them in the same proof.'
+    kind: code
+    territory_size: 0
+    difficulty: M
+    rank: urgent
+  params:
+    difficulty: M
+    rank: urgent
+    lower: 'Opus at high effort: several seams, or a cause to find inside one component'
+    higher: 'Opus at extra high effort: an unknown cause across several components, or a redesign of a core concept'
+  expected:
+    option: higher
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 433
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7193275154014789
+        probabilities:
+          lower: 0.8596637577007394
+          higher: 0.14033624229926062
+  - source: jev-1.13
+    latency_ms: 287
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.48
+        probabilities:
+          lower: 0.74
+          higher: 0.26
+  - source: pplx-decider-v1-27b
+    latency_ms: 929
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7921570080134515
+        probabilities:
+          lower: 0.8960785040067257
+          higher: 0.10392149599327426
+  notes:
+    state_digest: 79d0c2def5bd1ce7
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: the change is within one component, but finding whether the t20 failures share the cause can reach other
+      components
+- name: rig-grade-swarm-vidn2
+  state:
+    title: Separate logical agents from execution attempts
+    description: 'Swarm v2 work package SV2-IDN-02, tier 1 of 8. Spec: read section SV2-IDN-02 of /home/user/dev/fleet-ecosystem/agentihooks/Swarm-v2.md
+      (also Swarm-v2.md at the root of your agentihooks worktree) in full, fixture, boundary obligations, acceptance tests,
+      rollback and completion, plus sections 1 to 3. Repository: agentihooks. Integration gate: G1. Intended change: Keep
+      seat continuity while giving every replacement process an immutable execution incarnation. Required fixture: One seat
+      with three sequential attempts and two Pods sharing a human display label. Name SV2-IDN-02 in the pull request. antoncore
+      changes go through GitOps, never live patches. Priority: Atlas compute first, because the operator''s workstation memory
+      is the bottleneck.'
+    kind: code
+    territory_size: 1
+    difficulty: M
+    rank: high
+  params:
+    difficulty: M
+    rank: high
+    lower: 'Opus at high effort: several seams, or a cause to find inside one component'
+    higher: 'Opus at extra high effort: an unknown cause across several components, or a redesign of a core concept'
+  expected:
+    option: higher
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 550
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8198140145191788
+        probabilities:
+          lower: 0.9099070072595894
+          higher: 0.09009299274041056
+  - source: jev-1.13
+    latency_ms: 264
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.22
+        probabilities:
+          lower: 0.61
+          higher: 0.39
+  - source: pplx-decider-v1-27b
+    latency_ms: 315
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.6448487043295266
+        probabilities:
+          lower: 0.8224243521647633
+          higher: 0.17757564783523677
+  notes:
+    state_digest: a53cb64d4dd464ba
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: redesigns a core concept, splitting seat identity from the identity of each execution attempt
+- name: rig-grade-swarm-doctor-t14
+  state:
+    title: Measure non master replies to whole swarm chat lines after the fix is live
+    description: 'Once the whole swarm chat fix is live in the ledger server (restarted after task t13), count replies from
+      agents other than the master to whole swarm chat lines over thirty minutes, the same way as before. Before: eight replies
+      on two lines. Target zero, with the master answering each line once.'
+    kind: tune
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 244
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9158245333550736
+        probabilities:
+          lower: 0.9579122666775368
+          higher: 0.04208773332246319
+  - source: jev-1.13
+    latency_ms: 388
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.92
+        probabilities:
+          lower: 0.96
+          higher: 0.04
+  - source: pplx-decider-v1-27b
+    latency_ms: 319
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9212166786347391
+        probabilities:
+          lower: 0.9606083393173696
+          higher: 0.0393916606826305
+  notes:
+    state_digest: ac2ce7b5cfe261e5
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: repeats a named count and compares it with a known before value
+- name: rig-grade-swarm-tc1
+  state:
+    title: Grouped local test runs across swarm and root tests keep swarm fixtures
+    description: 'From an engineer follow up: running the swarm tests and root tests in one local pytest run loses the swarm
+      fixtures, giving model classification failures and a missing scratch fixture. This reproduces on unchanged dev, and
+      separate runs pass. Seams: test collection and fixture scoping between the swarm tests folder and the root tests folder.
+      Done when one grouped run of the affected swarm and root test files passes locally with at most two workers, a red run
+      on dev is recorded first, and CI stays green. Do not run the full suite locally.'
+    kind: ci
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: higher
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 233
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9377123438763293
+        probabilities:
+          lower: 0.9688561719381646
+          higher: 0.031143828061835372
+  - source: jev-1.13
+    latency_ms: 319
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.58
+        probabilities:
+          lower: 0.79
+          higher: 0.21
+  - source: pplx-decider-v1-27b
+    latency_ms: 384
+    answers:
+      option:
+        type: choice
+        choice: higher
+        confidence: 0.4293400781079959
+        probabilities:
+          lower: 0.285329960946002
+          higher: 0.714670039053998
+  notes:
+    state_digest: 9d90cdbe140a28ad
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: the fixture loss in test collection and scoping has an unknown cause to find
+- name: rig-grade-swarm-doctor-t25
+  state:
+    title: Measure rewritten life stamps over a full hour of watched swarm startups
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. Pull request 1300 keeps an agent''s
+      life stamp fixed before startup telemetry reads it; it merged and reached the watched swarm''s main checkout by the
+      Doctor''s next pull. Before: twenty one of twenty one watched swarm startups had their life stamp rewritten. Count every
+      watched swarm startup in the first full hour after the pull, with the life count script in the telemetry code task''s
+      work folder, the same way as before. Target zero rewritten. Done when the count command and its output for before and
+      after are on the proof.'
+    kind: tune
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 232
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8482836462252734
+        probabilities:
+          lower: 0.9241418231126367
+          higher: 0.07585817688736327
+  - source: jev-1.13
+    latency_ms: 358
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.92
+        probabilities:
+          lower: 0.96
+          higher: 0.04
+  - source: pplx-decider-v1-27b
+    latency_ms: 319
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9327829037503721
+        probabilities:
+          lower: 0.966391451875186
+          higher: 0.033608548124814015
+  notes:
+    state_digest: fb871e174812dba4
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: runs an existing count script the same way as before and pastes the output
+- name: rig-grade-swarm-doctor-t38
+  state:
+    title: The red checks detector waits for a head to sit red with no push
+    description: 'Parent: the Doctor fixes the system its watched swarm runs on, with proof. The Doctor red checks detector
+      raised six findings today (pull requests 1286, 1333, 1353, 1390, 1408 and 1413) within minutes of a push; every one
+      was fixed by its engineer and merged, so each was judged noise. The swarm tick already tells an engineer when its pull
+      request sits red with no push for twenty minutes. Seams: (1) the detector reports a red head only after it has sat red
+      with no new push for the same twenty minutes the tick uses, read from the same setting; (2) a red head with a push since
+      resets; (3) a red head past the window is still reported. Red first. Number to move: red check findings on heads that
+      got a push and turned green within twenty minutes, replayed over today''s findings before and after; six before, target
+      zero, while a head left red past the window is still found.'
+    kind: code
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 242
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7982427599461548
+        probabilities:
+          lower: 0.8991213799730774
+          higher: 0.10087862002692255
+  - source: jev-1.13
+    latency_ms: 315
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.7
+        probabilities:
+          lower: 0.85
+          higher: 0.15
+  - source: pplx-decider-v1-27b
+    latency_ms: 307
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.47451587496535375
+        probabilities:
+          lower: 0.7372579374826769
+          higher: 0.2627420625173231
+  notes:
+    state_digest: 0f4bd84eaecc604c
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: three clearly stated behaviours in one detector, with a named setting and measure
+- name: rig-grade-swarm-ed1
+  state:
+    title: Enforce determinism skill reaches every profile
+    description: 'Follow up: the new top doctrine rule names the enforce determinism skill, but the skill ships only in the
+      engineer kit, so ci, planner, qa and master agents read the rule without the tool. Seams: move the skill to the bundle
+      global Claude folder so every profile inherits it, and the role profile tests pin it in every role. Done when merged
+      in the bundle and a fresh ci session lists the skill.'
+    kind: code
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 286
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9932467737321544
+        probabilities:
+          lower: 0.9966233868660772
+          higher: 0.003376613133922829
+  - source: jev-1.13
+    latency_ms: 264
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.92
+        probabilities:
+          lower: 0.96
+          higher: 0.04
+  - source: pplx-decider-v1-27b
+    latency_ms: 305
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.8496852496552081
+        probabilities:
+          lower: 0.924842624827604
+          higher: 0.07515737517239592
+  notes:
+    state_digest: d32bba8bda0565d3
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: moves a skill folder and pins it in the existing role tests
+- name: rig-grade-swarm-doctor-fx-8be892c4-cause
+  state:
+    title: Find the cause of the inbox no outcome finding
+    description: 'Doctor found 379 inbox items in the watched swarm closed done with no outcome named: 228 are notices the
+      swarm tick itself sends (red checks, a wait that ended, a pull request still open after merge), 151 are items from engineers,
+      ci agents, masters and the operator. Seams: the tick code that sends these notices (is each one a work item or for information
+      only), the msg close path that accepts a bare done, and the Doctor inbox no outcome detector. Show with evidence from
+      the inbox history which group is a sender bug (notices that should carry the information only flag) and which is a closer
+      lapse (a receiver that should name where the work went). Proof: root cause, evidence (item counts by sender and kind,
+      the code that sends each notice), and the fix or a filed task.'
+    kind: troubleshoot
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: higher
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 235
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.5758623713664381
+        probabilities:
+          lower: 0.7879311856832191
+          higher: 0.21206881431678096
+  - source: jev-1.13
+    latency_ms: 274
+    answers:
+      option:
+        type: choice
+        choice: higher
+        confidence: 0.72
+        probabilities:
+          lower: 0.14
+          higher: 0.86
+  - source: pplx-decider-v1-27b
+    latency_ms: 305
+    answers:
+      option:
+        type: choice
+        choice: higher
+        confidence: 0.9026106367444922
+        probabilities:
+          lower: 0.0486946816277538
+          higher: 0.9513053183722461
+  notes:
+    state_digest: a6c1d6d8f56a8616
+    found_in_ledger: true
+    reader_option: higher
+    reader_reason: a root cause has to be found and shown with evidence across the tick, the close path and the detector
+- name: rig-grade-swarm-t64
+  state:
+    title: Quota transfer refusal text names the right direction
+    description: 'Profile QA found the quota transfer refusal message names the wrong direction of the transfer. Seam: the
+      refusal text names the source and target account as they are. Done when a test pins the message for both directions
+      and the pull request is merged. Evidence is on the profile QA task proof.'
+    kind: code
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 234
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9640275734959454
+        probabilities:
+          lower: 0.9820137867479727
+          higher: 0.017986213252027258
+  - source: jev-1.13
+    latency_ms: 269
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 1.0
+        probabilities:
+          lower: 1.0
+          higher: 0.0
+  - source: pplx-decider-v1-27b
+    latency_ms: 332
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.952314960256132
+        probabilities:
+          lower: 0.976157480128066
+          higher: 0.023842519871934028
+  notes:
+    state_digest: 35ef80246812c2db
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: fixes one message string and pins it with a test
+- name: rig-grade-swarm-tc104
+  state:
+    title: Unit test jobs carry a time limit
+    description: The unit test job has no time limit, so a hung shard can run six hours while every newer dev Sonar scan waits
+      behind it. Set a job time limit near twice the slowest measured shard so a hung shard fails fast. Done when the pull
+      request merges and the workflow shows the limit on every unit shard.
+    kind: code
+    territory_size: 0
+    difficulty: M
+    rank: normal
+  params:
+    difficulty: M
+    rank: normal
+    lower: 'Opus at medium effort: the task names what to change and how to check it'
+    higher: 'Opus at high effort: several seams, or a cause to find inside one component'
+  expected:
+    option: lower
+  control: false
+  samples:
+  - source: liquid-d1
+    latency_ms: 234
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9857571422978062
+        probabilities:
+          lower: 0.9928785711489031
+          higher: 0.007121428851096951
+  - source: jev-1.13
+    latency_ms: 285
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 1.0
+        probabilities:
+          lower: 1.0
+          higher: 0.0
+  - source: pplx-decider-v1-27b
+    latency_ms: 321
+    answers:
+      option:
+        type: choice
+        choice: lower
+        confidence: 0.9186838248004303
+        probabilities:
+          lower: 0.9593419124002152
+          higher: 0.040658087599784815
+  notes:
+    state_digest: bcc7c04ca294ff60
+    found_in_ledger: true
+    reader_option: lower
+    reader_reason: sets a job time limit with a clear rule and a clear check

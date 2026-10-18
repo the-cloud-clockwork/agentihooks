@@ -296,10 +296,16 @@ def test_inline_scripts_read_each_shell_c_form():
     assert list(inline_scripts("bash -o")) == []
 
 
-def test_inline_scripts_read_a_long_option_word_in_linear_time():
-    started = time.perf_counter()
+def test_inline_scripts_find_no_script_in_a_long_option_word():
     assert list(inline_scripts("bash -" + "c" * 50_000 + "1 x")) == []
     assert list(inline_scripts("bash -" + "o" * 50_000 + "1 x")) == []
+
+
+@pytest.mark.wall_clock
+def test_inline_scripts_read_a_long_option_word_in_linear_time():
+    started = time.perf_counter()
+    list(inline_scripts("bash -" + "c" * 50_000 + "1 x"))
+    list(inline_scripts("bash -" + "o" * 50_000 + "1 x"))
     assert time.perf_counter() - started < 1
 
 

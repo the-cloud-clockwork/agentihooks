@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_swarm.py:scripts.swarm.metrics_swarm.x__log_batch__mutmut_22:3a34bf14772e488d3b598d914f52beca475df8185bd82ca29f2947718ec0edf9": {
+    "reader": "standards_reader",
+    "reason": "Only SQL keyword letter case changes. The same parameterized SELECT returns the same stored position for the same source."
+  }
+}

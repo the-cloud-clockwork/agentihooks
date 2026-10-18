@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_bench.py:scripts.swarm_v2.startup_bench.x_read__mutmut_10:d929c2ec7f901aff5f97463ef73994d5236587030bad5accfdc0a2b84128ce97": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "read_at holds an ASCII timestamp, which decodes identically under any ASCII-compatible locale, and the UTF-8 locale of CI and the worker image is the same as the explicit codec."
+  }
+}

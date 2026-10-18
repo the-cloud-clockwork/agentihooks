@@ -123,6 +123,13 @@ def test_the_launch_process_is_named_by_its_environment(plant):
     assert _gone(launch)
 
 
+@pytest.mark.parametrize("display", ["engineer@a1b2c3-0001", "engineer-a1b2c3-0001"])
+def test_reaper_finds_both_swarm_display_name_forms(plant, display):
+    launch = plant(name=display)
+    assert reaper.retire("engineer@a1b2c3-0001", launch.pid, []).ended == (launch.pid,)
+    assert _gone(launch)
+
+
 def test_a_reused_launch_pid_carrying_another_name_is_left_alone(plant):
     stranger = plant(name="engineer@a1b2c3-0008")
     assert reaper.targets(NAME, stranger.pid, []) == reaper.Targets()

@@ -1,0 +1,26 @@
+{
+  "case": "T-SV2-MST-01-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-MST-01-B",
+    "evidence_class": "fakeredis swarm store and inbox; fixture ledger document; no live swarm",
+    "input_sha256": "442c3c3caf41df962800006dea2f299f7e410a3f7a0ceaafa626d89c09177ca7",
+    "observed": {
+      "after_comment_on_empty_owner_seat": {
+        "master-2@fixture": 0,
+        "master-3@fixture": 0,
+        "master@fixture": 1
+      },
+      "count_kept": 2,
+      "count_text": "masters takes a whole number of master seats, not 'two'",
+      "count_zero": "a swarm needs at least one master seat, not 0",
+      "owners": {
+        "p1": "master@fixture",
+        "p2": "master-2@fixture",
+        "p3": "master@fixture",
+        "p4": "master-2@fixture"
+      }
+    },
+    "state": "passed"
+  }
+}

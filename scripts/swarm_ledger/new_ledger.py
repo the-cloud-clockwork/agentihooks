@@ -74,7 +74,7 @@ def check_types(content):
         ("phases", ("title", "description")),
         ("questions", ("text",)),
         ("followups", ("text",)),
-        ("tasks", ("title", "description", "phase", "lane")),
+        ("tasks", ("title", "description", "phase", "lane", "profile")),
     ):
         items = content.get(key, [])
         if not isinstance(items, list) or not all(isinstance(i, dict) for i in items):
@@ -119,6 +119,11 @@ def check(content):
     errors += [f"source not found: {s}" for s in missing]
     if not content.get("phases"):
         errors.append("no phases")
+    errors += [
+        f"tasks[{n}].rank is not allowed in seed content; set the rank after creation"
+        for n, task in enumerate(content.get("tasks", []), 1)
+        if "rank" in task
+    ]
     return errors
 
 
@@ -156,8 +161,15 @@ def build_doc(content, size="small"):
         "chat": [],
         "followups": items("followups", "f", ("text",)),
         "tasks": [
-            {**task, "lane": task["lane"] or "eng", "state": "open", "claimed_by": "", "issue_url": "", "pr_url": ""}
-            for task in items("tasks", "t", ("title", "description", "phase", "lane"))
+            {
+                **{key: value for key, value in task.items() if value or key != "profile"},
+                "lane": task["lane"] or "eng",
+                "state": "open",
+                "claimed_by": "",
+                "issue_url": "",
+                "pr_url": "",
+            }
+            for task in items("tasks", "t", ("title", "description", "phase", "lane", "profile"))
         ],
     }
 

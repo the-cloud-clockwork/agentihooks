@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/startup_stages.py:scripts.swarm_v2.startup_stages.x_failure__mutmut_37:d1ff210a312680c1eef56f5ae2a97f478ecb8a1eb0a6189de5de3158db12fa03": {
+    "reader": "Standards reader for SV2-PRF-02",
+    "reason": "BackOff events always carry a message key from _event, so the default is never read; XXXX does not contain the substring pulling image, the same as the empty default."
+  }
+}

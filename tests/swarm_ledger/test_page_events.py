@@ -81,7 +81,9 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
     assert all("token" not in r["url"].lower() and r["headers"].get("x-ledger-token") for r in events)
     assert sorted(r["url"] for r in seen if "/api/" in r["url"] and not is_events(r["url"])) == [
         "http://ledger.test/api/layout",
+        "http://ledger.test/api/swarm/__LEDGER_SLUG__/models",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__",
+        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/architecture",
     ]
 
 
@@ -139,10 +141,57 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
         tab.wait_for_function("() => document.querySelector('#swarm-state').textContent === 'paused'", timeout=5000)
     time.sleep(3)
     reads = [(method, path) for method, path in requests if path.startswith("/api/") and path != "/api/layout"]
-    assert sorted(reads) == sorted([("GET", f"/api/v1/ledgers/{SLUG}/events"), ("GET", f"/api/v1/ledgers/{SLUG}")] * 2)
+    assert sorted(reads) == sorted(
+        [
+            ("GET", f"/api/v1/ledgers/{SLUG}/events"),
+            ("GET", f"/api/v1/ledgers/{SLUG}"),
+            ("GET", f"/api/swarm/{SLUG}/models"),
+            ("GET", f"/api/v1/ledgers/{SLUG}/architecture"),
+        ]
+        * 2
+    )
     context.close()
     for _ in range(100):
         if not server.HUB.watched():
             break
         time.sleep(0.05)
     assert server.HUB.watched() == []
+
+
+def test_a_page_recovers_a_burst_in_one_stream_and_matches_a_fresh_reload(browser, live, monkeypatch):
+    base, _ = live
+    context = browser.new_context(viewport={"width": 1920, "height": 1080})
+    page = context.new_page()
+    requests = []
+    page.on("request", lambda request: requests.append(request.url))
+    hub = server.HUB
+    hub.retained = 1
+    waiting, release = threading.Event(), threading.Event()
+    original_wait = hub.wait
+
+    def held_wait(slug, seq, timeout):
+        if not waiting.is_set():
+            waiting.set()
+            if not release.wait(10):
+                raise TimeoutError("burst was never released")
+        return original_wait(slug, seq, timeout)
+
+    monkeypatch.setattr(hub, "wait", held_wait)
+    try:
+        page.goto(f"{base}/{SLUG}")
+        assert waiting.wait(10)
+        for n in range(8):
+            server.repository.apply_ops(SLUG, ops=[note(n)])
+        release.set()
+        page.wait_for_function("() => document.body.textContent.includes('streamed note 7')", timeout=10000)
+        for n in range(8):
+            assert page.locator("#notes").get_by_text(f"streamed note {n}", exact=True).count() == 1
+        assert [url for url in requests if url.endswith(f"/{SLUG}/events")] == [f"{base}/api/v1/ledgers/{SLUG}/events"]
+        fresh = context.new_page()
+        fresh.goto(f"{base}/{SLUG}")
+        fresh.wait_for_function("() => document.body.textContent.includes('streamed note 7')", timeout=10000)
+        for n in range(8):
+            assert fresh.locator("#notes").get_by_text(f"streamed note {n}", exact=True).count() == 1
+    finally:
+        release.set()
+        context.close()

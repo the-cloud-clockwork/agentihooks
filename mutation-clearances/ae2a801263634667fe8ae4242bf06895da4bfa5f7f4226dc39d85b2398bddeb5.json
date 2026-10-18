@@ -1,0 +1,6 @@
+{
+  "scripts/gate_protected.py:scripts.gate_protected.x__duration_problems__mutmut_43:0ed2bfad72dbbc95c213016b4ccae9929d39a884179a561d37601a0ae59a4afb": {
+    "reader": "Standards",
+    "reason": "Diagnostic-only decoration; finding, rejection and exit status remain unchanged."
+  }
+}

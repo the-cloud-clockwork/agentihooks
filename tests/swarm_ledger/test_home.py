@@ -62,15 +62,28 @@ class Home(unittest.TestCase):
 
     def test_home_and_bin_render_from_the_home_html_source(self):
         source = core.HOME.read_text(encoding="utf-8")
-        with tempfile.TemporaryDirectory() as tmp:
-            edited = Path(tmp) / "home.html"
-            edited.write_text(
-                source.replace("</title>", '</title><p id="edited">__HOME_HEADING__</p>'), encoding="utf-8"
-            )
-            with mock.patch.object(core, "HOME", edited):
-                self.assertIn('<p id="edited">HOME</p>', rendered_home(server, self.browser, "home"))
-                self.assertIn('<p id="edited">BIN</p>', rendered_home(server, self.browser, "bin"))
+        server.served_page.cache_clear()
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                edited = Path(tmp) / "home.html"
+                edited.write_text(
+                    source.replace("</title>", '</title><p id="edited">__HOME_HEADING__</p>'), encoding="utf-8"
+                )
+                with mock.patch.object(core, "HOME", edited):
+                    self.assertIn('<p id="edited">HOME</p>', rendered_home(server, self.browser, "home"))
+                    self.assertIn('<p id="edited">BIN</p>', rendered_home(server, self.browser, "bin"))
+        finally:
+            server.served_page.cache_clear()
         self.assertTrue(source.rstrip().endswith("</html>"))
+
+    def test_home_template_edit_leaves_the_page_version_current(self):
+        server.served_page.cache_clear()
+        try:
+            self.test_home_and_bin_render_from_the_home_html_source()
+            page = server.page_for("alpha-2026-01-01")
+            self.assertEqual(core.PAGE_RE.search(page).group(1), core.page_version())
+        finally:
+            server.served_page.cache_clear()
 
 
 if __name__ == "__main__":

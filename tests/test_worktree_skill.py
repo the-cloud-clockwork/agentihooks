@@ -330,16 +330,19 @@ class Done(WtBase):
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(
             result.stderr.strip().splitlines()[-1],
-            "wt: branch 'parked-two' is not on origin at the worktree head — worktree kept",
+            "wt: branch 'parked-two' is not contained in an origin branch — worktree kept",
         )
         self.assertTrue(dest.is_dir())
         self.assertTrue(self.branch_exists("parked-two"))
 
     def test_done_pushed_keeps_a_worktree_never_pushed(self):
         dest = self._new("parked-three")
+        (dest / "unpushed.txt").write_text("unpushed\n")
+        _git(dest, "add", "unpushed.txt", env=self.gitenv)
+        _git(dest, "commit", "--quiet", "-m", "unpushed", env=self.gitenv)
         result = self.run_wt("done", "parked-three", "--repo", str(self.primary), "--pushed")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("is not on origin at the worktree head", result.stderr)
+        self.assertIn("is not contained in an origin branch", result.stderr)
         self.assertTrue(dest.is_dir())
 
     def test_done_pushed_refuses_a_dirty_worktree(self):
@@ -358,7 +361,7 @@ class Done(WtBase):
         self.assertEqual(result.stderr.strip(), "wt: --pushed and --force do not combine")
         self.assertTrue((dest / "scratch.txt").is_file())
 
-    def test_done_pushed_keeps_a_worktree_behind_origin(self):
+    def test_done_pushed_drops_a_worktree_behind_origin(self):
         dest = self._pushed_worktree("parked-six")
         other = Path(self.tmp) / "other-six"
         _git(Path(self.tmp), "clone", "--quiet", "-b", "parked-six", str(self.origin), str(other), env=self.gitenv)
@@ -367,16 +370,17 @@ class Done(WtBase):
         _git(other, "commit", "--quiet", "-m", "ahead", env=self.gitenv)
         _git(other, "push", "--quiet", "origin", "parked-six", env=self.gitenv)
         result = self.run_wt("done", "parked-six", "--repo", str(self.primary), "--pushed")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertIn("is not on origin at the worktree head", result.stderr)
-        self.assertTrue(dest.is_dir())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(dest.exists())
+        self.assertFalse(self.branch_exists("parked-six"))
+        self.assertTrue(self.remote_branch_exists("parked-six"))
 
     def test_done_pushed_keeps_the_worktree_when_origin_cannot_be_read(self):
         dest = self._pushed_worktree("parked-seven")
         _git(self.primary, "remote", "set-url", "origin", str(Path(self.tmp) / "gone.git"), env=self.gitenv)
         result = self.run_wt("done", "parked-seven", "--repo", str(self.primary), "--pushed")
         self.assertNotEqual(result.returncode, 0)
-        self.assertIn("cannot read remote branch 'parked-seven' — worktree kept", result.stderr)
+        self.assertIn("cannot read origin branches — worktree kept", result.stderr)
         self.assertTrue(dest.is_dir())
 
     def test_done_without_force_keeps_a_worktree_whose_pull_request_closed_unmerged(self):
@@ -414,6 +418,37 @@ class Done(WtBase):
                 self.assertTrue(dest.is_dir())
                 self.assertTrue(self.branch_exists(name))
                 self.assertTrue(self.remote_branch_exists(name))
+
+
+class DoneOrigin(WtBase):
+    def test_done_pushed_drops_heads_contained_in_a_differently_named_origin_branch(self):
+        for advanced in (False, True):
+            with self.subTest(advanced=advanced):
+                name = f"successor-{advanced}"
+                remote = f"predecessor-{advanced}"
+                dest = Path(self.run_wt("new", name, "--repo", str(self.primary)).stdout.strip())
+                (dest / "saved.txt").write_text("saved\n")
+                _git(dest, "add", "saved.txt", env=self.gitenv)
+                _git(dest, "commit", "--quiet", "-m", "saved", env=self.gitenv)
+                head = subprocess.check_output(
+                    ["git", "-C", str(dest), "rev-parse", "HEAD"], env=self.gitenv, text=True
+                ).strip()
+                _git(dest, "push", "--quiet", "origin", f"HEAD:refs/heads/{remote}", env=self.gitenv)
+                _git(self.primary, "update-ref", "-d", f"refs/remotes/origin/{remote}", env=self.gitenv)
+                if advanced:
+                    other = Path(self.tmp) / remote
+                    _git(
+                        Path(self.tmp), "clone", "--quiet", "-b", remote, str(self.origin), str(other), env=self.gitenv
+                    )
+                    (other / "later.txt").write_text("later\n")
+                    _git(other, "add", "later.txt", env=self.gitenv)
+                    _git(other, "commit", "--quiet", "-m", "later", env=self.gitenv)
+                    _git(other, "push", "--quiet", "origin", remote, env=self.gitenv)
+                result = self.run_wt("done", name, "--repo", str(self.primary), "--pushed")
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertFalse(dest.exists())
+                self.assertFalse(self.branch_exists(name))
+                _git(self.origin, "merge-base", "--is-ancestor", head, f"refs/heads/{remote}", env=self.gitenv)
 
 
 CONCURRENT_GIT = """#!{bash}

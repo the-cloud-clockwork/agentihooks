@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_15:fb927b30144f7b3b93d8d36ea7852cea62cf1cc9b31652fa230a5ed253a13fc8": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --codex-transport help text has its first letter lowercased, shown only by --help and read by no program or test."
+  }
+}

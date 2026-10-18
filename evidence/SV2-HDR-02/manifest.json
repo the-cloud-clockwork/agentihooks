@@ -1,0 +1,28 @@
+{
+  "cases": [
+    "T-SV2-HDR-02-A",
+    "T-SV2-HDR-02-B",
+    "T-SV2-HDR-02-C"
+  ],
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38101226814",
+  "evidence_class": "mocked cases run the renderers, client home and attach path against a recording runner and an injected resolver; the live proof ran the worker image sshd and the pinned herdr 0.9.1 behind a private localhost sshd on the operator workstation",
+  "inputs": {
+    "docker/swarm-node/ssh/sshd_config": "543a3601fc46ffff9b0984edd53128c3f356efe2238a5ad15d09ff567c57f092",
+    "docker/swarm-node/ssh/start.sh": "a3f22dda8f6c93acf23c000e114e632b7ca67c3b4915072b964b9a7bb44d7270",
+    "evidence/SV2-HDR-02/live-proof.jsonl": "e9c05aba7585e4c212d45c2cd9c8802b4641d0051e65ed0a3d3ab80b492c4f13",
+    "scripts/swarm_v2/herdr/attach.py": "36417a073b1a1013e27bdbe800cd12bccdefac1bb7436701bf4cc6e22e674748",
+    "scripts/swarm_v2/herdr/capabilities.py": "1f625f753cb2b5bbb2dc0483640b4bb2436ff661b4ca5339ae0c719479893ed8",
+    "scripts/swarm_v2/herdr/endpoints.py": "e4db9b9cb8ca4c2ae6d5f1404b93567a33ae4e16c7376d4c5f8fd93efd8f27aa",
+    "scripts/swarm_v2/herdr/session.py": "4a212ce000d0766d7f769ec71665c3de45dfaff42e389b3b1d0fb62a033e9c1f",
+    "tests/fixtures/swarm_v2/herdr-terminal-objects.json": "14bedb92d7b8d06eec222780bd5ae9ae5e3f29b6c4e1286218801ca631b1f83f",
+    "tests/fixtures/swarm_v2/herdr-terminal-pod.json": "d042e94da795467a93966a965c54f3ff68087ba783b03938dab4537f73d59bd8",
+    "tests/fixtures/swarm_v2/herdr-terminal.json": "096cb6a1bc81149885ad765e80d3d42536bcd01982f41b2c21eea22b2fd4ecfe",
+    "tests/integration/herdr_terminal/terminal_proof.py": "ed234f7f3ad3fa506c43c5245f8c512e6c855296ac8091b42a5c5fbc59c72c91",
+    "tests/sv2_hdr02_cases.py": "3b5cd060cff7eab1b27d26eeea6ec9455c363ede110aff823de0151b81e73c36",
+    "tests/test_swarm_v2_herdr_attach.py": "7dbac664ee38fa738097064687d7e19bc1be1bdf080f51157a99ba5ec1aa0113",
+    "tests/test_swarm_v2_herdr_endpoints.py": "357715e4965bc678b4563a099d093471feaace1d1077b36d62a2a7da70c9c00f",
+    "tests/test_swarm_v2_herdr_session.py": "667bf2ba3c3f51e97ee16abf952816417284d4d670ce94e2246a83534b4fbbce"
+  },
+  "mutation_preflight": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38101055930",
+  "tested_commit": "244b33e365a3071269bc257a23490b4ab2eab81a"
+}

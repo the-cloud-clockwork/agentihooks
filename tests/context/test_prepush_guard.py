@@ -1,6 +1,7 @@
 """Tests for hooks.context.prepush_guard."""
 
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -44,7 +45,8 @@ def _stamp(root):
 def _message(root):
     return (
         f"BLOCKED: HEAD in {root} has not passed `python -m scripts.ci_prepush`. "
-        "Run it there, fix what fails, commit, and push once it passes."
+        "Commit intended changes first, run the gate on that commit, then push. "
+        f"Next: cd {root} && python -m scripts.ci_prepush"
     )
 
 
@@ -117,6 +119,306 @@ def test_push_from_another_directory_resolves_the_repository(repo, tmp_path, mon
     elsewhere.mkdir()
     with pytest.raises(BlockAction):
         check_prepush(_bash(f"git -C {tmp_path} -C repo push", elsewhere))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "git status && cd {worktree} && git push",
+        "cd {worktree}\ngit push -u origin HEAD",
+        "cd ../worktree && git push",
+        "cd .. && git -C worktree push origin HEAD",
+        "cd /nowhere-at-all; cd {worktree} && git push",
+        "cd -P {worktree} && git push",
+        "cd && cd worktree && git push",
+        "cd {worktree}; cd missing; git push",
+        "env -C {worktree} git push",
+        "cd {worktree}; cd ..; cd -; git push",
+        "cd {worktree} && (git push)",
+    ],
+)
+def test_the_push_is_graded_in_the_folder_the_command_changes_into(repo, tmp_path, monkeypatch, command):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+
+    check_prepush(_bash(command.format(worktree=worktree), repo))
+
+    _stamp(repo)
+    _git(worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash(command.format(worktree=worktree), repo))
+    assert str(blocked.value) == _message(worktree)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "(cd {worktree}); git push",
+        "(cd {worktree} && true) && git push",
+        "cd {worktree} | true; git push",
+        "cd {worktree} & git push",
+        "env -C {worktree} true; git push",
+        "cd {worktree} && cd - && git push",
+        "cd -; git push",
+    ],
+)
+def test_a_folder_change_that_does_not_last_leaves_the_push_where_it_started(repo, tmp_path, command):
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash(command.format(worktree=worktree), repo))
+    assert str(blocked.value) == _message(repo)
+
+
+@pytest.mark.parametrize("workdir", ["{worktree}", "../worktree"])
+def test_the_push_is_graded_in_the_shell_tool_workdir(repo, tmp_path, workdir):
+    worktree = _init(tmp_path / "worktree")
+    _stamp(worktree)
+    payload = _bash("", repo)
+    payload["tool_input"] = {"cmd": "git push origin HEAD", "workdir": workdir.format(worktree=worktree)}
+
+    check_prepush(payload)
+
+    _stamp(repo)
+    _git(worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(worktree)
+
+
+@pytest.fixture
+def swarm_worktree(repo, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    _git(repo, "add", "scripts/ci_prepush/__init__.py")
+    _git(repo, "commit", "-q", "-m", "guard")
+    worktree = tmp_path / "worktree"
+    _git(repo, "worktree", "add", "-q", "-b", "task-branch", str(worktree))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "task-branch"}
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    legacy_page.store(folder, "rig", {"tasks": [task]})
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    return worktree
+
+
+def test_codex_command_only_push_grades_the_claimed_task_worktree(repo, swarm_worktree):
+    _stamp(swarm_worktree)
+    payload = _bash("git push origin HEAD", repo)
+
+    check_prepush(payload)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(swarm_worktree)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"command": "cd ../repo && git push origin HEAD"},
+        {"command": "git -C . push origin HEAD"},
+        {"command": "git push origin HEAD", "workdir": "."},
+        {"command": "git push origin HEAD", "workdir": "{repo}"},
+    ],
+)
+def test_swarm_fallback_keeps_explicit_directory_selection(repo, swarm_worktree, fields):
+    _stamp(swarm_worktree)
+    payload = _bash("", repo)
+    payload["tool_input"] = {key: value.format(repo=repo) for key, value in fields.items()}
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"AGENTIHOOKS_SWARM": ""},
+        {"AGENTIHOOKS_SWARM_TASK": ""},
+        {"AGENTIHOOKS_AGENT_NAME": ""},
+        {"AGENTIHOOKS_SWARM_TASK": "other"},
+        {"AGENTIHOOKS_AGENT_NAME": "other"},
+        {"LEDGER_DIR": "{tmp_path}/missing"},
+    ],
+)
+def test_missing_swarm_binding_keeps_the_payload_directory(repo, swarm_worktree, tmp_path, monkeypatch, fields):
+    for key, value in fields.items():
+        monkeypatch.setenv(key, value.format(tmp_path=tmp_path))
+    _stamp(swarm_worktree)
+    payload = _bash("git push origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [{"id": "other"}, {"claimed_by": "other"}, {"state": "done"}, {"branch": None}, {"branch": "missing"}],
+)
+def test_missing_claimed_task_worktree_keeps_the_payload_directory(repo, swarm_worktree, tmp_path, fields):
+    from tests.swarm_ledger import legacy_page
+
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "task-branch", **fields}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    _stamp(swarm_worktree)
+    payload = _bash("git push origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
+
+
+def test_swarm_push_in_pr_state_uses_its_recorded_branch(repo, swarm_worktree, tmp_path):
+    from tests.swarm_ledger import legacy_page
+
+    task = {"id": "push", "state": "pr", "claimed_by": "engineer@test", "branch": "task-branch"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(_bash("git push origin HEAD", repo))
+    assert str(blocked.value) == _message(swarm_worktree)
+
+
+@pytest.mark.parametrize("checkout", ["primary", "worktree"])
+def test_a_push_from_a_second_repository_grades_only_that_repository(swarm_worktree, tmp_path, checkout):
+    from tests.swarm_ledger import legacy_page
+
+    task = {
+        "id": "push",
+        "state": "claimed",
+        "claimed_by": "engineer@test",
+        "branch": "task-branch",
+        "worktree": str(swarm_worktree),
+    }
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    infra = _init(tmp_path / "infra")
+    _git(infra, "add", "scripts/ci_prepush/__init__.py")
+    _git(infra, "commit", "-q", "-m", "guard")
+    if checkout == "worktree":
+        infra_tree = tmp_path / "worktrees" / "infra" / "engineer-test-2"
+        _git(infra, "worktree", "add", "-q", "-b", "engineer-test-2", str(infra_tree))
+        infra = infra_tree
+    payload = _bash("git push -u origin HEAD", infra)
+    _stamp(swarm_worktree)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(infra)
+
+    _stamp(infra)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
+
+
+def test_a_worktree_shares_its_repository_common_dir(repo, swarm_worktree, tmp_path):
+    assert prepush_guard._common_dir(swarm_worktree) == str(repo / ".git")
+    assert prepush_guard._common_dir(repo) == str(repo / ".git")
+    assert prepush_guard._common_dir(tmp_path) is None
+
+
+@pytest.mark.parametrize("folder", ["engineer-test", "engineer-test-2"])
+def test_a_first_push_before_the_branch_is_recorded_grades_the_agent_worktree(repo, swarm_worktree, tmp_path, folder):
+    from tests.swarm_ledger import legacy_page
+
+    root = tmp_path / "worktrees"
+    own = root / "repo" / folder
+    _git(repo, "worktree", "add", "-q", "-b", folder, str(own))
+    _git(repo, "worktree", "add", "-q", "-b", "engineer-test-3", str(root / "other" / "engineer-test-3"))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    _stamp(repo)
+    payload = _bash("git push -u origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(own)
+
+    _stamp(own)
+    check_prepush(payload)
+
+
+def test_two_agent_worktrees_of_the_repository_keep_the_payload_directory(repo, swarm_worktree, tmp_path):
+    from tests.swarm_ledger import legacy_page
+
+    for folder in ("engineer-test", "engineer-test-2"):
+        _git(repo, "worktree", "add", "-q", "-b", folder, str(tmp_path / "worktrees" / "repo" / folder))
+        _stamp(tmp_path / "worktrees" / "repo" / folder)
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    payload = _bash("git push -u origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+
+def test_a_swarm_push_outside_a_repository_passes_without_a_guard_error(swarm_worktree, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    logged = []
+    monkeypatch.setattr(prepush_guard, "log", lambda *args: logged.append(args))
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    outside = tmp_path / "outside"
+    outside.mkdir()
+
+    check_prepush(_bash("git push -u origin HEAD", outside))
+
+    assert logged == []
+
+
+@pytest.mark.parametrize("directory", [None, "", "~/development-ledger"])
+def test_default_swarm_ledger_location_resolves_the_task_worktree(repo, swarm_worktree, monkeypatch, directory):
+    from tests.swarm_ledger import legacy_page
+
+    task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "task-branch"}
+    legacy_page.store(Path.home() / "development-ledger", "rig", {"tasks": [task]})
+    if directory is None:
+        monkeypatch.delenv("LEDGER_DIR")
+    else:
+        monkeypatch.setenv("LEDGER_DIR", directory)
+    _stamp(repo)
+    payload = _bash("git push origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(swarm_worktree)
+
+    _stamp(swarm_worktree)
+    check_prepush(payload)
+
+
+def test_task_without_a_claimant_cannot_supply_the_fallback_directory(repo, swarm_worktree, tmp_path, monkeypatch):
+    from tests.swarm_ledger import legacy_page
+
+    task = {"id": "push", "state": "claimed", "claimed_by": "", "branch": "task-branch"}
+    legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "")
+    _stamp(swarm_worktree)
+    payload = _bash("git push origin HEAD", repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(repo)
+
+    _stamp(repo)
+    _git(swarm_worktree, "commit", "-q", "--allow-empty", "-m", "more")
+    check_prepush(payload)
 
 
 def test_a_later_push_in_the_same_command_is_checked(repo, tmp_path):
@@ -196,3 +498,107 @@ def test_cmd_payloads_are_checked_for_pushes(repo):
     payload["tool_input"] = {"cmd": "git push origin HEAD"}
     with pytest.raises(BlockAction):
         check_prepush(payload)
+
+
+@pytest.mark.parametrize("directory", ["workdir", "task", "branch"])
+def test_codex_push_in_bundle_worktree_uses_bundle_repository(repo, tmp_path, monkeypatch, directory):
+    from hooks.targets.normalizer import normalize_payload
+    from tests.swarm_ledger import legacy_page
+
+    bundle = _init(tmp_path / "agentihooks-bundle")
+    _git(bundle, "add", "scripts/ci_prepush/__init__.py")
+    _git(bundle, "commit", "-q", "-m", "guard")
+    folder_name = "continuation" if directory == "branch" else "engineer-test"
+    worktree = tmp_path / "worktrees" / "agentihooks-bundle" / folder_name
+    worktree.parent.mkdir(parents=True)
+    _git(bundle, "worktree", "add", "-q", "-b", "engineer-test", str(worktree))
+    task = {
+        "id": "push",
+        "state": "claimed",
+        "claimed_by": "engineer@test",
+        "branch": "engineer-test",
+        "worktree": str(worktree),
+    }
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    if directory == "branch":
+        task.pop("worktree")
+    legacy_page.store(folder, "rig", {"tasks": [task]})
+    monkeypatch.setenv("LEDGER_DIR", str(folder))
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "rig")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "push")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@test")
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    root = tmp_path / ("unused" if directory == "task" else "worktrees")
+    monkeypatch.setenv("WORKTREE_ROOT", str(root))
+    payload = {"tool_name": "exec_command", "tool_input": {"command": "git push -u origin HEAD"}, "cwd": str(repo)}
+    if directory == "workdir":
+        payload["tool_input"]["workdir"] = str(worktree)
+    payload = normalize_payload(payload)
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == _message(worktree)
+    _stamp(worktree)
+    check_prepush(payload)
+
+
+@pytest.mark.parametrize("step", ["identity", "ledger", "claimant", "worktree"])
+def test_codex_unresolved_push_refuses_with_directory_guidance(repo, swarm_worktree, tmp_path, monkeypatch, step):
+    from hooks.targets.normalizer import normalize_payload
+    from tests.swarm_ledger import legacy_page
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    if step == "identity":
+        monkeypatch.setenv("AGENTIHOOKS_SWARM", "")
+    elif step == "ledger":
+        monkeypatch.setenv("LEDGER_DIR", str(tmp_path / "missing"))
+    elif step == "claimant":
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "other")
+    else:
+        task = {"id": "push", "state": "claimed", "claimed_by": "engineer@test", "branch": "missing"}
+        legacy_page.store(tmp_path / "ledgers", "rig", {"tasks": [task]})
+    payload = normalize_payload(
+        {
+            "tool_name": "exec_command",
+            "tool_input": {"command": "git push -u origin HEAD"},
+            "cwd": str(repo),
+        }
+    )
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    message = str(blocked.value)
+    stage = {
+        "identity": "identity binding",
+        "ledger": "ledger task",
+        "claimant": "claimant or task state",
+        "worktree": "worktree lookup",
+    }[step]
+    assert f"Could not resolve the push directory ({stage})" in message
+    assert "git -C /absolute/path/to/worktree push" in message
+    assert str(repo) not in message
+    payload["tool_input"]["command"] = f"git -C {repo} push -u origin HEAD"
+    check_prepush(payload)
+
+
+@pytest.mark.parametrize("selection", ["workdir", "git-c"])
+def test_codex_explicit_directory_without_a_repository_is_refused(repo, tmp_path, monkeypatch, selection):
+    from hooks.targets.normalizer import normalize_payload
+
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    target = tmp_path / "not-a-repository"
+    target.mkdir()
+    tool_input = {"command": "git push -u origin HEAD"}
+    if selection == "workdir":
+        tool_input["workdir"] = str(target)
+    else:
+        tool_input["command"] = f"git -C {target} push -u origin HEAD"
+    payload = normalize_payload({"tool_name": "exec_command", "tool_input": tool_input, "cwd": str(repo)})
+    _stamp(repo)
+    with pytest.raises(BlockAction) as blocked:
+        check_prepush(payload)
+    assert str(blocked.value) == (
+        "BLOCKED: Could not resolve the push directory (repository lookup). "
+        "Use git -C /absolute/path/to/worktree push with the intended repository."
+    )

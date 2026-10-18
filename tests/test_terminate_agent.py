@@ -56,6 +56,41 @@ def test_validate_leaves_out_group_members_that_ended(monkeypatch, state):
     assert validate(item, [item]) == [item.process]
 
 
+@pytest.mark.parametrize("state", ["Z", "X"])
+def test_validate_refuses_a_dead_target_with_a_live_sibling(monkeypatch, state):
+    item = session()
+    ended = Process(200, 1, 190, 190, 100, state, "claude", item.process.argv)
+    sibling = process(201, ppid=200, pgid=190, sid=190, comm="node", argv=("node",))
+    table = {100: process(100, comm="python"), 200: ended, 201: sibling}
+    monkeypatch.setattr("scripts.terminate_agent.processes", lambda proc=Path("/proc"): table)
+    monkeypatch.setattr("scripts.terminate_agent.os.getpid", lambda: 100)
+    with pytest.raises(ValueError) as error:
+        validate(item, [item], force_shared=True)
+    assert str(error.value) == "target process has ended"
+
+
+@pytest.mark.parametrize("state", ["Z", "X"])
+@pytest.mark.parametrize("registered", [False, True])
+def test_sessions_omit_a_dead_agent_with_a_live_sibling(tmp_path, state, registered):
+    from scripts.terminate_agent import sessions
+
+    ended = Process(200, 1, 190, 190, 100, state, "claude", ("claude",))
+    sibling = process(201, ppid=200, pgid=190, sid=190, argv=("claude", "--name", "sibling"))
+    registry = {"dead": {"pid": 200, "status": "alive"}} if registered else {}
+    with patch("scripts.terminate_agent.processes", return_value={200: ended, 201: sibling}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [item.process.pid for item in found] == [201]
+
+
+def test_sessions_omit_a_registered_non_agent_process(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(200, comm="python", argv=("python",))
+    registry = {"non-agent": {"pid": 200, "status": "alive"}}
+    with patch("scripts.terminate_agent.processes", return_value={200: item}):
+        assert sessions(tmp_path / "proc", registry=registry) == []
+
+
 @pytest.mark.parametrize("state,alive", [("S", True), ("Z", False), ("X", False)])
 def test_alive_counts_a_zombie_or_a_process_being_reaped_as_ended(monkeypatch, state, alive):
     from scripts.terminate_agent import _alive
@@ -250,6 +285,18 @@ def test_an_agent_without_a_name_argument_is_named_from_its_environment(tmp_path
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
 
 
+def test_claude_display_name_keeps_the_canonical_process_identity(tmp_path):
+    from scripts.terminate_agent import sessions
+
+    item = process(300, comm="claude", argv=("claude", "--name", "engineer-a1b2c3-0001"))
+    proc = _herdr_env(tmp_path, 300, AGENTIHOOKS_AGENT_NAME="engineer@a1b2c3-0001")
+    with patch("scripts.terminate_agent.processes", return_value={300: item}):
+        found = sessions(proc, registry={})
+    assert [(s.target, s.name) for s in found] == [("claude", "engineer@a1b2c3-0001")]
+    assert resolve(found, "engineer@a1b2c3-0001", "claude").process.pid == 300
+    assert resolve(found, "engineer-a1b2c3-0001", "claude").process.pid == 300
+
+
 def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
     from scripts.terminate_agent import sessions
 
@@ -260,6 +307,7 @@ def test_a_child_agent_process_does_not_inherit_its_parents_name(tmp_path):
     (proc / "301" / "environ").write_bytes((proc / "300" / "environ").read_bytes())
     with patch("scripts.terminate_agent.processes", return_value={300: parent, 301: child}):
         found = sessions(proc, registry={})
+    assert {s.process.pid: s.name for s in found} == {300: "smoke-codex", 301: ""}
     assert resolve(found, "smoke-codex", "codex").process.pid == 300
 
 
@@ -335,6 +383,36 @@ def test_claude_sessions_list_from_their_own_records(tmp_path, monkeypatch):
     assert [(s.target, s.name, s.session_id, s.cwd, s.status) for s in found] == [
         ("claude", "engineer", "uuid-1", "/repo", "alive")
     ]
+
+
+def test_a_record_from_another_process_namespace_never_claims_a_local_pid(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {
+        "remote": {"status": "alive", "pid": 400, "cwd": "/pod", "process_namespace": "boot-worker/pid:[1]"},
+        "local": {"status": "alive", "pid": 400, "cwd": "/repo", "process_namespace": "boot-anton/pid:[1]"},
+    }
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        here = sessions(tmp_path / "proc", registry=registry, namespace="boot-anton/pid:[1]")
+        alone = sessions(tmp_path / "proc", registry={"remote": registry["remote"]}, namespace="boot-anton/pid:[1]")
+    assert [(s.session_id, s.cwd, s.status) for s in here] == [("local", "/repo", "alive")]
+    assert [(s.session_id, s.process.pid, s.status) for s in alone] == [("", 400, "unregistered")]
+    with pytest.raises(ValueError, match="no live claude session exactly matches 'remote'"):
+        resolve(alone, "remote", "claude")
+
+
+def test_sessions_read_the_local_namespace_when_none_is_given(tmp_path, monkeypatch):
+    from scripts.terminate_agent import sessions
+
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setattr("scripts.swarm_v2.runtime.process.local_namespace", lambda: "boot-anton/pid:[1]")
+    item = process(400, argv=("claude", "--name", "engineer"))
+    registry = {"remote": {"status": "alive", "pid": 400, "cwd": "/pod", "process_namespace": "boot-worker/pid:[1]"}}
+    with patch("scripts.terminate_agent.processes", return_value={400: item}):
+        found = sessions(tmp_path / "proc", registry=registry)
+    assert [(s.session_id, s.status) for s in found] == [("", "unregistered")]
 
 
 def test_sessions_name_a_registered_session_from_its_record(monkeypatch):

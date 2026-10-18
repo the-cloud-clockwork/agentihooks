@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/outcomes.py:scripts.swarm_v2.outcomes.x\u01c1Outcomes\u01c1_inherit__mutmut_19:8bd1512e0d1b8d0e9e5042d437857b162f6dbc750ce2404e7d501ae22843063d": {
+    "reader": "Standards",
+    "reason": "The current admission or renewal journal tail repeats the current claim and contains no outcome before proposal. Omitting it preserves all earlier outcome operations."
+  }
+}

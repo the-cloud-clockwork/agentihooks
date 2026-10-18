@@ -1,0 +1,51 @@
+{
+  "case": "T-SV2-LDG-03-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-03-B",
+    "evidence_class": "mocked Redis and server clock; SQLite fixture ledger; signed fixture grants",
+    "input_sha256": "d398bb2096487a5e0fe517c41511bc1e409b3e90578ca17c1bb24f17c8b92683",
+    "observed": {
+      "global_caps": [
+        403,
+        "forbidden_scope",
+        "new_request"
+      ],
+      "ledger_revision_conflicts_total": 0,
+      "operator_fields": [
+        [
+          403,
+          "forbidden_scope",
+          "new_request"
+        ],
+        [
+          403,
+          "forbidden_scope",
+          "new_request"
+        ],
+        [
+          403,
+          "forbidden_scope",
+          "new_request"
+        ],
+        [
+          403,
+          "forbidden_scope",
+          "new_request"
+        ]
+      ],
+      "other_task_read": [
+        403,
+        "forbidden_scope",
+        "new_request",
+        [
+          "error_class",
+          "message",
+          "operation_id",
+          "retry"
+        ]
+      ]
+    },
+    "state": "passed"
+  }
+}

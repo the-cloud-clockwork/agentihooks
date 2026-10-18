@@ -1,0 +1,15 @@
+redis:
+  existingSecret:
+    name: swarm-redis
+    key: url
+hive:
+  join:
+    enabled: true
+    memberRedisUrl: rediss://swarm.example.test:6379/0
+    tlsSecretName: swarm-hive-tls
+    redisSecret:
+      name: swarm-redis-admin
+      key: url
+    ingressFrom:
+      - ipBlock:
+          cidr: 10.10.30.0/24

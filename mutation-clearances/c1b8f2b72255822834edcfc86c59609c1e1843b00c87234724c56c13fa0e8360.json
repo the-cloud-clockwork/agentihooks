@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_15:004ac7a7f703b8f8337954a472c4c13a331d27618002d390b74d11e5ccb8fa47": {
+    "reader": "standards_reader",
+    "reason": "Changes only capitalization in this natural-language classifier criterion: 'Can the phase use these compatible preparatory tests before the later gate change?'. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

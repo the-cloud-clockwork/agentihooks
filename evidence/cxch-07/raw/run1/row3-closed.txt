@@ -1,0 +1,7 @@
+2026-10-16T15:26:54Z
+viewer alive: gone
+    PID CMD
+ 328133 /home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc8/venv/bin/python -m scripts.codex_session serve --cwd /
+ 328198 codex app-server --listen unix:///run/user/1000/cx/36e5cdccdc554952/s -c model_provider="agentihooks-chatgpt" -c
+ 328317 /home/iamroot/scratchpad/agentihooks/rig-grade-swarm-cxc8/venv/bin/python -m scripts.inbox.codex proof-323133-cx
+{"id":"cli:pane:list","result":{"panes":[],"type":"pane_list"}}

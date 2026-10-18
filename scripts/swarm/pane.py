@@ -1,5 +1,6 @@
+import hashlib
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(frozen=True)
@@ -7,6 +8,58 @@ class PaneObservation:
     state: str
     prompt_title: str = ""
     typed: str = ""
+    provider_error: str = ""
+    provider_checked: bool = field(default=False, compare=False)
+    provider_error_id: str = ""
+    content_refusal: bool = False
+
+
+PROVIDER_ERRORS = {
+    "claude": (
+        r"API Error: (?:500|502|503|504|529)\b",
+        r"Unable to connect to API",
+        r"Connection error\.",
+    ),
+    "codex": (
+        r"stream disconnected before completion",
+        r"unexpected status (?:500|502|503|504)\b",
+        r"error sending request for url",
+        r"(?m)^\W*(Selected model is at capacity)",
+    ),
+    "copilot": (
+        r"Request failed with status code (?:500|502|503|504)\b",
+        r"Failed to connect to (?:the )?model provider",
+    ),
+}
+
+
+def content_refusal(harness: str, text: str) -> bool:
+    if harness != "codex":
+        return False
+    plain = ESCAPE.sub("", text)
+    notices = list(re.finditer(r"(?m)^ⓘ This content can[’']t be shown\s*$", plain))
+    if not notices:
+        return False
+    tail = plain[notices[-1].end() :]
+    return len(re.findall(r"(?m)^› ", tail)) == 1 and not re.search(r"(?m)^• ", tail) and not selection_prompt(text)
+
+
+def refusal_input(text: str) -> str:
+    typed = typed_input(text)
+    return "" if typed == "Ask Codex to do anything" else typed
+
+
+def provider_error(harness: str, text: str) -> str:
+    plain = ESCAPE.sub("", text)
+    for pattern in PROVIDER_ERRORS.get(harness, ()):
+        if match := re.search(pattern, plain, re.I):
+            return match.group(match.lastindex or 0)
+    return ""
+
+
+def provider_error_id(harness: str, text: str) -> str:
+    lines = [line.strip() for line in ESCAPE.sub("", text).splitlines() if provider_error(harness, line)]
+    return hashlib.sha256("\n".join(lines).encode()).hexdigest() if lines else ""
 
 
 def selection_prompt(text: str) -> str:

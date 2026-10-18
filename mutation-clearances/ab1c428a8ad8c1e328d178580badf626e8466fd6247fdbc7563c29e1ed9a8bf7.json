@@ -1,0 +1,6 @@
+{
+  "scripts/hive/server.py:scripts.hive.server.xǁJoinServerǁhandle_error__mutmut_2:acd4ad2c6c63bb4f72d0e0030ffd1dc6aa901d7c403377dcdb7aa5e2881cddbf": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: on Python 3.12 BaseServer.handle_error never reads request, only client_address and sys.exc_info(), and in the JoinServer MRO handle_error is defined only on BaseServer, so passing None changes no output."
+  }
+}

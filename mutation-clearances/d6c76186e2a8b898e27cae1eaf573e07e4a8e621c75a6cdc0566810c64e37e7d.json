@@ -1,0 +1,6 @@
+{
+  "scripts/openbao_kv.py:scripts.openbao_kv.x__call__mutmut_11:4f963b85cab1fe98b498ef66c7ba5e0afa65751ce78d10ed177487550693ab15": {
+    "reader": "standards_reader",
+    "reason": "Changes only the spelling case of an HTTP header name. urllib.request.Request stores every header key with key.capitalize(), so 'content-type' and the original spelling send the identical header on the wire. Cleared by the Standards reader on PR 2578 round 3 as equivalent."
+  }
+}

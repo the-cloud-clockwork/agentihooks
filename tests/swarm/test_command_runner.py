@@ -200,7 +200,7 @@ def test_controller_fences_ledger_and_spawn_writes(store):
     ledger = FakeLedger([])
     held = lease.acquire(store, "sw", "home")
     guarded_ledger = controller.FencedLedger(store, "sw", held, ledger)
-    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, True)
+    guarded_runtime = controller.FencedRuntime(store, "sw", held, runtime, "local")
     assert guarded_ledger.state("sw") == ledger.state("sw")
     guarded_runtime.spawn(store.config("sw"), "eng", "one", {"id": "t"})
     assert runtime.tasks[0]["controller_epoch"] == 1
@@ -342,11 +342,11 @@ def test_fenced_adapters_preserve_arguments_and_refuse_disabled_spawn(store):
         has_capacity=lambda saved: False,
         spawn=lambda *args: calls.append(args) or "placed",
     )
-    enabled = controller.FencedRuntime(store, "sw", held, receiver, True)
+    enabled = controller.FencedRuntime(store, "sw", held, receiver, "local")
     assert enabled.has_capacity(config) is False
     assert enabled.spawn(config, "eng", "one", {"id": "t"}) == "placed"
     assert calls[-1] == (config, "eng", "one", {"id": "t", "controller_epoch": 1})
-    disabled = controller.FencedRuntime(store, "sw", held, receiver, False)
+    disabled = controller.FencedRuntime(store, "sw", held, receiver, "compose")
     with pytest.raises(SwarmError) as error:
         disabled.spawn(config, "eng", "one", {"id": "t"})
     assert str(error.value) == "controller spawning is disabled in this deployment mode"
@@ -387,9 +387,9 @@ def test_run_once_passes_the_supplied_tick_interfaces(store, monkeypatch):
 
     ledger, runtime, messenger = object(), object(), object()
     calls = []
-    monkeypatch.setattr(cli, "run_tick", lambda *args: calls.append(args) or ["done"])
+    monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: calls.append((args, kwargs)) or ["done"])
     assert controller.run_once(store, ledger, runtime, messenger) == {"sw": ["done"]}
-    assert calls == [(store, "sw", ledger, runtime, messenger)]
+    assert calls == [((store, "sw", ledger, runtime, messenger), {"scheduled": True})]
 
 
 def test_runtime_spawn_carries_epoch_to_launch_receiver(store, monkeypatch, tmp_path):
@@ -428,3 +428,24 @@ def test_launch_receiver_accepts_the_current_epoch(store, monkeypatch, tmp_path)
     with pytest.raises(SwarmError) as error:
         receiver._launch(config, "eng", "t", "one", ["--agent", "claude"], controller_epoch=held.epoch)
     assert str(error.value) == "launch reached"
+
+
+@pytest.mark.parametrize(
+    ("mode", "member_url", "member", "expected"),
+    [
+        ("compose", "rediss://hive:6379/0", "m1", "m1"),
+        ("local", "rediss://hive:6379/0", "m1", "home"),
+        ("compose", "", "m1", "home"),
+        ("compose", "rediss://hive:6379/0", "", "home"),
+    ],
+)
+def test_a_joined_member_beats_under_its_member_id_only_when_it_uses_the_member_redis(
+    monkeypatch, mode, member_url, member, expected
+):
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", member_url)
+
+    assert commands.hive_id() == expected

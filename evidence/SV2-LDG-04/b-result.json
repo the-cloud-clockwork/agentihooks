@@ -1,0 +1,26 @@
+{
+  "case": "T-SV2-LDG-04-B",
+  "independent_runs": 2,
+  "observed": {
+    "case": "T-SV2-LDG-04-B",
+    "evidence_class": "two real ledger server processes sharing one SQLite ledger folder; no Redis fixture",
+    "observed": {
+      "a_new_writer_starts_once_the_first_stops": true,
+      "ledger_writer_conflicts_total": 2,
+      "protected_state_unchanged": true,
+      "restore_while_serving": {
+        "exit": 1,
+        "leaked_the_token": false,
+        "named_the_holder": true
+      },
+      "second_server": {
+        "exit": 1,
+        "leaked_the_token": false,
+        "named_the_holder": true,
+        "served": false
+      },
+      "snapshot_exit": 0
+    },
+    "state": "passed"
+  }
+}

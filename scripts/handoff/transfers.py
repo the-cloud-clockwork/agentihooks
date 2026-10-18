@@ -16,7 +16,7 @@ def first_next(text: str) -> str:
     return next((line.strip().lstrip("- ") for line in section(text, "Next").splitlines() if line.strip()), "")
 
 
-def record(store, slug: str, agent, reason: str, text: str, at: int) -> dict:
+def record(store, slug: str, agent, reason: str, text: str, at: int, avoid_harness: str = "") -> dict:
     row = {
         "id": uuid4().hex,
         "reason": reason,
@@ -30,6 +30,8 @@ def record(store, slug: str, agent, reason: str, text: str, at: int) -> dict:
         "continuity": {"state": "pending"} if text else {"state": "unknown", "gap": "No handoff document"},
         "binding": {"state": "pending"},
     }
+    if avoid_harness:
+        row["avoid_harness"] = avoid_harness
     store.redis.hset(store.key(slug, "transfers"), row["id"], json.dumps(row))
     return row
 
@@ -111,6 +113,18 @@ def failed(store, slug: str, agent) -> None:
         store.redis.hset(store.key(slug, "transfers"), retry["id"], json.dumps(retry))
 
 
+def detach(store, slug: str, agent) -> None:
+    """A spawn that waits on capacity hands its transfer back to the next spawn, recording no failed binding."""
+    for row in list_transfers(store, slug):
+        if row["successor"] != agent.name or row["binding"]["state"] == "live":
+            continue
+
+        def change(current):
+            current["successor"] = ""
+
+        _change(store, slug, row["id"], change)
+
+
 def observe(store, slug: str, live: set[str]) -> None:
     for row in list_transfers(store, slug):
         if not row["successor"] or row["binding"]["state"] == "live":
@@ -138,8 +152,9 @@ def confirm(store, slug: str, transfer: str, agent, next_action: str, at: int) -
         expected = row["next"]
         if agent.lane == "master" and agent.harness == "codex":
             from scripts.profiles.codex_master import next_action as codex_next
+            from scripts.swarm import capabilities
 
-            expected = codex_next(expected, slug)
+            expected = codex_next(expected, slug, not capabilities.of_agent(agent).requires_foreground_inbox_wait)
         if not expected or next_action.strip() != expected:
             raise SwarmError("Confirm the first Next action exactly as written in the handoff")
         row["continuity"] = {"state": "confirmed", "at": at, "by": agent.name, "next": next_action.strip()}

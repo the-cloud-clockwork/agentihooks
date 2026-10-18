@@ -37,7 +37,9 @@ def test_a_page_save_answers_applied_rejected_and_bounded_warnings(quiet, monkey
     monkeypatch.setattr(server, "repository", SimpleNamespace(apply_ops=apply_ops))
     h = handler("/api/demo")
     h.reply_state("demo", ops=[{"id": "a"}, {"id": "b"}], refusals={"c": "refused c"})
-    assert calls == [("demo", None, [{"id": "a"}, {"id": "b"}], "budget demo")]
+    gate = calls[0][3]
+    assert calls == [("demo", None, [{"id": "a"}, {"id": "b"}], gate)]
+    assert (type(gate).__name__, gate.slug, gate.inner.inner) == ("Fence", "demo", "budget demo")
     assert h.sent == [
         (
             200,
@@ -58,6 +60,15 @@ def test_the_retired_whole_ledger_read_answers_gone_with_the_new_address(quiet, 
     h.exists = lambda slug: slug == "demo"
     h.do_GET()
     assert h.sent == [(410, "read the ledger from /api/v1/ledgers/demo", "text/plain")]
+
+
+def test_health_reports_the_served_ledger_folder_without_a_server_process(quiet, tmp_path, monkeypatch):
+    monkeypatch.setattr(server.core, "LEDGER_DIR", tmp_path)
+    h = handler("/healthz?probe=1")
+    h.do_GET()
+    assert [(code, json.loads(body), ctype) for code, body, ctype in h.sent] == [
+        (200, {"dir": str(tmp_path)}, "application/json")
+    ]
 
 
 def test_a_ledger_request_is_judged_against_that_ledgers_token(quiet, monkeypatch):
@@ -90,7 +101,13 @@ def test_serve_runs_the_ledger_watch_on_a_daemon_thread(monkeypatch, tmp_path):
             pass
 
     class Server:
-        def __init__(self, address, handler_class):
+        def __init__(self, address, handler_class, bind_and_activate=True):
+            pass
+
+        def server_bind(self):
+            pass
+
+        def server_activate(self):
             pass
 
         def serve_forever(self):

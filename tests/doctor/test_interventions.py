@@ -1,12 +1,15 @@
 import os
+import re
 import subprocess
 from argparse import Namespace
+from datetime import datetime, timezone
 
 import pytest
 
 from scripts.doctor import interventions
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
+from scripts.swarm_ledger import server_code
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
@@ -25,14 +28,20 @@ class FakeRun:
 
 
 class FakeLedger:
-    def __init__(self):
-        self.said, self.noted = [], []
+    def __init__(self, rows=()):
+        self.said, self.noted, self.rows, self.updates = [], [], {slug: list(rows) for slug in (DOCTOR,)}, []
 
     def say(self, slug, text, by=None):
         self.said.append((slug, text, by))
 
     def notify(self, slug, text):
         self.noted.append((slug, text))
+
+    def tasks(self, slug):
+        return self.rows.get(slug, [])
+
+    def update_task(self, slug, task_id, fields, by="swarm"):
+        self.updates.append((slug, task_id, fields, by))
 
 
 @pytest.fixture
@@ -85,6 +94,57 @@ def test_pull_dev_refuses_a_checkout_that_is_not_on_dev(store):
     assert not any("pull" in call for call in ctx.run.calls) and ctx.ledger.noted == []
 
 
+def test_pull_dev_records_the_applied_time_of_each_merged_fix_an_open_tune_task_measures(store):
+    rows = [
+        {"id": "m", "kind": "tune", "state": "open", "depends_on": ["a", "b", "c", "d", "e", "g", "h", "ghost"]},
+        {"id": "done-tune", "kind": "tune", "state": "done", "depends_on": ["f"]},
+        {"id": "a", "state": "done"},
+        {"id": "b", "kind": "ci", "state": "done"},
+        {"id": "c", "kind": "code", "state": "pr"},
+        {"id": "d", "kind": "code", "state": "done", "applied_at": "2026-10-17T01:00:00Z"},
+        {"id": "e", "kind": "research", "state": "done"},
+        {"id": "f", "kind": "code", "state": "done"},
+        {"id": "g", "kind": "code", "state": "done", "branch_repo": "git@github.com:O/bundle.git"},
+        {"id": "h", "kind": "code", "state": "done", "branch_repo": "https://github.com/o/r"},
+    ]
+    run = FakeRun({"rev-parse": "dev\n", "get-url": "git@github.com:O/r.git\n"})
+    ledger = FakeLedger(rows)
+    read = ledger.tasks
+    ledger.tasks = lambda slug: run.calls.append(["ledger-read", slug]) or read(slug)
+    ctx = interventions.Context(store, ledger, WATCHED, DOCTOR, run)
+    line = interventions.apply(ctx, "pull-dev", args())
+    stamped = [(slug, task, by) for slug, task, _, by in ctx.ledger.updates]
+    assert stamped == [(DOCTOR, t, f"master@{DOCTOR}") for t in ("a", "b", "h")]
+    times = {fields["applied_at"] for *_, fields, _ in ctx.ledger.updates}
+    assert len(times) == 1 and re.fullmatch(r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ", times.pop())
+    pull = ["git", "-C", "/repo", "pull", "--ff-only", "origin", "dev"]
+    assert run.calls.index(["ledger-read", DOCTOR]) < run.calls.index(pull)
+    assert ["git", "-C", "/repo", "remote", "get-url", "origin"] in run.calls
+    assert (
+        line == "The Doctor pulled dev into the main checkout of the watched swarm and recorded 3 merged fixes applied."
+    )
+    assert logged_on_both(ctx)
+
+
+def test_pull_dev_with_no_unapplied_fix_records_nothing(store):
+    ctx = context(store)
+    line = interventions.apply(ctx, "pull-dev", args())
+    assert ctx.ledger.updates == []
+    assert line == "The Doctor pulled dev into the main checkout of the watched swarm."
+
+
+def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 18, 12, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 10, 18, 21)
+
+    monkeypatch.setattr(interventions, "datetime", Clock)
+    ctx = context(store)
+    assert interventions.record_applied(ctx, ["a"]) == ["a"]
+    assert ctx.ledger.updates == [(DOCTOR, "a", {"applied_at": "2026-10-18T12:00:00Z"}, f"master@{DOCTOR}")]
+
+
 def test_a_failed_command_is_reported_and_not_logged(store):
     ctx = context(store, FakeRun({"rev-parse": "dev\n"}, failing=("pull",)))
     with pytest.raises(SwarmError, match="refused"):
@@ -118,7 +178,18 @@ def server_tree(tmp_path):
     pidfile = tmp_path / ".server.pid"
     pidfile.write_text("1")
     os.utime(pidfile, (200, 200))
+    server_code.record(tmp_path, 1, 200_000_000_000)
     return tmp_path / "scripts" / "swarm_ledger", pidfile
+
+
+def process_tree(tmp_path, monkeypatch):
+    proc = tmp_path / "proc"
+    (proc / "1").mkdir(parents=True)
+    (proc / "stat").write_text("btime 100\n")
+    tail = ["0"] * 20
+    tail[19] = str(100 * os.sysconf("SC_CLK_TCK"))
+    (proc / "1" / "stat").write_text("1 (ledger server) " + " ".join(tail))
+    monkeypatch.setattr(interventions, "PROC", proc, raising=False)
 
 
 def restarted(changed):
@@ -139,6 +210,95 @@ def test_the_ledger_server_restarts_only_when_its_code_changed(store, tmp_path):
         "scripts/swarm_ledger/ledger_gate.py, scripts/swarm_ledger/ledger_server.py changed since it started"
     )
     assert logged_on_both(ctx)
+
+
+@pytest.mark.parametrize("recorded", [True, False])
+def test_rewritten_pidfile_does_not_hide_code_newer_than_the_process(store, tmp_path, monkeypatch, recorded):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    if not recorded:
+        (tmp_path / server_code.RECORD).unlink()
+    os.utime(code / "ledger_server.py", (300, 300))
+    pidfile.write_text("1")
+    os.utime(pidfile, (400, 400))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    line = interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+    assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
+    assert logged_on_both(ctx)
+
+
+def test_current_loaded_code_refuses_restart_after_same_process_reload(store, tmp_path, monkeypatch):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    os.utime(code / "ledger_server.py", (300, 300))
+    server_code.record(tmp_path, 1, 300_000_000_000)
+    pidfile.write_text("1")
+    os.utime(pidfile, (400, 400))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    with pytest.raises(SwarmError, match=REFUSED):
+        interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
+
+
+@pytest.mark.parametrize("recorded_pid", [None, 2])
+def test_legacy_process_refuses_restart_when_imported_code_is_unchanged(store, tmp_path, monkeypatch, recorded_pid):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    if recorded_pid is None:
+        (tmp_path / server_code.RECORD).unlink()
+    else:
+        server_code.record(tmp_path, recorded_pid, 0)
+    os.utime(pidfile, (400, 400))
+    os.utime(code / "ledger_server.py", (200, 200))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    with pytest.raises(SwarmError, match=REFUSED):
+        interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
+
+
+def test_missing_process_start_is_reported_without_restarting(store, tmp_path, monkeypatch):
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    (tmp_path / server_code.RECORD).unlink()
+    (tmp_path / "proc" / "1" / "stat").unlink()
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    with pytest.raises(SwarmError, match="^cannot read the ledger server process start$"):
+        interventions.apply(ctx, "restart-ledger-server", args())
+
+    assert ctx.run.calls == [] and ctx.ledger.noted == []
+
+
+@pytest.mark.parametrize("newer", [False, True])
+def test_legacy_restart_preserves_nanosecond_process_start_boundary(store, tmp_path, monkeypatch, newer):
+    monkeypatch.setattr(interventions.os, "sysconf", lambda _: 100)
+    code, pidfile = server_tree(tmp_path)
+    process_tree(tmp_path, monkeypatch)
+    (tmp_path / server_code.RECORD).unlink()
+    (tmp_path / "proc" / "stat").write_text("btime 1791800000\n")
+    tail = ["0"] * 20
+    tail[19] = "10001"
+    (tmp_path / "proc" / "1" / "stat").write_text("1 (ledger server) " + " ".join(tail))
+    stamp = 1_791_800_100_010_000_001 if newer else 1_791_800_100_010_000_000
+    os.utime(code / "ledger_server.py", ns=(stamp, stamp))
+    ctx = context(store, code=code, pidfile=pidfile)
+
+    if newer:
+        line = interventions.apply(ctx, "restart-ledger-server", args())
+        assert [call[-1] for call in ctx.run.calls] == ["--stop", "--ensure"]
+        assert line == restarted("scripts/swarm_ledger/ledger_server.py changed since it started")
+        assert logged_on_both(ctx)
+    else:
+        with pytest.raises(SwarmError, match=REFUSED):
+            interventions.apply(ctx, "restart-ledger-server", args())
+        assert ctx.run.calls == [] and ctx.ledger.noted == []
 
 
 @pytest.mark.parametrize(

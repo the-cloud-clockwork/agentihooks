@@ -1,0 +1,82 @@
+{
+  "package": "SV2-ACC-04",
+  "dependency": [
+    "SV2-ACC-03"
+  ],
+  "integration_gate": "G3",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2409",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2421",
+  "tested_commit": "eea0a65108ef3076a97d4686b49875b325948583",
+  "status": "mocked-acceptance-qualified",
+  "package_complete": false,
+  "evidence_class": "Scoped fixture launch grants from LaunchAuthority, fixture operator credential, fakeredis, fixture clock; no live rollout. Live G3 qualification is separate.",
+  "failure_fixture": "tests/fixtures/swarm_v2/fleet-broadcasts.json with the Racing store wrapper in tests/test_swarm_v2_broadcasts.py, which runs a concurrent write before each commit",
+  "interfaces": [
+    "scripts.swarm_v2.broadcasts.FleetBroadcasts.publish: grant-only; the author is the seat and execution id of the validated launch grant, the brain defaults to and must equal the grant's brain, the project must be one of the grant's projects; agents cannot publish critical or nuclear",
+    "FleetBroadcasts.publish_operator: operator credential resolved by the operator callback; a launch grant is refused as an operator credential",
+    "FleetBroadcasts.claim: routing on fleet, brain, project, target role, channel, revision and expiry; once and until_ack policies; optional claim id replays the same answer; older seat generations are fenced",
+    "FleetBroadcasts.acknowledge, delivery, duplicate_acknowledgements, broadcast_delivery_lag_seconds, current, history",
+    "FleetBroadcasts.freeze, thaw, frozen: switch distributed publication off and on",
+    "scripts.swarm_v2.broadcasts.local_entry, sync_local (only with AGENTIHOOKS_FLEET_BROADCASTS=1) and acknowledge_local",
+    "hooks.context.broadcast.cache_fleet_broadcasts and the per-session filter in _admitted"
+  ],
+  "supported_versions": {
+    "python": "3.11 and 3.12 unit shards passed in the linked CI run",
+    "coordination": "SV2-CTL launch grants (LaunchAuthority), Redis WATCH/MULTI on the broadcast keys under the swarm root, five write attempts",
+    "compatibility": "With AGENTIHOOKS_FLEET_BROADCASTS unset, sync_local writes nothing and the broadcast file behaves as before; hook injection shows fleet entries only to the session that claimed them, while list_broadcasts and the CLI listing still show every entry"
+  },
+  "states": {
+    "observed": "Drafts from operator credentials and launch grants; claims from subscribed seats",
+    "accepted": "A draft whose credential or grant validates for this swarm and whose fields pass the draft schema",
+    "committed": "Redis WATCH/MULTI transaction on broadcasts, broadcast-history and broadcast-operations with broadcasts-frozen watched (publish); on broadcast-deliveries, broadcast-claims and broadcast-generations with broadcasts watched (claim); on broadcast-deliveries with broadcast-generations watched, plus broadcast-duplicate-acks inside the same transaction (acknowledge)",
+    "externally_verified": "None; no hook delivers fleet broadcasts yet"
+  },
+  "recovery_contract": {
+    "obligation": "Reconnecting workers replay unexpired undelivered messages without duplicating acknowledged content",
+    "case": "T-SV2-ACC-04-C, evidence/SV2-ACC-04/c-result.json",
+    "test": "tests/test_swarm_v2_broadcasts.py::test_c_a_reconnecting_worker_replays_unexpired_undelivered_messages_without_acknowledged_ones",
+    "result": "The reconnected generation receives only unexpired undelivered revisions, a claim id retry writes nothing new, and the older generation is fenced with stale_generation"
+  },
+  "validation": {
+    "red": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38056370675 on the tests-only commit failed collecting the tests: the broadcasts module did not exist",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059850340",
+    "unit": "All Python unit shards on 3.11 and 3.12 passed; 61 broadcast test ids, 122 PASSED rows, none failed; case A ran twice on independent fixtures",
+    "lint": "CI lint passed",
+    "coverage": "CI coverage ratchet passed",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38059547429 passed on eea0a651: broadcasts.py 817 killed, hooks/context/broadcast.py 105 killed, no survivors",
+    "sonar": "CI sonar passed",
+    "review": "Standards and Spec readers closed after three rounds",
+    "local": "No local tests or mutation ran; static prepush passed on eea0a651"
+  },
+  "measurements": {
+    "broadcast_delivery_lag_seconds": {
+      "a": [
+        60.0,
+        60.0
+      ],
+      "b": null,
+      "c": 0.0
+    },
+    "dimension": "Each test has its own fakeredis swarm built from fleet-broadcasts.json; publish 1000 ms, claim 61000 ms"
+  },
+  "cases": {
+    "a": "evidence/SV2-ACC-04/a-result.json",
+    "b": "evidence/SV2-ACC-04/b-result.json",
+    "c": "evidence/SV2-ACC-04/c-result.json",
+    "manifest": "evidence/SV2-ACC-04/manifest.json"
+  },
+  "rollback_rehearsal": {
+    "action": "FleetBroadcasts.freeze disables distributed publication: operator and agent publishes are refused distribution_disabled without writing, claims still deliver what was published, history is unchanged; thaw re-enables it. Unsetting AGENTIHOOKS_FLEET_BROADCASTS stops sync_local and keeps the local file path",
+    "test": "tests/test_swarm_v2_broadcasts.py::test_freeze_disables_distributed_publication_and_keeps_the_event_history",
+    "job": 114235852606,
+    "output": "PASSED at 2026-10-10T14:34:15.0197199Z",
+    "data_safety": "broadcasts, broadcast-history, broadcast-operations and broadcast-deliveries are authoritative and no code path deletes them; freeze only sets broadcasts-frozen"
+  },
+  "remaining_limitations": [
+    "No hook calls sync_local or acknowledge_local yet: no code on dev places a validated launch grant in a worker's hook environment (no LAUNCH_GRANT or AGENTIHOOKS_GRANT reference on dev when this record was written), so hook-side delivery and local acknowledgement are not complete. Wiring them needs that grant delivery, which belongs with the worker entrypoint and registration packages; a ledger follow-up is filed",
+    "hooks/mcp/channels.py, an owned path candidate, is unchanged: operator credentials are refused to sessions that carry an agent name or swarm, and an operator session has no swarm to name, so an operator fleet publish from that tool needs a swarm binding decision first",
+    "freeze and thaw are not authenticated",
+    "At the message cap cache_fleet_broadcasts evicts fleet cache entries before local ones, while create_broadcast still trims the oldest entry of any kind",
+    "broadcast_delivery_lag_seconds is collected as evidence only; no metric exporter emits it"
+  ]
+}

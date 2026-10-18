@@ -67,6 +67,10 @@ def _feed_path(scope: Namespace) -> Path:
     return _state_dir() / f"{key(scope, 'feed')}.json"
 
 
+def feed_file() -> Path:
+    return _feed_path(namespace())
+
+
 def store_feed(entries: list) -> None:
     from hooks.context.broadcast import _file_lock
 

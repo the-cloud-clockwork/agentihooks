@@ -3,7 +3,7 @@ from types import SimpleNamespace
 import pytest
 
 from hooks.classifier import Answer, ClassifierUnavailable, DecisionResult
-from scripts.swarm import profile_choice, runtime, store, tick
+from scripts.swarm import dispatcher, profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
@@ -77,6 +77,18 @@ def test_explicit_task_profile_wins_without_classifier(monkeypatch):
     assert decision == profile_choice.ProfileDecision("qa", "task", "explicit task profile")
 
 
+def test_the_decision_the_tick_recorded_is_reused_without_the_classifier(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("recorded decision asked classifier"))
+    saved = profile_choice.ProfileDecision(
+        "frontend", "classifier", "frontend", "m1", 0.8, True, ("task:t9", "phase:p1"), ("o1",), "rev1"
+    )
+    task = {**TASK, "profile_decision": saved.record()}
+    assert profile_choice.pick("sw", "eng", {}, task) == saved
+    assert profile_choice.pick("sw", "eng", {}, {**task, "profile": "qa"}) == profile_choice.ProfileDecision(
+        "qa", "task", "explicit task profile"
+    )
+
+
 @pytest.mark.parametrize(
     "lane,lanes,expected",
     [
@@ -91,6 +103,53 @@ def test_fixed_lane_responsibility_survives_without_classifier(monkeypatch, lane
     monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("fixed lane asked classifier"))
     decision = profile_choice.choose("sw", lane, lanes, {"id": "t9", "title": "Fix the page layout"}, {})
     assert decision == profile_choice.ProfileDecision(expected, "lane", f"{lane} lane")
+
+
+CONTRACT = {
+    "must": "Each alleged form is classified from CI evidence as actual runner execution or nonexecution",
+    "check": "Controlled CI invocation checks and guard results for the exact three reported forms",
+    "judge": "Independent Standards reader",
+}
+CI_PROOF_TASKS = [
+    {**TASK, "kind": "troubleshoot", "contract": {**CONTRACT, "push": "yes"}},
+    {**TASK, "kind": "ops", "contract": {"push": "yes"}},
+    {**TASK, "kind": "code", "contract": {"must": "m", "check": "c", "push": "yes"}},
+    {key: value for key, value in TASK.items() if key != "kind"} | {"contract": {"push": "yes"}},
+]
+
+
+@pytest.mark.parametrize("task", CI_PROOF_TASKS)
+def test_a_task_whose_proof_needs_a_pushed_ci_run_picks_engineer_without_a_model_call(monkeypatch, task):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("CI proof task asked the classifier"))
+    decision = profile_choice.choose("sw", "eng", {"profile": "engineer"}, task, {})
+    assert decision == profile_choice.ProfileDecision(
+        "engineer",
+        "proof contract",
+        "proof needs a pushed CI run",
+        anchors=("task:t9", "phase:p1", "territory:scripts/swarm/tick.py", "territory:scripts/swarm_ledger/static"),
+    )
+
+
+@pytest.mark.parametrize(
+    "task",
+    [
+        {**TASK, "kind": "troubleshoot", "contract": CONTRACT},
+        {**TASK, "kind": "troubleshoot", "contract": {**CONTRACT, "push": "no"}},
+        {**TASK, "kind": "troubleshoot", "contract": None},
+        {**TASK, "kind": "troubleshoot", "contract": {"push": "Yes"}},
+    ],
+)
+def test_a_task_without_the_push_field_still_asks_the_classifier(asked, ledger_file, task):
+    calls = asked("qa")
+    decision = profile_choice.choose("sw", "eng", {}, task, {})
+    assert (decision.profile, decision.source, len(calls)) == ("qa", "classifier", 1)
+
+
+def test_a_pinned_lane_or_task_profile_wins_over_a_ci_proof(monkeypatch):
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("pinned profile asked classifier"))
+    task = CI_PROOF_TASKS[0]
+    assert profile_choice.choose("sw", "eng", {}, {**task, "profile": "qa"}, {}).source == "task"
+    assert profile_choice.choose("sw", "eng", {"profile": "qa"}, task, {}).profile == "qa"
 
 
 def test_unpinned_engineering_task_asks_one_typed_choice_with_public_behaviour_and_intent(asked, ledger_file):
@@ -210,6 +269,34 @@ def test_an_answer_without_confidence_takes_the_lane_default(asked):
     assert decision.responsibility.endswith("answered frontend with confidence 0.00, below the floor 0.00")
 
 
+def test_a_legacy_floor_above_one_is_refused_with_its_remedy(monkeypatch, tmp_path, ledger_file):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked with a malformed floor"))
+    with pytest.raises(profile_choice.ProfileUnresolved) as refused:
+        profile_choice.choose("sw", "eng", {}, TASK, {"AGENTIHOOKS_PROFILE_PICK_MIN_CONFIDENCE": "1.5"})
+    assert str(refused.value) == (
+        "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
+        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "into one public responsibility each, then reopen it"
+    )
+
+
+def test_a_refused_definition_is_unresolved_with_its_remedy(monkeypatch, tmp_path, ledger_file):
+    from hooks import config
+
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", tmp_path)
+    monkeypatch.setattr(profile_choice, "decide", lambda *a, **k: pytest.fail("picked without a definition"))
+    with pytest.raises(profile_choice.ProfileUnresolved) as refused:
+        profile_choice.classify("sw", TASK, {"AGENTIHOOKS_CLASSIFIER_PROFILE_PICK_CONFIDENCE": "1.5"})
+    assert str(refused.value) == (
+        "task t9 profile classification is unavailable (threshold confidence must be between zero and one): "
+        "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, or split the task "
+        "into one public responsibility each, then reopen it"
+    )
+
+
 def test_pinned_task_profile_wins_over_a_low_confidence_answer(asked):
     calls = asked("frontend", confidence=0.1)
     decision = profile_choice.choose("sw", "eng", {}, {**TASK, "profile": "qa"}, {})
@@ -312,7 +399,8 @@ def test_tick_blocks_task_with_the_unresolved_reason(swarm):
     rt = FakeRuntime(crash=profile_choice.ProfileUnresolved("profile unresolved: set it"))
     actions = tick.tick("sw", swarm, ledger, rt, now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "blocked" and swarm.claimant("sw", "t1") is None
-    assert ledger.comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
+    comments = [row for row in ledger.comments if row[-1] != dispatcher.AUTHOR]
+    assert comments == [("sw", "t1", "profile unresolved: set it", "swarm")]
     assert "blocked t1: profile unresolved: set it" in actions
 
 

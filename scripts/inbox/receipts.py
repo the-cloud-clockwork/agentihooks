@@ -46,9 +46,10 @@ def transact(redis, body, keys=()):
     raise DispatchError("the inbox changed meanwhile; run it again")
 
 
-def check_owner(pipe, recipient, owner):
-    pipe.watch(owner_key(recipient))
-    held = pipe.get(owner_key(recipient))
+def check_owner(pipe, recipient, owner, world):
+    key = owner_key(recipient, world)
+    pipe.watch(key)
+    held = pipe.get(key)
     if held != owner:
         raise DispatchError(f"{owner} does not deliver for {recipient}; {held or 'nobody'} does")
 
@@ -57,6 +58,7 @@ class Receipts:
     def __init__(self, store):
         self.store = store
         self.redis = store.redis
+        self.authority = None
 
     def key(self, *parts):
         return self.store.key(*parts)
@@ -95,7 +97,7 @@ class Receipts:
 
     def recover(self, recipient, owner):
         recipient = self.store.names.resolve(recipient)
-        held = self.redis.get(owner_key(recipient))
+        held = self.redis.get(owner_key(recipient, self.store.world))
         if held != owner:
             raise DispatchError(f"{owner} does not deliver for {recipient}; {held or 'nobody'} does")
         recovered = []
@@ -140,10 +142,12 @@ class Receipts:
         return moved
 
     def _open(self, pipe, delivery_id, owner, before):
+        if self.authority is not None:
+            self.authority(pipe)
         key = self.key("delivery", delivery_id)
         pipe.watch(key)
         delivery = _delivery(pipe.hgetall(key), delivery_id)
-        check_owner(pipe, delivery.recipient, owner)
+        check_owner(pipe, delivery.recipient, owner, self.store.world)
         if delivery.state not in before or delivery.committed:
             raise DispatchError(f"delivery {delivery_id} is {delivery.state}")
         return delivery

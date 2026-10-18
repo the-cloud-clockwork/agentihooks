@@ -14,54 +14,40 @@ def _workflow():
     return yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
 
 
-def test_sonar_is_required_on_dev_and_main_pull_requests():
+def test_sonar_remains_required_during_promotion_trigger_rollout():
     workflow = _workflow()
     event = workflow[True]["pull_request"]
-    assert set(event["branches"]) == {"dev", "main"}
+    assert set(event["branches"]) in ({"dev", "main"}, {"dev"})
     assert "paths" not in event
     assert "paths-ignore" not in event
     jobs = workflow["jobs"]
     assert "sonar" in jobs["gate-required"]["needs"]
     sonar = jobs["sonar"]
-    assert sonar["needs"] == ["unit"]
-    assert "if" not in sonar
+    assert sonar["needs"] == ["unit", "unit-selected", "select", "reuse", "admission"]
+    assert sonar["if"] in (
+        "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}",
+    )
     assert not sonar.get("continue-on-error")
     gate = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Quality Gate")
-    assert gate["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in gate
     assert not gate.get("continue-on-error")
-    assert "needs" not in jobs["lint"]
-    assert jobs["unit"]["needs"] == ["split"]
+    assert jobs["lint"]["needs"] in (["reuse"], ["reuse", "admission"])
+    assert jobs["unit"]["needs"] == ["split", "select", "reuse", "admission"]
 
 
-def test_sonar_restores_downloads_before_every_scan():
+def test_sonar_restores_no_cache_since_the_runner_image_carries_the_downloads():
     steps = _workflow()["jobs"]["sonar"]["steps"]
-    scan_index = next(i for i, step in enumerate(steps) if step.get("name") == "SonarQube Scan")
-    cache = next(step for step in steps[:scan_index] if step.get("name") == "Restore Sonar downloads")
-    assert set(cache["with"]["path"].splitlines()) == {
-        "~/.sonar/cache",
-        "${{ runner.tool_cache }}/sonar-scanner-cli",
-    }
-    key = cache["with"]["key"]
-    assert "${{ runner.os }}" in key
-    assert "${{ runner.arch }}" in key
-    assert "hashFiles(" not in key
-    assert "if" not in cache
-    assert steps[scan_index]["if"] == "steps.current.outputs.superseded != 'true'"
-    assert not cache.get("continue-on-error")
+    assert not any(step.get("uses", "").startswith("actions/cache") for step in steps)
+    assert not any("Restore" in step.get("name", "") for step in steps)
 
 
-def test_sonar_download_cache_tracks_scanner_and_server_versions():
+def test_sonar_scans_with_the_pinned_scanner_version():
     sonar = _workflow()["jobs"]["sonar"]
-    steps = sonar["steps"]
-    cache = next(step for step in steps if step.get("name") == "Restore Sonar downloads")
-    scan = next(step for step in steps if step.get("name") == "SonarQube Scan")
-    proxy = next(step for step in steps if step.get("id") == "proxy")
+    scan = next(step for step in sonar["steps"] if step.get("name") == "SonarQube Scan")
     assert sonar["env"]["SONAR_SCANNER_VERSION"]
     assert "$SONAR_SCANNER_VERSION" in scan["run"]
-    assert "${{ env.SONAR_SCANNER_VERSION }}" in cache["with"]["key"]
-    assert "${{ steps.proxy.outputs.version }}" in cache["with"]["key"]
-    assert "/api/server/version" in proxy["run"]
-    assert '>> "$GITHUB_OUTPUT"' in proxy["run"]
 
 
 @pytest.mark.parametrize("sonar", ["success", "failure", "skipped", "cancelled", "pending"])

@@ -57,7 +57,7 @@ class Palette(unittest.TestCase):
         def value(role):
             return tokens[tokens[role][len("var(") : -1]]
 
-        expected = {"--canvas": "#010104", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
+        expected = {"--canvas": "#050812", "--accent": "#3b82f6", "--signal": "#ef4444", "--destructive": "#ef4444"}
         for role, colour in expected.items():
             self.assertEqual(value(role), colour, role)
         self.assertEqual(value("--warn"), "#facc15")
@@ -164,6 +164,30 @@ def resolve(name):
     return value
 
 
+RECORD_ROWS = (".prio", ".item", ".stat")
+TILE_PROPS = ("background", "background-color", "border-radius", "box-shadow", "border")
+ROW_STATES = (":hover", ":focus-visible", ":focus-within")
+
+
+def tiled_rows(css):
+    """Record rows and sibling-spaced rows that paint their own surface instead of a hairline."""
+    found = []
+    rules = re.findall(r"([^{}]+)\{([^{}]*)\}", css)
+    gapped = {m.group(1) for heads, _ in rules for m in re.finditer(r"(\.[\w-]+)\s*\+\s*\1\b", heads)}
+    for heads, body in rules:
+        props = {line.split(":", 1)[0].strip() for line in body.split(";") if ":" in line}
+        if not props & set(TILE_PROPS):
+            continue
+        for part in heads.split(","):
+            last = re.split(r"[\s>+~]+", part.strip())[-1]
+            if any(state in last for state in ROW_STATES):
+                continue
+            row = re.match(r"\.[\w-]+", last)
+            if row and (row.group(0) in RECORD_ROWS or row.group(0) in gapped) and row.group(0) not in found:
+                found.append(row.group(0))
+    return found
+
+
 def declared(css, selector):
     merged = {}
     for heads, body in re.findall(r"([^{}]+)\{([^{}]*)\}", css):
@@ -182,7 +206,7 @@ class BluePalette(unittest.TestCase):
 
     def test_the_ramp_holds_the_approved_blue_values(self):
         expected = {
-            "--ink-950": "#010104",
+            "--ink-950": "#050812",
             "--steel-060": "#0e131b",
             "--steel-100": "#151c29",
             "--steel-160": "#1b2636",
@@ -196,7 +220,7 @@ class BluePalette(unittest.TestCase):
 
     def test_roles_take_the_blue_ramp_instead_of_white_lifts(self):
         expected = {
-            "--canvas": "#010104",
+            "--canvas": "#050812",
             "--veil": "#0e131b",
             "--hover": "#151c29",
             "--rule": "#151c29",
@@ -289,6 +313,37 @@ class LandingBays(unittest.TestCase):
             "bin": re.search(r"<main([^>]*)>", server.index_page("bin")).group(1),
         }
         self.assertEqual(mains, {"ledger": "", "home": ' class="home"', "bin": ' class="bin"'})
+
+    def test_priority_item_and_stat_rows_are_hairline_rows(self):
+        css = css_of(page_source())
+        for row in RECORD_ROWS:
+            self.assertEqual(declared(css, row).get("border-top"), "1px solid var(--rule)", row)
+            self.assertEqual(declared(css, f"{row}:first-child").get("border-top"), "0", row)
+
+    def test_no_record_row_is_painted_as_a_tile(self):
+        self.assertEqual(tiled_rows(css_of(page_source()) + home_style()), [])
+
+    def test_the_tile_check_turns_red_on_a_planted_tile(self):
+        clean = css_of(page_source())
+        planted = {
+            ".prio": ".prio { background: var(--surface-2); border-radius: 6px; }",
+            ".item": "#ledger .item { padding: 12px 14px; background: var(--surface-1); }",
+            ".stat": ".stat { box-shadow: 0 0 0 1px var(--edge); }",
+            ".note-row": ".note-row { background: var(--surface-2); }\n.note-row + .note-row { margin-top: 6px; }",
+        }
+        for row, rule in planted.items():
+            self.assertIn(row, tiled_rows(clean + "\n" + rule), row)
+
+    def test_stat_labels_sit_on_a_fixed_track(self):
+        columns = declared(css_of(page_source()), "#stats .stat")["grid-template-columns"]
+        self.assertRegex(columns, r"^\d+px minmax\(0, 1fr\)$")
+
+    def test_stat_values_stay_on_one_line(self):
+        value = declared(css_of(page_source()), ".stat dd")
+        self.assertEqual(
+            (value.get("white-space"), value.get("overflow"), value.get("text-overflow")),
+            ("nowrap", "hidden", "ellipsis"),
+        )
 
 
 if __name__ == "__main__":

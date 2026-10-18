@@ -12,6 +12,7 @@ import pytest
 pytestmark = pytest.mark.xdist_group("mcp-sdk")
 
 FAKE = Path(__file__).parent / "fixtures" / "fake_serena.py"
+OPT_IN = {"read_file", "search_for_pattern"}
 
 
 def _git(cwd: Path, *args: str) -> None:
@@ -77,6 +78,83 @@ async def test_each_session_edits_only_its_own_worktree(router, repo):
         assert (repo["a"] / "f.txt").read_text() == "from-a"
         assert (repo["b"] / "f.txt").read_text() == "from-b"
         assert not (repo["primary"] / "f.txt").exists()
+
+
+async def test_child_read_inherits_parent_worktree_without_activation(router, repo):
+    parent_meta = {"sessionId": "parent", "threadId": "parent"}
+    child_meta = {"sessionId": "parent", "threadId": "child"}
+    async with connect(router) as parent, connect(router) as child, connect(router) as unrelated:
+        await parent.call_tool("activate_project", {"project": str(repo["a"])}, meta=parent_meta)
+        result = await child.call_tool("find_symbol", {"name_path_pattern": "Binding"}, meta=child_meta)
+        assert not result.isError
+        assert _text(result) == f"root={repo['a']}"
+        isolated = await unrelated.call_tool("find_symbol", {}, meta={"sessionId": "other", "threadId": "other-child"})
+        assert isolated.isError
+        assert "No project" in _text(isolated)
+        await parent.call_tool("activate_project", {"project": str(repo["b"])}, meta=parent_meta)
+        moved = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(moved) == f"root={repo['b']}"
+        await child.call_tool("activate_project", {"project": str(repo["a"])}, meta=child_meta)
+        explicit = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(explicit) == f"root={repo['a']}"
+        parent_read = await parent.call_tool("find_symbol", {}, meta=parent_meta)
+        assert _text(parent_read) == f"root={repo['b']}"
+
+
+async def test_child_inherits_primary_read_restriction_and_removed_worktree(router, repo):
+    from hooks.serena_router.server import UNBOUND
+
+    parent_meta = {"sessionId": "parent", "threadId": "parent"}
+    child_meta = {"sessionId": "parent", "threadId": "child"}
+    async with connect(router) as parent, connect(router) as child:
+        await parent.call_tool("activate_project", {"project": str(repo["primary"])}, meta=parent_meta)
+        read = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(read) == f"root={repo['primary']}"
+        edit = await child.call_tool("replace_content", {"relative_path": "f.txt", "repl": "refused"}, meta=child_meta)
+        assert edit.isError
+        assert "primary checkout" in _text(edit)
+        await parent.call_tool("activate_project", {"project": str(repo["a"])}, meta=parent_meta)
+        _git(repo["primary"], "worktree", "remove", "--force", str(repo["a"]))
+        removed = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert removed.isError
+        assert UNBOUND in _text(removed)
+        parent_read = await parent.call_tool("find_symbol", {}, meta=parent_meta)
+        assert parent_read.isError
+        assert UNBOUND in _text(parent_read)
+
+
+async def test_child_cannot_supply_another_child_as_the_root(router, repo):
+    async with connect(router) as first, connect(router) as second:
+        await first.call_tool(
+            "activate_project", {"project": str(repo["a"])}, meta={"sessionId": "parent", "threadId": "first"}
+        )
+        result = await second.call_tool("find_symbol", {}, meta={"sessionId": "parent", "threadId": "second"})
+        assert result.isError
+        assert "No project" in _text(result)
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        None,
+        {},
+        {"sessionId": "parent"},
+        {"threadId": "child"},
+        {"sessionId": "", "threadId": "child"},
+        {"sessionId": 7, "threadId": "child"},
+        {"sessionId": ["parent"], "threadId": "child"},
+        {"sessionId": "parent", "threadId": ""},
+        {"sessionId": "parent", "threadId": 7},
+    ],
+)
+async def test_child_requires_complete_string_identity(router, repo, meta):
+    async with connect(router) as parent, connect(router) as child:
+        await parent.call_tool(
+            "activate_project", {"project": str(repo["a"])}, meta={"sessionId": "parent", "threadId": "parent"}
+        )
+        result = await child.call_tool("find_symbol", {}, meta=meta)
+        assert result.isError
+        assert "No project" in _text(result)
 
 
 async def test_edit_refused_while_unbound(router, repo):
@@ -187,6 +265,61 @@ def test_app_bounds_idle_sessions():
 
     app = build_app(Pool(BackendConfig(command=(sys.executable, str(FAKE)))), [])
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
+
+
+async def _listed_over_http(router, path: str) -> set[str]:
+    import json
+
+    import httpx
+
+    from hooks.serena_router.app import build_app
+
+    app = build_app(*router)
+    headers = {"Accept": "application/json, text/event-stream"}
+    init = {
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "initialize",
+        "params": {"protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "0"}},
+    }
+    async with (
+        app.router.lifespan_context(app),
+        httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://router") as client,
+    ):
+        started = await client.post(path, json=init, headers=headers)
+        headers["mcp-session-id"] = started.headers["mcp-session-id"]
+        await client.post(path, json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=headers)
+        listed = await client.post(path, json={"jsonrpc": "2.0", "id": 2, "method": "tools/list"}, headers=headers)
+    data = [line.removeprefix("data:") for line in listed.text.splitlines() if line.startswith("data:")]
+    return {tool["name"] for tool in json.loads(data[-1])["result"]["tools"]}
+
+
+async def test_default_listing_hides_the_opt_in_tools(router):
+    async with connect(router) as session:
+        names = {tool.name for tool in (await session.list_tools()).tools}
+    assert "find_symbol" in names
+    assert not names & OPT_IN
+
+
+async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router):
+    names = await _listed_over_http(router, "/mcp")
+    assert "find_symbol" in names
+    assert not names & OPT_IN
+
+
+async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router):
+    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern") >= OPT_IN | {"find_symbol"}
+    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file") == {"search_for_pattern"}
+
+
+def test_listed_ignores_names_outside_the_opt_in_set():
+    from mcp.types import Tool
+
+    from hooks.serena_router.server import listed
+
+    tools = [Tool(name=name, inputSchema={"type": "object"}) for name in ("find_symbol", "read_file", "mystery")]
+    assert [t.name for t in listed(tools, [])] == ["find_symbol", "mystery"]
+    assert [t.name for t in listed(tools, ["mystery,", "read_file"])] == ["find_symbol", "read_file", "mystery"]
 
 
 def test_fake_backend_imports_only_the_standard_library():

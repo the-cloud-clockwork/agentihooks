@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_38:589b3bf9a64ca4569f808dd16c912aaab5203ff9bdc2f9562901b25566461bd5": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --previous-execution help text gains XX wrapping, shown only by --help and read by no program or test."
+  }
+}

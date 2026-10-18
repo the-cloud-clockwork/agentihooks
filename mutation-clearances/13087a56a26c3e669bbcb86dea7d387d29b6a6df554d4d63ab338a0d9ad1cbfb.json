@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__tests_first_questions__mutmut_36:bb11820c79919fa87473b49afc433de77de1e710efe7941f4693a946489ddfa4": {
+    "reader": "standards_reader",
+    "reason": "Changes only nonsemantic XX padding in this natural-language classifier criterion: 'Can CI run the preparatory tests before the later gate change?'. The same preparatory scope, condition and answer polarity remain stated; no JSON state key, YesNo schema, confidence threshold or control flow changes. Equivalent to the documented intent contract, without claiming identical stochastic model probabilities."
+  }
+}

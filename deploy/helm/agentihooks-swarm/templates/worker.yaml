@@ -29,7 +29,7 @@ spec:
           command:
             {{- toYaml .Values.worker.command | nindent 12 }}
           env:
-            {{- include "swarm.env" . | nindent 12 }}
+            {{- include "swarm.env" (dict "root" . "role" "worker") | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.worker.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:

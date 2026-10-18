@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1return_to_pool__mutmut_23:3b67e0e5608975e9a3603003d3565eabca8c85fe77f575efe38aec83e9e2f220": {
+    "reader": "standards_reader",
+    "reason": "_item uses its item_id argument only in the error it raises for an empty hash, and return_to_pool returns before that line when the hash is empty; Item.id comes from the id field the store wrote, so the item and every write are unchanged."
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "home": {
+    "mode": "0555",
+    "absent": [
+      "development-ledger"
+    ],
+    "present": [
+      ".agentihooks"
+    ]
+  },
+  "deployment": "distributed",
+  "task": {
+    "title": "Remote worker reads its task",
+    "lane": "eng",
+    "phase": "p1"
+  },
+  "updates": {
+    "first": "Remote worker posted its update from the first home",
+    "second": "Remote worker posted its update from the second home"
+  },
+  "outage": {
+    "refused_reads": 2
+  }
+}

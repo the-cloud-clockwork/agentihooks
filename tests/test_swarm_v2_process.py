@@ -1,8 +1,14 @@
+import faulthandler
+import os
+import signal
+import subprocess
+import threading
+from contextlib import contextmanager, suppress
 from dataclasses import replace
 
 import pytest
 
-from hooks.proc import Process
+from hooks.proc import Process, processes
 from scripts.swarm import reaper
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -38,6 +44,62 @@ def record(namespace=ANTON, pid=PID, start=STARTED, execution="exe-1"):
         generation=1 if execution else 0,
         runtime_target={k: v for k, v in runtime_target.items() if v is not None},
     )
+
+
+def children():
+    rows = [row for row in processes().values() if row.state != "Z"]
+    found, parents = set(), {os.getpid()}
+    while parents:
+        parents = {row.pid for row in rows if row.ppid in parents} - found
+        found |= parents
+    return found
+
+
+@contextmanager
+def bounded(what, seconds=30):
+    finished = []
+
+    def expired(signum, frame):
+        if not finished:
+            pytest.fail(f"{what} did not finish within {seconds} seconds")
+
+    before = children()
+    previous = signal.signal(signal.SIGALRM, expired)
+
+    # Ends the worker, which xdist reports as a crash in this test, when SIGALRM cannot interrupt the wait.
+    def abort():
+        faulthandler.dump_traceback()
+        os._exit(1)
+
+    watchdog = threading.Timer(seconds + 10, abort)
+    watchdog.start()
+    try:
+        signal.setitimer(signal.ITIMER_REAL, seconds)
+        yield
+    finally:
+        finished.append(True)
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+        left = children() - before
+        for pid in left:
+            with suppress(ProcessLookupError, ChildProcessError):
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+        watchdog.cancel()
+    assert not left, f"{what} left child processes running"
+
+
+def test_bounded_does_not_cancel_a_pending_faulthandler_dump(tmp_path):
+    with (tmp_path / "dump").open("w+") as dump:
+        faulthandler.dump_traceback_later(0.5, file=dump)
+        try:
+            with bounded("nothing"):
+                pass
+            threading.Event().wait(1)
+        finally:
+            faulthandler.cancel_dump_traceback_later()
+        dump.seek(0)
+        assert "Timeout" in dump.read()
 
 
 def test_the_local_namespace_is_the_boot_id_and_the_pid_namespace_link(tmp_path):
@@ -197,13 +259,45 @@ def test_anton_and_a_remote_worker_sharing_pid_4321_are_each_ended_only_by_their
 def test_a_qualified_execution_started_by_the_store_terminates_through_the_router(tmp_path, monkeypatch):
     import fakeredis
 
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
-    seed = replace(record(execution=""), name=store.next_name("sw", "eng"), seat="eng-1@sw")
-    started = store.start_execution("sw", seed)
-    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
-    assert RuntimeRouter([local]).terminate(store.execution("sw", started.execution_id)).ok
-    assert ended == [(started.name, PID, (), STARTED)]
+    with bounded("the store started execution terminate"):
+        store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+        store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+        seed = replace(record(execution=""), name=store.next_name("sw", "eng"), seat="eng-1@sw")
+        started = store.start_execution("sw", seed)
+        local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+        assert RuntimeRouter([local]).terminate(store.execution("sw", started.execution_id)).ok
+        assert ended == [(started.name, PID, (), STARTED)]
+
+
+def test_a_store_call_blocked_on_its_server_fails_within_its_bound():
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    store = RedisStore(fakeredis.FakeRedis(server=server, decode_responses=True))
+    server.lock.acquire()
+    release = threading.Timer(5, server.lock.release)
+    release.start()
+    try:
+        with pytest.raises(pytest.fail.Exception, match="^swarm create did not finish within 0.5 seconds$"):
+            with bounded("swarm create", 0.5):
+                store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    finally:
+        release.cancel()
+        if server.lock.locked():
+            server.lock.release()
+
+
+def test_the_bound_refuses_a_child_process_that_outlives_the_test():
+    child = None
+    try:
+        with pytest.raises(AssertionError, match="a sleeper left child processes running"):
+            with bounded("a sleeper"):
+                child = subprocess.Popen(["sleep", "30"])
+        assert child.pid not in processes()
+    finally:
+        if child is not None:
+            child.kill()
+            child.wait()
 
 
 def test_the_routed_runtime_reports_why_the_router_refused(tmp_path, monkeypatch):
@@ -241,6 +335,71 @@ def test_a_local_target_may_carry_the_pid_start_time():
                 runtime_target={**agent.runtime_target, "pid_start": "777"},
             ),
         )
+
+
+def launch_store():
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    return store
+
+
+def launched(store, pid=PID):
+    decision = {"validation": {"pid": pid}} if pid is not None else {}
+    return AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw", profile_decision=decision)
+
+
+def launcher(namespace=ANTON, table=None):
+    rows = {PID: proc()} if table is None else table
+    return LocalHerdrRuntime(None, namespace=lambda: namespace, table=lambda: rows)
+
+
+@pytest.mark.parametrize("pid", [PID, 1])
+def test_a_local_launch_stores_its_process_namespace_number_and_start_time(pid):
+    store = launch_store()
+    table = {pid: proc(pid=pid)}
+    started = launcher(table=table).admit(store, "sw", launched(store, pid))
+    stored = store.execution("sw", started.execution_id)
+    assert stored.runtime_backend == LOCAL
+    assert stored.runtime_target == {"process_namespace": ANTON, "pid": pid, "pid_start": STARTED}
+    assert process.resolve(stored, ANTON, table) == pid
+
+
+@pytest.mark.parametrize(
+    ("namespace", "table", "pid", "missing"),
+    [
+        ("", None, PID, "process namespace"),
+        (ANTON, {}, PID, "start time"),
+        (ANTON, {PID: proc(start=0)}, PID, "start time"),
+        (ANTON, None, None, "process number and start time"),
+        (ANTON, None, True, "process number and start time"),
+        (ANTON, None, float(PID), "process number and start time"),
+        (ANTON, {-PID: proc(pid=-PID)}, -PID, "process number and start time"),
+        ("", {}, None, "process namespace, process number and start time"),
+    ],
+)
+def test_a_local_launch_that_cannot_read_its_process_identity_is_refused_and_leaves_no_record(
+    namespace, table, pid, missing
+):
+    store = launch_store()
+    with pytest.raises(SwarmError) as refused:
+        launcher(namespace, table).admit(store, "sw", launched(store, pid))
+    assert str(refused.value) == f"local launch refused: its {missing} could not be read"
+    assert store.execution_registry.records("sw") == []
+    assert store.agents("sw") == []
+    assert store.execution_identity_conflicts_total("sw") == 0
+
+
+def test_a_local_launch_admitted_by_the_local_runtime_is_retired_through_the_tick_runtime(tmp_path, monkeypatch):
+    with bounded("the admitted launch retire"):
+        store = launch_store()
+        local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+        started = local.admit(store, "sw", launched(store))
+        tick_runtime = RoutedRuntime(local.herdr, RuntimeRouter([local]))
+        assert tick_runtime.retire(store.execution("sw", started.execution_id), ("/scratch/t1",))
+        assert ended == [(started.name, PID, ("/scratch/t1",), STARTED)]
+        assert tick_runtime.refused == {}
 
 
 @pytest.fixture
@@ -336,9 +495,9 @@ def test_the_reap_keeps_earlier_actions_when_a_remote_agent_turns_suspect(remote
     assert f"suspect {agent.name}: its runtime did not answer" in actions
 
 
-def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_swarm):
+def test_an_idle_remote_agent_is_retired_through_its_runtime_without_a_typed_nudge(remote_swarm):
     from scripts.gates import log
-    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+    from scripts.swarm.tick import IDLE_KILL_TICKS
 
     store, ledger, agent = remote_swarm
     store.update("sw", state="paused")
@@ -346,8 +505,7 @@ def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_
     runtime.statuses[agent.name] = "idle"
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-        if n + 1 == IDLE_NUDGE_TICKS:
-            assert runtime.nudged == [agent.name]
+    assert runtime.nudged == []
     assert [row["at"] for row in log.recent("sw")][:2] == [2_000, 2_001]
     assert agent.name in runtime.homes and ledger.rows["t1"]["state"] == "open"
 

@@ -1,0 +1,6 @@
+{
+  "scripts/init_agent.py:scripts.init_agent.x__parser__mutmut_56:32caf60bdeb94b238c606cb4dd3f0200ec03c1ff674102c009bb49f43a6f3483": {
+    "reader": "Standards reader for cxc2",
+    "reason": "Only the --previous-execution help text is uppercased, shown only by --help and read by no program or test."
+  }
+}

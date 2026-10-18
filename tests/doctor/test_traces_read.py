@@ -148,6 +148,50 @@ def test_the_history_budget_leaves_the_rest_for_a_later_scan_and_says_so(tmp_pat
     assert coverage["covered"] == 4
 
 
+def test_a_single_trace_stops_at_the_budget_without_caching_partial_history(tmp_path):
+    now = [0.0]
+    pages = []
+
+    def get(path, params):
+        if path == "traces":
+            return _page([_trace_row("a", "u")], 1, 1)
+        pages.append(params["page"])
+        now[0] += 5
+        return _page(
+            [{"type": "TOOL", "name": f"page {params['page']}", "startTime": "2026-10-05T15:00:00Z"}],
+            params["page"],
+            4,
+        )
+
+    budget = traces_read.Budget(history_seconds=10)
+    [row], coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=lambda: now[0])
+    assert pages == [1, 2]
+    assert now[0] == 10
+    assert row["complete"] is False
+    assert len(row["observations"]) == 2
+    assert coverage == {"listed": True, "traces": 1, "covered": 0, "complete": False, "unreadable": []}
+    assert failures == []
+    assert list(tmp_path.rglob("*.json")) == []
+
+    pages.clear()
+    [row], coverage, failures = traces_read.history(
+        "s", get, tmp_path, traces_read.Budget(history_seconds=30), clock=lambda: now[0]
+    )
+    assert pages == [1, 2, 3, 4]
+    assert row["complete"] is True
+    assert [o["name"] for o in row["observations"]] == ["page 1", "page 2", "page 3", "page 4"]
+    assert coverage["complete"] is True
+    assert failures == []
+
+    pages.clear()
+    [row], coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=lambda: now[0])
+    assert pages == []
+    assert row["complete"] is True
+    assert len(row["observations"]) == 4
+    assert coverage["complete"] is True
+    assert failures == []
+
+
 def test_the_trace_listing_stops_at_its_page_cap(tmp_path):
     langfuse = Langfuse([_trace_row("a", "u")], pages=50)
     _, coverage, failures = traces_read.history("s", langfuse, tmp_path, traces_read.Budget(trace_pages=3))
@@ -299,3 +343,151 @@ def test_record_runs_the_history_budget_on_its_own_clock(tmp_path):
         "s", [], [], 1000, Langfuse([_trace_row("a", "u")]), home=tmp_path, budget=budget, clock=_ticks(2)
     )
     assert data["reader"]["historical"]["covered"] == 0
+
+
+def test_record_reads_active_bindings_and_history_side_by_side(tmp_path, monkeypatch):
+    import threading
+
+    met = threading.Barrier(2, timeout=5)
+    whole = {"listed": True, "traces": 0, "covered": 0, "complete": True, "unreadable": []}
+
+    def active(slug, agents, get, state, seconds, page, clock):
+        met.wait()
+        return [], ["active failure"]
+
+    def history(slug, get, cache, budget, clock):
+        met.wait()
+        return [], whole, ["history failure"]
+
+    monkeypatch.setattr(traces_read.registry, "read", active)
+    monkeypatch.setattr(traces_read, "history", history)
+    data = traces_read.record("s", [], [], 1000, Langfuse([]), home=tmp_path)
+    assert data["reader"]["failures"] == ["active failure", "history failure"]
+    assert data["reader"]["historical"] == whole
+
+
+LOCAL = {
+    "generated_bytes": 10,
+    "accepted_bytes": 10,
+    "oldest_unaccepted": 0,
+    "pending": 0,
+    "overflow": 0,
+    "accepted": 103,
+    "accepted_at": 0,
+    "exporter_alive": True,
+    "requested_at": 0,
+}
+
+
+class Project:
+    def __init__(self, name, traces=(), listed=True):
+        self.name, self.traces, self.listed = name, list(traces), listed
+
+    def __call__(self, path, params):
+        if path == "projects":
+            assert params == {}
+            if self.name is None:
+                raise ConnectionError("refused")
+            return {"data": [{"id": "p", "name": self.name}]}
+        if path == "traces":
+            tags = params["tags"] if isinstance(params["tags"], list) else [params["tags"]]
+            rows = [t for t in self.traces if set(tags) <= set(t["tags"])] if self.listed or len(tags) > 1 else []
+            return _page(rows if params["page"] == 1 else [], params["page"], 1)
+        return _page([], params["page"], 1)
+
+
+def _working(name, session):
+    return {"name": name, "state": "working", "task": "t1", "started_at": 5, "conversation_id": session}
+
+
+def _tagged(agent, session):
+    return {"id": f"tr-{agent}", "sessionId": session, "tags": ["swarm:s", f"agent:{agent}"], "updatedAt": "u"}
+
+
+HISTORICAL = [{"id": "t0", "claimed_by": "s-eng-0", "state": "done"}]
+WORKING = [_working("s-eng-1", "c1"), _working("s-ci-1", "c2")]
+
+
+def test_an_empty_project_while_exporters_report_accepted_observations_is_a_reader_failure(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, Project("antoncore"), home=tmp_path)
+    assert data["reader"]["failures"] == [
+        "Langfuse project antoncore holds no trace tagged swarm:s while the exporters of s-eng-1, s-ci-1 "
+        "report accepted exports: the reader's keys may belong to another project"
+    ]
+    assert [b["read"] for b in data["active"]] == [False, False]
+    assert data["reader"]["active"] == {"bindings": 2, "read": 0}
+    assert (data["reader"]["historical"]["listed"], data["reader"]["historical"]["complete"]) == (False, False)
+    assert [f.kind for f in traces.findings(data, traces.Limits())] == ["trace reader unavailable"]
+
+
+def test_an_unreadable_project_name_still_names_the_empty_read(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    data = traces_read.record("s", [], WORKING[:1], 10**9, Project(None), home=tmp_path)
+    assert data["reader"]["failures"][0].startswith(
+        "Langfuse project unknown (ConnectionError) holds no trace tagged swarm:s"
+    )
+
+
+def test_an_empty_project_with_no_accepted_observations_is_judged_as_read(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: None)
+    data = traces_read.record("s", HISTORICAL, WORKING[:1], 10**9, Project("agent-swarm"), home=tmp_path)
+    assert data["reader"]["failures"] == []
+    kinds = sorted(f.kind for f in traces.findings(data, traces.Limits()))
+    assert kinds == ["telemetry never exported", "untraced session", "untraced session"]
+
+
+def test_genuine_missing_and_unattributed_traces_stay_detected_in_the_swarm_project(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-1", "c1")])
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    found = traces.findings(data, traces.Limits())
+    assert [f.subject for f in found if f.kind == "untraced session"] == ["s-ci-1", "s-eng-0"]
+    assert [f.subject for f in found if f.kind == "telemetry misattributed"] == ["s-ci-1.5.unattributed"]
+
+
+def test_working_agents_without_traces_in_a_project_that_holds_the_swarm_stay_misattributed(tmp_path, monkeypatch):
+    from scripts.doctor import registry, traces
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-0", "c0")])
+    data = traces_read.record("s", HISTORICAL, WORKING, 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    found = traces.findings(data, traces.Limits())
+    assert sorted(f.subject for f in found if f.kind == "telemetry misattributed") == [
+        "s-ci-1.5.unattributed",
+        "s-eng-1.5.unattributed",
+    ]
+
+
+def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+
+    def listing_down(path, params):
+        if path == "traces" and isinstance(params["tags"], str):
+            raise ConnectionError("refused")
+        return Project("antoncore")(path, params)
+
+    data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
+    assert data["reader"]["failures"] == ["trace listing failed: ConnectionError: refused"]
+
+
+def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):
+    from scripts.doctor import registry
+
+    monkeypatch.setattr(registry, "progress", lambda session_id, harness: dict(LOCAL))
+    project = Project("agent-swarm", [_tagged("s-eng-1", "c1")], listed=False)
+    data = traces_read.record("s", [], WORKING[:1], 10**9, project, home=tmp_path)
+    assert data["reader"]["failures"] == []
+    assert data["active"][0]["read"] is True

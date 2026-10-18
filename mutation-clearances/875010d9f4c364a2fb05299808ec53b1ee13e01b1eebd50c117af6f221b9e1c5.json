@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_v2/launch.py:scripts.swarm_v2.launch.x\u01c1DistributedLaunch\u01c1_reserve__mutmut_7:48f60f2f187818ebef8c00b6929ae28ff36f51143298709529975406efd5c956": {
+    "reader": "standards",
+    "reason": "Equivalent on reachable scoped launches: ExecutionRegistry generation identity and AccountCapacity ownership fencing give the same execution for a same generation holder. The added equality branch makes previous equal admitted.execution_id. Lua returns immediately if its own key exists; if absent, its atomic loop cannot find that same key as a reserved predecessor. Counts, deletion and admission are identical. This ruling excludes corrupted or manually injected duplicate generation identities."
+  }
+}
