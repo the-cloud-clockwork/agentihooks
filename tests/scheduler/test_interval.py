@@ -71,3 +71,13 @@ def test_an_interval_must_be_positive(every):
 
     assert str(refused.value) == "an interval must be positive"
     assert scheduler.redis.hgetall(scheduler.key("entries")) == {}
+
+
+def test_an_interval_of_one_second_is_accepted():
+    import fakeredis
+
+    from scripts.scheduler.core import Scheduler
+
+    scheduler = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+
+    assert scheduler.interval(owner="operator", payload="tick", every=1, now=0).record["due"] == 1

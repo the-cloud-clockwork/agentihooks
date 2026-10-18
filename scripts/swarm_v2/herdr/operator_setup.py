@@ -353,7 +353,7 @@ def _live(scheduler: Scheduler, entry_id: str) -> bool:
 def scheduled(root: Path, address: str, scheduler: Scheduler) -> bool:
     record = _recorded(Placement(root / FOLDER))
     return record.get("payload") == _payload(root, address) and all(
-        _live(scheduler, record.get(name, "")) for name, _, _ in JOBS
+        _live(scheduler, record.get(name)) for name, _, _ in JOBS
     )
 
 

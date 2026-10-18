@@ -390,7 +390,7 @@ def test_install_defaults_to_the_user_units_the_machine_scheduler_and_its_superv
     (units / "agentihooks-swarm-terminal.service").write_text("old\n")
     systemctl = Systemctl()
 
-    operator_setup.install(tmp_path / "home", "", run=systemctl)
+    operator_setup.install(tmp_path / "home", run=systemctl)
 
     assert list(units.iterdir()) == []
     assert systemctl.calls == [(["systemctl", "--user", "daemon-reload"], {**QUIET, "check": True})]
@@ -491,11 +491,13 @@ def test_settings_keep_an_equals_sign_in_a_path(tmp_path):
     ],
 )
 def test_install_refuses_when_systemctl_fails(tmp_path, error, named):
-    (tmp_path / "agentihooks-swarm-terminal.timer").write_text("old\n")
+    for name in ("agentihooks-swarm-terminal.timer", "agentihooks-swarm-terminal.service"):
+        (tmp_path / name).write_text("old\n")
     with pytest.raises(SetupRefused) as refused:
         operator_setup.install(tmp_path / "home", "", tmp_path, Systemctl(error=error), scheduler(), lambda: None)
 
-    assert str(refused.value) == f"systemctl could not remove agentihooks-swarm-terminal.timer: {named}"
+    units = "agentihooks-swarm-terminal.timer, agentihooks-swarm-terminal.service"
+    assert str(refused.value) == f"systemctl could not remove {units}: {named}"
 
 
 def test_install_command_names_an_unreachable_scheduler_redis_and_keeps_the_old_units(tmp_path, monkeypatch):
@@ -679,12 +681,12 @@ def test_a_failed_scheduled_pass_is_reported_and_never_raised(tmp_path, monkeypa
         raise error
 
     monkeypatch.setattr(operator_setup, "sync_once", fail)
-    err = io.StringIO()
+    err = Journal()
 
     with redirect_stderr(err):
         operator_setup.sync(event(tmp_path / "home"), "delivery", None)
 
-    assert err.getvalue() == line + "\n"
+    assert (err.getvalue(), err.flushed) == (line + "\n", 1)
 
 
 def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeypatch):
@@ -704,17 +706,45 @@ def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeyp
     assert [environ["OPENBAO_URL"] for _, environ in seen] == [BAO_URL, BAO_URL]
 
 
+class Journal(io.StringIO):
+    flushed = 0
+
+    def flush(self):
+        self.flushed += 1
+
+
 def test_a_failed_refresh_is_reported_and_never_raised(tmp_path, monkeypatch):
     def fail(root, environ):
         raise OSError("disk full")
 
     monkeypatch.setattr(operator_setup, "setup", fail)
-    err = io.StringIO()
+    err = Journal()
 
     with redirect_stderr(err):
         operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
 
-    assert err.getvalue() == "operator terminal setup failed: OSError: disk full\n"
+    assert (err.getvalue(), err.flushed) == ("operator terminal setup failed: OSError: disk full\n", 1)
+
+
+def test_setup_flushes_each_line_it_prints(tmp_path, monkeypatch):
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: pytest.fail("no ledger without a transport"))
+    out, err = Journal(), Journal()
+
+    with redirect_stdout(out), redirect_stderr(err):
+        assert operator_setup.setup(tmp_path / "home", {}) == 1
+    assert (out.flushed, err.flushed) == (0, 1)
+
+    monkeypatch.setattr(
+        openbao_kv.urllib.request, "urlopen", Bao({"user_ca": ssh_private(Ed25519PrivateKey.generate())})
+    )
+    environ = {
+        "OPENBAO_URL": BAO_URL,
+        "OPENBAO_TOKEN": "fixture-token",
+        "AGENTIHOOKS_ANTONCORE_DIR": str(antoncore(tmp_path)),
+    }
+    with redirect_stdout(out), redirect_stderr(err):
+        assert operator_setup.setup(tmp_path / "home", environ) == 0
+    assert (out.flushed, err.flushed) == (1, 1)
 
 
 def test_a_successful_setup_drops_the_saved_sync_state_and_a_refused_one_keeps_it(tmp_path, monkeypatch):
@@ -1078,6 +1108,16 @@ def test_a_job_mid_delivery_still_counts_as_scheduled(tmp_path):
 
     machine.update(recorded(root)["sync"], lambda entry: entry.update(state="pending"))
 
+    assert operator_setup.installed(root, "", tmp_path, machine)
+
+
+def test_jobs_the_scheduler_no_longer_holds_are_scheduled_again(tmp_path):
+    machine, root = scheduler(), tmp_path / "home"
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    machine.redis.delete(machine.key("entries"))
+
+    assert not operator_setup.installed(root, "", tmp_path, machine)
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
     assert operator_setup.installed(root, "", tmp_path, machine)
 
 
