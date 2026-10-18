@@ -252,6 +252,19 @@ def test_an_unreachable_swarm_store_answers_storage_error():
     assert (caught.value.status, caught.value.code, str(caught.value)) == (503, "storage_error", "Redis is unreachable")
 
 
+@pytest.mark.parametrize(
+    ("method", "path", "payload"), [("GET", "/api/v1/hives", None), ("PATCH", "/api/v1/hives/pod", {"ui": "no"})]
+)
+def test_a_redis_drop_after_the_store_opens_answers_storage_error(store, monkeypatch, method, path, payload):
+    import redis
+
+    def drop(*args, **kwargs):
+        raise redis.ConnectionError("Connection reset by peer")
+
+    monkeypatch.setattr(store.redis, "hgetall", drop)
+    assert refusal(request(method, path, payload), store) == (503, "Connection reset by peer")
+
+
 @pytest.mark.parametrize("hive", ["desk", "pod-2.a_b"])
 def test_master_move_runs_the_swarm_master_move_command(hive):
     from scripts.swarm_ledger.ledger_server import control_argv

@@ -11,7 +11,7 @@ function loadHives() {
   hivesAt = Date.now();
   hivesRead = readHives().then((resp) => (resp.ok ? resp.json() : Promise.reject(resp.status)))
     .then((reply) => { hives = reply.data; hivesFailed = false; renderHives(true); renderQuota(swarm, Date.now()); })
-    .catch(() => { hivesFailed = hives === null; renderHives(true); })
+    .catch(() => { hivesFailed = true; renderHives(true); })
     .finally(() => { hivesRead = null; });
 }
 
@@ -64,7 +64,7 @@ export function renderHives(force) {
   const list = hives || [];
   $("hives-count").textContent = hivesFailed ? "—" : `${list.filter((hive) => hive.live).length} live · ${list.length} ${list.length === 1 ? "hive" : "hives"}`;
   $("swarm-hives").replaceChildren(...(list.length ? list.map(hiveRow)
-    : [h("tr", { class: "sw-empty" }, h("td", { colspan: "11", text: hivesFailed ? "Could not read hives." : "No hives registered." }))]));
+    : [h("tr", { class: "sw-empty" }, h("td", { colspan: "11", text: hivesFailed ? "Could not read hives." : hives ? "No hives registered." : "Reading hives…" }))]));
 }
 
 function value(input) {

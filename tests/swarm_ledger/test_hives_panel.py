@@ -50,6 +50,10 @@ class HivesPage(Page):
                 self.patches.append(
                     (hive_id, body, request.headers.get("x-ledger-token"), request.headers.get("x-ledger-slug"))
                 )
+                if self.refusal == "abort":
+                    return route.abort()
+                if isinstance(self.refusal, int):
+                    return route.fulfill(status=self.refusal, body="not json")
                 if self.refusal:
                     return route.fulfill(
                         status=400, json={"error": {"code": "schema_invalid", "message": self.refusal}}
@@ -165,6 +169,31 @@ def test_a_refused_write_names_the_reason_and_keeps_the_stored_value(hives_page)
     page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('needs a UI')")
     assert page.text("#swarm-note").startswith("Could not set hive")
     assert dict(fields(page, "pod"))["roles"] == "eng,ci"
+
+
+@pytest.mark.parametrize(("refusal", "reason"), [("abort", "ledger server unreachable"), (500, "server answered 500")])
+def test_a_failed_write_without_a_reason_names_what_went_wrong(hives_page, refusal, reason):
+    page = hives_page(refusal=refusal)
+    box = page.tab.locator('#hive-pod [data-hive-field="max_agents"]')
+    box.fill("5")
+    box.press("Enter")
+    page.tab.wait_for_function(f"() => document.querySelector('#swarm-note').textContent.includes('{reason}')")
+    assert page.text("#swarm-note") == f"Could not set hive: {reason}. Try again or ask the master."
+    assert dict(fields(page, "pod"))["max_agents"] == "2"
+
+
+def test_a_hive_without_a_name_roles_prefer_or_slots_shows_its_id_and_empty_settings(browser):
+    page = HivesPage(browser, status(), 1920)
+    page.hives = [{"id": "bare", "live": True, "ui": "no", "ephemeral": "yes", "max_agents": 3, "agents": 0}]
+    page.tab.reload()
+    try:
+        page.tab.locator("#swarm-hives tr#hive-bare").wait_for(timeout=3000)
+        assert page.table("swarm-hives")[0][0] == "bare"
+        assert fields(page, "bare")[2:4] == [["roles", ""], ["prefer", ""]]
+        assert page.text("#quota-count").lower().endswith("bare 0/3")
+        assert page.errors == []
+    finally:
+        page.context.close()
 
 
 def test_move_master_orders_the_move_and_is_off_for_the_masters_hive_and_quiet_hives(hives_page):
