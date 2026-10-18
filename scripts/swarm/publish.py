@@ -151,6 +151,19 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
     return {**result, "repository_source": "task" if task.get("repositories") else "swarm default"}
 
 
+def staged_changes(root: Path) -> set[str]:
+    changed = set(git(root, "diff", "--cached", "--name-only", "--no-renames", "-z").split("\0"))
+    merge_head = root / git(root, "rev-parse", "--git-path", "MERGE_HEAD")
+    if merge_head.is_file():
+        for parent in merge_head.read_text().splitlines():
+            on_dev = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", parent, "origin/dev"], cwd=root, capture_output=True
+            )
+            if on_dev.returncode == 0:
+                changed &= set(git(root, "diff", "--cached", "--name-only", "--no-renames", "-z", parent).split("\0"))
+    return changed
+
+
 def selected_files(root: Path, files: list[str]) -> list[str]:
     selected = []
     for name in files:
@@ -158,9 +171,8 @@ def selected_files(root: Path, files: list[str]) -> list[str]:
         if path.is_absolute() or ".." in path.parts or not path.parts or (root / path).is_dir():
             raise SwarmError("publish accepts explicit repository relative file names only")
         selected.append(path.as_posix())
-    changed = git(root, "diff", "--name-only", "-z").split("\0")
-    changed += git(root, "diff", "--cached", "--name-only", "-z").split("\0")
-    unrelated = set(changed) - set(selected) - {""}
+    changed = set(git(root, "diff", "--name-only", "--no-renames", "-z").split("\0")) | staged_changes(root)
+    unrelated = changed - set(selected) - {""}
     if unrelated:
         raise SwarmError(
             f"unrelated tracked changes remain: {', '.join(sorted(unrelated))}; Next: git -C {shlex.quote(str(root))} status --short"
