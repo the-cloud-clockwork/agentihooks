@@ -193,7 +193,7 @@ def test_discovery_matches_registry_configuration(monkeypatch, capsys, categorie
     discovery = capsys.readouterr()
     assert discovery.out == ""
     assert discovery.err == registry.err
-    if categories == "unknown" or allowed == "missing":
+    if categories == "unknown" or allowed in ("missing", ","):
         assert "ZERO tools" in discovery.err
     else:
         assert "ZERO tools" not in discovery.err
