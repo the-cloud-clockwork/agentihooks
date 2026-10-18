@@ -123,7 +123,8 @@ def test_init_brings_up_the_stack_then_creates_the_paused_swarm_and_its_ledger_i
     assert (doc["size"], doc["title"], [p["title"] for p in doc["phases"]]) == ("swarm", TITLE, [TITLE])
     assert scratch.config("demo-swarm").state == "paused" and scratch.config("demo-swarm").repo == str(tmp_path)
     assert "  3. Start the swarm only when you want it: agentihooks swarm demo-swarm start\n" in out
-    assert f"{LINK}\n{PAUSED}" in out and out.endswith(PAUSED)
+    created = {"created": "demo-swarm", "repo": str(tmp_path), "state": "paused", "template": ""}
+    assert out.endswith(f"{json.dumps(created)}\n{LINK}\n{PAUSED}")
 
 
 def test_init_twice_is_safe_and_prints_the_swarm_again(scratch, plan, tmp_path):
@@ -250,6 +251,66 @@ def test_init_and_names_check_route_from_the_swarm_command(monkeypatch):
     assert cli.main(["init", "demo-swarm", "--timeout", "9"]) == 7
     assert cli.main(["names", "check", "demo-swarm"]) == 5
     assert seen == [("init", ["demo-swarm", "--timeout", "9"]), ("check", ["demo-swarm"])]
+
+
+def test_init_help_names_the_command_and_every_option():
+    text = " ".join(swarm_init.parser().format_help().split())
+    assert text.startswith("usage: agentihooks swarm init [-h] [--plan PLAN] [--content CONTENT] [--repo REPO]")
+    for words in (
+        "name the swarm name, which is also its ledger name",
+        "--plan PLAN the accepted plan file; its title seeds the ledger and the name suggestions",
+        "--template TEMPLATE the swarm template for caps, models and lanes",
+        "--operator-asked OPERATOR_ASKED the operator's words asking for a swarm with fewer than three tasks",
+        "--timeout TIMEOUT seconds to wait for every service to be healthy",
+    ):
+        assert words in text
+
+
+def test_names_check_help_names_the_command_and_its_plan_option(capsys):
+    with pytest.raises(SystemExit):
+        swarm_init.check(["--help"], os.environ, Stack())
+    text = " ".join(capsys.readouterr().out.split())
+    assert text.startswith("usage: agentihooks swarm names check [-h] [--plan PLAN] name")
+    assert "--plan PLAN the plan file whose title seeds the suggestions" in text
+
+
+def test_the_timeout_is_a_number_passed_to_the_stack(scratch, plan, tmp_path, capsys):
+    with pytest.raises(SystemExit):
+        init("demo-swarm", "--timeout", "soon")
+    assert "invalid int value: 'soon'" in capsys.readouterr().err
+    docker = Stack()
+    assert init("demo-swarm", "--plan", str(plan), "--timeout", "9", docker=docker)[0] == 0
+    assert any(call[-2:] == ["--wait-timeout", "9"] for call in docker.calls)
+
+
+def test_a_plan_without_a_heading_is_titled_from_its_file_name(tmp_path):
+    plan = tmp_path / "dating_app-launch.md"
+    plan.write_text("no heading here\n")
+    assert swarm_init.plan_title(str(plan)) == "dating app launch"
+
+
+def test_with_no_plan_or_content_the_ledger_is_one_automatic_phase_named_after_the_swarm():
+    args = swarm_init.parser().parse_args(["dating-app-swarm"])
+    phase = {"title": "dating app swarm", "description": "", "planning": "auto"}
+    assert swarm_init.seed(args) == {"title": "dating app swarm", "overview": "", "phases": [phase]}
+
+
+def test_the_repo_defaults_to_the_directory_init_runs_in(scratch, plan, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert init("demo-swarm", "--plan", str(plan))[0] == 0
+    assert scratch.config("demo-swarm").repo == str(tmp_path)
+
+
+@pytest.mark.parametrize(("stdout", "said"), [("half written\n", "half written"), ("", "no output")])
+def test_a_silent_stack_failure_names_its_last_output(scratch, plan, stdout, said):
+    class Quiet(Stack):
+        def __call__(self, argv, capture_output, text, input=None):
+            if "exec" in argv:
+                return subprocess.CompletedProcess(argv, 1, stdout, "")
+            return super().__call__(argv, capture_output, text)
+
+    code, out = init("demo-swarm", "--plan", str(plan), docker=Quiet())
+    assert code == 1 and out.endswith(f"Swarm not created: the stack refused it: {said}.\n")
 
 
 def test_main_runs_init_with_the_process_environment_docker_and_stdout(monkeypatch):

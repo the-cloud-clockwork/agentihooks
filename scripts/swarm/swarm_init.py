@@ -102,8 +102,10 @@ class Refusal(NamedTuple):
     name_taken: bool
 
 
-def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], run: stack_init.Run, out: TextIO):
-    """Create the swarm and its ledger in the stack, or find them made; an empty problem when done."""
+def create(
+    args: argparse.Namespace, content: dict, environ: Mapping[str, str], run: stack_init.Run, out: TextIO
+) -> Refusal | None:
+    """Create the swarm and its ledger in the stack, or find them made; None when done."""
     from scripts.doctor import priming
     from scripts.swarm_ledger import ledger_creator
 
@@ -129,10 +131,10 @@ def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], 
             return Refusal(f"{args.name} is taken by the swarm working {found['repo']}", True)
         print(json.dumps({"swarm": args.name, "created": False, "repo": found["repo"]}), file=out)
         print(ledger_page(environ, args.name), file=out)
-        return Refusal("", False)
+        return None
     print(lines[0], file=out)
     print(ledger_page(environ, args.name), file=out)
-    return Refusal("", False)
+    return None
 
 
 def main(argv: list[str]) -> int:
@@ -150,10 +152,9 @@ def init(argv: list[str], environ: Mapping[str, str], run: stack_init.Run, opene
         return 1
     if code := stack_init.init(["--timeout", str(args.timeout)], environ, run, opener, out, args.name):
         return code
-    problem, name_taken = create(args, content, environ, run, out)
-    if problem:
-        print(paint(f"Swarm not created: {problem}.", "failed"), file=out)
-        if name_taken:
+    if refusal := create(args, content, environ, run, out):
+        print(paint(f"Swarm not created: {refusal.problem}.", "failed"), file=out)
+        if refusal.name_taken:
             rule(out, title, (taken(run, environ) or set()) | {args.name})
         return 1
     print(f"Swarm {args.name} is paused; start it only when you want it: agentihooks swarm {args.name} start", file=out)
@@ -169,7 +170,7 @@ def check(argv: list[str], environ: Mapping[str, str] = os.environ, run: stack_i
     used = taken(run, environ)
     if problem := naming.swarm_name_problem(args.name, used or ()):
         print(f"invalid: {problem}")
-        rule(sys.stdout, plan_title(args.plan) or args.name.replace("-", " "), used or ())
+        rule(sys.stdout, plan_title(args.plan) or args.name, used or ())
         return 1
     unchecked = "" if used is not None else "; the swarm stack did not answer, so the names it holds were not checked"
     print(f"valid: {args.name}{unchecked}")
