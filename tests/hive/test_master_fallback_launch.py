@@ -73,3 +73,91 @@ def test_controller_routes_an_unpinned_primary_master_through_hive_placement(set
     fenced.runtime.spawn.assert_called_once_with(
         setup.config, "master", "name", {**task, "controller_epoch": setup.held.epoch}
     )
+
+
+@pytest.mark.parametrize("route", ["interactive", "subscription", "api"])
+def test_master_order_preserves_placement_health_through_the_consumer(setup, route):
+    from types import SimpleNamespace
+
+    from scripts.hive import launch, orders
+    from scripts.swarm import tick
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    task = master(setup)
+    if route == "interactive":
+        write_hive(setup, roles=["master"], ui="yes", interactive={"claude": "account"})
+    elif route == "api":
+        write_hive(setup, roles=["master"], ui="no", slots=[{"harness": "claude", "account": "account", "kind": "api"}])
+    name = setup.store.next_name(setup.config.slug, "master")
+    task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        tick.Placed("pane", "claude", "account", profile="master", profile_decision={"validation": {"pid": 12}}),
+    )
+    runtime.namespace.return_value = "namespace"
+    runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
+    consumer = orders.Consumer(setup.store.redis, "remote", runtime)
+
+    def consume(_):
+        assert consumer.poll() == 1
+
+    setup.launcher.sleep = consume
+    assert isinstance(setup.launcher, launch.HiveLaunch)
+    outcome = setup.launcher.spawn(SpawnRequest(setup.config, "master", name, task))
+    assert outcome.ok
+    assert outcome.value.route_kind == route
+    assert outcome.value.desired_route_kind == "interactive"
+    assert outcome.value.profile_decision["master_placement"] == {"hive": "remote", "headless": route == "api"}
+    assert outcome.value.execution.profile_decision == outcome.value.profile_decision
+    assert outcome.value.execution.desired_route_kind == "interactive"
+
+
+def test_a_master_fallback_order_cannot_be_overridden_by_the_persistent_login_flag(setup):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from scripts.hive import orders
+    from scripts.swarm import lease, tick
+    from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
+
+    task = master(setup)
+    setup.store.update(setup.config.slug, master_claude_login=True)
+    name = setup.store.next_name(setup.config.slug, "master")
+    task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
+    request = SpawnRequest(setup.store.config(setup.config.slug), "master", name, task)
+    selected = setup.launcher.select(request.config, "master", task)
+    admitted = setup.launcher.admit(request, selected)
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "master",
+        "master",
+        "master",
+        "account",
+        "claude",
+        "subscription",
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+    )
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome(
+        "spawn",
+        Status.OK,
+        "local",
+        tick.Placed("pane", "claude", "account", profile="master", profile_decision={"validation": {"pid": 12}}),
+    )
+    runtime.namespace.return_value = "namespace"
+    runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
+    consumer = orders.Consumer(setup.store.redis, "remote", runtime)
+    assert consumer.launch(order, admitted, task).status == "live"
+    sent = runtime.spawn.call_args.args[0]
+    assert sent.config == replace(
+        request.config, lanes={"master": {"agent": "claude", "role": "master"}}, master_claude_login=False
+    )
+    assert sent.task["route_kind"] == "subscription"
+    assert sent.task["launch_assignment"]["account"] == "account"
