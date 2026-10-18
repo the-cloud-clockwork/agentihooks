@@ -15,7 +15,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
-from scripts.swarm import dev_red, naming
+from scripts.swarm import dev_red, naming, promotion_owner
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
@@ -94,9 +94,11 @@ def _held_jobs(redis, slug: str, doc: dict) -> set[str]:
     return {job for task_id, job in filed.items() if task_id in live}
 
 
-def _red(slug, redis, ledger, doc, last, failed):
+def _red(slug, redis, ledger, doc, last, failed, repo):
     run_id, sha, url = last["id"], last["head_sha"], last["html_url"]
     held, present = _held_jobs(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
+    for previous in promotion_owner.history(repo, redis) - {slug}:
+        held.update(_held_jobs(redis, previous, ledger.state(previous)))
     actions = []
     for n, job in enumerate(failed):
         task_id = f"{TASK_PREFIX}{run_id}-{n}"
@@ -107,8 +109,8 @@ def _red(slug, redis, ledger, doc, last, failed):
             "the swarm closes this task when a later dev push run passes."
         )
         fields = {"task": task_id, "title": title(job), "lane": "ci", "kind": "ci", "rank": "urgent"}
-        ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         redis.hset(key(slug, "jobs"), task_id, job)
+        ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
     if not _live_alerts(doc):
         where = f" in {', '.join(failed)}" if failed else ""
@@ -132,7 +134,14 @@ def _green(slug, ledger, doc, last):
     return actions
 
 
-def refresh(
+def _recover(slug, redis, ledger, doc, last, repo):
+    actions = _green(slug, ledger, doc, last)
+    for previous in promotion_owner.history(repo, redis) - {slug}:
+        actions.extend(_green(previous, ledger, ledger.state(previous), last))
+    return actions
+
+
+def _refresh(
     slug: str,
     config: SwarmConfig,
     store: RedisStore,
@@ -159,8 +168,34 @@ def refresh(
     if stale:
         actions = [f"dev push run {last['id']} was superseded before Sonar analysis"]
     elif last["conclusion"] == "failure":
-        actions = _red(slug, redis, ledger, doc, last, failed)
+        actions = _red(slug, redis, ledger, doc, last, failed, config.repo)
     else:
-        actions = _green(slug, ledger, doc, last)
+        actions = _recover(slug, redis, ledger, doc, last, config.repo)
     redis.set(key(slug, "seen"), last["id"])
     return actions
+
+
+def refresh(
+    slug: str,
+    config: SwarmConfig,
+    store: RedisStore,
+    ledger: LedgerClient,
+    doc: dict,
+    now_ms: int,
+    run: Callable = subprocess.run,
+) -> list[str]:
+    if naming.PROOF_RE.fullmatch(slug):
+        return []
+    with promotion_owner.intake(slug, config.repo, store) as owner:
+        if owner != slug:
+            return []
+        record = promotion_owner.key(config.repo)
+        seen = max(int(store.redis.hget(record, "seen") or 0), int(store.redis.get(key(slug, "seen")) or 0))
+        if seen:
+            store.redis.set(key(slug, "seen"), seen)
+        if slug in store.slugs():
+            doc = ledger.state(slug)
+        actions = _refresh(slug, config, store, ledger, doc, now_ms, run)
+        if handled := store.redis.get(key(slug, "seen")):
+            store.redis.hset(record, "seen", handled)
+        return actions
