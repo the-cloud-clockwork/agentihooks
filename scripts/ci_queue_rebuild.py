@@ -60,9 +60,9 @@ def cause(pull: str, started: str, until: str, groups: list[dict], events: list[
     if not ahead:
         return {"action": "unknown", "gap": UNSEEN}
     return {
-        "action": "priority enqueue" if any(g["jump"] for g in ahead) else "enqueue ahead",
-        "ahead": [{key: g[key] for key in ("pull", "enqueuer", "enqueued_at", "jump")} for g in ahead],
-        "evidence": CORRELATED,
+        "action": "unknown",
+        "gap": CORRELATED,
+        "correlated": [{key: g[key] for key in ("pull", "enqueuer", "enqueued_at", "jump")} for g in ahead],
     }
 
 
@@ -71,13 +71,13 @@ def record(observed: str, env, run, now: str | None = None) -> dict:
     repo = env.get("GITHUB_REPOSITORY", "")
     number = re.search(r"/pr-(\d+)-", env.get("GITHUB_REF", ""))
     pull = f"https://github.com/{repo}/pull/{number[1]}" if number else None
-    started, old_base, groups = None, None, []
+    started, old_parent, groups = None, None, []
     try:
         if pull is None:
             raise SwarmError("the queue ref names no pull request")
         started = merge_queue.rest(f"repos/{repo}/actions/runs/{env['GITHUB_RUN_ID']}", run)["created_at"]
         parents = merge_queue.rest(f"repos/{repo}/git/commits/{env['GITHUB_SHA']}", run)["parents"]
-        old_base = parents[0]["sha"] if parents else None
+        old_parent = parents[0]["sha"] if parents else None
         journal = queue_record.Journal(pull, run)
         groups = journal.groups() or []
         if journal.gaps:
@@ -94,7 +94,7 @@ def record(observed: str, env, run, now: str | None = None) -> dict:
         "pull": pull,
         "expected_head": own.get("pull_head"),
         "old_head": env.get("GITHUB_SHA"),
-        "old_base": old_base,
+        "old_parent": old_parent,
         "observed_ref_head": observed or None,
         "new_head": own.get("head"),
         "new_base": own.get("base"),
@@ -111,10 +111,10 @@ def summary(found: dict) -> str:
         text = f"dequeue by {linked['actor']} ({linked['reason']})"
     elif action == "requeue":
         text = f"requeue by {linked['actor']}"
-    elif action == "unknown":
-        text = f"unknown cause: {linked['gap']}"
     else:
-        text = "; ".join(f"{action} of {g['pull']} by {g['enqueuer']}" for g in linked["ahead"])
+        text = f"unknown cause: {linked['gap']}"
+        for g in linked.get("correlated", []):
+            text += f"; {'jump' if g['jump'] else 'enqueue'} of {g['pull']} by {g['enqueuer']} at {g['enqueued_at']}"
     return " ".join(f"record {found['id']}: {text}".split())
 
 
@@ -123,10 +123,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("observed", nargs="?", default="")
     found = record(parser.parse_args(argv).observed, os.environ, subprocess.run)
     print(f"queue-rebuild {json.dumps(found)}", file=sys.stderr)
-    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
-        with Path(path).open("a") as handle:
-            handle.write(f"### Queue rebuild {found['id']}\n\n```json\n{json.dumps(found, indent=2)}\n```\n")
     print(summary(found))
+    if path := os.environ.get("GITHUB_STEP_SUMMARY"):
+        try:
+            with Path(path).open("a") as handle:
+                handle.write(f"### Queue rebuild {found['id']}\n\n```json\n{json.dumps(found, indent=2)}\n```\n")
+        except OSError as exc:
+            print(f"job summary not written: {exc}", file=sys.stderr)
     return 0
 
 

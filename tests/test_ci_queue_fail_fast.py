@@ -116,7 +116,7 @@ def test_the_module_runs_from_the_command_line(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == "wait\n"
 
 
-def _watch(tmp_path, reads, heads=None, server_error=False):
+def _watch(tmp_path, reads, heads=None, server_error=False, rebuild_fail=False):
     fake, bin_dir = tmp_path / "fake", tmp_path / "bin"
     fake.mkdir()
     bin_dir.mkdir()
@@ -147,6 +147,7 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
         "sleep": 'echo "$1" >> "$FAKE/sleeps"\n(( $(wc -l < "$FAKE/sleeps") <= 30 ))\n',
         "python3": 'if [[ "$2" == scripts.ci_queue_rebuild ]]; then\n'
         '  echo "${3-unset}" > "$FAKE/rebuild-arg"\n'
+        '  [[ -z "$FAKE_REBUILD_FAIL" ]] || exit 1\n'
         '  echo "record queue-rebuild-7-2: unknown cause: g"\n'
         "  exit 0\n"
         "fi\n"
@@ -170,6 +171,7 @@ def _watch(tmp_path, reads, heads=None, server_error=False):
         "GITHUB_SHA": "old",
         "GITHUB_REF": "refs/heads/gh-readonly-queue/dev/pr-1-old",
         "FAKE_HEADS": "no" if heads is None else "yes",
+        "FAKE_REBUILD_FAIL": "1" if rebuild_fail else "",
     }
     run = _step(_jobs()["queue-fail-fast"], "Watch for the first failed graded job")["run"]
     result = subprocess.run(["bash", "-e", "-c", run], cwd=_ROOT, env=env, capture_output=True, text=True)
@@ -194,6 +196,12 @@ def test_a_deleted_or_replaced_queue_group_stops_before_jobs_finish(tmp_path, he
     ref_call = (tmp_path / "fake" / "ref-calls").read_text()
     assert "git/matching-refs/heads/gh-readonly-queue/dev/pr-1-old" in ref_call
     assert 'select(.ref == "refs/heads/gh-readonly-queue/dev/pr-1-old")' in ref_call
+
+
+def test_a_failed_rebuild_record_still_cancels_the_stale_group(tmp_path):
+    result, output, _, _ = _watch(tmp_path, [[_job("lint")]], heads=["replacement"], rebuild_fail=True)
+    assert result.returncode == 0, result.stderr
+    assert output == "failed=queue group is no longer current (record unavailable)\n"
 
 
 def test_a_queue_lookup_error_is_retried_without_cancelling_a_live_group(tmp_path):

@@ -1,5 +1,6 @@
 import json
 import subprocess
+from collections.abc import Callable
 
 from scripts.swarm import ledger_events
 from scripts.swarm.store import SwarmError
@@ -91,7 +92,7 @@ def require_green(url: str, head: str, run) -> None:
         raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
 
 
-def journaled(journal, action: str, url: str, head: str, call):
+def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict]) -> dict:
     if journal is None:
         return call()
     before = journal.groups()
@@ -164,11 +165,11 @@ def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
     if raw["repository"]["mergeQueue"] is None:
         raise SwarmError("queue priority requires a dev merge queue")
     require_green(url, raw["headRefOid"], run)
+    waiting = waiting_ahead(url, raw["id"], run)
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []
     try:
-        waiting = waiting_ahead(url, raw["id"], run)
         removed = []
         try:
             for pull in reversed(waiting):

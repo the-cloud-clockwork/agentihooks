@@ -43,23 +43,24 @@ def cause(groups, events=()):
     return rebuild.cause(PULL + "3505", STARTED, UNTIL, groups, list(events))
 
 
-def test_an_entry_enqueued_ahead_while_the_group_ran_is_named_with_its_evidence():
+def test_an_entry_enqueued_ahead_while_the_group_ran_is_evidence_for_an_unknown_cause():
     groups = [group(1, 1), group(3541, 2, enqueued="2026-10-16T01:16:43Z", jump=True), group(3505, 3)]
     assert cause(groups) == {
-        "action": "priority enqueue",
-        "ahead": [
+        "action": "unknown",
+        "gap": rebuild.CORRELATED,
+        "correlated": [
             {"pull": PULL + "3541", "enqueuer": "nestorcolt", "enqueued_at": "2026-10-16T01:16:43Z", "jump": True}
         ],
-        "evidence": rebuild.CORRELATED,
     }
 
 
-def test_a_plain_enqueue_ahead_is_named_as_an_enqueue():
-    assert cause([group(7, 1, enqueued="2026-10-16T01:05:00Z"), group(3505, 2)])["action"] == "enqueue ahead"
+def test_a_plain_enqueue_ahead_is_correlated_without_a_jump():
+    found = cause([group(7, 1, enqueued="2026-10-16T01:05:00Z"), group(3505, 2)])
+    assert [g["jump"] for g in found["correlated"]] == [False]
 
 
 def test_an_entry_enqueued_at_the_group_start_second_is_inside_the_window():
-    assert cause([group(7, 1, enqueued=STARTED), group(3505, 2)])["action"] == "enqueue ahead"
+    assert cause([group(7, 1, enqueued=STARTED), group(3505, 2)])["correlated"][0]["pull"] == PULL + "7"
 
 
 def test_an_entry_enqueued_after_the_observation_links_nothing():
@@ -138,7 +139,7 @@ class Gh:
         if command[2] != "graphql":
             data = {
                 "repos/org/repo/actions/runs/7": {"created_at": STARTED},
-                "repos/org/repo/git/commits/old": {"parents": [{"sha": "oldbase"}]},
+                "repos/org/repo/git/commits/old": {"parents": [{"sha": "oldparent"}]},
             }[command[2]]
             return subprocess.CompletedProcess(command, 0, json.dumps(data), "")
         args = dict(item.split("=", 1) for item in command[4::2])
@@ -176,12 +177,13 @@ def test_the_record_keeps_old_and_new_group_heads_bases_and_the_linked_cause():
     assert record["pull"] == PULL + "3505"
     assert record["expected_head"] == "pr3505"
     assert record["old_head"] == "old"
-    assert record["old_base"] == "oldbase"
+    assert record["old_parent"] == "oldparent"
     assert record["observed_ref_head"] is None
     assert record["new_head"] == "new"
     assert record["new_base"] == "h3541"
     assert record["started"] == STARTED
-    assert record["cause"]["action"] == "priority enqueue"
+    assert record["cause"]["gap"] == rebuild.CORRELATED
+    assert [g["pull"] for g in record["cause"]["correlated"]] == [PULL + "3541"]
     assert [g["pull"] for g in record["groups"]] == [PULL + "3541", PULL + "3505"]
 
 
@@ -215,7 +217,9 @@ def test_main_prints_the_summary_logs_the_record_and_writes_the_job_summary(tmp_
     monkeypatch.setattr(rebuild.subprocess, "run", Gh())
     assert rebuild.main(["replacement"]) == 0
     out = capsys.readouterr()
-    assert out.out.startswith(f"record queue-rebuild-7-2: priority enqueue of {PULL}3541 by nestorcolt")
+    assert out.out.startswith("record queue-rebuild-7-2: unknown cause: the queue entry was enqueued ahead")
+    assert out.out.endswith(f"; jump of {PULL}3541 by nestorcolt at 2026-10-16T01:16:43Z\n")
+    assert out.out.count("\n") == 1
     logged = json.loads(out.err.split("queue-rebuild ", 1)[1])
     assert logged["observed_ref_head"] == "replacement"
     assert "queue-rebuild-7-2" in summary.read_text()
