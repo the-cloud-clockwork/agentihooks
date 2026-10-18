@@ -73,6 +73,7 @@ class SwarmConfig:
     codex_inbox_transport: str = LEGACY_TRANSPORT
     master_claude_login: bool = False
     masters_step: int = 0
+    caps_pinned: bool = False
     master_move_grace: int = DEFAULT_MASTER_MOVE_GRACE
 
 
@@ -205,6 +206,7 @@ class RedisStore:
             raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
             raw.get("master_claude_login") == "True",
             int(raw.get("masters_step") or 0),
+            raw.get("caps_pinned", "True") == "True",
             int(raw.get("master_move_grace") or DEFAULT_MASTER_MOVE_GRACE),
         )
 

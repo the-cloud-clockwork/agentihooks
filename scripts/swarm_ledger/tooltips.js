@@ -43,6 +43,7 @@
     ['[data-gate-name="quiet"]', "Checks claimed tasks for thirty minutes without progress; ledger commands remain available."],
     ['[data-gate-name="trace-plan"]', "Checks plan pieces against task, phase and project intent and the size of one pull request."],
     ['[data-gate-name="stall"]', "Stalled pull requests."],
+    ['[data-gate-name="lane-split"]', "Seat moves between the eng and ci lanes."],
     ["#quota-refresh", "Probe every Claude and Codex account now and redraw the quota table."],
     ['[data-gate-mode="enforce"]', "When the check fails, refuse the call and log the denial."],
     ['[data-gate-mode="observe"]', "When the check fails, let the call through and log a would be denial."],
