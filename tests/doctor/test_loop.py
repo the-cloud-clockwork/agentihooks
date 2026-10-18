@@ -214,3 +214,28 @@ def test_a_judged_finding_whose_only_growth_is_age_stays_judged_until_its_eviden
     step(store, T0 + 100 * MINUTE_MS, [aged(110, "from a to b", "1 wake")], closed=[])
     [_, again] = master_items(store)
     assert f"{aged(0).id}: pending for 110 minutes. It came back after a false-positive verdict." in again.text
+
+
+@pytest.mark.parametrize("value", ["false-positive", "established"])
+@pytest.mark.parametrize("minutes", [10, 100])
+def test_detector_wording_changes_do_not_return_judged_findings(store, value, minutes):
+    before = [
+        Finding("inbox past window", f"item-{i}", "pending", ("0 wakes",), "window", 10, evidence_identity=(0, 0))
+        for i in range(19)
+    ]
+    assert len(loop.record(store, DOCTOR, before, T0, MINUTE_MS)) == 19
+    for finding in before:
+        loop.verdicts(store, DOCTOR).judge(finding.id, value, "known", "master", T0)
+    after = [
+        Finding(
+            "inbox past window",
+            f"item-{i}",
+            "unread delivery",
+            ("recipient has no live occupant", "no wakes"),
+            "window",
+            minutes,
+            evidence_identity=(0, 0),
+        )
+        for i in range(19)
+    ]
+    assert loop.record(store, DOCTOR, after, T0 + 90 * MINUTE_MS, MINUTE_MS) == []
