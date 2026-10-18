@@ -107,9 +107,11 @@ def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_modul
     find = steps[find_at]
     assert find_at == 2
     assert find["id"] == "suite"
-    assert find["if"] == "steps.open.outputs.open == 'false'"
-    assert "git diff --name-only --no-renames origin/dev...HEAD" in find["run"]
-    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$'" in find["run"]
+    assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
+    assert find["run"].startswith(
+        'files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n'
+    )
+    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
     run_at = names.index("Run the suite speed contracts")
     assert run_at < names.index("Record the revisions the report grades")
     assert run_at < names.index("Reuse a green report when this head only adds tests to it")
