@@ -1034,7 +1034,7 @@ jobs:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}
     needs: [split, select, reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
-    timeout-minutes: 17
+    timeout-minutes: 22
     permissions:
       contents: read
     outputs:
@@ -1182,7 +1182,7 @@ jobs:
       # are allowed to delete — never ran in CI at all.
       - name: Run tests
         if: needs.split.outputs.source == ''
-        timeout-minutes: 9
+        timeout-minutes: 12
         env:
           PYTHONUNBUFFERED: "1"
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini --cov-context=test -p tests.browser_coverage -p tests.dep_inputs', github.workspace) || '-p no:pytest_cov' }}
@@ -1262,7 +1262,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: ./.github/actions/retry-upload
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           path: |
@@ -1273,7 +1273,6 @@ jobs:
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
-          overwrite: true
 
   unit-selected:
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.select.result == 'success' && needs.select.outputs.scope == 'selected' }}
@@ -1820,10 +1819,22 @@ jobs:
 
       - name: Build docs with Jekyll
         if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
-        uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./
-          destination: ./_site
+        env:
+          INPUT_SOURCE: ./
+          INPUT_DESTINATION: ./_site
+          INPUT_FUTURE: 'false'
+          INPUT_VERBOSE: 'true'
+          INPUT_BUILD_REVISION: ${{ github.sha }}
+          INPUT_TOKEN: ''
+        run: |
+          docker run --rm \
+            --volume "$GITHUB_WORKSPACE:/github/workspace" \
+            --env GITHUB_WORKSPACE=/github/workspace \
+            --env GITHUB_REPOSITORY \
+            --env INPUT_SOURCE --env INPUT_DESTINATION \
+            --env INPUT_FUTURE --env INPUT_VERBOSE \
+            --env INPUT_BUILD_REVISION --env INPUT_TOKEN \
+            ghcr.io/actions/jekyll-build-pages:v1.0.13
 
       - name: Retain the rendered documentation
         if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}

@@ -30,7 +30,9 @@ def store():
     import fakeredis
 
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    saved.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=2, scaling=MANUAL_SCALING))
+    saved.create(
+        SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=2, scaling=MANUAL_SCALING, gates={"lane-split": "enforce"})
+    )
     return saved
 
 
@@ -169,6 +171,34 @@ def test_a_seat_shift_never_passes_a_cap_and_proposes_instead(store, home, shipp
     assert master_items(store) == [proposal("seat wait", CLAIM, why)]
     assert recorded(store)["seat_wait"]["text"] == proposed(CLAIM, why)
     assert logged(home) == [(NOW, "dispatcher", "propose", "", RULE, proposed(CLAIM, why))]
+
+
+def test_a_seat_shift_into_a_lane_with_no_ready_task_proposes_instead(store, home, shipped):
+    fire(store, "seat_wait", value=7.5)
+    empty = lane_split.Lanes(ready={"eng": 0, "ci": 1}, live={"eng": 1, "ci": 0}, room=4)
+    why = "the eng lane has no ready task"
+    assert run(store, lanes=empty) == [proposed(CLAIM, why)]
+    assert caps(store) == (2, 2)
+
+
+def test_a_seat_shift_keeps_the_caps_the_operator_or_master_set(store, home, shipped):
+    store.update(SLUG, caps_pinned=True)
+    fire(store, "seat_wait", value=7.5)
+    why = "the operator or the master set the lane caps"
+    assert run(store) == [proposed(CLAIM, why)]
+    assert caps(store) == (2, 2)
+
+
+def test_a_seat_shift_in_log_only_records_the_would_be_move(store, home, shipped):
+    store.update(SLUG, gates={})
+    fire(store, "seat_wait", value=7.5)
+    why = "the lane split switch is log only"
+    assert run(store) == [proposed(CLAIM, why)]
+    assert caps(store) == (2, 2)
+    text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1)
+    assert [row for row in logged(home) if row[1] == "lane-split"] == [
+        (NOW, "lane-split", "observe", "", "lane-split", text)
+    ]
 
 
 def test_one_action_per_stage_per_window_and_the_cap_holds_across_windows(store, home, shipped):
