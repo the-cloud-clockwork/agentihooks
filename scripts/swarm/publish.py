@@ -171,7 +171,7 @@ def selected_files(root: Path, files: list[str]) -> list[str]:
         if path.is_absolute() or ".." in path.parts or not path.parts or (root / path).is_dir():
             raise SwarmError("publish accepts explicit repository relative file names only")
         selected.append(path.as_posix())
-    changed = set(git(root, "diff", "--name-only", "-z").split("\0")) | staged_changes(root)
+    changed = set(git(root, "diff", "--name-only", "--no-renames", "-z").split("\0")) | staged_changes(root)
     unrelated = changed - set(selected) - {""}
     if unrelated:
         raise SwarmError(

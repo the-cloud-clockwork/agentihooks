@@ -546,6 +546,39 @@ def test_publish_does_not_exempt_files_from_a_merge_outside_dev(conflicted_publi
         publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge another branch", ["chosen.txt"])
 
 
+@pytest.mark.parametrize("fixture", ["publication", "conflicted_publication"])
+def test_publish_requires_both_paths_of_a_staged_rename(request, fixture):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = request.getfixturevalue(fixture)
+    git(p.root, "mv", "other.txt", "renamed.txt")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Rename file", ["chosen.txt", "renamed.txt"])
+
+
+def test_publish_requires_the_source_of_an_unstaged_rename(conflicted_publication):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    (p.root / "other.txt").rename(p.root / "renamed.txt")
+    git(p.root, "add", "-N", "renamed.txt")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Rename file", ["chosen.txt", "renamed.txt"])
+
+
+def test_publish_missing_dev_ref_refuses_without_leaking_git_diagnostics(conflicted_publication, capfd):
+    from scripts.swarm import publish
+    from scripts.swarm.store import SwarmError
+
+    p = conflicted_publication
+    git(p.root, "update-ref", "-d", "refs/remotes/origin/dev")
+    with pytest.raises(SwarmError, match="unrelated tracked changes remain: inherited.txt, other.txt, sub/other.txt;"):
+        publish.publish("swarm", p.agent, str(p.repo), p.ledger, "Merge dev", ["chosen.txt"])
+    assert capfd.readouterr().err == ""
+
+
 @pytest.mark.parametrize("staged", [False, True])
 def test_unrelated_refusal_names_every_file_and_the_exact_worktree(publication, staged):
     from scripts.swarm import publish
