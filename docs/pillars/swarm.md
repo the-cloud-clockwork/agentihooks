@@ -254,7 +254,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | Command | Effect |
 |---|---|
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
-| `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
+| `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
 | `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` reconciles without spawning; `distributed` spawns only engineer and CI work its Kubernetes runtime places, and leaves master, planner, dispatcher and frontend work to the workstation hive. |
@@ -1048,8 +1048,11 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 
 ## The minute tick
 
-A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute. `start` installs
-and enables it. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
+An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
+registers it and starts the scheduler runner; each tick pass re-registers it if it is gone and deletes the
+`agentihooks-swarm` systemd timer and service an older install left. A minute fires a holder that takes a machine
+lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
 An outage holds the affected idle and delivery decisions until recovery (see
 [Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
