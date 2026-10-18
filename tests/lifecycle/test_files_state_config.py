@@ -90,7 +90,7 @@ def test_roots_merge_by_id_and_drop_disabled_or_invalid(tmp_path, monkeypatch):
     assert roots["worktrees"].path == str(tmp_path / "dev" / "worktrees")
 
 
-def test_entries_skip_a_missing_directory_or_invalid_file(tmp_path):
+def test_entries_skip_a_missing_file_a_directory_or_invalid_json(tmp_path):
     invalid = tmp_path / "invalid.json"
     invalid.write_text("{not json")
     valid = tmp_path / "valid.json"
