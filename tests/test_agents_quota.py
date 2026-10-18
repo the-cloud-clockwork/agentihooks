@@ -1029,3 +1029,29 @@ def test_quota_json_is_indented_two_spaces(monkeypatch, capsys):
     monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [row])
     assert agents_quota.main(["--json"]) == 0
     assert capsys.readouterr().out.startswith('[\n  {\n    "agent": "codex",')
+
+
+@pytest.mark.parametrize("fable", [False, True])
+def test_balance_table_names_the_master_reservation_for_each_harness(monkeypatch, fable):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+
+    held = {
+        "claude": reservation.Reservation("claude", "home", 2),
+        "codex": reservation.Reservation("codex", "default", 1),
+    }
+    asked = []
+    monkeypatch.setattr(agents_quota, "_codex", lambda now, force=False: [])
+    monkeypatch.setattr(agents_quota, "_masters", lambda harness="": {})
+    monkeypatch.setattr(agents_quota, "api_rows", lambda source, harness, now: [])
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: asked.append(harness) or held[harness])
+    lines = agents_quota.balance_table([], {}, 20_000.0, fable, observed={}).splitlines()
+    claude = "claude home: reserved for 2 live masters: workers stop at 60% of the week"
+    codex = "codex default: reserved for 1 live master: workers stop at 70% of the week"
+    assert [line for line in lines if "reserved for" in line] == ([claude] if fable else [claude, codex])
+    assert asked == (["claude"] if fable else ["claude", "codex"])
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: reservation.Reservation(harness, "x", 0))
+    assert "reserved" not in agents_quota.balance_table([], {}, 20_000.0, fable, observed={})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: None)
+    assert "reserved" not in agents_quota.balance_table([], {}, 20_000.0, fable, observed={})
