@@ -404,7 +404,7 @@ def test_a_queue_without_observed_merge_history_has_no_invented_merge_time_or_fi
 def test_slow_merge_refresh_budget_uses_elapsed_monotonic_time(rig, monkeypatch, start):
     import time
 
-    from scripts.swarm import merge_stall
+    from scripts.swarm.health import merge_stall
 
     store, config, state = rig
     merge_stall.findings(store, "proof", "/repo", AT)
@@ -427,7 +427,7 @@ def test_slow_merge_refresh_budget_uses_elapsed_monotonic_time(rig, monkeypatch,
 def test_exact_merge_read_deadline_reports_its_exhausted_budget(rig, monkeypatch):
     import time
 
-    from scripts.swarm import merge_stall
+    from scripts.swarm.health import merge_stall
 
     store, config, state = rig
     merge_stall.findings(store, "proof", "/repo", AT)
@@ -453,7 +453,7 @@ def test_exact_merge_read_deadline_reports_its_exhausted_budget(rig, monkeypatch
 def test_positive_remaining_merge_budget_can_finish_a_refresh(rig, monkeypatch):
     import time
 
-    from scripts.swarm import merge_stall
+    from scripts.swarm.health import merge_stall
 
     store, config, state = rig
     merge_stall.findings(store, "proof", "/repo", AT)
@@ -478,7 +478,8 @@ def test_positive_remaining_merge_budget_can_finish_a_refresh(rig, monkeypatch):
 
 
 def test_merge_observation_records_github_read_wall_time(rig, capsys):
-    from scripts.swarm import merge_stall, timing
+    from scripts.swarm import timing
+    from scripts.swarm.health import merge_stall
 
     token = timing.SWARM.set("proof")
     try:
