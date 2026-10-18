@@ -21,7 +21,7 @@ def _trace(task, tokens, *, complete=True, turns=True):
 def test_unreliable_task_costs_cannot_raise_findings_or_lower_the_median(complete, turns):
     record = {
         "now_ms": 0,
-        "merged": ["small", "medium", "large", "partial", "partial2", "partial3"],
+        "merged": ["partial", "small", "medium", "large", "partial2", "partial3"],
         "traces": [
             _trace("small", 100),
             _trace("medium", 150),
