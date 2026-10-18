@@ -18,8 +18,8 @@ def free_port(preferred: int) -> int:
         return probe.getsockname()[1]
 
 
-def write_private(path: Path, text: str):
-    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC), "w") as handle:
+def write_private(path: Path, text: str) -> None:
+    with os.fdopen(os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600), "w") as handle:
         os.fchmod(handle.fileno(), 0o600)
         handle.write(text)
 

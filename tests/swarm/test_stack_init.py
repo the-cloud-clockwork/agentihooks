@@ -226,11 +226,11 @@ def test_compose_output_is_trimmed_to_its_last_lines(home):
     assert "  line 4\n" not in out
 
 
-def test_a_failed_listing_is_shown_and_every_service_is_not_created(home):
+def test_a_failed_listing_is_shown_and_every_service_state_is_unknown(home):
     code, out = init(home, Docker(ps_err="cannot connect\n"))
     assert code == 1
-    assert "docker compose said:\n  cannot connect\nSwarm stack not ready: redis is not created.\n" in out
-    assert "Swarm stack not ready: controller is not created.\n" in out
+    assert "docker compose said:\n  cannot connect\nSwarm stack not ready: redis is in an unknown state.\n" in out
+    assert "Swarm stack not ready: controller is in an unknown state.\n" in out
 
 
 def test_an_unhealthy_redis_names_its_port_and_password(home):

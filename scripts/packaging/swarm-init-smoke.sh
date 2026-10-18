@@ -2,6 +2,11 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/../.."
+owned=label=com.docker.compose.project=agentihooks-swarm
+if [[ -n "$(docker ps --all --quiet --filter "$owned")$(docker volume ls --quiet --filter "$owned")" ]]; then
+  printf 'A stack named agentihooks-swarm already runs on this host; the smoke would replace and remove it.\n' >&2
+  exit 1
+fi
 work="$(mktemp -d -p "${RUNNER_TEMP:-${TMPDIR:-/tmp}}")"
 export AGENTIHOOKS_HOME="$work/agentihooks-home" NO_COLOR=1
 trap 'docker compose --project-name agentihooks-swarm down --volumes >/dev/null 2>&1 || true' EXIT

@@ -73,7 +73,7 @@ def docker_problem(run: Run) -> tuple[str, str] | None:
     return None
 
 
-def materialize(home: Path):
+def materialize(home: Path) -> None:
     for source in BUNDLED.rglob("*"):
         if source.is_file():
             target = home / source.relative_to(BUNDLED)
@@ -119,14 +119,14 @@ def page_problem(base: str, opener: Callable) -> str | None:
     return None
 
 
-def failed(out: TextIO, paint: Paint, problem: str, fix: str, logs: str = ""):
+def failed(out: TextIO, paint: Paint, problem: str, fix: str, logs: str = "") -> None:
     print(paint(f"Swarm stack not ready: {problem}.", "failed"), file=out)
     print(f"  Fix: {fix}.", file=out)
     if logs:
         print(f"  Logs: {LOGS} {logs}", file=out)
 
 
-def ready(out: TextIO, paint: Paint, home: Path, base: str):
+def ready(out: TextIO, paint: Paint, home: Path, base: str) -> None:
     print(paint("Swarm stack ready: redis, swarm and controller are healthy.", "ready"), file=out)
     print("Next steps:", file=out)
     print(f"  1. Open the ledger: {paint(base + '/', 'link')}", file=out)
@@ -144,7 +144,8 @@ def start(run: Run, home: Path, timeout: int, out: TextIO) -> list[tuple[str, st
     up = compose(home, "up", "--detach", "--pull", "missing", "--no-build", "--wait", "--wait-timeout", str(timeout))
     result = run(up, capture_output=True, text=True)
     found, failure = health(run, home)
-    sick = [(service, found.get(service, "not created")) for service in SERVICES if found.get(service) != "healthy"]
+    absent = "in an unknown state" if failure else "not created"
+    sick = [(service, found.get(service, absent)) for service in SERVICES if found.get(service) != "healthy"]
     said = [line for part in (result.stderr, failure) for line in part.strip().splitlines()]
     if sick and said:
         print("docker compose said:", file=out)
