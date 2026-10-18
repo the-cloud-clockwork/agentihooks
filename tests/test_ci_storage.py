@@ -17,13 +17,13 @@ FLOOR = timedelta(hours=6)
 BRANCHES = frozenset({"dev", "open"})
 
 
-def artifact(id, name="a", branch="dev", hours=48, size=10, expired=False):
+def artifact(id, name="a", branch="dev", hours=48, size=10, expired=False, now=NOW):
     return {
         "id": id,
         "name": name,
         "size_in_bytes": size,
         "expired": expired,
-        "created_at": (NOW - timedelta(hours=hours)).isoformat(),
+        "created_at": (now - timedelta(hours=hours)).isoformat(),
         "workflow_run": {"head_branch": branch},
     }
 
@@ -160,7 +160,9 @@ def test_a_listing_the_api_refuses_falls_back_to_names_from_recent_runs(monkeypa
     gh = Gh(routes)
     monkeypatch.setattr(subprocess, "run", gh)
     assert ids(ci_storage.artifacts("o/r")) == [1, 2, 3]
-    runs = [command for command, _ in gh.calls if "workflows/7/runs?status=success&per_page=3" in command]
+    runs = [
+        command for command, _ in gh.calls if "repos/o/r/actions/workflows/7/runs?status=success&per_page=3" in command
+    ]
     assert runs == [
         ["gh", "api", "repos/o/r/actions/workflows/7/runs?status=success&per_page=3", "--jq", ".workflow_runs[]"]
     ]
@@ -282,12 +284,14 @@ def test_the_verdict_fails_on_errors_and_on_kept_bytes_no_rule_may_delete():
 
 
 def test_main_writes_the_report_and_prints_each_repository(monkeypatch, tmp_path, capfd):
-    found_a = [artifact(1, branch="pr", size=3 * MB), artifact(2, branch="dev", size=MB)]
+    now = datetime.now(UTC)
+    found_a = [artifact(1, branch="pr", size=3 * MB, now=now), artifact(2, branch="dev", size=MB, now=now)]
     seen = {}
+    real = ci_storage.plan
 
     def plan(found, branches, now, keep, floor, limit):
         seen.update(keep=keep, floor=floor, limit=limit, aware=now.tzinfo is UTC)
-        return ci_storage.plan(found, branches, now, keep, floor, limit)
+        return real(found, branches, now, keep, floor, limit)
 
     monkeypatch.setattr(subprocess, "run", Gh(_org(found_a, [])))
     monkeypatch.setattr(ci_storage, "plan", plan)
@@ -302,7 +306,7 @@ def test_main_writes_the_report_and_prints_each_repository(monkeypatch, tmp_path
 
 
 def test_main_options_reach_the_plan_and_the_verdict(monkeypatch, tmp_path, capfd):
-    found_a = [artifact(1, branch="pr", size=3 * MB, hours=2)]
+    found_a = [artifact(1, branch="pr", size=3 * MB, hours=2, now=datetime.now(UTC))]
     monkeypatch.setattr(subprocess, "run", Gh(_org(found_a, [])))
     argv = ["--owner", "o", "--keep-hours", "1", "--floor-hours", "0.5", "--limit-mb", "2", "--budget", "0"]
     assert ci_storage.main([*argv, "--report", str(tmp_path / "r.json")]) == 0
