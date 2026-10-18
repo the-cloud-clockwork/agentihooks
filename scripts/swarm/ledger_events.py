@@ -45,7 +45,7 @@ GATE = "Gate — Required"
 RED_NOTICE = re.compile(r"^Your pull request (\S+) for .* has red checks and no push for twenty minutes\.")
 GATE_JOB = re.compile(rf"^[ \t]+name:[ \t]*(['\"]?){re.escape(GATE)}\1[ \t]*$", re.MULTILINE)
 CONTEXT_NODES = (
-    "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:$number) "
+    "nodes{...on CheckRun{databaseId name conclusion startedAt completedAt isRequired(pullRequestNumber:$number) "
     "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
     "...on StatusContext{context state createdAt isRequired(pullRequestNumber:$number)}} "
     "pageInfo{hasNextPage endCursor}"
@@ -53,7 +53,8 @@ CONTEXT_NODES = (
 SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id resourcePath}}} pageInfo{hasNextPage endCursor}"
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
-    "mergeable isDraft "
+    "mergeable isDraft timelineItems(last:1,itemTypes:[REOPENED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT])"
+    "{nodes{...on ReopenedEvent{createdAt} ...on AddedToMergeQueueEvent{createdAt}}} "
     "commits(last:1){nodes{commit{id oid committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
     + "statusCheckRollup{contexts(first:100){"
@@ -92,6 +93,7 @@ class PullRequest:
     latest_run_cancelled: bool = False
     checks_pending: bool = False
     checks_passed: bool = False
+    stale_red: bool = False
 
 
 def iso_ms(text):
@@ -137,6 +139,12 @@ def pull_request(raw):
         pushes = [iso_ms(commits[-1]["committedDate"])]
     unpassed_gate = _unpassed_gate(raw.get("gated"), checks, results, running)
     failing = any(result in RED for result in results)
+    restarted = _restarted(raw)
+    stale_red = (
+        failing
+        and restarted is not None
+        and all(_started(check) is not None and _started(check) < restarted for check in _red(checks, results))
+    )
     return PullRequest(
         raw["state"],
         iso_ms(raw["mergedAt"]) if raw.get("mergedAt") else None,
@@ -166,7 +174,22 @@ def pull_request(raw):
         any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
         any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
+        stale_red,
     )
+
+
+def _restarted(raw):
+    events = ((raw.get("timelineItems") or {}).get("nodes")) or []
+    return max((iso_ms(event["createdAt"]) for event in events if event and event.get("createdAt")), default=None)
+
+
+def _started(check):
+    started = check.get("startedAt") or check.get("createdAt")
+    return iso_ms(started) if started else None
+
+
+def _red(checks, results):
+    return [check for check, result in zip(checks, results) if result in RED]
 
 
 def _read_head(head, commits):

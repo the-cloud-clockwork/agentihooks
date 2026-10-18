@@ -101,6 +101,7 @@ class Watch:
     environ: dict | None = None
     post: Callable = ntfy
     released: Callable = lambda task: True
+    reread: Callable | None = None
 
 
 def _key(watch, name):
@@ -157,7 +158,8 @@ def _stall(watch, task, pull, marks, seen, agent):
     tid, queued = task["id"], _key(watch, QUEUED)
     if pull.queued:
         watch.store.redis.sadd(queued, tid)
-    if not pull.queued and (pull.mergeable == "CONFLICTING" or watch.store.redis.sismember(queued, tid)):
+    dropped = watch.store.redis.sismember(queued, tid) and not pull.checks_pending
+    if not pull.queued and (pull.mergeable == "CONFLICTING" or dropped):
         if pull.draft or (agent is not None and agent.name in watch.live and agent.state == "working"):
             return None, None
         return "unmergeable", _since(watch, marks, seen, f"{tid}:unmergeable")
@@ -168,6 +170,7 @@ def _stall(watch, task, pull, marks, seen, agent):
         and not pull.queued
         and marks_red
         and not pull.latest_run_cancelled
+        and not pull.stale_red
         and not pull.draft
     ):
         return "red", max(marks_red)
@@ -198,6 +201,9 @@ def _pull_request(watch, mail, task, limit, marks, seen):
         since = max(since, pull.pushed_at or 0, pull.red_at or 0, agent.started_at if agent else 0, _woken(watch, task))
     minutes = _minutes(watch, since)
     if minutes < getattr(limit, case):
+        return []
+    fresh = (watch.reread or watch.view)(task["pr_url"])
+    if fresh is None or fresh.state != "OPEN" or _stall(watch, task, fresh, marks, seen, agent)[0] != case:
         return []
     return _reopen(watch, mail, task, case, minutes, limit)
 

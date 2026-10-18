@@ -1300,7 +1300,7 @@ def test_only_red_runs_started_after_the_latest_reopen_or_queue_entry_stop_an_ow
 def test_a_red_check_without_a_start_time_is_never_stale():
     raw = {
         "state": "OPEN",
-        "timelineItems": {"nodes": [None, {"createdAt": RESTARTED_AT}]},
+        "timelineItems": {"nodes": [None, {"createdAt": RESTARTED_AT}, {"createdAt": "1970-01-01T02:40:00Z"}]},
         "statusCheckRollup": [{"name": "Tests", "conclusion": "FAILURE", "completedAt": "1970-01-01T02:55:00Z"}],
     }
     assert ledger_events.pull_request(raw).stale_red is False
