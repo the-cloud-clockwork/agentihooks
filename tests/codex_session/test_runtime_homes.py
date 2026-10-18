@@ -90,3 +90,30 @@ def test_next_launch_reclaims_only_abandoned_local_homes(store, server, root, tm
 
     assert directory.exists() == (owner in {"live", "foreign", "starting"})
     assert Path(started.record.endpoint_ref.removeprefix("unix://")).exists()
+
+
+@pytest.mark.parametrize("action", ["launch", "finish"])
+def test_concurrent_cleanup_does_not_fail_launch_or_finish(store, server, root, tmp_path, monkeypatch, action):
+    import shutil
+
+    from tests.codex_session.test_supervisor import other_seat
+
+    first = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
+    directory = Path(first.record.endpoint_ref.removeprefix("unix://")).parent
+    original = shutil.rmtree
+
+    def removed_concurrently(path, *args, **kwargs):
+        if path == directory:
+            original(path)
+        return original(path, *args, **kwargs)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(shutil, "rmtree", removed_concurrently)
+        if action == "finish":
+            supervisor.stop(first.process)
+            supervisor.finish(store, SLUG, first, 5000)
+        else:
+            successor = Server(server.codex_home)
+            spec = other_seat(launch_spec(store, successor, tmp_path))
+            supervisor.launch(store, spec, deps(successor, Clock(), root))
+    assert not directory.exists()
