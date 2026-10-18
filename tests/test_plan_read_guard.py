@@ -291,6 +291,28 @@ def test_ledger_root_search_refused_and_ledger_file_allowed(ledger):
     assert check(read(str(ledger / f"{SLUG}.json")), env(ledger)) is None
 
 
+def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
+    folder = "/home/x/.agentihooks/swarm/demo/tasks/t1"
+    assert check(bash(f'echo "plan read done, ledger at {ledger} checked" >> {folder}/progress.md'), env(ledger)) is None
+    assert check(bash(f"printf '%s\\n' 'listed {ledger}/{SLUG}.media' >> {folder}/proof.md"), env(ledger)) is None
+    assert check(bash(f"cat >> {folder}/proof.md <<'EOF'\nsearched {ledger} with grep -rn\nEOF"), env(ledger)) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat {root}/demo.media/{plan}",
+        'cat "{root}/demo.media/{plan}" >> progress.md',
+        "grep -rn needle {root}",
+        "bash -c 'grep -rn needle {root}'",
+        'echo "$(cat {root}/*/*.md)" >> progress.md',
+        "bash <<'EOF'\ngrep -rn needle {root}\nEOF",
+    ],
+)
+def test_direct_plan_reads_still_refused_beside_quoted_evidence(ledger, command):
+    assert check(bash(command.format(root=ledger, plan=PLAN)), env(ledger))
+
+
 def test_reads_process_environment(ledger, monkeypatch):
     for key, value in env(ledger).items():
         monkeypatch.setenv(key, value)
