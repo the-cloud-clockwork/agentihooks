@@ -10,10 +10,20 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 
 
 @pytest.fixture
-def redis():
+def redis(monkeypatch):
     import fakeredis
 
-    return fakeredis.FakeRedis(decode_responses=True)
+    connection = fakeredis.FakeRedis(decode_responses=True)
+    pop = connection.blpop
+
+    def bounded_pop(key):
+        result = pop(key, timeout=0.2)
+        if result is None:
+            raise TimeoutError("scheduler delivered no wake")
+        return result
+
+    monkeypatch.setattr(connection, "blpop", bounded_pop)
+    return connection
 
 
 def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
@@ -64,7 +74,9 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     with process_timer.Timer(3, redis=redis) as timer:
         event = timer.entry.record
+        redis.rpush(timer.key, "pending", "cancelled")
         process_timer.wake(event, "first", redis)
+        assert redis.lrange(timer.key, 0, -1) == ["first"]
         process_timer.wake(event, "same", redis)
         process_timer.wake(event, "same", redis)
         assert redis.lrange(timer.key, 0, -1) == ["same"]
@@ -100,7 +112,7 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
     pop = redis.blpop
 
     def bounded_pop(key):
-        result = pop(key, timeout=0.2)
+        result = pop(key)
         popped.append(result)
         return result
 
@@ -114,7 +126,7 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     monkeypatch.setattr(process_timer, "Timer", timer)
     task = asyncio.create_task(process_timer.async_wait(60))
-    await started.wait()
+    await asyncio.wait_for(started.wait(), timeout=1)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task
@@ -281,6 +293,7 @@ def test_member_schedules_and_consumes_wakes_while_shared_writes_are_refused(mon
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     with process_timer.Timer(0, redis=member) as timer:
         assert Scheduler(admin).run_due(now=timer.entry.record["due"]) == 1
+        assert admin.llen(timer.key) == 1
         timer.wait()
     Scheduler(admin).run_due()
     assert not admin.exists(timer.key)
