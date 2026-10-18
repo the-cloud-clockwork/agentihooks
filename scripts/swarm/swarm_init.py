@@ -12,13 +12,13 @@ import sys
 import urllib.request
 from collections.abc import Callable, Mapping
 from pathlib import Path
-from typing import TextIO
+from typing import NamedTuple, TextIO
 
 from scripts.swarm import naming, stack_init
 from scripts.swarm.stack_env import BIND, read_env
 
 CREATE = """
-import json, sys
+import contextlib, io, json, sys
 from scripts.swarm import cli
 from scripts.swarm_ledger import ledger_size
 from scripts.swarm_ledger.repository import repository
@@ -31,7 +31,10 @@ elif repository.exists(name) and ledger_size.size_of(repository.get_document(nam
     print(json.dumps({"found": "ledger"}))
 else:
     repository.create(name, order["content"], "swarm")
-    sys.exit(cli.main([name, "create", "--repo", order["repo"], *order["flags"]]))
+    with contextlib.redirect_stdout(io.StringIO()) as told:
+        code = cli.main([name, "create", "--repo", order["repo"], *order["flags"]])
+    print("\\n".join(told.getvalue().splitlines()[:1]))
+    sys.exit(code)
 """
 TAKEN = """
 import json
@@ -94,8 +97,13 @@ def ledger_page(environ: Mapping[str, str], name: str) -> str:
     return f"Ledger page: http://{BIND}:{port}/{name} (open it to follow and steer the work)"
 
 
+class Refusal(NamedTuple):
+    problem: str
+    name_taken: bool
+
+
 def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], run: stack_init.Run, out: TextIO):
-    """Create the swarm and its ledger in the stack, or find them made: (why it was refused, the name is taken)."""
+    """Create the swarm and its ledger in the stack, or find them made; an empty problem when done."""
     from scripts.doctor import priming
     from scripts.swarm_ledger import ledger_creator
 
@@ -104,7 +112,7 @@ def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], 
         args.template != priming.TEMPLATE and ledger_creator.floor_refusal(environ, tasks, args.operator_asked)
     )
     if refusal:
-        return refusal, False
+        return Refusal(refusal, False)
     repo = os.path.abspath(os.path.expanduser(args.repo or "."))
     flags = ["--template", args.template] if args.template else []
     stacked = {key: value for key, value in content.items() if key != "sources"}
@@ -112,19 +120,19 @@ def create(args: argparse.Namespace, content: dict, environ: Mapping[str, str], 
     lines = done.stdout.strip().splitlines()
     if done.returncode:
         said = (done.stderr.strip().splitlines() or lines or ["no output"])[-1]
-        return f"the stack refused it: {said}", False
+        return Refusal(f"the stack refused it: {said}", False)
     found = json.loads(lines[0]) if lines else {}
     if found.get("found") == "ledger":
-        return f"{args.name} is taken by a ledger that is not a swarm's", True
+        return Refusal(f"{args.name} is taken by a ledger that is not a swarm's", True)
     if found.get("found") == "swarm":
         if args.repo and repo != found["repo"]:
-            return f"{args.name} is taken by the swarm working {found['repo']}", True
+            return Refusal(f"{args.name} is taken by the swarm working {found['repo']}", True)
         print(json.dumps({"swarm": args.name, "created": False, "repo": found["repo"]}), file=out)
         print(ledger_page(environ, args.name), file=out)
-        return "", False
-    for line in lines:
-        print(ledger_page(environ, args.name) if line.startswith("Ledger page:") else line, file=out)
-    return "", False
+        return Refusal("", False)
+    print(lines[0], file=out)
+    print(ledger_page(environ, args.name), file=out)
+    return Refusal("", False)
 
 
 def main(argv: list[str]) -> int:
