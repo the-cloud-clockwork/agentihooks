@@ -92,7 +92,7 @@ def primary_checkout(released, monkeypatch):
     return released
 
 
-@pytest.mark.parametrize("kind", ["code", "ci"])
+@pytest.mark.parametrize("kind", ["code", "ci", "tune", "troubleshoot", "ops"])
 def test_ready_records_the_pull_request_and_head_and_ends_the_agent(released, capsys, kind):
     store, ledger, shell, doc = released
     ledger.rows["t1"]["kind"] = kind
@@ -408,10 +408,7 @@ def test_the_stop_gate_lets_a_ready_engineer_stop(released, tmp_path):
     "change, says",
     [
         ({"pr_url": ""}, "record the pull request with swarm pr before swarm ready"),
-        (
-            {"kind": "ops"},
-            "swarm ready carries a code or ci pull request; this ops task closes with swarm done and its proof",
-        ),
+        ({"pr_url": "", "kind": "tune"}, "record the pull request with swarm pr before swarm ready"),
     ],
 )
 def test_ready_refuses_a_task_without_a_pull_request_to_carry(released, capsys, change, says):
@@ -739,6 +736,40 @@ def test_a_merged_pull_request_closes_the_task_with_the_done_proof_and_removes_t
     assert ready.record(merging.store, "sw", "t1") is None
     assert merging.store.handoff("sw", "t1") == ""
     assert merging.run() == []
+
+
+@pytest.mark.parametrize("kind", ["tune", "troubleshoot"])
+def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(merging, kind):
+    merging.rows["t1"]["kind"] = kind
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 awaits its proof, {URL} merged", f"removed the worktree {TOP}"]
+    row = merging.rows["t1"]
+    assert row["state"] == "open" and row["claimed_by"] == "" and row["awaiting"] == ""
+    assert row["pr_url"] == URL and row["claim_generation"] == 1
+    assert merging.ledger.comments == [("t1", ready.PROOF.format(url=URL, kind=kind), "swarm")]
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.store.redis.get(merging.store.key("sw", "claim", "t1")) is None
+    assert merging.shell.calls == [REMOVE]
+    assert merging.run() == []
+
+
+def test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live(merging, monkeypatch):
+    merging.rows["t1"]["kind"] = "tune"
+    merging.pulls[URL] = MERGED
+    monkeypatch.setattr(ready, "_owners", lambda run, task_id: [AGENT])
+    assert merging.run() == []
+    assert merging.rows["t1"]["state"] == "pr" and merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is not None
+
+
+def test_a_merged_pull_request_of_another_kind_keeps_its_record_when_the_claim_release_is_refused(merging):
+    merging.rows["t1"]["kind"] = "tune"
+    merging.pulls[URL] = MERGED
+    merging.store.redis.set(merging.store.key("sw", "claim", "t1"), "engineer@other-0002")
+    assert merging.run() == []
+    assert merging.ledger.comments == [] and merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is not None
 
 
 ISSUE = "https://github.com/o/r/issues/5"
