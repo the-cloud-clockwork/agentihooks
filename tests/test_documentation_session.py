@@ -92,7 +92,7 @@ def test_a_session_named_for_no_ledger_task_queues_no_documentation_task(world, 
     assert ledger.added == []
     row = json.loads(args[0].read_text())
     assert row["status"] == "complete"
-    assert row["verdict"]["needs_documentation"] is False
+    assert row["verdict"] == {"needs_documentation": False, "size": "none", "source": "no ledger task"}
 
 
 @pytest.mark.parametrize(("needed", "covered"), [(0.05, 0.05), (0.95, 0.95)])

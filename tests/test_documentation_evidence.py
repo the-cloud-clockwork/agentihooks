@@ -74,9 +74,12 @@ def test_commits_already_on_dev_are_excluded_from_the_delivered_changes(tmp_path
     assert "PulledWidget" not in result["changes"]
 
 
-def test_a_branch_without_dev_history_keeps_its_session_base(tmp_path):
-    base = repository(tmp_path)
-    git(tmp_path, "update-ref", "refs/remotes/origin/dev", base)
+def test_a_session_base_ahead_of_dev_keeps_its_session_base(tmp_path):
+    git(tmp_path, "update-ref", "refs/remotes/origin/dev", repository(tmp_path))
+    (tmp_path / "local.py").write_text("class LocalWidget:\n    size = 1\n")
+    git(tmp_path, "add", "local.py")
+    git(tmp_path, "commit", "-qm", "Add local widget")
+    base = git(tmp_path, "rev-parse", "HEAD")
     (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
     git(tmp_path, "add", "policy.py")
     git(tmp_path, "commit", "-qm", "Add retry policy")

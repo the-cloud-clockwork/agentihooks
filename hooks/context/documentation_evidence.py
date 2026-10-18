@@ -15,6 +15,7 @@ import json
 GIT_OPTIONS = {"text": True, "stderr": subprocess.DEVNULL, "timeout": 10}
 VERIFY_REVISION = ("rev-parse", "--verify", "--end-of-options")
 DEFAULT_REVISION = "HEAD"
+INTEGRATION = "refs/remotes/origin/dev"
 HEAD_REVISION = ("rev-parse", DEFAULT_REVISION)
 DIFF_NAMES = ("diff", "--name-only", "-z")
 DIFF_CONTENT = ("diff", "--no-ext-diff", "--unified=3")
@@ -52,6 +53,15 @@ def matches(root: Path, sources: list[str], text: str) -> list[dict]:
     return found
 
 
+def _delivered_base(root: Path, base: str, head: str) -> str:
+    try:
+        integrated = git(root, "merge-base", INTEGRATION, head)
+    except subprocess.CalledProcessError:
+        return base
+    ancestor = subprocess.run(["git", "merge-base", "--is-ancestor", base, integrated], cwd=root, **GIT_OPTIONS)
+    return integrated if ancestor.returncode == 0 else base
+
+
 def collect(root: Path, base: str, context: dict | None = None) -> dict:
     root = Path(root)
     context = context or {}
@@ -60,6 +70,7 @@ def collect(root: Path, base: str, context: dict | None = None) -> dict:
     except subprocess.CalledProcessError:
         head = git(root, *HEAD_REVISION)
     base = git(root, "merge-base", base, head) if base else head
+    base = _delivered_base(root, base, head)
     names = git(root, *DIFF_NAMES, base, head).split("\0")
     files = [
         name for name in names if name and not sensitive_kind(name) and Path(name).suffix in CODE_TYPES | DOC_TYPES
