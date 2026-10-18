@@ -1,9 +1,9 @@
 """swarm ready: an engineer hands its reviewed pull request to the tick and frees its seat.
 
 The merge pass watches the pull request's checks, queues it on green, waits for the merge, then writes the done fields
-swarm done writes and removes the worktree; a task of a kind other than code or ci reopens instead, with its pull
-request and handoff kept, for the proof its kind needs. Red checks, a closed pull request or a queue ejection reopen the task for
-the next engineer, who continues from the stored handoff.
+swarm done writes and removes the worktree; a task of a kind other than code or ci is left open instead, with its
+pull request and handoff kept, for the proof its kind needs. Red checks, a closed pull request or a queue ejection
+reopen the task for the next engineer, who continues from the stored handoff.
 """
 
 import json

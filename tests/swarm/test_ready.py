@@ -763,6 +763,15 @@ def test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live(mer
     assert ready.record(merging.store, "sw", "t1") is not None
 
 
+def test_a_merged_pull_request_of_another_kind_keeps_its_record_when_the_claim_release_is_refused(merging):
+    merging.rows["t1"]["kind"] = "tune"
+    merging.pulls[URL] = MERGED
+    merging.store.redis.set(merging.store.key("sw", "claim", "t1"), "engineer@other-0002")
+    assert merging.run() == []
+    assert merging.ledger.comments == [] and merging.shell.calls == []
+    assert ready.record(merging.store, "sw", "t1") is not None
+
+
 ISSUE = "https://github.com/o/r/issues/5"
 NAMED = "https://github.com/o/r/issues/12"
 MEMBER = "https://github.com/o/r/issues/7"
