@@ -300,8 +300,11 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
         assert not (work / name).exists()
 
 
-@pytest.mark.parametrize("fixture", ["deploy/chart/ci/smoke.sh", "mutation-clearances/reader.json", "data/new-fixture.txt"])
+@pytest.mark.parametrize(
+    "fixture", ["deploy/chart/ci/smoke.sh", "mutation-clearances/reader.json", "data/new-fixture.txt"]
+)
 def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(tmp_path, fixture):
+    import os
     import shutil
     import subprocess
     import sys
