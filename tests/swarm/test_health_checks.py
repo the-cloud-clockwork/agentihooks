@@ -181,3 +181,11 @@ def test_snapshot_check_probes_preserve_unknown_waiting_and_approval_states(pend
 
     waiting, green = checks.from_view(view, approval=approval)
     assert (waiting(URL), green(URL)) == expected
+
+
+def test_default_snapshot_probe_treats_passing_checks_as_finished():
+    from types import SimpleNamespace
+
+    waiting, green = checks.from_view(lambda url: SimpleNamespace(checks_pending=False, checks_passed=True))
+    assert waiting(URL) is False
+    assert green(URL) is True

@@ -177,3 +177,31 @@ def test_deadline_boundary_preserves_the_next_tables_turn(tmp_path, monkeypatch)
     finally:
         box.close()
     assert received == ["a1", "cold"]
+
+
+def test_a_table_finishing_at_the_deadline_cannot_skip_the_next_table(tmp_path, monkeypatch):
+    import json
+    import time
+
+    clock, received = [0.0], []
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+
+    def row(event_id):
+        return {"event_id": event_id, "ledger": "sw", "plan": "", "phase": "", "slice": "", "task": "", "ts_ms": 1}
+
+    def send(sink, query, body):
+        if body:
+            clock[0] += 5
+            received.extend(json.loads(line)["event_id"] for line in body.splitlines())
+        return True
+
+    path, sink = tmp_path / "metrics.sqlite", metrics_outbox.Settings("http://sink", "", "")
+    for turn in range(3):
+        box = metrics_outbox.Outbox(path, sink, send)
+        try:
+            box.append(metrics_outbox.Table("a_hot"), [row(f"hot_{turn}")])
+            box.append(metrics_outbox.Table("z_cold"), [row("cold")])
+            box.flush(1)
+        finally:
+            box.close()
+    assert received[:2] == ["hot_0", "cold"]

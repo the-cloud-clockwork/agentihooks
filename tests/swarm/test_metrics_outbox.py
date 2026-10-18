@@ -493,6 +493,59 @@ def test_metric_history_read_sees_committed_rows_while_a_writer_holds_the_spool(
         box.db.rollback()
 
 
+def test_metric_history_uses_read_only_uris_when_sqlite_global_uri_support_is_off(box):
+    import subprocess
+    import sys
+    import textwrap
+
+    box.append(TASKS, [row("old")])
+    code = textwrap.dedent("""
+        import ctypes
+        import ctypes.util
+        import sys
+
+        sqlite = ctypes.CDLL(ctypes.util.find_library("sqlite3"))
+        assert sqlite.sqlite3_config(17, 0) == 0
+
+        from pathlib import Path
+        from scripts.swarm import metrics_outbox
+
+        metrics_outbox.spool_path = lambda: Path(sys.argv[1])
+        rows = metrics_outbox.read_recent("task_moves", int(sys.argv[2]))
+        assert rows is not None
+        assert [row["event_id"] for row in rows] == ["old"]
+    """)
+    result = subprocess.run(
+        [sys.executable, "-c", code, str(box.path), str(NOW)], capture_output=True, text=True, timeout=20
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_metric_history_survives_a_read_lock_longer_than_the_sqlite_default(box, monkeypatch):
+    import sqlite3
+    import threading
+
+    box.append(TASKS, [row("old")])
+    path = box.path
+    box.close()
+    writer = sqlite3.connect(path, check_same_thread=False)
+    writer.execute("PRAGMA journal_mode=DELETE")
+    writer.execute("BEGIN EXCLUSIVE")
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+
+    def release():
+        threading.Event().wait(6)
+        writer.rollback()
+
+    thread = threading.Thread(target=release)
+    thread.start()
+    try:
+        assert metrics_outbox.read_recent("task_moves", NOW) == [row("old")]
+    finally:
+        thread.join()
+        writer.close()
+
+
 def test_unreadable_metric_history_is_reported_without_changing_the_spool(tmp_path, monkeypatch, caplog):
     path = tmp_path / "broken.sqlite"
     contents = b"not a sqlite database"
