@@ -300,6 +300,61 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
         assert not (work / name).exists()
 
 
+@pytest.mark.parametrize("fixture", ["deploy/chart/ci/smoke.sh", "mutation-clearances/reader.json", "data/new-fixture.txt"])
+def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(tmp_path, fixture):
+    import shutil
+    import subprocess
+    import sys
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    resource = root / fixture
+    resource.parent.mkdir(parents=True)
+    resource.write_text("selected fixture")
+    (resource.parent / "unrelated.txt").write_text("unrelated")
+    (root / "other-data").mkdir()
+    (root / "other-data" / "unused.txt").write_text("unused")
+    expression = " / ".join(repr(part) for part in fixture.split("/"))
+    (root / "tests/test_fixture.py").write_text(
+        "from pathlib import Path\n"
+        "ROOT = Path(__file__).resolve().parents[1]\n"
+        "def test_fixture():\n"
+        f"    assert (ROOT / {expression}).read_text() == 'selected fixture'\n"
+    )
+    (root / "tests/test_unselected.py").write_text('UNUSED = "other-data/unused.txt"\n')
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_fixture.py"])
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    mutants = work / "mutants"
+    mutants.mkdir()
+    shutil.copytree(work / "tests", mutants / "tests")
+    for name in config["also_copy"]:
+        source = work / name
+        if source.is_dir():
+            shutil.copytree(source, mutants / name, dirs_exist_ok=True)
+        elif source.exists():
+            (mutants / name).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, mutants / name)
+    for baseline in (work, mutants):
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-o", "addopts=", "tests/test_fixture.py"],
+            cwd=baseline,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (baseline / fixture).read_text() == "selected fixture"
+        assert not (baseline / resource.relative_to(root).parent / "unrelated.txt").exists()
+        assert not (baseline / "other-data").exists()
+    assert fixture in config["also_copy"]
+
+
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
