@@ -1801,6 +1801,45 @@ jobs:
           PROXY_PID: ${{ steps.proxy.outputs.pid }}
         run: kill "$PROXY_PID"
 
+  docs:
+    if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' }}
+    needs: [reuse, admission]
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Select docs build
+        if: ${{ !cancelled() }}
+        id: docs
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+        run: |
+          git diff --name-only "$BASE"...HEAD -- docs index.md _config.yml assets .github/workflows/test.yml > "$RUNNER_TEMP/docs-changes"
+          if [[ -s "$RUNNER_TEMP/docs-changes" ]]; then echo "build=true" >> "$GITHUB_OUTPUT"; fi
+
+      - name: Build docs with Jekyll
+        if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
+        uses: actions/jekyll-build-pages@v1
+        with:
+          source: ./
+          destination: ./_site
+
+      - name: Retain the rendered documentation
+        if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: documentation-site
+          path: _site/
+          retention-days: 7
+          if-no-files-found: error
+
   lint:
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && github.event_name != 'merge_group' && github.event_name != 'push' }}
     needs: [reuse, admission]
@@ -1965,31 +2004,6 @@ jobs:
             [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on this step's pip install line."
             exit 1
           fi
-
-      - name: Select docs build
-        if: ${{ !cancelled() }}
-        id: docs
-        env:
-          BASE: ${{ github.event_name == 'pull_request' && github.base_ref == 'dev' && 'origin/dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
-        run: |
-          git diff --name-only "$BASE"...HEAD -- docs index.md _config.yml assets .github/workflows/test.yml > "$RUNNER_TEMP/docs-changes"
-          if [[ -s "$RUNNER_TEMP/docs-changes" ]]; then echo "build=true" >> "$GITHUB_OUTPUT"; fi
-
-      - name: Build docs with Jekyll
-        if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
-        uses: actions/jekyll-build-pages@v1
-        with:
-          source: ./
-          destination: ./_site
-
-      - name: Retain the rendered documentation
-        if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: documentation-site
-          path: _site/
-          retention-days: 7
-          if-no-files-found: error
 
       - name: Select artifact browser checks
         if: ${{ !cancelled() }}
@@ -2163,7 +2177,7 @@ jobs:
 
   # Reports only: it fails when it cannot read the run, never because a stage ran slow.
   stage-budget:
-    needs: [select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
+    needs: [select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, reuse]
     if: ${{ always() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
@@ -2266,7 +2280,7 @@ jobs:
 
   gate-required:
     name: Gate — Required
-    needs: [select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
+    needs: [select, split, unit, unit-selected, shard-check, test-count, coverage-ratchet, lint, docs, sonar, mutation-plan, mutation-stats, mutation, swarm-image, worker-image, brain-smoke, kind-due, helm-kind, semgrep, ledger-load, stage-budget, reuse, queue-fail-fast]
     if: ${{ always() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -2285,7 +2299,7 @@ jobs:
               | (if $event == "merge_group" then
                 ["select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
               else
-                ["select", "test-count", "lint", "semgrep", "sonar"]
+                ["select", "test-count", "lint", "docs", "semgrep", "sonar"]
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
                 + (if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)
               end) as $required

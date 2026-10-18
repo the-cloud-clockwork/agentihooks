@@ -300,6 +300,321 @@ def test_workspace_carries_the_repository_root_files_into_the_mutants_copy(tmp_p
         assert not (work / name).exists()
 
 
+@pytest.mark.parametrize(
+    "fixture",
+    [
+        "deploy/chart/ci/smoke.sh",
+        "mutation-clearances/reader.json",
+        "data/new-fixture.txt",
+        "deploy/compose/.env.example",
+        "deploy/worker/start.sh",
+    ],
+)
+def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(tmp_path, fixture):
+    import os
+    import shutil
+    import subprocess
+    import sys
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    resource = root / fixture
+    resource.parent.mkdir(parents=True)
+    content = "printf 'selected fixture'" if fixture == "deploy/worker/start.sh" else "selected fixture"
+    resource.write_text(content)
+    (resource.parent / "unrelated.txt").write_text("unrelated")
+    (root / "other-data").mkdir()
+    (root / "other-data" / "unused.txt").write_text("unused")
+    (root / "deploy").mkdir(exist_ok=True)
+    (root / "deploy" / "unread.yaml").write_text("unread")
+    expression = " / ".join(repr(part) for part in fixture.split("/"))
+    read = f"    assert (ROOT / {expression}).read_text() == 'selected fixture'\n"
+    if fixture == "deploy/worker/start.sh":
+        read = (
+            f"    START = ROOT / {expression}\n"
+            "    result = subprocess.run(['bash', str(START)], capture_output=True, text=True)\n"
+            "    assert result.returncode == 0, result.stderr\n"
+            "    assert result.stdout == 'selected fixture'\n"
+        )
+    (root / "tests/test_fixture.py").write_text(
+        "import subprocess\n"
+        "from pathlib import Path\n"
+        "ROOT = Path(__file__).resolve().parents[1]\n"
+        "def test_fixture():\n"
+        "    unused_text = 'deploy/unread.yaml'\n"
+        "    tmp_path = Path('scratch')\n"
+        "    (tmp_path / 'deploy').mkdir(parents=True, exist_ok=True)\n" + read
+    )
+    (root / "tests/test_unselected.py").write_text('UNUSED = "other-data/unused.txt"\n')
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_fixture.py"])
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    mutants = work / "mutants"
+    mutants.mkdir()
+    shutil.copytree(work / "tests", mutants / "tests")
+    for name in config["also_copy"]:
+        source = work / name
+        if source.is_dir():
+            shutil.copytree(source, mutants / name, dirs_exist_ok=True)
+        elif source.exists():
+            shutil.copy2(source, mutants / name)
+    for baseline in (work, mutants):
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", "-q", "-o", "addopts=", "tests/test_fixture.py"],
+            cwd=baseline,
+            capture_output=True,
+            text=True,
+            env={**os.environ, "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1"},
+        )
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (baseline / fixture).read_text() == content
+        assert not (baseline / resource.relative_to(root).parent / "unrelated.txt").exists()
+        assert not (baseline / "other-data").exists()
+        assert not (baseline / "deploy/unread.yaml").exists()
+    assert f"{fixture.split('/')[0]}/" in config["also_copy"]
+
+
+@pytest.mark.parametrize(
+    "source, expected",
+    [
+        ('(ROOT / "extra/text.txt").read_bytes()', ["text.txt"]),
+        (
+            'HERE = Path(__file__).resolve()\nROOT = HERE.parent.parent\n(ROOT / "extra/text.txt").read_text()',
+            ["text.txt"],
+        ),
+        (
+            'HERE = Path(__file__)\nROOT = HERE.resolve().parents[1]\n(ROOT / "extra/text.txt").read_text()',
+            ["text.txt"],
+        ),
+        ('PATTERN = "*.json"\nlist((ROOT / "extra").rglob(PATTERN))', ["nested/child.json"]),
+        (
+            'def ignore(name, value):\n    pass\nignore("ROOT", "unrelated")\n(ROOT / "extra/text.txt").read_text()',
+            ["text.txt"],
+        ),
+        ('(ROOT / "extra/text.txt").exists()', ["text.txt"]),
+        ('(ROOT / "extra/text.txt").is_file()', ["text.txt"]),
+        ('open(ROOT / "extra/text.txt")', ["text.txt"]),
+        ('(ROOT / "extra/text.txt").open()', ["text.txt"]),
+        ('subprocess.check_output(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('subprocess.check_call(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('subprocess.call(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('subprocess.Popen(["cat", str(ROOT / "extra/text.txt")])', ["text.txt"]),
+        ('list((ROOT / "extra").glob("*.txt"))', ["text.txt"]),
+        ('list((ROOT / "extra").rglob("*.json"))', ["nested/child.json"]),
+        ('list((ROOT / "extra").iterdir())', ["bytes.bin", "text.txt", "unused.ignore"]),
+        (
+            'def read(name):\n    return (ROOT / name).read_text()\nread("extra/text.txt")\nread("extra/nested/child.json")',
+            ["nested/child.json", "text.txt"],
+        ),
+        (
+            'import pytest\nFIELD = "folder"\n@pytest.mark.parametrize(FIELD, ["extra"])\ndef test_records(folder):\n    return list((ROOT / folder).rglob("*.json"))',
+            ["nested/child.json"],
+        ),
+    ],
+)
+def test_workspace_discovers_repository_inputs_for_each_selected_read_operation(tmp_path, source, expected):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra/nested").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    for name in ("text.txt", "bytes.bin", "nested/child.json", "unused.ignore"):
+        (root / "extra" / name).write_text(name)
+    (root / "tests/test_selected.py").write_text(
+        "import subprocess\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        + source
+        + "\ndef test_selected():\n    pass\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    copied = sorted(
+        path.relative_to(work / "extra").as_posix() for path in (work / "extra").rglob("*") if path.is_file()
+    )
+    assert copied == expected
+
+
+def test_workspace_extra_inputs_preserve_templates_and_exclude_credentials_caches_and_links(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra/.git").mkdir(parents=True)
+    (root / "extra/__pycache__").mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    templates = [".env.dist", ".env.example", ".env.sample", ".env.template"]
+    for name in [
+        *templates,
+        ".env",
+        ".env.local",
+        "cache.pyc",
+        ".git/index",
+        "__pycache__/old.pyc",
+        "__pycache__/metadata.json",
+        "z-after-link.txt",
+    ]:
+        (root / "extra" / name).write_text("fixture")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    (root / "extra/linked.txt").symlink_to(outside)
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        'def test_inputs():\n    return (ROOT / "extra").rglob("*")\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    glob = Path.glob
+    monkeypatch.setattr(Path, "glob", lambda path, pattern: iter(sorted(glob(path, pattern))))
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py::test_inputs"])
+    copied = sorted(
+        path.relative_to(work / "extra").as_posix() for path in (work / "extra").rglob("*") if path.is_file()
+    )
+    assert copied == [*templates, "z-after-link.txt"]
+
+
+def test_workspace_does_not_enumerate_fixture_directories_outside_the_repository(tmp_path, monkeypatch):
+    import os
+    from pathlib import Path
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "private.txt").write_text("outside")
+    (root / "linked").symlink_to(outside, target_is_directory=True)
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        'def test_inputs():\n    return (ROOT / "linked").rglob("*")\n'
+    )
+    scandir = os.scandir
+
+    def scan(path):
+        assert not Path(path).resolve().is_relative_to(outside)
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", scan)
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert not (work / "linked").exists()
+
+
+def test_workspace_keeps_generated_configuration_and_handles_probed_path_length_limits(tmp_path):
+    import tomllib
+
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra").mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    allowed = "a" * 255
+    (root / "extra" / allowed).write_text("fixture")
+    rejected = "a" * 256
+    (root / "tests/test_selected.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        '(ROOT / "pyproject.toml").read_text()\n'
+        f'(ROOT / "extra" / {allowed!r}).read_text()\n'
+        "import pytest\n"
+        "with pytest.raises(OSError):\n"
+        f'    (ROOT / "extra" / {rejected!r}).read_text()\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    config = tomllib.loads((work / "pyproject.toml").read_text())["tool"]["mutmut"]
+    assert config["also_copy"][-1] == "extra/"
+    assert "pyproject.toml/" not in config["also_copy"]
+    assert (work / "extra" / allowed).read_text() == "fixture"
+
+
+def test_workspace_discovers_inputs_read_by_a_parent_conftest(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests/nested").mkdir(parents=True)
+    (root / "records").mkdir()
+    (root / "records/input.json").write_text("fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/nested/test_selected.py").write_text("def test_selected():\n    pass\n")
+    (root / "tests/conftest.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        '(ROOT / "records/input.json").read_text()\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/nested/test_selected.py::test_selected"])
+    assert (work / "records/input.json").read_text() == "fixture"
+
+
+def test_workspace_does_not_copy_inputs_referenced_through_repository_parent_traversal(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    (root / "tests/test_selected.py").write_text(
+        'from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / "../outside.txt").read_text()\n'
+    )
+    work = tmp_path / "nested/work"
+    work.mkdir(parents=True)
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert outside.read_text() == "outside"
+    assert not (work / "outside.txt").exists()
+    assert not (work.parent / "outside.txt").exists()
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r"])
+def test_workspace_preserves_valid_fixture_names_containing_line_breaks(tmp_path, separator):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra").mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    name = f"extra/line{separator}name.txt"
+    (root / name).write_text("fixture")
+    (root / "tests/test_selected.py").write_text(
+        f"from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / {name!r}).read_text()\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert (work / name).read_text() == "fixture"
+
+
+def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "extra").mkdir()
+    name = "extra/nul\0name"
+    (root / "tests/test_selected.py").write_text(
+        "import pytest\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        "with pytest.raises(ValueError):\n"
+        f"    (ROOT / {name!r}).read_text()\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert not (work / "extra").exists()
+
+
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
     from scripts.ci_mutation.runner import prepare_workspace
 
