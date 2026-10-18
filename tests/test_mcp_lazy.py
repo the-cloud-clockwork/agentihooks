@@ -10,7 +10,7 @@ from tempfile import TemporaryFile
 
 import pytest
 
-pytestmark = pytest.mark.unit
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("mcp-sdk")]
 
 _RUNNER = """
 import json, runpy, sys
