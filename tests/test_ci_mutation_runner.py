@@ -601,6 +601,7 @@ def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path
     root = tmp_path / "repo"
     (root / "tests").mkdir(parents=True)
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "extra").mkdir()
     name = "extra/nul\0name"
     (root / "tests/test_selected.py").write_text(
         "import pytest\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"

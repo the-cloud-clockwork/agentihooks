@@ -121,8 +121,6 @@ def fixture_literals(node: ast.AST) -> list[str]:
 
 
 def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
-    if any(char in literal for char in ("\n", "\r", "\0")):
-        return []
     relative = Path(literal)
     if not relative.parts or relative.is_absolute() or ".." in relative.parts:
         return []
