@@ -22,7 +22,7 @@ waited=0
 wait=2
 attempt=0
 denials=0
-uploads=0
+upload_attempt=0
 
 while true; do
   attempt=$((attempt + 1))
@@ -33,26 +33,27 @@ while true; do
     cat "$out"
     exit 0
   fi
-  reason=$(cat "$out" "$err" | grep -E "$transient|$upload" | tail -n1 || true)
-  if [[ -z "$reason" || (-n "$unless" && -e "$unless") ]]; then
+  upload_reason=$(cat "$out" "$err" | grep -E "$upload" | tail -n1 || true)
+  reason=${upload_reason:-$(cat "$out" "$err" | grep -E "$transient" | tail -n1 || true)}
+  if [[ (-z "$reason" && "$upload_attempt" == 0) || (-n "$unless" && -e "$unless") ]]; then
     cat "$err" >&2
     cat "$out"
     exit "$status"
   fi
   spent=$((SECONDS - start > waited ? SECONDS - start : waited))
-  if [[ "$reason" =~ $upload ]]; then
-    uploads=$((uploads + 1))
+  if [[ -n "$upload_reason" && "$upload_attempt" == 0 ]]; then
+    upload_attempt=$attempt
     wait=2
   fi
   if [[ "$reason" =~ $authorization ]]; then
     denials=$((denials + 1))
     wait=2
   fi
-  if ((uploads == 2 || denials == 2 || spent + wait > deadline)); then
+  if ((upload_attempt > 0 && attempt > upload_attempt || denials == 2 || spent + wait > deadline)); then
     cat "$err" >&2
     cat "$out" >&2
     message="$label failed $attempt times over ${spent}s: $reason. The Sonar server or its Access proxy did not answer; this is not a code verdict."
-    if ((uploads > 0)); then
+    if ((upload_attempt > 0)); then
       message="$message Sonar report upload failed during a Sonar server outage (infrastructure)."
     fi
     echo "::error title=Sonar server unavailable::$message" >&2

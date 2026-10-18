@@ -192,6 +192,27 @@ def test_a_scanner_upload_server_error_recovers_on_one_retry(tmp_path, code, str
     assert summary == ""
 
 
+@pytest.mark.parametrize(
+    "second_error",
+    [
+        "Failed to upload report: Error 502 on http://localhost/api/ce/submit",
+        "Connection reset",
+        "ERROR Quality profile not found",
+        "",
+    ],
+)
+def test_an_upload_retry_never_leads_to_a_third_scan_when_the_failure_changes(tmp_path, second_error):
+    error = "Failed to upload report: Error 502 on http://localhost/api/ce/submit\nConnection reset\n"
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [(error, "", 1), ("", second_error, 8), ("", "", 0)], "--unless", ".scannerwork/report-task.txt"
+    )
+    assert result.returncode == 8
+    assert len(calls) == 2
+    assert sleeps == [2]
+    assert LABEL in result.stderr
+    assert "Sonar server outage (infrastructure)" in summary
+
+
 @pytest.mark.parametrize("seconds, count", [("180", 2), ("1", 1)])
 def test_a_scanner_upload_outage_stays_red_after_one_retry_or_its_budget(tmp_path, seconds, count):
     error = "Failed to upload report: Error 502 on http://127.0.0.1:9000/api/ce/submit?projectKey=agentihooks : Bad gateway\n"
