@@ -107,6 +107,19 @@ if [[ $planted != *"the controller container references swarm-worker-terminal as
   printf 'the chart check did not flag a required reference where the values say optional: %s\n' "$planted" >&2
   exit 1
 fi
+ingress=(--set ingress.enabled=true --set ingress.host=ledger.example.test --set 'networkPolicy.ingressFrom[0].podSelector.matchLabels.app=ingress')
+rendered="$(helm template "$release" "$chart" "${ingress[@]}" --set ledger.tls.secretName=swarm-ledger-tls)"
+for annotation in backend-protocol proxy-ssl-verify proxy-ssl-name proxy-ssl-secret; do
+  if [[ $rendered != *"nginx.ingress.kubernetes.io/$annotation:"* ]]; then
+    printf 'the ingress to a TLS ledger lacks %s\n' "$annotation" >&2
+    exit 1
+  fi
+done
+if [[ "$(helm template "$release" "$chart" "${ingress[@]}")" == *backend-protocol* ]]; then
+  printf 'the ingress to a plain http ledger asked for an https backend\n' >&2
+  exit 1
+fi
+printf 'the ingress verifies the TLS ledger certificate and leaves a plain ledger on http\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
 if [[ $rendered != *":dev@$digest"* ]]; then

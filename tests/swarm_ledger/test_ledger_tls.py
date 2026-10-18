@@ -1,5 +1,6 @@
 import io
 import os
+import socket
 import subprocess
 import threading
 from pathlib import Path
@@ -10,7 +11,7 @@ import pytest
 from scripts.swarm_ledger import ledger, ledger_link, ledger_server, proof_ledger, watch_ledger
 from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
-from tests.swarm_ledger.test_ledger_authority import SLUG, Burst, core, new_ledger
+from tests.swarm_ledger.test_ledger_authority import SLUG, core, new_ledger
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 
@@ -162,7 +163,7 @@ def tls_ledger(cert):
         (ledger_server.Handler,),
         {"tls": ledger_link.server_context(dict(zip(("LEDGER_TLS_CERT", "LEDGER_TLS_KEY"), cert, strict=True)))},
     )
-    httpd = Burst(("127.0.0.1", 0), handler)
+    httpd = ledger_server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     port = httpd.server_address[1]
     page = legacy_page.render(new_ledger.build_doc({"title": "TLS", "phases": [{"title": "Proof"}]}), SLUG, port)
     core.paths(SLUG)[0].write_text(page)
@@ -174,7 +175,7 @@ def tls_ledger(cert):
     ):
         thread.start()
         try:
-            yield {"base": f"https://localhost:{port}", "admin": core.read_token(page)}
+            yield {"base": f"https://localhost:{port}", "port": port, "admin": core.read_token(page)}
         finally:
             httpd.shutdown()
             httpd.server_close()
@@ -187,6 +188,15 @@ def test_a_credential_reaches_the_ledger_over_tls(tls_ledger):
     )
 
     assert reply["data"]["title"] == "TLS"
+
+
+def test_a_plain_http_client_on_the_tls_port_is_dropped_quietly(tls_ledger, capsys):
+    with socket.create_connection(("127.0.0.1", tls_ledger["port"]), timeout=5) as plain:
+        plain.sendall(b"GET /healthz HTTP/1.0\r\n\r\n")
+        assert not plain.recv(1024).startswith(b"HTTP/")
+
+    assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
+    assert "Traceback" not in capsys.readouterr().err
 
 
 def test_the_health_check_answers_over_tls(tls_ledger):
