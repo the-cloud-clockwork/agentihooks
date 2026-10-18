@@ -181,7 +181,6 @@ def test_all_thirteen_tools_keep_their_results_after_lazy_start(monkeypatch):
         ("all", ","),
     ],
 )
-
 def test_discovery_matches_registry_configuration(monkeypatch, capsys, categories, allowed):
     from hooks.mcp import build_server
     from hooks.mcp._stdio import list_tools
