@@ -3,12 +3,15 @@
 import json
 import re
 from dataclasses import asdict
+from functools import cache
 from pathlib import Path
 
 from scripts.inbox.seats import is_seat, of_swarm
+from scripts.inbox.store import _item, _order
 from scripts.swarm.naming import NameRegistry
 from scripts.swarm.store import MASTER, PREFIX
 
+BATCH = 1000
 MINUTE_MS = 60_000
 FINISHED = "finished"
 OPERATOR = "operator"
@@ -24,14 +27,35 @@ def health_records(redis, slug):
     return {finding_id: json.loads(record) for finding_id, record in raw.items()}
 
 
+def _batched(redis, keys, queue):
+    found = []
+    for start in range(0, len(keys), BATCH):
+        pipe = redis.pipeline(transaction=False)
+        for key in keys[start : start + BATCH]:
+            queue(pipe, key)
+        found += pipe.execute()
+    return found
+
+
 def inbox_items(inbox, slug):
-    prefix = inbox.key("address", "")
-    rows, names = [], NameRegistry(inbox.redis)
-    for key in sorted(inbox.redis.scan_iter(match=prefix + "*")):
-        for item in inbox.inbox(key[len(prefix) :]):
-            if of_swarm(item.address, slug, names) or of_swarm(item.sender, slug, names):
-                rows.append({**asdict(item), "history": inbox.history(item.id)})
-    return rows
+    prefix, redis, names = inbox.key("address", ""), inbox.redis, NameRegistry(inbox.redis)
+    ours = cache(lambda name: of_swarm(name, slug, names))
+    keys = sorted(redis.scan_iter(match=prefix + "*", count=BATCH))
+    listed = _batched(redis, keys, lambda pipe, key: pipe.zrange(key, 0, -1))
+    ids = [item_id for group in listed for item_id in group]
+    raws = iter(_batched(redis, ids, lambda pipe, item_id: pipe.hgetall(inbox.key("item", item_id))))
+    items = [
+        item
+        for group in listed
+        for item in sorted((_item(next(raws), item_id) for item_id in group), key=_order)
+        if ours(item.address) or ours(item.sender)
+    ]
+    histories = _batched(
+        redis, [item.id for item in items], lambda pipe, item_id: pipe.lrange(inbox.key("history", item_id), 0, -1)
+    )
+    return [
+        {**asdict(item), "history": [json.loads(entry) for entry in history]} for item, history in zip(items, histories)
+    ]
 
 
 def inbox_receivers(store, inbox, slug, items):
