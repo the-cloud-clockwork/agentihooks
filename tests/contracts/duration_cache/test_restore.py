@@ -47,7 +47,7 @@ def restore(folder, failures):
         assert attempt["uses"] == "actions/cache/restore@v4"
         settings = {
             name: inputs[match[1]]
-            if isinstance(value, str) and (match := re.fullmatch(r"\$\{\{ inputs\.(\w+) \}\}", value))
+            if isinstance(value, str) and (match := re.fullmatch(r"\$\{\{ inputs\.([\w-]+) \}\}", value))
             else value
             for name, value in attempt["with"].items()
         }
