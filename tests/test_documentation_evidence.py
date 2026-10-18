@@ -122,3 +122,9 @@ def test_a_session_base_ahead_of_dev_keeps_its_session_base(tmp_path):
     git(tmp_path, "add", "policy.py")
     git(tmp_path, "commit", "-qm", "Add retry policy")
     assert documentation_evidence.collect(tmp_path, base)["files"] == ["policy.py"]
+
+
+def test_an_unknown_revision_is_not_an_ancestor_and_prints_nothing(tmp_path, capfd):
+    repository(tmp_path)
+    assert documentation_evidence._is_ancestor(tmp_path, "0" * 40, "HEAD") is False
+    assert capfd.readouterr().err == ""

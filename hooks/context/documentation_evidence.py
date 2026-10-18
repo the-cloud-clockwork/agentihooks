@@ -16,7 +16,7 @@ GIT_OPTIONS = {"text": True, "stderr": subprocess.DEVNULL, "timeout": 10}
 VERIFY_REVISION = ("rev-parse", "--verify", "--end-of-options")
 DEFAULT_REVISION = "HEAD"
 INTEGRATION = "refs/remotes/origin/dev"
-HEAD_MOVES = ("reflog", "--format=%H%x09%gs", DEFAULT_REVISION)
+HEAD_MOVES = ("reflog", "--format=%H %gs", DEFAULT_REVISION)
 HEAD_REVISION = ("rev-parse", DEFAULT_REVISION)
 DIFF_NAMES = ("diff", "--name-only", "-z")
 DIFF_CONTENT = ("diff", "--no-ext-diff", "--unified=3")
@@ -65,7 +65,7 @@ def _delivered_base(root: Path, base: str, head: str) -> str:
         return base
     if not _is_ancestor(root, base, integrated):
         return base if _is_ancestor(root, integrated, base) else integrated
-    entries = (line.partition("\t") for line in git(root, *HEAD_MOVES).splitlines())
+    entries = (line.partition(" ") for line in git(root, *HEAD_MOVES).splitlines())
     authored = {commit for commit, _, subject in entries if subject.startswith("commit")}
     on_integration = git(root, "rev-list", f"{base}..{integrated}").split()
     return base if authored.intersection(on_integration) else integrated
