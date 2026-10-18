@@ -4,10 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger, new_ledger
+from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
-from scripts.swarm_ledger.repository import hierarchy
+from scripts.swarm_ledger.repository import hierarchy, legacy
 from scripts.swarm_ledger.repository import sqlite as store
 
 SLUG = "hierarchy-reads"
@@ -187,12 +187,15 @@ def test_the_hierarchy_revision_follows_the_rows(repo):
     assert whole != resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1", {})["revision"]
 
 
-def test_a_warm_hierarchy_read_sees_a_task_state_written_by_another_repository(repo, tmp_path):
+def test_a_warm_hierarchy_read_sees_a_task_state_written_by_another_repository(repo, tmp_path, monkeypatch):
     state = new_ledger.build_doc({"title": "Freshness", "phases": []})
     state.update({key: value for key, value in STATE.items() if key != "_meta"})
-    repo.import_document(SLUG, state, replace=True)
+    state, meta, _ = legacy.fresh(state)
+    repo.import_document(SLUG, {**state, "_meta": meta}, replace=True)
     before = resources.hierarchy_read(repo, SLUG, "hierarchy", {})
     writer = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    for name in ledger_tasks.OPS:
+        monkeypatch.setitem(writer.domain.EXTENSION_OPS, name, ledger_tasks)
     _, rejected = writer.apply_ops(
         SLUG,
         ops=[
