@@ -287,24 +287,29 @@ def test_refresh_drops_ineligible_priorities(priority, monkeypatch, state, base,
     if run_status is None:
         record["run_id"] = None
         p.store.redis.hset(key, URL, json.dumps(record))
+    p.store.redis.hset(key, URL + "0", json.dumps(record))
     records = []
 
     def graphql(query, variables, run):
         assert query == merge_queue.STATE
-        assert variables == {"url": URL}
+        assert variables in ({"url": URL}, {"url": URL + "0"})
         assert run is subprocess.run
         return {"resource": {"state": state, "baseRefName": base}}
 
     monkeypatch.setattr(merge_queue, "graphql", graphql)
     monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [
-        f"dropped deferred merge queue priority for {URL}: {reason}"
+        f"dropped deferred merge queue priority for {URL}: {reason}",
+        f"dropped deferred merge queue priority for {URL}0: {reason}",
     ]
     assert p.store.redis.hgetall(key) == {}
-    assert records == [(("priority-dropped", URL, "", None, None), {"reason": reason, **record})]
+    assert records == [
+        (("priority-dropped", URL, "", None, None), {"reason": reason, **record}),
+        (("priority-dropped", URL + "0", "", None, None), {"reason": reason, **record}),
+    ]
     assert p.queue.mutations == []
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
-    assert len(records) == 1
+    assert len(records) == 2
 
 
 @pytest.mark.parametrize("unreadable", [False, True])

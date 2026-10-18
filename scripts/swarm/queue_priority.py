@@ -74,14 +74,15 @@ def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
     for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items():
         record = json.loads(raw)
         try:
+            journal = queue_record.Journal(url)
             reason = drop_reason(url)
             if reason:
                 store.redis.hdel(store.key(slug, PENDING), url)
-                queue_record.Journal(url).write("priority-dropped", url, "", None, None, reason=reason, **record)
+                journal.write("priority-dropped", url, "", None, None, reason=reason, **record)
                 actions.append(f"dropped deferred merge queue priority for {url}: {reason}")
                 continue
             if record["run_id"] is None:
-                held = blocking(url, queue_record.Journal(url), record["group_head"])
+                held = blocking(url, journal, record["group_head"])
                 if held is not None:
                     store.redis.hset(store.key(slug, PENDING), url, json.dumps({**held, "sender": record["sender"]}))
                     continue
@@ -89,7 +90,6 @@ def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
                 run = merge_queue.rest(f"repos/{record['repo']}/actions/runs/{record['run_id']}", subprocess.run)
                 if run["status"] != "completed":
                     continue
-            journal = queue_record.Journal(url)
             apply(store, slug, url, record["sender"], tasks, journal)
             journal.write("priority-applied", url, "", None, None, **record)
             actions.append(f"applied deferred merge queue priority for {url}")
