@@ -29,7 +29,6 @@ jobs:
       shards: ${{ steps.plan.outputs.shards }}
       stats_parts: ${{ steps.plan.outputs.stats_parts }}
       bases: ${{ steps.plan.outputs.bases }}
-      selection: ${{ steps.plan.outputs.selection }}
       browser: ${{ steps.plan.outputs.browser }}
       changed: ${{ steps.plan.outputs.changed }}
       graded: ${{ steps.plan.conclusion == 'success' }}
@@ -94,6 +93,16 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: python -m scripts.ci_mutation.plan --base "$BASE"
+
+      - name: Upload planned mutation test selection
+        if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-selection
+          path: .mutation-selection.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 1
 
   # A branch that adds only failing tests has no mutants and may reuse a green report, so its touched tests run here.
   touched-tests:
@@ -167,7 +176,6 @@ jobs:
       matrix:
         part: ${{ fromJSON(needs.plan.outputs.stats_parts) }}
     env:
-      MUTATION_SELECTION: ${{ needs.plan.outputs.selection }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       MUTATION_STATS_CACHE: ${{ github.workspace }}/.mutation-stats-cache
     steps:
@@ -187,6 +195,11 @@ jobs:
 
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
 
       - name: Install the browser that page tests drive
         id: browser
@@ -301,7 +314,6 @@ jobs:
       matrix:
         shard: ${{ fromJSON(needs.refine.outputs.shards) }}
     env:
-      MUTATION_SELECTION: ${{ needs.plan.outputs.selection }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -320,6 +332,11 @@ jobs:
 
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
+
+      - name: Download planned mutation test selection
+        uses: actions/download-artifact@v4
+        with:
+          name: mutation-selection
 
       - name: Install the browser that page tests drive
         id: browser

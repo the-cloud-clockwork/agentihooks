@@ -28,11 +28,7 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             stdout=stream,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            env={
-                key: value
-                for key, value in {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}.items()
-                if key != "MUTATION_SELECTION"
-            },
+            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
         )
         try:
             return process.wait(timeout=timeout)
@@ -224,7 +220,8 @@ def run_gate(
     started = time.monotonic()
     deadline = started + budget
     cleared = load_clearances(root)
-    selection = json.loads(os.environ["MUTATION_SELECTION"]) if "MUTATION_SELECTION" in os.environ else None
+    selection_path = root / ".mutation-selection.json"
+    selection = json.loads(selection_path.read_text()) if selection_path.is_file() else None
     split = split_plan_names(stats)
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected, failing = {}, {}, {}, []

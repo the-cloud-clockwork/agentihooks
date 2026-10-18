@@ -573,7 +573,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     assert plan.main() == 0
     assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
     assert output.read_text() == (
-        "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nselection={}\nbrowser=false\n"
+        "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"
     )
     assert capsys.readouterr().out == (
         "Mutation bases: earlier merged\n"

@@ -67,6 +67,7 @@ def main() -> int:
     selection = {}
     seconds, mutants, tests = estimate(root, changes, selection)
     browser = str(needs_browser(root, tests)).lower()
+    (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
@@ -79,7 +80,6 @@ def main() -> int:
             stream.write(f"stats_parts={json.dumps(list(range(parts)))}\n")
             stream.write(f"bases={','.join(bases)}\n")
             stream.write(f"changed={len(changes)}\n")
-            stream.write(f"selection={json.dumps(selection)}\n")
             stream.write(f"browser={browser}\n")
     return 0
 

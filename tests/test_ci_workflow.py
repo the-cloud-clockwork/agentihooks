@@ -395,7 +395,8 @@ def test_mutation_browser_setup_is_selected_bounded_and_reports_failure():
     assert steps[install]["timeout-minutes"] == 6
     job = _mutation_workflow()["jobs"]["mutation"]
     assert job["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
-    assert job["env"]["MUTATION_SELECTION"] == "${{ needs.mutation-plan.outputs.selection }}"
+    selection = next(step for step in steps if step.get("name") == "Download planned mutation test selection")
+    assert selection["with"]["name"] == "mutation-selection"
     failure = next(step for step in steps if step.get("name") == "Report browser setup failure")
     assert failure["if"] == "failure() && steps.browser.outcome == 'failure'"
     assert "::error::" in failure["run"]
@@ -1154,10 +1155,12 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     }
     assert "permissions" not in plan
     assert plan["outputs"]["bases"] == "${{ steps.plan.outputs.bases }}"
-    assert plan["outputs"]["selection"] == "${{ steps.plan.outputs.selection }}"
     assert plan["outputs"]["browser"] == "${{ steps.plan.outputs.browser }}"
     for job in (mutation, jobs["mutation-stats"]):
-        assert job["env"]["MUTATION_SELECTION"] == "${{ needs.mutation-plan.outputs.selection }}"
+        selection = next(
+            step for step in job["steps"] if step.get("name") == "Download planned mutation test selection"
+        )
+        assert selection["with"]["name"] == "mutation-selection"
         assert not any(step.get("id") == "selection" for step in job["steps"])
     checkout = next(step for step in plan["steps"] if step.get("uses", "").startswith("actions/checkout"))
     assert checkout["with"] == {"fetch-depth": 0, "ref": "${{ github.event.pull_request.head.sha }}"}

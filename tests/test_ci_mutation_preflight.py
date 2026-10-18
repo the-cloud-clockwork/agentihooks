@@ -180,7 +180,8 @@ def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget(
     steps, names = _steps(job)
     collect = steps[names.index("Collect one stats part for every mutation shard")]
     assert collect["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
-    assert job["env"]["MUTATION_SELECTION"] == "${{ needs.plan.outputs.selection }}"
+    selection = steps[names.index("Download planned mutation test selection")]
+    assert selection["with"]["name"] == "mutation-selection"
     assert "Select mutation tests before browser setup" not in names
     browser = steps[names.index("Install the browser that page tests drive")]
     assert browser["if"] == "needs.plan.outputs.browser == 'true'"

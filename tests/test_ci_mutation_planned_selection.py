@@ -1,5 +1,4 @@
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -29,7 +28,7 @@ def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_pat
     monkeypatch.setattr(plan, "select_tests", select)
     assert plan.main() == 0
     values = dict(line.split("=", 1) for line in output.read_text().splitlines())
-    assert json.loads(values["selection"]) == {"scripts/sample.py": tests}
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/sample.py": tests}
     assert values["browser"] == browser
     assert calls == [(tmp_path, Path("scripts/sample.py"))]
 
@@ -38,7 +37,7 @@ def test_plan_publishes_each_file_selection_and_browser_requirement_once(tmp_pat
 def test_shard_uses_planned_tests_without_scanning_again(tmp_path, monkeypatch, tests):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "scripts/sample.py").write_text("def sample(value):\n    return value + 1\n")
-    monkeypatch.setenv("MUTATION_SELECTION", json.dumps({"scripts/sample.py": tests}))
+    (tmp_path / ".mutation-selection.json").write_text(json.dumps({"scripts/sample.py": tests}))
 
     def select(*args):
         raise AssertionError("shard repeated test selection")
@@ -55,9 +54,3 @@ def test_shard_uses_planned_tests_without_scanning_again(tmp_path, monkeypatch, 
         assert report["not_mutated"] == [
             {"path": "scripts/sample.py", "reason": "no matching or importing test modules"}
         ]
-
-
-def test_planned_selection_does_not_leak_into_nested_mutation_tests(tmp_path, monkeypatch):
-    monkeypatch.setenv("MUTATION_SELECTION", '{"scripts/sample.py": []}')
-    command = [sys.executable, "-c", "import os; assert 'MUTATION_SELECTION' not in os.environ"]
-    assert runner.run_process(command, tmp_path, 10, tmp_path / "run.log") == 0
