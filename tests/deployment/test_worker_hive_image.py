@@ -11,10 +11,11 @@ BASE = "ghcr.io/the-cloud-clockwork/agentihooks-worker:dev"
 
 def builds():
     joined = re.sub(r"\\\n\s*", " ", PROOF.read_text())
-    return [line for line in joined.splitlines() if line.startswith("docker build")]
+    return [line for line in joined.splitlines() if "docker build" in line]
 
 
 def test_kind_proof_layers_the_hive_on_the_published_worker_base():
+    assert len(builds()) == 1
     (build,) = builds()
     assert "--pull" in build
     assert "-f deploy/worker/Dockerfile" in build
