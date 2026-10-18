@@ -54,6 +54,7 @@ print("PUT /api/v1/layout: persisted height 240")
 PY
 docker compose exec -T swarm python -c 'import importlib.metadata as m, os; from mcp import ClientSession; from mcp.client.streamable_http import streamablehttp_client; assert os.getuid() == 10001; packages = sorted(d.metadata["Name"] for d in m.distributions()); assert not {"playwright", "tree-sitter", "opentelemetry-sdk"} & set(packages); print("reader imports: ready", "uid:", os.getuid(), "packages:", packages)'
 docker compose exec -T swarm python -c 'from scripts.swarm.store import connect; store = connect(); print("Redis connection: ready")'
+docker compose exec -T swarm python -c 'import os; from scripts.swarm_ledger.api import architecture; print("architecture record revision:", architecture.view(os.environ)["data"]["revision"])'
 docker compose up --pull never --force-recreate --no-deps --wait --wait-timeout 120 swarm
 python3 - <<'PY'
 import json
