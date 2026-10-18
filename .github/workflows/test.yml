@@ -2602,7 +2602,7 @@ jobs:
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: python -m scripts.ci_mutation.plan --base "$BASE"
+        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload planned mutation test selection
         if: steps.reuse.outputs.reused != 'true'
