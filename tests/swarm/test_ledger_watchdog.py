@@ -282,7 +282,10 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
 
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):
     host = Host(tmp_path, code=1, stderr="ledger server did not answer on http://127.0.0.1:8765\n")
-    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "ledger server did not answer on http://127.0.0.1:8765"
+    assert (
+        ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+        == "ledger server did not answer on http://127.0.0.1:8765"
+    )
     host.code, host.stderr = 3, ""
     assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "exit code 3"
     host.code, host.stderr = 1, "a" + "x" * 250
