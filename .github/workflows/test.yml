@@ -928,11 +928,12 @@ jobs:
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
+          QUEUE_BOTH_VERSIONS: ${{ github.event_name == 'merge_group' }}
         run: |
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
             --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
-          if [[ "${GITHUB_EVENT_NAME:-}" == merge_group ]]; then
+          if [[ "${QUEUE_BOTH_VERSIONS:-false}" == true ]]; then
             "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
               --collected "$GITHUB_WORKSPACE/queue-input/3.12/collected.json" --out "$GITHUB_WORKSPACE/queue-input/3.12/reused.json"
           fi
