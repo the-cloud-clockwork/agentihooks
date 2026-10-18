@@ -137,7 +137,11 @@ def prepare(slug: str, agent: AgentRecord, repo: str, ledger: LedgerClient) -> d
                 command.extend(["--from", f"origin/{scoped['branch']}"])
             output = execute(command, repository)
             root = Path(output.splitlines()[-1])
-        fields.append({**checkout_fields(root), "repository": str(repository)})
+        checkout = checkout_fields(root)
+        delivery = target_branch(root, scoped, checkout["branch"])
+        if delivery != checkout["branch"]:
+            git(root, "branch", f"--set-upstream-to=origin/{delivery}")
+        fields.append({**checkout, "branch": delivery, "repository": str(repository)})
     update = branch_record(fields[-1], Path(fields[-1]["repository"]), task)
     update["repository_branches"].update({entry["repository"]: entry["branch"] for entry in fields})
     ledger.update_task(slug, agent.task, update, by=agent.name)
