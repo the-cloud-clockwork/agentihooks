@@ -1,6 +1,9 @@
 name: Hierarchy CPU proof
 
 on:
+  push:
+    branches-ignore: [dev, main, "gh-readonly-queue/**"]
+    paths: [.github/workflows/hierarchy-cpu.yml]
   workflow_dispatch:
     inputs:
       base:
@@ -26,7 +29,7 @@ jobs:
           path: head
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base }}
+          ref: ${{ inputs.base || '726353637' }}
           path: base
       - uses: actions/setup-python@v5
         with:
