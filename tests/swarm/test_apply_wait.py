@@ -23,6 +23,8 @@ def rows(**deps):
         ({"a": {"kind": "ci"}}, ["a"]),
         ({"a": {"applied_at": AT}}, []),
         ({"a": {"kind": "tune"}}, []),
+        ({"a": {"kind": "ops"}}, []),
+        ({"a": {"kind": "plan"}}, []),
         ({"a": {"applied_at": AT}, "b": {"kind": "code"}}, ["b"]),
     ],
 )
