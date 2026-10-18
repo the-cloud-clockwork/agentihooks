@@ -107,6 +107,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_priority,
     queue_record,
     ready,
     reaper,
@@ -332,6 +333,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
+            actions += skip_refused(queue_priority.refresh, store, slug, doc["tasks"])
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(
                 ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
@@ -1480,16 +1482,9 @@ def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
-        result = merge_queue.prioritize(args.url, journal=queue_record.Journal(args.url))
-        for task in tasks:
-            if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
-                InboxStore(store.redis).send(
-                    sender,
-                    task["claimed_by"],
-                    f"Your pull request {task['pr_url']} was requeued in its original order after priority request {args.url}.",
-                )
-        if result["errors"]:
-            raise SwarmError("; ".join(result["errors"]))
+        if args.lift and not clearance.is_operator(store, Who.from_env()):
+            raise SwarmError("only the operator lifts a running merge group priority hold")
+        result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         agent = _worker(store, args) if args.action != "state" else None
         if agent is not None:
@@ -2048,6 +2043,9 @@ def build_parser():
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
     merge.add_argument("url")
+    merge.add_argument(
+        "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
+    )
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)
