@@ -14,8 +14,8 @@ FIELDS = {"Read": ("file_path",), "Grep": ("path", "glob"), "Bash": ("command",)
 COMMAND = "agentihooks plan read"
 WRITERS = {"echo", "printf"}
 SINKS = WRITERS | {"cat", "tee"}
-SEPARATOR = re.compile(r"[;&|()]+")
-HEREDOC = re.compile(r"<<-?[ \t]*(['\"]?)(\w+)\1([^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
+SEPARATOR = re.compile(r"[<>]*[;&|()\n][;&|()<>\n]*")
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"])(\w+)\1([^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
 
 
 def enabled(env: Mapping[str, str]) -> bool:
@@ -114,8 +114,8 @@ def _operands(tool_name: str, tool_input: dict, text: str) -> str:
 
 
 def _segments(command: str) -> list[list[str]]:
-    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
-    lexer.whitespace_split, lexer.commenters = True, ""
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace_split, lexer.whitespace, lexer.commenters = True, " \t\r", ""
     segments: list[list[str]] = [[]]
     for word in lexer:
         if SEPARATOR.fullmatch(word):
