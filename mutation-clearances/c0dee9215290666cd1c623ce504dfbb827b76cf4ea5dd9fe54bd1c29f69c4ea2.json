@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/stall_watch.py:scripts.swarm.stall_watch.x__judged__mutmut_1:ee19107415c92ab7c98dbdc7048c03b96fb386b276d4d6b3ea166b94a7cc3d47": {
+    "reader": "standards_reader",
+    "reason": "Changes only the minutes returned beside case None in _judged. Both callers in _pull_request test `case is None or minutes < getattr(limit, case)` and return on case None before reading minutes, so the value is never observed."
+  }
+}
