@@ -106,6 +106,15 @@ def test_a_status_amends_the_latest_comment_when_it_ends_the_thread(comments):
     assert thread[1]["edited_at"] == 5
 
 
+def test_a_deleted_later_comment_leaves_the_status_amendable(comments):
+    thread, ctx = [], Context()
+    post(comments, thread, ctx, "p1", "Building the first slice")
+    thread.append({"id": "m1", "by": "master@1-1", "at": 4, "text": "", "deleted": True})
+    post(comments, thread, ctx, "p2", "Merge queue passed")
+    assert shown(thread) == [("p1", "Merge queue passed", None), ("m1", "", None)]
+    assert thread[0]["edited_at"] == 5
+
+
 @pytest.mark.parametrize(
     ("entry", "by", "allowed"),
     [
