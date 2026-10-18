@@ -324,6 +324,13 @@ flock "$load_lock" kind load docker-image "$image" "$bundle_image" --name "$clus
 kubectl wait --for=condition=Ready node --all --timeout=120s
 bash "$chart/ci/terminal-route-proof.sh" "$image" &
 route=$!
+ledger_tls="$(mktemp -d)"
+ledger_host="$release-ledger"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$ledger_host" \
+  -addext "subjectAltName=DNS:$ledger_host,DNS:$ledger_host.default,DNS:$ledger_host.default.svc,DNS:$ledger_host.default.svc.cluster.local,DNS:localhost,IP:127.0.0.1" \
+  -keyout "$ledger_tls/tls.key" -out "$ledger_tls/tls.crt" 2>/dev/null
+kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt" --from-file="$ledger_tls/tls.key" \
+  --from-file=ca.crt="$ledger_tls/tls.crt"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 

@@ -8,6 +8,7 @@ import urllib.request
 import uuid
 from urllib.parse import quote, urlencode
 
+from .. import ledger_link
 from . import resources, schemas
 
 RETRIES = 5
@@ -21,13 +22,14 @@ class ResourceClient:
         self.timeout = timeout
 
     def request(self, slug: str, path: str, payload: dict | None = None) -> dict:
+        ledger_link.guard(self.base, self.credentials)
         request = urllib.request.Request(
             f"{self.base}/api/v1/ledgers/{quote(slug, safe='')}/{path}",
             data=None if payload is None else json.dumps(payload).encode(),
             headers={"Content-Type": "application/json", **self.credentials},
             method="GET" if payload is None else "POST",
         )
-        with urllib.request.urlopen(request, timeout=self.timeout) as response:
+        with urllib.request.urlopen(request, timeout=self.timeout, **ledger_link.transport()) as response:
             return json.loads(response.read())
 
     def collection(self, slug: str, path: str) -> list:

@@ -102,6 +102,18 @@ def test_the_local_base_is_https_when_the_ledger_serves_tls(tmp_path):
     )
 
 
+def test_a_tls_ledger_admits_its_https_page_origin(tmp_path):
+    environ = {
+        "LEDGER_DIR": str(tmp_path),
+        "LEDGER_PORT": "8766",
+        "LEDGER_TLS_CERT": "c.pem",
+        "LEDGER_TLS_KEY": "k.pem",
+    }
+
+    assert "https://127.0.0.1:8766" in ledger_link.allowed_origins(environ)
+    assert "http://127.0.0.1:8766" not in ledger_link.allowed_origins(environ)
+
+
 @pytest.mark.parametrize("half", [{"LEDGER_TLS_CERT": "c.pem"}, {"LEDGER_TLS_KEY": "k.pem"}])
 def test_tls_needs_both_the_certificate_and_the_key(half):
     with pytest.raises(SystemExit, match="LEDGER_TLS_CERT and LEDGER_TLS_KEY"):
