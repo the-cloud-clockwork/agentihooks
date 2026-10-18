@@ -34,6 +34,7 @@ from scripts.swarm import (
     claim_order,
     continuation,
     control_notifications,
+    dead_resume,
     dev_red,
     difficulty,
     dispatch_seat,
@@ -137,6 +138,7 @@ class Placed:
     execution: AgentRecord | None = None
     remote_control: dict = field(default_factory=dict)
     desired_route_kind: str | None = None
+    conversation_id: str = ""
 
 
 class Ledger(Protocol):
@@ -362,6 +364,8 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
             if agent.state == "retiring":
                 store.put_agent(slug, replace(agent, state="working"))
             continue
+        if "process" in differences and agent.runtime_backend == "local" and not reports.host(agent):
+            continue
         fields = ", ".join(differences)
         saved = live_binding.relaunch_assignment(agent, task, store.config(slug))
         if agent.lane == MASTER and "process" not in differences and not live_binding.complete(saved):
@@ -539,6 +543,9 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
+            if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+                actions.append(f"resumed {agent.name}")
+                continue
             runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
             actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
     return actions
@@ -699,7 +706,7 @@ def _conversations(slug, store, runtime):
         current = found.get(pane, "")
         if current:
             context_recycle.pin_swarm(current, slug, store.config(slug).compact_limit or None)
-        if current != agent.conversation_id:
+        if current and current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)
 
@@ -1109,6 +1116,7 @@ def placed_record(record, placed):
     return replace(
         record,
         pane_id=placed.pane_id,
+        conversation_id=placed.conversation_id or record.conversation_id,
         harness=placed.harness,
         account=placed.account,
         model=placed.model,

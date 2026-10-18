@@ -1,20 +1,17 @@
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
 from hooks.context import context_recycle
 from scripts.swarm import tick as tick_module
+from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed
+from tests.swarm.profile_fixture import validated
+from tests.swarm.test_runtime import _resuming
 from tests.swarm.test_tick import FakeRuntime, tasks
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
-from types import SimpleNamespace
-
-from scripts.swarm.runtime import HerdrRuntime
-from tests.swarm.profile_fixture import validated
-from tests.swarm.test_runtime import _resuming
 
 
 @pytest.fixture
@@ -103,3 +100,61 @@ def test_resume_placement_carries_the_original_conversation(tmp_path):
     record = tick_module.placed_record(agent, placed)
     assert record.conversation_id == "c0ffee"
     assert placed.conversation_id == "c0ffee"
+
+
+@pytest.mark.parametrize("lane", ["master", "eng"])
+@pytest.mark.parametrize("reason", ["handoff", "limit", "failed"])
+def test_dead_resume_records_why_a_fresh_agent_is_needed(store, monkeypatch, lane, reason):
+    from scripts.swarm import dead_resume
+    from scripts.swarm.tick import SpawnError
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == lane)
+    agent = replace(agent, conversation_id="old-conversation", profile="engineer")
+    store.put_agent("sw", agent)
+    runtime.live.discard(agent.name)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 600_000 if reason == "limit" else 240_000)
+    if reason == "handoff":
+        store.put_handoff("sw", agent.task, "Submitted handoff")
+    if reason == "failed":
+
+        def fail(config, original, text):
+            assert original == agent
+            raise SpawnError("native resume refused")
+
+        monkeypatch.setattr(runtime, "resume", fail)
+
+    assert dead_resume.reopen("sw", store, ledger, runtime, agent, 10) is False
+    explanations = {
+        "handoff": "a handoff was submitted",
+        "limit": "the conversation reached its compact limit",
+        "failed": "resume failed: native resume refused",
+    }
+    assert ledger.notes[-1] == f"Starting a fresh agent after {agent.name} ended because {explanations[reason]}."
+    assert runtime.resumed == []
+
+
+@pytest.mark.parametrize("lane", ["master", "eng"])
+def test_confirmed_dead_process_reaches_resume_before_binding_retirement(store, monkeypatch, lane):
+    from scripts.swarm.live_binding import assignment
+
+    ledger, runtime = tasks(("t1", "eng")), ResumingRuntime()
+    tick_module.tick("sw", store, ledger, runtime, 1)
+    agent = next(a for a in store.agents("sw") if a.lane == lane)
+    agent = replace(agent, conversation_id="old-conversation", profile="engineer")
+    store.put_agent("sw", agent)
+    runtime.live.discard(agent.name)
+
+    def bindings(agents):
+        return {
+            a.name: {**assignment(a), "hooks": True} if a.name in runtime.live else {"process": False} for a in agents
+        }
+
+    monkeypatch.setattr(runtime, "bindings", bindings)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+
+    tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+
+    assert runtime.resumed == [agent]
+    assert agent.pane_id not in runtime.closed
