@@ -67,7 +67,7 @@ def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
             for left in path_parts(node.left, bindings)
             for right in path_parts(node.right, bindings)
         ]
-    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == "Path" and node.args:
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"Path", "str"} and node.args:
         return path_parts(node.args[0], bindings)
     if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "resolve":
         return path_parts(node.func.value, bindings)
@@ -76,6 +76,24 @@ def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
     if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
         return path_parts(node.value.value, bindings)
     return []
+
+
+def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
+    if isinstance(call.func, ast.Name) and call.func.id == "open" and call.args:
+        return path_parts(call.args[0], bindings)
+    if not isinstance(call.func, ast.Attribute):
+        return []
+    operation = call.func.attr
+    if operation in {"run", "Popen", "call", "check_call", "check_output"}:
+        return path_parts(call.args[0], bindings) if call.args else []
+    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "exists"}:
+        return []
+    paths = path_parts(call.func.value, bindings)
+    if operation in {"glob", "rglob", "iterdir"}:
+        patterns = ["*"] if operation == "iterdir" else path_parts(call.args[0], bindings)
+        prefix = "**/" if operation == "rglob" else ""
+        return [str(Path(path) / (prefix + pattern)) for path in paths for pattern in patterns]
+    return paths
 
 
 def fixture_literals(node: ast.AST) -> list[str]:
@@ -88,36 +106,18 @@ def fixture_literals(node: ast.AST) -> list[str]:
         and target.id not in {part.id for part in ast.walk(assignment.value) if isinstance(part, ast.Name)}
     }
     functions = {function.name: function for function in ast.walk(node) if isinstance(function, ast.FunctionDef)}
+    parameters = {}
     for call in (part for part in ast.walk(node) if isinstance(part, ast.Call)):
         if isinstance(call.func, ast.Name) and call.func.id in functions:
             for parameter, value in zip(functions[call.func.id].args.args, call.args):
                 if parameter.arg not in {part.id for part in ast.walk(value) if isinstance(part, ast.Name)}:
-                    bindings[parameter.arg] = value
+                    parameters.setdefault(parameter.arg, []).append(value)
         if isinstance(call.func, ast.Attribute) and call.func.attr == "parametrize" and len(call.args) >= 2:
             names = path_parts(call.args[0], bindings)
             if len(names) == 1 and "," not in names[0]:
                 bindings[names[0]] = call.args[1]
-    literals = []
-    for call in (part for part in ast.walk(node) if isinstance(part, ast.Call)):
-        if isinstance(call.func, ast.Name) and call.func.id == "open" and call.args:
-            literals.extend(path_parts(call.args[0], bindings))
-        elif isinstance(call.func, ast.Attribute) and call.func.attr in {
-            "read_text",
-            "read_bytes",
-            "open",
-            "glob",
-            "rglob",
-            "iterdir",
-            "is_file",
-            "exists",
-        }:
-            paths = path_parts(call.func.value, bindings)
-            if call.func.attr in {"glob", "rglob", "iterdir"}:
-                patterns = ["*"] if call.func.attr == "iterdir" else path_parts(call.args[0], bindings)
-                prefix = "**/" if call.func.attr == "rglob" else ""
-                paths = [str(Path(path) / (prefix + pattern)) for path in paths for pattern in patterns]
-            literals.extend(paths)
-    return literals
+    bindings.update({name: ast.List(elts=values) for name, values in parameters.items()})
+    return [path for call in ast.walk(node) if isinstance(call, ast.Call) for path in read_paths(call, bindings)]
 
 
 def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
