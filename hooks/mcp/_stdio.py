@@ -12,8 +12,7 @@ def list_tools() -> list[dict]:
     unknown = [category for category in categories if category not in CATALOG]
     if unknown:
         print(
-            f"[agentihooks] WARNING: ignoring unknown MCP categories {unknown}; "
-            f"valid categories: {sorted(CATALOG)}",
+            f"[agentihooks] WARNING: ignoring unknown MCP categories {unknown}; valid categories: {sorted(CATALOG)}",
             file=sys.stderr,
         )
     allowed = {name.strip().lower() for name in os.getenv("ALLOWED_TOOLS", "").split(",") if name.strip()}
@@ -49,7 +48,7 @@ class _Output:
         await self.stream.flush()
 
 
-async def _serve(history, stdin, stdout) -> None:
+async def _serve(history, stdin, stdout, initialize_id) -> None:
     import anyio
     from mcp.server.stdio import stdio_server
 
@@ -63,8 +62,6 @@ async def _serve(history, stdin, stdout) -> None:
         async for line in anyio.wrap_file(stdin):
             yield line
 
-    first = json.loads(history[0]) if history and history[0].lstrip().startswith("{") else {}
-    initialize_id = first.get("id") if first.get("method") == "initialize" else None
     output = _Output(anyio.wrap_file(stdout), initialize_id)
     async with stdio_server(stdin=incoming(), stdout=output) as (read, write):
         await server._mcp_server.run(read, write, server._mcp_server.create_initialization_options())
@@ -72,6 +69,7 @@ async def _serve(history, stdin, stdout) -> None:
 
 def run() -> None:
     history = []
+    initialize_id = None
     tools = list_tools()
     for line in sys.stdin:
         try:
@@ -79,11 +77,12 @@ def run() -> None:
         except ValueError:
             import anyio
 
-            anyio.run(_serve, history + [line], sys.stdin, sys.stdout)
+            anyio.run(_serve, history + [line], sys.stdin, sys.stdout, initialize_id)
             return
         method = message.get("method")
         if method == "initialize":
             history = [line]
+            initialize_id = message["id"]
             requested = message["params"]["protocolVersion"]
             result = {
                 "protocolVersion": requested if requested in PROTOCOL_VERSIONS else PROTOCOL_VERSIONS[-1],
@@ -100,6 +99,6 @@ def run() -> None:
         else:
             import anyio
 
-            anyio.run(_serve, history + [line], sys.stdin, sys.stdout)
+            anyio.run(_serve, history + [line], sys.stdin, sys.stdout, initialize_id)
             return
         print(json.dumps({"jsonrpc": "2.0", "id": message["id"], "result": result}), flush=True)
