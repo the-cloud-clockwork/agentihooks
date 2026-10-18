@@ -79,5 +79,7 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     ]
     for name in shipped:
         assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
+    check = (ROOT / "deploy/compose/redis/healthcheck.sh").read_text()
+    assert 'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli' in check and "--pass" not in check
     for service in ("swarm", "controller", "hive"):
         assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"

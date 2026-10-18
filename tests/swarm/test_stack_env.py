@@ -58,13 +58,16 @@ def test_missing_settings_are_filled_in(tmp_path, fixed):
     )
 
 
-def test_client_settings_follow_the_stack_settings():
+def test_client_settings_follow_the_stack_settings(tmp_path):
     values = {"SWARM_REDIS_PASSWORD": PASSWORD, "SWARM_REDIS_PORT": "6380", "SWARM_PORT": "8766"}
     url = "swarm:" + PASSWORD + "@127.0.0.1:6380/0"
-    assert stack_env.client_env(values) == (
+    assert stack_env.client_env(values, tmp_path) == (
         f"AGENTIHOOKS_DEPLOYMENT=compose\nLEDGER_URL=http://127.0.0.1:8766\nAGENTIHOOKS_SWARM_REDIS_URL=redis://{url}\n"
     )
-    assert stack_env.client_env({**values, "SWARM_REDIS_SCHEME": "rediss"}).endswith(f"=rediss://{url}\n")
+    tls = stack_env.client_env({**values, "SWARM_REDIS_SCHEME": "rediss"}, tmp_path)
+    assert tls.endswith(f"=rediss://{url}\nSSL_CERT_FILE={tmp_path}/deploy/compose/tls/ca.pem\n")
+    moved = stack_env.client_env({**values, "SWARM_REDIS_SCHEME": "rediss", "SWARM_TLS_DIR": "/certs/swarm"}, tmp_path)
+    assert moved.endswith("\nSSL_CERT_FILE=/certs/swarm/ca.pem\n")
 
 
 def test_write_private_replaces_a_longer_file_and_makes_it_private(tmp_path):

@@ -128,7 +128,7 @@ def test_init_brings_up_the_stack_and_prints_the_next_steps(home):
     ]
     folder = stack(home)
     assert f"SWARM_REDIS_PASSWORD={PASSWORD}\n" in (folder / ".env").read_text()
-    assert (folder / "client.env").read_text() == stack_env.client_env(stack_env.read_env(folder / ".env"))
+    assert (folder / "client.env").read_text() == stack_env.client_env(stack_env.read_env(folder / ".env"), folder)
     for name in (".env", "client.env"):
         assert stat.S_IMODE((folder / name).stat().st_mode) == 0o600
     for name in STACK_FILES:

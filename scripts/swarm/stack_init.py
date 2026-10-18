@@ -167,7 +167,7 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
     home = stack_home(environ)
     materialize(home)
     values = settings(home / ".env")
-    write_private(home / "client.env", client_env(values))
+    write_private(home / "client.env", client_env(values, home))
     if sick := start(run, home, args.timeout, out):
         for service, state in sick:
             fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)

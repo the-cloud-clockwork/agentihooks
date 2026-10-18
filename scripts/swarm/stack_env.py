@@ -50,11 +50,16 @@ def settings(env_file: Path) -> dict[str, str]:
     return values
 
 
-def client_env(values: dict[str, str]) -> str:
+def client_env(values: dict[str, str], home: Path) -> str:
+    scheme = values.get("SWARM_REDIS_SCHEME", "redis")
     netloc = f"swarm:{values['SWARM_REDIS_PASSWORD']}@{BIND}:{values['SWARM_REDIS_PORT']}"
-    redis_url = urllib.parse.urlunsplit((values.get("SWARM_REDIS_SCHEME", "redis"), netloc, "/0", "", ""))
-    return (
+    redis_url = urllib.parse.urlunsplit((scheme, netloc, "/0", "", ""))
+    text = (
         "AGENTIHOOKS_DEPLOYMENT=compose\n"
         f"LEDGER_URL=http://{BIND}:{values['SWARM_PORT']}\n"
         f"AGENTIHOOKS_SWARM_REDIS_URL={redis_url}\n"
     )
+    if scheme == "rediss":
+        tls = home / values.get("SWARM_TLS_DIR", "./deploy/compose/tls") / "ca.pem"
+        text += f"SSL_CERT_FILE={os.path.normpath(tls)}\n"
+    return text
