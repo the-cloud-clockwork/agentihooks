@@ -114,7 +114,7 @@ def add_timer(
     now = time.time() if now is None else now
     _reachable(scheduler, slot)
     with _refusal():
-        entry = scheduler.timer(owner=owner, payload=message, delay=delay, at=at, now=now)
+        entry = scheduler.timer(owner=owner, payload=message, delay=delay, at=at)
     return _arm(entry, slot, now)
 
 
@@ -124,7 +124,7 @@ def start_stopwatch(
     now = time.time() if now is None else now
     _reachable(scheduler, slot)
     with _refusal():
-        entry = scheduler.stopwatch(owner=owner, payload=message, limit=limit, now=now)
+        entry = scheduler.stopwatch(owner=owner, payload=message, limit=limit)
     return _arm(entry, slot, now)
 
 
@@ -145,7 +145,7 @@ def add_cron(
     except (ValueError, ZoneInfoNotFoundError):
         raise CommandError(f"{timezone} is not a time zone") from None
     with _refusal():
-        entry = scheduler.cron(owner=owner, payload=message, expression=expression, timezone=timezone, now=now)
+        entry = scheduler.cron(owner=owner, payload=message, expression=expression, timezone=timezone)
     return _arm(entry, slot, now)
 
 
@@ -183,7 +183,7 @@ def cancel(scheduler: Scheduler, kind: str, entry_id: str) -> dict:
 def stop_stopwatch(scheduler: Scheduler, entry_id: str, *, now: float | None = None) -> dict:
     entry = _open(scheduler, "stopwatch", entry_id)
     entry.stop(now=now)
-    return show_stopwatch(scheduler, entry_id, now=now)
+    return show_stopwatch(scheduler, entry_id)
 
 
 def show_stopwatch(scheduler: Scheduler, entry_id: str, *, now: float | None = None) -> dict:

@@ -202,3 +202,11 @@ def test_help_names_the_command_and_every_target(capsys, command, prog):
     out = capsys.readouterr().out
     assert out.startswith(f"usage: agentihooks {prog} ")
     assert "TARGET is --fleet, --swarm SLUG, --seat SEAT@SLUG or --session NAME." in out
+
+
+@pytest.mark.parametrize("command", [cli.timer, cli.stopwatch, cli.cron])
+def test_a_command_without_an_action_names_the_missing_action(capsys, command):
+    with pytest.raises(SystemExit) as exit_:
+        command([])
+    assert exit_.value.code == 2
+    assert capsys.readouterr().err.splitlines()[-1].endswith("error: the following arguments are required: action")

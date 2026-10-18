@@ -239,3 +239,33 @@ def test_a_named_target_that_does_not_fit_is_refused(tools):
         "success": False,
         "error": "no swarm nope",
     }
+
+
+@pytest.mark.parametrize(
+    ("tool", "args"),
+    [
+        ("timer_add", ("x",)),
+        ("timer_list", ()),
+        ("timer_cancel", ("id",)),
+        ("stopwatch_start", ("x", "5")),
+        ("stopwatch_stop", ("id",)),
+        ("stopwatch_show", ("id",)),
+        ("cron_add", ("x", "* * * * *")),
+        ("cron_list", ()),
+        ("cron_remove", ("id",)),
+    ],
+)
+def test_each_tool_logs_its_own_failure(tools, logged, monkeypatch, tool, args):
+    def down():
+        raise RuntimeError("redis down")
+
+    monkeypatch.setattr(commands, "connect", down)
+    kwargs = {"delay": "5"} if tool == "timer_add" else {}
+    assert tools[tool](*args, **kwargs) == {"success": False, "error": "redis down"}
+    assert logged == [(f"MCP {tool} failed", {"error": "redis down"})]
+
+
+def test_a_passed_session_id_owns_each_kind_without_an_agent_name(tools):
+    assert tools["timer_add"]("x", delay="5", session_id="sid-given")["entry"]["owner"] == "sid-given"
+    assert tools["stopwatch_start"]("x", "5", session_id="sid-given")["entry"]["owner"] == "sid-given"
+    assert tools["cron_add"]("x", "* * * * *", session_id="sid-given")["entry"]["owner"] == "sid-given"

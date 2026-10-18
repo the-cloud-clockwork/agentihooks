@@ -12,7 +12,7 @@ from hooks.mcp._session import env_fallback_allowed
 from scripts.scheduler import commands
 
 
-def _owner(session_id: str, agent_name: str = "") -> str:
+def _owner(session_id: str, agent_name: str) -> str:
     if agent_name:
         return agent_name
     if not env_fallback_allowed():
