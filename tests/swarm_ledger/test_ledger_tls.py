@@ -193,7 +193,11 @@ def test_a_credential_reaches_the_ledger_over_tls(tls_ledger):
 def test_a_plain_http_client_on_the_tls_port_is_dropped_quietly(tls_ledger, capsys):
     with socket.create_connection(("127.0.0.1", tls_ledger["port"]), timeout=5) as plain:
         plain.sendall(b"GET /healthz HTTP/1.0\r\n\r\n")
-        assert not plain.recv(1024).startswith(b"HTTP/")
+        try:
+            reply = plain.recv(1024)
+        except ConnectionResetError:
+            reply = b""
+        assert not reply.startswith(b"HTTP/")
 
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
     assert "Traceback" not in capsys.readouterr().err
