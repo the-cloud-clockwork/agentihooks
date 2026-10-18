@@ -37,15 +37,17 @@ fi
 slug="compose-proof"
 docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
 import os
+import time
 
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm.store import SwarmConfig, connect
+from scripts.swarm.store import AgentRecord, SwarmConfig, connect
 from scripts.swarm_ledger.new_ledger import create
 
 store, slug = connect(), os.environ["SLUG"]
 create(slug, {"title": "Compose proof", "phases": [{"title": "Prove the compose stack"}]}, "swarm")
 store.create(SwarmConfig(slug, "/data", 1, 1))
 seats = SeatRegistry(store.redis)
+store.start_execution(slug, AgentRecord("host-agent", "master", "", seat=f"master@{slug}", started_at=int(time.time() * 1000)))
 seats.occupy(f"master@{slug}", "host-agent", 0)
 print(f"seeded swarm {slug} with host-agent seated, in the compose Redis over TLS")
 PY
@@ -82,13 +84,19 @@ member_id="${joined#joined the hive as }"
 member_id="${member_id%%;*}"
 member_agent="$(docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="$member_id" swarm python -c '
 import os, time
+from scripts.inbox import exits
+from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, connect
 store, slug, member = connect(), os.environ["SLUG"], os.environ["MEMBER_ID"]
 name = store.next_name(slug, "eng")
 started = int(time.time() * 1000)
 agent = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", started_at=started, hive=member, runtime_target={"host_id": member})
-store.start_execution(slug, agent)
-store.seats.occupy(f"eng-1@{slug}", name, started)
+def place_member():
+    store.start_execution(slug, agent)
+    store.seats.occupy(agent.seat, name, started)
+    return {}
+exits.sweep(InboxStore(store.redis), slug, store, place_member)
+assert store.seats.exit_of(name) == {}, "the exit sweep marked the newly placed member as exited"
 print(name)
 ')"
 printf 'placed %s on the member in seat eng-1\n' "$member_agent"
