@@ -12,7 +12,6 @@ import pytest
 
 from scripts.swarm import cli, stack_init
 
-ROOT = Path(__file__).resolve().parents[2]
 PASSWORD = "pw-test"
 CLIENT_REDIS = "redis://" + "swarm:" + PASSWORD + "@127.0.0.1:6380/0"
 HEALTHY = [
@@ -111,13 +110,6 @@ READY = (
 )
 
 
-def test_packaged_stack_matches_the_repository_stack():
-    for name in STACK_FILES:
-        assert (stack_init.BUNDLED / name).read_bytes() == (ROOT / name).read_bytes(), name
-    shipped = sorted(str(p.relative_to(stack_init.BUNDLED)) for p in stack_init.BUNDLED.rglob("*") if p.is_file())
-    assert shipped == STACK_FILES
-
-
 def test_init_brings_up_the_stack_and_prints_the_next_steps(home):
     docker = Docker()
     code, out = init(home, docker)
@@ -144,7 +136,7 @@ def test_init_brings_up_the_stack_and_prints_the_next_steps(home):
     for name in (".env", "client.env"):
         assert stat.S_IMODE((folder / name).stat().st_mode) == 0o600
     for name in STACK_FILES:
-        assert (folder / name).read_bytes() == (ROOT / name).read_bytes(), name
+        assert (folder / name).read_bytes() == (stack_init.BUNDLED / name).read_bytes(), name
     assert (folder / "deploy/compose/tls").is_dir()
     assert PASSWORD not in out
 

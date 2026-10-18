@@ -66,3 +66,16 @@ def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
     assert 'if (( attempt == attempts )); then\n    exit "$status"\n  fi' in retry
     assert "sleep 10" in retry
     assert script.index(pull) < script.index(start)
+
+
+def test_swarm_init_ships_the_repository_stack_byte_for_byte():
+    bundled = ROOT / "scripts/swarm/stack"
+    shipped = sorted(str(path.relative_to(bundled)) for path in bundled.rglob("*") if path.is_file())
+    assert shipped == [
+        "compose.yaml",
+        "deploy/compose/redis/healthcheck.sh",
+        "deploy/compose/redis/start.sh",
+        "deploy/compose/redis/users.acl.template",
+    ]
+    for name in shipped:
+        assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
