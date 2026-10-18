@@ -1,6 +1,7 @@
 """One supervised Codex app-server per admitted execution: admit, spawn, connect, bind, then open exactly once."""
 
 import contextlib
+import fcntl
 import json
 import os
 import shutil
@@ -342,9 +343,16 @@ def preserve_legacy_rollouts(home: Path) -> None:
         for rollout in sessions.rglob("*.jsonl"):
             destination = canonical / sessions.name / rollout.relative_to(sessions)
             destination.parent.mkdir(parents=True, exist_ok=True)
-            with rollout.open("rb") as incoming, contextlib.suppress(FileExistsError):
-                with destination.open("xb") as outgoing:
-                    shutil.copyfileobj(incoming, outgoing)
+            with rollout.open("rb") as incoming, destination.open("a+b") as outgoing:
+                fcntl.flock(outgoing.fileno(), fcntl.LOCK_EX)
+                outgoing.seek(0)
+                previous, current = outgoing.read(), incoming.read()
+                if current.startswith(previous):
+                    outgoing.write(current[len(previous) :])
+                elif not previous.startswith(current):
+                    recovered = canonical / sessions.name / f"recovered-{home.parent.name}" / rollout.relative_to(sessions)
+                    recovered.parent.mkdir(parents=True, exist_ok=True)
+                    recovered.write_bytes(current)
 
 
 def remove_home(directory: Path) -> None:
