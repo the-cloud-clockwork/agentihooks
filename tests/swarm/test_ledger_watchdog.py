@@ -359,7 +359,13 @@ def test_a_server_that_does_not_start_again_alerts_the_master(store, tmp_path):
     for _ in range(2):
         ledger_probe.observe(store, "sw", ledger, FakeRuntime(), 1000, clock=ledger.clock, facts=lambda: {})
     assert master_mail(store) == [
-        "The ledger server needed a restart because its code changed on disk, and the restart failed: port 8765 busy."
+        "The ledger probe failed: sw pass 1: read 0.1 seconds and write 0.1 seconds, restart failed, "
+        "CPU unknown over pass, streaks before/after slow 0/1, fast 0/0. "
+        "sw pass 2: read 0.1 seconds and write 0.1 seconds, restart failed, "
+        "CPU unknown over pass, streaks before/after slow 1/2, fast 0/0. "
+        "Server start time unknown. Newest on dev unknown. "
+        "The ledger server needed a restart because its code changed on disk, and the restart failed: port 8765 busy. "
+        "Idle and stale claim checks and nudges pause until recovery below four seconds."
     ]
 
 

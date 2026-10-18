@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/pane_evidence.py:scripts.swarm.pane_evidence.x__last_capture__mutmut_6:83491360563f55dc94b22fbe5cdf2cb9e769a35d96f780e364d473b33d755ba1": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled equivalent: missing file sort key zero versus one preserves production ordering because every captured file has a positive epoch nanosecond modification time. Verified against complete preflight 39082836472."
+  }
+}
