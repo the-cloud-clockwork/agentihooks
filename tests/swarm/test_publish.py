@@ -278,7 +278,7 @@ def test_prepare_creates_the_task_worktree_once_through_the_worktree_command(rep
     assert git(repository, "ls-remote", "origin", "refs/heads/engineer-test") == ""
 
 
-def test_prepare_creates_a_continuation_from_the_recorded_remote_branch(repository, tmp_path, monkeypatch):
+def test_prepare_continues_the_recorded_remote_branch_and_publish_pushes_only_it(repository, tmp_path, monkeypatch):
     from scripts.swarm import publish, stack
 
     git(repository, "push", "origin", "HEAD:predecessor")
@@ -866,6 +866,8 @@ def test_parked_successor_restacks_and_publishes_with_predecessor_checkout_prese
 
     stack.restack("swarm", p.agent, p.ledger)
 
+    upstream = subprocess.run(["git", "-C", str(root), "rev-parse", "@{upstream}"], capture_output=True)
+    assert upstream.returncode != 0
     assert p.task["branch"] == "engineer-test"
     assert p.task["repository_branches"] == {str(repository): "engineer-test"}
     assert p.task["parked_on"] == []
