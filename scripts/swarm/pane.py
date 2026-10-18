@@ -32,6 +32,24 @@ PROVIDER_ERRORS = {
 }
 
 
+def content_refusal(harness: str, text: str) -> str:
+    if harness != "codex":
+        return ""
+    plain = ESCAPE.sub("", text)
+    notice = re.search(r"(?m)^ⓘ This content can[’']t be shown\s*$", plain)
+    if not notice:
+        return ""
+    tail = plain[notice.end() :]
+    if not re.search(r"(?m)^› ", tail):
+        return ""
+    return notice.group(0)
+
+
+def refusal_input(text: str) -> str:
+    typed = typed_input(text)
+    return "" if typed == "Ask Codex to do anything" else typed
+
+
 def provider_error(harness: str, text: str) -> str:
     plain = ESCAPE.sub("", text)
     for pattern in PROVIDER_ERRORS.get(harness, ()):
