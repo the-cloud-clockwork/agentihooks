@@ -56,18 +56,21 @@ def test_shard_uses_planned_tests_without_scanning_again(tmp_path, monkeypatch, 
         ]
 
 
-def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_through_a_helper(tmp_path, monkeypatch):
+@pytest.mark.parametrize("recorded,tests", [(True, ["tests/test_helper.py"]), (False, [])])
+def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_through_a_helper(
+    tmp_path, monkeypatch, recorded, tests
+):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
     (tmp_path / "scripts/core.py").write_text(
-        "def judge(value):\n    return value + 1\n\n\ndef other(value):\n    return value - 1\n"
+        "class Store:\n    def judge(self, value):\n        return value + 1\n\n\ndef other(value):\n    return value - 1\n"
     )
-    (tmp_path / "scripts/helper.py").write_text("from scripts.core import judge\n")
+    (tmp_path / "scripts/helper.py").write_text("from scripts.core import Store\n")
     (tmp_path / "tests/test_helper.py").write_text("from scripts import helper\n")
     (tmp_path / "tests/test_other.py").write_text("import json\n")
     (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
     manifest = {
-        "units": ["scripts/core.py::judge", "scripts/core.py::other", "scripts/core.py::<module>"],
+        "units": ["scripts/core.py::Store.judge", "scripts/core.py::other", "scripts/core.py::<module>"],
         "tests": {
             "tests/test_helper.py::test_judge": {"units": [0]},
             "tests/test_other.py::test_other": {"units": [1, 2]},
@@ -78,20 +81,18 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
 
     def record(repository, before):
         asked.append(repository)
-        return {"id": 7}, manifest
+        return ({"id": 7}, manifest) if recorded else None
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
     monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
     monkeypatch.setattr("mutmut.configuration._config", None)
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
-    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {2}})
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {3}})
     monkeypatch.setattr(plan, "find_record", record)
     assert plan.main() == 0
     assert asked == ["owner/repo"]
-    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
-        "scripts/core.py": ["tests/test_helper.py"]
-    }
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/core.py": tests}
 
 
 def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, monkeypatch):

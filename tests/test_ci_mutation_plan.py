@@ -556,7 +556,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     )
     monkeypatch.setattr(
         "scripts.ci_mutation.plan.estimate",
-        lambda root, changes, selection: (
+        lambda root, changes, selection, manifest: (
             (1601.4, 50, ["tests/test_sample.py"])
             if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
             else None
