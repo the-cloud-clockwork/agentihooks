@@ -20,6 +20,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 from dataclasses import replace
 
+from hooks.context import swarm_heartbeat
 from scripts.handoff import transfers
 from scripts.swarm.tick import tick
 from tests.swarm.test_outage_resume import three_owners
@@ -82,7 +83,8 @@ def test_refusal_wake_respects_busy_typed_and_operator_quiet_guards(store, state
     assert prompts == []
 
 
-def test_second_distinct_refusal_frees_the_task_with_a_handoff(store, monkeypatch):
+@pytest.mark.parametrize("expanded", [False, True])
+def test_second_distinct_refusal_frees_the_task_with_a_handoff(store, monkeypatch, expanded):
     ledger, runtime, agents = three_owners(store)
     owner = executing(store, replace(agents[0], harness="codex"))
     capture = [CAPTURE]
@@ -99,13 +101,20 @@ def test_second_distinct_refusal_frees_the_task_with_a_handoff(store, monkeypatc
     )
     for agent in agents[1:]:
         runtime.statuses[agent.name] = "working"
+    env = {"AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_AGENT_NAME": owner.name}
+    swarm_heartbeat.heard("[swarm delivery] Continue", env, store.redis, 1500)
     tick("sw", store, ledger, runtime, 2000)
     tick("sw", store, ledger, runtime, 3000)
     assert owner.name not in runtime.killed
-    capture[0] = "Earlier scrollback\n" + CAPTURE
+    capture[0] = (
+        CAPTURE.replace("• Ran gh api repos/", "• Ran expanded details gh api repos/")
+        if expanded
+        else "Earlier scrollback\n" + CAPTURE
+    )
     tick("sw", store, ledger, runtime, 4000)
     assert owner.name not in runtime.killed
-    capture[0] = CAPTURE.replace("• Ran gh api repos/", "• Ran a second command gh api repos/")
+    swarm_heartbeat.heard("[swarm delivery] Continue", env, store.redis, 4500)
+    capture[0] = CAPTURE
     tick("sw", store, ledger, runtime, 5000)
     assert owner.name in runtime.killed
     assert store.claimant("sw", owner.task) is None
