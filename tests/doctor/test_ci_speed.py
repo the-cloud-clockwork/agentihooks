@@ -45,6 +45,29 @@ def test_waiting_shards_share_one_finding_with_full_group_statistics():
     assert "anton-oss" in finding.evidence[0]
 
 
+def test_wait_groups_keep_runs_attempts_and_label_sets_separate():
+    first = job(301, identity=11)
+    second = job(302, identity=12)
+    second["labels"] = ["anton-batch"]
+    records = [
+        record([first, second]),
+        record([job(303)], identity=8),
+        record([job(304)], run_attempt=2),
+    ]
+    found = ci_speed.findings(records, NOW - 2000000, NOW)
+    assert len({finding.id for finding in found}) == 4
+    assert sorted(finding.measure for finding in found) == [301, 302, 303, 304]
+
+
+def test_new_wait_keeps_older_group_members_in_its_statistics():
+    older = job(400, created=-1000)
+    new = job(302, created=-310, identity=12)
+    [finding] = ci_speed.findings([record([older, new])], NOW - 60000, NOW)
+    assert "2 jobs" in finding.summary
+    assert finding.measure == 400
+    assert "median 351.0 seconds" in finding.evidence[0]
+
+
 @pytest.mark.parametrize("wait, count", [(299, 0), (300, 0), (301, 1)])
 def test_runner_wait_crosses_only_above_five_minutes(wait, count):
     found = ci_speed.findings([record([job(wait)])], NOW - 2000000, NOW)
@@ -53,7 +76,7 @@ def test_runner_wait_crosses_only_above_five_minutes(wait, count):
         [finding] = found
         assert finding.kind == "ci runner wait"
         assert finding.measure == 301
-        assert all(text in " ".join(finding.evidence) for text in ["anton-oss", "unit", "7", "301"])
+        assert all(text in " ".join(finding.evidence) for text in ["anton-oss", "1 jobs", "7", "301"])
 
 
 def test_a_still_queued_job_uses_now_and_remains_visible_after_its_creation_window():
