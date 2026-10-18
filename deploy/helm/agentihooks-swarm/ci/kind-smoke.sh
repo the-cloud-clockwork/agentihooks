@@ -111,6 +111,19 @@ if [[ $planted != *"the controller container references swarm-worker-terminal as
   printf 'the chart check did not flag a required reference where the values say optional: %s\n' "$planted" >&2
   exit 1
 fi
+ingress=(--set ingress.enabled=true --set ingress.host=ledger.example.test --set 'networkPolicy.ingressFrom[0].podSelector.matchLabels.app=ingress')
+rendered="$(helm template "$release" "$chart" "${ingress[@]}" --set ledger.tls.secretName=swarm-ledger-tls)"
+for annotation in backend-protocol proxy-ssl-verify proxy-ssl-name proxy-ssl-secret; do
+  if [[ $rendered != *"nginx.ingress.kubernetes.io/$annotation:"* ]]; then
+    printf 'the ingress to a TLS ledger lacks %s\n' "$annotation" >&2
+    exit 1
+  fi
+done
+if [[ "$(helm template "$release" "$chart" "${ingress[@]}")" == *backend-protocol* ]]; then
+  printf 'the ingress to a plain http ledger asked for an https backend\n' >&2
+  exit 1
+fi
+printf 'the ingress verifies the TLS ledger certificate and leaves a plain ledger on http\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
 if [[ $rendered != *":dev@$digest"* ]]; then
@@ -328,6 +341,14 @@ flock "$load_lock" kind load docker-image "$image" "$bundle_image" --name "$clus
 kubectl wait --for=condition=Ready node --all --timeout=120s
 bash "$chart/ci/terminal-route-proof.sh" "$image" &
 route=$!
+ledger_tls="$(mktemp -d)"
+ledger_host="$release-ledger"
+openssl req -x509 -newkey rsa:2048 -nodes -days 1 -subj "/CN=$ledger_host" \
+  -addext "subjectAltName=DNS:$ledger_host,DNS:$ledger_host.default,DNS:$ledger_host.default.svc,DNS:$ledger_host.default.svc.cluster.local,DNS:localhost,IP:127.0.0.1" \
+  -keyout "$ledger_tls/tls.key" -out "$ledger_tls/tls.crt" 2>/dev/null
+kubectl create secret generic swarm-ledger-tls --from-file="$ledger_tls/tls.crt" --from-file="$ledger_tls/tls.key" \
+  --from-file=ca.crt="$ledger_tls/tls.crt"
+rm -rf "$ledger_tls"
 helm install "$release" "$chart" -f "$chart/ci/kind-values.yaml" --wait --timeout 5m
 helm test "$release" --logs --timeout 2m
 
