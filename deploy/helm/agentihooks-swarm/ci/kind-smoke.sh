@@ -370,14 +370,17 @@ import dataclasses, json, os, sys, time
 from scripts.swarm import lease
 from scripts.swarm.store import connect
 
-store, slug, hive = connect(), os.environ["SLUG"], os.environ["HIVE"]
+slug, hive = os.environ["SLUG"], os.environ["HIVE"]
 
 
 def await_lease(accept):
     held = {}
     deadline = time.monotonic() + 180
     while time.monotonic() < deadline:
-        current = lease.current(store, slug)
+        try:
+            current = lease.current(connect(), slug)
+        except Exception:
+            current = None
         held = dataclasses.asdict(current) if current else {}
         if accept(held):
             return held, True
@@ -426,7 +429,10 @@ if [[ -z $retaken ]]; then
 fi
 printf 'controller restarted by its liveness probe and holds the lease again: %s\n' "$retaken"
 
-wait "$prep"
+if ! wait "$prep"; then
+  printf 'the controller setup objects for the control API were not created\n' >&2
+  exit 1
+fi
 helm upgrade "$release" "$chart" -f "$chart/ci/kind-values.yaml" "${workers[@]}" "${policy_map[@]}" "${api[@]}" \
   --wait --timeout 5m
 kubectl rollout status deployment "$release-controller" --timeout 2m
@@ -454,8 +460,13 @@ for probe in startup liveness readiness; do
   kubectl exec "deployment/$release-controller" -c controller -- "${command[@]}" >"$ca_dir/$probe.answer" &
   probe_jobs[$probe]=$!
 done
+declare -A probe_status
 for probe in startup liveness readiness; do
-  if ! wait "${probe_jobs[$probe]}"; then
+  probe_status[$probe]=0
+  wait "${probe_jobs[$probe]}" || probe_status[$probe]=$?
+done
+for probe in startup liveness readiness; do
+  if [[ ${probe_status[$probe]} != 0 ]]; then
     printf 'the controller %s probe failed: %s\n' "$probe" "$(<"$ca_dir/$probe.answer")" >&2
     exit 1
   fi

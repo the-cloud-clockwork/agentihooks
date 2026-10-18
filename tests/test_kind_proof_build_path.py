@@ -174,7 +174,8 @@ def test_controller_setup_runs_beside_the_lease_proof_and_finishes_before_the_up
         "prep=$!\n",
         "registered, no lease bound",
         "pkill -STOP",
-        'wait "$prep"\nhelm upgrade "$release"',
+        'if ! wait "$prep"; then',
+        'fi\nhelm upgrade "$release"',
     ]
     assert [_at(text) for text in order] == sorted(_at(text) for text in order)
 
@@ -185,10 +186,12 @@ def test_one_exec_waits_for_the_lease_and_its_renewal():
     assert "controller lease renewed: " in watch
     assert 'held["expires_at"] > first["expires_at"]' in watch
     assert "sleep 1" not in watch
+    assert "current = lease.current(connect(), slug)\n        except Exception:\n            current = None" in watch
 
 
 def test_every_controller_probe_still_runs_and_fails_the_proof():
     probes = SCRIPT[_at("declare -A probe_jobs") : _at('kubectl wait pod "${controller[@]}" --for=condition=Ready')]
     assert probes.count("for probe in startup liveness readiness; do") == 2
-    assert 'if ! wait "${probe_jobs[$probe]}"; then' in probes
-    assert "exit 1" in probes
+    reaped = probes.index('wait "${probe_jobs[$probe]}" || probe_status[$probe]=$?')
+    failed = probes.index("if [[ ${probe_status[$probe]} != 0 ]]; then")
+    assert reaped < failed < probes.index("probe failed: %s\\n", failed) < probes.index("exit 1", failed)
