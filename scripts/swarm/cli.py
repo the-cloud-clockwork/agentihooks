@@ -495,35 +495,42 @@ def _tickable(slug):
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
+    from scripts.swarm_ledger import authority_context
 
     started = time.monotonic()
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
     operator_env.fill(os.environ)
-    operator_env.classifier(os.environ)
-    if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
-        raise SwarmError(
-            "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-            "and the host timer ticks every 60 seconds"
-        )
-    slugs = store.slugs()
-    if slugs:
-        _reconcile_services()
-        firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
-        if tick_stop.run(
-            slugs,
-            lambda slug: _tick_while_others_run(store, slug, firsts, until),
-            firsts.settled.set,
-            time.monotonic() - started,
-        ):
-            return
-    from scripts import herdr_gc
+    value = None
+    if os.environ.get("SWARM_URL"):
+        from scripts.swarm_ledger.storage_migration.hosted import server_secret
 
-    try:
-        for line in herdr_gc.run(dict(os.environ), now_ms(), True):
-            print(f"herdr: {line}")
-    except Exception as exc:
-        print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
+        value = server_secret()
+    with authority_context.bound(value):
+        operator_env.classifier(os.environ)
+        if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
+            raise SwarmError(
+                "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
+                "and the host timer ticks every 60 seconds"
+            )
+        slugs = store.slugs()
+        if slugs:
+            _reconcile_services()
+            firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
+            if tick_stop.run(
+                slugs,
+                lambda slug: _tick_while_others_run(store, slug, firsts, until),
+                firsts.settled.set,
+                time.monotonic() - started,
+            ):
+                return
+        from scripts import herdr_gc
+
+        try:
+            for line in herdr_gc.run(dict(os.environ), now_ms(), True):
+                print(f"herdr: {line}")
+        except Exception as exc:
+            print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def cmd_controller(store, args):

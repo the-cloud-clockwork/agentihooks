@@ -103,6 +103,10 @@ def workspace(server: ModuleType, slug: str, task_id: str) -> dict:
 def global_resource(handler: object, server: ModuleType, parts: list) -> dict:
     from . import admin, routing
 
+    if parts[0] == "migrations":
+        from scripts.swarm_ledger.storage_migration import hosted
+
+        return hosted.route(handler, server, parts)
     if parts == ["routing", "settings"]:
         return routing.settings(handler, server, body)
     if parts == ["layout"]:

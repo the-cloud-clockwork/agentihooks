@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_server_secret__mutmut_36:cee595455cb6d3fe9e70b74ebd4a0641f191ec9783b0bd3c7d951f562add97f2": {
+    "reader": "Standards",
+    "reason": "urllib Request normalizes this OpenBao header case to the identical header name and sends the same bytes."
+  }
+}
