@@ -149,8 +149,8 @@ def test_gc_cli_parses_the_schedule_flags(monkeypatch, capsys):
     with pytest.raises(SystemExit):
         parser.parse_args(["gc", "--help"])
     shown = capsys.readouterr().out
-    assert "Schedule the hourly sweep on the agentihooks scheduler" in shown
-    assert "Remove the hourly sweep from the agentihooks scheduler" in shown
+    assert " Schedule the hourly sweep on the agentihooks scheduler\n" in shown
+    assert " Remove the hourly sweep from the agentihooks scheduler\n" in shown
 
 
 def test_scheduled_lists_only_live_gc_entries(scheduler):
