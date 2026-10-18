@@ -72,6 +72,7 @@ def _collection_tree(tmp_path):
         subprocess.run(["git", *arguments], cwd=root, check=True, capture_output=True)
     return root
 
+
 @pytest.mark.parametrize("lost", [False, True])
 def test_the_floor_exports_the_same_head_collection_without_collecting_it_again(tmp_path, monkeypatch, lost):
     from tests.count_floor import main
