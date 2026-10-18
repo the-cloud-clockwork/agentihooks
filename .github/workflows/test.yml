@@ -61,7 +61,7 @@ jobs:
       attempt: ${{ steps.decision.outputs.attempt }}
       grader: ${{ steps.grader.outputs.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: dev
           fetch-depth: 0
@@ -71,7 +71,7 @@ jobs:
         id: grader
         run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: hashFiles('scripts/ci_reuse.py') != ''
         with:
           python-version: "3.12"
@@ -149,7 +149,7 @@ jobs:
 
       - name: Publish protected tested tree evidence
         if: steps.decision.outputs.recorded == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: required-tree-${{ github.run_attempt }}
           path: ${{ runner.temp }}/provenance.json
@@ -191,7 +191,7 @@ jobs:
     outputs:
       due: ${{ steps.key.outputs.hit != 'true' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
@@ -226,7 +226,7 @@ jobs:
       files_2: ${{ steps.select.outputs.files_2 }}
       files_3: ${{ steps.select.outputs.files_3 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
         with:
           ref: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
@@ -234,7 +234,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'merge_group' || github.event_name == 'pull_request'
         with:
           python-version: '3.12'
@@ -265,20 +265,20 @@ jobs:
 
       - name: Publish protected tested tree evidence
         if: (github.event_name == 'merge_group' || github.event_name == 'pull_request') && steps.provenance.outputs.recorded == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: required-tree-${{ github.run_attempt }}
           path: ${{ runner.temp }}/provenance.json
           if-no-files-found: error
           retention-days: 7
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'push'
         with:
           ref: ${{ needs.reuse.outputs.grader }}
           persist-credentials: false
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'push'
         with:
           python-version: "3.12"
@@ -290,7 +290,7 @@ jobs:
       - name: Look up the base revision's dev durations
         id: stored
         if: github.event_name == 'pull_request' || github.event_name == 'push'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || github.sha }}
@@ -458,7 +458,7 @@ jobs:
 
       - name: Download the dev durations
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: durations-merged
           path: ~/dev-durations
@@ -468,7 +468,7 @@ jobs:
 
       - name: Download the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -478,7 +478,7 @@ jobs:
 
       - name: Republish the dev durations
         if: github.event_name == 'merge_group' || github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dev-durations
           path: ~/dev-durations/
@@ -489,7 +489,7 @@ jobs:
 
       - name: Republish the dispatched base's coverage baseline
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: queue-coverage-baseline
           path: ~/coverage-baseline/
@@ -504,7 +504,7 @@ jobs:
           ls -A ~/dev-durations
           echo "queued=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'pull_request'
         with:
           ref: ${{ github.sha }}
@@ -519,7 +519,7 @@ jobs:
           git fetch --no-tags origin "$GRADER"
           git worktree add --detach "$RUNNER_TEMP/grader" FETCH_HEAD
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: github.event_name == 'pull_request'
         with:
           python-version: "3.12"
@@ -550,7 +550,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: github.event_name == 'pull_request'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.event.pull_request.base.sha }}
@@ -588,7 +588,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -597,7 +597,7 @@ jobs:
         name: Set up Python ${{ matrix.python-version }}
         if: env.UNIT_SOURCE == ''
         id: python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
 
@@ -614,7 +614,7 @@ jobs:
         name: Restore the test environment
         if: env.UNIT_SOURCE == ''
         id: venv
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
@@ -622,7 +622,7 @@ jobs:
       - &uv
         name: Set up uv
         if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -659,7 +659,7 @@ jobs:
 
       - name: Restore exact count collections
         id: counts
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/count-collections
           key: ${{ steps.venv.outputs.cache-primary-key }}-counts-v1-${{ github.sha }}
@@ -712,7 +712,7 @@ jobs:
           fi
 
       - name: Upload the early collection
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: early-collected-${{ matrix.python-version }}
           path: ${{ runner.temp }}/collected.json
@@ -722,7 +722,7 @@ jobs:
 
       - name: Save exact count collections
         if: steps.counts.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/count-collections
           key: ${{ steps.counts.outputs.cache-primary-key }}
@@ -750,7 +750,7 @@ jobs:
       queue_311: ${{ steps.queue-size.outputs.queue_311 }}
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -760,14 +760,14 @@ jobs:
       - name: Restore the test environment
         if: github.event_name == 'push' && env.UNIT_SOURCE == ''
         id: venv
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/venv
           key: venv-${{ runner.os }}-${{ steps.python.outputs.python-version }}-${{ steps.day.outputs.date }}-${{ hashFiles('pyproject.toml', '.github/test-excludes.txt') }}-${{ hashFiles('.github/test-constraints.txt') }}
 
       - name: Set up uv
         if: github.event_name == 'push' && env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -784,7 +784,7 @@ jobs:
       - &save-venv
         name: Save the test environment from dev
         if: env.UNIT_SOURCE == '' && steps.venv.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/venv
           key: ${{ steps.venv.outputs.cache-primary-key }}
@@ -823,7 +823,7 @@ jobs:
 
       - name: Restore latest dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.key != ''
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/dev-durations
           key: ${{ needs.select.outputs.key }}
@@ -878,7 +878,7 @@ jobs:
 
       - name: Upload the test plan
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reused-tests-${{ matrix.python-version }}
           path: reused-tests.json
@@ -888,7 +888,7 @@ jobs:
 
       - name: Upload the Python 3.12 queue test plan
         if: github.event_name == 'merge_group' && steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reused-tests-3.12
           path: reused-tests.json
@@ -942,7 +942,7 @@ jobs:
 
       - name: Upload the deselected tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reused-${{ matrix.python-version }}
           path: reused.json
@@ -952,7 +952,7 @@ jobs:
 
       - name: Upload the Python 3.12 queue deselected tests
         if: github.event_name == 'merge_group' && steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: reused-3.12
           path: queue-input/3.12/reused.json
@@ -972,7 +972,7 @@ jobs:
 
       - name: Restore the queue split inputs
         if: needs.select.outputs.source != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: split-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
@@ -980,7 +980,7 @@ jobs:
 
       - name: Restore the queue collected tests
         if: needs.select.outputs.source != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: collected-${{ matrix.python-version }}
           run-id: ${{ needs.select.outputs.source }}
@@ -1011,7 +1011,7 @@ jobs:
 
       - name: Upload the Python 3.12 queue collection
         if: github.event_name == 'merge_group'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: collected-3.12
           path: queue-input/3.12/collected.json
@@ -1021,7 +1021,7 @@ jobs:
 
       - name: Upload collected tests
         if: github.event.pull_request.base.ref != 'main'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: collected-${{ matrix.python-version }}
           path: collected.json
@@ -1061,7 +1061,7 @@ jobs:
       - name: Check out the graded commit
         id: checkout
         continue-on-error: true
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         env: &low-speed
           GIT_HTTP_LOW_SPEED_LIMIT: "1000"
           GIT_HTTP_LOW_SPEED_TIME: "60"
@@ -1072,7 +1072,7 @@ jobs:
 
       - name: Check out the graded commit, attempt 2
         if: steps.checkout.outcome == 'failure'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         env: *low-speed
         with: *unit-checkout
 
@@ -1094,7 +1094,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: needs.split.outputs.source == '' && matrix.python-version == '3.12' && matrix.shard == 1
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
@@ -1143,7 +1143,7 @@ jobs:
 
       - name: Download this shard's dev coverage
         if: *reused-coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.run }}
@@ -1208,7 +1208,7 @@ jobs:
 
       - name: Restore queue shard durations
         if: needs.split.outputs.source != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1216,7 +1216,7 @@ jobs:
 
       - name: Restore queue shard flakes
         if: needs.split.outputs.source != ''
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: flakes-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1224,7 +1224,7 @@ jobs:
 
       - name: Restore queue shard coverage
         if: needs.split.outputs.source != '' && matrix.python-version == '3.12'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           run-id: ${{ needs.split.outputs.source }}
@@ -1292,7 +1292,7 @@ jobs:
         python-version: ["3.11", "3.12"]
         leg: ${{ fromJSON(needs.select.outputs.legs) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -1340,7 +1340,7 @@ jobs:
       - name: Restore the Codex CLI
         id: codex
         if: matrix.python-version == '3.12' && contains(format(' {0} ', env.FILES), ' tests/routing/test_codex_api.py ')
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/codex
           key: codex-${{ runner.os }}-${{ env.CODEX_RELEASE }}
@@ -1388,7 +1388,7 @@ jobs:
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-${{ matrix.python-version }}-${{ matrix.leg }}
           path: |
@@ -1401,7 +1401,7 @@ jobs:
 
       - name: Upload selected test durations
         if: ${{ !cancelled() && hashFiles('durations.json') != '' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.leg }}
           path: durations.json
@@ -1410,7 +1410,7 @@ jobs:
 
       - name: Upload selected test flakes
         if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flakes-${{ matrix.python-version }}-${{ matrix.leg }}
           path: flakes.jsonl
@@ -1429,7 +1429,7 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.base.ref == 'main' && github.sha || github.event_name == 'pull_request' && 'dev' || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event_name == 'push' && github.sha || github.event.before || (inputs.base == 'origin/dev' && 'dev' || inputs.base) }}
           persist-credentials: false
@@ -1442,7 +1442,7 @@ jobs:
 
       - name: Set up legacy grader installer
         if: github.event.pull_request.base.ref == 'main'
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -1455,27 +1455,27 @@ jobs:
         run: uv pip install --python "$PYTHON_PATH" --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download shard durations
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: durations-${{ matrix.python-version }}-*
           path: shard-durations
 
       - name: Download collected tests
         if: github.event.pull_request.base.ref != 'main'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: collected-${{ matrix.python-version }}
           path: collected-data
 
       - name: Download the test plan
         if: needs.unit.outputs.reused != '' && needs.unit.outputs.reused != '0'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: reused-tests-${{ matrix.python-version }}
           path: reused-plan
 
       - name: Download shard flake reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: flakes-${{ matrix.python-version }}-*
           path: shard-flakes
@@ -1527,12 +1527,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -1541,7 +1541,7 @@ jobs:
 
       - name: Download shard coverage
         if: needs.select.outputs.scope != 'none'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: coverage-3.12-*
           path: .coverage-shards
@@ -1695,7 +1695,7 @@ jobs:
 
       - name: Upload the test dependency manifest
         if: needs.select.outputs.scope == 'full'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: dep-manifest
           path: ${{ runner.temp }}/dep-manifest/manifest.json
@@ -1705,7 +1705,7 @@ jobs:
 
       - name: Upload coverage and analysis evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sonar-report
           path: |
@@ -1802,7 +1802,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
@@ -1838,7 +1838,7 @@ jobs:
 
       - name: Retain the rendered documentation
         if: ${{ !cancelled() && steps.docs.outputs.build == 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: documentation-site
           path: _site/
@@ -1855,13 +1855,13 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip
@@ -1874,7 +1874,7 @@ jobs:
         run: python -m pip install "pyyaml>=6.0"
 
       - name: Set up uv
-        uses: astral-sh/setup-uv@v10.2.0
+        uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -1971,7 +1971,7 @@ jobs:
       # antoncore dev owns the dashboard and its checker, so the pull request head is only the data they grade.
       - name: Check out the antoncore dashboard column checker
         if: ${{ !cancelled() && steps.antoncore-token.outcome == 'success' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: the-cloud-clockwork/antoncore
           ref: dev
@@ -2038,12 +2038,12 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -2051,7 +2051,7 @@ jobs:
         run: python -m pip install "coverage>=7.4"
 
       - name: Download shard coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: coverage-3.12-*
           path: head-coverage
@@ -2070,7 +2070,7 @@ jobs:
       - name: Restore the exact coverage baseline
         id: cached
         if: github.event_name != 'merge_group' && github.event_name != 'workflow_dispatch'
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.base.outputs.tree }}
@@ -2141,7 +2141,7 @@ jobs:
 
       - name: Download the base baseline its run published
         if: steps.base-run.outcome == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -2151,7 +2151,7 @@ jobs:
 
       - name: Download the queue base coverage baseline
         if: github.event_name == 'workflow_dispatch'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: queue-coverage-baseline
           path: ~/coverage-baseline
@@ -2173,7 +2173,7 @@ jobs:
 
       - name: Upload the coverage ratchet report
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-ratchet
           path: coverage-ratchet/report.txt
@@ -2187,7 +2187,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           persist-credentials: false
@@ -2218,7 +2218,7 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: github.event_name == 'merge_group'
         with:
           ref: ${{ github.sha }}
@@ -2329,7 +2329,7 @@ jobs:
             exit 1
           fi
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: ${{ always() }}
         with:
           ref: ${{ github.sha }}
@@ -2339,14 +2339,14 @@ jobs:
 
       - name: Download this run's test durations
         if: ${{ always() }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: durations-3.*
           path: test-reports
 
       - name: Download this run's test flakes
         if: ${{ always() }}
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: flakes-3.*
           path: test-reports
@@ -2362,15 +2362,15 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -2380,14 +2380,14 @@ jobs:
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Restore recent shard durations
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
           restore-keys: durations-samples-
 
       - name: Download this run's shard durations
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: durations-3.*
           path: ~/durations-samples/${{ github.run_id }}
@@ -2398,7 +2398,7 @@ jobs:
           test -s .test_durations
 
       - name: Publish merged durations
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: durations-merged
           path: .test_durations*
@@ -2410,13 +2410,13 @@ jobs:
         run: mkdir -p ~/dev-durations && cp .test_durations* ~/dev-durations/
 
       - name: Save merged durations to the cache
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/dev-durations
           key: durations-merged-${{ github.sha }}
 
       - name: Save recent shard durations
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/durations-samples
           key: durations-samples-${{ github.sha }}
@@ -2429,23 +2429,23 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
       - name: Restore the flake history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/flake-history
           key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: flake-history-
 
       - name: Download this run's flake reports
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: flakes-3.*
           path: ~/flake-reports
@@ -2455,7 +2455,7 @@ jobs:
         run: python -m tests.flake_budget --history ~/flake-history/history.jsonl --reports ~/flake-reports --out flake-budget.json | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the flake budget
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: flake-budget
           path: flake-budget.json
@@ -2464,7 +2464,7 @@ jobs:
           overwrite: true
 
       - name: Save the flake history
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/flake-history
           key: flake-history-${{ github.run_id }}-${{ github.run_attempt }}
@@ -2475,12 +2475,12 @@ jobs:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
@@ -2496,14 +2496,14 @@ jobs:
           echo "previous=$(git rev-parse "$PREVIOUS^{tree}")" >> "$GITHUB_OUTPUT"
 
       - name: Restore measured coverage history
-        uses: actions/cache/restore@v4
+        uses: actions/cache/restore@v6
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.tree.outputs.previous }}
           restore-keys: coverage-baseline-
 
       - name: Download this run's measured coverage
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: coverage-3.12-*
           path: baseline-coverage
@@ -2516,13 +2516,13 @@ jobs:
             --previous "$HOME/coverage-baseline/baseline.json"
 
       - name: Save the passed dev coverage baseline
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: ~/coverage-baseline
           key: coverage-baseline-${{ steps.tree.outputs.tree }}
 
       - name: Publish the passed dev coverage baseline
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage-baseline
           path: ~/coverage-baseline
@@ -2532,14 +2532,14 @@ jobs:
 
       - name: Download the test dependency manifest
         if: needs.gate-required.result == 'success'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dep-manifest
           path: dep-manifest
 
       - name: Save the dev test dependency manifest
         if: needs.gate-required.result == 'success'
-        uses: actions/cache/save@v4
+        uses: actions/cache/save@v6
         with:
           path: dep-manifest
           key: dep-manifest-${{ github.sha }}
@@ -2558,16 +2558,16 @@ jobs:
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
       selection: ${{ steps.contract.outputs.selection || 'false' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         with:
           version: "0.12.23"
           checksum: "9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6"
@@ -2633,7 +2633,7 @@ jobs:
 
       - name: Upload planned mutation test selection
         if: steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-selection
           path: .mutation-selection.json
@@ -2649,7 +2649,7 @@ jobs:
 
       - name: Forward the reused or empty mutation report
         if: always() && (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-report-0
           path: .mutation-gate/
@@ -2669,18 +2669,18 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           version: "0.12.23"
@@ -2693,7 +2693,7 @@ jobs:
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-selection
 
@@ -2720,7 +2720,7 @@ jobs:
 
       - name: Upload mutation stats part
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-stats-${{ matrix.part }}
           path: .mutation-stats/
@@ -2731,7 +2731,7 @@ jobs:
 
       - name: Upload stats evidence
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-evidence-stats-${{ matrix.part }}
           path: .mutation-gate/
@@ -2751,18 +2751,18 @@ jobs:
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           fetch-depth: 0
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           python-version: "3.12"
 
-      - uses: astral-sh/setup-uv@v10.2.0
+      - uses: astral-sh/setup-uv@v10.3.0
         if: needs.mutation-plan.outputs.forwarded != 'true'
         with:
           version: "0.12.23"
@@ -2775,7 +2775,7 @@ jobs:
 
       - name: Download planned mutation test selection
         if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: mutation-selection
 
@@ -2793,7 +2793,7 @@ jobs:
 
       - name: Download the shared mutation stats
         if: needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: mutation-stats-*
           path: .mutation-stats
@@ -2819,7 +2819,7 @@ jobs:
 
       - name: Upload complete mutation evidence
         if: always() && needs.mutation-plan.outputs.forwarded != 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: mutation-report-${{ matrix.shard }}
           path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
