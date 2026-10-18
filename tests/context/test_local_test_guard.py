@@ -550,6 +550,7 @@ def test_source_inspection_and_prose_naming_a_runner_pass(command, monkeypatch):
         "python3 -c \"import inspect, pytest, sys; print(inspect.getsource(pytest)); sys.modules['pytest'].main()\"",
         "python3 -c \"import runpy; runpy._run_module_as_main('pytest'); print('launch via subprocess')\"",
         "python3 -c \"import runpy; runpy._run_module_as_main('pytest')\"",
+        "python3 -c \"import inspect, pytest, sys; print(inspect.getsource(pytest)); sys.modules['pyt'+'est'].main()\"",
     ],
 )
 def test_runner_use_beside_an_inspection_is_blocked(command, monkeypatch):

@@ -133,19 +133,23 @@ def _imports(tree: ast.Module) -> list[tuple[str, str]]:
     return found
 
 
-def _is_reader(call: ast.Call, modules: set[str], functions: set[str]) -> bool:
+def _is_reader(call: ast.Call, imports: list[tuple[str, str]]) -> bool:
     func = call.func
     if isinstance(func, ast.Attribute):
-        return func.attr in _READERS and isinstance(func.value, ast.Name) and func.value.id in modules
-    return isinstance(func, ast.Name) and func.id in functions
+        return (
+            func.attr in _READERS
+            and isinstance(func.value, ast.Name)
+            and (func.value.id, "inspect") in {(bound, path) for path, bound in imports}
+        )
+    return isinstance(func, ast.Name) and any(
+        bound == func.id and path.startswith("inspect.") and path[8:] in _READERS for path, bound in imports
+    )
 
 
 def _read_roots(tree: ast.Module, imports: list[tuple[str, str]]) -> set[int]:
-    modules = {bound for path, bound in imports if path == "inspect"}
-    functions = {bound for path, bound in imports if path.startswith("inspect.") and path[8:] in _READERS}
     roots = set()
     for node in ast.walk(tree):
-        if isinstance(node, ast.Call) and _is_reader(node, modules, functions):
+        if isinstance(node, ast.Call) and _is_reader(node, imports):
             for arg in node.args:
                 chain = [arg]
                 while isinstance(chain[-1], ast.Attribute):
@@ -153,6 +157,14 @@ def _read_roots(tree: ast.Module, imports: list[tuple[str, str]]) -> set[int]:
                 if isinstance(chain[-1], ast.Name):
                     roots.update(id(link) for link in chain)
     return roots
+
+
+def _only_reads(tree: ast.Module, imports: list[tuple[str, str]]) -> bool:
+    return all(
+        _is_reader(node, imports) or (isinstance(node.func, ast.Name) and node.func.id == "print")
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+    )
 
 
 def _node_text(node: ast.AST) -> str:
@@ -176,7 +188,7 @@ def _reads_runner_source(code: str) -> bool:
         return False
     roots = _read_roots(tree, imports)
     uses = [node for node in ast.walk(tree) if _node_text(node) in runners or _PYTHON_TEST.search(_node_text(node))]
-    return bool(uses) and all(id(node) in roots for node in uses)
+    return bool(uses) and all(id(node) in roots for node in uses) and _only_reads(tree, imports)
 
 
 def _python_code_runs_tests(code: str) -> bool:
