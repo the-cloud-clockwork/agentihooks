@@ -296,7 +296,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         if "github.event_name == 'push'" in str(job.get("if", "")) and "merge_group" not in str(job.get("if", ""))
     }
     queued = set(jobs) - push_only - {"admission", "gate-required"}
-    assert push_only == {
+    expected = {
         "promote",
         "refresh-durations",
         "count-record",
@@ -310,6 +310,9 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "brain-smoke",
         "ledger-load",
     }
+    if (_ROOT / ".github/workflows/count-record.yml").exists():
+        expected.remove("count-record")
+    assert push_only == expected
     assert queued <= _gate_needs(jobs)
 
 
