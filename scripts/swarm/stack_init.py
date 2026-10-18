@@ -141,7 +141,7 @@ def ready(out: TextIO, paint: Paint, home: Path, base: str) -> None:
 
 def start(run: Run, home: Path, timeout: int, out: TextIO) -> list[tuple[str, str]]:
     print("Starting the swarm stack; the first run pulls its images.", file=out)
-    up = compose(home, "up", "--detach", "--pull", "missing", "--no-build", "--wait", "--wait-timeout", str(timeout))
+    up = compose(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", str(timeout))
     result = run(up, capture_output=True, text=True)
     found, failure = health(run, home)
     absent = "in an unknown state" if failure else "not created"

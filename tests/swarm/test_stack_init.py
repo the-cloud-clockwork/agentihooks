@@ -100,7 +100,7 @@ def compose(home, *args):
 
 
 def up(home, timeout):
-    return compose(home, "up", "--detach", "--pull", "missing", "--no-build", "--wait", "--wait-timeout", timeout)
+    return compose(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", timeout)
 
 
 READY = (
