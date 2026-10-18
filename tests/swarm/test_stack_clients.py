@@ -23,6 +23,7 @@ def redis_source(monkeypatch):
         return fakeredis.FakeRedis(
             server=server,
             decode_responses=True,
+            protocol=2,
             username=parsed.username,
             password=parsed.password,
         )
