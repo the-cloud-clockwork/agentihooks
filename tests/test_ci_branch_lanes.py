@@ -455,3 +455,22 @@ def test_a_head_carrying_the_superseded_mutation_lanes_passes_dev_grading(tmp_pa
     (base / lanes.WORKFLOWS / "mutation-preflight.yml").write_text(trusted)
     monkeypatch.chdir(head)
     assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
+def test_the_superseded_mutation_lane_is_refused_on_any_other_job(job, stage, index):
+    workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    updated = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    updated["jobs"][f"{job}-2"] = {**updated["jobs"][job], "concurrency": _superseded_block(stage, index)}
+    assert lanes.problems(updated, workflow) == [f"job {job}-2 has no shared hosted lane concurrency group"]
+
+
+def test_a_branch_only_copy_of_the_mutation_preflight_keeps_no_superseded_lane(tmp_path, monkeypatch):
+    workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    workflow["jobs"]["stats"]["concurrency"] = _superseded_block("stats", "part")
+    workflow["jobs"]["mutation-shard"]["concurrency"] = _superseded_block("shard", "shard")
+    base, head, sha = _repo(tmp_path, {"mutation-copy.yml": workflow, "test.yml": "name: Tests\n"})
+    monkeypatch.chdir(head)
+    found = lanes.refused(sha, base)[f"{lanes.WORKFLOWS}/mutation-copy.yml"]
+    assert "job stats has no shared hosted lane concurrency group" in found
+    assert "job mutation-shard has no shared hosted lane concurrency group" in found
