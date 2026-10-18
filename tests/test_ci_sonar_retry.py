@@ -174,6 +174,24 @@ def test_a_failure_that_is_not_the_server_fails_at_once_without_the_label(tmp_pa
     assert LABEL not in result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("code", [500, 502, 503, 599])
+@pytest.mark.parametrize("stream", ["stdout", "stderr"])
+def test_a_scanner_upload_server_error_recovers_on_one_retry(tmp_path, code, stream):
+    error = f"java.lang.IllegalStateException: Failed to upload report: Error {code} on http://127.0.0.1:9000/api/ce/submit?projectKey=agentihooks : Bad gateway\n"
+    failure = (error, "", 1) if stream == "stdout" else ("", error, 1)
+    result, calls, sleeps, summary = _retry(
+        tmp_path, [failure, ("ANALYSIS SUCCESSFUL\n", "", 0)], "--unless", ".scannerwork/report-task.txt"
+    )
+    assert result.returncode == 0
+    assert len(calls) == 2
+    assert calls[0] == calls[1]
+    assert sleeps == [2]
+    assert result.stdout == "ANALYSIS SUCCESSFUL\n"
+    assert "::warning title=Sonar server retry::" in result.stderr
+    assert LABEL not in result.stderr
+    assert summary == ""
+
+
 def test_a_scanner_that_already_submitted_its_report_is_never_run_again(tmp_path):
     (tmp_path / ".scannerwork").mkdir()
     (tmp_path / ".scannerwork/report-task.txt").write_text("ceTaskId=T1\n")
