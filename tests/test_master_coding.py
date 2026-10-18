@@ -15,6 +15,15 @@ GUARD = runpy.run_path(str(ROOT / "profiles" / "package" / "roles" / "_guards" /
 SID = "master-session"
 
 
+@pytest.fixture(autouse=True)
+def scheduler_storage(monkeypatch):
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
+
+
 @pytest.fixture
 def master(tmp_path, monkeypatch):
     for key, value in {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SWARM_TASK": "master"}.items():
@@ -282,11 +291,6 @@ PROMPT_REFUSAL = (
 
 @pytest.mark.parametrize("task", ["master", "t12"])
 def test_the_question_and_plan_prompts_reach_the_operator_only_after_operator_on(master, monkeypatch, capsys, task):
-    import fakeredis
-
-    redis = fakeredis.FakeRedis(decode_responses=True)
-    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
-    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
     for tool in ("AskUserQuestion", "ExitPlanMode"):
         assert _permission(capsys, tool, SID) == {"behavior": "deny", "message": PROMPT_REFUSAL.format(tool=tool)}
