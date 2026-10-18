@@ -15,15 +15,13 @@ def call(path: str, payload: dict | None, environ) -> dict | None:
     credential = environ.get("AGENTIHOOKS_CONTROLLER_CREDENTIAL")
     if not credential:
         sys.exit("AGENTIHOOKS_CONTROLLER_CREDENTIAL is not set")
-    base, headers = ledger_link.base(environ), {"X-Controller-Credential": credential}
-    ledger_link.guard(base, headers)
     request = urllib.request.Request(
-        f"{base}/api/v1/{path}",
+        f"{ledger_link.base(environ)}/api/v1/{path}",
         data=None if payload is None else json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json", **headers},
+        headers={"Content-Type": "application/json", "X-Controller-Credential": credential},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT, **ledger_link.transport(environ)) as response:
+        with ledger_link.urlopen(request, TIMEOUT, environ) as response:
             return json.loads(response.read())["data"]
     except urllib.error.HTTPError as exc:
         if exc.code == 404 and payload is None:
@@ -56,15 +54,13 @@ def controller_control(slug: str, owner: dict, request: dict, environ=os.environ
 
 
 def _control_call(slug: str, route: str, payload: dict, headers: dict, environ) -> dict:
-    base = ledger_link.base(environ)
-    ledger_link.guard(base, headers)
     request = urllib.request.Request(
-        f"{base}/api/v1/proof-ledgers/{slug}/{route}",
+        f"{ledger_link.base(environ)}/api/v1/proof-ledgers/{slug}/{route}",
         data=json.dumps(payload).encode(),
         headers={"Content-Type": "application/json", **headers},
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT, **ledger_link.transport(environ)) as response:
+        with ledger_link.urlopen(request, TIMEOUT, environ) as response:
             return json.loads(response.read())["data"]
     except urllib.error.HTTPError as exc:
         message = json.loads(exc.read())["error"]["message"]

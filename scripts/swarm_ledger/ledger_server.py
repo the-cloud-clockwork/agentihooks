@@ -722,9 +722,9 @@ class Handshake(Exception):
 
 
 class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
-    def handle_error(self, request, client_address):
+    def handle_error(self, *args):
         if not isinstance(sys.exc_info()[1], Handshake):
-            super().handle_error(request, client_address)
+            super().handle_error(*args)
 
     def process_request(self, request: socket.socket, client_address: tuple[str, int]) -> None:
         try:
@@ -734,7 +734,7 @@ class ThreadingHTTPServer(http.server.ThreadingHTTPServer):
 
 
 class Handler(BaseHTTPRequestHandler):
-    tls: ssl.SSLContext | None = None
+    tls: ssl.SSLContext | None = ledger_link.server_context()
 
     def setup(self):
         if self.tls is not None:
@@ -1163,7 +1163,6 @@ def serve():
         sys.exit(str(conflict))
     legacy.adopt(stored)
     threading.Thread(target=watch_ledgers, daemon=True).start()
-    Handler.tls = ledger_link.server_context()
     server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
     server.request_queue_size = 128
     server.server_bind()

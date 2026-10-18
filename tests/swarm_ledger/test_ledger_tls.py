@@ -1,14 +1,16 @@
 import io
 import os
 import socket
+import ssl
 import subprocess
 import threading
+import urllib.request
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_link, ledger_server, proof_ledger, watch_ledger
+from scripts.swarm_ledger import ledger, ledger_health, ledger_link, ledger_server, proof_ledger, watch_ledger
 from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, new_ledger
@@ -205,3 +207,79 @@ def test_a_plain_http_client_on_the_tls_port_is_dropped_quietly(tls_ledger, caps
 
 def test_the_health_check_answers_over_tls(tls_ledger):
     assert ledger_link.serving(timeout=5, url=tls_ledger["base"]) == str(core.LEDGER_DIR)
+
+
+def trusted(monkeypatch, cert):
+    seen = []
+
+    def urlopen(request, timeout, **options):
+        seen.append((request.full_url.split("/api/")[0], timeout, isinstance(options.get("context"), ssl.SSLContext)))
+        return io.BytesIO(b'{"data": {"credential": "issued"}, "revision": "r"}')
+
+    monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    return seen
+
+
+def test_every_credential_sender_trusts_the_ledger_ca_with_its_own_timeout(monkeypatch, cert, tmp_path):
+    seen = trusted(monkeypatch, cert)
+    environ = {**os.environ, "AGENTIHOOKS_DEPLOYMENT": "distributed", "LEDGER_URL": "https://ledger:8765"}
+    (tmp_path / "shot.png").write_bytes(b"png")
+    monkeypatch.setattr(ledger, "base", lambda: "https://ledger:8765")
+    monkeypatch.setattr(ledger, "credentials", lambda slug: {"X-Ledger-Token": "token"})
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "https://ledger:8765")
+
+    api_client.ResourceClient("https://ledger:8765", {"X-Ledger-Token": "token"}, timeout=3).request(SLUG, "chat")
+    proof_ledger.call("ledgers", {}, {**environ, "AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller"})
+    proof_ledger._control_call(SLUG, "controls", {}, {"X-Proof-Credential": "proof"}, environ)
+    ledger.upload(SLUG, "engineer@323133-0256", str(tmp_path / "shot.png"), "media", {})
+    list(watch_ledger.stream(SLUG, None, {"X-Ledger-Token": "token"}))
+
+    assert seen == [
+        ("https://ledger:8765", 3, True),
+        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
+        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
+        ("https://ledger:8765", ledger.REQUEST_TIMEOUT, True),
+        ("https://ledger:8765", watch_ledger.STREAM_TIMEOUT_S, True),
+    ]
+
+
+def test_the_health_probe_trusts_the_ledger_ca(monkeypatch, cert):
+    seen = []
+
+    def urlopen(request, timeout, **options):
+        seen.append((timeout, isinstance(options.get("context"), ssl.SSLContext)))
+        return io.BytesIO(b"{}")
+
+    monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+
+    assert ledger_health.probe("https://127.0.0.1:8765", urlopen) == ""
+    assert seen == [(ledger_health.WRITE_TIMEOUT_S, True)]
+
+
+def test_only_a_failed_handshake_is_kept_out_of_the_error_log(capsys):
+    server = ledger_server.ThreadingHTTPServer(("127.0.0.1", 0), ledger_server.Handler)
+    try:
+        for error in (ledger_server.Handshake(), ValueError("broken handler")):
+            try:
+                raise error
+            except Exception:
+                server.handle_error(None, ("192.0.2.7", 4242))
+    finally:
+        server.server_close()
+
+    logged = capsys.readouterr().err
+    assert "('192.0.2.7', 4242)" in logged
+    assert "broken handler" in logged
+    assert "Handshake" not in logged
+
+
+def test_a_client_that_never_starts_the_handshake_is_dropped(tls_ledger, monkeypatch):
+    monkeypatch.setattr(ledger_server, "TLS_HANDSHAKE_S", 0.3)
+    with socket.create_connection(("127.0.0.1", tls_ledger["port"]), timeout=5) as stalled:
+        try:
+            reply = stalled.recv(1)
+        except ConnectionResetError:
+            reply = b""
+
+    assert reply == b""

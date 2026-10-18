@@ -55,7 +55,7 @@ def loopback(host: str | None) -> bool:
         found = {info[4][0] for info in socket.getaddrinfo(host, None)}
     except (OSError, TypeError, UnicodeError):
         return False
-    return bool(found) and all(ipaddress.ip_address(address.split("%")[0]).is_loopback for address in found)
+    return bool(found) and all(ipaddress.ip_address(address).is_loopback for address in found)
 
 
 def guard(url: str, headers: dict) -> None:
@@ -73,6 +73,11 @@ def guard(url: str, headers: dict) -> None:
 def transport(environ=os.environ) -> dict:
     pem = environ.get(CA_ENV, "").strip()
     return {"context": ssl.create_default_context(cadata=pem)} if pem else {}
+
+
+def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ):
+    guard(request.full_url, dict(request.header_items()))
+    return urllib.request.urlopen(request, timeout=timeout, **transport(environ))
 
 
 def remote(environ=os.environ) -> bool:
