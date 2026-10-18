@@ -61,20 +61,13 @@ class _Context(dict):
         return _Context(value) if isinstance(value, dict) else value
 
 
-def _evaluate(value, inputs=None, matrix=None, needs=None, **github):
+def _evaluate(value, inputs=None, matrix=None, **github):
     if not isinstance(value, str) or not value.startswith("${{"):
         return value
     names = {
         "github": _Context(github),
         "inputs": _Context(inputs or {}),
         "matrix": _Context(matrix or {"part": 0, "shard": 0}),
-        "needs": _Context(
-            needs
-            or {
-                "plan": {"outputs": {"stats_lane": str(github.get("run_id", 1000) % 10)}},
-                "refine": {"outputs": {"shard_lane": str(github.get("run_id", 1000) % 10)}},
-            }
-        ),
         "endsWith": lambda text, end: str(text).endswith(end),
         "format": lambda template, *args: template.format(*args),
     }
@@ -292,7 +285,7 @@ def test_lane_titles_match_the_workflow_names():
 
 
 @pytest.mark.parametrize("where", sorted(LEGS))
-def test_shard_jobs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool(where):
+def test_mutation_legs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool(where):
     index = {"shard" if LEGS[where] == "shard" else "part": 0}
     groups = set()
     for ref, run_id in (("refs/heads/branch-one", 1000), ("refs/heads/branch-two", 1001)):
