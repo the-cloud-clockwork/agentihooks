@@ -45,8 +45,10 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
     cli.cmd_tick(store, None)
     assert ticked == ["active"]
     error = capsys.readouterr().err
-    assert ("retired: RuntimeError: ledger unavailable" in error) is (excluded == "unavailable")
-    assert "AssertionError" not in error
+    if excluded == "unavailable":
+        assert "retired: RuntimeError: ledger unavailable" in error
+    else:
+        assert error == ""
     assert sorted(checked) == sorted(
         [("binned", "retired"), ("binned", "active"), ("closed", "active")]
         if excluded == "binned"
