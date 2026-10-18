@@ -112,7 +112,16 @@ def _inbox_receiver(address, agent, seat, departed, configs):
     if not is_seat(address):
         return Receiver()
     raw = configs[address.split("@", 1)[1]]
-    config = SimpleNamespace(**{"max_plan": 1, **raw}) if raw else None
+    config = (
+        SimpleNamespace(
+            state=raw["state"],
+            max_eng=int(raw["max_eng"]),
+            max_ci=int(raw["max_ci"]),
+            max_plan=int(raw.get("max_plan", 1)),
+        )
+        if raw
+        else None
+    )
     waiting = config is None or (config.state != "stopped" and not exits.no_successor(address, config))
     return Receiver(seat_wait=waiting)
 
