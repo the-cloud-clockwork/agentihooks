@@ -229,16 +229,18 @@ def test_every_credential_sender_trusts_the_ledger_ca_with_its_own_timeout(monke
     monkeypatch.setattr(ledger, "credentials", lambda slug: {"X-Ledger-Token": "token"})
     monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda environ=None: "https://ledger:8765")
 
-    api_client.ResourceClient("https://ledger:8765", {"X-Ledger-Token": "token"}, timeout=3).request(SLUG, "chat")
+    monkeypatch.delenv("LEDGER_CA_PEM")
     proof_ledger.call("ledgers", {}, {**environ, "AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller"})
     proof_ledger._control_call(SLUG, "controls", {}, {"X-Proof-Credential": "proof"}, environ)
+    monkeypatch.setenv("LEDGER_CA_PEM", environ["LEDGER_CA_PEM"])
+    api_client.ResourceClient("https://ledger:8765", {"X-Ledger-Token": "token"}, timeout=3).request(SLUG, "chat")
     ledger.upload(SLUG, "engineer@323133-0256", str(tmp_path / "shot.png"), "media", {})
     list(watch_ledger.stream(SLUG, None, {"X-Ledger-Token": "token"}))
 
     assert seen == [
+        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
+        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
         ("https://ledger:8765", 3, True),
-        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
-        ("https://ledger:8765", proof_ledger.TIMEOUT, True),
         ("https://ledger:8765", ledger.REQUEST_TIMEOUT, True),
         ("https://ledger:8765", watch_ledger.STREAM_TIMEOUT_S, True),
     ]
