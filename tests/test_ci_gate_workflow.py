@@ -282,12 +282,24 @@ cat "$RUNNER_TEMP/collection.log"
 exit "$status"
 """,
     )
-    assert floor["run"] in (serial, parallel)
+    shared = serial + (
+        'if [[ ! -f "$TEST_COUNT_HEAD_COLLECTION" ]]; then\n'
+        '  cd "$GITHUB_WORKSPACE"\n'
+        "  python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; "
+        'Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))\'\n'
+        "fi\n"
+    )
+    assert floor["run"] in (serial, parallel, shared)
 
 
 def test_dev_records_the_suite_count_and_the_count_floor_reads_it_only_through_the_base_grader():
     jobs = _workflow()["jobs"]
-    recorder = jobs["count-record"]
+    recorder_path = _ROOT / ".github/workflows/count-record.yml"
+    recorder = (
+        yaml.safe_load(recorder_path.read_text())["jobs"]["count-record"]
+        if recorder_path.exists()
+        else jobs["count-record"]
+    )
     assert recorder["if"] == "${{ github.event_name == 'push' && github.ref == 'refs/heads/dev' }}"
     assert recorder["continue-on-error"] is True
     assert recorder["strategy"]["matrix"] == jobs["test-count"]["strategy"]["matrix"]

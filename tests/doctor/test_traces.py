@@ -61,14 +61,20 @@ def test_a_task_cost_finding_says_it_counts_uncached_tokens():
     record = {
         "merged": ["a", "b", "c"],
         "traces": [
-            {"tags": [f"task:{t}"], "observations": [{"type": "GENERATION", "turn": None, "tokens": n}]}
+            {
+                "tags": [f"task:{t}"],
+                "observations": [
+                    {"type": "GENERATION", "turn": None, "tokens": n},
+                    {"type": "SPAN", "turn": 1},
+                ],
+            }
             for t, n in (("a", 100), ("b", 120), ("c", 1000))
         ],
     }
     [found] = traces.task_cost(record, traces.Limits(task_cost_ratio=3))
     assert found.summary == "1000 uncached tokens, over 3 times the other merged tasks"
     assert found.evidence == (
-        "turns 0",
+        "turns 1",
         "traced sessions 1",
         "uncached tokens 1000, median of the other merged tasks 110",
         "uncached tokens are input, cache writes and output; cache reads are left out",

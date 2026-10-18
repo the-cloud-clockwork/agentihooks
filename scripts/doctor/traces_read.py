@@ -150,6 +150,7 @@ def history(
             "session_id": trace.get("sessionId") or "",
             "tags": sorted(trace.get("tags") or []),
             "observations": entries[trace["id"]].get("observations", []),
+            "complete": bool(entries[trace["id"]].get("whole")),
         }
         for trace in listed
     ]
