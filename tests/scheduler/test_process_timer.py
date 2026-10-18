@@ -47,10 +47,13 @@ def test_interruption_cancels_the_timer_and_cleans_the_wake(redis, monkeypatch):
 def test_wait_uses_the_configured_redis_client(redis, monkeypatch):
     monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
     monkeypatch.setattr(process_timer, "blocking_client", lambda: redis)
+    close = Mock()
+    monkeypatch.setattr(redis, "close", close)
     with process_timer.Timer(0) as timer:
         Scheduler(redis).run_due(now=timer.entry.record["due"])
         timer.wait()
     assert not redis.exists(timer.key)
+    close.assert_called_once_with()
 
 
 def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
@@ -62,6 +65,7 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
         assert redis.lrange(timer.key, 0, -1) == ["same"]
         assert redis.ttl(timer.key) == -1
         assert json.loads(event["payload"])["key"] == timer.key
+    assert not redis.exists(timer.key)
 
 
 def test_blocking_client_keeps_connection_settings_without_a_read_timeout(monkeypatch):
@@ -72,7 +76,7 @@ def test_blocking_client_keeps_connection_settings_without_a_read_timeout(monkey
     source.connection_pool.connection_kwargs = {"host": "scheduler", "socket_timeout": 10, "decode_responses": True}
     pool, client = Mock(), Mock()
     constructor = Mock(return_value=pool)
-    monkeypatch.setattr(process_timer, "redis_client", lambda: source)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: source)
     monkeypatch.setattr(redis, "ConnectionPool", constructor)
     monkeypatch.setattr(redis, "Redis", Mock(return_value=client))
     assert process_timer.blocking_client() is client

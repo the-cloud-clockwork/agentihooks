@@ -10,14 +10,10 @@ if TYPE_CHECKING:
     from redis import Redis
 
 
-def redis_client() -> "Redis":
-    from scripts.swarm.store import redis_client as connect
-
-    return connect()
-
-
 def blocking_client() -> "Redis":
     from redis import ConnectionPool, Redis
+
+    from scripts.swarm.store import redis_client
 
     source = redis_client()
     pool = source.connection_pool
@@ -49,7 +45,6 @@ class Timer:
 
     def wait(self) -> None:
         self.redis.blpop(self.key)
-        self.redis.delete(self.key)
 
     def close(self) -> None:
         if self.closed:
