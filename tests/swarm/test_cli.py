@@ -1112,13 +1112,13 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable"]
 
     calls.clear()
     failing.clear()
     failing.add(names[1])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 4]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 3]
     failing.clear()
 
     calls.clear()
