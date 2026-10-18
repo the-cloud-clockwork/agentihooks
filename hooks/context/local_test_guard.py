@@ -85,6 +85,18 @@ _NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
 _FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
 _READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
 _RUNS_ON_IMPORT = frozenset({"unittest.__main__"})
+_READ_NODES = (
+    ast.Module,
+    ast.Expr,
+    ast.Import,
+    ast.ImportFrom,
+    ast.alias,
+    ast.Call,
+    ast.Attribute,
+    ast.Name,
+    ast.Constant,
+    ast.Load,
+)
 _DENY = (
     "BLOCKED: Local test and mutation runs are disabled. Push and open a draft pull request so CI runs the tests. "
     "Set AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true to opt in to local runs."
@@ -157,9 +169,13 @@ def _read_roots(tree: ast.Module, imports: list[tuple[str, str]]) -> set[int]:
 
 def _only_reads(tree: ast.Module, imports: list[tuple[str, str]]) -> bool:
     return all(
-        _is_reader(node, imports) or (isinstance(node.func, ast.Name) and node.func.id == "print")
+        isinstance(node, _READ_NODES)
+        and (
+            not isinstance(node, ast.Call)
+            or _is_reader(node, imports)
+            or (isinstance(node.func, ast.Name) and node.func.id == "print")
+        )
         for node in ast.walk(tree)
-        if isinstance(node, ast.Call)
     )
 
 
