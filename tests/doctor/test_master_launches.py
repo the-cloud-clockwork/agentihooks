@@ -275,8 +275,14 @@ def test_master_reader_is_read_only_and_reads_master_rows_and_journal():
     assert read["journal"] == record["journal"]
     assert read["journal_error"] == ""
     argv = seen[0]
-    assert argv[:4] == ["journalctl", "--user", "-u", "agentihooks-swarm.service"]
-    assert ["--since", "@1", "--until", "@2"] == argv[4:8]
+    assert argv[:5] == [
+        "journalctl",
+        "--user",
+        "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+        "+",
+        "SYSLOG_IDENTIFIER=agentihooks-swarm",
+    ]
+    assert ["--since", "@1", "--until", "@2"] == argv[5:9]
     assert "master spawn failed" in argv
     assert master_launches.findings(read) == []
 
