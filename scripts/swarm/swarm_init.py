@@ -53,9 +53,9 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument("--plan", help="the accepted plan file; its title seeds the ledger and the name suggestions")
     parser.add_argument("--content", help="ledger content JSON as ledger new takes it; default one phase for the plan")
     parser.add_argument("--repo", help="the repository the swarm works; default the current directory")
-    parser.add_argument("--template", default="", help="the swarm template for caps, models and lanes")
+    parser.add_argument("--template", help="the swarm template for caps, models and lanes")
     parser.add_argument("--operator-asked", help="the operator's words asking for a swarm with fewer than three tasks")
-    parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for every service to be healthy")
+    parser.add_argument("--timeout", default="300", help="seconds to wait for every service to be healthy")
     return parser
 
 
@@ -74,7 +74,7 @@ def seed(args: argparse.Namespace) -> dict:
     return {"title": title, "overview": "", "phases": [{"title": title, "description": "", "planning": "auto"}]}
 
 
-def rule(out: TextIO, title: str, used=()) -> None:
+def rule(title: str, used=(), out: TextIO | None = None) -> None:
     print(f"  Rule: {naming.SWARM_NAME_RULE}.", file=out)
     print(f"  Try: {' or '.join(naming.swarm_name_suggestions(title, used))}", file=out)
 
@@ -99,7 +99,7 @@ def ledger_page(environ: Mapping[str, str], name: str) -> str:
 
 class Refusal(NamedTuple):
     problem: str
-    name_taken: bool
+    name_taken: bool = False
 
 
 def create(
@@ -114,7 +114,7 @@ def create(
         args.template != priming.TEMPLATE and ledger_creator.floor_refusal(environ, tasks, args.operator_asked)
     )
     if refusal:
-        return Refusal(refusal, False)
+        return Refusal(refusal)
     repo = os.path.abspath(os.path.expanduser(args.repo or "."))
     flags = ["--template", args.template] if args.template else []
     stacked = {key: value for key, value in content.items() if key != "sources"}
@@ -122,7 +122,7 @@ def create(
     lines = done.stdout.strip().splitlines()
     if done.returncode:
         said = (done.stderr.strip().splitlines() or lines or ["no output"])[-1]
-        return Refusal(f"the stack refused it: {said}", False)
+        return Refusal(f"the stack refused it: {said}")
     found = json.loads(lines[0]) if lines else {}
     if found.get("found") == "ledger":
         return Refusal(f"{args.name} is taken by a ledger that is not a swarm's", True)
@@ -148,14 +148,14 @@ def init(argv: list[str], environ: Mapping[str, str], run: stack_init.Run, opene
     title = plan_title(args.plan) or str(content.get("title", ""))
     if problem := naming.swarm_name_problem(args.name):
         print(paint(f"Swarm not created: {problem}.", "failed"), file=out)
-        rule(out, title)
+        rule(title, out=out)
         return 1
     if code := stack_init.init(["--timeout", str(args.timeout)], environ, run, opener, out, args.name):
         return code
     if refusal := create(args, content, environ, run, out):
         print(paint(f"Swarm not created: {refusal.problem}.", "failed"), file=out)
         if refusal.name_taken:
-            rule(out, title, (taken(run, environ) or set()) | {args.name})
+            rule(title, (taken(run, environ) or set()) | {args.name}, out)
         return 1
     print(f"Swarm {args.name} is paused; start it only when you want it: agentihooks swarm {args.name} start", file=out)
     return 0
@@ -170,7 +170,7 @@ def check(argv: list[str], environ: Mapping[str, str] = os.environ, run: stack_i
     used = taken(run, environ)
     if problem := naming.swarm_name_problem(args.name, used or ()):
         print(f"invalid: {problem}")
-        rule(sys.stdout, plan_title(args.plan) or args.name, used or ())
+        rule(plan_title(args.plan) or args.name, used or ())
         return 1
     unchecked = "" if used is not None else "; the swarm stack did not answer, so the names it holds were not checked"
     print(f"valid: {args.name}{unchecked}")

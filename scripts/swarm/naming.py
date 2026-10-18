@@ -203,7 +203,7 @@ def is_built_slug(slug):
 
 
 def is_code_named_swarm(slug):
-    return any(PATTERNS[kind].fullmatch(slug or "") for kind in CODE_SWARM_KINDS)
+    return any(PATTERNS[kind].fullmatch(slug) for kind in CODE_SWARM_KINDS)
 
 
 def swarm_name_problem(name, taken=()):

@@ -2132,11 +2132,7 @@ def main(argv):
     if argv[:2] == ["names", "check"]:
         from scripts.swarm import swarm_init
 
-        try:
-            return swarm_init.check(argv[2:])
-        except SwarmError as exc:
-            print(f"swarm: {exc}", file=sys.stderr)
-            return 1
+        return swarm_init.check(argv[2:])
     return dispatch(argv)
 
 

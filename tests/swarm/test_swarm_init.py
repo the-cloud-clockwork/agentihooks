@@ -49,12 +49,14 @@ def test_suggestions_come_from_the_plan_title_and_skip_taken_names():
     assert naming.swarm_name_suggestions(TITLE, {"one-way-swarm"}) == ["one-swarm", "way-swarm"]
     assert naming.swarm_name_suggestions("The plan for a swarm") == ["new-swarm", "next-swarm"]
     assert naming.swarm_name_suggestions("Dating app 2", count=3) == ["dating-app-swarm", "dating-swarm", "app-swarm"]
+    held = {"one-two-swarm", "one-swarm", "two-swarm", "three-swarm"}
+    assert naming.swarm_name_suggestions("one two three", held) == ["two-three-swarm", "new-swarm"]
 
 
 def test_only_proof_and_demo_slugs_are_code_named_swarms():
     assert naming.is_code_named_swarm("proof-a1b2c3-t1-1")
     assert naming.is_code_named_swarm("doctor-demo-20261006093000123456")
-    assert not any(map(naming.is_code_named_swarm, ["demo-swarm", "rig-grade-swarm", "plan-2026-10-18", ""]))
+    assert not any(map(naming.is_code_named_swarm, ["demo-swarm", "rig-grade-swarm", "plan-2026-10-18"]))
 
 
 @pytest.fixture
@@ -67,12 +69,16 @@ def plan(tmp_path):
 class Stack(Docker):
     """The stack's swarm container: an exec runs its script in this process, on the fixture's Redis and ledgers."""
 
+    ledgers = None
+
     def __call__(self, argv, capture_output, text, input=None):
         if "exec" not in argv:
             return super().__call__(argv, capture_output, text)
+        assert capture_output is True and text is True and isinstance(json.loads(input), dict)
         self.calls.append(argv[: argv.index("-c")])
         printed, code = io.StringIO(), 0
-        with contextlib.redirect_stdout(printed), mock.patch.object(sys, "stdin", io.StringIO(input)):
+        inside = mock.patch.dict(os.environ, {"LEDGER_DIR": str(self.ledgers)})
+        with inside, contextlib.redirect_stdout(printed), mock.patch.object(sys, "stdin", io.StringIO(input)):
             try:
                 exec(argv[-1], {"__name__": "__main__"})
             except SystemExit as stop:
@@ -95,6 +101,7 @@ def scratch(env, home, monkeypatch, tmp_path):
     monkeypatch.setattr(new_ledger.core, "LEDGER_DIR", ledgers)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://127.0.0.1:6390/0")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    monkeypatch.setattr(Stack, "ledgers", ledgers)
     return env[0]
 
 
@@ -150,7 +157,9 @@ def test_a_name_held_by_a_ledger_that_is_not_a_swarm_is_refused(scratch, plan):
     new_ledger.create("demo-swarm", {"title": "Notes", "phases": [{"title": "One"}]}, "small")
     code, out = init("demo-swarm", "--plan", str(plan))
     assert (code, scratch.slugs()) == (1, [])
-    assert "Swarm not created: demo-swarm is taken by a ledger that is not a swarm's.\n" in out
+    assert out.endswith(
+        f"Swarm not created: demo-swarm is taken by a ledger that is not a swarm's.\n{RULE}  Try: one-way-swarm or one-swarm\n"
+    )
     assert new_ledger.repository.get_document("demo-swarm")["title"] == "Notes"
 
 
@@ -257,8 +266,11 @@ def test_init_help_names_the_command_and_every_option():
     text = " ".join(swarm_init.parser().format_help().split())
     assert text.startswith("usage: agentihooks swarm init [-h] [--plan PLAN] [--content CONTENT] [--repo REPO]")
     for words in (
+        "agentihooks swarm init NAME: bring up the swarm stack, then create the swarm and its ledger under NAME",
         "name the swarm name, which is also its ledger name",
         "--plan PLAN the accepted plan file; its title seeds the ledger and the name suggestions",
+        "--content CONTENT ledger content JSON as ledger new takes it; default one phase for the plan",
+        "--repo REPO the repository the swarm works; default the current directory",
         "--template TEMPLATE the swarm template for caps, models and lanes",
         "--operator-asked OPERATOR_ASKED the operator's words asking for a swarm with fewer than three tasks",
         "--timeout TIMEOUT seconds to wait for every service to be healthy",
@@ -272,6 +284,7 @@ def test_names_check_help_names_the_command_and_its_plan_option(capsys):
     text = " ".join(capsys.readouterr().out.split())
     assert text.startswith("usage: agentihooks swarm names check [-h] [--plan PLAN] name")
     assert "--plan PLAN the plan file whose title seeds the suggestions" in text
+    assert "valid or invalid, the reason and suggestions" in text
 
 
 def test_the_timeout_is_a_number_passed_to_the_stack(scratch, plan, tmp_path, capsys):
@@ -311,6 +324,61 @@ def test_a_silent_stack_failure_names_its_last_output(scratch, plan, stdout, sai
 
     code, out = init("demo-swarm", "--plan", str(plan), docker=Quiet())
     assert code == 1 and out.endswith(f"Swarm not created: the stack refused it: {said}.\n")
+
+
+def test_init_with_nothing_given_refuses_with_fallback_suggestions(scratch):
+    docker = Stack()
+    code, out = init(docker=docker)
+    assert (code, docker.calls) == (1, [])
+    assert out == f"Swarm not created: a swarm needs a name.\n{RULE}  Try: new-swarm or next-swarm\n"
+
+
+def test_suggestions_take_the_plan_title_over_the_content_title(scratch, plan, tmp_path):
+    (tmp_path / "content.json").write_text(json.dumps({"title": "Dating app", "phases": [{"title": "Build"}]}))
+    code, out = init("Demo", "--plan", str(plan), "--content", str(tmp_path / "content.json"))
+    assert code == 1 and out.endswith("  Try: one-way-swarm or one-swarm\n")
+
+
+def test_content_without_a_title_falls_back_to_the_fixed_suggestions(scratch, tmp_path):
+    (tmp_path / "content.json").write_text(json.dumps({"phases": [{"title": "Build"}]}))
+    code, out = init("Demo", "--content", str(tmp_path / "content.json"))
+    assert code == 1 and out.endswith("  Try: new-swarm or next-swarm\n")
+
+
+def test_refusals_are_red_on_a_terminal(scratch, plan, monkeypatch):
+    class Terminal(io.StringIO):
+        def isatty(self):
+            return True
+
+    out = Terminal()
+    assert swarm_init.init(["Demo", "--plan", str(plan)], os.environ, Stack(), page, out) == 1
+    assert out.getvalue().startswith("\033[1;31mSwarm not created: Demo breaks the swarm name rule.\033[0m\n")
+    as_lane(monkeypatch, "eng")
+    out = Terminal()
+    assert swarm_init.init(["demo-swarm", "--plan", str(plan)], os.environ, Stack(), page, out) == 1
+    assert out.getvalue().endswith(f"\033[1;31mSwarm not created: {ledger_creator.CALLER}.\033[0m\n")
+
+
+def test_the_operator_asking_lifts_the_shared_folder_floor(scratch, plan, monkeypatch):
+    as_lane(monkeypatch, "operator")
+    assert init("demo-swarm", "--plan", str(plan))[0] == 1
+    asked = init("demo-swarm", "--plan", str(plan), "--operator-asked", "make one small demo swarm")
+    assert asked[0] == 0 and scratch.slugs() == ["demo-swarm"]
+
+
+def test_a_template_reaches_the_swarm_create_in_the_stack(scratch, plan, monkeypatch):
+    from scripts.swarm import templates
+
+    monkeypatch.setattr(cli.templates, "load", lambda name, environ: templates.parse({"name": name}))
+    assert init("demo-swarm", "--plan", str(plan), "--template", "codex-ci")[0] == 0
+    assert scratch.config("demo-swarm").template == "codex-ci"
+
+
+def test_a_taken_refusal_suggests_around_every_swarm_the_stack_holds(scratch, plan, tmp_path):
+    assert init("one-way-swarm", "--plan", str(plan), "--repo", str(tmp_path))[0] == 0
+    assert init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path))[0] == 0
+    code, out = init("demo-swarm", "--plan", str(plan), "--repo", "/elsewhere")
+    assert code == 1 and out.endswith("  Try: one-swarm or way-swarm\n")
 
 
 def test_main_runs_init_with_the_process_environment_docker_and_stdout(monkeypatch):
