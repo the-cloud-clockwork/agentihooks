@@ -383,6 +383,19 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
     "source, expected",
     [
         ('(ROOT / "extra/text.txt").read_bytes()', ["text.txt"]),
+        (
+            'HERE = Path(__file__).resolve()\nROOT = HERE.parent.parent\n(ROOT / "extra/text.txt").read_text()',
+            ["text.txt"],
+        ),
+        (
+            'HERE = Path(__file__)\nROOT = HERE.resolve().parents[1]\n(ROOT / "extra/text.txt").read_text()',
+            ["text.txt"],
+        ),
+        ('PATTERN = "*.json"\nlist((ROOT / "extra").rglob(PATTERN))', ["nested/child.json"]),
+        (
+            'def ignore(name, value):\n    pass\nignore("ROOT", "unrelated")\n(ROOT / "extra/text.txt").read_text()',
+            ["text.txt"],
+        ),
         ('(ROOT / "extra/text.txt").exists()', ["text.txt"]),
         ('(ROOT / "extra/text.txt").is_file()', ["text.txt"]),
         ('open(ROOT / "extra/text.txt")', ["text.txt"]),
@@ -399,7 +412,7 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
             ["nested/child.json", "text.txt"],
         ),
         (
-            'import pytest\n@pytest.mark.parametrize("folder", ["extra"])\ndef test_records(folder):\n    return (ROOT / folder).rglob("*.json")',
+            'import pytest\nFIELD = "folder"\n@pytest.mark.parametrize(FIELD, ["extra"])\ndef test_records(folder):\n    return list((ROOT / folder).rglob("*.json"))',
             ["nested/child.json"],
         ),
     ],
@@ -438,7 +451,16 @@ def test_workspace_extra_inputs_preserve_templates_and_exclude_credentials_cache
     (root / "extra/__pycache__").mkdir()
     (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     templates = [".env.dist", ".env.example", ".env.sample", ".env.template"]
-    for name in [*templates, ".env", ".env.local", "cache.pyc", ".git/index", "__pycache__/old.pyc"]:
+    for name in [
+        *templates,
+        ".env",
+        ".env.local",
+        "cache.pyc",
+        ".git/index",
+        "__pycache__/old.pyc",
+        "__pycache__/metadata.json",
+        "z-after-link.txt",
+    ]:
         (root / "extra" / name).write_text("fixture")
     outside = tmp_path / "outside.txt"
     outside.write_text("outside")
@@ -455,7 +477,7 @@ def test_workspace_extra_inputs_preserve_templates_and_exclude_credentials_cache
     copied = sorted(
         path.relative_to(work / "extra").as_posix() for path in (work / "extra").rglob("*") if path.is_file()
     )
-    assert copied == templates
+    assert copied == [*templates, "z-after-link.txt"]
 
 
 def test_workspace_does_not_enumerate_fixture_directories_outside_the_repository(tmp_path, monkeypatch):
@@ -515,6 +537,80 @@ def test_workspace_keeps_generated_configuration_and_handles_probed_path_length_
     assert config["also_copy"][-1] == "extra/"
     assert "pyproject.toml/" not in config["also_copy"]
     assert (work / "extra" / allowed).read_text() == "fixture"
+
+
+def test_workspace_discovers_inputs_read_by_a_parent_conftest(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests/nested").mkdir(parents=True)
+    (root / "records").mkdir()
+    (root / "records/input.json").write_text("fixture")
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    (root / "tests/nested/test_selected.py").write_text("def test_selected():\n    pass\n")
+    (root / "tests/conftest.py").write_text(
+        "from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        '(ROOT / "records/input.json").read_text()\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/nested/test_selected.py::test_selected"])
+    assert (work / "records/input.json").read_text() == "fixture"
+
+
+def test_workspace_does_not_copy_inputs_referenced_through_repository_parent_traversal(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    outside = tmp_path / "outside.txt"
+    outside.write_text("outside")
+    (root / "tests/test_selected.py").write_text(
+        'from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / "../outside.txt").read_text()\n'
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert outside.read_text() == "outside"
+    assert not (work / "outside.txt").exists()
+
+
+@pytest.mark.parametrize("separator", ["\n", "\r"])
+def test_workspace_preserves_valid_fixture_names_containing_line_breaks(tmp_path, separator):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "extra").mkdir()
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    name = f"extra/line{separator}name.txt"
+    (root / name).write_text("fixture")
+    (root / "tests/test_selected.py").write_text(
+        f"from pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n(ROOT / {name!r}).read_text()\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert (work / name).read_text() == "fixture"
+
+
+def test_workspace_handles_a_selected_test_probing_an_invalid_null_path(tmp_path):
+    from scripts.ci_mutation.runner import prepare_workspace
+
+    root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
+    (root / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
+    name = "extra/nul\0name"
+    (root / "tests/test_selected.py").write_text(
+        "import pytest\nfrom pathlib import Path\nROOT = Path(__file__).resolve().parents[1]\n"
+        "with pytest.raises(ValueError):\n"
+        f"    (ROOT / {name!r}).read_text()\n"
+    )
+    work = tmp_path / "work"
+    work.mkdir()
+    prepare_workspace(root, work, ["hooks/sample.py"], ["tests/test_selected.py"])
+    assert not (work / "extra").exists()
 
 
 def test_workspace_inside_a_copied_folder_is_not_copied_into_itself(tmp_path):
