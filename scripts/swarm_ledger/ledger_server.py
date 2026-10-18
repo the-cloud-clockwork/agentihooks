@@ -46,6 +46,7 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
+from scripts.scheduler.process_timer import wait as scheduled_wait  # noqa: E402
 from scripts.swarm import freeze  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
     ledger_task_duplicates,
@@ -1189,7 +1190,7 @@ def watch_ledgers(interval=2.0):
                 sys.stderr.write(f"unrelayed replay: {exc}\n")
         sample_streams()
         metrics_journal(request_metrics.persist)
-        time.sleep(interval)
+        scheduled_wait(interval)
 
 
 def serve():
