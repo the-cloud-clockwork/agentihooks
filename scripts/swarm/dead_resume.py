@@ -10,6 +10,16 @@ if TYPE_CHECKING:
     from scripts.swarm.tick import Ledger, Runtime
 
 
+def skip_binding(agent: AgentRecord, facts: dict) -> bool:
+    from scripts.swarm import reports
+
+    return (agent.name not in facts and agent.state != "retiring") or (
+        facts.get(agent.name, {}).get("process") is False
+        and agent.runtime_backend == "local"
+        and not reports.host(agent)
+    )
+
+
 def _owns(store, slug, agent, ledger):
     from scripts.swarm.tick import LEASE_MS
 

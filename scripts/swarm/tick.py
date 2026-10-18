@@ -349,7 +349,7 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
             continue
-        if agent.name not in facts and agent.state != "retiring":
+        if dead_resume.skip_binding(agent, facts):
             continue
         agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
         actions.extend(followed)
@@ -363,8 +363,6 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
         if not differences:
             if agent.state == "retiring":
                 store.put_agent(slug, replace(agent, state="working"))
-            continue
-        if "process" in differences and agent.runtime_backend == "local" and not reports.host(agent):
             continue
         fields = ", ".join(differences)
         saved = live_binding.relaunch_assignment(agent, task, store.config(slug))
@@ -543,12 +541,15 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-            if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
-                actions.append(f"resumed {agent.name}")
-                continue
-            runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
-            actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
+            actions += _lost(slug, store, ledger, runtime, rows, agent, now_ms)
     return actions
+
+
+def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
+    if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+        return [f"resumed {agent.name}"]
+    runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
+    return [f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent)]
 
 
 def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
