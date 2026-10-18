@@ -112,5 +112,7 @@ def sweep(event: dict, delivery_id: str, redis: "Redis") -> None:
             stderr=subprocess.DEVNULL,
             start_new_session=True,
         )
-    except OSError:
-        return
+    except OSError as error:
+        from hooks.common import log
+
+        log("lifecycle sweep failed to start", {"error": str(error)})

@@ -192,9 +192,12 @@ def test_a_sweep_that_cannot_start_never_crashes_the_runner(monkeypatch):
 
     from hooks.lifecycle import timer
 
+    logged = Mock()
+    monkeypatch.setattr("hooks.common.log", logged)
     monkeypatch.setattr(timer.subprocess, "Popen", Mock(side_effect=FileNotFoundError("nice")))
     payload = {"python": "/gone/python", "root": "/opt/agentihooks", "home": "/srv/ah"}
     assert timer.sweep({"payload": json.dumps(payload)}, "delivery-1", fakeredis.FakeRedis()) is None
+    logged.assert_called_once_with("lifecycle sweep failed to start", {"error": "nice"})
 
 
 def test_the_runner_fires_the_sweep_on_the_hour_and_reschedules(scheduler, monkeypatch):
