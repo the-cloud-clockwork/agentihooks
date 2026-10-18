@@ -161,14 +161,26 @@ def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls
 
 
-def _systemctl(calls):
+def _systemctl(calls, failing=()):
     import subprocess
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 0)
+        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0)
 
     return run
+
+
+def test_a_tick_timer_that_cannot_be_disabled_keeps_its_files_for_a_later_pass(tmp_path, capsys):
+    for name in ("agentihooks-swarm.timer", "agentihooks-swarm.service"):
+        (tmp_path / name).write_text("[Unit]\n")
+    calls = []
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls, failing={"disable"}))
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert (tmp_path / "agentihooks-swarm.service").exists()
+    assert capsys.readouterr().err == (
+        "the agentihooks-swarm timer could not be disabled; its unit files stay until a later pass\n"
+    )
 
 
 def test_an_upgrade_disables_and_deletes_the_tick_timer_without_stopping_a_running_tick(tmp_path, monkeypatch):
@@ -240,11 +252,23 @@ def test_schedule_registers_the_tick_and_starts_the_scheduler_runner(monkeypatch
     from scripts.swarm import scheduled_tick, store
 
     seen = []
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.setenv("SCHEDULE_MARKER", "kept")
     monkeypatch.setattr(store, "redis_client", lambda: "redis")
     monkeypatch.setattr(scheduled_tick, "ensure", lambda scheduler: seen.append(("tick", scheduler.redis)))
-    monkeypatch.setattr(service, "ensure_running", lambda: seen.append(("runner",)))
+    monkeypatch.setattr(
+        service,
+        "ensure_running",
+        lambda environ: seen.append(("runner", environ["AGENTIHOOKS_SWARM_REDIS_URL"], environ["SCHEDULE_MARKER"])),
+    )
     assert real_schedule() is True
-    assert seen == [("tick", "redis"), ("runner",)]
+    assert seen == [("tick", "redis"), ("runner", "redis://127.0.0.1:6379/0", "kept")]
+
+    seen.clear()
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://swarm:6379/3")
+    assert real_schedule() is True
+    assert seen[1] == ("runner", "redis://swarm:6379/3", "kept")
 
 
 def test_schedule_reports_a_redis_failure_and_starts_no_runner(monkeypatch, capsys):
@@ -259,7 +283,7 @@ def test_schedule_reports_a_redis_failure_and_starts_no_runner(monkeypatch, caps
     started = []
     monkeypatch.setattr(store, "redis_client", lambda: "redis")
     monkeypatch.setattr(scheduled_tick, "ensure", refuse)
-    monkeypatch.setattr(service, "ensure_running", lambda: started.append(True))
+    monkeypatch.setattr(service, "ensure_running", lambda environ: started.append(True))
     assert real_schedule() is False
     assert started == []
     assert capsys.readouterr().err == "the scheduled swarm tick could not be registered: ConnectionError: down\n"

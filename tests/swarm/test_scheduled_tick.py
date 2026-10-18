@@ -144,8 +144,11 @@ def test_the_holder_runs_the_installed_tick_in_the_journal_with_a_clean_environm
     assert tick.waits == [540]
 
 
-def test_without_systemd_cat_the_holder_runs_the_bare_tick():
-    assert scheduled_tick.command("/bin/agentihooks", which=lambda name: None) == ["/bin/agentihooks", "swarm", "tick"]
+def test_without_systemd_cat_the_holder_runs_the_bare_tick(monkeypatch):
+    asked = []
+    monkeypatch.setattr(scheduled_tick.shutil, "which", lambda name: asked.append(name))
+    assert scheduled_tick.command("/bin/agentihooks") == ["/bin/agentihooks", "swarm", "tick"]
+    assert asked == ["systemd-cat"]
 
 
 def test_the_environment_keeps_only_the_user_manager_variables():

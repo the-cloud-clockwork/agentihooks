@@ -1,5 +1,6 @@
-"""The systemd user timer that runs `agentihooks swarm tick` every minute."""
+"""The swarm user services and the scheduler cron that runs `agentihooks swarm tick` every minute."""
 
+import os
 import shutil
 import subprocess
 import sys
@@ -75,12 +76,15 @@ def _services(names):
 
 def _retire(unit_dir, run):
     present = [unit_dir / name for name in RETIRED if (unit_dir / name).exists()]
-    if present:
-        disable = ["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"]
-        run(disable, capture_output=True, text=True, timeout=30, check=False)
+    if not present:
+        return False
+    disable = ["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"]
+    if run(disable, capture_output=True, text=True, timeout=30, check=False).returncode:
+        print(f"the {UNIT} timer could not be disabled; its unit files stay until a later pass", file=sys.stderr)
+        return False
     for path in present:
         path.unlink()
-    return bool(present)
+    return True
 
 
 def schedule():
@@ -89,14 +93,14 @@ def schedule():
     from scripts.scheduler.core import Scheduler
     from scripts.scheduler.service import ensure_running
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import redis_client
+    from scripts.swarm.store import redis_client, redis_url
 
     try:
         scheduled_tick.ensure(Scheduler(redis_client()))
     except RedisError as exc:
         print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
         return False
-    ensure_running()
+    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
     return True
 
 
