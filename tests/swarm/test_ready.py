@@ -754,6 +754,19 @@ def test_a_merged_pull_request_leaves_a_task_of_another_kind_open_for_its_proof(
     assert merging.run() == []
 
 
+def test_a_merged_code_task_waits_for_declared_post_merge_proof(merging):
+    merging.rows["t1"]["contract"] = {"after": "yes"}
+    merging.pulls[URL] = MERGED
+    assert merging.run() == [f"task t1 awaits its proof, {URL} merged", f"removed the worktree {TOP}"]
+    row = merging.rows["t1"]
+    assert row["state"] == "open" and row["awaiting"] == "verify" and row["claimed_by"] == ""
+    assert row["pr_url"] == URL
+    assert merging.store.handoff("sw", "t1") == "the handoff"
+    assert ready.record(merging.store, "sw", "t1") is None
+    assert merging.store.redis.get(merging.store.key("sw", "claim", "t1")) is None
+    assert merging.run() == []
+
+
 def test_a_merged_pull_request_of_another_kind_waits_while_its_owner_is_live(merging, monkeypatch):
     merging.rows["t1"]["kind"] = "tune"
     merging.pulls[URL] = MERGED
