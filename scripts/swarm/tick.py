@@ -723,7 +723,8 @@ def _session_models(slug, store):
 
 
 def _reopen(slug, ledger, rows, task_id, expected=None):
-    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE, if_match=expected)
+    guard = {"if_match": expected} if expected is not None else {}
+    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE, **guard)
     rows[task_id].update(live)
     return live["state"] == "open"
 
