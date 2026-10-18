@@ -6,6 +6,8 @@ import hooks.hook_manager as hm
 from hooks.context import operator_mode, planner_plan
 from hooks.targets import emitter
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 PLAN = {"plan": "1. Slice the phase.", "planFilePath": "/home/u/.claude/plans/p.md"}
 
 
@@ -90,6 +92,11 @@ def test_pre_tool_use_leaves_the_planner_plan_exit_to_the_permission_request(
 def test_non_swarm_sessions_get_the_pane_prompt_after_operator_on(
     forced_claude, monkeypatch, capsys, tmp_path, lane, tool
 ):
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
     _planner(monkeypatch, lane)
     monkeypatch.delenv("AGENTIHOOKS_SWARM")
     operator_mode.observe("sid-planner-plan", "operator on", True, now=100)
