@@ -1,4 +1,3 @@
-import argparse
 import json
 import os
 import re
@@ -68,9 +67,9 @@ def cause(pull: str, started: str, until: str, groups: list[dict], events: list[
 
 def record(observed: str, env, run, now: str | None = None) -> dict:
     now = now or datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
-    repo = env.get("GITHUB_REPOSITORY", "")
-    number = re.search(r"/pr-(\d+)-", env.get("GITHUB_REF", ""))
-    pull = f"https://github.com/{repo}/pull/{number[1]}" if number else None
+    repo, ref = env.get("GITHUB_REPOSITORY"), env.get("GITHUB_REF")
+    number = ref and re.search(r"/pr-(\d+)-", ref)
+    pull = f"https://github.com/{repo}/pull/{number[1]}" if repo and number else None
     started, old_parent, groups = None, None, []
     try:
         if pull is None:
@@ -81,7 +80,7 @@ def record(observed: str, env, run, now: str | None = None) -> dict:
         journal = queue_record.Journal(pull, run)
         groups = journal.groups() or []
         if journal.gaps:
-            raise SwarmError("; ".join(journal.gaps))
+            raise SwarmError(journal.gaps[0])
         events = merge_queue.graphql(QUERY, {"url": pull}, run)["resource"]["timelineItems"]["nodes"]
         linked = cause(pull, started, now, groups, events)
     except (SwarmError, KeyError, TypeError) as exc:
@@ -90,7 +89,7 @@ def record(observed: str, env, run, now: str | None = None) -> dict:
     return {
         "id": f"queue-rebuild-{env.get('GITHUB_RUN_ID')}-{env.get('GITHUB_RUN_ATTEMPT')}",
         "at": now,
-        "ref": env.get("GITHUB_REF"),
+        "ref": ref,
         "pull": pull,
         "expected_head": own.get("pull_head"),
         "old_head": env.get("GITHUB_SHA"),
@@ -119,9 +118,8 @@ def summary(found: dict) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Record why this merge queue group stopped being current")
-    parser.add_argument("observed", nargs="?", default="")
-    found = record(parser.parse_args(argv).observed, os.environ, subprocess.run)
+    observed = next(iter(sys.argv[1:] if argv is None else argv), "")
+    found = record(observed, os.environ, subprocess.run)
     print(f"queue-rebuild {json.dumps(found)}", file=sys.stderr)
     print(summary(found))
     if path := os.environ.get("GITHUB_STEP_SUMMARY"):

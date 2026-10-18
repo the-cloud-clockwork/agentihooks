@@ -237,3 +237,111 @@ def test_main_prints_the_summary_logs_the_record_and_writes_the_job_summary(tmp_
 )
 def test_the_summary_names_each_cause_on_one_line(found, expected):
     assert rebuild.summary({"id": "r", "cause": found}) == f"record r: {expected}"
+
+
+def test_the_summary_names_a_plain_correlated_enqueue():
+    found = {"action": "unknown", "gap": "g", "correlated": [group(7, 1)]}
+    assert rebuild.summary({"id": "r", "cause": found}) == (
+        f"record r: unknown cause: g; enqueue of {PULL}7 by nestorcolt at 2026-10-16T00:30:00Z"
+    )
+
+
+def test_this_pull_request_itself_is_never_correlated_ahead_of_itself():
+    assert cause([group(3505, 1, enqueued="2026-10-16T01:10:00Z")]) == {"action": "unknown", "gap": rebuild.UNSEEN}
+
+
+def test_an_entry_enqueued_at_the_observation_second_is_inside_the_window():
+    assert cause([group(7, 1, enqueued=UNTIL), group(3505, 2)])["correlated"][0]["pull"] == PULL + "7"
+
+
+@pytest.mark.parametrize("at", [STARTED, UNTIL])
+def test_a_removal_at_either_window_edge_is_linked(at):
+    assert cause([group(1, 1)], [removed(at)])["at"] == at
+
+
+def test_the_gap_for_a_pull_request_gone_without_events_is_exact():
+    assert cause([group(1, 1)]) == {"action": "unknown", "gap": "the pull request left the queue with no removal event"}
+
+
+def test_a_removal_without_a_later_add_while_still_queued_is_not_a_requeue():
+    assert cause([group(3505, 1)], [removed("2026-10-16T01:10:00Z")]) == {"action": "unknown", "gap": rebuild.UNSEEN}
+
+
+def test_a_removal_and_add_in_the_same_second_is_a_requeue():
+    at = "2026-10-16T01:10:00Z"
+    assert cause([group(3505, 1)], [removed(at, id="R"), added(at, id="A")])["action"] == "requeue"
+
+
+@pytest.mark.parametrize("missing", ["GITHUB_REPOSITORY", "GITHUB_REF"])
+def test_a_missing_repository_or_ref_is_recorded_as_a_gap(missing):
+    env = {k: v for k, v in ENV.items() if k != missing}
+    record = rebuild.record("", env, Gh(), now=UNTIL)
+    assert record["pull"] is None
+    assert record["ref"] == env.get("GITHUB_REF")
+    assert record["cause"]["gap"] == "queue unreadable: the queue ref names no pull request"
+
+
+def test_the_record_keeps_the_queue_ref():
+    assert rebuild.record("", ENV, Gh(), now=UNTIL)["ref"] == ENV["GITHUB_REF"]
+
+
+def test_a_journal_gap_is_the_cause_gap():
+    record = rebuild.record("", ENV, Gh(fail="viewer"), now=UNTIL)
+    assert record["cause"]["gap"] == "queue unreadable: queue unreadable: HTTP 403"
+
+
+def test_the_record_time_defaults_to_utc_now_in_github_form(monkeypatch):
+    import time
+    from datetime import UTC, datetime
+
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
+    try:
+        at = rebuild.record("", ENV, Gh())["at"]
+    finally:
+        monkeypatch.delenv("TZ")
+        time.tzset()
+    stamp = datetime.strptime(at, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+    assert abs((datetime.now(UTC) - stamp).total_seconds()) < 60
+
+
+def _main(monkeypatch, argv, summary=None):
+    for name, value in ENV.items():
+        monkeypatch.setenv(name, value)
+    if summary is None:
+        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+    else:
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+    monkeypatch.setattr(rebuild.subprocess, "run", Gh())
+    return rebuild.main(argv)
+
+
+def _logged(err):
+    return json.loads(err.split("queue-rebuild ", 1)[1].splitlines()[0])
+
+
+def test_main_without_an_observed_head_records_none(monkeypatch, capsys):
+    assert _main(monkeypatch, []) == 0
+    assert _logged(capsys.readouterr().err)["observed_ref_head"] is None
+
+
+def test_main_reads_the_observed_head_from_the_command_line(monkeypatch, capsys):
+    monkeypatch.setattr(rebuild.sys, "argv", ["ci_queue_rebuild", "replacement"])
+    assert _main(monkeypatch, None) == 0
+    assert _logged(capsys.readouterr().err)["observed_ref_head"] == "replacement"
+
+
+def test_the_job_summary_holds_the_record_as_indented_json(tmp_path, monkeypatch, capsys):
+    summary = tmp_path / "summary.md"
+    _main(monkeypatch, ["x"], summary)
+    text = summary.read_text()
+    assert text.startswith('### Queue rebuild queue-rebuild-7-2\n\n```json\n{\n  "id": ')
+    assert text.endswith("\n}\n```\n")
+
+
+def test_an_unwritable_job_summary_still_prints_the_summary(tmp_path, monkeypatch, capsys):
+    assert _main(monkeypatch, ["x"], tmp_path) == 0
+    out = capsys.readouterr()
+    assert out.out.startswith("record queue-rebuild-7-2: ")
+    assert out.out.count("\n") == 1
+    assert "\njob summary not written: " in out.err

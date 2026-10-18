@@ -754,12 +754,12 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     seen = []
 
     def operate(verb, url, **kwargs):
-        seen.append((verb, url))
+        seen.append((verb, url, kwargs["journal"].url))
         return {"queued": True}
 
     monkeypatch.setattr(merge_queue, "operate", operate)
     assert cli.main(["sw", "merge", action, URL]) == 0
-    assert seen == [(action, URL)]
+    assert seen == [(action, URL, URL)]
     assert capsys.readouterr().out == '{"queued": true}\n'
 
 

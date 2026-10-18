@@ -143,6 +143,39 @@ def test_an_unreadable_queue_records_the_gap_instead_of_an_inferred_rebuild(tmp_
     assert "rebuilt" not in record
     assert record["gaps"] == ["queue unreadable: HTTP 502", "queue unreadable: HTTP 502"]
     assert record["errors"] == ["refused"]
+    assert record["token_actor"] is None
+
+
+def test_one_unreadable_snapshot_records_no_rebuild(tmp_path, monkeypatch):
+    book = journal(tmp_path, Snapshots(), monkeypatch)
+    record = book.write("queue", URL, "head9", None, [queue_record.group(node(1, "h1", 1))])
+    assert "rebuilt" not in record
+
+
+def test_the_journal_defaults_to_the_agentihooks_home_under_the_user_home(tmp_path, monkeypatch):
+    book = journal(tmp_path, Snapshots(), monkeypatch)
+    monkeypatch.delenv("AGENTIHOOKS_HOME")
+    monkeypatch.setenv("HOME", str(tmp_path))
+    record = book.write("queue", URL, "head9", None, None)
+    lines = (tmp_path / ".agentihooks" / "merge-queue-events.jsonl").read_text().splitlines()
+    assert [json.loads(line) for line in lines] == [record]
+
+
+def test_the_journal_creates_a_nested_home(tmp_path, monkeypatch):
+    book = journal(tmp_path / "a" / "b", Snapshots(), monkeypatch)
+    book.write("queue", URL, "head9", None, None)
+    assert (tmp_path / "a" / "b" / "merge-queue-events.jsonl").exists()
+
+
+def test_observed_between_spans_the_first_and_last_queue_read(tmp_path, monkeypatch):
+    ticks = iter(datetime(2026, 10, 16, 1, 0, second, tzinfo=UTC) for second in range(10))
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    run = Snapshots(*[([node(1, "h1", 1)], LAST)] * 3)
+    book = queue_record.Journal(URL, run=run, clock=lambda: next(ticks))
+    for _ in range(3):
+        book.groups()
+    record = book.write("queue", URL, "head9", None, None)
+    assert record["observed_between"] == ["2026-10-16T01:00:00+00:00", "2026-10-16T01:00:02+00:00"]
 
 
 class Book:
@@ -225,3 +258,16 @@ def test_priority_journals_its_steps_when_an_unexpected_error_escapes():
     with pytest.raises(RuntimeError):
         merge_queue.prioritize(URL, run=run, journal=book)
     assert book.records == [("priority", URL, "head9", "1", "2", [], {"steps": [["dequeue", URL[:-1] + "3"]]})]
+
+
+def test_priority_journals_the_errors_it_returns():
+    queue = FakeQueue()
+    book = Book()
+
+    def run(command, **kwargs):
+        if "enqueuePullRequest" in " ".join(command) and "id=P9" in command:
+            return subprocess.CompletedProcess(command, 1, "", "insertion refused")
+        return queue.run(command, **kwargs)
+
+    result = merge_queue.prioritize(URL, run=run, journal=book)
+    assert book.records[0][5] == result["errors"] == ["insertion refused"]
