@@ -43,6 +43,7 @@ def judge(tmp_path, *, diff=0, run=0):
 
 
 def test_kind_proof_layers_only_the_hive_on_a_current_base():
+    assert len(builds()) == 3
     published, rebuilt_base, rebuilt_hive = builds()
     assert "--pull" not in published
     assert "-f deploy/worker/Dockerfile" in published
