@@ -2,7 +2,7 @@ import json
 from types import SimpleNamespace
 
 import pytest
-from scripts.swarm.models import AgentRecord
+from scripts.swarm.store import AgentRecord
 
 from scripts.swarm import runtime
 
