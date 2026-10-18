@@ -6,6 +6,8 @@ import pytest
 
 from scripts.swarm import stack_env, stack_init
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 
 @pytest.fixture
 def redis_source(monkeypatch):
@@ -47,7 +49,7 @@ def test_prepare_clients_keeps_the_live_store_and_legacy_clients(tmp_path, redis
     def no_docker(*args, **kwargs):
         pytest.fail("client preparation must not change containers")
 
-    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 0
+    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 0, out.getvalue()
     loaded = operator_env.values(environ)
     endpoint = urllib.parse.urlsplit(loaded["AGENTIHOOKS_SWARM_REDIS_URL"])
     assert (endpoint.hostname, endpoint.port, endpoint.username, endpoint.password) == (
@@ -62,5 +64,5 @@ def test_prepare_clients_keeps_the_live_store_and_legacy_clients(tmp_path, redis
     assert redis_source.get("test-stage:inbox:retained") == "pending"
     assert bundle["SWARM_REDIS_PASSWORD"] not in out.getvalue()
     assert stat.S_IMODE((home / "swarm-client.env").stat().st_mode) == 0o600
-    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 0
+    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 0, out.getvalue()
     assert operator_env.values(environ)["AGENTIHOOKS_SWARM_REDIS_URL"] == loaded["AGENTIHOOKS_SWARM_REDIS_URL"]
