@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, queue_record
+from scripts.swarm import cli, ledger_events, merge_queue, queue_priority, queue_record
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/o/r/pull/9"
@@ -157,13 +157,14 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
         return {"url": url, "displaced": [URL[:-1] + "2", URL[:-1] + "3"], "errors": errors}
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
     sent = []
 
     def inbox(redis):
         assert redis is store.redis
         return SimpleNamespace(send=lambda sender, recipient, text: sent.append((sender, recipient, text)))
 
-    monkeypatch.setattr(cli, "InboxStore", inbox)
+    monkeypatch.setattr(queue_priority, "InboxStore", inbox)
     assert cli.main(["sw", "merge", "priority", URL]) == status
     assert sent == [
         (
