@@ -80,18 +80,22 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
     monkeypatch.setattr(server, "repository", Publishing(repo, server.publish_snapshot))
     samples = queue.Queue()
     monkeypatch.setattr(request_metrics, "record", lambda method, route, wall, cpu, lock: samples.put(cpu))
-    profiler = cProfile.Profile(timer=time.thread_time)
+    profiles = []
     profiling = threading.Event()
 
     class ProfileHandler(server.Handler):
         def do_GET(self):
             if not profiling.is_set():
                 return super().do_GET()
+            profiler = cProfile.Profile(timer=time.thread_time)
             profiler.enable()
             try:
                 return super().do_GET()
             finally:
                 profiler.disable()
+                stream = io.StringIO()
+                pstats.Stats(profiler, stream=stream).sort_stats("cumulative").print_stats(35)
+                profiles.append(stream.getvalue())
 
     httpd = server.ThreadingHTTPServer(("127.0.0.1", 0), ProfileHandler)
     port = httpd.server_port
@@ -117,15 +121,13 @@ def test_hierarchy_http_cpu_and_exact_responses(tmp_path, monkeypatch):
         httpd.shutdown()
         httpd.server_close()
         thread.join(timeout=10)
-    stream = io.StringIO()
-    pstats.Stats(profiler, stream=stream).sort_stats("cumulative").print_stats(35)
     seconds = [value for observation in observations for value in observation["cpu_seconds"]]
     report = {
         "source": recorded["source"],
         "requests": len(seconds),
         "mean_cpu_seconds": sum(seconds) / len(seconds),
         "observations": observations,
-        "profile": stream.getvalue(),
+        "profile": profiles[0],
     }
     Path(os.environ["HIERARCHY_CPU_REPORT"]).write_text(json.dumps(report))
     print(json.dumps({key: value for key, value in report.items() if key != "observations"}, indent=2))

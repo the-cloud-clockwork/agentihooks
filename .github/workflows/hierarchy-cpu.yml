@@ -9,7 +9,7 @@ on:
       base:
         description: Revision to compare on the same real ledger and runner
         required: true
-        default: dev
+        default: 726353637ab44da81bdbd374ec393db275856e22
 
 permissions:
   contents: read
