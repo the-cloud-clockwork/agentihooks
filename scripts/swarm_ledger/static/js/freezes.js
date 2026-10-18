@@ -16,7 +16,7 @@ function byId(list, id) {
   return list.find((i) => i.id === id);
 }
 
-export function ancestors(d, key) {
+export function ancestors(d, key, seen = new Set()) {
   const [list, id] = key.split("/");
   if (list === "phases") {
     const phase = byId(d.phases, id);
@@ -29,7 +29,11 @@ export function ancestors(d, key) {
   if (list === "tasks") {
     const task = byId(d.tasks, id);
     if (!task) return [key];
-    if (task.merged_into) return task.freeze_ancestry;
+    if (task.merged_into) {
+      if (task.freeze_ancestry) return task.freeze_ancestry;
+      const target = `tasks/${task.merged_into}`;
+      return [...new Set([key, ...(seen.has(target) ? [] : ancestors(d, target, seen.add(key)))])];
+    }
     const up = [...(task.slice ? ancestors(d, task.slice) : []),
       ...(task.phase ? ancestors(d, `phases/${task.phase}`) : [])];
     return [key, ...new Set(up)];
