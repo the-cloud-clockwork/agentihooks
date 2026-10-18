@@ -3,11 +3,14 @@ import ast
 import json
 import math
 import os
+from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
+from scripts.ci_test_plan import find_record
+from tests.dep_manifest import line_units
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
@@ -15,11 +18,16 @@ WORKERS = 4
 
 
 def estimate(
-    root: Path, changes: dict[str, set[int]], selection: dict[str, list[str]] | None = None
+    root: Path,
+    changes: dict[str, set[int]],
+    selection: dict[str, list[str]] | None = None,
+    manifest: dict | None = None,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
+        if manifest is not None:
+            chosen = sorted({*chosen, *recorded_tests(root, manifest, path, lines)})
         if selection is not None:
             selection[path] = chosen
         if not chosen:
@@ -34,6 +42,14 @@ def estimate(
         # mutmut emits only mutants inside a function or method.
         mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
+
+
+def recorded_tests(root: Path, manifest: dict, path: str, lines: set[int]) -> set[str]:
+    by_line = line_units((root / path).read_text())
+    changed = {f"{path}::{by_line[line]}" for line in lines if line in by_line}
+    units = {index for index, unit in enumerate(manifest["units"]) if unit in changed}
+    files = {test.partition("::")[0] for test, found in manifest["tests"].items() if units.intersection(found["units"])}
+    return {name for name in files if Path(name).name.startswith("test_") and (root / name).is_file()}
 
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
@@ -77,13 +93,22 @@ def main() -> int:
     parser.add_argument("--target", type=float, default=120)
     parser.add_argument("--stats-target", type=float, default=30)
     parser.add_argument("--limit", type=int, default=10)
+    parser.add_argument("--repository")
     args = parser.parse_args()
     root = Path.cwd()
     bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
     changes = discover_changes(root, bases, args.head)
+    manifest = None
+    if args.repository:
+        found = find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
+        if found is None:
+            print("No dev test dependency manifest found; tests are selected by import only.")
+        else:
+            run, manifest = found
+            print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection)
+    seconds, mutants, tests = estimate(root, changes, selection, manifest)
     validate_tests(root, tests)
     browser = str(needs_browser(root, tests)).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")

@@ -3,7 +3,7 @@ import time
 
 import pytest
 
-from hooks.lifecycle import guard, run, timer
+from hooks.lifecycle import guard, run
 from hooks.lifecycle.lease import read_lease
 from hooks.lifecycle.locks import being_removed, removing
 from hooks.lifecycle.model import Holder, Root
@@ -73,7 +73,13 @@ def test_disk_warning_fires_below_the_floor_once_per_window(tmp_path, monkeypatc
 
 def test_kick_is_throttled_unless_forced(tmp_path, monkeypatch):
     started = []
-    monkeypatch.setattr(timer, "start_now", lambda: started.append(1) or True)
+
+    def forked(target, **kwargs):
+        assert target is run.sweep
+        assert kwargs == {"timeout_sec": 3600, "task_name": "lifecycle-gc", "act": True}
+        started.append(1)
+
+    monkeypatch.setattr("hooks._async.fork_and_call", forked)
     guard.kick(home=tmp_path)
     guard.kick(home=tmp_path)
     assert started == [1]
@@ -109,19 +115,6 @@ def test_enforce_holds_the_removal_lock_while_acting(repo, tmp_path, monkeypatch
     run.sweep([repo.root()], snap(uptime=10_000), home, act=True, fresh=lambda: snap(uptime=10_000))
     run.sweep([repo.root()], snap(uptime=14_000), home, act=True, fresh=lambda: snap(uptime=14_000))
     assert seen == [True]
-
-
-def test_timer_units_render_and_install_into_a_fake_home(monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", "/srv/ah")
-    service, unit = timer.render("/venv/bin/python", "/opt/agentihooks")
-    assert "ExecStart=/venv/bin/python -m scripts.gc_cli gc --enforce" in service
-    assert "WorkingDirectory=/opt/agentihooks" in service and "Environment=AGENTIHOOKS_HOME=/srv/ah" in service
-    assert "OnBootSec=2h" in unit and "OnUnitActiveSec=1h" in unit
-    assert "not enabled" in timer.install_timer("/venv/bin/python", "/opt/agentihooks")
-    assert timer.installed()
-    assert timer.start_now() is False
-    assert timer.remove_timer() == "[OK] Removed agentihooks-gc.timer"
-    assert not timer.installed()
 
 
 def test_session_event_kicks_only_when_enabled(monkeypatch):

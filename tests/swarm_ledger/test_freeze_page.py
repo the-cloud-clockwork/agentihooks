@@ -43,7 +43,8 @@ DOC = {
 
 @pytest.fixture
 def page(browser, request):
-    freezes = getattr(request, "param", [])
+    param = getattr(request, "param", [])
+    setup = param if isinstance(param, dict) else {"freezes": param}
     context = browser.new_context(viewport={"width": 1920, "height": 1080})
     from scripts.swarm_ledger import ledger_server
 
@@ -60,7 +61,10 @@ def page(browser, request):
         return route.abort()
 
     context.route("**/*", answer)
-    serve_modules(context, ledger_server.ledger_view(ledger_state({**DOC, "freezes": freezes})), SWARM)
+    view = ledger_server.ledger_view(ledger_state({**DOC, **setup.get("doc", {}), "freezes": setup["freezes"]}))
+    if setup.get("bare"):
+        view["tasks"] = [{k: v for k, v in row.items() if k != "freeze_ancestry"} for row in view["tasks"]]
+    serve_modules(context, view, SWARM)
     tab = context.new_page()
     tab.set_default_timeout(3000)
     tab.on("dialog", lambda dialog: dialog.accept())
@@ -317,3 +321,36 @@ def test_a_lane_focus_holds_tasks_outside_the_lane_and_no_phase(page):
     for selector in ("#item-phases-p1", "#item-phases-p2"):
         assert row_state(tab, selector)["held"] is False
     assert tab.locator("#item-plans-v2 > details.plan-fold > summary > .snowflake").count() == 0
+
+
+@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p1")], "bare": True}], indirect=True)
+def test_a_folded_task_without_stored_ancestry_follows_its_merged_target(page):
+    tab, _ = page
+    assert row_state(tab, "#item-tasks-t5")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t2")["frozen"] is False
+
+
+MERGE_CYCLE = {
+    "tasks": [*DOC["tasks"], {**task("t6", "p2"), "merged_into": "t7"}, {**task("t7", "p3"), "merged_into": "t6"}]
+}
+
+
+@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p3")], "bare": True, "doc": MERGE_CYCLE}], indirect=True)
+def test_folded_tasks_merged_into_each_other_render_and_share_their_freezes(page):
+    tab, _ = page
+    assert row_state(tab, "#item-tasks-t6")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t7")["frozen"] is True
+    assert row_state(tab, "#item-tasks-t2")["frozen"] is False
+
+
+BAD_PHASE = {
+    "phases": [*DOC["phases"], {**phase("p9", "plans/v2", "Broken"), "depends_on": "p1"}],
+    "followups": [{"id": "u1", "text": "Later", "done": False, "comments": []}],
+}
+
+
+@pytest.mark.parametrize("page", [{"freezes": [], "doc": BAD_PHASE}], indirect=True)
+def test_one_malformed_item_leaves_the_other_sections_rendered(page):
+    tab, _ = page
+    assert tab.locator("#item-tasks-t2").count() == 1
+    assert tab.locator("#item-followups-u1").count() == 1

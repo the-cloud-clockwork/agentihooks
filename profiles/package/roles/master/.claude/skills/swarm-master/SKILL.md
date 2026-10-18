@@ -100,7 +100,7 @@ takes the claude ai login and Remote Control.
   A swarm below one step behaves exactly as a single master swarm.
 - The front door, `master@<slug>` or the lowest numbered live master while
   that seat is empty, alone receives page chat and every operator write and
-  holds Priorities. With `master-claude-login` on, a Claude front door also
+  holds Priorities. With `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` on, a Claude front door also
   takes the claude ai login and Remote Control; Codex masters take neither. A
   backend master's page chat write is refused; ask the front door instead.
 - Sync with the other masters, never with workers:

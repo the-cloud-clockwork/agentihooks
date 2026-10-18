@@ -319,6 +319,19 @@ def test_a_prompt_without_overlaps_says_nothing_about_shared_areas():
     assert prompt.OVERLAP_LINE not in text and "shares" not in text
 
 
+def test_an_ownerless_overlap_never_requests_a_note_or_claims_to_wait_on_checks():
+    from scripts.swarm import prompt
+
+    task = {
+        "id": "t3",
+        "title": "Build it",
+        "overlaps": [{"task": "t1", "claimant": "", "checks": False, "areas": ["hooks"]}],
+    }
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", task)
+    assert "Task t1, no live agent; no coordination note needed, shares hooks." in text
+    assert "waiting on checks" not in text
+
+
 ENGINEER = "engineer@a1b2c3-0003"
 CUT = "wt.sh new engineer-a1b2c3-0003"
 

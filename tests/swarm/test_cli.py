@@ -964,12 +964,11 @@ def test_timer_units_and_enable(tmp_path):
     ok = timer.ensure(
         "/bin/agentihooks", tmp_path, run=lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)
     )
-    assert ok and (tmp_path / "agentihooks-swarm.timer").exists()
-    service = (tmp_path / "agentihooks-swarm.service").read_text()
-    assert 'ExecStart="/bin/agentihooks" swarm tick' in service
-    assert "Environment=PATH=%h/.local/bin" in service and "EnvironmentFile=-%h/.agentihooks/.env" in service
-    assert "KillMode=process" in service
-    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    assert ok and (tmp_path / "agentihooks-swarm-waits.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.service").exists()
+    assert ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"] not in calls
+    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
 def test_timer_ensure_also_runs_the_inbox_waker_service(tmp_path):
@@ -1019,7 +1018,7 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
     assert timer.ensure("/scratch/bin/agentihooks", shared, run=run) is False
 
     assert {path.name: path.read_text() for path in shared.iterdir()} == before
-    assert 'ExecStart="/installed/bin/agentihooks" swarm tick' in before["agentihooks-swarm.service"]
+    assert 'ExecStart="/installed/bin/agentihooks" swarm waker' in before["agentihooks-inbox-waker.service"]
     assert calls == []
     refusal = (
         f"this run comes from {scratch}, not the installed agentihooks at {installed}, "
@@ -1029,7 +1028,10 @@ def test_timer_from_a_scratch_copy_leaves_the_shared_units_alone(shared_units, t
 
     proof_dir = tmp_path / "proof-units"
     assert timer.ensure("/scratch/bin/agentihooks", proof_dir, run=run)
-    assert 'ExecStart="/scratch/bin/agentihooks" swarm tick' in (proof_dir / "agentihooks-swarm.service").read_text()
+    assert (
+        'ExecStart="/scratch/bin/agentihooks" swarm waker'
+        in (proof_dir / "agentihooks-inbox-waker.service").read_text()
+    )
 
 
 def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_units):
@@ -1041,7 +1043,7 @@ def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_uni
     assert (
         'ExecStart="/installed/bin/agentihooks" swarm waker' in (shared / "agentihooks-inbox-waker.service").read_text()
     )
-    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
 def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):
@@ -1071,7 +1073,7 @@ def test_timer_ensure_also_runs_the_alert_intake_service(tmp_path):
     )
     enable = ["systemctl", "--user", "enable", "--now", "agentihooks-alert-intake.service"]
     assert (enable, {"capture_output": True, "text": True, "timeout": 30}) in calls
-    assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"]
+    assert calls[-1][0] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
 def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units_alone(tmp_path, monkeypatch):
@@ -1092,20 +1094,19 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
         "agentihooks-alert-intake.service",
         "agentihooks-quota-prober.service",
         "agentihooks-swarm-waits.timer",
-        "agentihooks-swarm.timer",
     ]
     assert calls == [(["systemctl", "--user", "is-enabled", "--quiet", name], kw) for name in names]
 
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
 
     calls.clear()
     failing.clear()
     failing.add(names[1])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 5]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 4]
     failing.clear()
 
     calls.clear()
@@ -1129,7 +1130,6 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
         enable("agentihooks-quota-prober.service"),
         enable("agentihooks-new-intake.service"),
         enable("agentihooks-swarm-waits.timer"),
-        enable("agentihooks-swarm.timer"),
     ]
 
 
@@ -1137,7 +1137,7 @@ def test_the_host_tick_reconciles_the_user_services_once_per_pass(monkeypatch):
     monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
     store = _tick_all(monkeypatch, lambda store, slug: [], ["a", "b"])
     assert store.reconciled == ["/installed/bin/agentihooks"]
-    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == []
+    assert _tick_all(monkeypatch, lambda store, slug: [], []).reconciled == ["/installed/bin/agentihooks"]
 
 
 def test_a_failed_service_install_warns_and_lets_the_tick_go_on(monkeypatch, capsys):
@@ -2759,7 +2759,7 @@ def test_the_host_tick_refuses_a_controller_tick_setting(monkeypatch):
         cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
     assert str(error.value) == (
         "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-        "and the host timer ticks every 60 seconds"
+        "and the host scheduler ticks every 60 seconds"
     )
     assert ticked == []
 

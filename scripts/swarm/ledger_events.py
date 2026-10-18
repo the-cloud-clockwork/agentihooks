@@ -95,6 +95,7 @@ class PullRequest:
     checks_passed: bool = False
     stale_red: bool = False
     required_pending: bool = False
+    running: bool = False
 
 
 def iso_ms(text):
@@ -171,6 +172,7 @@ def pull_request(raw):
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
         _stale_red(raw, checks, results),
         any(result in PENDING - {"EXPECTED"} for result in results),
+        running or any(result in PENDING for result in results),
     )
 
 
