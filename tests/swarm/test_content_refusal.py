@@ -6,7 +6,6 @@ from scripts.swarm.delivery import HerdrMessenger
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord
 
-
 CAPTURE = Path("tests/fixtures/swarm/codex-content-refusal.txt").read_text()
 
 
