@@ -71,6 +71,7 @@ def test_repeated_retained_statements_still_lose_coverage(head_lines, inserted, 
 
 
 def test_long_repeated_line_mapping_fits_the_ratchet_budget(capsys):
+    import sys
     from time import perf_counter
 
     old = "    value = 1\n" * 3000
@@ -79,7 +80,7 @@ def test_long_repeated_line_mapping_fits_the_ratchet_budget(capsys):
     mapped = ratchet.line_map(old, new)
     elapsed = perf_counter() - started
     with capsys.disabled():
-        print(f"Repeated line mapping: lines=3000 seconds={elapsed:.6f} job_budget_seconds=600")
+        print(f"Repeated line mapping: lines=3000 seconds={elapsed:.6f} job_budget_seconds=600", file=sys.stderr)
     assert mapped == {line: line + 1 for line in range(1, 3001)}
     assert elapsed < 10
 
