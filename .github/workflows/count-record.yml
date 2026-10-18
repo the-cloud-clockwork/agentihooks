@@ -1,5 +1,5 @@
 name: Dev test count records
-'on':
+on:
   push:
     branches:
     - dev
