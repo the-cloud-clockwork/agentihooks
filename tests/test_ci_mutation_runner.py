@@ -321,11 +321,15 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
     (resource.parent / "unrelated.txt").write_text("unrelated")
     (root / "other-data").mkdir()
     (root / "other-data" / "unused.txt").write_text("unused")
+    (root / "deploy").mkdir(exist_ok=True)
+    (root / "deploy" / "unread.yaml").write_text("unread")
     expression = " / ".join(repr(part) for part in fixture.split("/"))
     (root / "tests/test_fixture.py").write_text(
         "from pathlib import Path\n"
         "ROOT = Path(__file__).resolve().parents[1]\n"
         "def test_fixture():\n"
+        "    tmp_path = Path('scratch')\n"
+        "    (tmp_path / 'deploy').mkdir(parents=True, exist_ok=True)\n"
         f"    assert (ROOT / {expression}).read_text() == 'selected fixture'\n"
     )
     (root / "tests/test_unselected.py").write_text('UNUSED = "other-data/unused.txt"\n')
@@ -355,6 +359,7 @@ def test_selected_test_clean_baseline_reads_only_its_extra_repository_fixtures(t
         assert (baseline / fixture).read_text() == "selected fixture"
         assert not (baseline / resource.relative_to(root).parent / "unrelated.txt").exists()
         assert not (baseline / "other-data").exists()
+        assert not (baseline / "deploy/unread.yaml").exists()
     assert fixture in config["also_copy"]
 
 
