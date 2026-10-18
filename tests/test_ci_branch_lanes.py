@@ -465,6 +465,22 @@ def test_the_superseded_mutation_lane_is_refused_on_any_other_job(job, stage, in
     assert lanes.problems(updated, workflow) == [f"job {job}-2 has no shared hosted lane concurrency group"]
 
 
+@pytest.mark.parametrize("change", ["swap", "events"])
+def test_the_superseded_mutation_lanes_are_refused_swapped_or_with_new_events(change):
+    workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    updated = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
+    stats, shard = _superseded_block("stats", "part"), _superseded_block("shard", "shard")
+    if change == "swap":
+        stats, shard = shard, stats
+    else:
+        updated[True if True in updated else "on"] = {"workflow_dispatch": None}
+    updated["jobs"]["stats"]["concurrency"] = stats
+    updated["jobs"]["mutation-shard"]["concurrency"] = shard
+    found = lanes.problems(updated, workflow)
+    assert "job stats has no shared hosted lane concurrency group" in found
+    assert "job mutation-shard has no shared hosted lane concurrency group" in found
+
+
 def test_a_branch_only_copy_of_the_mutation_preflight_keeps_no_superseded_lane(tmp_path, monkeypatch):
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
     workflow["jobs"]["stats"]["concurrency"] = _superseded_block("stats", "part")
