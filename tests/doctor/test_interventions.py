@@ -2,6 +2,7 @@ import os
 import re
 import subprocess
 from argparse import Namespace
+from datetime import datetime, timezone
 
 import pytest
 
@@ -130,6 +131,18 @@ def test_pull_dev_with_no_unapplied_fix_records_nothing(store):
     line = interventions.apply(ctx, "pull-dev", args())
     assert ctx.ledger.updates == []
     assert line == "The Doctor pulled dev into the main checkout of the watched swarm."
+
+
+def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return datetime(2026, 10, 18, 12, tzinfo=timezone.utc).astimezone(tz) if tz else datetime(2026, 10, 18, 21)
+
+    monkeypatch.setattr(interventions, "datetime", Clock)
+    ctx = context(store)
+    assert interventions.record_applied(ctx, ["a"]) == ["a"]
+    assert ctx.ledger.updates == [(DOCTOR, "a", {"applied_at": "2026-10-18T12:00:00Z"}, f"master@{DOCTOR}")]
 
 
 def test_a_failed_command_is_reported_and_not_logged(store):

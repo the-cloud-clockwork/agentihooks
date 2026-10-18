@@ -45,6 +45,12 @@ def test_a_swarm_that_is_not_a_doctor_never_waits_on_an_applied_time():
     assert apply_wait.checker(PLAIN, found)(found["m"]) is True
 
 
+def test_a_tune_task_waits_on_a_dependency_missing_from_the_rows():
+    found = rows(a={})
+    del found["a"]
+    assert apply_wait.unapplied(found["m"], found) == ["a"]
+
+
 @pytest.mark.parametrize(("template", "held"), [("doctor", True), ("", False)])
 def test_the_tick_claims_a_doctor_tune_task_only_after_its_fix_is_applied(tmp_path, template, held):
     import fakeredis

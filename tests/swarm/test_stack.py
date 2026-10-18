@@ -1,3 +1,4 @@
+import dataclasses
 import json
 import subprocess
 
@@ -271,6 +272,41 @@ def test_a_read_only_task_with_no_open_dependency_is_refused(parked, capsys):
     ledger.rows["t1"].update({"kind": "tune", "branch": ""})
     ledger.rows["a"]["state"] = "done"
     _refused(parked, capsys, "the task waits on no open dependency; finish it, or hand it off for its window")
+
+
+def test_a_read_only_task_names_each_open_dependency_including_one_missing_from_the_ledger(parked):
+    _, ledger, _, _, doc = parked
+    ledger.rows["t1"].update({"kind": "tune", "branch": "", "depends_on": ["a", "gone"]})
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a", "gone"]
+    note = stack.READ_ONLY_NOTE.format(names="Build the parser and its dependency")
+    assert ("sw", "t1", note, AGENT) in ledger.comments
+
+
+def test_a_read_only_task_names_a_title_the_comment_filter_refuses_only_as_its_dependencies(parked):
+    _, ledger, _, _, doc = parked
+    ledger.rows["t1"].update({"kind": "tune", "branch": ""})
+    ledger.rows["a"]["title"] = "Fix the parser — then the schema"
+    assert park(doc) == 0
+    assert ("sw", "t1", stack.READ_ONLY_NOTE.format(names="its dependencies"), AGENT) in ledger.comments
+
+
+def test_a_read_only_task_refuses_a_malformed_document(parked, capsys):
+    parked[1].rows["t1"].update({"kind": "tune", "branch": ""})
+    doc = parked[4]
+    doc.write_text(doc.read_text().replace("<!-- handoff complete -->", ""))
+    found = handoff_check.problems(doc.read_text(), lambda address: True)
+    _refused(parked, capsys, handoff_check.refusal(found))
+
+
+def test_a_doctor_tune_task_parks_on_a_merged_fix_not_yet_applied(parked, monkeypatch):
+    store, ledger, _, _, doc = parked
+    config = store.config
+    monkeypatch.setattr(store, "config", lambda slug: dataclasses.replace(config(slug), template="doctor"))
+    ledger.rows["t1"].update({"kind": "tune", "branch": "", "depends_on": ["a"]})
+    ledger.rows["a"].update({"state": "done", "kind": "code"})
+    assert park(doc) == 0
+    assert ledger.rows["t1"]["parked_on"] == ["a"]
 
 
 @pytest.mark.parametrize("repo", [None, "https://github.com/o/other"])

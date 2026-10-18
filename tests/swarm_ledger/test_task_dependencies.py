@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
-from scripts.swarm_ledger import ledger_tasks  # noqa: E402
+from scripts.swarm_ledger import ledger_kinds, ledger_tasks, task_dependencies  # noqa: E402
 from scripts.swarm_ledger.ledger_core import Context  # noqa: E402
 
 
@@ -128,6 +128,16 @@ def test_claim_treats_an_unspecified_state_as_open():
     live, ctx = claim({"tasks": [work, {"id": "dep", "state": "open"}]})
     assert "state" not in live
     assert (live["claimed_by"], ctx.dirty) == ("", False)
+
+
+def test_a_tune_task_is_not_ready_while_its_dependency_is_missing_from_the_rows():
+    task = {"id": "m", "kind": "tune", "depends_on": ["gone"]}
+    assert task_dependencies.ready(task, {"m": task}) is False
+
+
+@pytest.mark.parametrize(("task", "read_only"), [({}, False), ({"kind": "ci"}, False), ({"kind": "tune"}, True)])
+def test_read_only_names_every_kind_that_keeps_no_branch(task, read_only):
+    assert ledger_kinds.read_only(task) is read_only
 
 
 @pytest.mark.parametrize(
