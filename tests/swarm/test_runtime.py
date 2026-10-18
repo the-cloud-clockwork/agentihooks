@@ -291,6 +291,23 @@ def test_spawn_marks_the_launch_as_the_tick_s_own(tmp_path, monkeypatch):
     assert _spawn_env(tmp_path, monkeypatch, compact_limit=0)["AGENTIHOOKS_SWARM_SPAWN"] == "1"
 
 
+def test_spawn_hands_each_agent_its_own_ledger_token_and_never_the_server_secret(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.ledger_authority import agent_token
+
+    monkeypatch.setenv("SWARM_SECRET", "seed-one")
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert env["AGENTIHOOKS_LEDGER_AGENT_TOKEN"] == agent_token("seed-one", "sw", "engineer@a1b2c3-0001")
+    assert "SWARM_SECRET" not in env
+
+
+def test_spawn_without_the_server_secret_never_passes_on_the_tick_s_token(tmp_path, monkeypatch):
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "the-tick-s-own")
+    env = _spawn_env(tmp_path, monkeypatch, compact_limit=0)
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in env and "SWARM_SECRET" not in env
+
+
 def test_spawn_names_the_predecessor_conversation_of_an_attached_transfer(tmp_path, monkeypatch):
     task = {"id": "t1", "title": "x", "transfer": {"id": "x1"}, "handoff_envelope": {"conversation_id": "sess-old"}}
     env = _spawn_env(tmp_path, monkeypatch, task=task, compact_limit=0)

@@ -24,6 +24,7 @@ class Selection:
     hive: str
     account: capacity.Account
     route_kind: str
+    master_placement: placement.MasterPlacement | None = None
 
 
 def loaded_hives(store: RedisStore) -> list[dict]:
@@ -72,13 +73,20 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
-        if role in registry.UI_ROLES and not any(hive["ui"] == "yes" and registry.live(hive, now) for hive in hives):
+        if (
+            role in registry.UI_ROLES
+            and lane != "master"
+            and not any(hive["ui"] == "yes" and registry.live(hive, now) for hive in hives)
+        ):
             return self._record_wait(lane, task, placement.Wait(placement.NO_UI_HIVE))
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
             return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"))
         rows = getattr(self.herdr, "_quota_accounts", None)
         rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
+        if lane == "master" and not task.get("route_kind"):
+            selected = self._master_selection(config, decision, hives, now, rows)
+            return self._record_wait(lane, task, selected)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
         candidates = [
             row
@@ -93,6 +101,21 @@ class HiveLaunch:
                 return self._record_wait(lane, task, Selection(decision, hive, row, route_kind))
             reason = hive
         return self._record_wait(lane, task, reason)
+
+    def _master_selection(self, config, decision, hives, now, rows):
+        accounts = {row.name: row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
+        available = [
+            {**hive, "slots": [slot for slot in hive["slots"] if slot["account"] in accounts]} for hive in hives
+        ]
+        selected = placement.place_master("claude", "", config.repo, available, now)
+        if isinstance(selected, placement.Wait):
+            return selected if hives else placement.Wait(placement.NO_UI_HIVE)
+        account = (
+            capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
+            if selected.route_kind == "interactive"
+            else accounts[selected.account]
+        )
+        return Selection(decision, selected.hive, account, selected.route_kind, selected)
 
     def orders_for(self, task: str) -> LaunchOrder | None:
         raw = self.store.redis.hget(self.store.key(self.slug, ORDERS), task)
@@ -148,12 +171,20 @@ class HiveLaunch:
             seat=request.task["seat"],
             state="launching",
             profile=selected.profile.profile,
-            profile_decision=selected.profile.record(),
+            profile_decision={
+                **selected.profile.record(),
+                **(
+                    {"master_placement": {"hive": selected.hive, "headless": selected.master_placement.headless}}
+                    if selected.master_placement is not None
+                    else {}
+                ),
+            },
             harness="claude",
             account=selected.account.name,
             hive=selected.hive,
             runtime_target={"host_id": selected.hive},
             route_kind=selected.route_kind,
+            desired_route_kind="interactive" if selected.master_placement is not None else "",
         )
         previous = self.store.execution_occupants(self.slug).get(agent.seat)
         ended = previous and (
@@ -201,6 +232,7 @@ class HiveLaunch:
             profile_decision=agent.profile_decision,
             execution=agent,
             route_kind=agent.route_kind,
+            desired_route_kind=agent.desired_route_kind if agent.lane == "master" else None,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 

@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import uuid
+from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -49,6 +50,7 @@ class FencedRuntime:
             and callable(getattr(runtime.herdr_runtime, "_profile_decision", None))
         ):
             runtime = hive_controller(runtime, store, slug, held)
+            runtime.router.placement = replace(runtime.router.placement, master_seats=lambda: frozenset(("master",)))
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
@@ -75,6 +77,7 @@ class FencedRuntime:
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
     def placement_refusal(self, lane: str, task: dict) -> str:
+        task = {"id": "master", **task} if lane == "master" else task
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
@@ -118,7 +121,7 @@ class FencedRuntime:
 
 
 def _hive_lane(lane: str, task: dict) -> bool:
-    return lane in ("eng", "ci") or bool(task.get("hive"))
+    return lane in ("eng", "ci") or (lane == "master" and task.get("id") == "master") or bool(task.get("hive"))
 
 
 def _read(path: str) -> str:

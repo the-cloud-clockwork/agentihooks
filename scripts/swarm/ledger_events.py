@@ -90,6 +90,8 @@ class PullRequest:
     mergeable: str = ""
     draft: bool = False
     latest_run_cancelled: bool = False
+    checks_pending: bool = False
+    checks_passed: bool = False
 
 
 def iso_ms(text):
@@ -161,6 +163,9 @@ def pull_request(raw):
         raw.get("mergeable") or "",
         bool(raw.get("isDraft")),
         _latest_run_cancelled(suites),
+        any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
+        any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
+        and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
     )
 
 
@@ -463,12 +468,18 @@ def _workflow_gates(data, run, cache):
 
 
 def tick_view(inbox: object, store: object, slug: str, doc: dict) -> Callable[[str], PullRequest | None]:
+    from scripts.swarm import metrics_outbox, metrics_swarm
+
     urls = [
         task["pr_url"] for task in doc.get("tasks", []) if task.get("state") in ("pr", "claimed") and task.get("pr_url")
     ]
+    at = int(datetime.now().timestamp() * 1000)
+    recent = metrics_outbox.read_recent("delivery_events", at)
+    if recent is not None:
+        urls.extend(url for url, _ in metrics_swarm.pull_targets(doc, at, recent))
     notices = store.redis.hgetall(store.key(slug, "red-notices"))
     urls += [url for item_id, url in notices.items() if _open(inbox, item_id)]
-    snapshots = views(urls, cache=store.redis)
+    snapshots = views(list(dict.fromkeys(urls)), cache=store.redis)
 
     @functools.cache
     def lookup(url):

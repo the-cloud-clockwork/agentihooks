@@ -31,17 +31,26 @@ class _Api:
         return json.loads(response.stdout)
 
     def pages(self, endpoint: str, field: str) -> list[dict]:
-        rows = []
-        page = 1
-        while True:
-            separator = "&" if "?" in endpoint else "?"
-            body = self.get(f"{endpoint}{separator}per_page=100&page={page}")
-            rows.extend(body[field])
-            if len(rows) >= body["total_count"]:
-                return rows
-            if not body[field]:
-                raise RuntimeError("Actions API pagination ended before the full count")
-            page += 1
+        separator = "&" if "?" in endpoint else "?"
+        for _ in range(2):
+            rows, totals = {}, set()
+            page = 1
+            while True:
+                body = self.get(f"{endpoint}{separator}per_page=100&page={page}")
+                total = body["total_count"]
+                totals.add(total)
+                rows.update((row["id"], row) for row in body[field])
+                if len(rows) >= total:
+                    return list(rows.values())
+                if len(body[field]) < 100:
+                    if len(totals) > 1:
+                        return list(rows.values())
+                    break
+                page += 1
+        raise RuntimeError(
+            "Actions API pagination ended before the full count: "
+            f"endpoint={endpoint}; page={page}; rows={len(rows)}; total={total}"
+        )
 
 
 def read(
