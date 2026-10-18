@@ -282,11 +282,12 @@ cat "$RUNNER_TEMP/collection.log"
 exit "$status"
 """,
     )
-    shared = serial.replace(
-        '--head "$GITHUB_WORKSPACE"\
-',
-        '--head "$GITHUB_WORKSPACE" --collected "$GITHUB_WORKSPACE/collected.json"\
-',
+    shared = serial + (
+        'if [[ ! -f "$TEST_COUNT_HEAD_COLLECTION" ]]; then\n'
+        '  cd "$GITHUB_WORKSPACE"\n'
+        "  python -c 'import json, os; from pathlib import Path; from tests.duration_coverage import collected_tests; "
+        'Path(os.environ["TEST_COUNT_HEAD_COLLECTION"]).write_text(json.dumps(collected_tests(Path.cwd())))\'\n'
+        "fi\n"
     )
     assert floor["run"] in (serial, parallel, shared)
 

@@ -553,8 +553,10 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
     python.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\n'
         'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\n'
-        'if [[ "$*" == *--collected* && "$COLLECTION_EXIT" != 0 ]]; then exit "$COLLECTION_EXIT"; fi\n'
-        'exit "$FLOOR_EXIT"\n'
+        'if [[ -n "${TEST_COUNT_HEAD_COLLECTION:-}" ]]; then\n'
+        '  [[ "$COLLECTION_EXIT" == 0 ]] || exit "$COLLECTION_EXIT"\n'
+        '  printf "[]" > "$TEST_COUNT_HEAD_COLLECTION"\n'
+        'fi\nexit "$FLOOR_EXIT"\n'
     )
     python.chmod(0o755)
     step = next(
@@ -572,12 +574,15 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
             CALLS=str(commands),
             COLLECTION_EXIT=str(collection),
             FLOOR_EXIT=str(floor),
+            TEST_COUNT_HEAD_COLLECTION=(
+                str(tmp_path / "collected.json") if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ""
+            ),
         ),
         capture_output=True,
         text=True,
     )
     assert (outcome.returncode == 0) == (collection == floor == 0)
-    expected = ["-m"] if "--collected" in step["run"] else ["-c", "-m"]
+    expected = ["-m"] if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ["-c", "-m"]
     assert sorted(commands.read_text().splitlines()) == expected
 
 
