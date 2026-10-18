@@ -235,11 +235,20 @@ class LedgerClient:
         self._call(slug, [_op("join", name, role=role)])
 
     def _lifecycle(self, slug, payload):
+        from scripts.swarm import lease
         from scripts.swarm_ledger.api.client import ResourceClient
 
+        if (epoch := lease.EPOCH.get()) is not None:
+            payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
-        client = ResourceClient(ledger.base(), ledger.credentials(slug, self.service))
-        return client.request(slug, "lifecycle/actions", payload)["data"]
+        try:
+            client = ResourceClient(ledger.base(), ledger.credentials(slug, self.service))
+            return client.request(slug, "lifecycle/actions", payload)["data"]
+        except urllib.error.HTTPError as exc:
+            error = LedgerRefused if 400 <= exc.code < 500 else SwarmError
+            raise error(f"ledger {slug}: server refused: {exc.code} {ledger.refusal_text(exc)}") from exc
+        except OSError as exc:
+            raise SwarmError(f"ledger {slug}: {exc}") from exc
 
     def bin_closed(self, slug, closed_at):
         from scripts.swarm_ledger import ledger_link

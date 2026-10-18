@@ -133,7 +133,7 @@ def ledger_operation(handler: object, server: ModuleType, slug: str, path: str, 
         return admin.upload(handler, server, slug, path)
     payload = body(handler, server)
     if path == "lifecycle/actions":
-        return admin.lifecycle(principal, slug, payload)
+        return admin.lifecycle(server, principal, slug, payload)
     if path == "swarm/actions":
         return admin.control(server, slug, principal, payload)
     if path in ("export", "swarm/export"):

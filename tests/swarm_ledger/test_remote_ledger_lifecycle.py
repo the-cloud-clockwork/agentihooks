@@ -8,11 +8,13 @@ from scripts.swarm import lease
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger.repository import bin_storage
-from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, agent_headers, core, server
+from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, core, server
 from tests.swarm_ledger.test_ledger_authority import cli_ledger as ledger
 from tests.swarm_ledger.test_ledger_authority import live as authority_live
+from tests.swarm_ledger.test_remote_ledger_client import hive as remote_hive
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+hive = remote_hive
 live = authority_live
 
 
@@ -98,12 +100,19 @@ def test_displaced_controller_cannot_bin_a_ledger(live):
 
 
 @pytest.mark.parametrize("mode", ["compose", "distributed"])
-def test_remote_agent_can_reopen_but_cannot_bin(live, mode):
+def test_remote_agent_can_reopen_but_cannot_bin(live, hive, mode):
     core.sync(SLUG, ops=[{"op": "join", "id": f"join-remote-{mode}", "by": WORKER}])
     bin_storage.delete(SLUG)
     with (
         patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": mode}),
-        patch.object(ledger, "credentials", return_value=agent_headers(live, WORKER)),
+        patch.object(
+            ledger,
+            "credentials",
+            return_value={
+                "X-Ledger-Token": server.authority.hive_agent_token("member-1", SLUG, WORKER),
+                "X-Ledger-Agent": WORKER,
+            },
+        ),
     ):
         client = LedgerClient()
         client.reopen(SLUG, WORKER)

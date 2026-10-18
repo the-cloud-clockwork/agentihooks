@@ -55,7 +55,7 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
     return {"slug": slug, "action": payload["action"], **({"swarm_error": error} if error else {})}
 
 
-def lifecycle(principal: str, slug: str, payload: dict) -> dict:
+def lifecycle(server: ModuleType, principal: str, slug: str, payload: dict) -> dict:
     from scripts.swarm_ledger.repository import bin_storage
 
     if principal:
@@ -70,18 +70,29 @@ def lifecycle(principal: str, slug: str, payload: dict) -> dict:
                     "properties": {
                         "action": {"const": "bin_closed"},
                         "closed_at": {"type": "integer", "minimum": 1},
+                        "controller_epoch": {"type": "integer", "minimum": 1},
                     },
                 },
                 {
                     "type": "object",
                     "required": ["action"],
                     "additionalProperties": False,
-                    "properties": {"action": {"enum": ["restore", "binned"]}},
+                    "properties": {
+                        "action": {"enum": ["restore", "binned"]},
+                        "controller_epoch": {"type": "integer", "minimum": 1},
+                    },
                 },
             ],
         },
         payload,
     )
+    if "controller_epoch" in payload:
+        from scripts.swarm.store import SwarmError
+
+        try:
+            server.authority.fence(slug, payload["controller_epoch"])
+        except SwarmError as exc:
+            raise APIError(409, "stale_controller", str(exc)) from None
     if payload["action"] == "bin_closed":
         result = bin_storage.bin_closed(slug, payload["closed_at"])
     elif payload["action"] == "restore":
