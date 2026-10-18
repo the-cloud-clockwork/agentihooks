@@ -26,6 +26,7 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
   agentihooks hive join "${HIVE_JOIN_URL:?the hive join URL is required}" "$code"
   unset code
 fi
-agentihooks hive set "${SWARM_HIVE_ID:?the pod identity is required}" ui=no ephemeral=yes \
+member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
+agentihooks hive set "$member" ui=no ephemeral=yes \
   "roles=${HIVE_ROLES:-eng,ci,plan}" "max-agents=${HIVE_MAX_AGENTS:-1}"
 exec agentihooks hive run

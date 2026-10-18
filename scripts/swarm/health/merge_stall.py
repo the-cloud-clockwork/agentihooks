@@ -1,12 +1,15 @@
 import json
 import subprocess
+import time
 from collections import Counter
+from contextvars import ContextVar
 from datetime import datetime
 
 from scripts.swarm import timing
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import SwarmError
 
+DEADLINE = ContextVar("merge_observation_deadline", default=None)
 HOUR_MS = 3_600_000
 CACHE_MS = 300_000
 RUNS = 10
@@ -26,7 +29,11 @@ query($owner:String!,$name:String!,$cursor:String){
 
 def request(repo: str, args: list[str]) -> dict:
     timing.keep()
-    result = subprocess.run(["gh", *args], cwd=repo, capture_output=True, text=True, timeout=20)
+    remaining = 20 if DEADLINE.get() is None else DEADLINE.get() - time.monotonic()
+    if remaining <= 0:
+        raise SwarmError("GitHub merge observation exhausted its read budget")
+    with timing.step("scripts.swarm.health.merge_stall.github_read"):
+        result = subprocess.run(["gh", *args], cwd=repo, capture_output=True, text=True, timeout=min(20, remaining))
     if result.returncode:
         raise SwarmError(result.stderr.strip() or "GitHub API failed")
     data = json.loads(result.stdout)
@@ -80,10 +87,14 @@ def failed_checks(repo: str, name: str) -> str:
 
 
 def observe(repo: str, at: int) -> dict:
-    name = request(repo, ["repo", "view", "--json", "nameWithOwner"])["nameWithOwner"]
-    length, merged = queue(repo, name)
-    failed = failed_checks(repo, name) if length and merged and at - merged >= HOUR_MS else "none observed"
-    return {"repo": name, "queue": length, "merged": merged, "failed": failed, "at": at}
+    token = DEADLINE.set(time.monotonic() + 10)
+    try:
+        name = request(repo, ["repo", "view", "--json", "nameWithOwner"])["nameWithOwner"]
+        length, merged = queue(repo, name)
+        failed = failed_checks(repo, name) if length and merged and at - merged >= HOUR_MS else "none observed"
+        return {"repo": name, "queue": length, "merged": merged, "failed": failed, "at": at}
+    finally:
+        DEADLINE.reset(token)
 
 
 def findings(store, slug: str, repo: str, at: int) -> list[Finding]:

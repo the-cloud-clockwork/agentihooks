@@ -18,6 +18,14 @@ class Wait:
     reason: str
 
 
+@dataclass(frozen=True)
+class MasterPlacement:
+    hive: str
+    account: str
+    route_kind: str
+    headless: bool
+
+
 def _room(hive: dict) -> int:
     return hive["max_agents"] - hive["agents"]
 
@@ -62,3 +70,32 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
         if not candidates:
             return Wait(reason)
     return min(candidates, key=_order(role))["id"]
+
+
+def place_master(harness: str, login: str, repo: str, hives: list[dict], now: int) -> MasterPlacement | Wait:
+    candidates = []
+    for hive in hives:
+        if not live(hive, now) or repo not in hive["repos"]:
+            continue
+        headless = hive["ui"] != YES
+        if not headless and MASTER not in hive["roles"]:
+            continue
+        native = hive["interactive"].get(harness)
+        if not headless and native and login in ("", native):
+            candidates.append(
+                ((False, False), _order(MASTER)(hive), native, MasterPlacement(hive["id"], native, INTERACTIVE, False))
+            )
+        for slot in hive["slots"]:
+            if slot["harness"] != harness or slot["kind"] not in ("subscription", "api"):
+                continue
+            candidates.append(
+                (
+                    (headless, True),
+                    _order(MASTER)(hive),
+                    slot["account"],
+                    MasterPlacement(hive["id"], slot["account"], slot["kind"], headless),
+                )
+            )
+    if not candidates:
+        return Wait("no live hive can run the master with interactive, subscription or api authentication")
+    return min(candidates, key=lambda candidate: candidate[:3])[3]

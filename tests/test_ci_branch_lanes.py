@@ -375,100 +375,30 @@ def test_a_second_event_key_spelling_cannot_widen_a_trusted_conditional_lane(tmp
     }
 
 
-@pytest.mark.parametrize(
-    ("job", "stage", "index", "producer", "output"),
-    [("stats", "stats", "part", "plan", "stats_lane"), ("mutation-shard", "shard", "shard", "refine", "shard_lane")],
-)
-def test_trusted_mutation_stages_can_migrate_to_computed_lanes(job, stage, index, producer, output):
+@pytest.mark.parametrize(("job", "stage", "index"), [("stats", "stats", "part"), ("mutation-shard", "shard", "shard")])
+@pytest.mark.parametrize("change", [None, "runs-on", "queue", "cancel", "stage", "index", "group", "untrusted"])
+def test_a_trusted_mutation_leg_may_move_to_a_group_of_its_own_run(job, stage, index, change):
     import copy
 
     baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
-    baseline["jobs"]["plan"]["outputs"]["stats_lane"] = "${{ steps.lanes.outputs.lane }}"
-    baseline["jobs"]["refine"]["outputs"]["shard_lane"] = "${{ steps.lanes.outputs.lane }}"
+    for name in ("stats", "mutation-shard"):
+        baseline["jobs"][name]["concurrency"] = {"group": "${{ 'mutation-lane-a' }}", "queue": "max"}
     updated = copy.deepcopy(baseline)
-    updated["jobs"][job]["concurrency"]["group"] = (
-        "${{ format('{0}-"
-        + stage
-        + "-{1}', github.workflow == 'Mutation preflight' && needs."
-        + producer
-        + ".outputs."
-        + output
-        + " != '' && format('mutation-lane-{0}', needs."
-        + producer
-        + ".outputs."
-        + output
-        + ") || format('mutation-preflight-job-{0}', github.run_id), matrix."
-        + index
-        + ") }}"
-    )
-    assert lanes.problems(updated, baseline) == []
-
-
-def test_computed_lane_acceptance_still_grades_later_jobs():
-    import copy
-
-    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
-    baseline["jobs"]["plan"]["outputs"]["stats_lane"] = "${{ steps.lanes.outputs.lane }}"
-    updated = copy.deepcopy(baseline)
-    updated["jobs"]["stats"]["concurrency"]["group"] = (
-        "${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && needs.plan.outputs.stats_lane != '' && format('mutation-lane-{0}', needs.plan.outputs.stats_lane) || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}"
-    )
-    updated["jobs"]["unbounded"] = {
-        "runs-on": "ubuntu-latest",
-        "concurrency": {"group": "${{ github.run_id }}"},
-        "steps": [{"run": "echo unbounded"}],
-    }
-    assert any("job unbounded " in problem for problem in lanes.problems(updated, baseline))
-
-
-@pytest.mark.parametrize(
-    "change", ["capacity", "plan", "refine", "queue", "cancel", "group", "output", "untrusted", "needs", "strategy"]
-)
-def test_computed_mutation_lane_migration_keeps_trusted_producers_and_queue_policy(change):
-    import copy
-
-    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
-    baseline["jobs"]["plan"]["outputs"]["stats_lane"] = "${{ steps.lanes.outputs.lane }}"
-    baseline["jobs"]["refine"]["outputs"]["shard_lane"] = "${{ steps.lanes.outputs.lane }}"
-    updated = copy.deepcopy(baseline)
-    block = updated["jobs"]["stats"]["concurrency"]
-    block["group"] = (
-        "${{ format('{0}-stats-{1}', github.workflow == 'Mutation preflight' && needs.plan.outputs.stats_lane != '' && format('mutation-lane-{0}', needs.plan.outputs.stats_lane) || format('mutation-preflight-job-{0}', github.run_id), matrix.part) }}"
-    )
-    if change in {"needs", "strategy"}:
-        updated["jobs"]["stats"][change] = None
-    elif change == "capacity":
-        updated["jobs"]["capacity"] = {"steps": [{"run": "echo values=unbounded"}]}
-    elif change in {"plan", "refine"}:
-        updated["jobs"][change]["steps"].append({"run": "echo changed producer"})
+    block = {"group": f"${{{{ format('mutation-preflight-job-{{0}}-{stage}-{{1}}', github.run_id, matrix.{index}) }}}}"}
+    updated["jobs"][job]["concurrency"] = block
+    if change == "runs-on":
+        updated["jobs"][job]["runs-on"] = "ubuntu-latest"
     elif change == "queue":
-        block["queue"] = "single"
+        block["queue"] = "max"
     elif change == "cancel":
         block["cancel-in-progress"] = True
+    elif change == "stage":
+        block["group"] = block["group"].replace(f"-{stage}-", "-other-")
+    elif change == "index":
+        block["group"] = block["group"].replace(f"matrix.{index}", "matrix.other")
     elif change == "group":
         block["group"] = "${{ github.run_id }}"
-    elif change == "output":
-        baseline["jobs"]["plan"]["outputs"].pop("stats_lane")
-        updated["jobs"]["plan"] = copy.deepcopy(baseline["jobs"]["plan"])
-    else:
+    elif change == "untrusted":
         baseline = None
-    assert any("job stats " in problem for problem in lanes.problems(updated, baseline))
-
-
-@pytest.mark.parametrize(
-    ("job", "stage", "index", "producer", "output"),
-    [("stats", "stats", "part", "plan", "stats_lane"), ("mutation-shard", "shard", "shard", "refine", "shard_lane")],
-)
-def test_an_existing_computed_lane_cannot_keep_its_group_while_changing_its_producer(
-    job, stage, index, producer, output
-):
-    import copy
-
-    baseline = yaml.safe_load((ROOT / lanes.WORKFLOWS / "mutation-preflight.yml").read_text())
-    baseline["jobs"][producer]["outputs"][output] = "${{ steps.lanes.outputs.lane }}"
-    baseline["jobs"][job]["concurrency"]["group"] = (
-        f"${{{{ format('{{0}}-{stage}-{{1}}', github.workflow == 'Mutation preflight' && needs.{producer}.outputs.{output} != '' && format('mutation-lane-{{0}}', needs.{producer}.outputs.{output}) || format('mutation-preflight-job-{{0}}', github.run_id), matrix.{index}) }}}}"
-    )
-    updated = copy.deepcopy(baseline)
-    updated["jobs"][producer]["steps"].append({"run": "echo lane=unbounded"})
-    assert any(f"job {job} " in problem for problem in lanes.problems(updated, baseline))
+    found = [problem for problem in lanes.problems(updated, baseline) if problem.startswith(f"job {job} ")]
+    assert bool(found) == (change is not None)

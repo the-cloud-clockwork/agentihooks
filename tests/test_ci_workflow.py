@@ -893,6 +893,19 @@ def test_unit_shards_upload_their_durations_for_the_refresh():
     )
 
 
+def test_unit_shards_retry_coverage_upload_without_changing_the_artifact():
+    _, upload = _unit_step_index(lambda s: s.get("name") == "Upload coverage")
+    assert upload["uses"] == "./.github/actions/retry-upload"
+    assert upload["if"] == "matrix.python-version == '3.12'"
+    assert upload["with"] == {
+        "name": "coverage-${{ matrix.python-version }}-${{ matrix.shard }}",
+        "path": ".coverage\njs-coverage/\ndep-inputs/\nreused-coverage/\n",
+        "include-hidden-files": True,
+        "if-no-files-found": "error",
+        "retention-days": 7,
+    }
+
+
 @pytest.mark.parametrize("status", [0, 3])
 def test_unit_step_records_elapsed_time_and_preserves_pytest_status(tmp_path, status):
     import json

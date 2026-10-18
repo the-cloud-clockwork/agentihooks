@@ -13,6 +13,7 @@ from pathlib import Path
 
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
+USER_AGENT = "agentihooks-swarm"
 CREDENTIAL_HEADERS = ("X-Controller-Credential", "X-Hive-Credential", "X-Ledger-Token", "X-Proof-Credential")
 TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM"
 
@@ -23,9 +24,10 @@ class Cleartext(SystemExit):
 
 def base(environ=os.environ) -> str:
     if remote(environ):
-        if not environ.get("LEDGER_URL"):
-            raise SystemExit("a remote ledger client needs LEDGER_URL, the address of the hive ledger server")
-        return environ["LEDGER_URL"].rstrip("/")
+        url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
+        if not url:
+            raise SystemExit("a remote ledger client needs SWARM_URL, the address of the hosted ledger server")
+        return url.rstrip("/")
     host, port = address(environ)
     return f"{scheme(environ)}://{host}:{port}"
 
@@ -76,12 +78,21 @@ def transport(environ=os.environ) -> dict:
 
 
 def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ):
+    for name, value in access_headers(environ).items():
+        request.add_header(name, value)
     guard(request.full_url, dict(request.header_items()))
     return urllib.request.urlopen(request, timeout=timeout, **transport(environ))
 
 
 def remote(environ=os.environ) -> bool:
-    return environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+    return bool(environ.get("SWARM_URL")) or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+
+
+def access_headers(environ=os.environ) -> dict:
+    client, secret = environ.get("SWARM_ACCESS_CLIENT_ID"), environ.get("SWARM_ACCESS_CLIENT_SECRET")
+    if not (client and secret):
+        return {}
+    return {"CF-Access-Client-Id": client, "CF-Access-Client-Secret": secret, "User-Agent": USER_AGENT}
 
 
 def shared_directory(environ=os.environ) -> bool:
@@ -132,7 +143,7 @@ def folder(environ=os.environ) -> Path:
 
 def serving(timeout: float = 1, url: str | None = None) -> str | None:
     try:
-        with urllib.request.urlopen(f"{url or base()}/healthz", timeout=timeout, **transport()) as resp:
+        with urlopen(urllib.request.Request(f"{url or base()}/healthz"), timeout) as resp:
             body = json.loads(resp.read())
     except http.client.RemoteDisconnected:
         return None

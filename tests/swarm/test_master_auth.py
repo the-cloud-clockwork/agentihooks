@@ -164,13 +164,16 @@ def test_fallback_finding_reads_every_agent_and_names_an_unrecorded_route_as_sub
 
 def test_unreserved_rows_regain_the_state_of_their_original_cap():
     from scripts.routing.reservation import Reservation
-    from scripts.swarm.capacity import Account, _state, reserve, unreserved
+    from scripts.swarm.capacity import Account, reserve, unreserved
 
     held = reserve([Account("claude", "reserved", "OPEN", 0, 90, 25, 6)], Reservation("claude", "reserved", 1))
-    assert (held[0].cap, held[0].state) == (0, _state(0))
+    assert (held[0].cap, held[0].state) == (0, "CLOSED")
     row = unreserved(held)[0]
-    assert (row.cap, row.state, row.reserved) == (6, _state(6), "")
-    assert _state(6) != _state(0)
+    assert (row.cap, row.state, row.reserved) == (6, "OPEN", "")
+    drained = unreserved(reserve([Account("claude", "low", "DRAIN", 0, 8, 25, 6)], Reservation("claude", "low", 1)))
+    assert drained[0].state == "DRAIN"
+    codex = unreserved(reserve([Account("codex", "weekly", "UNKNOWN", 0, 5, 25, 2)], Reservation("codex", "weekly", 1)))
+    assert codex[0].state == "OPEN"
 
 
 def _master_spawn(tmp_path, login, task):

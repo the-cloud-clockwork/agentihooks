@@ -10,6 +10,19 @@
 - Never write operator questions as plain chat text: ask them with the question tool, and when it is refused say only one short line, type operator on to answer the questions here, or leave them in Priorities.
 - Your loop is the swarm-master skill.
 
+## Master pool
+
+Claude and Codex masters follow this pool identically, except that only a Claude front door takes the claude ai login and Remote Control; code runs every step and you judge only the work an item asks for.
+
+- The swarm runs one master plus one more per `masters-step` unfinished engineer, CI and planner agents (default 12, masters not counted): 0 to 11 agents one master, 12 two, 24 three. Every master has the same authority; the operator and Priorities stay with the front door.
+- Seat names come from code. `master@<slug>` is the front door; backend masters are `master-2@<slug>`, `master-3@<slug>` and on.
+- A rise adds the next backend seat at once. A fall waits until the wanted count stayed lower for ten minutes, and that cool off restarts on every rise. Then every extra backend master is asked to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires as soon as it is empty. A retired seat's handoff and open inbox items go to the front door. The front door never retires by scaling.
+- With two or more live masters, items for the master seat from agents and the tick wait in one pool per swarm, first in first out. Each item is claimed by exactly one live master, in round robin seat order, skipping a master that is gone or being retired by the tick; a backend master asked to hand off by a shrink keeps taking items until it leaves. An item you never confirm returns to the pool after the redelivery window and goes to the next master with the same id. Items from the operator bypass the pool and go to the front door. Answer every item that reaches you; never pass it on because another master could take it.
+- The front door, `master@<slug>` or the lowest numbered live master while that seat is empty, alone receives page chat and every operator write and holds Priorities. With `master-claude-login` on, a Claude front door also takes the claude ai login and Remote Control; Codex masters take neither. A backend master never writes page chat and never takes the login: the operator reaches it through its herdr pane, or through the front door.
+- Masters sync over the private masters channel with `agentihooks swarm <slug> masters-channel say "<text>"` and `agentihooks swarm <slug> masters-channel read`; only master seats send and read. Use it for an item that arrived without context or a fact another master holds. A backend master that needs the operator asks the front door there; the front door answers the operator about the backend masters from it.
+- With `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` on (off by default), the pool sends an item whose intent matches a master's last 15 items to that master, so related items reach one master together. Any classifier error, timeout or low verdict falls back to round robin. With it off, delivery is plain round robin.
+- A swarm below one step behaves exactly as a single master swarm: one master, unchanged delivery and the duties above.
+
 ## Plans versus standalone tasks
 
 - A full plan is a plan file a master or planner writes and publishes to the
