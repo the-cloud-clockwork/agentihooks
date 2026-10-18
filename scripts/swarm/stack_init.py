@@ -66,6 +66,11 @@ def parser() -> argparse.ArgumentParser:
         help="serve the existing shared ledger folder as this user from the stack, on the default ledger port, "
         "and keep doing so on every later run",
     )
+    parser.add_argument(
+        "--no-start",
+        action="store_true",
+        help="write the stack files and settings, adoption included, without starting any service",
+    )
     return parser
 
 
@@ -207,6 +212,9 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
         adopt(home / ".env", environ)
     values = settings(home / ".env")
     write_private(home / "client.env", client_env(values, home))
+    if args.no_start:
+        print(f"Swarm stack settings written to {home}; no service was started.", file=out)
+        return 0
     if sick := start(run, home, args.timeout, out):
         for service, state in sick:
             fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)

@@ -214,6 +214,24 @@ def test_adopt_and_prepare_clients_are_refused_together(home, capsys):
     assert not stack(home).exists()
 
 
+def test_no_start_records_adoption_and_starts_no_service(home, monkeypatch):
+    monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
+    docker = Docker()
+    code, out = init(home, docker, ["--adopt", "--no-start"])
+    folder = stack(home)
+    assert (code, out) == (0, f"Swarm stack settings written to {folder}; no service was started.\n")
+    assert docker.calls == [
+        ["docker", "info", "--format", "{{.ServerVersion}}"],
+        ["docker", "compose", "version", "--short"],
+    ]
+    values = stack_env.read_env(folder / ".env")
+    assert values["SWARM_ADOPT_LEDGER_DIR"] == "/home/op/development-ledger"
+    assert values["SWARM_PORT"] == "8765"
+    assert (folder / "client.env").read_text() == stack_env.client_env(values, folder)
+    for name in STACK_FILES:
+        assert (folder / name).read_bytes() == (stack_init.BUNDLED / name).read_bytes(), name
+
+
 def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
     text = (stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml").read_text()
     swarm = yaml.safe_load(text)["services"]["swarm"]
@@ -401,12 +419,13 @@ def test_help_names_the_command_and_its_timeout():
     text = " ".join(stack_init.parser().format_help().split())
     description = " ".join(stack_init.__doc__.split())
     assert text == (
-        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--prepare-clients | --adopt] {description} options: "
+        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--prepare-clients | --adopt] [--no-start] {description} options: "
         "-h, --help show this help message and exit "
         "--timeout TIMEOUT seconds to wait for every service to be healthy "
         "--prepare-clients verify bundle credentials on existing local Redis and activate clients "
         "--adopt serve the existing shared ledger folder as this user from the stack, on the default ledger port, "
-        "and keep doing so on every later run"
+        "and keep doing so on every later run "
+        "--no-start write the stack files and settings, adoption included, without starting any service"
     )
 
 
