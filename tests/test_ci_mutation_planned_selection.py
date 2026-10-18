@@ -1,4 +1,5 @@
 import json
+import sys
 from pathlib import Path
 
 import pytest
@@ -54,3 +55,9 @@ def test_shard_uses_planned_tests_without_scanning_again(tmp_path, monkeypatch, 
         assert report["not_mutated"] == [
             {"path": "scripts/sample.py", "reason": "no matching or importing test modules"}
         ]
+
+
+def test_planned_selection_does_not_leak_into_nested_mutation_tests(tmp_path, monkeypatch):
+    monkeypatch.setenv("MUTATION_SELECTION", '{"scripts/sample.py": []}')
+    command = [sys.executable, "-c", "import os; assert 'MUTATION_SELECTION' not in os.environ"]
+    assert runner.run_process(command, tmp_path, 10, tmp_path / "run.log") == 0

@@ -28,7 +28,11 @@ def run_process(command: list[str], cwd: Path, timeout: float, log: Path) -> int
             stdout=stream,
             stderr=subprocess.STDOUT,
             start_new_session=True,
-            env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+            env={
+                key: value
+                for key, value in {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}.items()
+                if key != "MUTATION_SELECTION"
+            },
         )
         try:
             return process.wait(timeout=timeout)
