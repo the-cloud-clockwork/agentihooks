@@ -1,4 +1,3 @@
-import json
 import re
 import time
 from collections.abc import Iterator
@@ -54,9 +53,12 @@ def seconds(text: str) -> float:
 
 def moment(text: str) -> float:
     try:
-        return datetime.fromisoformat(text.strip()).timestamp()
+        parsed = datetime.fromisoformat(text.strip())
     except ValueError:
-        raise CommandError(f"{text} is not an ISO time such as 2026-10-18T09:30:00+00:00") from None
+        parsed = None
+    if parsed is None or parsed.tzinfo is None:
+        raise CommandError(f"{text} is not an ISO time with an offset such as 2026-10-18T09:30:00+00:00")
+    return parsed.timestamp()
 
 
 def describe(record: dict) -> dict:
@@ -67,6 +69,17 @@ def describe(record: dict) -> dict:
     if record["kind"] == "stopwatch":
         view["limit"] = record["delay"]
     return view
+
+
+def _reachable(scheduler: Scheduler, slot: Slot) -> None:
+    if not isinstance(slot, SwarmSlot):
+        return
+    from scripts.swarm.store import RedisStore, SwarmError
+
+    try:
+        RedisStore(scheduler.redis).config(slot.slug)
+    except SwarmError as exc:
+        raise CommandError(str(exc)) from None
 
 
 def _arm(entry: Entry, slot: Slot, now: float) -> dict:
@@ -95,6 +108,7 @@ def add_timer(
     now: float | None = None,
 ) -> dict:
     now = time.time() if now is None else now
+    _reachable(scheduler, slot)
     with _refusal():
         entry = scheduler.timer(owner=owner, payload=message, delay=delay, at=at, now=now)
     return _arm(entry, slot, now)
@@ -104,6 +118,7 @@ def start_stopwatch(
     scheduler: Scheduler, owner: str, slot: Slot, message: str, *, limit: float, now: float | None = None
 ) -> dict:
     now = time.time() if now is None else now
+    _reachable(scheduler, slot)
     with _refusal():
         entry = scheduler.stopwatch(owner=owner, payload=message, limit=limit, now=now)
     return _arm(entry, slot, now)
@@ -120,6 +135,7 @@ def add_cron(
     now: float | None = None,
 ) -> dict:
     now = time.time() if now is None else now
+    _reachable(scheduler, slot)
     try:
         ZoneInfo(timezone)
     except (ValueError, ZoneInfoNotFoundError):
@@ -130,23 +146,27 @@ def add_cron(
 
 
 def entries(scheduler: Scheduler, kind: str) -> list[dict]:
-    records = [json.loads(raw) for raw in scheduler.redis.hvals(scheduler.key("entries"))]
     return sorted(
-        (describe(record) for record in records if record["kind"] == kind and record["state"] in OPEN),
+        (describe(record) for record in scheduler.records() if record["kind"] == kind and record["state"] in OPEN),
         key=lambda view: view["due"],
     )
 
 
-def _open(scheduler: Scheduler, kind: str, entry_id: str) -> Entry:
+def _get(scheduler: Scheduler, kind: str, entry_id: str) -> Entry:
     try:
         entry = scheduler.get(entry_id)
     except KeyError:
         raise CommandError(f"no {kind} {entry_id}") from None
-    record = entry.record
-    if record["kind"] != kind:
+    if entry.record["kind"] != kind:
         raise CommandError(f"no {kind} {entry_id}")
-    if record["state"] not in OPEN:
-        raise CommandError(f"{kind} {entry_id} is already {record['state']}")
+    return entry
+
+
+def _open(scheduler: Scheduler, kind: str, entry_id: str) -> Entry:
+    entry = _get(scheduler, kind, entry_id)
+    state = entry.record["state"]
+    if state not in OPEN:
+        raise CommandError(f"{kind} {entry_id} is already {state}")
     return entry
 
 
@@ -163,10 +183,5 @@ def stop_stopwatch(scheduler: Scheduler, entry_id: str, *, now: float | None = N
 
 
 def show_stopwatch(scheduler: Scheduler, entry_id: str, *, now: float | None = None) -> dict:
-    try:
-        entry = scheduler.get(entry_id)
-    except KeyError:
-        raise CommandError(f"no stopwatch {entry_id}") from None
-    if entry.record["kind"] != "stopwatch":
-        raise CommandError(f"no stopwatch {entry_id}")
+    entry = _get(scheduler, "stopwatch", entry_id)
     return {**describe(entry.record), "elapsed": entry.elapsed(now=now)}

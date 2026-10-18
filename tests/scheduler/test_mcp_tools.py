@@ -40,8 +40,10 @@ def scheduler(monkeypatch):
     import fakeredis
 
     from scripts.scheduler.core import Scheduler
+    from scripts.swarm.store import RedisStore, SwarmConfig
 
     found = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    RedisStore(found.redis).create(SwarmConfig("sw", "/repo", 2, 1))
     monkeypatch.setattr(commands, "connect", lambda: found)
     monkeypatch.setattr(commands.time, "time", lambda: NOW)
     monkeypatch.setenv("CLAUDE_CODE_SESSION_ID", SID)
@@ -187,4 +189,8 @@ def test_a_named_target_that_does_not_fit_is_refused(tools):
     assert tools["cron_add"]("x", "* * * * *", target="session") == {
         "success": False,
         "error": "the session target needs a name",
+    }
+    assert tools["stopwatch_start"]("x", "5", target="swarm", name="nope") == {
+        "success": False,
+        "error": "no swarm nope",
     }

@@ -84,9 +84,10 @@ def test_moments_read_iso_time():
     assert commands.moment(" 2026-10-18T09:30:00+00:00 ") == 1792315800.0
 
 
-def test_a_moment_that_is_not_iso_is_refused():
-    with refused("soon is not an ISO time such as 2026-10-18T09:30:00\\+00:00"):
-        commands.moment("soon")
+@pytest.mark.parametrize("text", ["soon", "2026-10-18T09:30:00"])
+def test_a_moment_that_is_not_iso_with_an_offset_is_refused(text):
+    with refused(f"{text} is not an ISO time with an offset such as 2026-10-18T09:30:00\\+00:00"):
+        commands.moment(text)
 
 
 def test_a_timer_after_a_delay_is_armed_for_its_target(scheduler):
@@ -110,20 +111,19 @@ def test_a_timer_at_a_time_is_due_then(scheduler):
 
 
 @pytest.mark.parametrize(
-    ("change", "message"),
+    ("message", "when", "refusal"),
     [
-        ({"delay": -1}, "delay must not be negative"),
-        ({"delay": 5, "message": " "}, "a schedule needs an owner and payload"),
-        ({}, "a timer needs either delay or at"),
+        ("hello", {"delay": -1}, "delay must not be negative"),
+        (" ", {"delay": 5}, "a schedule needs an owner and payload"),
+        ("hello", {}, "a timer needs either delay or at"),
     ],
 )
-def test_a_timer_the_scheduler_refuses_is_a_command_refusal(scheduler, change, message):
-    fields = {"message": "hello", **change}
-    with refused(message):
-        commands.add_timer(scheduler, OWNER, BroadcastSlot(), fields.pop("message"), now=100, **fields)
+def test_a_timer_the_scheduler_refuses_is_a_command_refusal(scheduler, message, when, refusal):
+    with refused(refusal):
+        commands.add_timer(scheduler, OWNER, BroadcastSlot(), message, now=100, **when)
 
 
-def test_a_stopwatch_fires_its_limit_signal(scheduler):
+def test_a_stopwatch_fires_its_limit_signal(scheduler, swarm):
     view = commands.start_stopwatch(scheduler, OWNER, SwarmSlot("sw"), "too long", limit=30, now=100)
     assert view == {
         "id": view["id"],
@@ -180,7 +180,7 @@ def test_a_cron_the_scheduler_refuses_is_a_command_refusal(scheduler, expression
     assert scheduler.redis.hlen(scheduler.key("entries")) == 0
 
 
-def test_listing_shows_open_entries_of_one_kind_soonest_first(scheduler, monkeypatch):
+def test_listing_shows_open_entries_of_one_kind_soonest_first(scheduler):
     late = commands.add_timer(scheduler, OWNER, InboxSlot(OWNER), "late", delay=90, now=100)
     soon = commands.add_timer(scheduler, OWNER, InboxSlot(OWNER), "soon", delay=10, now=100)
     ready = scheduler.timer(owner=OWNER, payload="ready", delay=50, now=100)
@@ -191,17 +191,22 @@ def test_listing_shows_open_entries_of_one_kind_soonest_first(scheduler, monkeyp
     assert [view["id"] for view in commands.entries(scheduler, "timer")] == [soon["id"], ready.id, late["id"]]
     assert [view["payload"] for view in commands.entries(scheduler, "cron")] == ["cron"]
 
+
+def test_a_timer_whose_delivery_is_in_flight_stays_listed(scheduler, monkeypatch):
+    soon = commands.add_timer(scheduler, OWNER, InboxSlot(OWNER), "soon", delay=10, now=100)
+    late = commands.add_timer(scheduler, OWNER, InboxSlot(OWNER), "late", delay=90, now=100)
+
     def lost(self, event, delivery_id, redis):
         raise RuntimeError("delivery lost")
 
     monkeypatch.setattr(InboxSlot, "deliver", lost)
     with pytest.raises(RuntimeError, match="^delivery lost$"):
         scheduler.run_due(now=120)
-    assert [(view["payload"], view["state"]) for view in commands.entries(scheduler, "timer")] == [
-        ("soon", "pending"),
-        ("ready", "ready"),
-        ("late", "active"),
+    assert [(view["id"], view["state"]) for view in commands.entries(scheduler, "timer")] == [
+        (soon["id"], "pending"),
+        (late["id"], "active"),
     ]
+    assert commands.cancel(scheduler, "timer", soon["id"])["state"] == "cancelled"
 
 
 def test_a_fired_timer_leaves_the_list(scheduler):
@@ -247,7 +252,19 @@ def test_showing_names_only_stopwatches(scheduler):
         commands.stop_stopwatch(scheduler, timer["id"])
 
 
-def test_a_swarm_target_reaches_each_live_agent_but_the_owner_once(scheduler, swarm):
+def test_a_schedule_for_a_swarm_that_does_not_exist_is_refused(scheduler, swarm):
+    for add in (
+        lambda: commands.add_timer(scheduler, OWNER, SwarmSlot("nope"), "x", delay=5, now=100),
+        lambda: commands.start_stopwatch(scheduler, OWNER, SwarmSlot("nope"), "x", limit=5, now=100),
+        lambda: commands.add_cron(scheduler, OWNER, SwarmSlot("nope"), "x", expression="* * * * *", now=100),
+    ):
+        with refused("no swarm nope"):
+            add()
+    assert scheduler.records() == []
+    assert commands.add_timer(scheduler, OWNER, SwarmSlot("sw"), "x", delay=5, now=100)["state"] == "active"
+
+
+def test_a_swarm_target_reaches_each_live_agent_once_but_not_the_owner(scheduler, swarm):
     from scripts.inbox.outbox import stable_id
     from scripts.inbox.store import InboxStore
 

@@ -94,9 +94,10 @@ class SwarmSlot:
                 pass
 
 
+KINDS = {"inbox": InboxSlot, "broadcast": BroadcastSlot, "swarm": SwarmSlot, "callable": CallableSlot}
+
+
 def restore(record: dict) -> Slot:
     fields = dict(record)
     kind = fields.pop("kind")
-    return {"inbox": InboxSlot, "broadcast": BroadcastSlot, "swarm": SwarmSlot, "callable": CallableSlot}[kind](
-        **fields
-    )
+    return KINDS[kind](**fields)

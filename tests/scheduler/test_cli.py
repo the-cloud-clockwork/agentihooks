@@ -16,8 +16,10 @@ def scheduler(monkeypatch):
     import fakeredis
 
     from scripts.scheduler.core import Scheduler
+    from scripts.swarm.store import RedisStore, SwarmConfig
 
     found = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    RedisStore(found.redis).create(SwarmConfig("sw", "/repo", 2, 1))
     monkeypatch.setattr(commands, "connect", lambda: found)
     monkeypatch.setattr(commands.time, "time", lambda: NOW)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", OWNER)
@@ -82,6 +84,16 @@ def test_a_refused_timer_command_says_why_and_fails(capsys, scheduler):
         1,
         None,
         f"agentihooks timer: {OWNER} is not a seat address\n",
+    )
+    assert run(capsys, cli.timer, ["add", "--in", "5", "--swarm", "nope", "x"]) == (
+        1,
+        None,
+        "agentihooks timer: no swarm nope\n",
+    )
+    assert run(capsys, cli.timer, ["add", "--at", "2026-10-18T09:30:00", "--fleet", "x"]) == (
+        1,
+        None,
+        "agentihooks timer: 2026-10-18T09:30:00 is not an ISO time with an offset such as 2026-10-18T09:30:00+00:00\n",
     )
 
 
