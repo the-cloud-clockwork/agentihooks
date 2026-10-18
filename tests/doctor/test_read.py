@@ -142,6 +142,89 @@ def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_o
     }
 
 
+@pytest.mark.parametrize("count", [10, 200])
+def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, monkeypatch, count):
+    from redis.client import Pipeline
+
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import AgentRecord, SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.names.mint_code(SLUG, SLUG, "/r")
+    expected, items = {}, []
+    for n in range(count):
+        name = store.names.next(SLUG, "eng")
+        alias = f"old-{n}"
+        redis.set(store.names.key("alias", alias), name)
+        store.put_agent(SLUG, AgentRecord(name=name, lane="eng", task="t1", idle_ticks=n))
+        seat = f"eng-{n}@{SLUG}"
+        store.seats.occupy(seat, name, 10)
+        foreign = f"foreign-{n}"
+        store.create(SwarmConfig(foreign, "/r", 1, 1, "running" if n % 2 else "stopped"))
+        taker = f"eng-1@{foreign}"
+        items.extend(
+            [
+                {"address": alias, "history": [{"state": "delivered", "by": taker}]},
+                {"address": seat, "history": []},
+            ]
+        )
+        expected[alias] = expected[seat] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name)
+        expected[taker] = Receiver(seat_wait=bool(n % 2))
+    items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
+    expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
+    trips = []
+    direct, batched = redis.execute_command, Pipeline.execute
+    monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))
+    monkeypatch.setattr(Pipeline, "execute", lambda pipe, *a, **k: trips.append("pipeline") or batched(pipe, *a, **k))
+    assert read.inbox_receivers(store, box, SLUG, items) == expected
+    assert len(trips) <= 16
+
+
+@pytest.mark.parametrize("state, cap, waiting", [("running", 2, True), ("stopped", 2, False), ("running", 0, False)])
+def test_receiver_reads_keep_delivery_seats_and_exited_occupants(redis, state, cap, waiting):
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import AgentRecord, SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig(SLUG, "/r", cap, 1, state))
+    name, seat, taker = f"{SLUG}-eng-1", f"eng-1@{SLUG}", f"eng-2@{SLUG}"
+    store.put_agent(SLUG, AgentRecord(name=name, lane="eng", task="t1", harness="codex"))
+    store.seats.occupy(seat, name, 10)
+    store.seats.record_exit(name, seat, "left")
+    items = [
+        {"address": seat, "history": [{"state": "delivered", "by": taker}]},
+        {"address": seat, "history": []},
+        {"address": name, "history": []},
+    ]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        seat: Receiver(seat_wait=waiting),
+        taker: Receiver(seat_wait=waiting),
+        name: Receiver(live=True, occupant=name, harness="codex"),
+    }
+
+
+@pytest.mark.parametrize("plan_cap", [None, 0, 2])
+def test_receiver_reads_operator_delivery_seats_and_legacy_planner_limits(redis, plan_cap):
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    for slug in (SLUG, "foreign"):
+        store.create(SwarmConfig(slug, "/r", 1, 1, "running", max_plan=plan_cap or 0))
+        if plan_cap is None:
+            redis.hdel(store.key(slug, "config"), "max_plan")
+    first, second = "plan-1@foreign", f"plan-2@{SLUG}"
+    items = [
+        {"address": "operator", "history": [{"state": "delivered", "by": first}]},
+        {"address": second, "history": []},
+    ]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        "operator": Receiver(),
+        first: Receiver(seat_wait=plan_cap != 0),
+        second: Receiver(seat_wait=plan_cap == 2),
+    }
+
+
 def prompt(name, seat, task, handoff):
     lines = [f"You are {name}, an engineer in swarm {SLUG}.", f"Your one task for this session is {task}: a title"]
     lines.append(f"Your seat {seat} carries what earlier occupants left. Read it in this order:")

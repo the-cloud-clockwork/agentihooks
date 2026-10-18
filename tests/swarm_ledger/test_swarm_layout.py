@@ -32,6 +32,7 @@ ROWS = [
     "swarm-alert",
     "capacity-box",
     "quota-box",
+    "hives-box",
     "overlays-box",
     "agents-box",
     "health-box",
@@ -207,7 +208,15 @@ def test_every_swarm_row_stays_full_width_at_every_viewport(open_page):
     for width in (1440, 390):
         page = open_page(status(), width)
         full = page.box("swarm-box")["width"]
-        for row in ("capacity-box", "quota-box", "overlays-box", "agents-box", "health-box", "handoff-box"):
+        for row in (
+            "capacity-box",
+            "quota-box",
+            "hives-box",
+            "overlays-box",
+            "agents-box",
+            "health-box",
+            "handoff-box",
+        ):
             assert abs(page.box(row)["width"] - full) < 1, row
 
 

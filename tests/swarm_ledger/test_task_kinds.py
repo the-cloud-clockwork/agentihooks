@@ -88,6 +88,36 @@ class Kinds(unittest.TestCase):
         self.assertEqual(state["tasks"][0]["proof"], {"command": "kubectl get pods", "output": "cache-0 Running"})
         self.assertTrue(state["tasks"][0]["done"])
 
+    def test_code_after_merge_contract_requires_command_and_output(self):
+        make_ledger([{"task": "t1", "title": "verify cache", "lane": "eng", "contract": {"after": "yes"}}])
+        for n, proof in enumerate(({}, {"command": "probe"}, {"output": "ok"}, {"command": " ", "output": "ok"}), 1):
+            state, rejected = core.sync(SLUG, ops=[done(n, **proof)])
+            self.assertEqual(rejected, [f"task_update-{n}"])
+            self.assertFalse(state["tasks"][0]["done"])
+        state, rejected = core.sync(SLUG, ops=[done(9, command="probe", output="ok")])
+        self.assertEqual(rejected, [])
+        self.assertTrue(state["tasks"][0]["done"])
+
+    def test_after_contract_validation_and_plain_code_controls(self):
+        for value in ("yes", "no"):
+            core.check_op(op("task_update", 1, item="tasks/t1", fields={"contract": {"after": value}}))
+        for value in ("true", "", "Yes"):
+            with self.assertRaisesRegex(ValueError, "contract after must be yes or no"):
+                core.check_op(op("task_update", 1, item="tasks/t1", fields={"contract": {"after": value}}))
+        for value in ("", "1000"):
+            core.check_op(op("task_update", 1, item="tasks/t1", fields={"contract": {"after_at": value}}))
+        for value in ("-1", "1.5", "tomorrow", "１２３"):
+            with self.assertRaisesRegex(ValueError, "contract after_at must be Unix milliseconds or empty"):
+                core.check_op(op("task_update", 1, item="tasks/t1", fields={"contract": {"after_at": value}}))
+        for task in (
+            {},
+            {"contract": {"after": "no"}},
+            {"kind": "ci"},
+            {"kind": "ops", "proof": {"command": "x", "output": "y"}, "contract": {"after": "yes"}},
+        ):
+            self.assertEqual(ledger_kinds.unmet(task), [])
+        self.assertEqual(ledger_kinds.unmet({"kind": "ci", "contract": {"after": "yes"}}), ["command", "output"])
+
     def test_each_kind_names_the_proof_it_needs(self):
         unmet = ledger_kinds.unmet
         self.assertEqual(unmet({}), [])
@@ -152,6 +182,20 @@ class KindCli(unittest.TestCase):
         self.assertEqual(sent[0][1]["contract"], {"must": CONTRACT["must"], "push": "yes"})
         self.assertNotIn("contract", sent[1][1])
         self.assertEqual(sent[2][1]["fields"], {"contract": {"push": "yes"}})
+
+    def test_task_set_sends_post_merge_contract_and_maturity(self):
+        import ledger
+
+        sent = []
+        with unittest.mock.patch.object(ledger, "send", lambda args, kind, /, **f: sent.append((kind, f))):
+            ledger.cmd_task(
+                ledger.build_parser().parse_args(
+                    ["--slug", SLUG, "--as", "x", "task", "set", "t3", "contract.after=yes", "contract.after_at=1000"]
+                )
+            )
+        self.assertEqual(
+            sent, [("task_update", {"item": "tasks/t3", "fields": {"contract": {"after": "yes", "after_at": "1000"}}})]
+        )
 
     def test_task_set_sends_a_dotted_proof_as_one_object_the_ledger_stores(self):
         import ledger

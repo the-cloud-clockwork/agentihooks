@@ -2556,6 +2556,7 @@ jobs:
       browser: ${{ steps.plan.outputs.browser }}
       reused: ${{ steps.reuse.outputs.reused || 'false' }}
       forwarded: ${{ (steps.reuse.outputs.reused == 'true' || steps.plan.outputs.changed == '0') && 'true' || 'false' }}
+      selection: ${{ steps.contract.outputs.selection || 'false' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -2614,10 +2615,24 @@ jobs:
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: python -m scripts.ci_mutation.plan --base "$BASE"
+        run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
+
+      # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
+      - name: Check the planned selection contract
+        id: contract
+        if: steps.reuse.outputs.reused != 'true'
+        run: |
+          if [[ ! -e .mutation-selection.json ]]; then
+            echo "This head's planner predates the planned test selection, so mutation selects matching and importing test modules as before." >> "$GITHUB_STEP_SUMMARY"
+            echo "selection=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python -c 'import json, sys; s = json.load(open(".mutation-selection.json")); sys.exit(not (isinstance(s, dict) and all(isinstance(v, list) and all(isinstance(t, str) for t in v) for v in s.values())))' \
+            || { echo "::error::.mutation-selection.json is malformed."; exit 1; }
+          echo "selection=true" >> "$GITHUB_OUTPUT"
 
       - name: Upload planned mutation test selection
-        if: steps.reuse.outputs.reused != 'true'
+        if: steps.reuse.outputs.reused != 'true' && steps.contract.outputs.selection == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: mutation-selection
@@ -2677,7 +2692,7 @@ jobs:
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
-        if: needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection
@@ -2759,7 +2774,7 @@ jobs:
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
       - name: Download planned mutation test selection
-        if: needs.mutation-plan.outputs.forwarded != 'true'
+        if: needs.mutation-plan.outputs.forwarded != 'true' && needs.mutation-plan.outputs.selection == 'true'
         uses: actions/download-artifact@v4
         with:
           name: mutation-selection

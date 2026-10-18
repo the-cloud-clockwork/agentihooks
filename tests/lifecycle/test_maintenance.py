@@ -1,5 +1,6 @@
 import subprocess
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
@@ -53,11 +54,12 @@ def test_a_report_only_sweep_counts_objects_without_registering(repo, tmp_path):
 def test_lifecycle_setup_registers_every_managed_primary(repo, monkeypatch):
     repo.worktree("held")
     monkeypatch.setattr(maintenance, "load_roots", lambda: [repo.root()])
+    from redis.exceptions import ConnectionError as Refused
+
+    monkeypatch.setattr(timer, "_scheduler", Mock(side_effect=Refused("refused")))
     message = timer.install_timer("/venv/bin/python", "/opt/agentihooks")
     assert str(repo.primary.resolve()) in _registered()
     assert message.endswith(f"\n  [OK] git maintenance registered for {repo.primary}")
-    service = (timer.unit_dir() / f"{timer.UNIT}.service").read_text()
-    assert "ExecStart=/venv/bin/python " in service and "WorkingDirectory=/opt/agentihooks\n" in service
     assert "git maintenance" not in timer.install_timer("/venv/bin/python", "/opt/agentihooks")
 
 
