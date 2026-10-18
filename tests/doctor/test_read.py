@@ -142,6 +142,35 @@ def test_inbox_receivers_name_the_agent_that_took_delivery_apart_from_the_seat_o
     }
 
 
+@pytest.mark.parametrize("count", [10, 200])
+def test_receiver_reads_have_constant_round_trips_and_preserve_results(redis, monkeypatch, count):
+    from redis.client import Pipeline
+
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import AgentRecord
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.names.mint_code(SLUG, SLUG, "/r")
+    expected, items = {}, []
+    for n in range(count):
+        name = store.names.next(SLUG, "eng")
+        alias = f"old-{n}"
+        redis.set(store.names.key("alias", alias), name)
+        store.put_agent(SLUG, AgentRecord(name=name, lane="eng", task="t1", idle_ticks=n))
+        seat = f"eng-{n}@{SLUG}"
+        store.seats.occupy(seat, name, 10)
+        items.extend([{"address": alias, "history": []}, {"address": seat, "history": []}])
+        expected[alias] = expected[seat] = Receiver(live=True, quiet_ms=n * 60_000, occupant=name)
+    items.extend([{"address": "operator", "history": []}, {"address": "stranger", "history": []}])
+    expected.update(operator=Receiver(), stranger=Receiver(scoped=False))
+    trips = []
+    direct, batched = redis.execute_command, Pipeline.execute
+    monkeypatch.setattr(redis, "execute_command", lambda *a, **k: trips.append(a[0]) or direct(*a, **k))
+    monkeypatch.setattr(Pipeline, "execute", lambda pipe, *a, **k: trips.append("pipeline") or batched(pipe, *a, **k))
+    assert read.inbox_receivers(store, box, SLUG, items) == expected
+    assert len(trips) <= 16
+
+
 def prompt(name, seat, task, handoff):
     lines = [f"You are {name}, an engineer in swarm {SLUG}.", f"Your one task for this session is {task}: a title"]
     lines.append(f"Your seat {seat} carries what earlier occupants left. Read it in this order:")
