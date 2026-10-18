@@ -209,10 +209,11 @@ def test_receiver_reads_operator_delivery_seats_and_legacy_planner_limits(redis,
     from scripts.swarm.store import SwarmConfig
 
     store, box = RedisStore(redis), InboxStore(redis)
-    store.create(SwarmConfig(SLUG, "/r", 1, 1, "running", max_plan=plan_cap or 0))
-    if plan_cap is None:
-        redis.hdel(store.key(SLUG, "config"), "max_plan")
-    first, second = f"plan-1@{SLUG}", f"plan-2@{SLUG}"
+    for slug in (SLUG, "foreign"):
+        store.create(SwarmConfig(slug, "/r", 1, 1, "running", max_plan=plan_cap or 0))
+        if plan_cap is None:
+            redis.hdel(store.key(slug, "config"), "max_plan")
+    first, second = "plan-1@foreign", f"plan-2@{SLUG}"
     items = [
         {"address": "operator", "history": [{"state": "delivered", "by": first}]},
         {"address": second, "history": []},
