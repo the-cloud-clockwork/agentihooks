@@ -47,8 +47,9 @@ def transact(redis, body, keys=()):
 
 
 def check_owner(pipe, recipient, owner, world):
-    pipe.watch(owner_key(recipient, world))
-    held = pipe.get(owner_key(recipient, world))
+    key = owner_key(recipient, world)
+    pipe.watch(key)
+    held = pipe.get(key)
     if held != owner:
         raise DispatchError(f"{owner} does not deliver for {recipient}; {held or 'nobody'} does")
 

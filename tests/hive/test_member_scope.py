@@ -87,6 +87,23 @@ def test_a_member_beat_lands_below_its_own_hive_key_and_the_controller_reads_it_
     assert [entry["at"] for entry in idle.wait_history(redis, "fixture", name)] == [7]
 
 
+def test_the_controller_ends_a_member_agents_wait_below_its_member(redis, swarm, monkeypatch):
+    from scripts.swarm import idle, waits
+
+    name = place(swarm, "m1")
+    join(redis, "m1")
+    with monkeypatch.context() as member:
+        as_member(member)
+        idle.declare_wait(redis, "fixture", name, 100, "checks", 7)
+    own = f"{ROOT}:hive:m1:swarm:fixture"
+    previous = redis.get(f"{own}:wait:{name}")
+
+    assert waits._save_wait(redis, "fixture", name, previous, {}, "merged", 50)
+    assert not redis.exists(f"{own}:wait:{name}")
+    assert redis.get(f"{own}:woke:{name}") == "50"
+    assert not redis.keys(f"{ROOT}:swarm:fixture:*:{name}")
+
+
 @pytest.mark.parametrize("hive", ["", "other"])
 def test_an_agent_on_the_controller_or_an_unjoined_hive_keeps_the_shared_readings(redis, swarm, hive):
     from scripts.swarm import idle
@@ -117,6 +134,7 @@ def test_member_session_model_progress_and_stop_blocks_stay_below_the_member(red
     )
     assert session_model.get(redis, "fixture", name)["model"] == "opus"
     assert Progress(redis, "fixture").read(name).outcome == "pushed"
+    assert Streak(swarm, "fixture", name).key == f"{own}:stop-blocks:{name}"
 
 
 def test_a_member_inbox_keeps_its_items_owners_and_marks_below_its_own_hive_key(redis, swarm, monkeypatch):
@@ -222,6 +240,30 @@ def test_a_member_inbox_pools_and_owns_below_its_own_keys(redis, swarm):
     assert owner_key("engineer", "m1") == f"{ROOT}:hive:m1:inbox:owner:engineer"
     assert redis.get(f"{ROOT}:hive:m1:inbox:owner:engineer") == "session"
     assert not redis.exists(owner_key("engineer", ""))
+
+
+def test_a_controller_delivers_a_member_inbox_through_that_members_owner_key(redis, swarm):
+    from scripts.inbox.dispatch import Dispatcher
+    from scripts.inbox.store import InboxStore
+
+    name = place(swarm, "m1")
+    join(redis, "m1")
+    world = InboxStore(redis, world="m1")
+    world.send("operator", name, "hello")
+    dispatcher = Dispatcher(world)
+    owned = f"{ROOT}:hive:m1:inbox:owner:{name}"
+
+    dispatcher.own(name, "pump", ttl_s=5)
+    assert dispatcher.owner(name) == "pump"
+    assert dispatcher.renew(name, "pump", ttl_s=50)
+    assert redis.ttl(owned) == 50
+    [delivery] = dispatcher.reserve(name, "pump")
+    assert dispatcher.receipts.recover(name, "pump") is not None
+    dispatcher.receipts.reject(delivery.id, "pump", "proof")
+    assert dispatcher.receipts.get(delivery.id).state == "rejected"
+    assert dispatcher.release(name, "pump")
+    assert not redis.exists(owned)
+    assert not redis.keys(f"{ROOT}:inbox:*")
 
 
 @pytest.mark.parametrize(("hive", "pooled"), [("m1", []), ("", ["master@fixture", "master-2@fixture"])])
