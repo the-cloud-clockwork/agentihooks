@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from tests import refresh_durations
 
 
@@ -256,7 +258,8 @@ def test_queue_capacity_admission_precedes_the_unit_matrix():
     assert "split" in jobs["gate-required"]["needs"]
 
 
-def test_joint_queue_planning_keeps_version_specific_collections_and_hashes(tmp_path):
+@pytest.mark.parametrize("reuse", [False, True])
+def test_joint_queue_planning_keeps_version_specific_collections_and_hashes(tmp_path, reuse):
     import hashlib
     import os
     import subprocess
@@ -275,17 +278,28 @@ def test_joint_queue_planning_keeps_version_specific_collections_and_hashes(tmp_
     tests.mkdir()
     (tests / "test_one.py").write_text("")
     (tests / "test_two.py").write_text("")
+    (tests / "test_reused.py").write_text("")
+    skipped = "tests/test_reused.py::test_old"
     restored = tmp_path / "home/dev-durations"
     restored.mkdir(parents=True)
     merged = {node: seconds for durations in cases.values() for node, seconds in durations.items()}
+    if reuse:
+        merged[skipped] = 9000.0
     (restored / ".test_durations").write_text(json.dumps(merged))
     (tmp_path / ".test_durations").write_text(json.dumps(merged))
     for version, durations in cases.items():
-        (restored / f".test_durations-{version}").write_text(json.dumps(durations))
+        (restored / f".test_durations-{version}").write_text(
+            json.dumps({**durations, **({skipped: 9000.0} if reuse else {})})
+        )
     (tmp_path / "collected.json").write_text(json.dumps(list(cases["3.11"])))
     other = tmp_path / "queue-input/3.12"
     other.mkdir(parents=True)
     (other / "collected.json").write_text(json.dumps(list(cases["3.12"])))
+    if reuse:
+        for folder in (tmp_path, other):
+            collected = folder / "collected.json"
+            collected.write_text(json.dumps([*json.loads(collected.read_text()), skipped]))
+            (folder / "reused.json").write_text(json.dumps({"tests": [skipped], "files": ["tests/test_reused.py"]}))
     binaries = tmp_path / "bin"
     binaries.mkdir()
     python = binaries / "python"
