@@ -103,6 +103,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *stalled(agents, limits),
         *master_rc(agents),
         *master_fallback_auth(agents),
+        *master_headless(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -368,7 +369,7 @@ def master_fallback_auth(agents: list[dict]) -> list[Finding]:
             agent.get("lane") != "master"
             or agent.get("desired_route_kind") != "interactive"
             or agent.get("route_kind") == "interactive"
-            or agent.get("state") == "finished"
+            or agent.get("state") in ("finished", "ended")
         ):
             continue
         found.append(
@@ -378,6 +379,25 @@ def master_fallback_auth(agents: list[dict]) -> list[Finding]:
                 "master on fallback auth, phone access lost",
                 (f"route: {agent.get('route_kind', 'subscription')}", f"agent {agent['name']}"),
                 "the master desires interactive authentication but runs on fallback authentication",
+                1,
+            )
+        )
+    return found
+
+
+def master_headless(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        placed = agent.get("profile_decision", {}).get("master_placement", {})
+        if agent.get("lane") != "master" or agent.get("state") in ("finished", "ended") or not placed.get("headless"):
+            continue
+        found.append(
+            Finding(
+                "master-headless",
+                agent.get("seat") or agent["name"],
+                "master runs on a headless hive",
+                (f"hive: {placed['hive']}", f"agent {agent['name']}"),
+                "the master has no UI hive",
                 1,
             )
         )

@@ -55,14 +55,14 @@ def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) 
     return get
 
 
-def _pages(get, path, params, cap):
+def _pages(get, path, params, cap, deadline, clock):
     rows, page = [], 1
     while True:
         body = get(path, {**params, "page": page, "limit": OBSERVATION_PAGE})
         rows += body["data"]
         if page >= body["meta"]["totalPages"]:
             return rows, True
-        if page >= cap:
+        if page >= cap or clock() >= deadline:
             return rows, False
         page += 1
 
@@ -112,13 +112,14 @@ def _listing(slug, get, budget, deadline, clock):
         return rows, False, [f"trace listing failed: {type(exc).__name__}: {exc}"]
 
 
-def _backfill(get, cache, trace, budget):
+def _backfill(get, cache, trace, budget, deadline, clock):
     try:
-        rows, whole = _pages(get, "observations", {"traceId": trace["id"]}, budget.observation_pages)
+        rows, whole = _pages(get, "observations", {"traceId": trace["id"]}, budget.observation_pages, deadline, clock)
         entry = {"updated_at": trace.get("updatedAt"), "whole": whole, "observations": [_observation(o) for o in rows]}
     except Exception as exc:  # noqa: BLE001
         entry = {"updated_at": trace.get("updatedAt"), "failed": f"{type(exc).__name__}: {exc}"}
-    registry.save(_cache_path(cache, trace["id"]), entry)
+    if entry.get("whole") or entry.get("failed"):
+        registry.save(_cache_path(cache, trace["id"]), entry)
     return entry
 
 
@@ -142,7 +143,7 @@ def history(
     for trace in [] if failures else unread + retried:
         if clock() >= deadline:
             break
-        entries[trace["id"]] = _backfill(get, cache, trace, budget)
+        entries[trace["id"]] = _backfill(get, cache, trace, budget, deadline, clock)
     found = [
         {
             "id": trace["id"],
