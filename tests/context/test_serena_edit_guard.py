@@ -195,6 +195,91 @@ def test_patch_deleting_then_adding_the_same_python_file_is_blocked(trees):
         check({"tool_name": name, "tool_input": tool_input, "cwd": str(worktree)})
 
 
+def _block_text(payload):
+    with pytest.raises(BlockAction) as caught:
+        check(payload)
+    return str(caught.value)
+
+
+def test_built_in_edit_refusal_names_the_path_root_and_allowed_deletion(trees):
+    _, worktree = trees
+    assert _block_text(_tool("Edit", worktree, file_path="pkg/mod.py")) == (
+        f"BLOCKED: pkg/mod.py is Python in the worktree {worktree}, which is edited through Serena "
+        "(Development Manifesto §7).\n"
+        f"Call mcp__serena__activate_project with {worktree}, then edit with replace_symbol_body, "
+        "insert_after_symbol / insert_before_symbol, rename_symbol or replace_content. "
+        "A new .py file may be created with Write; a whole file in this worktree is deleted with git rm or rm."
+    )
+
+
+def test_foreign_deletion_refusal_names_the_path_and_checkout(trees, sibling):
+    _, worktree = trees
+    target = sibling / "pkg" / "mod.py"
+    expected = (
+        f"BLOCKED: {target} is Python in another checkout, {sibling}. "
+        "A session deletes Python files only inside its own checkout."
+    )
+    assert _block_text(_tool("Bash", worktree, command=f"rm {target}")) == expected
+    name, tool_input = _patch(f"*** Delete File: {target}")
+    assert _block_text({"tool_name": name, "tool_input": tool_input, "cwd": str(worktree)}) == expected
+
+
+def test_shell_deletion_with_an_unclosed_quote_still_checks_its_paths(trees, sibling):
+    _, worktree = trees
+    with pytest.raises(BlockAction, match="another checkout"):
+        check(_tool("Bash", worktree, command=f'rm {sibling / "pkg" / "mod.py"} "unclosed'))
+
+
+def test_a_file_tool_call_without_a_path_is_allowed(trees):
+    _, worktree = trees
+    check(_tool("Write", worktree, content="x = 1\n"))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find {root} -name '*.py' -delete",
+        "find {root}/pkg -type f -exec rm {{}} \\;",
+        "find {root} -name mod.py | xargs rm",
+        "echo {root}/pkg/mod.py | xargs rm -f",
+        "cd {root} && ls pkg/mod.py | xargs rm",
+        "git -C {root} rm pkg/mod.py",
+        "git -C '{root}' rm -q pkg/mod.py",
+        "rm -r {root}/pkg",
+        "rm -rf {root}",
+        "sudo rm {root}/pkg/mod.py",
+    ],
+)
+def test_other_deletion_forms_of_python_in_another_worktree_are_blocked(trees, sibling, command):
+    _, worktree = trees
+    with pytest.raises(BlockAction, match="another checkout"):
+        check(_tool("Bash", worktree, command=command.format(root=sibling)))
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "find . -name '*.py' -delete",
+        "find pkg -exec rm {{}} +",
+        "ls pkg/mod.py | xargs rm",
+        "git -C {root} rm pkg/mod.py",
+        "rm -r pkg",
+        "rm {other}/README.md",
+        "rm -r {other}/docs",
+        "rm {loose}",
+        "rm {other}/pkg/missing.py",
+    ],
+)
+def test_deletions_inside_the_worktree_or_of_no_python_are_allowed(trees, sibling, command):
+    _, worktree = trees
+    (sibling / "README.md").write_text("doc\n")
+    (sibling / "docs").mkdir()
+    (sibling / "docs" / "guide.md").write_text("doc\n")
+    loose = worktree.parent.parent.parent / "loose.py"
+    loose.write_text("x = 1\n")
+    check(_tool("Bash", worktree, command=command.format(root=worktree, other=sibling, loose=loose)))
+
+
 def test_the_guard_can_be_turned_off(trees, monkeypatch):
     _, worktree = trees
     monkeypatch.setattr("hooks.config.SERENA_EDIT_GUARD_ENABLED", False)
