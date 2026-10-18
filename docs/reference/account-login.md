@@ -56,11 +56,13 @@ recovery copies under `secret/agentihooks/master-claude/<slug>` are no longer
 read: run `agentihooks claude login --master` once after the upgrade.
 
 With it on, the Claude front door master of every swarm, seat
-`master@<slug>` (or a master with no seat, which predates seats), launches on route `master-login` from one private home,
+`master@<slug>` (or a master with no seat, which predates seats), launches
+and resumes on route `master-login` from one private home,
 `$AGENTIHOOKS_HOME/master-login/claude`, copied from its rendered master
 profile without the shared credential link. Pool master seats
-(`master-2@<slug>` and up) and a master order placed on an explicit
-subscription or API route keep their routed quota tokens. `CLAUDE_CONFIG_DIR` and
+(`master-2@<slug>` and up) keep their routed quota tokens, and so does a
+master launched from an order on an explicit subscription or API route; a
+later resume of the front door takes the login. `CLAUDE_CONFIG_DIR` and
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` both point at that home, the session gets
 `--settings {"forceLoginMethod":"claudeai"}`, and its environment drops routed
 OAuth tokens, API keys, custom endpoints and provider selectors. Settings that
