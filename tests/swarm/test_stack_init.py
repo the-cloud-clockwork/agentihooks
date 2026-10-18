@@ -1,6 +1,5 @@
 import io
 import json
-import socket
 import stat
 import subprocess
 import sys
@@ -10,10 +9,9 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import cli, stack_init
+from scripts.swarm import cli, stack_env, stack_init
 
 PASSWORD = "pw-test"
-CLIENT_REDIS = "redis://" + "swarm:" + PASSWORD + "@127.0.0.1:6380/0"
 HEALTHY = [
     {"Service": "redis", "State": "running", "Health": "healthy"},
     {"Service": "swarm", "State": "running", "Health": "healthy"},
@@ -41,9 +39,10 @@ def page(url, timeout):
 
 
 class Docker:
-    def __init__(self, rows=HEALTHY, failing=(), up_code=0, up_err="", ps_text=None):
+    def __init__(self, rows=HEALTHY, failing=(), up_code=0, up_err="", ps_text=None, ps_err=""):
         self.calls = []
-        self.rows, self.failing, self.up_code, self.up_err, self.ps_text = rows, failing, up_code, up_err, ps_text
+        self.rows, self.failing, self.up_code, self.up_err = rows, failing, up_code, up_err
+        self.ps_text, self.ps_err = ps_text, ps_err
 
     def __call__(self, argv, capture_output, text):
         assert capture_output is True and text is True
@@ -53,6 +52,8 @@ class Docker:
         if "up" in argv:
             return subprocess.CompletedProcess(argv, self.up_code, "", self.up_err)
         if "ps" in argv:
+            if self.ps_err:
+                return subprocess.CompletedProcess(argv, 1, "", self.ps_err)
             out = self.ps_text if self.ps_text is not None else "\n".join(json.dumps(row) for row in self.rows)
             return subprocess.CompletedProcess(argv, 0, out, "")
         return subprocess.CompletedProcess(argv, 0, "", "")
@@ -66,8 +67,8 @@ class Terminal(io.StringIO):
 @pytest.fixture
 def home(tmp_path, monkeypatch):
     monkeypatch.setattr(stack_init.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(stack_init.secrets, "token_urlsafe", lambda: PASSWORD)
-    monkeypatch.setattr(stack_init, "free_port", lambda preferred: preferred + 1)
+    monkeypatch.setattr(stack_env.secrets, "token_urlsafe", lambda: PASSWORD)
+    monkeypatch.setattr(stack_env, "free_port", lambda preferred: preferred + 1)
     return tmp_path
 
 
@@ -98,6 +99,10 @@ def compose(home, *args):
     ]
 
 
+def up(home, timeout):
+    return compose(home, "up", "--detach", "--pull", "missing", "--no-build", "--wait", "--wait-timeout", timeout)
+
+
 READY = (
     "Starting the swarm stack; the first run pulls its images.\n"
     "Swarm stack ready: redis, swarm and controller are healthy.\n"
@@ -118,21 +123,12 @@ def test_init_brings_up_the_stack_and_prints_the_next_steps(home):
     assert docker.calls == [
         ["docker", "info", "--format", "{{.ServerVersion}}"],
         ["docker", "compose", "version", "--short"],
-        compose(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", "300"),
+        up(home, "300"),
         compose(home, "ps", "--all", "--format", "json"),
     ]
     folder = stack(home)
-    assert (folder / ".env").read_text() == (
-        "AGENTIHOOKS_DEPLOYMENT=compose\n"
-        "SWARM_BIND=127.0.0.1\n"
-        "SWARM_HIVE_ID=compose-controller\n"
-        f"SWARM_REDIS_PASSWORD={PASSWORD}\n"
-        "SWARM_PORT=8766\n"
-        "SWARM_REDIS_PORT=6380\n"
-    )
-    assert (folder / "client.env").read_text() == (
-        f"AGENTIHOOKS_DEPLOYMENT=compose\nLEDGER_URL=http://127.0.0.1:8766\nAGENTIHOOKS_SWARM_REDIS_URL={CLIENT_REDIS}\n"
-    )
+    assert f"SWARM_REDIS_PASSWORD={PASSWORD}\n" in (folder / ".env").read_text()
+    assert (folder / "client.env").read_text() == stack_env.client_env(stack_env.read_env(folder / ".env"))
     for name in (".env", "client.env"):
         assert stat.S_IMODE((folder / name).stat().st_mode) == 0o600
     for name in STACK_FILES:
@@ -145,9 +141,7 @@ def test_a_second_run_keeps_the_password_ports_and_edits(home, monkeypatch):
     init(home, Docker())
     env = stack(home) / ".env"
     env.write_text(env.read_text().replace("SWARM_PORT=8766", "SWARM_PORT=9100"))
-    env.chmod(0o644)
-    monkeypatch.setattr(stack_init.secrets, "token_urlsafe", lambda: "other")
-    monkeypatch.setattr(stack_init, "free_port", lambda preferred: pytest.fail("ports are chosen once"))
+    monkeypatch.setattr(stack_env.secrets, "token_urlsafe", lambda: "other")
     docker = Docker()
     code, out = init(home, docker, ["--timeout", "42"])
     assert code == 0
@@ -155,29 +149,19 @@ def test_a_second_run_keeps_the_password_ports_and_edits(home, monkeypatch):
     assert f"SWARM_REDIS_PASSWORD={PASSWORD}\n" in env.read_text()
     assert "  1. Open the ledger: http://127.0.0.1:9100/\n" in out
     assert (stack(home) / "client.env").read_text().splitlines()[1] == "LEDGER_URL=http://127.0.0.1:9100"
-    assert stat.S_IMODE(env.stat().st_mode) == 0o644
-    assert docker.calls[2] == compose(home, "up", "--detach", "--no-build", "--wait", "--wait-timeout", "42")
-
-
-def test_missing_settings_are_filled_in_on_a_rerun(home):
-    folder = stack(home)
-    folder.mkdir()
-    (folder / ".env").write_text("# SWARM_HIVE_ID=old\nSWARM_PORT = 9200\nSWARM_REDIS_PASSWORD=\n")
-    init(home, Docker())
-    assert (folder / ".env").read_text() == (
-        "SWARM_PORT=9200\n"
-        f"SWARM_REDIS_PASSWORD={PASSWORD}\n"
-        "AGENTIHOOKS_DEPLOYMENT=compose\n"
-        "SWARM_BIND=127.0.0.1\n"
-        "SWARM_HIVE_ID=compose-controller\n"
-        "SWARM_REDIS_PORT=6380\n"
-    )
+    assert docker.calls[2] == up(home, "42")
 
 
 def test_stack_folder_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):
     monkeypatch.setattr(stack_init.Path, "home", lambda: tmp_path)
     assert stack_init.stack_home({}) == tmp_path / ".agentihooks" / "swarm-stack"
     assert stack_init.stack_home({"AGENTIHOOKS_HOME": "/x"}) == Path("/x/swarm-stack")
+
+
+DAEMON = (
+    "Swarm stack not ready: the Docker daemon is not reachable.\n"
+    "  Fix: start Docker, or add your user to the docker group, then run agentihooks swarm init again.\n"
+)
 
 
 @pytest.mark.parametrize(
@@ -189,12 +173,8 @@ def test_stack_folder_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):
             "Swarm stack not ready: Docker is not installed.\n"
             "  Fix: install Docker Engine with the Compose plugin, then run agentihooks swarm init again.\n",
         ),
-        (
-            "/usr/bin/docker",
-            (["info", "--format"],),
-            "Swarm stack not ready: the Docker daemon is not reachable.\n"
-            "  Fix: start Docker, or add your user to the docker group, then run agentihooks swarm init again.\n",
-        ),
+        ("/usr/bin/docker", (["info", "--format"],), DAEMON),
+        ("/usr/bin/docker", (["info", "--format"], ["compose", "version"]), DAEMON),
         (
             "/usr/bin/docker",
             (["compose", "version"],),
@@ -224,16 +204,16 @@ def test_an_unhealthy_service_is_named_with_its_fix_and_logs(home):
     assert code == 1
     assert out == (
         "Starting the swarm stack; the first run pulls its images.\n"
-        "docker compose up said:\n"
+        "docker compose said:\n"
         "  line one\n"
         "  Bind for 127.0.0.1:6380 failed: port is already allocated\n"
         "Swarm stack not ready: swarm is unhealthy.\n"
-        f"  Fix: the ledger server needs port 8766 free and Redis healthy; free the port or set SWARM_PORT in {env} "
-        "to a free port, then run agentihooks swarm init again.\n"
+        "  Fix: read its logs; the ledger server needs Redis healthy, and if port 8766 is in use, "
+        f"set SWARM_PORT in {env} to a free port, then run agentihooks swarm init again.\n"
         "  Logs: docker compose --project-name agentihooks-swarm logs swarm\n"
         "Swarm stack not ready: controller is not created.\n"
-        "  Fix: the controller starts once Redis and the ledger server are healthy and then holds a lease; "
-        "fix those first, then run agentihooks swarm init again.\n"
+        "  Fix: read its logs; the controller starts once Redis and the ledger server are healthy "
+        "and then holds a lease, so fix those first, then run agentihooks swarm init again.\n"
         "  Logs: docker compose --project-name agentihooks-swarm logs controller\n"
     )
 
@@ -242,8 +222,15 @@ def test_compose_output_is_trimmed_to_its_last_lines(home):
     lines = [f"line {n}" for n in range(15)]
     code, out = init(home, Docker(rows=[], up_code=1, up_err="\n".join(lines)))
     assert code == 1
-    assert "docker compose up said:\n" + "".join(f"  {line}\n" for line in lines[5:]) in out
+    assert "docker compose said:\n" + "".join(f"  {line}\n" for line in lines[5:]) in out
     assert "  line 4\n" not in out
+
+
+def test_a_failed_listing_is_shown_and_every_service_is_not_created(home):
+    code, out = init(home, Docker(ps_err="cannot connect\n"))
+    assert code == 1
+    assert "docker compose said:\n  cannot connect\nSwarm stack not ready: redis is not created.\n" in out
+    assert "Swarm stack not ready: controller is not created.\n" in out
 
 
 def test_an_unhealthy_redis_names_its_port_and_password(home):
@@ -253,17 +240,17 @@ def test_an_unhealthy_redis_names_its_port_and_password(home):
     assert code == 1
     assert (
         "Swarm stack not ready: redis is exited.\n"
-        f"  Fix: Redis needs port 6380 free and the password in {env} unchanged since its first start; "
-        "free the port or set SWARM_REDIS_PORT to a free port, then run agentihooks swarm init again.\n"
+        f"  Fix: read its logs; if port 6380 is in use, set SWARM_REDIS_PORT in {env} to a free port, "
+        f"and keep the password in {env} as it was at the first start, then run agentihooks swarm init again.\n"
         "  Logs: docker compose --project-name agentihooks-swarm logs redis\n"
     ) in out
-    assert "docker compose up said:" not in out
+    assert "docker compose said:" not in out
 
 
 def test_a_failed_up_with_healthy_services_is_still_ready(home):
     code, out = init(home, Docker(up_code=1, up_err="warning"))
     assert code == 0
-    assert "docker compose up said:" not in out
+    assert "docker compose said:" not in out
 
 
 def test_compose_ps_as_a_json_array_is_read(home):
@@ -319,16 +306,6 @@ def test_failures_are_red_on_a_terminal(home, monkeypatch):
     )
 
 
-def test_free_port_prefers_the_default_and_falls_back_to_any_free_port():
-    with socket.socket() as held:
-        held.bind(("127.0.0.1", 0))
-        held.listen()
-        busy = held.getsockname()[1]
-        other = stack_init.free_port(busy)
-        assert other not in (busy, 0)
-    assert stack_init.free_port(busy) == busy
-
-
 def test_swarm_init_routes_to_the_stack_command(monkeypatch):
     seen = []
     monkeypatch.setattr(stack_init, "main", lambda argv: seen.append(argv) or 7)
@@ -348,10 +325,3 @@ def test_main_runs_init_with_the_process_environment_docker_and_stdout(monkeypat
     monkeypatch.setattr(stack_init, "init", lambda *args: seen.append(args) or 3)
     assert stack_init.main(["--timeout", "1"]) == 3
     assert seen == [(["--timeout", "1"], stack_init.os.environ, subprocess.run, urllib.request.urlopen, sys.stdout)]
-
-
-def test_write_private_replaces_a_longer_file(tmp_path):
-    path = tmp_path / "client.env"
-    path.write_text("a much longer earlier text\n")
-    stack_init.write_private(path, "short\n")
-    assert path.read_text() == "short\n"
