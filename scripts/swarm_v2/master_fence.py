@@ -98,7 +98,7 @@ def _ledger_state(slug: str) -> dict:
     return LedgerClient().state(slug)
 
 
-def check_send(inbox, sender: str, address: str, doc_of=None) -> None:
+def check_send(inbox, sender: str, address: str) -> None:
     """A master's message to a task's claimant rules on that task, so only the task's owning master sends one."""
     from scripts.inbox.seats import master_of
     from scripts.inbox.store import InboxError
@@ -115,7 +115,7 @@ def check_send(inbox, sender: str, address: str, doc_of=None) -> None:
         seats = Seats(slug, RedisStore(inbox.redis), {})
         if len(seats.live) < 2:
             return
-        seats.doc = (doc_of or _ledger_state)(slug)
+        seats.doc = _ledger_state(slug)
         owner, _ = seats.owner(f"{TASKS}{task}", {})
     except Exception as exc:  # a crashed check lets the message through, counted in the gate log
         log.append(slug, log.Row.of(NAME, "fail-open", Who(name=sender), "inbox", f"{type(exc).__name__}: {exc}"))

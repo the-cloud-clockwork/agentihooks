@@ -158,6 +158,14 @@ def test_swarm_say_from_a_backend_master_to_the_claimant_is_refused(world):
     assert inbox(world).mailbox(ENGINEER) == []
 
 
+def test_a_queued_swarm_say_from_a_backend_master_is_refused_on_replay(world):
+    entry = {"args": {"slug": SLUG, "to": CLAIMANT, "text": "Cut over now", "fyi": False}, "item": "i-say"}
+
+    with pytest.raises(InboxError, match=f"belongs to {LEAD}, so {SECOND} cannot message its claimant"):
+        delivery.apply_say(inbox(world), SECOND_NAME, entry)
+    assert inbox(world).mailbox(ENGINEER) == []
+
+
 def test_msg_send_from_a_backend_master_to_the_claimant_is_refused(world):
     record = {"op": "send", "by": SECOND_NAME, "item": "i-send", "args": {"address": CLAIMANT, "text": "Cut over"}}
 
@@ -181,7 +189,7 @@ def test_the_front_door_replies_to_the_claimant(world):
     assert inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})["closed"] == asked.id
 
 
-def test_phase_owners_are_read_from_the_whole_ledger(world):
+def test_a_message_check_keeps_the_owner_of_every_phase(world):
     master_fence.check_send(inbox(world), SECOND_NAME, OWN_CLAIMANT)
 
     saved = json.loads(world.redis.hget(masters.MasterSeats(world.redis).key(SLUG), "owners"))
