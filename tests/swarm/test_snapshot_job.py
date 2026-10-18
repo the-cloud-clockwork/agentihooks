@@ -92,10 +92,26 @@ def test_start_waits_out_the_interval_after_the_last_automatic_snapshot(store, m
     _running(store)
     launched = []
     monkeypatch.setattr(snapshot_job, "spawn", launched.append)
-    snapshot_job.run(store, "sw", 0, {}, _no_git)
-    assert snapshot_job.start(store, "sw", 30 * MINUTE - 1, {}) is False
-    assert snapshot_job.start(store, "sw", 30 * MINUTE, {}) is True
+    snapshot_job.run(store, "sw", 10 * MINUTE, {}, _no_git)
+    assert snapshot_job.start(store, "sw", 40 * MINUTE - 1, {}) is False
+    assert snapshot_job.start(store, "sw", 40 * MINUTE, {}) is True
     assert launched == ["sw"]
+
+
+def test_the_lock_is_the_swarms_own_snapshot_lock_key(store):
+    assert snapshot_job.lock_key(store, "sw") == store.key("sw", "snapshot-lock")
+
+
+def test_the_job_reads_worktrees_through_the_runner_it_is_given(store):
+    _running(store)
+    calls = []
+
+    def runner(argv, **kw):
+        calls.append(argv)
+        return _no_git(argv, **kw)
+
+    snapshot_job.run(store, "sw", 0, {}, runner)
+    assert calls == [["git", "-C", "/repo", "worktree", "list", "--porcelain"]]
 
 
 def test_a_second_job_takes_nothing_while_another_holds_the_lock(store):
