@@ -58,11 +58,28 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     return apply(store, slug, url, sender, tasks, journal)
 
 
+def drop_reason(url: str) -> str:
+    raw = merge_queue.graphql(merge_queue.STATE, {"url": url}, subprocess.run)["resource"]
+    if raw is None:
+        raise SwarmError("pull request could not be read")
+    if raw["state"] != "OPEN":
+        return f"pull request is {raw['state']}"
+    if raw["baseRefName"] != "dev":
+        return "pull request no longer targets dev"
+    return ""
+
+
 def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
     actions = []
     for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items():
         record = json.loads(raw)
         try:
+            reason = drop_reason(url)
+            if reason:
+                store.redis.hdel(store.key(slug, PENDING), url)
+                queue_record.Journal(url).write("priority-dropped", url, "", None, None, reason=reason, **record)
+                actions.append(f"dropped deferred merge queue priority for {url}: {reason}")
+                continue
             if record["run_id"] is None:
                 held = blocking(url, queue_record.Journal(url), record["group_head"])
                 if held is not None:

@@ -32,6 +32,16 @@ def priority(monkeypatch, tmp_path):
         return reorder(url, run=queue.run, journal=journal)
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    original_graphql = merge_queue.graphql
+
+    def graphql(query, variables, run):
+        if run is subprocess.run:
+            assert query == merge_queue.STATE
+            assert variables["url"] in (URL, URL + "0")
+            return original_graphql(query, variables, queue.run)
+        return original_graphql(query, variables, run)
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
 
     def read_groups(journal):
