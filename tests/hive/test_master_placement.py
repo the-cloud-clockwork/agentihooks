@@ -13,6 +13,7 @@ def hive(name, **fields):
         "ui": "yes",
         "repos": [REPO],
         "heartbeat_at": NOW,
+        "agents": 0,
         "slots": [{"harness": "claude", "account": "token", "kind": "subscription"}],
         **fields,
     }
