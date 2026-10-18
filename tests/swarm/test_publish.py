@@ -600,7 +600,8 @@ def counted_pushes(publish, monkeypatch):
     return pushes
 
 
-def test_an_unchanged_publish_to_a_matching_remote_makes_no_commit_gate_or_push(publication, monkeypatch):
+@pytest.mark.parametrize("files", [[], ["chosen.txt"]])
+def test_an_unchanged_publish_to_a_matching_remote_makes_no_commit_gate_or_push(publication, monkeypatch, files):
     from scripts.swarm import publish
 
     root = publication.root
@@ -611,7 +612,7 @@ def test_an_unchanged_publish_to_a_matching_remote_makes_no_commit_gate_or_push(
     (root / ".git-gate-head").unlink()
     pushes = counted_pushes(publish, monkeypatch)
     result = publish.publish(
-        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", files
     )
     assert pushes == []
     assert git(root, "rev-parse", "HEAD") == head
@@ -637,6 +638,22 @@ def test_an_unchanged_publish_still_pushes_a_branch_the_remote_is_behind(publica
     result = publish.publish(
         "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
     )
+    assert len(pushes) == 1
+    assert "unchanged" not in result
+    assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
+
+
+def test_an_unchanged_publish_still_pushes_a_branch_the_remote_lacks(publication, monkeypatch):
+    from scripts.swarm import publish
+
+    root = publication.root
+    publish.publish(
+        "swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", ["chosen.txt"]
+    )
+    git(root, "push", "origin", "--delete", "engineer-test")
+    head = git(root, "rev-parse", "HEAD")
+    pushes = counted_pushes(publish, monkeypatch)
+    result = publish.publish("swarm", publication.agent, str(publication.repo), publication.ledger, "Change chosen", [])
     assert len(pushes) == 1
     assert "unchanged" not in result
     assert git(root, "ls-remote", "origin", "refs/heads/engineer-test").split()[0] == head
