@@ -242,9 +242,12 @@ def test_detector_wording_changes_do_not_return_judged_findings(store, value, mi
 
 
 def test_new_evidence_identity_returns_a_judged_finding_even_with_unchanged_display(store):
+    from scripts.swarm.health.verdicts import VerdictStore
+
+    judgments = VerdictStore(store.redis, loop.verdicts(store, DOCTOR).key)
     first = Finding("inbox past window", "item", "pending", ("same display",), "window", 10, evidence_identity=(0,))
     loop.record(store, DOCTOR, [first], T0, MINUTE_MS)
-    loop.verdicts(store, DOCTOR).judge(first.id, "established", "known", "master", T0)
+    judgments.judge(first.id, "established", "known", "master", T0)
     changed = Finding("inbox past window", "item", "pending", ("same display",), "window", 11, evidence_identity=(1,))
     assert loop.record(store, DOCTOR, [changed], T0, MINUTE_MS) == []
     [returned] = loop.record(store, DOCTOR, [changed], T0 + MINUTE_MS, MINUTE_MS)
