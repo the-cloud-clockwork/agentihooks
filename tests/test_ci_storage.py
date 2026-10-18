@@ -90,6 +90,12 @@ def test_the_floor_and_keep_windows_are_exact():
     assert total == 40
 
 
+def test_a_docker_build_record_is_never_kept():
+    found = [artifact(1, name="o~r~ABC123.dockerbuild"), artifact(2, name="o~r~ABC123.dockerbuildx")]
+    doomed, _ = ci_storage.plan(found, BRANCHES, NOW, KEEP, FLOOR, 1000)
+    assert ids(doomed) == [1]
+
+
 def test_an_artifact_without_a_run_is_not_kept():
     found = [{**artifact(1), "workflow_run": None}, {**artifact(2, hours=1), "workflow_run": None}]
     doomed, _ = ci_storage.plan(found, BRANCHES, NOW, KEEP, FLOOR, 1000)

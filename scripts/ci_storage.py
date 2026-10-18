@@ -17,6 +17,8 @@ LONG_LIVED = frozenset({"dev", "main", "master"})
 RUNS_PER_WORKFLOW = 3
 WORKERS = 4
 MB = 1000**2
+# Docker build actions upload one record per build under a random name that no run reads back.
+BUILD_RECORD = ".dockerbuild"
 
 
 def rows(path: str, key: str | None, paginate: bool = True) -> list[dict]:
@@ -73,7 +75,11 @@ def _created(row: dict) -> datetime:
 
 def plan(found: list[dict], branches: frozenset[str], now: datetime, keep: timedelta, floor: timedelta, limit: int):
     live = sorted((row for row in found if not row["expired"]), key=_created)
-    newest = {(row["name"], _branch(row)): row["id"] for row in live if _branch(row) in branches}
+    newest = {
+        (row["name"], _branch(row)): row["id"]
+        for row in live
+        if _branch(row) in branches and not row["name"].endswith(BUILD_RECORD)
+    }
     free = [row for row in live if row["id"] not in newest.values()]
     old = [row for row in free if _created(row) < now - keep]
     total = sum(row["size_in_bytes"] for row in live) - sum(row["size_in_bytes"] for row in old)
