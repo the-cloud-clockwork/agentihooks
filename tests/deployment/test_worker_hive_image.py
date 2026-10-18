@@ -10,7 +10,8 @@ ROOT = Path(__file__).resolve().parents[2]
 PROOF = ROOT / "deploy/worker/kind-proof.sh"
 CURRENT = ROOT / "deploy/worker/base-current.sh"
 BASE = "ghcr.io/the-cloud-clockwork/agentihooks-worker:dev"
-INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py"
+INPUTS = "docker/swarm-node scripts/swarm_v2/worker_image.py profiles docs/swarm-v2/schemas"
+WHEEL = {"pyproject.toml", "README.md", "hooks/", "scripts/"}
 
 
 def builds():
@@ -18,16 +19,19 @@ def builds():
     return [line.strip() for line in joined.splitlines() if "docker build" in line]
 
 
-def judge(tmp_path, *, diff=0, run=0):
+def judge(tmp_path, *, diff=0, pull=0, run=0, fetch=0):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
     (tools / "docker").write_text(
         '#!/usr/bin/env bash\nprintf "docker %s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$1" == pull ]]; then exit "$FAKE_PULL"; fi\n'
         'if [[ "$1" == run ]]; then\n  [[ "$FAKE_RUN" == 0 ]] || exit "$FAKE_RUN"\n  echo rev123\nfi\n'
     )
     (tools / "git").write_text(
-        '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$COMMAND_LOG"\n[[ "$1" != diff ]] || exit "$FAKE_DIFF"\n'
+        '#!/usr/bin/env bash\nprintf "git %s\\n" "$*" >> "$COMMAND_LOG"\n'
+        'if [[ "$1" == fetch ]]; then exit "$FAKE_FETCH"; fi\n'
+        '[[ "$1" != diff ]] || exit "$FAKE_DIFF"\n'
     )
     for tool in tools.iterdir():
         tool.chmod(0o755)
@@ -36,7 +40,9 @@ def judge(tmp_path, *, diff=0, run=0):
         "PATH": f"{tools}:{os.environ['PATH']}",
         "COMMAND_LOG": str(log),
         "FAKE_DIFF": str(diff),
+        "FAKE_PULL": str(pull),
         "FAKE_RUN": str(run),
+        "FAKE_FETCH": str(fetch),
     }
     result = subprocess.run(["bash", str(CURRENT), BASE], env=env, capture_output=True, text=True)
     return result.returncode, log.read_text().splitlines()
@@ -60,6 +66,14 @@ def test_kind_proof_rebuilds_the_base_only_when_it_is_not_current():
     assert "docker/swarm-node/Dockerfile" in stale.split("\nfi\n")[0]
 
 
+def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
+    dockerfile = (ROOT / "docker/swarm-node/Dockerfile").read_text()
+    sources = {s for line in re.findall(r"^COPY (?:--\S+ )*(.+) \S+$", dockerfile, re.M) for s in line.split()}
+    assert sources - WHEEL
+    for source in sources - WHEEL:
+        assert any(source.startswith(path) for path in INPUTS.split()), source
+
+
 def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
     status, commands = judge(tmp_path)
     assert status == 0
@@ -68,13 +82,14 @@ def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
 
 
-def test_base_is_not_current_when_an_input_changed(tmp_path):
+def test_base_is_stale_when_an_input_changed(tmp_path):
     status, commands = judge(tmp_path, diff=1)
     assert status == 1
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
 
 
-def test_base_is_not_current_when_its_revision_cannot_be_read(tmp_path):
-    status, commands = judge(tmp_path, run=125)
-    assert status == 125
-    assert not any(command.startswith("git") for command in commands)
+@pytest.mark.parametrize("failure", [{"pull": 1}, {"run": 125}, {"fetch": 128}])
+def test_base_is_undetermined_when_its_revision_cannot_be_obtained(tmp_path, failure):
+    status, commands = judge(tmp_path, **failure)
+    assert status == 2
+    assert not any(command.startswith("git diff") for command in commands)
