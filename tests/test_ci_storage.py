@@ -102,9 +102,17 @@ def test_an_artifact_without_a_run_is_not_kept():
     assert ids(doomed) == [1]
 
 
+@pytest.fixture(autouse=True)
+def waits(monkeypatch):
+    slept = []
+    monkeypatch.setattr(ci_storage.time, "sleep", slept.append)
+    return slept
+
+
 class Gh:
-    def __init__(self, routes, failing=(), missing=()):
+    def __init__(self, routes, failing=(), missing=(), flaky=()):
         self.routes, self.failing, self.missing, self.calls = routes, set(failing), set(missing), []
+        self.flaky = set(flaky)
 
     def __call__(self, command, **kwargs):
         self.calls.append((command, kwargs))
@@ -115,6 +123,9 @@ class Gh:
             failed = artifact_id in self.failing
             return SimpleNamespace(returncode=int(failed), stdout="", stderr="gh: boom (HTTP 502)" if failed else "")
         path = next(part for part in command if "/" in part and not part.startswith("."))
+        if path in self.flaky:
+            self.flaky.discard(path)
+            raise subprocess.CalledProcessError(1, command, "", "gh: Bad Gateway (HTTP 502)")
         if self.routes.get(path) is None:
             raise subprocess.CalledProcessError(1, command, "", "gh: Server Error (HTTP 500)")
         jq = command[command.index("--jq") + 1]
@@ -134,6 +145,18 @@ def test_rows_paginates_reads_json_lines_and_fails_loudly(monkeypatch):
     assert gh.calls[1][0] == ["gh", "api", "x/y", "--jq", ".artifacts[]"]
     with pytest.raises(subprocess.CalledProcessError):
         ci_storage.rows("x/missing", None)
+    assert [command[3] for command, _ in gh.calls[2:]] == ["x/missing"] * 3
+
+
+def test_a_failed_read_is_retried_after_a_growing_wait(monkeypatch, waits):
+    gh = Gh({"x/y": [{"c": 3}]}, flaky={"x/y"})
+    monkeypatch.setattr(subprocess, "run", gh)
+    assert ci_storage.rows("x/y", None) == [{"c": 3}]
+    assert len(gh.calls) == 2
+    assert waits == [1]
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_storage.rows("x/missing", None)
+    assert waits == [1, 1, 2]
 
 
 def test_only_unarchived_private_and_internal_repositories_are_billed(monkeypatch):

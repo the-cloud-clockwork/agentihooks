@@ -8,22 +8,35 @@ import argparse
 import json
 import subprocess
 import sys
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
 LONG_LIVED = frozenset({"dev", "main", "master"})
 RUNS_PER_WORKFLOW = 3
+ATTEMPTS = 3
 MB = 1000**2
 # Docker build actions upload one record per build under a random name that no run reads back.
 BUILD_RECORD = ".dockerbuild"
 
 
 def _read(command: list[str], key: str | None) -> list[dict]:
-    done = subprocess.run(
-        [*command, "--jq", f".{key}[]" if key else ".[]"], capture_output=True, text=True, check=True, timeout=900
-    )
-    return [json.loads(line) for line in done.stdout.splitlines() if line]
+    for attempt in range(ATTEMPTS):
+        try:
+            done = subprocess.run(
+                [*command, "--jq", f".{key}[]" if key else ".[]"],
+                capture_output=True,
+                text=True,
+                check=True,
+                timeout=900,
+            )
+        except subprocess.CalledProcessError:
+            if attempt == ATTEMPTS - 1:
+                raise
+            time.sleep(attempt + 1)
+        else:
+            return [json.loads(line) for line in done.stdout.splitlines() if line]
 
 
 def rows(path: str, key: str | None) -> list[dict]:
