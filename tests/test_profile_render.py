@@ -315,6 +315,8 @@ def test_refresh_rules_rerenders_every_home_from_a_new_bundle_commit(world, monk
     assert "Re-rendered the rb-role profile home" not in out
     caller_homes = [p for p in (render.rendered_root() / ".homes" / "rb-role").iterdir() if not p.is_symlink()]
     assert len(caller_homes) == 2
+    assert "MERGED FLEET DOCTRINE" in (render.profile_dir("rb-role") / "claude" / "CLAUDE.md").read_text()
+    assert "MERGED FLEET DOCTRINE" in rules_refresh._load_marker("rb-role")["payload"]
     received = []
     monkeypatch.setattr(rules_refresh, "inject_context", received.append)
     monkeypatch.setenv("CLAUDE_CONFIG_DIR", str(master))

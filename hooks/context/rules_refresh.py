@@ -42,9 +42,10 @@ def profile_home(home: Path) -> str:
 def current_home(home: Path) -> Path:
     from scripts.profiles.homes import CURRENT
 
-    if home_profile(home) is None:
+    resolved = home.resolve()
+    if home_profile(resolved) is None:
         return home
-    latest = home.resolve().parent.parent / CURRENT / home.resolve().name
+    latest = resolved.parent.parent / CURRENT / resolved.name
     return latest if latest.is_dir() else home
 
 

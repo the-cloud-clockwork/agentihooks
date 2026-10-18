@@ -5797,7 +5797,7 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
     """Handle the refresh-rules CLI command — push rules to running sessions."""
     sys.path.insert(0, str(AGENTIHOOKS_ROOT))
     from hooks.context.rules_refresh import _delete_marker, _load_marker, home_profile, write_refresh_marker
-    from scripts.targets.claude_target import refresh_rules
+    from scripts.targets.claude_target import refresh_every_home, refresh_rules
 
     profile = args.profile or home_profile(claude_home()) or _detect_active_profile()
     rules_dir = claude_home() / "rules"
@@ -5856,8 +5856,6 @@ def _cmd_refresh_rules(args: argparse.Namespace) -> None:
         print("  No running sessions to notify — marker will GC in 24h.")
     else:
         print("  Each session will consume the refresh on its next UserPromptSubmit.")
-
-    from scripts.targets.claude_target import refresh_every_home
 
     refresh_every_home(profile)
 
