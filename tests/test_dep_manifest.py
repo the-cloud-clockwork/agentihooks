@@ -235,7 +235,7 @@ def test_sonar_builds_the_manifest_and_only_dev_pushes_save_it():
     assert (
         steps.index("Merge shard coverage")
         < steps.index("Build the test dependency manifest")
-        < steps.index("Restore Sonar downloads")
+        < steps.index("Start Cloudflare Access proxy")
     )
     build = _step("sonar", "Build the test dependency manifest")
     assert "python -m tests.dep_manifest build" in build["run"]
