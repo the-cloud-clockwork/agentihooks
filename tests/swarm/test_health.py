@@ -318,6 +318,34 @@ def test_plain_restarts_after_an_excused_first_life_are_all_reruns():
     assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
 
 
+def test_lives_that_push_a_new_pull_request_head_are_progress_not_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n, "head": head} for n, head in enumerate(["", "a", "b", "c", "d"])]
+    assert run({"tasks": [task("t1")], "_meta": {"events": events}}) == []
+
+
+def test_only_lives_that_end_on_the_head_they_started_on_are_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    heads = ["a", "a", "b", "b", "b", "c", "c"]
+    events = [{**plain, "at": NOW + n, "head": head} for n, head in enumerate(heads)]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 7 times (4 reruns)", "0 review rounds"]
+
+
+def test_lives_without_a_pull_request_on_either_side_are_reruns():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n, "head": ""} for n in range(4)]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
+
+
+def test_a_launch_recorded_before_heads_were_kept_counts_as_a_rerun():
+    plain = ev("task started", "tasks/t1", by="swarm")
+    events = [{**plain, "at": NOW + n, "head": head} for n, head in enumerate([None, "a", None, "b"])]
+    [found] = run({"tasks": [task("t1")], "_meta": {"events": events}})
+    assert found["evidence"] == ["task t1", "started 4 times (3 reruns)", "0 review rounds"]
+
+
 def test_reruns_at_the_cap_are_no_proof_loop_and_one_more_measures_reruns_plus_rounds():
     started = ev("task started", "tasks/t1", by="swarm")
     tasks = {"t1": task("t1")}

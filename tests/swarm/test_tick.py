@@ -518,6 +518,20 @@ def test_a_failed_launch_keeps_the_restart_mark_for_the_next_start(store):
     assert sorted((row["state"], row["after"]) for row in store.launches("sw")) == [("failed", ""), ("started", "park")]
 
 
+@pytest.mark.parametrize(("pr_url", "head"), [("", ""), ("https://github.com/o/r/pull/7", "abc123")])
+def test_a_started_launch_records_the_pull_request_head_it_started_on(store, monkeypatch, pr_url, head):
+    from scripts.swarm import ledger_events
+
+    seen = []
+    monkeypatch.setattr(ledger_events, "head", lambda url: seen.append(url) or "abc123")
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    if pr_url:
+        ledger.rows["t1"]["pr_url"] = pr_url
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [(row["state"], row["head"]) for row in store.launches("sw")] == [("started", head)]
+    assert seen == ([pr_url] if pr_url else [])
+
+
 class FailingFor(FakeRuntime):
     def __init__(self, *failing):
         super().__init__()
