@@ -60,7 +60,7 @@ def test_duplicate_delivery_keeps_one_wake(redis, monkeypatch):
         process_timer.wake(event, "same", redis)
         process_timer.wake(event, "same", redis)
         assert redis.lrange(timer.key, 0, -1) == ["same"]
-        assert redis.ttl(timer.key) > 0
+        assert redis.ttl(timer.key) == 60
         assert json.loads(event["payload"])["key"] == timer.key
 
 
@@ -139,3 +139,36 @@ def test_member_grants_still_refuse_shared_scheduler_writes(redis, monkeypatch):
     shared = Scheduler(redis).key("entries")
     writable = [pattern[1:] for pattern in _acl_keys("member") if pattern.startswith("~")]
     assert not any(fnmatchcase(shared, pattern) for pattern in writable)
+
+
+@pytest.mark.parametrize("asynchronous", [False, True])
+async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, asynchronous):
+    timers = []
+    original = process_timer.Timer
+
+    def timer(delay):
+        result = original(delay, redis=redis)
+        timers.append(result)
+        Scheduler(redis).run_due(now=result.entry.record["due"])
+        return result
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer, "Timer", timer)
+    if asynchronous:
+        await process_timer.async_wait(2)
+    else:
+        process_timer.wait(2)
+    assert len(timers) == 1
+    assert timers[0].entry.record["delay"] == 2
+    assert timers[0].entry.state == "cancelled"
+    assert not redis.exists(timers[0].key)
+
+
+def test_host_scheduler_keys_remain_unchanged_without_member_identity(redis, monkeypatch):
+    from hooks._redis import redis_key
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT")
+    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
