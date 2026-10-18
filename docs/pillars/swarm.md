@@ -59,7 +59,8 @@ reopening the same thread and handoff behavior, and
 the canary order and rollback. The Claude inbox channel, the Codex push pump and
 broadcast topics are separate paths; that page tells them apart.
 
-Every swarm that is not stopped keeps exactly one master, named `master@<code>-<n>`. The tick spawns it when the
+Every swarm that is not stopped keeps at least one master, named `master@<code>-<n>`, and adds more as it grows
+(see [Master pool](#master-pool)). The tick spawns it when the
 swarm starts and recovers it when its execution ends (closing a managed Codex viewer alone leaves it running); it is never nudged or retired for being idle, and it
 does not count against the `eng` and `ci` caps. A stopping swarm keeps its master until the last worker leaves.
 
@@ -184,6 +185,44 @@ that phase; any other item, and one whose owner seat has no live master, reaches
 `@master` stay with the lead, which answers the operator; while the lead seat is empty the lowest numbered live
 master answers.
 
+### Master pool
+
+Masters scale with the swarm so no single master drowns in inbox items. Claude and Codex masters behave
+identically: the same seats, pool, channel and duties, and both read the same master role text and swarm-master
+skill. Only a Claude front door takes the claude ai login and Remote Control. A swarm below one step behaves exactly as a single master swarm.
+
+- **Sizing.** With no `master-per` rule, the wanted count is one plus the unfinished engineer, CI and planner agents
+  divided by `masters-step` (default 12), masters not counted: 0 to 11 agents one master, 12 two, 24 three. Every
+  master has the same authority; the operator and Priorities stay with the front door.
+- **Seats.** Seat names come from code. The front door keeps `master@<id>`; backend masters are `master-2@<id>`,
+  `master-3@<id>` and on, launched by the same seat launcher as the first master on either harness.
+- **Cool off.** A rise launches the next backend seat at once. A fall waits until the wanted count stayed lower for
+  ten minutes running, and the cool off restarts whenever the count rises. Then every extra backend master is asked
+  to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
+  as soon as it is empty. A retired seat's handoff and open inbox items go to the front door. The front door never retires by
+  scaling.
+- **Inbox pool.** With two or more live masters, items for the master seat from agents and the tick wait in one
+  pool per swarm, first in first out, and each is claimed by exactly one live master in round robin seat order,
+  skipping a master that is gone or being retired by the tick; a backend master asked to hand off by a shrink keeps taking items until it
+  leaves. An unconfirmed item goes to the next master with
+  the same id. Items from the operator bypass the pool and go to the front door. Master inbox pool below gives
+  every rule.
+- **Front door.** Only `master@<id>`, or the lowest numbered live master while that seat is empty, faces the
+  operator: it receives page chat and every operator write, holds Priorities and, with
+  `master-claude-login` on, the claude ai login and Remote Control on a Claude front door; Codex masters take neither. A backend master's page chat write is refused
+  naming the front door, and its launch carries no login route and no Remote Control. The operator reaches a backend
+  master through its herdr pane, or through the front door.
+- **Private channel.** Masters sync with `agentihooks swarm <id> masters-channel say TEXT` and
+  `agentihooks swarm <id> masters-channel read`; only master seats send and read, and engineer, CI and planner
+  sessions are refused. It carries sync only: an item that arrived without context, or a fact another master holds.
+  The front door answers the operator about the backend masters from it.
+- **Intent grouping.** `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (off by default) turns on the classifier. Each
+  master keeps its last 15 delivered items; every waiting pool item is compared for intent against each master's
+  items in parallel, using only first lines, the first configured API classifier model falling through to the next on a backend failure, one short verdict per master and a cache
+  by item id. A match sends the item to that master, so related items reach the same master together. Any
+  classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
+  round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
+
 ### Master inbox pool
 
 The lead address `master@<id>` is the swarm's front door. While two or more masters are live, an item sent to
@@ -196,7 +235,7 @@ live master:
 | Order | Items leave the pool oldest first, by the arrival sequence number the inbox gives each item sent to `master@<id>`. |
 | Exactly once | A master takes an item in one Redis transaction that removes it from the pool, moves it pending to that master's seat and records the seat as its holder. Two processes handing out the same pool never give one item to two masters. |
 | Round robin | The pool remembers the last seat it served and gives the next item to the next live seat in seat order, lead first, then `master-2@<id>`, `master-3@<id>` and on, wrapping back to the first. |
-| Skips | A seat whose master is finished, retiring, asked to retire, retired early, numbered above the seat count with no live master record, or recorded as having left its seat is not live and is passed over. |
+| Skips | A seat whose master is finished, retiring, under a tick retire request (a shrink handoff ask is not one), retired early, numbered above the seat count with no live master record, or recorded as having left its seat is not live and is passed over. |
 | Redelivery | A pooled item its holder does not confirm within `AGENTIHOOKS_INBOX_REDELIVER_S` (default 300 seconds) goes back to the pool and on to the next live master, passing over the master that let it lapse while another is live. It keeps its id. |
 | Gone holder | Items a master claimed that are still pending at its seat return to the pool when that master stops being live, for the remaining masters. Items it had already been delivered return at the next redelivery pass, as any unconfirmed item does. |
 | No master | Items already in the pool wait there, in order, until a master is live. A new item sent while fewer than two masters are live does not enter the pool and waits at the lead seat. |
@@ -283,7 +322,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> names [--json]` | The swarm code, its herdr space and every agent name the swarm gave, each with its type, number, session id and spawn and retire times. |
 | `agentihooks swarm <id> set max-eng-agents=N max-ci-agents=N max-plan-agents=N` | Change the caps; `swarm <id> max-eng-agents=N` also works. |
 | `agentihooks swarm <id> set masters=N` | The master seat count: `master@<id>` is the lead and answers the operator, `master-2@<id>` and up each own phases assigned by code. The tick launches a master in every empty seat after the lead. |
-| `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the running engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
+| `agentihooks swarm <id> set masters-step=N` | `swarm create` stores 12; a swarm created before the setting loads `0` until it is set. With no `master-per` rule the master count is one plus the unfinished engineer, CI and planner agents divided by N, masters not counted: 0 to 11 agents one master, 12 two, 24 three. The front door seat `master@<id>` never retires by scaling; backend seats are `master-2@<id>`, `master-3@<id>`, launched by the same seat launcher as the first master. A smaller count waits until it stayed lower for ten minutes, and that cool off restarts whenever the wanted count rises; a rise also withdraws the retire request of a seat wanted again. The highest backend seat retires first, as `master-per` describes below. `0` keeps the `masters=N` count, and `set masters=N` sets the step to `0` unless the same command sets it. The ledger page shows it beside the lane caps. |
 | `agentihooks swarm <id> set master-per=N\|hive\|off` | Overrides `masters-step`. The master count follows the swarm size: one seat per N working agents rounded up, or one per hive (agents with no hive count as the local hive), with a floor of one; `off` (default) hands sizing back to `masters-step`. A larger swarm raises the count at once. A swarm smaller for ten minutes asks each extra master to hand off, and the count falls only past seats whose master has left. When an asked seat empties, its handoff and its other open items go to the lead and its retire request is withdrawn; until the count falls past it, items for its phases reach the lead. Each change rebalances phase owners and posts them on the masters channel. |
 | `agentihooks swarm <id> set compact-limit=N` | Launch this swarm's next agents with `AGENTIHOOKS_COMPACT_LIMIT=N` (thousands of tokens); 0 keeps the default. |
 | `agentihooks swarm <id> set autonomy=LEVEL` | Set how far agents go without the operator: `manual` engineers open a draft pull request and stop for the operator; `assist` engineers open a pull request and merge only after an operator approval line on the ledger; `delegate` (default) engineers merge on green checks; `full` is delegate, and the master also turns follow ups into tasks without asking. Agents spawned next get it in their prompt and as `AGENTIHOOKS_SWARM_AUTONOMY`; the ledger page swarm panel shows it. |
