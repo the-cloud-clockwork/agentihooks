@@ -42,9 +42,9 @@ def used(
 ) -> bool:
     if environ.get("LEDGER_SERVER_RUNTIME") == "process":
         return False
-    if adopted(folder, environ):
-        return True
     shared = ledger_link.shared_directory(environ={"LEDGER_DIR": str(folder)})
+    if adoption(environ):
+        return shared or adopted(folder, environ)
     return shared and which("docker") is not None and compose_file.is_file()
 
 

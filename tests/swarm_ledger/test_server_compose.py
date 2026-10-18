@@ -125,6 +125,8 @@ def test_an_adoption_of_another_folder_refuses_rather_than_restoring_the_old_ser
     assert server_compose.start(folder, {}, run) == refusal
     assert server_compose.stop(folder, {}, run) == refusal
     assert calls == []
+    assert server_compose.used(folder, {}, {}.get, tmp_path / "gone.yaml")
+    assert not server_compose.used(tmp_path / "scratch", {}, {}.get, tmp_path / "gone.yaml")
     assert server_compose.adoption({"AGENTIHOOKS_HOME": str(tmp_path / "none")}) == ""
 
 

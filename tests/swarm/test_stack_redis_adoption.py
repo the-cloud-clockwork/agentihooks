@@ -6,11 +6,12 @@ from pathlib import Path
 
 import yaml
 
+from scripts.hive import auth
 from scripts.swarm import stack_init
 
 REDIS = stack_init.BUNDLED / "deploy" / "compose" / "redis"
 TOKEN = secrets.token_urlsafe()
-HIVE = "user hive-abc on #00 ~swarm:hive:abc:* &* +@all -@admin -@dangerous"
+HIVE = f"user hive-abc on #00 ~swarm:hive:abc:* &* {' '.join(auth.ACL_CATEGORIES)}"
 
 
 def rendered(tmp_path: Path, adopted: bool) -> dict[str, list[str]]:
