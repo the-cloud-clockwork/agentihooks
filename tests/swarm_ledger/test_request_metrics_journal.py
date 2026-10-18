@@ -4,6 +4,7 @@ import threading
 import time
 from collections import deque
 from http.server import ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 from urllib.error import HTTPError
 from urllib.request import urlopen
@@ -458,3 +459,16 @@ def test_serve_restores_then_stops_the_journal(monkeypatch, tmp_path, now):
     rows = [json.loads(line) for line in (tmp_path / request_metrics.JOURNAL_NAME).read_text().splitlines()]
     assert [row[0] for row in rows] == ["held", "start", "flush", "stop"]
     assert request_metrics.JOURNAL == tmp_path / request_metrics.JOURNAL_NAME
+
+
+def test_rewrite_stages_beside_the_journal_under_its_name(tmp_path, monkeypatch):
+    path = tmp_path / "metrics.jsonl"
+    moved = []
+    monkeypatch.setattr(
+        request_metrics, "Path", lambda name: SimpleNamespace(replace=lambda target: moved.append((name, target)))
+    )
+    request_metrics.replace_lines(path, [["stop", 1.0]])
+    staged = Path(moved[0][0])
+    assert (staged.parent, moved[0][1]) == (tmp_path, path)
+    assert staged.name.startswith("metrics.jsonl")
+    assert staged.read_text() == '["stop", 1.0]\n'
