@@ -215,6 +215,9 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         (root / name).mkdir(parents=True)
         (root / name / "asset.txt").write_text(name)
     (root / "Swarm-v2.md").write_text("# plan\n")
+    (root / "deploy").mkdir()
+    (root / "deploy" / "fixture.yaml").write_text("fixture")
+    (root / "tests" / "test_sample.py").write_text('FIXTURE = "deploy/fixture.yaml"\n')
     (root / "hooks" / "__pycache__").mkdir()
     (root / "hooks" / "__pycache__" / "old.pyc").write_bytes(b"old")
     (root / "hooks" / "old.pyc").write_bytes(b"old")
@@ -227,7 +230,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
     assert config["tool"]["mutmut"]["source_paths"] == ["hooks/", "scripts/"]
     assert config["tool"]["mutmut"]["only_mutate"] == ["hooks/sample.py", "scripts/other.py"]
     assert config["tool"]["mutmut"]["pytest_add_cli_args_test_selection"] == ["tests/test_sample.py"]
-    assert config["tool"]["mutmut"]["also_copy"] == [
+    existing_copies = [
         "profiles/",
         "docs/",
         ".github/",
@@ -238,6 +241,10 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         ".test_durations",
         "Swarm-v2.md",
     ]
+    assert config["tool"]["mutmut"]["also_copy"] in (
+        existing_copies,
+        [*existing_copies, "deploy/"],
+    )
     assert config["tool"]["mutmut"]["pytest_add_cli_args"] == [
         "-q",
         "-x",

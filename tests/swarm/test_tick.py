@@ -2269,7 +2269,7 @@ def test_a_spawned_agent_gets_the_conversation_id_herdr_reports_for_its_pane(sto
     assert _conversations(store) == {"engineer@a1b2c3-0001": "5c90d80c", "master@a1b2c3-0001": "15e33356"}
 
 
-def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(store):
+def test_each_tick_refreshes_the_conversation_id_and_preserves_known_ids(store):
     rt = FakeRuntime()
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}])
     tick("sw", store, ledger, rt, 1000)
@@ -2285,12 +2285,12 @@ def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(sto
     tick("sw", store, ledger, rt, 3000)
     assert _conversations(store) == {
         "engineer@a1b2c3-0001": "resumed",
-        "engineer@a1b2c3-0002": "",
+        "engineer@a1b2c3-0002": "other",
         "master@a1b2c3-0001": "",
     }
     del rt.conversation_ids["w1:p1"]
     tick("sw", store, ledger, rt, 4000)
-    assert _conversations(store)["engineer@a1b2c3-0001"] == ""
+    assert _conversations(store)["engineer@a1b2c3-0001"] == "resumed"
 
 
 def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(store):
