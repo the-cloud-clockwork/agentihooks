@@ -50,6 +50,53 @@ def failing_tests(log: Path) -> list[str]:
     return list(named.values())
 
 
+def path_parts(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return path_parts(node.left) + path_parts(node.right)
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    return []
+
+
+def fixture_literals(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return ["/".join(path_parts(node))]
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    return [value for child in ast.iter_child_nodes(node) for value in fixture_literals(child)]
+
+
+def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
+    sources = {root / test.split("::")[0] for test in tests}
+    for source in tuple(sources):
+        sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
+    files = set()
+    for source in sorted(sources):
+        if not source.is_file():
+            continue
+        for literal in fixture_literals(ast.parse(source.read_text())):
+            if any(char in literal for char in ("\n", "\r", "\0")):
+                continue
+            relative = Path(literal)
+            if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+                continue
+            if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
+                continue
+            if (work / relative).exists():
+                continue
+            target = root / relative
+            candidates = target.rglob("*") if target.is_dir() else [target]
+            for candidate in candidates:
+                name = candidate.relative_to(root)
+                if any(part.startswith(".") or part == "__pycache__" or part == work.name for part in name.parts):
+                    continue
+                if any(part.is_symlink() for part in (candidate, *candidate.parents) if part != root):
+                    continue
+                if candidate.is_file() and candidate.suffix != ".pyc" and not (work / name).exists():
+                    files.add(name.as_posix())
+    return sorted(files)
+
+
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
     for name in (
         "hooks",
@@ -76,6 +123,10 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
     )
     for name in root_files:
         shutil.copy(root / name, work / name)
+    extra_files = fixture_files(root, work, tests)
+    for name in extra_files:
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(root / name, work / name)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
     if IDENTITY not in paths:
@@ -93,6 +144,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "docker/swarm-node/",
             ".agentihooks/conditions/",
             *root_files,
+            *extra_files,
         ],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,
