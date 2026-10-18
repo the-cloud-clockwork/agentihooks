@@ -17,14 +17,14 @@ BRANCHES = frozenset({"dev", "open"})
 MB = ci_storage.MB
 
 
-def artifact(id, name="a", branch="dev", hours=48, size=10, expired=False, now=NOW, run=None):
+def artifact(id, name="a", branch="dev", hours=48, size=10, **state):
     return {
         "id": id,
         "name": name,
         "size_in_bytes": size,
-        "expired": expired,
-        "created_at": (now - timedelta(hours=hours)).isoformat(),
-        "workflow_run": {"head_branch": branch, "id": run if run is not None else 1000 + id},
+        "expired": state.get("expired", False),
+        "created_at": (state.get("now", NOW) - timedelta(hours=hours)).isoformat(),
+        "workflow_run": {"head_branch": branch, "id": 1000 + id},
     }
 
 
