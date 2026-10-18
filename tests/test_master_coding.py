@@ -8,9 +8,20 @@ import pytest
 from hooks import config, hook_manager
 from hooks.context import master_coding, operator_mode
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = runpy.run_path(str(ROOT / "profiles" / "package" / "roles" / "_guards" / "no_code_edits.py"))
 SID = "master-session"
+
+
+@pytest.fixture(autouse=True)
+def scheduler_storage(monkeypatch):
+    import fakeredis
+
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda: redis)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", lambda: True)
 
 
 @pytest.fixture

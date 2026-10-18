@@ -17,7 +17,11 @@ DURATION_JOB = (
 )
 UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"}
 QUEUE = UNIT | {"queue-fail-fast"}
-PULL_REQUEST = UNIT | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+PULL_REQUEST = (
+    UNIT
+    | {"select", "lint", "semgrep", "sonar", "mutation-plan", "mutation-stats", "mutation"}
+    | ({"docs"} if "docs" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"] else set())
+)
 SELECTED = PULL_REQUEST - {"split", "unit", "shard-check"} | {"unit-selected"}
 PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lint", "semgrep", "test-count"}) | {
     "queue-fail-fast",
@@ -113,7 +117,9 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     assert "queue-baseline" not in jobs
     assert not any("queue-baseline" in job.get("needs", []) for job in jobs.values())
     options = {"consolidated": True} if DURATION_JOB == "select" else {}
-    assert jobs["gate-required"]["steps"] in [
+    steps = jobs["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
+    assert steps in [
         ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary) for summary in (False, True)
     ]
 

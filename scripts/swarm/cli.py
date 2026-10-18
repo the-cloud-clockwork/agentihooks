@@ -104,6 +104,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_record,
     ready,
     reaper,
     release_wait,
@@ -1432,7 +1433,7 @@ def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
-        result = merge_queue.prioritize(args.url)
+        result = merge_queue.prioritize(args.url, journal=queue_record.Journal(args.url))
         for task in tasks:
             if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
                 InboxStore(store.redis).send(
@@ -1449,10 +1450,13 @@ def cmd_merge(store, args):
             done_gate.require_target(store, args.slug, agent.task, args.url, LedgerClient().tasks(args.slug))
         if args.action == "queue":
             result = merge_queue.operate(
-                args.action, args.url, admit=lambda head: _queue_intent(store, args, agent, head)
+                args.action,
+                args.url,
+                admit=lambda head: _queue_intent(store, args, agent, head),
+                journal=queue_record.Journal(args.url),
             )
         else:
-            result = merge_queue.operate(args.action, args.url)
+            result = merge_queue.operate(args.action, args.url, journal=queue_record.Journal(args.url))
     print(json.dumps(result))
 
 
