@@ -227,7 +227,7 @@ def test_every_credential_sender_trusts_the_ledger_ca_with_its_own_timeout(monke
     (tmp_path / "shot.png").write_bytes(b"png")
     monkeypatch.setattr(ledger, "base", lambda: "https://ledger:8765")
     monkeypatch.setattr(ledger, "credentials", lambda slug: {"X-Ledger-Token": "token"})
-    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda: "https://ledger:8765")
+    monkeypatch.setattr(watch_ledger.ledger_link, "base", lambda environ=None: "https://ledger:8765")
 
     api_client.ResourceClient("https://ledger:8765", {"X-Ledger-Token": "token"}, timeout=3).request(SLUG, "chat")
     proof_ledger.call("ledgers", {}, {**environ, "AGENTIHOOKS_CONTROLLER_CREDENTIAL": "controller"})
