@@ -9,6 +9,7 @@ from pathlib import Path
 UNIT = "agentihooks-swarm"
 WAKER = "agentihooks-inbox-waker"
 ALERTS = "agentihooks-alert-intake"
+PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 
@@ -45,6 +46,15 @@ def units(binary):
         "Restart=on-failure\nRestartSec=5\n\n"
         "[Install]\nWantedBy=default.target\n"
     )
+    prober = (
+        "[Unit]\nDescription=agentihooks quota prober for the ledger page refresh\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm prober\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
     wait_service = (
         "[Unit]\nDescription=agentihooks swarm wait checks\n\n"
         "[Service]\nType=oneshot\n"
@@ -65,6 +75,7 @@ def units(binary):
         f"{UNIT}.timer": timer,
         f"{WAKER}.service": waker,
         f"{ALERTS}.service": alerts,
+        f"{PROBER}.service": prober,
     }
 
 

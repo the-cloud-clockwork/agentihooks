@@ -8,6 +8,7 @@ import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts import quota_state
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
@@ -50,7 +51,7 @@ class Limits:
     master_watch_ratio: int = 15
     cooldown_minutes: int = 60
     drain_minutes: int = 10
-    drain_left: int = 10
+    drain_left: int = quota_state.DRAIN_LEFT
 
 
 @dataclass(frozen=True)
