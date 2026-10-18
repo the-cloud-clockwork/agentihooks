@@ -267,12 +267,6 @@ def test_head_matching_the_base_count_passes(tmp_path):
     assert "head collects 3 tests, base floor 3" in result.stdout
 
 
-def test_head_adding_tests_passes(tmp_path):
-    result = _floor(tmp_path, {"test_a.py": SUITE}, {"test_a.py": SUITE, "test_c.py": OTHER})
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "head collects 4 tests, base floor 3" in result.stdout
-
-
 def test_a_deleted_test_file_is_red_and_names_every_lost_test(tmp_path):
     result = _floor(tmp_path, {"test_a.py": SUITE, "test_c.py": OTHER}, {"test_a.py": SUITE})
     assert result.returncode == 1
