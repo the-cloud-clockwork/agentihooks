@@ -297,7 +297,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm init [--timeout SECONDS]` | Bring up the local swarm stack, Redis with its password, the ledger server and the controller, from the Compose files packaged with agentihooks into `$AGENTIHOOKS_HOME/swarm-stack`. The first run writes `.env` there with a random Redis password, free ledger and Redis ports and `SWARM_IMAGE_TAG=release`, so the stack runs the released swarm image; later runs keep them, so a rerun is safe and keeps the data. It waits until every service is healthy (default 300 seconds) and the ledger home page answers, then prints the ledger address, the `client.env` line that points a shell at the stack and the commands that start a swarm. A missing Docker, daemon or Compose plugin, an unhealthy service or a silent ledger page is named with its fix and exits 1. It never creates or starts a swarm, and `init`, like `list` and `tick`, is read as a command word before any swarm id, so do not name a swarm `init`. Output is coloured on a terminal, plain when piped or with `NO_COLOR`. |
 | `agentihooks swarm init --prepare-clients` | Stage named authentication before moving an existing local swarm into the bundle. First deploy the bundle's named Redis user and persistent ACL configuration through the source service's repository, retaining existing clients, and verify authentication after a source restart. Preparation checks the bundle credential against the current localhost Redis, its named user and configured ACL file, then atomically writes the private `swarm-client.env` companion for existing environment loaders. It changes no Redis users, data, services, deployment mode, ledger address or ports. Existing sessions keep their connections; new processes use named authentication on the same source. Keep that source as the sole writer until the master completes seat turnover and verifies client counts before the final data and port cutover. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
-| `agentihooks swarm tick` | One reconcile pass over every swarm (the timer runs it). |
+| `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
 | `agentihooks controller run [--once]` | Reconcile every registered swarm each minute; `--once` runs one pass. `AGENTIHOOKS_DEPLOYMENT=local` permits spawning; `compose` reconciles without spawning; `distributed` spawns only engineer and CI work its Kubernetes runtime places, and leaves master, planner, dispatcher and frontend work to the workstation hive. |
@@ -1092,8 +1092,11 @@ A split cannot change which pull request a verdict belongs to. Once the task rec
 
 ## The minute tick
 
-A systemd user timer (`agentihooks-swarm.timer`) runs `agentihooks swarm tick` every minute. `start` installs
-and enables it. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
+An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
+registers it and starts the scheduler runner; each tick pass re-registers it if it is gone and deletes the
+`agentihooks-swarm` systemd timer and service an older install left. A minute fires a holder that takes a machine
+lock, so a minute that fires while a tick still runs starts no second tick; the holder stops a tick after nine
+minutes. Tick output goes to the user journal: `journalctl --user -t agentihooks-swarm`. Every swarm ticks in its own thread; while one swarm's tick runs long, a quicker swarm ticks
 again each minute until every swarm's first tick of the pass ends; no extra tick starts after seven minutes.
 An outage holds the affected idle and delivery decisions until recovery (see
 [Outage holds and recovery](#outage-holds-and-recovery)). Each tick, per swarm:
@@ -1130,7 +1133,7 @@ observation succeeds. An empty queue or a new dev merge resets the notice interv
 
 Each tick renews the controller lease for three ticks. A tick is 60 seconds unless
 `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets another interval of at least one second. Set it only on the controller
-of an `agentihooks controller run` install; `swarm tick` refuses to run with it set, because the host timer ticks
+of an `agentihooks controller run` install; `swarm tick` refuses to run with it set, because the host scheduler ticks
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
