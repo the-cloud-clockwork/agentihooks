@@ -649,6 +649,45 @@ def test_a_head_switching_to_either_canonical_aggregation_is_green(selected):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
+@pytest.mark.parametrize("docs", [False, True])
+def test_documentation_aggregation_accepts_only_the_canonical_transition(docs):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=docs)
+    if docs:
+        head["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+        head["jobs"]["gate-required"]["needs"].append("docs")
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+    head["jobs"]["gate-required"]["steps"][0]["run"] += "\necho weakened"
+    assert _grade({"test.yml": head}, base={"test.yml": base})
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_a_declared_documentation_check_cannot_switch_to_legacy_aggregation(existing):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    head["jobs"]["docs"] = {"runs-on": "ubuntu-latest", "if": False}
+    head["jobs"]["gate-required"]["needs"].append("docs")
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    if existing:
+        base["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+        base["jobs"]["gate-required"]["needs"].append("docs")
+        base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True)
+    problems = _grade({"test.yml": head}, base={"test.yml": base})
+    assert any("changes its steps" in problem for problem in problems), problems
+
+
+def test_unchanged_noncanonical_documentation_gate_preserves_its_protected_steps():
+    base, head = _workflow(), _workflow()
+    for workflow in (base, head):
+        workflow["jobs"]["docs"] = {"runs-on": "ubuntu-latest"}
+        workflow["jobs"]["gate"]["needs"].append("docs")
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
 @pytest.mark.parametrize("change", ["outcome", "byte", "extra"])
 @pytest.mark.parametrize("selected", [False, True])
 def test_a_head_altering_the_queue_canonical_aggregation_is_red(change, selected):

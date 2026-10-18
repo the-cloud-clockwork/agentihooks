@@ -9,6 +9,8 @@ agentihooks swarm <id> close [--note TEXT] [--now]                 a live master
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
 agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
+agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
 agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
@@ -93,6 +95,7 @@ from scripts.swarm import (
     ledger_probe,
     ledger_watchdog,
     master_launch,
+    master_move,
     merge_queue,
     metrics,
     naming,
@@ -163,6 +166,7 @@ SETTABLE = {
     "masters-step": "masters_step",
     "compact-limit": "compact_limit",
     "snapshot-minutes": "snapshot_minutes",
+    "master-move-grace": "master_move_grace",
 }
 LANE_KEYS = {f"{lane}-{key}": (lane, key) for lane in templates.LANES for key in templates.LANE_FIELDS}
 EFFORT_KEYS = {"effort-min": "effort_min", "effort-max": "effort_max"}
@@ -733,6 +737,9 @@ def cmd_take_master(store, args):
 
 
 def cmd_master(store, args):
+    if args.action == "move":
+        print(json.dumps(master_move.order(store, args.slug, args.to, now_ms())))
+        return
     runtime = routed(herdr=HerdrRuntime())
     if args.slug not in store.slugs():
         snapshot.recreate(store, args.slug, runtime.live_names())
@@ -1953,7 +1960,9 @@ def build_parser():
     close.add_argument("--now", action="store_true")
     sub.add_parser("take-master").add_argument("--replace", action="store_true")
     sub.add_parser("proof-control").add_argument("--request", required=True)
-    master_up = sub.add_parser("master").add_subparsers(dest="action", required=True).add_parser("up")
+    master_actions = sub.add_parser("master").add_subparsers(dest="action", required=True)
+    master_up = master_actions.add_parser("up")
+    master_actions.add_parser("move").add_argument("--to", required=True)
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)

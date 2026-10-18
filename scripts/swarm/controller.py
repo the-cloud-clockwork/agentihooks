@@ -81,7 +81,7 @@ class FencedRuntime:
             return ""
         router = self.runtime.router
         if router.placement.backend == "hive":
-            if lane not in ("eng", "ci"):
+            if not _hive_lane(lane, task):
                 original = self.runtime.original_runtime.router
                 wanted = original.placed_backend(lane, task)
                 return (
@@ -112,9 +112,13 @@ class FencedRuntime:
             raise SwarmError(refused)
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
-            if lane not in ("eng", "ci") and getattr(runtime, "hive_launch", None) is not None:
+            if not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
+
+
+def _hive_lane(lane: str, task: dict) -> bool:
+    return lane in ("eng", "ci") or bool(task.get("hive"))
 
 
 def _read(path: str) -> str:
