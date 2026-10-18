@@ -77,6 +77,12 @@ def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
         listing = request("tools/list", request_id=2)["result"]["tools"]
         assert len(listing) == 13
         assert request("ping", request_id=3)["result"] == {}
+        for method, key in (
+            ("resources/list", "resources"),
+            ("resources/templates/list", "resourceTemplates"),
+            ("prompts/list", "prompts"),
+        ):
+            assert request(method, request_id=method)["result"] == {key: []}
     stderr = process.stderr_output
     modules = json.loads(next(line[8:] for line in stderr.splitlines() if line.startswith("IMPORTS=")))
     assert "hooks.hook_manager" not in modules
@@ -155,3 +161,102 @@ def test_all_thirteen_tools_keep_their_results_after_lazy_start(monkeypatch):
     assert process.returncode == 0
     modules = json.loads(next(line[8:] for line in process.stderr_output.splitlines() if line.startswith("IMPORTS=")))
     assert "mcp.server.fastmcp" in modules
+
+
+@pytest.mark.parametrize(
+    "categories,allowed",
+    [
+        ("all", ""),
+        ("channels,channels", "CHANNEL_LIST,brain_status"),
+        ("enforcement,conditions", ""),
+        ("unknown", ""),
+        ("all", "missing"),
+        ("all", ","),
+    ],
+)
+def test_discovery_matches_registry_configuration(monkeypatch, capsys, categories, allowed):
+    from hooks.mcp import build_server
+    from hooks.mcp._stdio import list_tools
+
+    monkeypatch.setenv("MCP_CATEGORIES", categories)
+    monkeypatch.setenv("ALLOWED_TOOLS", allowed)
+    expected = asyncio.run(build_server().list_tools())
+    assert list_tools() == [tool.model_dump(by_alias=True, exclude_none=True) for tool in expected]
+    if categories == "unknown" or allowed == "missing":
+        assert "ZERO tools" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("requested", ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25", "unknown"])
+def test_discovery_handshake_matches_protocol_library(monkeypatch, capsys, requested):
+    from io import StringIO
+
+    from mcp.shared.version import SUPPORTED_PROTOCOL_VERSIONS
+    from mcp.types import LATEST_PROTOCOL_VERSION
+
+    from hooks.mcp import build_server
+    from hooks.mcp._stdio import run
+
+    monkeypatch.setenv("MCP_CATEGORIES", "all")
+    monkeypatch.delenv("ALLOWED_TOOLS", raising=False)
+    monkeypatch.setattr(
+        sys,
+        "stdin",
+        StringIO(
+            json.dumps(
+                {
+                    "jsonrpc": "2.0",
+                    "id": "init",
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": requested,
+                        "capabilities": {},
+                        "clientInfo": {"name": "contract", "version": "1"},
+                    },
+                }
+            )
+            + "\n"
+            + json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})
+            + "\n"
+        ),
+    )
+    run()
+    replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    expected = build_server()._mcp_server.create_initialization_options()
+    assert replies[0] == {
+        "jsonrpc": "2.0",
+        "id": "init",
+        "result": {
+            "protocolVersion": requested if requested in SUPPORTED_PROTOCOL_VERSIONS else LATEST_PROTOCOL_VERSION,
+            "capabilities": expected.capabilities.model_dump(by_alias=True, exclude_none=True),
+            "serverInfo": {"name": expected.server_name, "version": expected.server_version},
+        },
+    }
+    assert len(replies[1]["result"]["tools"]) == 13
+
+
+@pytest.mark.parametrize("invalid", [[], {"jsonrpc": "2.0", "id": 0, "method": "initialize"}])
+def test_invalid_protocol_message_keeps_server_reading(monkeypatch, capsys, invalid):
+    from io import StringIO
+
+    from hooks.mcp._stdio import run
+
+    messages = [
+        invalid,
+        {
+            "jsonrpc": "2.0",
+            "id": "init",
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2025-03-26",
+                "capabilities": {},
+                "clientInfo": {"name": "contract", "version": "1"},
+            },
+        },
+        {"jsonrpc": "2.0", "id": "ping", "method": "ping"},
+    ]
+    monkeypatch.setattr(sys, "stdin", StringIO("".join(json.dumps(message) + "\n" for message in messages)))
+    run()
+    replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert any("error" in reply for reply in replies)
+    assert any(reply.get("id") == "init" and "result" in reply for reply in replies)
+    assert {"jsonrpc": "2.0", "id": "ping", "result": {}} in replies

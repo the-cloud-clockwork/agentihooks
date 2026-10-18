@@ -15,12 +15,13 @@ def list_tools() -> list[dict]:
             f"[agentihooks] WARNING: ignoring unknown MCP categories {unknown}; valid categories: {sorted(CATALOG)}",
             file=sys.stderr,
         )
-    allowed = {name.strip().lower() for name in os.getenv("ALLOWED_TOOLS", "").split(",") if name.strip()}
+    allowed_raw = os.getenv("ALLOWED_TOOLS", "").strip()
+    allowed = {name.strip().lower() for name in allowed_raw.split(",") if name.strip()}
     tools = {
         tool["name"]: tool
         for category in categories
         for tool in CATALOG.get(category, [])
-        if not allowed or tool["name"].lower() in allowed
+        if not allowed_raw or tool["name"].lower() in allowed
     }
     if not tools:
         print(
@@ -67,6 +68,28 @@ async def _serve(history, stdin, stdout, initialize_id) -> None:
         await server._mcp_server.run(read, write, server._mcp_server.create_initialization_options())
 
 
+def _method(message):
+    if not isinstance(message, dict) or message.get("jsonrpc") != "2.0":
+        return None
+    params = message.get("params", {})
+    if not isinstance(params, dict):
+        return None
+    method = message.get("method")
+    if method == "notifications/initialized" and "id" not in message:
+        return method
+    request_id = message.get("id")
+    if isinstance(request_id, bool) or not isinstance(request_id, (str, int)):
+        return None
+    if method == "initialize":
+        client = params.get("clientInfo", {})
+        if not isinstance(client, dict):
+            return None
+        fields = (params.get("protocolVersion"), client.get("name"), client.get("version"))
+        if not all(isinstance(value, str) for value in fields) or not isinstance(params.get("capabilities"), dict):
+            return None
+    return method
+
+
 def run() -> None:
     history = []
     initialize_id = None
@@ -75,11 +98,8 @@ def run() -> None:
         try:
             message = json.loads(line)
         except ValueError:
-            import anyio
-
-            anyio.run(_serve, history + [line], sys.stdin, sys.stdout, initialize_id)
-            return
-        method = message.get("method")
+            message = None
+        method = _method(message)
         if method == "initialize":
             history = [line]
             initialize_id = message["id"]
@@ -94,7 +114,14 @@ def run() -> None:
             continue
         elif method == "ping":
             result = {}
-        elif method == "tools/list" and history:
+        elif method in {"resources/list", "resources/templates/list", "prompts/list"} and initialize_id is not None:
+            key = {
+                "resources/list": "resources",
+                "resources/templates/list": "resourceTemplates",
+                "prompts/list": "prompts",
+            }[method]
+            result = {key: []}
+        elif method == "tools/list" and initialize_id is not None:
             result = {"tools": tools}
         else:
             import anyio
