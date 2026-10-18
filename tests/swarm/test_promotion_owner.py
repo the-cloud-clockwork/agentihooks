@@ -311,6 +311,27 @@ def test_real_git_repositories_remain_independent_with_bounded_identity_reads(li
     assert reads == ["--git-common-dir", "--git-common-dir"]
 
 
+def test_repository_uses_resolved_checkout_path_when_git_is_missing(tmp_path):
+    from scripts.swarm import promotion_owner
+
+    def missing_git(*args, **kwargs):
+        raise FileNotFoundError("git")
+
+    repo = tmp_path / "checkout" / ".." / "repository"
+    assert promotion_owner.repository(str(repo), missing_git) == str(tmp_path / "repository")
+
+
+def test_linked_swarms_retain_one_promotion_fixer_without_git_on_path(linked, tmp_path, monkeypatch):
+    store, ledger = linked
+    monkeypatch.setenv("PATH", str(tmp_path))
+
+    observe(store, ledger, DOCTOR)
+    observe(store, ledger, WATCHED)
+
+    assert ledger.docs[DOCTOR]["tasks"] == []
+    assert [task["id"] for task in ledger.docs[WATCHED]["tasks"]] == ["promo-900-0"]
+
+
 def test_first_owner_lookup_after_watcher_import_does_not_capture_a_temporary_runner(tmp_path):
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
