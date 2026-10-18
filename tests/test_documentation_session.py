@@ -76,21 +76,23 @@ def test_session_end_queues_one_documentation_task_with_source_and_docs_evidence
     assert "WidgetPolicy" in task["description"]
 
 
-def test_a_session_named_for_no_ledger_task_queues_documentation_without_that_dependency(world, monkeypatch):
+@pytest.mark.parametrize("task", ["master", "t9"])
+def test_a_session_named_for_no_ledger_task_queues_no_documentation_task(world, monkeypatch, task):
     root, _, ledger, jobs = world
     monkeypatch.setattr(documentation.runner, "decide", answer())
-    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "master")
-    payload = {"session_id": "documentation-master", "cwd": str(root)}
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    payload = {"session_id": f"documentation-{task}", "cwd": str(root)}
     documentation_session.start(payload)
     (root / "limits.py").write_text("class WidgetLimits:\n    ceiling = 5\n")
     git(root, "add", "limits.py")
     git(root, "commit", "-qm", "Add widget limits")
     documentation_session.end(payload)
-    for fn, args in jobs:
-        fn(*args)
-    assert len(ledger.added) == 1
-    assert ledger.added[0]["depends_on"] == []
-    assert ledger.added[0]["rank"] == "low"
+    fn, args = jobs.pop()
+    fn(*args)
+    assert ledger.added == []
+    row = json.loads(args[0].read_text())
+    assert row["status"] == "complete"
+    assert row["verdict"]["needs_documentation"] is False
 
 
 @pytest.mark.parametrize(("needed", "covered"), [(0.05, 0.05), (0.95, 0.95)])
@@ -273,3 +275,27 @@ def test_an_interrupted_worker_advances_the_pending_request_retry_order(world, m
     with pytest.raises(Interrupted):
         fn(*args)
     assert args[0].stat().st_mtime_ns > 1
+
+
+def test_commits_pulled_from_dev_are_not_delivered_by_the_session(tmp_path, monkeypatch):
+    repository(tmp_path)
+    monkeypatch.setattr(documentation_session, "HOME", tmp_path / "state")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_CLASSIFIER_CHILD", raising=False)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("pulled work needs no model call")
+
+    monkeypatch.setattr(documentation.runner, "decide", forbidden)
+    monkeypatch.setattr(documentation_session, "fork_and_call", lambda fn, *args, **kwargs: fn(*args))
+    payload = {"session_id": "fast-forward-fixture", "cwd": str(tmp_path)}
+    documentation_session.start(payload)
+    (tmp_path / "policy.py").write_text("class WidgetPolicy:\n    retries = 3\n")
+    git(tmp_path, "add", "policy.py")
+    git(tmp_path, "commit", "-qm", "Add retry policy")
+    git(tmp_path, "update-ref", "refs/remotes/origin/dev", "HEAD")
+    documentation_session.end(payload)
+    row = json.loads(next((documentation_session.HOME / "documentation").glob("*.json")).read_text())
+    assert row["status"] == "complete"
+    assert row["verdict"]["needs_documentation"] is False
+    assert "notice" not in row
