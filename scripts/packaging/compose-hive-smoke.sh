@@ -67,6 +67,7 @@ fi
 
 docker run -d --name "$run-member" --network "${run}_default" -v "$tls/ca.pem:/tls/ca.pem:ro" \
   -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/ca.pem -e LEDGER_URL=http://swarm:8765 \
+  -e AGENTIHOOKS_SWARM="$slug" \
   ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev sleep infinity >/dev/null
 code="$(docker compose exec -T hive agentihooks hive invite member)"
 joined="$(docker exec "$run-member" agentihooks hive join https://hive:8770 "$code")"
