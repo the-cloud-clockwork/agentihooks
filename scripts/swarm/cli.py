@@ -107,6 +107,7 @@ from scripts.swarm import (
     plan_review,
     priming_trace,
     prompt,
+    queue_priority,
     queue_record,
     ready,
     reaper,
@@ -198,6 +199,8 @@ EXTRA_TICKS_UNTIL = 420
 SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
+PARKED_NEXT = "stop now; the task waits on its branch"
+READ_ONLY_PARKED_NEXT = "stop now; the task waits on its dependencies and the next engineer continues it"
 CLOSE_ASK = (
     "The operator pressed Close on the ledger page. Write one short paragraph in plain words on where the work "
     'stands, then run: agentihooks swarm {slug} close --note "<your paragraph>". Close retires you too.'
@@ -332,6 +335,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
+            actions += skip_refused(queue_priority.refresh, store, slug, doc["tasks"])
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(
                 ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
@@ -581,6 +585,7 @@ def cmd_create(store, args):
         links=template.links,
         autonomy=template.autonomy or DELEGATE,
         scratch=not ledger_creator.shared(os.environ),
+        caps_pinned=args.max_eng_agents is not None or args.max_ci_agents is not None,
         codex_inbox_transport=APP_SERVER_TRANSPORT,
         masters_step=DEFAULT_MASTERS_STEP,
     )
@@ -897,6 +902,10 @@ def _store_master_rules(store, slug, rules):
         master_scale.set_rule(store.redis, slug, rule)
 
 
+def _pinned(changes):
+    return {"caps_pinned": True} if {"max_eng", "max_ci"} & changes.keys() else {}
+
+
 def _manual_count_step(counts):
     return {"masters_step": 0} if counts else {}
 
@@ -943,7 +952,7 @@ def cmd_set(store, args):
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
-    config = store.update(args.slug, **changes)
+    config = store.update(args.slug, **changes, **_pinned(changes))
     _store_master_counts(store, args.slug, counts, hives)
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
@@ -1475,16 +1484,9 @@ def cmd_merge(store, args):
     if args.action == "priority":
         sender = _master_or_operator(store, args, "only the master or the operator prioritizes the merge queue")
         tasks = LedgerClient().tasks(args.slug)
-        result = merge_queue.prioritize(args.url, journal=queue_record.Journal(args.url))
-        for task in tasks:
-            if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
-                InboxStore(store.redis).send(
-                    sender,
-                    task["claimed_by"],
-                    f"Your pull request {task['pr_url']} was requeued in its original order after priority request {args.url}.",
-                )
-        if result["errors"]:
-            raise SwarmError("; ".join(result["errors"]))
+        if args.lift and not clearance.is_operator(store, Who.from_env()):
+            raise SwarmError("only the operator lifts a running merge group priority hold")
+        result = queue_priority.request(store, args.slug, args.url, sender, tasks, lift=args.lift)
     else:
         agent = _worker(store, args) if args.action != "state" else None
         if agent is not None:
@@ -1743,17 +1745,9 @@ def cmd_park(store, args):
     fields, top = stack.park(store, args.slug, agent, text, ledger)
     store.mark_restart(args.slug, agent.task, "park")
     _hand_off(store, args.slug, agent, text, "exit", ledger)
-    removed = stack.remove_worktree(top)
-    print(
-        json.dumps(
-            {
-                "task": agent.task,
-                **fields,
-                "worktree_removed": removed,
-                "next": "stop now; the task waits on its branch",
-            }
-        )
-    )
+    removed = stack.remove_worktree(top) if top else ""
+    after = PARKED_NEXT if top else READ_ONLY_PARKED_NEXT
+    print(json.dumps({"task": agent.task, **fields, "worktree_removed": removed, "next": after}))
 
 
 def cmd_ready(store, args):
@@ -2043,6 +2037,9 @@ def build_parser():
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
     merge.add_argument("url")
+    merge.add_argument(
+        "--lift", action="store_true", help="operator: prioritize immediately despite a running head group"
+    )
     sub.add_parser("prepare")
     publish = sub.add_parser("publish")
     publish.add_argument("--message", "-m", required=True)
@@ -2119,6 +2116,14 @@ def _tick_store():
 
 
 def main(argv):
+    if argv[:1] == ["init"]:
+        from scripts.swarm import stack_init
+
+        return stack_init.main(argv[1:])
+    return dispatch(argv)
+
+
+def dispatch(argv):
     if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "prober", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:

@@ -28,10 +28,12 @@ from scripts.inbox.seats import seat_address
 from scripts.inbox.store import CLOSED, InboxStore
 from scripts.swarm import (
     affinity,
+    apply_wait,
     bottleneck_remedy,
     ci_speed,
     claim_hold,
     claim_order,
+    content_refusal,
     continuation,
     control_notifications,
     dead_resume,
@@ -597,8 +599,28 @@ def agent_status(agent):
     return "idle" if agent.idle_ticks else "working"
 
 
+def _refusal_due(slug, store, rows, agent, observed, now_ms):
+    if not observed.content_refusal:
+        return False
+    row = rows.get(agent.task)
+    if not row or row.get("claimed_by") != agent.name or _operator_at_pane(slug, store, agent, observed, now_ms):
+        return False
+    return content_refusal.repeated(store, slug, agent, observed)
+
+
+def _free_refused(slug, store, ledger, runtime, rows, agent, now_ms):
+    if not runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task)):
+        return [f"could not retire {agent.name} after repeated content refusals, retrying next tick"]
+    content_refusal.handoff(store, slug, agent, now_ms)
+    return [
+        f"freed {agent.name} after repeated content refusals" + _drop(slug, store, ledger, rows, agent, refund=True)
+    ]
+
+
 def _watch_idle(slug, store, ledger, runtime, rows, agent, now_ms):
     observed = runtime.observe(agent)
+    if _refusal_due(slug, store, rows, agent, observed, now_ms):
+        return _free_refused(slug, store, ledger, runtime, rows, agent, now_ms)
     store.redis.set(store.key(slug, "pane-state", agent.name), observed.state, ex=idle_state.BEAT_TTL_S)
     outage.mark_pane(store, slug, agent.name, observed.provider_error, now_ms)
     if observed.provider_error and not observed.prompt_title and not observed.typed:
@@ -745,7 +767,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
     held = [t.get("territory") or [] for t in rows.values() if t.get("state") in ACTIVE]
     config = store.config(slug)
     graph, fix = hierarchy.project(doc)[0], freeze.fix_phase(config)
-    released = release_wait.checker(config.repo)
+    released, applied = release_wait.checker(config.repo), apply_wait.checker(config, rows)
     clear, overlapping = [], []
     for t in sorted(rows.values(), key=dispatched or claim_order.key(rows)):
         if (
@@ -754,6 +776,7 @@ def _claimable(slug, store, rows, doc, lane, dispatched=None):
             and ready(t, rows, doc, graph, fix)
             and store.claimant(slug, t["id"]) is None
             and released(t)
+            and applied(t)
         ):
             mine = t.get("territory") or []
             if any(_overlaps(mine, other) for other in held):

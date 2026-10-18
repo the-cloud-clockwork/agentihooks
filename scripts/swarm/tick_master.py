@@ -3,6 +3,7 @@ when that launch fails, promote one live engineer whose only purpose is restorin
 
 import json
 import os
+from dataclasses import replace
 
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
@@ -15,6 +16,7 @@ SENDER = "swarm"
 FORCED = "master down {minutes} minutes, forced a master launch"
 NO_HOOK = "the forced master launch reported no hook within two minutes"
 NO_LAUNCH = "no master launched"
+SUSPECT = "suspect"
 PROMPT = (
     "PROMOTED: swarm {slug} has had no live master for {minutes} minutes and the forced master launch failed: "
     "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
@@ -73,12 +75,13 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     """launch runs the tick's own master launch and returns its actions."""
     state, minutes = read(store, slug), down_minutes(os.environ)
     forcing = bool(state) and config.state != "stopping" and _due(state, now_ms, minutes)
+    finished = _finish_dead(store, slug) if forcing else []
     if forcing and not _starting(store, slug):
         store.redis.delete(store.key(slug, "master-start"))
     launched = launch()
     if forcing and not launched:
         launched = [_launch_refusal(store, slug)]
-    actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
+    actions = [FORCED.format(minutes=_shown(minutes)), *finished, *launched] if forcing else launched
     if config.state == "stopping":
         master_alarm.drop(store, slug)
         return actions + _stop(slug, store, ledger, state, now_ms)
@@ -119,6 +122,16 @@ def _masters(store, slug):
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
+
+
+def _finish_dead(store, slug):
+    """A suspect lead has not answered through the whole down window, so the forced launch may replace it."""
+    actions = []
+    for lead in _masters(store, slug):
+        if lead.state == SUSPECT:
+            store.put_agent(slug, replace(lead, state="finished"))
+            actions.append(f"finished dead lead {lead.name} ({SUSPECT})")
+    return actions
 
 
 def _launch_refusal(store, slug):

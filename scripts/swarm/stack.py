@@ -6,9 +6,11 @@ from pathlib import Path
 
 from scripts.handoff import check as handoff_check
 from scripts.handoff.resolve import Resolver
+from scripts.swarm import apply_wait
 from scripts.swarm.store import SwarmError
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
+READ_ONLY_NOTE = "Released its seat while it waits on {names}. The next engineer continues it from the recorded window."
 WT_SCRIPT = Path(__file__).resolve().parents[2] / "profiles" / "package" / "skills" / "worktree" / "scripts" / "wt.sh"
 
 
@@ -39,17 +41,25 @@ def _pushed(branch):
         raise SwarmError(f"the worktree holds uncommitted changes; commit them and push {branch} first")
 
 
-def pushed(root: Path) -> bool:
+def pushed(root: Path, recorded: str = "") -> bool:
     git = ["git", "-C", str(root)]
-    branch = _out([*git, "branch", "--show-current"], "cannot read the worktree branch")
-    listed = shell([*git, "ls-remote", "--heads", "origin", branch]).stdout.splitlines()
+    local = _out([*git, "branch", "--show-current"], "cannot read the worktree branch")
+    upstream = _out(
+        [*git, "for-each-ref", "--format=%(upstream:remotename) %(upstream:remoteref)", f"refs/heads/{local}"],
+        "cannot read the worktree upstream",
+    )
+    remote_name, _, remote_ref = upstream.partition(" ")
+    branch = remote_ref.removeprefix("refs/heads/") or recorded or local
+    remote_name = remote_name or "origin"
+    listed = shell([*git, "ls-remote", "--heads", remote_name, branch]).stdout.splitlines()
     remote = [line.split()[0] for line in listed if line.endswith(f"\trefs/heads/{branch}")]
     if remote and shell([*git, "merge-base", "--is-ancestor", "HEAD", remote[0]]).returncode == 0:
         return True
     if remote or _out([*git, "rev-list", "--count", "origin/dev..HEAD"], "cannot count the worktree commits") != "0":
+        target = branch if branch == local else f"HEAD:{branch}"
         raise SwarmError(
             f"the worktree {root} holds commits origin lacks; "
-            f"push them with git -C {root} push -u origin {branch} before blocking"
+            f"push them with git -C {root} push -u {remote_name} {target} before blocking"
         )
     return False
 
@@ -186,6 +196,8 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     state = ledger.state(slug)
     rows = {t["id"]: t for t in state["tasks"]}
     row = rows.get(agent.task) or {}
+    if ledger_kinds.read_only(row):
+        return park_read_only(store, slug, agent, text, ledger, rows), ""
     _pushed(row.get("branch"))
     top = worktree()
     _issue_ready(row)
@@ -205,6 +217,27 @@ def park(store, slug: str, agent, text: str, ledger) -> dict:
     fields = {"parked_on": [b["id"] for b in open_], "stacked_base": base, "parked_repos": list(repos.values())}
     ledger.update_task(slug, agent.task, fields, by=agent.name)
     return fields, top
+
+
+def _read_only_note(open_):
+    note = READ_ONLY_NOTE.format(names=" and ".join(b.get("title") or "its dependency" for b in open_))
+    return note if not ledger_comments.problems(note, "comment") else READ_ONLY_NOTE.format(names="its dependencies")
+
+
+def park_read_only(store, slug: str, agent, text: str, ledger, rows: dict) -> dict:
+    row = rows[agent.task]
+    held = apply_wait.waiting(store.config(slug), row, rows)
+    deps = row.get("depends_on") or []
+    open_ = [rows.get(d, {"id": d}) for d in deps if d in held or rows.get(d, {}).get("state") != "done"]
+    if not open_:
+        raise SwarmError("the task waits on no open dependency; finish it, or hand it off for its window")
+    found = handoff_check.problems(text, Resolver(slug, store.redis, ledger.state))
+    if found:
+        raise SwarmError(handoff_check.refusal(found))
+    ledger.comment(slug, agent.task, _read_only_note(open_), by=agent.name)
+    fields = {"parked_on": [b["id"] for b in open_]}
+    ledger.update_task(slug, agent.task, fields, by=agent.name)
+    return fields
 
 
 def remove_worktree(top: str) -> str:

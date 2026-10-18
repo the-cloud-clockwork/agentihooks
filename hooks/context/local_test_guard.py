@@ -1,6 +1,8 @@
+import ast
 import os
 import posixpath
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from hooks.context.shell_commands import commands
@@ -76,8 +78,24 @@ _LITERAL = (
 )
 _LAUNCH = re.compile(
     r"\b(?:\w+_)?(?:subprocess|system|popen|spawn|exec)\w*"
-    r"|\b(?:eval|compile|Function|vm|run_module|run_path|__import__|import_module|child_process)\b"
+    r"|\b(?:eval|compile|Function|vm|_?run_module\w*|run_path|__import__|import_module|child_process)\b"
     r"|\brequire\s*\(\s*[A-Za-z_$]"
+)
+_NAME_LITERAL = re.compile(r"([\"'`])\w+\1")
+_FORMAT_PREFIX = re.compile(r"(?i)(?<!\w)[rb]?f[rb]?$")
+_READERS = frozenset({"getsource", "getsourcelines", "getsourcefile", "getfile", "getdoc", "signature"})
+_RUNS_ON_IMPORT = frozenset({"unittest.__main__"})
+_READ_NODES = (
+    ast.Module,
+    ast.Expr,
+    ast.Import,
+    ast.ImportFrom,
+    ast.alias,
+    ast.Call,
+    ast.Attribute,
+    ast.Name,
+    ast.Constant,
+    ast.Load,
 )
 _DENY = (
     "BLOCKED: Local test and mutation runs are disabled. Push and open a draft pull request so CI runs the tests. "
@@ -89,13 +107,104 @@ def local_tests_allowed() -> bool:
     return os.getenv(ALLOW_LOCAL_TEST_RUN_ENV, _FALSE).lower() == _TRUE
 
 
-def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
-    code = re.sub(
+def _strip(source: str, comment: str, keep: Callable[[str, re.Match], bool]) -> str:
+    return re.sub(
         f"(?s){_LITERAL}|{re.escape(comment)}[^\\n]*",
-        lambda match: match[0] if match["module"] else match["q"],
+        lambda match: match[0] if keep(source, match) else match["q"],
         source,
     )
-    return bool(runners.search(source if _LAUNCH.search(source) else code))
+
+
+def _module_literal(source: str, match: re.Match) -> bool:
+    return bool(match["module"])
+
+
+def _named_literal(source: str, match: re.Match) -> bool:
+    return bool(match["module"] or _NAME_LITERAL.fullmatch(match[0]) or _FORMAT_PREFIX.search(source, 0, match.start()))
+
+
+def _launches(source: str, comment: str) -> bool:
+    return bool(_LAUNCH.search(_strip(source, comment, _named_literal)))
+
+
+def _code_runs_tests(source: str, runners: re.Pattern, comment: str) -> bool:
+    return bool(runners.search(source if _launches(source, comment) else _strip(source, comment, _module_literal)))
+
+
+def _imports(tree: ast.Module) -> list[tuple[str, str]]:
+    found = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            found += [(alias.name, alias.asname or alias.name.partition(".")[0]) for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            found += [(f"{node.module}.{alias.name}", alias.asname or alias.name) for alias in node.names]
+    return found
+
+
+def _is_reader(call: ast.Call, imports: list[tuple[str, str]]) -> bool:
+    func = call.func
+    if isinstance(func, ast.Attribute):
+        return (
+            func.attr in _READERS
+            and isinstance(func.value, ast.Name)
+            and (func.value.id, "inspect") in {(bound, path) for path, bound in imports}
+        )
+    return isinstance(func, ast.Name) and any(
+        bound == func.id and path.startswith("inspect.") and path[8:] in _READERS for path, bound in imports
+    )
+
+
+def _read_roots(tree: ast.Module, imports: list[tuple[str, str]]) -> set[int]:
+    roots = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call) and _is_reader(node, imports):
+            for arg in node.args:
+                chain = [arg]
+                while isinstance(chain[-1], ast.Attribute):
+                    chain.append(chain[-1].value)
+                if isinstance(chain[-1], ast.Name):
+                    roots.update(id(link) for link in chain)
+    return roots
+
+
+def _only_reads(tree: ast.Module, imports: list[tuple[str, str]]) -> bool:
+    return all(
+        isinstance(node, _READ_NODES)
+        and (
+            not isinstance(node, ast.Call)
+            or _is_reader(node, imports)
+            or (isinstance(node.func, ast.Name) and node.func.id == "print")
+        )
+        for node in ast.walk(tree)
+    )
+
+
+def _node_text(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    return ""
+
+
+def _reads_runner_source(code: str) -> bool:
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError, RecursionError):
+        return False
+    imports = _imports(tree)
+    runners = {bound for path, bound in imports if _PYTHON_TEST.search(path)}
+    if any(path in _RUNS_ON_IMPORT for path, _ in imports):
+        return False
+    roots = _read_roots(tree, imports)
+    uses = [node for node in ast.walk(tree) if _node_text(node) in runners or _PYTHON_TEST.search(_node_text(node))]
+    return bool(uses) and all(id(node) in roots for node in uses) and _only_reads(tree, imports)
+
+
+def _python_code_runs_tests(code: str) -> bool:
+    return _code_runs_tests(code, _PYTHON_TEST, "#") and (_launches(code, "#") or not _reads_runner_source(code))
 
 
 def _python_script(args: list[str]) -> str | None:
@@ -115,9 +224,9 @@ def _python_script(args: list[str]) -> str | None:
 def _python_test(args: list[str]) -> bool:
     for index, arg in enumerate(args):
         if arg in {"-m", "-c"}:
-            if index + 1 < len(args) and _code_runs_tests(args[index + 1], _PYTHON_TEST, "#"):
+            if index + 1 < len(args) and _python_code_runs_tests(args[index + 1]):
                 return True
-        elif arg.startswith(("-m", "-c")) and _code_runs_tests(arg[2:], _PYTHON_TEST, "#"):
+        elif arg.startswith(("-m", "-c")) and _python_code_runs_tests(arg[2:]):
             return True
     script = _python_script(args)
     return script is not None and (
