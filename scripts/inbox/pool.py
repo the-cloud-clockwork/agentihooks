@@ -46,11 +46,14 @@ class MasterPool:
         return self.inbox.key("pool", slug, *parts)
 
     def masters_for(self, sender: str, address: str) -> list[str]:
-        """The live masters an item from sender to address is pooled across; empty sends it as before."""
+        """The live masters an item from sender to address is pooled across; empty sends it as before, as it does when
+        a live master's inbox sits in another hive member's keys."""
         slug = slug_of(address)
         if not slug or sender == OPERATOR:
             return []
         live = live_masters(self.redis, slug)
+        if any(self.inbox.home(seat) != self.inbox.world for seat in live):
+            return []
         return live if len(live) > 1 else []
 
     def stage_add(self, pipe, item) -> None:

@@ -222,3 +222,15 @@ def test_a_member_inbox_pools_and_owns_below_its_own_keys(redis, swarm):
     assert owner_key("engineer", "m1") == f"{ROOT}:hive:m1:inbox:owner:engineer"
     assert redis.get(f"{ROOT}:hive:m1:inbox:owner:engineer") == "session"
     assert not redis.exists(owner_key("engineer", ""))
+
+
+@pytest.mark.parametrize(("hive", "pooled"), [("m1", []), ("", ["master@fixture", "master-2@fixture"])])
+def test_the_master_pool_holds_only_masters_whose_inboxes_share_its_world(redis, swarm, monkeypatch, hive, pooled):
+    from scripts.inbox import pool
+    from scripts.inbox.store import InboxStore
+
+    join(redis, "m1")
+    place(swarm, hive, seat="master-2@fixture")
+    monkeypatch.setattr(pool, "live_masters", lambda client, slug: ["master@fixture", "master-2@fixture"])
+
+    assert InboxStore(redis, world="").pool.masters_for("engineer@0001-0001", "master@fixture") == pooled

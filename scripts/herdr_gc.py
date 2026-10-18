@@ -140,7 +140,8 @@ class Owners:
         try:
             if store is None:
                 return None
-            readings = scope.readings(store.redis, record.owner_swarm, record.owner_session)
+            owner = naming.NameRegistry(store.redis).resolve(record.owner_session)
+            readings = scope.readings(store.redis, record.owner_swarm, owner)
             prefix = idle.key(record.owner_swarm, "prompt", "", readings)
             names = {record.owner_session}
             names.update(
