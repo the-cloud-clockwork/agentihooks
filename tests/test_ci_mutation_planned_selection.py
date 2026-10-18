@@ -1,4 +1,6 @@
 import json
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -56,9 +58,19 @@ def test_shard_uses_planned_tests_without_scanning_again(tmp_path, monkeypatch, 
         ]
 
 
-@pytest.mark.parametrize("recorded,tests", [(True, ["tests/test_helper.py"]), (False, [])])
+@pytest.mark.parametrize(
+    "recorded,tests,notice",
+    [
+        (
+            True,
+            ["tests/test_helper.py"],
+            "Recorded coverage from dev run 7 adds the tests that executed a changed function.",
+        ),
+        (False, [], "No dev test dependency manifest found; tests are selected by import only."),
+    ],
+)
 def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_through_a_helper(
-    tmp_path, monkeypatch, recorded, tests
+    tmp_path, monkeypatch, capsys, recorded, tests, notice
 ):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests").mkdir()
@@ -73,7 +85,7 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     manifest = {
         "units": ["scripts/core.py::Store.judge", "scripts/core.py::other", "scripts/core.py::<module>"],
         "tests": {
-            "tests/test_helper.py::test_judge": {"units": [0]},
+            "tests/test_helper.py::TestStore::test_judge": {"units": [0]},
             "tests/test_other.py::test_other": {"units": [1, 2]},
             "tests/test_gone.py::test_judge": {"units": [0]},
         },
@@ -81,9 +93,11 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     asked = []
 
     def record(repository, before):
-        asked.append(repository)
+        asked.append((repository, datetime.strptime(before, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)))
         return ({"id": 7}, manifest) if recorded else None
 
+    monkeypatch.setenv("TZ", "Asia/Tokyo")
+    time.tzset()
     monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
     monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
@@ -91,8 +105,15 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
     monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {3}})
     monkeypatch.setattr(plan, "find_record", record)
-    assert plan.main() == 0
-    assert asked == ["owner/repo"]
+    try:
+        assert plan.main() == 0
+    finally:
+        monkeypatch.undo()
+        time.tzset()
+    [(repository, before)] = asked
+    assert repository == "owner/repo"
+    assert abs((datetime.now(UTC) - before).total_seconds()) < 120
+    assert notice in capsys.readouterr().out.splitlines()
     assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/core.py": tests}
 
 
