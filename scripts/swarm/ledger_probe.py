@@ -47,10 +47,6 @@ class Sample:
     def slow(self) -> bool:
         return bool(self.failure) or max(self.read_s, self.write_s) > SLOW_S
 
-    def took(self) -> str:
-        took = f"read {self.read_s:.1f} seconds and write {self.write_s:.1f} seconds"
-        return f"{took}, and the ledger {self.failure}" if self.failure else took
-
 
 def _failure(exc: BaseException) -> str:
     if isinstance(exc, urllib.error.HTTPError):

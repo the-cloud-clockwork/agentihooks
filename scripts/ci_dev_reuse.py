@@ -59,7 +59,7 @@ def _complete(evidence: Path, run: dict) -> bool:
     passed = {job["name"] for job in jobs if job["conclusion"] == "success"}
     if any(name.startswith("reused-tests-") for name in kept):
         return False
-    return artifact_names() <= kept and expected <= passed
+    return artifact_names() <= kept and expected == {name for name in passed if name.startswith("unit (")}
 
 
 def select_source(evidence: Path, head: str, repository: str) -> int | None:

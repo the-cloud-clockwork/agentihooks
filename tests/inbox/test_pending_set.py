@@ -112,6 +112,32 @@ def test_back_fill_rebuilds_the_pending_set_from_existing_items(store, monkeypat
     assert store.redis.sismember(store.key("indexed"), "bob")
 
 
+def test_back_fill_retries_a_watch_error_and_rebuilds_the_pending_index(store, monkeypatch):
+    from redis.exceptions import WatchError
+
+    pending = store.send("alice", "bob", "waiting")
+    closed = store.send("alice", "bob", "finished")
+    store.close(closed.id, "bob", "done", "handled the request")
+    store.redis.delete(store.key("pending", "bob"), store.key("indexed"))
+    pipeline = type(store.redis.pipeline())
+    watch = pipeline.watch
+    calls = []
+
+    def racing(pipe, *keys):
+        calls.append(keys)
+        if len(calls) == 1:
+            raise WatchError()
+        return watch(pipe, *keys)
+
+    monkeypatch.setattr(pipeline, "watch", racing)
+
+    assert [item.id for item in store.pending_items("bob")] == [pending.id]
+    assert calls[:2] == [(store.key("address", "bob"),)] * 2
+    assert pending_ids(store, "bob") == [pending.id]
+    assert store.redis.sismember(store.key("indexed"), "bob")
+    assert store.redis.sismember(store.key("waiting"), "bob")
+
+
 def test_back_fill_runs_once_and_keeps_items_sent_before_it(store, monkeypatch):
     from scripts.inbox import store as inbox_store
 

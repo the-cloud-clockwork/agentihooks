@@ -319,6 +319,49 @@ def test_ledger_root_search_refused_and_ledger_file_allowed(ledger):
     assert check(read(str(ledger / f"{SLUG}.json")), env(ledger)) is None
 
 
+def test_progress_and_proof_appends_quoting_the_ledger_folder_allowed(ledger):
+    folder = "/home/x/.agentihooks/swarm/demo/tasks/t1"
+    assert (
+        check(bash(f'echo "plan read done, ledger at {ledger} checked" >> {folder}/progress.md'), env(ledger)) is None
+    )
+    assert check(bash(f"printf '%s\\n' 'listed {ledger}/{SLUG}.media' >> {folder}/proof.md"), env(ledger)) is None
+    assert check(bash(f"cat >> {folder}/proof.md <<'EOF'\nsearched {ledger} with grep -rn\nEOF"), env(ledger)) is None
+    assert (
+        check(bash(f'echo "read lines 40 to 60 of {PLAN} by plan read" >> {folder}/progress.md'), env(ledger)) is None
+    )
+    assert check({"tool_name": "Bash", "tool_input": {}}, env(ledger)) is None
+    assert check(bash(f'cd {folder} && echo "ledger at {ledger} ok" >> progress.md'), env(ledger)) is None
+    every_sink = f"echo a | printf b | tee {folder}/proof.md | cat <<'EOF'\nsee {ledger}\nEOF"
+    assert check(bash(every_sink), env(ledger)) is None
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "cat {root}/demo.media/{plan}",
+        'cat "{root}/demo.media/{plan}" >> progress.md',
+        "grep -rn needle {root}",
+        "bash -c 'grep -rn needle {root}'",
+        'echo "$(cat {root}/*/*.md)" >> progress.md',
+        "bash <<'EOF'\ngrep -rn needle {root}\nEOF",
+        "ksh <<'EOF'\ngrep -rn needle {root}\nEOF",
+        "ssh localhost <<'EOF'\ngrep -rn needle {root}\nEOF",
+        'flock /dev/null -c "grep -rn needle {root}"',
+        'echo ok\nbash -c "grep -rn needle {root}"',
+        "echo x\nbash <<'EOF'\ngrep -rn needle {root}\nEOF",
+        'echo <(bash -c "grep -rn needle {root}")',
+        "cat >> progress.md <<EOF\n$(cat {root}/demo.media/{plan})\nEOF",
+        "cat <<'EOF' > {root}\nnotes\nEOF",
+        'echo "`ls {root} `" >> progress.md',
+        "cat {root}/a:b/*",
+        'curl -H "X-Ref: $RUN" https://ci.example/artifacts/plan.md',
+        'grep -rn needle "{root} "',
+    ],
+)
+def test_direct_plan_reads_still_refused_beside_quoted_evidence(ledger, command):
+    assert check(bash(command.format(root=ledger, plan=PLAN)), env(ledger))
+
+
 def test_reads_process_environment(ledger, monkeypatch):
     for key, value in env(ledger).items():
         monkeypatch.setenv(key, value)

@@ -4,6 +4,7 @@ import json
 
 from scripts.gates import lift, log
 from scripts.gates.base import Decision
+from scripts.hive import scope
 from scripts.swarm.naming import lane_of
 from scripts.swarm_ledger import ledger_kinds
 
@@ -186,7 +187,7 @@ class Streak:
 
     def __init__(self, store, slug, name):
         self.store, self.slug, self.name = store, slug, name
-        self.key = store.key(slug, "stop-blocks", name)
+        self.key = f"{scope.readings(store.redis, slug, store.names.resolve(name))}:{slug}:stop-blocks:{name}"
 
     def bump(self, now):
         from scripts.gates.progress import Progress

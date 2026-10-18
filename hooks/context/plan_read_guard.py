@@ -14,6 +14,10 @@ GITHUB = re.compile(r"/actions/(?:runs/\d+/)?artifacts/")
 SED_RANGE = re.compile(r"\s*sed\s+-n\s+(['\"]?)([1-9][0-9]*),([1-9][0-9]*)p\1\s+(\S+)\s*")
 FIELDS = {"Read": ("file_path",), "Grep": ("path", "glob"), "Bash": ("command",), "WebFetch": ("url",)}
 COMMAND = "agentihooks plan read"
+WRITERS = {"echo", "printf"}
+SINKS = WRITERS | {"cat", "tee"}
+SEPARATOR = re.compile(r"[<>]*[;&|()\n][;&|()<>\n]*")
+HEREDOC = re.compile(r"<<-?[ \t]*(['\"])(\w+)\1([^\n]*)\n.*?\n[ \t]*\2[ \t]*(?=\n|$)", re.DOTALL)
 
 
 def enabled(env: Mapping[str, str]) -> bool:
@@ -36,7 +40,7 @@ def check(payload: dict, environ: Mapping[str, str] | None = None) -> str | None
 
 
 def _decide(env: Mapping[str, str], slug: str, tool_name: str, tool_input: dict) -> str | None:
-    text = _text(tool_name, tool_input)
+    text = _operands(tool_name, tool_input, _text(tool_name, tool_input))
     folder = _names_folder(text, _ledger_dir(env))
     if not PLAN_ID.search(text) and not folder:
         return None
@@ -98,6 +102,43 @@ def _text(tool_name: str, tool_input: dict) -> str:
         return " ".join(shlex.split(text))
     except ValueError:
         return text
+
+
+def _operands(tool_name: str, tool_input: dict, text: str) -> str:
+    if tool_name != "Bash" or not text:
+        return text
+    command = str(tool_input["command"])
+    bare = HEREDOC.sub(r"\3", command)
+    try:
+        segments = _segments(bare)
+    except ValueError:
+        return text
+    programs = {PurePath(words[0]).name for words in segments if words}
+    if bare != command and not programs <= SINKS:
+        return text
+    return " ".join(word for words in segments for word in _arguments(words))
+
+
+def _segments(command: str) -> list[list[str]]:
+    lexer = shlex.shlex(command, posix=True, punctuation_chars="();<>|&\n")
+    lexer.whitespace_split, lexer.whitespace, lexer.commenters = True, " \t\r", ""
+    segments: list[list[str]] = [[]]
+    for word in lexer:
+        if SEPARATOR.fullmatch(word):
+            segments.append([])
+        else:
+            segments[-1].append(word)
+    return segments
+
+
+def _arguments(words: list[str]) -> list[str]:
+    if not words or PurePath(words[0]).name not in WRITERS:
+        return words
+    return [words[0], *(word for word in words[1:] if not _prose(word))]
+
+
+def _prose(word: str) -> bool:
+    return any(char.isspace() for char in word) and "$(" not in word and "`" not in word
 
 
 def _ledger_dir(env) -> Path:

@@ -17,12 +17,15 @@ if TYPE_CHECKING:
 
 
 def repository(repo: str, run: Callable = subprocess.run) -> str:
-    result = run(
-        ["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
-        capture_output=True,
-        text=True,
-        timeout=10,
-    )
+    try:
+        result = run(
+            ["git", "-C", repo, "rev-parse", "--path-format=absolute", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except FileNotFoundError:
+        return str(Path(repo).resolve())
     return str(Path(result.stdout.strip()).resolve()) if result.returncode == 0 else str(Path(repo).resolve())
 
 

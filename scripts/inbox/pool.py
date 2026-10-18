@@ -43,21 +43,24 @@ class MasterPool:
         self.redis = inbox.redis
 
     def key(self, slug: str, *parts: str) -> str:
-        return ":".join((PREFIX, slug, *parts))
+        return self.inbox.key("pool", slug, *parts)
 
     def masters_for(self, sender: str, address: str) -> list[str]:
-        """The live masters an item from sender to address is pooled across; empty sends it as before."""
+        """The live masters an item from sender to address is pooled across; empty sends it as before, as it does when
+        a live master's inbox sits in another hive member's keys."""
         slug = slug_of(address)
         if not slug or sender == OPERATOR:
             return []
         live = live_masters(self.redis, slug)
+        if any(self.inbox.home(seat) != self.inbox.world for seat in live):
+            return []
         return live if len(live) > 1 else []
 
     def stage_add(self, pipe, item) -> None:
         """pipe is in MULTI; the score is the item's place in its front door's arrival order."""
         slug = slug_of(item.address)
         pipe.zadd(self.key(slug), {item.id: item.sequence})
-        pipe.sadd(POOLS, slug)
+        pipe.sadd(self.inbox.key("pools"), slug)
 
     def stage_remove(self, pipe, item) -> None:
         if slug := slug_of(item.address):
@@ -91,7 +94,7 @@ class MasterPool:
         return [key for key in keys if slug and self.redis.exists(key)]
 
     def distribute_all(self) -> list:
-        return [item for slug in sorted(self.redis.smembers(POOLS)) for item in self.distribute(slug)]
+        return [item for slug in sorted(self.redis.smembers(self.inbox.key("pools"))) for item in self.distribute(slug)]
 
     def distribute(self, slug: str) -> list:
         """Hand the items waiting when the pass began, oldest first, to the next live master; stop early when another
@@ -133,7 +136,7 @@ class MasterPool:
             if not head:
                 if not pipe.exists(self.key(slug, "holders")):
                     pipe.multi()
-                    pipe.srem(POOLS, slug)
+                    pipe.srem(self.inbox.key("pools"), slug)
                     pipe.execute()
                 return None
             if not live:

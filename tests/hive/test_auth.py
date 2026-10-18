@@ -90,20 +90,36 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"%R~{ROOT}:*",
                     f"~{ROOT}:hive:m1",
                     f"~{ROOT}:hive:m1:*",
-                    f"~{ROOT}:inbox:*",
-                    f"~{ROOT}:swarm:*:heartbeat:*",
-                    f"~{ROOT}:swarm:*:prompt:*",
-                    f"~{ROOT}:swarm:*:session-model:*",
-                    f"~{ROOT}:swarm:*:progress:*",
-                    f"~{ROOT}:swarm:*:wait:*",
-                    f"~{ROOT}:swarm:*:waited:*",
-                    f"~{ROOT}:swarm:*:wait-history:*",
-                    f"~{ROOT}:swarm:*:stop-blocks:*",
                 ),
                 "channels": (f"{ROOT}:*",),
             },
         )
     ]
+
+
+@pytest.mark.parametrize(
+    ("suffix", "writable"),
+    [
+        ("hive:m1:inbox:item:abc", True),
+        ("hive:m1:swarm:proof:heartbeat:engineer@0001-0001", True),
+        ("hive:m2:inbox:item:abc", False),
+        ("hive:m2:swarm:proof:heartbeat:engineer@0001-0001", False),
+        ("hive:m10:inbox:item:abc", False),
+        ("inbox:item:abc", False),
+        ("inbox:owner:master@proof", False),
+        ("swarm:proof:heartbeat:engineer@0001-0001", False),
+        ("swarm:proof:stop-blocks:engineer@0001-0001", False),
+    ],
+)
+def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix, writable):
+    from fnmatch import fnmatchcase
+
+    key = f"{ROOT}:{suffix}"
+
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    assert any(fnmatchcase(key, pattern) for pattern in patterns) is writable
+    assert any(fnmatchcase(key, pattern[3:]) for pattern in auth._acl_keys("m1") if pattern.startswith("%R~"))
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):

@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import subprocess
@@ -17,6 +18,7 @@ pytestmark = pytest.mark.xdist_group("fakeredis")
 
 PID = 4242
 PYTHON = "/venv/bin/python3"
+REASON = "its code changed on disk"
 
 
 @pytest.fixture
@@ -177,7 +179,7 @@ def test_an_unreadable_code_tree_skips_the_pass(tmp_path, monkeypatch):
 def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_script(tmp_path):
     host = Host(tmp_path)
     plant(host.proc, host.argv)
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == ""
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
         ("run", [*host.argv[:2], "--ensure"], str(host.folder), 210, False, True),
@@ -187,7 +189,7 @@ def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_sc
 def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
     host = Host(tmp_path, survives=True)
     plant(host.proc, host.argv)
-    ledger_watchdog.restart(host, PID, host.argv[:2])
+    ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
         *[("sleep", 0.1)] * 100,
@@ -196,11 +198,55 @@ def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
     ]
 
 
+def watchdog_log(host):
+    return [json.loads(line) for line in (host.folder / ledger_watchdog.LOG).read_text().splitlines()]
+
+
+def test_every_signal_a_restart_sends_leaves_a_record_of_its_reason_target_and_caller(tmp_path, monkeypatch):
+    host = Host(tmp_path, survives=True)
+    plant(host.proc, host.argv)
+    monkeypatch.setattr(ledger_watchdog.time, "time", lambda: 1_792_000_000.5)
+    monkeypatch.setattr(ledger_watchdog.sys, "argv", ["agentihooks", "swarm", "tick"])
+    kill = host.kill
+
+    def recorded_first(pid, sig):
+        assert watchdog_log(host)[-1]["signal"] == signal.Signals(sig).name
+        kill(pid, sig)
+
+    host.kill = recorded_first
+    ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+    caller = {"pid": os.getpid(), "argv": ["agentihooks", "swarm", "tick"]}
+    assert watchdog_log(host) == [
+        {"at": 1_792_000_000.5, "reason": REASON, "signal": "SIGTERM", "pid": PID, "caller": caller},
+        {"at": 1_792_000_000.5, "reason": REASON, "signal": "SIGKILL", "pid": PID, "caller": caller},
+    ]
+    assert ledger_watchdog.LOG == ".watchdog.log"
+
+
+def test_a_restart_whose_record_cannot_be_written_sends_no_signal_and_reports_why(tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ledger_watchdog.LOG).mkdir()
+    error = ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+    assert error.startswith("[Errno 21] Is a directory")
+    assert host.calls == []
+
+
+def test_a_watched_restart_records_why_it_stopped_the_server(store, tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host)
+    assert [(entry["reason"], entry["signal"], entry["pid"]) for entry in watchdog_log(host)] == [
+        (REASON, "SIGTERM", PID)
+    ]
+
+
 def test_a_pid_taken_by_another_program_during_the_stop_is_never_killed(tmp_path):
     host = Host(tmp_path, survives=True)
     plant(host.proc, host.argv)
     host.sleep = lambda seconds: plant(host.proc, ["python3", "-m", "http.server"])
-    ledger_watchdog.restart(host, PID, host.argv[:2])
+    ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
     assert [call for call in host.calls if call[0] == "kill"] == [("kill", PID, signal.SIGTERM)]
 
 
@@ -211,7 +257,7 @@ def test_a_server_gone_before_the_stop_is_still_started(tmp_path):
         raise ProcessLookupError
 
     host.kill = gone
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == ""
     assert [call[0] for call in host.calls] == ["run"]
 
 
@@ -224,7 +270,7 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
         raise PermissionError(1, "Operation not permitted")
 
     host.kill = refused
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "[Errno 1] Operation not permitted"
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "[Errno 1] Operation not permitted"
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == [
         "the ledger server needed a restart because its code changed on disk, and the restart failed: "
         "[Errno 1] Operation not permitted"
@@ -245,17 +291,20 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
 
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):
     host = Host(tmp_path, code=1, stderr="ledger server did not answer on http://127.0.0.1:8765\n")
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "ledger server did not answer on http://127.0.0.1:8765"
+    assert (
+        ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+        == "ledger server did not answer on http://127.0.0.1:8765"
+    )
     host.code, host.stderr = 3, ""
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "exit code 3"
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "exit code 3"
     host.code, host.stderr = 1, "a" + "x" * 250
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "x" * 200
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "x" * 200
 
     def hung(argv, **kw):
         raise subprocess.TimeoutExpired(argv, 30)
 
     host.run = hung
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == (
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == (
         f"Command '{[*host.argv[:2], '--ensure']}' timed out after 30 seconds"
     )
 

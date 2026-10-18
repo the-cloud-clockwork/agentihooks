@@ -42,7 +42,14 @@ def test_dev_extra_declares_test_plugin(plugin):
 
 def test_workflow_runs_whole_suite_in_parallel():
     command = _pytest_command()
-    assert command.strip().startswith(("run: workers=$(", "run: start=$SECONDS && status=0 && workers=$("))
+    assert command.strip().startswith(
+        (
+            "run: workers=$(",
+            "run: start=$SECONDS && status=0 && workers=$(",
+            'run: if [[ -n "${QUEUE_SHARDS:-}" ]]; then SHARD="${SHARD%/*}/$QUEUE_SHARDS"; fi; '
+            "start=$SECONDS && status=0 && workers=$(",
+        )
+    )
     assert "ci_cpu_quota) && python -c " in command
     assert '-n "$workers"' in command
     assert "-n auto" not in command
@@ -69,7 +76,12 @@ def test_unit_shards_measure_no_coverage():
     command = _pytest_command()
     assert "--cov" not in command
     assert "matrix.cov" not in command
-    assert "include" not in _workflow()["jobs"]["unit"]["strategy"]["matrix"]
+    include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
+    assert include in (
+        [],
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
+        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}",
+    )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
 
@@ -198,6 +210,28 @@ def test_main_seeds_the_codex_cache_that_unit_shards_restore():
 def test_unit_install_keeps_playwright_and_excludes_the_grpc_exporter():
     excludes = (_ROOT / ".github/test-excludes.txt").read_text().split()
     assert excludes == ["opentelemetry-exporter-otlp-proto-grpc"]
+
+
+def test_queue_environment_matches_the_baked_browser_and_invalidates_old_venvs():
+    workflow = _workflow()
+    assert (_ROOT / ".github/test-constraints.txt").read_text().strip() == "playwright==1.63.0"
+    for job in ("test-count", "split", "unit"):
+        assert workflow["jobs"][job]["env"]["UV_CONSTRAINT"] == "${{ github.workspace }}/.github/test-constraints.txt"
+        cache = next(step for step in workflow["jobs"][job]["steps"] if step.get("id") == "venv")
+        assert "${{ hashFiles('.github/test-constraints.txt') }}" in cache["with"]["key"]
+
+
+def test_queue_browser_setup_cannot_enter_the_downloading_action():
+    steps = _workflow()["jobs"]["unit"]["steps"]
+    install = next(step for step in steps if step.get("uses") == "./.github/actions/browser-cache")
+    assert "github.event_name != 'merge_group'" in install["if"]
+    offline = next(step for step in steps if "use-image.sh" in step.get("run", ""))
+    assert (
+        offline["if"]
+        == "needs.split.outputs.source == '' && matrix.python-version == '3.12' && github.event_name == 'merge_group'"
+    )
+    assert steps.index(offline) < steps.index(next(step for step in steps if step.get("name") == "Run tests"))
+    assert offline["env"]["PLAYWRIGHT_BROWSERS_PATH"] == "${{ github.workspace }}/.playwright"
 
 
 def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
@@ -465,7 +499,9 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     collect = jobs["test-count"]
     assert collect["needs"] == jobs["select"]["needs"]
     assert "needs.select" not in collect["if"]
-    assert collect["strategy"]["matrix"] == jobs["split"]["strategy"]["matrix"]
+    assert collect["strategy"]["matrix"] == {"python-version": ["3.11", "3.12"]}
+    joint = "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
+    assert jobs["split"]["strategy"]["matrix"] in (collect["strategy"]["matrix"], {"python-version": joint})
     command = next(
         step["run"] for step in collect["steps"] if step.get("name") == "Hold the base revision's test count"
     )

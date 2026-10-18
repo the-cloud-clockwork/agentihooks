@@ -593,6 +593,23 @@ def rendered_profiles(target: str) -> list[str]:
     return sorted(config.parent.parent.name for config in rendered_root().glob(f"*/{target}/mcp-config.json"))
 
 
+def rerender(target: str, skip: Sequence[str] = ()) -> list[str]:
+    _i = _install_module()
+    done = []
+    for key in rendered_profiles(target):
+        if key in skip:
+            continue
+        name, overlays = split_key(key)
+        try:
+            render(target, name, force=True, overlays=overlays)
+        except ValueError as exc:
+            print(f"{_i._DIM}[--] Profile home {key} kept as it was: {exc}{_i._RESET}")
+            continue
+        print(f"{_i._GREEN}[OK]{_i._RESET} Re-rendered the {key} profile home")
+        done.append(key)
+    return done
+
+
 def _seed_linked_profiles(out: Path) -> None:
     _i = _install_module()
     state_file = out / "state.json"

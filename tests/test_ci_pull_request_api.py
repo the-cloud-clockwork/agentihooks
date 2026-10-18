@@ -224,6 +224,8 @@ def test_no_script_a_step_runs_calls_the_api():
     assert sorted(str(path.relative_to(ROOT)) for path in calls) in (
         sorted(expected),
         sorted(expected + routing_contracts),
+        sorted(expected + ["tests/queue_shards.py"]),
+        sorted(expected + routing_contracts + ["tests/queue_shards.py"]),
     )
     assert {path: count for path, count in calls.items() if count} == {}
 
