@@ -54,3 +54,70 @@ def test_shard_uses_planned_tests_without_scanning_again(tmp_path, monkeypatch, 
         assert report["not_mutated"] == [
             {"path": "scripts/sample.py", "reason": "no matching or importing test modules"}
         ]
+
+
+def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_through_a_helper(tmp_path, monkeypatch):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "scripts/core.py").write_text(
+        "def judge(value):\n    return value + 1\n\n\ndef other(value):\n    return value - 1\n"
+    )
+    (tmp_path / "scripts/helper.py").write_text("from scripts.core import judge\n")
+    (tmp_path / "tests/test_helper.py").write_text("from scripts import helper\n")
+    (tmp_path / "tests/test_other.py").write_text("import json\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    manifest = {
+        "units": ["scripts/core.py::judge", "scripts/core.py::other", "scripts/core.py::<module>"],
+        "tests": {
+            "tests/test_helper.py::test_judge": {"units": [0]},
+            "tests/test_other.py::test_other": {"units": [1, 2]},
+            "tests/test_gone.py::test_judge": {"units": [0]},
+        },
+    }
+    asked = []
+
+    def record(repository, before):
+        asked.append(repository)
+        return {"id": 7}, manifest
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {2}})
+    monkeypatch.setattr(plan, "find_record", record)
+    assert plan.main() == 0
+    assert asked == ["owner/repo"]
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
+        "scripts/core.py": ["tests/test_helper.py"]
+    }
+
+
+def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, monkeypatch):
+    from scripts.ci_mutation import measured
+
+    (tmp_path / "stats").mkdir()
+    (tmp_path / ".mutation-selection.json").write_text(
+        json.dumps({"scripts/sample.py": ["tests/test_helper.py"], "scripts/unreached.py": []})
+    )
+    refined = []
+
+    def select(*args):
+        raise AssertionError("refine repeated test selection")
+
+    def refine(root, selected, stats):
+        refined.append(selected)
+        return {"shards": 1, "estimated_worker_seconds": 0.0, "assignments": {}}
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+    monkeypatch.setattr("sys.argv", ["measured", "--bases", "base", "--stats", str(tmp_path / "stats")])
+    monkeypatch.setattr(
+        measured, "discover_changes", lambda *args: {"scripts/sample.py": {2}, "scripts/unreached.py": {1}}
+    )
+    monkeypatch.setattr(measured, "select_tests", select)
+    monkeypatch.setattr(measured, "refine_plan", refine)
+    monkeypatch.setattr(measured.subprocess, "check_output", lambda *args, **kwargs: "head\n")
+    assert measured.main() == 0
+    assert refined == [{"scripts/sample.py": ({2}, ["tests/test_helper.py"])}]
