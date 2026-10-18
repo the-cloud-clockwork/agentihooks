@@ -50,7 +50,7 @@ def test_remote_reopen_restores_on_the_server(live, mode):
         patch.object(bin_storage, "restore", server_restore),
     ):
         client = LedgerClient()
-        client.reopen(SLUG, None)
+        client.reopen(SLUG, "operator")
         assert client.closed(SLUG) is False
         assert client.binned(SLUG) is False
     assert SLUG not in bin_storage.entries()

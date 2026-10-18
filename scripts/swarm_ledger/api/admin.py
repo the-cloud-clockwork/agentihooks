@@ -50,7 +50,7 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
         server.ledger_bin.delete(slug)
         if server.swarm_status(slug) is not None:
             _, error = server.swarm_control(slug, ["stop", "--now"])
-    elif not server.ledger_bin.restore(slug):
+    elif not server.repository.restore(slug):
         raise APIError(404, "resource_missing", "Ledger is not in the bin")
     return {"slug": slug, "action": payload["action"], **({"swarm_error": error} if error else {})}
 
