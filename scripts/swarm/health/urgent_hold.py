@@ -25,9 +25,10 @@ def observe(store, slug: str, doc: dict, at: int) -> dict:
         if task.get("rank") != "urgent" or task.get("state") != "open" or task.get("out_of_scope"):
             continue
         why = claim_hold.urgent(task, rows, doc, graph) or (not released(task) and RELEASE.format(**task))
-        if task.get("merged_into") or not why:
+        if task.get("merged_into"):
             continue
-        since = before.get(task["id"], {}).get("since", at)
+        previous = before.get(task["id"], {})
+        since = previous["since"] if previous.get("why") == why else at
         held[task["id"]] = {"since": since, "why": why, "title": task.get("title") or task["id"]}
     timing.keep()
     store.redis.set(store.key(slug, KEY), json.dumps({"at": at, "tasks": held}))
@@ -39,9 +40,18 @@ def findings(store, slug: str) -> list[Finding]:
     found = []
     for task_id, row in state.get("tasks", {}).items():
         held_ms = state["at"] - row["since"]
-        if held_ms <= HOLD_MS:
+        if row["why"] or held_ms <= HOLD_MS:
             continue
         minutes = held_ms // MINUTE_MS
-        summary = f"urgent task {row['title']} has been unclaimable for {minutes} minutes"
-        found.append(Finding("urgent unclaimable", task_id, summary, (row["why"],), "ten minutes", minutes))
+        summary = f"urgent task {row['title']} has been claimable but unclaimed for {minutes} minutes"
+        found.append(
+            Finding(
+                "urgent unclaimable",
+                task_id,
+                summary,
+                ("it is claimable but remains unclaimed",),
+                "ten minutes",
+                minutes,
+            )
+        )
     return found
