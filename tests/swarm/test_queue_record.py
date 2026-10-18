@@ -219,9 +219,9 @@ def test_priority_journals_its_steps_when_an_unexpected_error_escapes():
 
     def run(command, **kwargs):
         if "dequeuePullRequest" in " ".join(command):
-            raise KeyError("data")
+            raise RuntimeError("runner lost")
         return queue.run(command, **kwargs)
 
-    with pytest.raises(KeyError):
+    with pytest.raises(RuntimeError):
         merge_queue.prioritize(URL, run=run, journal=book)
     assert book.records == [("priority", URL, "head9", "1", "2", [], {"steps": [["dequeue", URL[:-1] + "3"]]})]
