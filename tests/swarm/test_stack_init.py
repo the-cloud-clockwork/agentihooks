@@ -204,6 +204,16 @@ def test_adopt_defaults_to_the_shared_ledger_folder_in_the_home(home, monkeypatc
     assert values["SWARM_ADOPT_HOME"] == "/home/op"
 
 
+def test_adopt_and_prepare_clients_are_refused_together(home, capsys):
+    docker = Docker()
+    with pytest.raises(SystemExit) as raised:
+        init(home, docker, ["--prepare-clients", "--adopt"])
+    assert raised.value.code == 2
+    assert "argument --adopt: not allowed with argument --prepare-clients" in capsys.readouterr().err
+    assert docker.calls == []
+    assert not stack(home).exists()
+
+
 def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
     text = (stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml").read_text()
     swarm = yaml.safe_load(text)["services"]["swarm"]
@@ -391,7 +401,7 @@ def test_help_names_the_command_and_its_timeout():
     text = " ".join(stack_init.parser().format_help().split())
     description = " ".join(stack_init.__doc__.split())
     assert text == (
-        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--prepare-clients] [--adopt] {description} options: "
+        f"usage: agentihooks swarm init [-h] [--timeout TIMEOUT] [--prepare-clients | --adopt] {description} options: "
         "-h, --help show this help message and exit "
         "--timeout TIMEOUT seconds to wait for every service to be healthy "
         "--prepare-clients verify bundle credentials on existing local Redis and activate clients "

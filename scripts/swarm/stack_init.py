@@ -54,12 +54,13 @@ Paint = Callable[[str, str], str]
 def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="agentihooks swarm init", description=__doc__)
     parser.add_argument("--timeout", type=int, default=300, help="seconds to wait for every service to be healthy")
-    parser.add_argument(
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument(
         "--prepare-clients",
         action="store_true",
         help="verify bundle credentials on existing local Redis and activate clients",
     )
-    parser.add_argument(
+    mode.add_argument(
         "--adopt",
         action="store_true",
         help="serve the existing shared ledger folder as this user from the stack, on the default ledger port, "
