@@ -35,9 +35,15 @@ def runner(*pages, total=None, code=0):
 
 
 def test_cancelled_and_passed_own_runs_are_no_failure():
-    run = runner([run_of(7, "cancelled"), run_of(7, "success", run_id=2), run_of(7, None, run_id=3)])
+    run = runner([run_of(7, "cancelled"), run_of(7, "success", run_id=2), run_of(8, None, run_id=3)])
     assert queue_exit.own_failures(URL, SINCE, run) == []
     assert run.calls == [["gh", "api", PATH.format(page=1)]]
+
+
+def test_an_own_run_still_running_holds_the_answer():
+    run = runner([run_of(7, "cancelled"), run_of(7, None, run_id=3)])
+    with pytest.raises(SwarmError, match="still running: https://github.com/o/r/actions/runs/3$"):
+        queue_exit.own_failures(URL, SINCE, run)
 
 
 @pytest.mark.parametrize("conclusion", ["failure", "timed_out", "startup_failure"])

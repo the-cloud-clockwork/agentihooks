@@ -228,9 +228,10 @@ def _requeue(run, row, found):
         return [f"could not read the merge group runs of {url} for task {task_id}: {exc}"]
     if failures is None or failures or found.get("requeues", 0) >= QUEUE_TRIES:
         return _reopen(run, row, found, "left the merge queue without merging")
-    found["requeues"] = found.get("requeues", 0) + 1
     actions = _queue(run, row, found)
     if actions == [f"queued {url} for task {task_id}"]:
+        found["requeues"] = found.get("requeues", 0) + 1
+        save(run.store, run.slug, task_id, found)
         run.ledger.comment(run.slug, task_id, REQUEUED.format(url=url), by="swarm")
     return actions
 

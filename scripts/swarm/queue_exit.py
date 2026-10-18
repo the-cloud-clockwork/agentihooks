@@ -3,16 +3,17 @@ import subprocess
 from datetime import UTC, datetime
 
 from scripts.swarm import merge_queue
+from scripts.swarm.store import SwarmError
 
 PULL = re.compile(r"https://github\.com/([^/]+/[^/]+)/pull/(\d+)")
 QUEUE_BRANCH = re.compile(r"^gh-readonly-queue/.+/pr-(\d+)-[0-9a-f]+$")
-CLEAN = ("success", "cancelled", "skipped", "neutral", None)
+CLEAN = ("success", "cancelled", "skipped", "neutral")
 PAGE = 100
 PAGES = 5
 
 
 def _own(item: dict, number: str) -> bool:
-    match = QUEUE_BRANCH.match(str(item.get("head_branch")))
+    match = QUEUE_BRANCH.match(item["head_branch"])
     return bool(match) and match.group(1) == number
 
 
@@ -29,8 +30,7 @@ def own_failures(url: str, since_ms: int, run=subprocess.run) -> list[str] | Non
             break
     if len(listed) < body["total_count"]:
         return None
-    return [
-        f"{item['name']} {item['html_url']}"
-        for item in listed
-        if _own(item, number) and item.get("conclusion") not in CLEAN
-    ]
+    own = [item for item in listed if _own(item, number)]
+    if running := [item["html_url"] for item in own if item["conclusion"] is None]:
+        raise SwarmError(f"merge group runs still running: {', '.join(running)}")
+    return [f"{item['name']} {item['html_url']}" for item in own if item["conclusion"] not in CLEAN]

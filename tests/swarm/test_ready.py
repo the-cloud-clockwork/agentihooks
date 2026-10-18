@@ -1228,9 +1228,10 @@ def test_a_requeue_the_queue_refuses_records_no_requeue_comment(merging):
     def refuse(action, url):
         raise SwarmError("timed out")
 
-    assert merging.run(NOW + 120_000, refuse) == [f"could not queue {URL} for task t1: timed out"]
+    for minute in range(ready.QUEUE_TRIES + 1):
+        assert merging.run(NOW + 120_000 + minute * 60_000, refuse) == [f"could not queue {URL} for task t1: timed out"]
     assert merging.rows["t1"]["state"] == "pr" and merging.ledger.comments == []
-    assert ready.record(merging.store, "sw", "t1")["requeues"] == 1
+    assert "requeues" not in ready.record(merging.store, "sw", "t1")
 
 
 @pytest.mark.parametrize(
