@@ -35,6 +35,7 @@ from scripts.swarm import (
     snapshot,
     stall_watch,
     tick_master,
+    timing,
 )
 from scripts.swarm.health import (
     activity,
@@ -84,8 +85,13 @@ def verdict_store(store, slug):
     return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
 
 
-def findings(store, slug, config, tasks, events):
+def findings(store, slug, config, tasks, events, view=None):
     agents, limits = store.agents(slug), health.limits()
+    if view is None:
+        pending = checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST)
+        passing = checks.cached_green(store.redis, store.key(slug, "checks"))
+    else:
+        pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
     placement_waits.prune(store, slug, tasks)
     events = [
         *events,
@@ -101,8 +107,8 @@ def findings(store, slug, config, tasks, events):
             if row["state"] in ("started", "failed")
         ),
     ]
-    quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
-    rows = _health_rows(store, slug, agents, quiet, now_ms())
+    quiet = timing.call(quiet_gate.quiet_minutes, store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
+    rows = timing.call(_health_rows, store, slug, agents, quiet, now_ms())
     found = (
         health.findings(
             {
@@ -111,15 +117,15 @@ def findings(store, slug, config, tasks, events):
                 "review_rounds": {task["id"]: review_rounds.counts(slug, task["id"]) for task in tasks},
             },
             rows,
-            activity.counts(slug),
+            timing.call(activity.counts, slug),
             limits,
             checks.waiting(
                 rows,
                 tasks,
                 limits,
-                checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
+                pending,
             ),
-            checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
+            checks.green(tasks, passing),
             talk_since_outcome(store, slug, rows),
         )
         + live_binding.findings(store, slug)
@@ -128,7 +134,7 @@ def findings(store, slug, config, tasks, events):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
-        + merge_stall.findings(store, slug, config.repo, now_ms())
+        + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())

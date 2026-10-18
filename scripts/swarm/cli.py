@@ -358,7 +358,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
                 actions += skip_refused(langfuse.refresh, store, slug, now_ms())
             found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
+                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
             actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
             actions += timing.call(
