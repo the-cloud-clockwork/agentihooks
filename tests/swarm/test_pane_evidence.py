@@ -127,7 +127,9 @@ def test_rolling_capture_stays_bounded_and_incident_survives_recovery(tmp_path):
     assert sorted(row["at"] for row in rows) == [100, 106, 107]
 
 
-@pytest.mark.parametrize("changes", [{"runtime_backend": "kubernetes"}, {"hive": "remote"}, {"pane_id": ""}])
+@pytest.mark.parametrize(
+    "changes", [{"runtime_backend": "kubernetes"}, {"runtime_target": {"host_id": "remote"}}, {"pane_id": ""}]
+)
 def test_foreign_or_unbound_panes_are_not_read(tmp_path, changes):
     panes = Panes()
     assert collect(tmp_path, panes, agents=[agent(**changes)]) == ([], [])
@@ -152,7 +154,11 @@ def test_missing_pane_has_no_capture(tmp_path):
     def gone(args):
         raise RuntimeError("gone")
 
-    assert collect(tmp_path, gone) == ([], [])
+    actions, rows = collect(tmp_path, gone)
+    assert actions == ["pane evidence saved for engineer@abc: pane lookup failed: RuntimeError"]
+    assert rows[0]["reason"] == "pane lookup failed: RuntimeError"
+    assert rows[0]["screen_text"] == ""
+    assert rows[0]["process"] == {}
 
 
 def test_process_failure_still_saves_the_screen(tmp_path):
@@ -212,7 +218,7 @@ def test_record_count_screen_size_redaction_and_permissions_are_bounded(tmp_path
     monkeypatch.setattr(pane_evidence, "RECORD_LIMIT", 3)
     monkeypatch.setattr(pane_evidence, "SCREEN_LIMIT", 8)
     seen = []
-    monkeypatch.setattr(pane_evidence, "redact", lambda text: seen.append(text) or "redacted output")
+    monkeypatch.setattr(pane_evidence, "redact", lambda text, *, mode: seen.append((text, mode)) or "redacted output")
     panes = Panes("private")
     for name in ("one", "two", "three", "four"):
         row_agent = agent(name=name)
@@ -226,7 +232,75 @@ def test_record_count_screen_size_redaction_and_permissions_are_bounded(tmp_path
         collect(tmp_path, named, agents=[row_agent])
     files = list((tmp_path / "swarm" / "pane-evidence").glob("*.json"))
     assert len(files) == 3
-    assert seen == ["private"] * 4
+    assert seen == [("private", "strict")] * 4
     assert all(json.loads(path.read_text())["screen_ansi"] == "redacted" for path in files)
     assert all(path.stat().st_mode & 0o777 == 0o600 for path in files)
     assert files[0].parent.stat().st_mode & 0o777 == 0o700
+
+
+def test_ansi_cannot_hide_a_secret_from_redaction(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    monkeypatch.setattr(pane_evidence, "redact", lambda text, *, mode: text.replace("private", "[redacted]"))
+    _, rows = collect(tmp_path, Panes("pri\x1b[31mvate"))
+    assert rows[0]["screen_ansi"] == "[redacted]"
+    assert rows[0]["screen_text"] == "[redacted]"
+
+
+def test_changing_failure_reasons_keeps_the_first_incident_and_healthy_predecessor(tmp_path):
+    panes = Panes("Healthy")
+    collect(tmp_path, panes, 100)
+    for at, text in [(200, " "), (300, TimeoutError()), (400, "bad\ufffd")]:
+        panes.text = text
+        _, rows = collect(tmp_path, panes, at)
+    incident = next(row for row in rows if "previous" in row)
+    assert incident["at"] == 200
+    assert incident["previous"]["screen_text"] == "Healthy"
+
+
+@pytest.mark.parametrize(
+    ("args", "output", "expected"),
+    [
+        (["pane", "read", "w1:p1"], "screen", {"text": "screen"}),
+        (["agent", "get", "w1:p1"], '{"result":{"agent":{"pane_id":"w1:p1"}}}', {"agent": {"pane_id": "w1:p1"}}),
+    ],
+)
+def test_live_diagnostic_transport_has_a_short_timeout(tmp_path, monkeypatch, args, output, expected):
+    from scripts import herdr_host
+    from scripts.swarm import pane_evidence
+
+    calls = []
+    monkeypatch.setattr(herdr_host, "binary", lambda: "herdr")
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return SimpleNamespace(stdout=output)
+
+    monkeypatch.setattr(pane_evidence, "subprocess", SimpleNamespace(run=run))
+    rt = runtime.HerdrRuntime(home=tmp_path)
+    assert pane_evidence._call(rt, args) == expected
+    assert calls == [(["herdr", *args], {"capture_output": True, "text": True, "timeout": 2, "check": True})]
+
+
+def test_sweep_budget_defers_panes_and_next_tick_starts_with_the_oldest_capture(tmp_path, monkeypatch):
+    from scripts.swarm import pane_evidence
+
+    agents = [agent(), agent(name="second")]
+    rt = runtime.HerdrRuntime(home=tmp_path, herdr=Panes())
+    store = SimpleNamespace(agents=lambda slug: agents)
+    seen = []
+
+    def capture(directory, rt, who, at):
+        seen.append(who.name)
+        return pane_evidence._save(directory, who, {"reason": "", "at": at})
+
+    monkeypatch.setattr(pane_evidence, "capture", capture)
+    for at in (100, 200):
+        readings = iter([0, 0, 8])
+        monkeypatch.setattr(pane_evidence, "time", SimpleNamespace(monotonic=lambda: next(readings)))
+        assert pane_evidence.sweep("swarm", store, rt, at) == ["pane evidence capture budget exhausted"]
+    assert seen == ["engineer@abc", "second"]
+
+
+def test_empty_pane_reply_is_not_an_owned_pane(tmp_path):
+    assert collect(tmp_path, lambda args: {}) == ([], [])
