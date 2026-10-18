@@ -258,8 +258,7 @@ def test_a_controller_delivers_a_member_inbox_through_that_members_owner_key(red
     assert dispatcher.renew(name, "pump", ttl_s=50)
     assert redis.ttl(owned) == 50
     [delivery] = dispatcher.reserve(name, "pump")
-    assert dispatcher.receipts.recover(name, "pump") is not None
-    dispatcher.receipts.reject(delivery.id, "pump", "proof")
+    assert [recovered.state for recovered in dispatcher.receipts.recover(name, "pump")] == ["rejected"]
     assert dispatcher.receipts.get(delivery.id).state == "rejected"
     assert dispatcher.release(name, "pump")
     assert not redis.exists(owned)
