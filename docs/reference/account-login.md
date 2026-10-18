@@ -79,8 +79,8 @@ Engineers, CI agents, planners, pool masters and Codex masters never take this r
 once in that home; it refuses while any master or another login command holding
 the home is still running. Native Claude is the only refresher of the login.
 The front door masters of several swarms hold the home at once: a master launch
-refuses only while another live process holds it under the same name, and it
-rebuilds the home from its rendered profile only when no other live master runs
+refuses while a login command holding the home or another live process under
+the same name is still running, and it rebuilds the home from its rendered profile only when no other live master runs
 on it, otherwise it launches on the home as it is. Each claim takes an epoch
 above the one stored in OpenBao. With `--openbao`, and
 at each master launch and Stop where `OPENBAO_URL` and `OPENBAO_TOKEN` are set,

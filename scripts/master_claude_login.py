@@ -220,10 +220,11 @@ def _claim(
     held = _read(folder / OWNER)
     holders = {owner: found for owner, found in (held.get("holders") or {}).items() if alive(found)}
     others = sorted(owner for owner, found in holders.items() if found != pid)
-    if name in others or (alone and others):
-        raise LoginRefused(HELD.format(owner=name if name in others else others[0]))
+    blocker = next((owner for owner in (name, held.get("alone"), *(others if alone else ())) if owner in others), None)
+    if blocker:
+        raise LoginRefused(HELD.format(owner=blocker))
     epoch = max(int(held.get("epoch", 0)), floor) + 1
-    _write(folder / OWNER, {"holders": {**holders, name: pid}, "epoch": epoch})
+    _write(folder / OWNER, {"holders": {**holders, name: pid}, "epoch": epoch, **({"alone": name} if alone else {})})
     return epoch, bool(others)
 
 
@@ -291,7 +292,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         epoch, shared = _claim(
             folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, int(copy.get("epoch", 0)), False
         )
-        target = home() if shared and _private(home()) else _rebuild(folder, rendered)
+        target = home() if shared else _rebuild(folder, rendered)
     if environ.get(binding.REPORT):
         binding.rehome(Path(environ[binding.REPORT]), target)
     restore(copy, target)

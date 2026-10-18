@@ -105,6 +105,18 @@ def test_a_launch_beside_a_live_master_keeps_the_home_it_runs_on(ah, tmp_path, r
         login.claim("agentihooks claude login", os.getpid() + 1, lambda pid: True, alone=True)
 
 
+def test_a_launch_waits_out_a_running_login_command(ah, tmp_path, rendered):
+    import os
+
+    login.claim("agentihooks claude login", os.getppid(), alone=True)
+    with pytest.raises(
+        login.LoginRefused, match="^the master login is held by agentihooks claude login, still running$"
+    ):
+        login.prepare(_environ(rendered, "rig"), tmp_path)
+    assert not login.home().exists()
+    assert login.claim("master@rig-1", 10, lambda pid: pid == 10) == 2
+
+
 def _spawn(tmp_path, lane, seat, kind="interactive"):
     seen = []
 
