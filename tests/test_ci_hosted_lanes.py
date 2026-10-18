@@ -307,3 +307,16 @@ def test_only_the_dev_push_worker_image_build_stays_uncapped_because_it_publishe
 def test_lane_titles_match_the_workflow_names():
     for name, (title, _) in DIRECT.items():
         assert _workflow(name)["name"] == title, name
+
+
+@pytest.mark.parametrize("where", sorted(LEGS))
+def test_shard_jobs_of_two_branches_never_share_a_concurrency_lane_and_stay_on_the_batch_pool(where):
+    index = {"shard" if LEGS[where] == "shard" else "part": 0}
+    groups = set()
+    for ref, run_id in (("refs/heads/branch-one", 1000), ("refs/heads/branch-two", 1001)):
+        push = {"event_name": "push", "ref": ref, "workflow": "Mutation preflight", "run_id": run_id}
+        resolved = _resolve(_block(where), matrix=index, **push)
+        assert not _is_lane(resolved["group"]), (where, resolved)
+        groups.add(resolved["group"])
+    assert len(groups) == 2
+    assert "'anton-oss-batch'" in _workflow("mutation-preflight.yml")["jobs"][where.split(":")[1]]["runs-on"]
