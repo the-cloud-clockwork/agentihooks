@@ -45,7 +45,7 @@ def judge(tmp_path, *, diff=0, pull=0, run=0, fetch=0):
         "FAKE_FETCH": str(fetch),
     }
     result = subprocess.run(["bash", str(CURRENT), BASE], env=env, capture_output=True, text=True)
-    return result.returncode, log.read_text().splitlines()
+    return result.returncode, log.read_text().splitlines(), result.stdout
 
 
 def test_kind_proof_layers_only_the_hive_on_a_current_base():
@@ -75,7 +75,7 @@ def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
 
 
 def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
-    status, commands = judge(tmp_path)
+    status, commands, _ = judge(tmp_path)
     assert status == 0
     assert commands[0] == f"docker pull -q --platform linux/amd64 {BASE}"
     assert "git fetch -q --depth=1 origin rev123" in commands
@@ -83,13 +83,23 @@ def test_base_is_current_when_its_inputs_match_the_published_revision(tmp_path):
 
 
 def test_base_is_stale_when_an_input_changed(tmp_path):
-    status, commands = judge(tmp_path, diff=1)
+    status, commands, output = judge(tmp_path, diff=1)
     assert status == 1
     assert commands[-1] == f"git diff --quiet rev123 HEAD -- {INPUTS}"
+    assert "inputs changed since rev123" in output
 
 
-@pytest.mark.parametrize("failure", [{"pull": 1}, {"run": 125}, {"fetch": 128}])
-def test_base_is_undetermined_when_its_revision_cannot_be_obtained(tmp_path, failure):
-    status, commands = judge(tmp_path, **failure)
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ({"pull": 1}, "revision cannot be read"),
+        ({"run": 125}, "revision cannot be read"),
+        ({"fetch": 128}, "revision rev123 cannot be fetched"),
+        ({"diff": 128}, "inputs cannot be compared with revision rev123"),
+    ],
+)
+def test_base_is_undetermined_with_a_visible_reason_when_the_comparison_fails(tmp_path, failure, reason):
+    status, _, output = judge(tmp_path, **failure)
     assert status == 2
-    assert not any(command.startswith("git diff") for command in commands)
+    assert output.startswith("::warning title=Worker hive base::")
+    assert reason in output
