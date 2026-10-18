@@ -203,6 +203,27 @@ def test_receiver_reads_keep_delivery_seats_and_exited_occupants(redis, state, c
     }
 
 
+@pytest.mark.parametrize("plan_cap", [None, 0, 2])
+def test_receiver_reads_operator_delivery_seats_and_legacy_planner_limits(redis, plan_cap):
+    from scripts.doctor.inbox import Receiver
+    from scripts.swarm.store import SwarmConfig
+
+    store, box = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig(SLUG, "/r", 1, 1, "running", max_plan=plan_cap or 0))
+    if plan_cap is None:
+        redis.hdel(store.key(SLUG, "config"), "max_plan")
+    first, second = f"plan-1@{SLUG}", f"plan-2@{SLUG}"
+    items = [
+        {"address": "operator", "history": [{"state": "delivered", "by": first}]},
+        {"address": second, "history": []},
+    ]
+    assert read.inbox_receivers(store, box, SLUG, items) == {
+        "operator": Receiver(),
+        first: Receiver(seat_wait=plan_cap != 0),
+        second: Receiver(seat_wait=plan_cap == 2),
+    }
+
+
 def prompt(name, seat, task, handoff):
     lines = [f"You are {name}, an engineer in swarm {SLUG}.", f"Your one task for this session is {task}: a title"]
     lines.append(f"Your seat {seat} carries what earlier occupants left. Read it in this order:")
