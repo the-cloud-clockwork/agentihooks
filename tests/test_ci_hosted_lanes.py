@@ -58,6 +58,8 @@ REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs
 
 if (_WORKFLOWS / "count-record.yml").is_file():
     LANE_USERS = LANE_USERS | {"count-record.yml"}
+if (_WORKFLOWS / "actions-storage.yml").is_file():
+    LANE_USERS = LANE_USERS | {"actions-storage.yml"}
 
 
 class _Context(dict):

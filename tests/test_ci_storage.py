@@ -110,14 +110,16 @@ def waits(monkeypatch):
 
 
 class Gh:
-    def __init__(self, routes, failing=(), missing=(), flaky=()):
+    def __init__(self, routes, failing=(), missing=(), flaky=(), hung=()):
         self.routes, self.failing, self.missing, self.calls = routes, set(failing), set(missing), []
-        self.flaky = set(flaky)
+        self.flaky, self.hung = set(flaky), set(hung)
 
     def __call__(self, command, **kwargs):
         self.calls.append((command, kwargs))
         if "DELETE" in command:
             artifact_id = int(command[-1].rsplit("/", 1)[1])
+            if artifact_id in self.hung:
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
             if artifact_id in self.missing:
                 return SimpleNamespace(returncode=1, stdout="", stderr="gh: Not Found (HTTP 404)")
             failed = artifact_id in self.failing
@@ -126,6 +128,9 @@ class Gh:
         if path in self.flaky:
             self.flaky.discard(path)
             raise subprocess.CalledProcessError(1, command, "", "gh: Bad Gateway (HTTP 502)")
+        if path in self.hung:
+            self.hung.discard(path)
+            raise subprocess.TimeoutExpired(command, kwargs["timeout"])
         if self.routes.get(path) is None:
             raise subprocess.CalledProcessError(1, command, "", "gh: Server Error (HTTP 500)")
         jq = command[command.index("--jq") + 1]
@@ -140,7 +145,7 @@ def test_rows_paginates_reads_json_lines_and_fails_loudly(monkeypatch):
     assert ci_storage.first_page("x/y", "artifacts") == [{"c": 3}]
     assert gh.calls[0] == (
         ["gh", "api", "--paginate", "orgs/o/repos?per_page=100", "--jq", ".[]"],
-        {"capture_output": True, "text": True, "check": True, "timeout": 900},
+        {"capture_output": True, "text": True, "check": True, "timeout": 300},
     )
     assert gh.calls[1][0] == ["gh", "api", "x/y", "--jq", ".artifacts[]"]
     with pytest.raises(subprocess.CalledProcessError):
@@ -157,6 +162,9 @@ def test_a_failed_read_is_retried_after_a_growing_wait(monkeypatch, waits):
     with pytest.raises(subprocess.CalledProcessError):
         ci_storage.rows("x/missing", None)
     assert waits == [1, 1, 2]
+    gh.hung.add("x/y")
+    assert ci_storage.rows("x/y", None) == [{"c": 3}]
+    assert waits == [1, 1, 2, 1]
 
 
 def test_only_unarchived_private_and_internal_repositories_are_billed(monkeypatch):
@@ -205,11 +213,12 @@ def test_a_listing_the_api_answers_is_used_whole(monkeypatch):
 
 
 def test_delete_counts_an_already_gone_artifact_as_deleted(monkeypatch):
-    gh = Gh({}, failing={2}, missing={3})
+    gh = Gh({}, failing={2}, missing={3}, hung={4})
     monkeypatch.setattr(subprocess, "run", gh)
     assert ci_storage.delete("o/r", {"id": 1}) is True
     assert ci_storage.delete("o/r", {"id": 2}) is False
     assert ci_storage.delete("o/r", {"id": 3}) is True
+    assert ci_storage.delete("o/r", {"id": 4}) is False
     assert gh.calls[0] == (
         ["gh", "api", "--method", "DELETE", "repos/o/r/actions/artifacts/1"],
         {"capture_output": True, "text": True, "timeout": 60},

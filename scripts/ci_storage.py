@@ -7,7 +7,6 @@ long lived branch or an open pull request branch is what later runs read, so it 
 import argparse
 import json
 import subprocess
-import sys
 import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -29,9 +28,9 @@ def _read(command: list[str], key: str | None) -> list[dict]:
                 capture_output=True,
                 text=True,
                 check=True,
-                timeout=900,
+                timeout=300,
             )
-        except subprocess.CalledProcessError:
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired):
             if attempt == ATTEMPTS - 1:
                 raise
             time.sleep(attempt + 1)
@@ -91,14 +90,17 @@ def _created(row: dict) -> datetime:
     return datetime.fromisoformat(row["created_at"])
 
 
-def plan(found: list[dict], branches: frozenset[str], now: datetime, keep: timedelta, floor: timedelta, limit: int):
+def plan(
+    found: list[dict], branches: frozenset[str], now: datetime, keep: timedelta, floor: timedelta, limit: int
+) -> tuple[list[dict], int]:
     live = sorted((row for row in found if not row["expired"]), key=_created)
     newest = {
         (row["name"], _branch(row)): row["id"]
         for row in live
         if _branch(row) in branches and not row["name"].endswith(BUILD_RECORD)
     }
-    free = [row for row in live if row["id"] not in newest.values()]
+    kept = set(newest.values())
+    free = [row for row in live if row["id"] not in kept]
     old = [row for row in free if _created(row) < now - keep]
     total = sum(row["size_in_bytes"] for row in live) - sum(row["size_in_bytes"] for row in old)
     over = []
@@ -113,16 +115,19 @@ def plan(found: list[dict], branches: frozenset[str], now: datetime, keep: timed
 
 
 def delete(repo: str, row: dict) -> bool:
-    done = subprocess.run(
-        ["gh", "api", "--method", "DELETE", f"repos/{repo}/actions/artifacts/{row['id']}"],
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
+    try:
+        done = subprocess.run(
+            ["gh", "api", "--method", "DELETE", f"repos/{repo}/actions/artifacts/{row['id']}"],
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return False
     return done.returncode == 0 or "(HTTP 404)" in done.stderr
 
 
-def prune(args, now: datetime) -> list[dict]:
+def prune(args: argparse.Namespace, now: datetime) -> list[dict]:
     plans = []
     for repo in billed(args.owner):
         found = artifacts(repo["full_name"])
@@ -205,4 +210,4 @@ def main(argv: list[str] | None = None) -> int:
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    raise SystemExit(main())
