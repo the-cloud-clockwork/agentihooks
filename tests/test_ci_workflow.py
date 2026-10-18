@@ -239,6 +239,12 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
     }
+    recorder_path = _ROOT / ".github/workflows/count-record.yml"
+    if recorder_path.exists():
+        recorder = yaml.safe_load(recorder_path.read_text())["jobs"]["count-record"]
+        assert "count-record" not in jobs
+        jobs["count-record"] = recorder
+        callers["count-record"] = recorder["steps"]
     assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
@@ -545,7 +551,11 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
     python = binary / "python"
     python.write_text(
         '#!/usr/bin/env bash\nset -euo pipefail\nprintf "%s\\n" "$1" >> "$CALLS"\n'
-        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\nexit "$FLOOR_EXIT"\n'
+        'if [[ "$1" == -c ]]; then exit "$COLLECTION_EXIT"; fi\n'
+        'if [[ -n "${TEST_COUNT_HEAD_COLLECTION:-}" ]]; then\n'
+        '  [[ "$COLLECTION_EXIT" == 0 ]] || exit "$COLLECTION_EXIT"\n'
+        '  printf "[]" > "$TEST_COUNT_HEAD_COLLECTION"\n'
+        'fi\nexit "$FLOOR_EXIT"\n'
     )
     python.chmod(0o755)
     step = next(
@@ -563,12 +573,16 @@ def test_collection_and_count_floor_both_have_to_succeed(tmp_path, collection, f
             CALLS=str(commands),
             COLLECTION_EXIT=str(collection),
             FLOOR_EXIT=str(floor),
+            TEST_COUNT_HEAD_COLLECTION=(
+                str(tmp_path / "collected.json") if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ""
+            ),
         ),
         capture_output=True,
         text=True,
     )
     assert (outcome.returncode == 0) == (collection == floor == 0)
-    assert sorted(commands.read_text().splitlines()) == ["-c", "-m"]
+    expected = ["-m"] if "TEST_COUNT_HEAD_COLLECTION" in step.get("env", {}) else ["-c", "-m"]
+    assert sorted(commands.read_text().splitlines()) == expected
 
 
 def test_promotion_shard_reports_use_the_pushed_grader_and_prs_keep_the_base():

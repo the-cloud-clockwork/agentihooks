@@ -76,6 +76,8 @@ def run(slug, config, store, ledger, runtime, now_ms, launch) -> list[str]:
     if forcing and not _starting(store, slug):
         store.redis.delete(store.key(slug, "master-start"))
     launched = launch()
+    if forcing and not launched:
+        launched = [_launch_refusal(store, slug)]
     actions = [FORCED.format(minutes=_shown(minutes)), *launched] if forcing else launched
     if config.state == "stopping":
         master_alarm.drop(store, slug)
@@ -117,6 +119,18 @@ def _masters(store, slug):
 
 def _starting(store, slug):
     return bool(_masters(store, slug))
+
+
+def _launch_refusal(store, slug):
+    if leads := _masters(store, slug):
+        names = ", ".join(f"{a.name} ({a.state})" for a in leads)
+        return f"master launch refused: unfinished lead {names}"
+    pending = master_start.read(store, slug)
+    if name := pending.get("name"):
+        return f"master launch refused: startup pending for {name}"
+    if pending.get("alerted"):
+        return "master launch refused: startup retries exhausted, operator action is required"
+    return NO_LAUNCH
 
 
 def _bound(store, slug, runtime):

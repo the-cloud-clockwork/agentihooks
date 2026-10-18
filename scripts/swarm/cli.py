@@ -358,7 +358,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
 
                 actions += skip_refused(langfuse.refresh, store, slug, now_ms())
             found = timing.call(
-                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", [])
+                findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
             actions += skip_refused(ledger_events.findings_pass, inbox, store, slug, found, doc)
             actions += timing.call(
@@ -398,6 +398,8 @@ def cmd_list(store, args):
 
 def _tick_one(store, slug):
     try:
+        if not _tickable(slug):
+            return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")
     except Exception as exc:
@@ -478,6 +480,14 @@ def cmd_waits(store, args):
             list(pool.map(check, slugs))
 
 
+def _tickable(slug):
+    ledger = LedgerClient()
+    try:
+        return not (ledger.binned(slug) or ledger.closed(slug))
+    except LedgerGone:
+        return True
+
+
 @outage.guard_command
 def cmd_tick(store, args):
     from scripts import operator_env
@@ -536,6 +546,12 @@ def cmd_alerts(store, args):
     from scripts.swarm import alert_intake
 
     alert_intake.serve(store.redis, alert_intake.settings(os.environ), now_ms)
+
+
+def cmd_prober(store, args):
+    from scripts.swarm import command_runner, quota_refresh
+
+    quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
 
 
 def cmd_create(store, args):
@@ -1399,6 +1415,9 @@ def cmd_pr(store, args):
     doc = ledger.state(args.slug)
     row = next(t for t in doc["tasks"] if t.get("id") == agent.task)
     fields.update(_split_binding(row, args.url, args.half))
+    scoped = _pull_scope(row, args)
+    row.update(scoped)
+    fields.update(scoped)
     checked = intent.stamp(args.slug, agent.task, args.url, doc, intent.mode_of(config), now_ms())
     if row.get("pr_url") != args.url:
         lift.drop_task(args.slug, agent.task)
@@ -1425,6 +1444,22 @@ def _split_binding(row, url, half):
     if half != len(pulls) + 1:
         raise SwarmError(f"half {len(pulls) + 1} of this split task is next: record it before half {half}")
     return {"split_pulls": [*pulls, url]}
+
+
+PULL_URL = re.compile(r"https://github\.com/[^/\s]+/[^/\s]+/pull/\d+")
+
+
+def _pull_scope(row, args):
+    scopes = row.get("pull_scopes") or {}
+    kind = "stage" if args.stage is not None else "prerequisite" if args.prerequisite is not None else ""
+    if not kind:
+        return {"pull_scopes": {url: s for url, s in scopes.items() if url != args.url}} if args.url in scopes else {}
+    scope = getattr(args, kind).strip()
+    if not scope:
+        raise SwarmError(f"--{kind} needs the scope this pull request delivers")
+    if not PULL_URL.fullmatch(args.url):
+        raise SwarmError(f"--{kind} needs a GitHub pull request URL, not {args.url}")
+    return {"pull_scopes": {**scopes, args.url: {"kind": kind, "scope": scope}}}
 
 
 def _queue_intent(store, args, agent, head):
@@ -2002,6 +2037,9 @@ def build_parser():
     pr = sub.add_parser("pr")
     pr.add_argument("url")
     pr.add_argument("--half", type=int, default=0)
+    declared = pr.add_mutually_exclusive_group()
+    declared.add_argument("--stage")
+    declared.add_argument("--prerequisite")
     merge = sub.add_parser("merge")
     merge.add_argument("action", choices=("queue", "dequeue", "state", "priority"))
     merge.add_argument("url")
@@ -2089,7 +2127,7 @@ def main(argv):
 
 
 def dispatch(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "waits"):
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "alerts", "prober", "waits"):
         handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (

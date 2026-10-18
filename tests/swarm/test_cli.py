@@ -1090,6 +1090,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     names = [
         "agentihooks-inbox-waker.service",
         "agentihooks-alert-intake.service",
+        "agentihooks-quota-prober.service",
         "agentihooks-swarm-waits.timer",
         "agentihooks-swarm.timer",
     ]
@@ -1098,13 +1099,13 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
     calls.clear()
     failing.add("is-enabled")
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run)
-    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "enable", "enable", "enable", "enable", "enable"]
 
     calls.clear()
     failing.clear()
     failing.add(names[1])
     assert timer.reconcile("/bin/agentihooks", tmp_path, run=run) is False
-    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", "enable", "enable", "enable", "enable"]
+    assert [call[0][2] for call in calls] == ["is-enabled", "is-enabled", *["enable"] * 5]
     failing.clear()
 
     calls.clear()
@@ -1125,6 +1126,7 @@ def test_timer_reconcile_installs_a_newly_added_service_and_leaves_current_units
         (["systemctl", "--user", "daemon-reload"], {**kw, "check": False}),
         enable("agentihooks-inbox-waker.service"),
         enable("agentihooks-alert-intake.service"),
+        enable("agentihooks-quota-prober.service"),
         enable("agentihooks-new-intake.service"),
         enable("agentihooks-swarm-waits.timer"),
         enable("agentihooks-swarm.timer"),
@@ -2719,6 +2721,7 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(operator_env, "fill", lambda environ: filled.append(environ))
     monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
+    monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
     monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
     counts = {}

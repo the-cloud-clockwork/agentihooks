@@ -98,11 +98,17 @@ def _same_phase(record, task):
 
 def section(doc, task):
     phase = _phase(doc, task)
+    declared = _declared(task)
+    delivers = f"declared {declared['kind']}: {declared['scope']}" if declared else task["description"]
     return (
         f"{START}\n## Parent intent\n\n**Project:** {doc['overview']}\n\n"
         f"**Phase {phase.get('title', '')}:** {phase.get('description', '')}\n\n"
-        f"**Task {task['id']}, {task['title']}:** {task['description']}\n{END}"
+        f"**Task {task['id']}, {task['title']}:** {delivers}\n{END}"
     )
+
+
+def _declared(task):
+    return (task.get("pull_scopes") or {}).get(task.get("pr_url"))
 
 
 def with_intent(body, text):
@@ -124,7 +130,7 @@ def stamp_body(url, doc, task, run=subprocess.run):
         read = _gh(["gh", "pr", "view", url, "--json", "body"], run)
         if read.returncode:
             return False
-        body = with_intent(json.loads(read.stdout).get("body") or "", section(doc, task))
+        body = with_intent(json.loads(read.stdout).get("body") or "", section(doc, {**task, "pr_url": url}))
         path = f"repos/{owner}/{repo}/pulls/{number}"
         sent = _gh(["gh", "api", "--method", "PATCH", path, "--input", "-"], run, json.dumps({"body": body}))
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -329,7 +335,7 @@ def _split_note(task):
 def _plan_chunk(doc, task):
     half = _split_half(task)
     task = {**task, "plan_lines": half[1]} if half else task
-    if not task.get("plan_lines") or task.get("follow_up"):
+    if not task.get("plan_lines") or task.get("follow_up") or _declared(task):
         return {}
     try:
         text = plan_read.exact(doc, task)
@@ -364,8 +370,18 @@ def _parent(doc, task):
         "phase": phase.get("title", ""),
         "phase_intent": phase.get("description", ""),
         "task": task["title"],
-        "task_text": task["description"] + _split_note(task),
+        "task_text": _task_text(task),
     }
+
+
+def _task_text(task):
+    declared = _declared(task)
+    if declared is None:
+        return task["description"] + _split_note(task)
+    return (
+        f"This pull request is a declared {declared['kind']} of this task and delivers only: {declared['scope']}. "
+        "The whole task is judged at its final pull request."
+    )
 
 
 def _task_contract(doc, task):
@@ -693,7 +709,9 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
 def _fingerprint(doc, task):
     phase = _phase(doc, task)
     parent = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
-    return hashlib.sha256(json.dumps([*parent, _plan_chunk(doc, task)]).encode()).hexdigest()
+    declared = _declared(task)
+    inputs = [*parent, _plan_chunk(doc, task), *([declared] if declared else [])]
+    return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 
 
 def _drafted(record):

@@ -329,7 +329,7 @@ class TestClaudeRouting:
         output = capsys.readouterr().out
         lines = output.splitlines()
         assert lines[0].split()[-4:] == ["FABLE", "LEFT", "FABLE", "RESET"]
-        assert lines[2].split()[:9] == ["1", "claude", "ALPHA", "subscription", "NORMAL", "2/-", "-", "-", "70%"]
+        assert lines[2].split()[:9] == ["1", "claude", "ALPHA", "subscription", "UNKNOWN", "2/-", "-", "-", "70%"]
         assert lines[3].split()[:4] == ["-", "claude", "api", "api"]
         assert "codex" not in output and "source=" not in output and "?" not in output
 
@@ -472,7 +472,7 @@ class TestClaudeRouting:
             "claude",
             "ALPHA",
             "subscription",
-            "NORMAL",
+            "OPEN",
             "2/6",
             "-",
             "6",

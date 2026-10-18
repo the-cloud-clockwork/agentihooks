@@ -116,10 +116,10 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
 
 def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
     """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
+    seats = store.seats.agent_seats(slug)
     live = [agent for agent in store.agents(slug) if agent.state != "finished"]
     active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
-    seats = store.seats.agent_seats(slug)
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
     pending = gone

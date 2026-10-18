@@ -8,6 +8,7 @@ import os
 from collections import Counter
 from dataclasses import asdict, dataclass, fields
 
+from scripts import quota_state
 from scripts.swarm import naming
 from scripts.swarm_ledger import ledger_kinds
 
@@ -50,7 +51,7 @@ class Limits:
     master_watch_ratio: int = 15
     cooldown_minutes: int = 60
     drain_minutes: int = 10
-    drain_left: int = 10
+    drain_left: int = quota_state.DRAIN_LEFT
 
 
 @dataclass(frozen=True)
@@ -247,12 +248,15 @@ def proof_loops(
 
 
 def _lives(events: list[dict]) -> tuple[Counter, Counter]:
-    starts, reruns = Counter(), Counter()
+    starts, reruns, heads = Counter(), Counter(), {}
     for e in sorted((e for e in events if e.get("kind") == "task started"), key=lambda e: e["at"]):
         tid = _task_id(e["target"])
-        if starts[tid] and not e.get("after"):
+        head, last = e.get("head"), heads.get(tid)
+        moved = head is not None and last is not None and head != last
+        if starts[tid] and not e.get("after") and not moved:
             reruns[tid] += 1
         starts[tid] += 1
+        heads[tid] = head
     return starts, reruns
 
 

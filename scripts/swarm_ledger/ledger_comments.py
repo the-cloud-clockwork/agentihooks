@@ -81,11 +81,10 @@ def can_change(entry, by, members):
 
 
 def post_status(thread, by, entry_id, text, ctx, target, attachments=None):
-    """An agent's comment amends its own latest one on the item, unless the operator spoke after it."""
+    """An agent's comment amends its own latest one on the item, unless anyone commented after it."""
     live = [e for e in thread if not e.get("deleted")]
     mine = next((e for e in reversed(live) if e.get("by") == by and "to" not in e), None)
-    replied = mine is not None and any(e.get("by") == "operator" for e in live[live.index(mine) + 1 :])
-    if mine is None or replied or "outcome" in mine:
+    if mine is None or mine is not live[-1] or "outcome" in mine:
         if any(e["id"] == entry_id for e in thread):
             return
         thread.append({"id": entry_id, "by": by, "at": ctx.at, "text": text})

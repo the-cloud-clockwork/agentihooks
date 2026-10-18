@@ -415,7 +415,10 @@ def _restart_from_handoff(store, slug, agent, task, context):
         return "task ownership changed"
     placed = context.runtime.spawn(store.config(slug), agent.lane, agent.name, task)
     store.put_agent(
-        slug, replace(placed_record(agent, placed), conversation_id="", started_at=context.at, idle_ticks=0)
+        slug,
+        replace(
+            placed_record(agent, placed), conversation_id=placed.conversation_id, started_at=context.at, idle_ticks=0
+        ),
     )
     return ""
 

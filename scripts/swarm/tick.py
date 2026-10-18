@@ -34,6 +34,7 @@ from scripts.swarm import (
     claim_order,
     continuation,
     control_notifications,
+    dead_resume,
     dev_red,
     difficulty,
     dispatch_seat,
@@ -43,6 +44,7 @@ from scripts.swarm import (
     grouping,
     lane_split,
     launch_check,
+    ledger_events,
     ledger_probe,
     lifetime,
     live_binding,
@@ -138,6 +140,7 @@ class Placed:
     execution: AgentRecord | None = None
     remote_control: dict = field(default_factory=dict)
     desired_route_kind: str | None = None
+    conversation_id: str = ""
 
 
 class Ledger(Protocol):
@@ -334,7 +337,8 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
     held = rows.get(agent.task, {}).get("state") in ACTIVE and rows[agent.task].get("claimed_by") == agent.name
     if refund and held and store.claims(slug, agent.task) > 0:
         store.refund_claim(slug, agent.task)
-    reopen = held and _reopen(slug, ledger, rows, agent.task)
+    expected = {"claimed_by": agent.name, "claim_generation": rows.get(agent.task, {}).get("claim_generation", 0)}
+    reopen = held and _reopen(slug, ledger, rows, agent.task, expected)
     exits.settle(InboxStore(store.redis), agent.name, agent.seat if reopen else "", "stopped")
     return f", task {agent.task} reopened" if reopen else ""
 
@@ -342,14 +346,14 @@ def _drop(slug, store, ledger, rows, agent, refund=False):
 def _verify(slug, store, ledger, runtime, rows, now_ms):
     judged = launch_check.judged(store, slug)
     agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
-    facts = runtime.bindings(agents)
+    facts, live_names = runtime.bindings(agents), runtime.live_names()
     for agent in agents:
         if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
             continue
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
             continue
-        if agent.name not in facts and agent.state != "retiring":
+        if dead_resume.skip_binding(agent, facts, live_names):
             continue
         agent, followed = _follow(slug, store, runtime, agent, facts.get(agent.name, {}).get("rebound"))
         actions.extend(followed)
@@ -541,9 +545,17 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
         elif resume.recovery_pending(store, slug, agent):
             store.refresh(slug, agent.task, agent.name, LEASE_MS)
         elif now_ms - agent.started_at > STARTUP_GRACE_MS:
-            runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
-            actions.append(f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent))
+            actions += _lost(slug, store, ledger, runtime, rows, agent, now_ms)
     return actions
+
+
+def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
+    if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
+        return [f"resumed {agent.name}"]
+    if agent not in store.agents(slug):
+        return []
+    runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
+    return [f"lost {agent.name}" + _drop(slug, store, ledger, rows, agent)]
 
 
 def _watch_remote(slug, store, ledger, runtime, rows, agent, now_ms):
@@ -701,7 +713,7 @@ def _conversations(slug, store, runtime):
         current = found.get(pane, "")
         if current:
             context_recycle.pin_swarm(current, slug, store.config(slug).compact_limit or None)
-        if current != agent.conversation_id:
+        if current and current != agent.conversation_id:
             store.put_agent(slug, replace(agent, conversation_id=current))
             store.names.note(agent.name, session_id=current)
 
@@ -713,8 +725,9 @@ def _session_models(slug, store):
             store.put_agent(slug, reported)
 
 
-def _reopen(slug, ledger, rows, task_id):
-    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE)
+def _reopen(slug, ledger, rows, task_id, expected=None):
+    guard = {"if_match": expected} if expected is not None else {}
+    live = ledger.update_task(slug, task_id, {"state": "open", "claimed_by": ""}, if_state=ACTIVE, **guard)
     rows[task_id].update(live)
     return live["state"] == "open"
 
@@ -971,7 +984,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             continue
         store.count_claim(slug, task["id"])
         after = store.take_restart(slug, task["id"]) or _master_set(doc, task["id"])
-        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after)
+        head = (ledger_events.head(task["pr_url"]) or None) if task.get("pr_url") else ""
+        store.record_launch(slug, replace(record, pane_id=placed.pane_id), "started", after=after, head=head)
         store.put_agent(slug, launched)
         launch_check.begin(store, slug, record, now_ms)
         store.count_spawn(slug, placed.harness)
@@ -1111,6 +1125,7 @@ def placed_record(record, placed):
     return replace(
         record,
         pane_id=placed.pane_id,
+        conversation_id=placed.conversation_id or record.conversation_id,
         harness=placed.harness,
         account=placed.account,
         model=placed.model,
