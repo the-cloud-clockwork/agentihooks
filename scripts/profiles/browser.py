@@ -112,23 +112,21 @@ def tools_file() -> Path:
     return Path.home() / ".agentihooks" / "browser" / "tools.json"
 
 
-def cached_tools() -> list[types.Tool] | None:
+def cached_tools(key: str | None) -> list[types.Tool] | None:
     from mcp import types
 
-    key = fingerprint()
     if key is None:
         return None
     try:
         saved = json.loads(tools_file().read_text())
-    except (OSError, ValueError):
+        if saved["key"] != key:
+            return None
+        return [types.Tool.model_validate(tool) for tool in saved["tools"]]
+    except (OSError, ValueError, KeyError, TypeError):
         return None
-    if saved.get("key") != key:
-        return None
-    return [types.Tool.model_validate(tool) for tool in saved["tools"]]
 
 
-def save_tools(tools: list[types.Tool]) -> None:
-    key = fingerprint()
+def save_tools(tools: list[types.Tool], key: str | None) -> None:
     if key is None:
         return
     path = tools_file()
@@ -172,11 +170,12 @@ class Upstream:
     async def list_tools(self) -> types.ListToolsResult:
         from mcp import types
 
-        tools = cached_tools()
+        key = fingerprint()
+        tools = cached_tools(key)
         if tools is not None:
             return types.ListToolsResult(tools=tools)
         result = await (await self.started()).list_tools()
-        save_tools(result.tools)
+        save_tools(result.tools, key)
         return result
 
     async def call_tool(self, name: str, arguments: dict) -> types.CallToolResult:

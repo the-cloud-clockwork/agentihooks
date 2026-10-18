@@ -165,7 +165,9 @@ async def test_server_runs_the_task_browser_over_mcp(monkeypatch, types):
 def _upstream(types):
     upstream = AsyncMock()
     upstream.__aenter__.return_value = upstream
-    tool = types.Tool(name="browser_navigate", inputSchema={"type": "object"})
+    tool = types.Tool.model_validate(
+        {"name": "browser_navigate", "inputSchema": {"type": "object"}, "_meta": {"source": "playwright"}}
+    )
     upstream.list_tools.return_value = types.ListToolsResult(tools=[tool])
     upstream.call_tool.return_value = types.CallToolResult(content=[types.TextContent(type="text", text="ok")])
     return upstream, tool
@@ -210,12 +212,13 @@ async def _session_against(monkeypatch, upstream, actions):
 
 
 @pytest.mark.asyncio
-async def test_a_session_that_only_lists_cached_tools_never_launches_the_browser(monkeypatch, types):
+@pytest.mark.parametrize("count", [1, 0])
+async def test_a_session_that_only_lists_cached_tools_never_launches_the_browser(monkeypatch, types, count):
     monkeypatch.setattr(browser, "fingerprint", lambda: "playwright-mcp 1")
     upstream, tool = _upstream(types)
-    browser.save_tools([tool])
+    browser.save_tools([tool] * count, "playwright-mcp 1")
     launches, results = await _session_against(monkeypatch, upstream, [lambda client: client.list_tools()])
-    assert results[0].tools == [tool]
+    assert results[0].tools == [tool] * count
     assert launches == []
     upstream.initialize.assert_not_awaited()
 
@@ -224,14 +227,14 @@ async def test_a_session_that_only_lists_cached_tools_never_launches_the_browser
 async def test_a_list_without_a_matching_cache_launches_once_and_caches_the_tools(monkeypatch, types):
     upstream, tool = _upstream(types)
     monkeypatch.setattr(browser, "fingerprint", lambda: "playwright-mcp 1")
-    browser.save_tools([types.Tool(name="stale", inputSchema={"type": "object"})])
+    browser.save_tools([types.Tool(name="stale", inputSchema={"type": "object"})], "playwright-mcp 1")
     monkeypatch.setattr(browser, "fingerprint", lambda: "playwright-mcp 2")
     listing = [lambda client: client.list_tools()] * 2
     launches, results = await _session_against(monkeypatch, upstream, listing)
     assert [r.tools for r in results] == [[tool], [tool]]
     assert launches == ["playwright", "playwright-mcp"]
     upstream.list_tools.assert_awaited_once()
-    assert browser.cached_tools() == [tool]
+    assert browser.cached_tools("playwright-mcp 2") == [tool]
     upstream, _ = _upstream(types)
     launches, results = await _session_against(monkeypatch, upstream, listing[:1])
     assert results[0].tools == [tool]
@@ -239,14 +242,18 @@ async def test_a_list_without_a_matching_cache_launches_once_and_caches_the_tool
 
 
 @pytest.mark.asyncio
-async def test_without_playwright_mcp_on_the_path_nothing_is_cached(monkeypatch, types):
+@pytest.mark.parametrize("saved", [None, '{"key": null, "tools": []}'])
+async def test_without_playwright_mcp_on_the_path_nothing_is_cached(monkeypatch, types, saved):
     monkeypatch.setattr("shutil.which", lambda name: None)
     assert browser.fingerprint() is None
+    if saved is not None:
+        browser.tools_file().parent.mkdir(exist_ok=True)
+        browser.tools_file().write_text(saved)
     upstream, tool = _upstream(types)
     launches, results = await _session_against(monkeypatch, upstream, [lambda client: client.list_tools()])
     assert results[0].tools == [tool]
     assert launches == ["playwright", "playwright-mcp"]
-    assert browser.cached_tools() is None
+    assert (browser.tools_file().read_text() if saved else browser.tools_file().exists()) == (saved or False)
 
 
 def test_the_cache_key_follows_the_installed_playwright_mcp(monkeypatch, tmp_path):
@@ -261,12 +268,23 @@ def test_the_cache_key_follows_the_installed_playwright_mcp(monkeypatch, tmp_pat
     assert browser.fingerprint() != first
 
 
-def test_a_missing_or_unreadable_cache_is_no_cache(monkeypatch):
-    monkeypatch.setattr(browser, "fingerprint", lambda: "playwright-mcp 1")
-    assert browser.cached_tools() is None
-    browser.tools_file().parent.mkdir(exist_ok=True)
-    browser.tools_file().write_text("{not json")
-    assert browser.cached_tools() is None
+@pytest.mark.parametrize(
+    "content",
+    [
+        None,
+        "{not json",
+        "null",
+        "[]",
+        '{"tools": []}',
+        '{"key": "playwright-mcp 1"}',
+        '{"key": "playwright-mcp 1", "tools": [{"name": 5}]}',
+    ],
+)
+def test_a_missing_or_unreadable_cache_is_no_cache(content):
+    if content is not None:
+        browser.tools_file().parent.mkdir(exist_ok=True)
+        browser.tools_file().write_text(content)
+    assert browser.cached_tools("playwright-mcp 1") is None
 
 
 @pytest.mark.asyncio
@@ -275,7 +293,7 @@ async def test_the_first_tool_call_launches_the_browser_once_and_keeps_the_task_
     monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "hp1")
     monkeypatch.setattr(browser, "fingerprint", lambda: "playwright-mcp 1")
     upstream, tool = _upstream(types)
-    browser.save_tools([tool])
+    browser.save_tools([tool], "playwright-mcp 1")
     out = Path.home() / ".agentihooks/swarm/proof-swarm/tasks/hp1"
     calls = [
         lambda client: client.list_tools(),
