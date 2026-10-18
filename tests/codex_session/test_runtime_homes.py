@@ -154,7 +154,7 @@ def test_cleanup_preserves_unique_legacy_rollouts(store, server, root, tmp_path,
     from tests.codex_session.test_supervisor import other_seat
 
     legacy_text, canonical_text, expected = snapshot
-    canonical = tmp_path / ".codex"
+    canonical = tmp_path / ("custom-canonical" if config_mode == "explicit" else ".codex")
     canonical.mkdir()
     first = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, Clock(), root))
     home = Path(server.spawns[0]["env"]["CODEX_HOME"])
