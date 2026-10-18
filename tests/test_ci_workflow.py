@@ -205,7 +205,7 @@ def test_only_a_dev_push_saves_the_test_environment_after_installing_it():
     callers = {
         name: job["steps"] for name, job in jobs.items() if any(s.get("id") == "venv" for s in job.get("steps", []))
     }
-    assert sorted(callers) == ["split", "test-count", "unit", "unit-selected"]
+    assert sorted(callers) == ["count-record", "split", "test-count", "unit", "unit-selected"]
     for name, steps in callers.items():
         restore = next(step for step in steps if step.get("id") == "venv")
         assert restore["uses"] == "actions/cache/restore@v4"

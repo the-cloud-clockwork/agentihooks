@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import sys
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 
@@ -12,6 +13,8 @@ from hooks import config as hooks_config
 from hooks.context.account_sessions import API_MARKER, INTERACTIVE_PREFIX, TOKEN_PREFIX
 from scripts import aicode_tokens, openbao_kv
 from scripts.profiles import binding
+from scripts.routing import master_account
+from scripts.routing.settings import SettingsStore, open_store
 
 ROUTE = "master-login"
 FIELD = "master_claude_login"
@@ -52,7 +55,9 @@ DROPPED = (
 )
 PRIVATE_DIR, PRIVATE_FILE = 0o700, 0o600
 NO_LOGIN = "no master claude ai login for swarm {slug}: run agentihooks claude login --master {slug}"
-SAME_ACCOUNT = "the master login account {account} is also a worker quota token"
+OTHER_MASTER = (
+    "the master login account {account} is a worker quota token and the declared claude master account is {master}"
+)
 NO_QUOTA = "the master claude ai login needs workers on quota tokens; none is set"
 HELD = "the master login of swarm {slug} is held by {owner}, still running"
 API_HELPER = "{path} sets apiKeyHelper"
@@ -146,15 +151,32 @@ def refusal(target: Path, cwd: Path, managed: Path | None = None) -> str:
     return ""
 
 
-def account(slug: str, target: Path, environ: Mapping[str, str]) -> str:
+def routing_store(environ: Mapping[str, str]) -> SettingsStore:
+    from scripts.routing import place
+
+    return open_store(place._client(environ), environ)
+
+
+def _master(found: str, environ: Mapping[str, str], store: SettingsStore) -> None:
+    declared = master_account.claim(store, "claude", found, environ, environ["AGENTIHOOKS_AGENT_NAME"], time.time())
+    if declared != found:
+        raise LoginRefused(OTHER_MASTER.format(account=found, master=declared))
+
+
+def account(
+    slug: str,
+    target: Path,
+    environ: Mapping[str, str],
+    store_of: Callable[[Mapping[str, str]], SettingsStore] | None = None,
+) -> str:
     email = (_read(target / CONFIG).get(ACCOUNT) or {}).get("emailAddress")
     if not (email and _private(target)):
         raise LoginRefused(NO_LOGIN.format(slug=slug))
     found = aicode_tokens.slug(email)
-    if f"{TOKEN_PREFIX}{found}" in environ:
-        raise LoginRefused(SAME_ACCOUNT.format(account=found))
     if not any(name.startswith(TOKEN_PREFIX) for name in environ):
         raise LoginRefused(NO_QUOTA)
+    if f"{TOKEN_PREFIX}{found}" in environ:
+        _master(found, environ, (store_of or routing_store)(environ))
     return found
 
 

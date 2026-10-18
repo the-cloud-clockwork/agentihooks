@@ -100,6 +100,7 @@ def findings(ledger, agents, activity, limits, waiting=frozenset(), green=frozen
         *waiting_on_input(agents, tasks),
         *stalled(agents, limits),
         *master_rc(agents),
+        *master_fallback_auth(agents),
         *stale_claims(agents, tasks, limits),
         *over_monitoring(activity, limits),
     ]
@@ -349,6 +350,29 @@ def master_rc(agents: list[dict]) -> list[Finding]:
                 "Remote Control failed on the master, phone access lost",
                 (f"notice: {failed['message']}", f"agent {agent['name']}"),
                 "a Remote Control failure notice since the master started",
+                1,
+            )
+        )
+    return found
+
+
+def master_fallback_auth(agents: list[dict]) -> list[Finding]:
+    found = []
+    for agent in agents:
+        if (
+            agent.get("lane") != "master"
+            or agent.get("desired_route_kind") != "interactive"
+            or agent.get("route_kind") == "interactive"
+            or agent.get("state") == "finished"
+        ):
+            continue
+        found.append(
+            Finding(
+                "master-fallback-auth",
+                agent.get("seat") or agent["name"],
+                "master on fallback auth, phone access lost",
+                (f"route: {agent.get('route_kind', 'subscription')}", f"agent {agent['name']}"),
+                "the master desires interactive authentication but runs on fallback authentication",
                 1,
             )
         )

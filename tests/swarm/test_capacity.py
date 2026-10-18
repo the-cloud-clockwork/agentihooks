@@ -543,9 +543,9 @@ def test_runtime_refuses_an_account_when_its_harness_has_no_free_seat(tmp_path):
     runtime = HerdrRuntime(home=tmp_path)
     runtime._quota_accounts = [account(sessions=3), account("cx", harness="codex")]
     with pytest.raises(SpawnError, match="no claude account has placeable quota seats") as error:
-        runtime._quota_account("claude", None, None)
+        runtime._quota_account("claude", None, None, "eng")
     assert error.value.status == "unavailable"
-    assert runtime._quota_account("codex", None, None).name == "cx"
+    assert runtime._quota_account("codex", None, None, "eng").name == "cx"
 
 
 def test_failed_fresh_probe_does_not_leave_a_stale_healthy_account_placeable(monkeypatch):
@@ -2195,15 +2195,15 @@ def test_reason_names_every_api_side_and_a_closed_one_without_a_weight():
 
 def test_an_account_at_its_quota_warning_never_takes_the_spawn_pick(tmp_path, monkeypatch):
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, [account("w", left=5), account("b", sessions=1)])
-    assert runtime._quota_account("claude", None, None).name == "b"
+    assert runtime._quota_account("claude", None, None, "eng").name == "b"
 
 
 def test_sessions_on_full_accounts_weigh_in_the_api_share_of_a_spawn(tmp_path, monkeypatch):
     rows = [account("full", cap=4, sessions=4), account("a", cap=6), api(sessions=1)]
     runtime, config, seen = _runtime_probe(tmp_path, monkeypatch, rows)
-    assert runtime._quota_account("claude", None, None).name == "api"
+    assert runtime._quota_account("claude", None, None, "eng").name == "api"
     runtime._quota_accounts = rows[1:]
-    assert runtime._quota_account("claude", None, None).name == "a"
+    assert runtime._quota_account("claude", None, None, "eng").name == "a"
 
 
 def test_rotation_follows_the_api_split():
