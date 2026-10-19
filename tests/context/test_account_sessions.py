@@ -8,8 +8,6 @@ import pytest
 
 from hooks.context import account_sessions as acc
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def _proc(root, pid, comm, ppid, argv, env):
     d = root / str(pid)

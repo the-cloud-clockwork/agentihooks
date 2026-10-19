@@ -5,8 +5,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import idle
 from scripts.swarm.store import MASTER, AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 W = 300_000
 MASTER_NAME = "sw-master-1"
 

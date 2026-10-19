@@ -10,8 +10,6 @@ from scripts.swarm.store import SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_runtime import _launched, _passed, _resuming
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 TASK = {"id": "t1", "title": "x"}
 
 

@@ -5,8 +5,6 @@ from scripts.swarm import execution, remote_control
 from scripts.swarm.store import RedisStore
 from tests.swarm.test_cli import env as env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 MASTER_ENV = {
     "AGENTIHOOKS_SWARM": "proof",
     "AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001",

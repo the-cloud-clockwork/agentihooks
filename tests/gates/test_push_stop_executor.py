@@ -46,8 +46,6 @@ TEMPLATE = (
 )
 IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com")
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def git(path, *args):
     done = subprocess.run(["git", "-C", str(path), *IDENTITY, *args], capture_output=True, text=True, check=True)

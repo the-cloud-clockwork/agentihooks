@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_owned_lists_every_entry_of_one_owner_in_any_state():

@@ -6,8 +6,6 @@ import hooks.hook_manager as hm
 from hooks.context import operator_mode, planner_plan
 from hooks.targets import emitter
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PLAN = {"plan": "1. Slice the phase.", "planFilePath": "/home/u/.claude/plans/p.md"}
 
 

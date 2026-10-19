@@ -2,8 +2,6 @@ import pytest
 
 from scripts.swarm import tick_master
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def test_a_forced_launch_finishes_a_dead_suspect_lead_and_launches_its_replacement():
     from dataclasses import replace

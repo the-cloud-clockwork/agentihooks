@@ -8,8 +8,6 @@ import pytest
 from hooks import config, hook_manager
 from hooks.context import master_coding, operator_mode
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ROOT = Path(__file__).resolve().parents[1]
 GUARD = runpy.run_path(str(ROOT / "profiles" / "package" / "roles" / "_guards" / "no_code_edits.py"))
 SID = "master-session"

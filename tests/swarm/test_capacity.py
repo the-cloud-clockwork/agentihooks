@@ -10,7 +10,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, _spend_host, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 CODEX_COUNTS = capacity.account_sessions.codex_sessions_by_account
 
 

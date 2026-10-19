@@ -16,7 +16,6 @@ from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments
 from tests.swarm.test_cli import HANDOFF, env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 _fixture = env
 AGENT = "engineer@a1b2c3-0001"
 HEAD = "a" * 40

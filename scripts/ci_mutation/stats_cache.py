@@ -7,7 +7,7 @@ from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
-from scripts.ci_mutation.scope import imported_names, is_test_file, module_name
+from scripts.ci_mutation.scope import imported_names, is_test_file, module_name, selects, test_file
 
 SCHEMA = 2
 CONTEXT_FIELDS = ("schema", "sources", "changes", "options", "runtime")
@@ -60,7 +60,9 @@ def collect_cached_stats(
     folder.mkdir(parents=True, exist_ok=True)
     keys = {
         path: hashlib.sha256(
-            encode({**context, **dict(zip(KEY_FIELDS, (path, test_inputs(root, path, modules, records))))}).encode()
+            encode(
+                {**context, **dict(zip(KEY_FIELDS, (path, test_inputs(root, test_file(path), modules, records))))}
+            ).encode()
         ).hexdigest()
         for path in files
     }
@@ -73,10 +75,7 @@ def collect_cached_stats(
         raise SystemExit(1)
     for path in missing:
         durations = {
-            test: seconds
-            for result in fresh
-            for test, seconds in result["durations"].items()
-            if test.partition("::")[0] == path
+            test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
         }
         tests = {
             function: sorted(

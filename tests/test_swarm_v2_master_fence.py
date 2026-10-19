@@ -12,7 +12,7 @@ from scripts.swarm_v2.masters_channel import MastersChannel, Post
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import FOLLOWUP, LEAD, LEAD_NAME, QUESTION, SECOND, SECOND_NAME, SLUG
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-04"
 
@@ -400,7 +400,7 @@ def test_the_api_publishes_decisions_after_the_write(monkeypatch):
     for name in ("relay_to_inbox", "doctor_phrase", "deliver_alerts"):
         monkeypatch.setattr(ledger_server, name, lambda slug, state: None)
     ops = [{"op": "ack", "id": n, "by": LEAD_NAME, "rev": 1} for n in ("a", "b")]
-    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "o1", "ops": ops, "guards": {}})
+    reply = mutations.apply(ledger_server.api_services(), SLUG, "", {"operation_id": "o1", "ops": ops, "guards": {}})
 
     assert [type(g).__name__ for g in gates] == ["Gate"]
     assert published == [["b"]]

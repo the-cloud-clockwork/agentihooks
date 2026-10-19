@@ -9,7 +9,6 @@ from tests.swarm_ledger.test_proof_controls import hive as _hive
 from tests.swarm_ledger.test_proof_controls import live as _live
 from tests.swarm_ledger.test_proof_controls import owned as _owned
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 credential, hive, live, owned = _credential, _hive, _live, _owned
 
 

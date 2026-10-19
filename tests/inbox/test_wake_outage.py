@@ -7,8 +7,6 @@ from tests.inbox.test_wake import AGENTS, MASTER_NAME, FakeHerdr, FakeLedger, W,
 from tests.inbox.test_wake import inbox as inbox
 from tests.inbox.test_wake import server as server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture(autouse=True)
 def outages(tmp_path, monkeypatch):

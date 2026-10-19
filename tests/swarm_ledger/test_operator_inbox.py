@@ -20,7 +20,6 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 
 repository = default_repository()
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SLUG = "opmail-2026-01-01"
 
