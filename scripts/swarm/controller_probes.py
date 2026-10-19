@@ -41,7 +41,8 @@ def _frozen(store: RedisStore, owner: str | None, age_ms: Callable[[], int]) -> 
         held = lease.current(store, slug)
         if held is None or held.owner != mine or store.config(slug).state not in tick_heartbeat.JUDGED:
             continue
-        if any(record["kind"] == "ledger" for record in outage.open_records(slug)):
+        gone = store.redis.exists(store.key(slug, "ledger-gone"))
+        if gone or any(record["kind"] == "ledger" for record in outage.open_records(slug)):
             continue
         if evidence := tick_heartbeat.stale(tick_heartbeat.read(store, slug), now, since):
             return f"{slug}: {'; '.join(evidence)}"

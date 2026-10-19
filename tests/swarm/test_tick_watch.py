@@ -214,15 +214,26 @@ def test_a_stopped_swarm_is_not_watched(store):
     assert mail(store, FRONT_DOOR) == []
 
 
-def test_a_swarm_stopped_mid_episode_still_gets_its_resolved_notice(store):
+def test_a_swarm_stopped_mid_episode_ends_the_episode_with_a_closing_notice(store):
     beat(store, START)
     tick_watch.watch_pass(store, "sw", START + LIMIT, START)
     store.update("sw", state="stopped")
-    beat(store, START + LIMIT + MINUTE, rev=2)
 
-    assert tick_watch.watch_pass(store, "sw", START + LIMIT + MINUTE, START) == [
-        f"told {FRONT_DOOR} the tick runs again"
-    ]
+    actions = tick_watch.watch_pass(store, "sw", START + LIMIT + MINUTE, START)
+    again = tick_watch.watch_pass(store, "sw", START + LIMIT + 2 * MINUTE, START)
+
+    assert actions == [f"told {FRONT_DOOR} the tick is no longer watched"]
+    assert texts(store, FRONT_DOOR)[-1] == tick_watch.UNWATCHED.format(
+        slug="sw", at=tick_heartbeat.clock(START + LIMIT + MINUTE), since=tick_heartbeat.clock(START + LIMIT)
+    )
+    assert again == []
+
+
+def test_the_liveness_probe_leaves_a_swarm_whose_ledger_is_gone(store, lease_clock):
+    beat(store, START - 3 * LIMIT)
+    store.redis.set(store.key("sw", "ledger-gone"), 1)
+
+    assert probe(store, age=2 * LIMIT) == 0
 
 
 def test_the_watcher_respawns_the_master_only_while_the_tick_is_stale(store):

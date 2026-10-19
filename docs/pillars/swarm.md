@@ -1155,14 +1155,15 @@ its last pass. The tick never judges itself; two watchdogs do:
   control API, fails while a running, paused, stopping or drained swarm whose controller lease this controller
   holds has a stale tick, so Kubernetes restarts the tick container. A restarted container is judged from the later
   of its own start and the heartbeat, so it has 10 minutes to complete a pass with fresh inputs. A swarm in an open
-  ledger outage is left to the watcher, since a restart cannot end it, and swarms another hive holds are left to
+  ledger outage, or whose ledger is gone, is left to the watcher, since a restart cannot end it, and swarms another hive holds are left to
   that hive's probe.
 - **Stale watcher.** `agentihooks swarm tick-watch` is a process apart from the tick that never runs a tick pass. It
   checks every running, paused, stopping or drained swarm once a minute, judging an existing heartbeat from its
   own time, so a restarted watcher alerts at once on a tick already stale. A stale episode sends one information
   item from `swarm` through the Redis inbox to the front door master seat and every live agent seat, carrying the
   evidence; a seat that comes live during the episode gets the same alert. When a fresh pass completes, every
-  alerted seat gets one resolved notice. On a workstation install (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the
+  alerted seat gets one resolved notice; a swarm stopped mid episode ends it with a notice that its tick is no
+  longer watched. On a workstation install (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the
   watcher also restarts an empty front door master while the tick is stale: under this hive's controller lease and
   the tick lock it drops lead master records whose session is gone and spawns the master as the tick would. In a
   cluster the watcher only alerts: the probe restarts the controller, whose first pass spawns the master. A swarm

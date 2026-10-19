@@ -22,6 +22,7 @@ ALERT = (
 RESOLVED = (
     "The tick of swarm {slug} runs again: a fresh pass completed at {at}, ending the stale stretch since {since}."
 )
+UNWATCHED = "Swarm {slug} stopped at {at}, so its tick, stale since {since}, is no longer watched."
 
 
 def recipients(store: RedisStore, slug: str) -> list[str]:
@@ -34,13 +35,13 @@ def watch_pass(
     store: RedisStore, slug: str, now: int, since: int, respawn: Callable[[str], list[str]] | None = None
 ) -> list[str]:
     episode = _read(store, slug)
-    if store.config(slug).state not in tick_heartbeat.JUDGED and not episode:
-        return []
+    if store.config(slug).state not in tick_heartbeat.JUDGED:
+        return _resolve(store, slug, now, episode, UNWATCHED, "is no longer watched") if episode else []
     beat = tick_heartbeat.read(store, slug)
     evidence = tick_heartbeat.stale(beat, now, None if beat else since)
     if evidence:
         return _alert(store, slug, now, episode, evidence) + (respawn(slug) if respawn else [])
-    return _resolve(store, slug, now, episode) if episode else []
+    return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
 
 
 def _alert(store, slug, now, episode, evidence) -> list[str]:
@@ -53,12 +54,12 @@ def _alert(store, slug, now, episode, evidence) -> list[str]:
     return [f"told {address} the tick is stale" for address in fresh]
 
 
-def _resolve(store, slug, now, episode) -> list[str]:
-    text = RESOLVED.format(slug=slug, at=tick_heartbeat.clock(now), since=tick_heartbeat.clock(episode["since"]))
+def _resolve(store, slug, now, episode, template, told) -> list[str]:
+    text = template.format(slug=slug, at=tick_heartbeat.clock(now), since=tick_heartbeat.clock(episode["since"]))
     for address in episode["told"]:
         _send(store, address, text, _item_id(slug, episode["since"], address, "resolved"))
     store.redis.delete(store.key(slug, KEY))
-    return [f"told {address} the tick runs again" for address in episode["told"]]
+    return [f"told {address} the tick {told}" for address in episode["told"]]
 
 
 def _send(store, address, text, item_id) -> None:
