@@ -105,6 +105,29 @@ prompt. It does not create a new conversation. The same command retains the
 existing worker-terminal path for Kubernetes executions; see
 [Swarm](../pillars/swarm.md).
 
+The printed `pane` becomes the agent's recorded pane. After the viewer opens,
+the reopen writes that pane id to the agent's execution record, so the `Pane`
+column of `agentihooks swarm <id> status` and a later retire name the pane
+that exists now, not the one the launch or an earlier reopen opened:
+
+```console
+$ agentihooks swarm <id> terminal <execution-id>
+{"agent": "<agent-name>", "thread": "<thread-id>", "pane": "<new-pane-id>"}
+$ agentihooks swarm <id> status
+Agent         ...  Pane           ...
+<agent-name>  ...  <new-pane-id>  ...
+```
+
+The pane write changes only the pane field. It rereads the stored execution
+inside a Redis watch, so a tick that updates the same execution at the same
+moment keeps its change. The write retries a conflicting update up to five
+times and refuses with `execution history kept changing; pane was not
+committed` when every attempt conflicts. It leaves the agent's state-since time untouched, so a
+reopen never resets how long the agent has been in its current state. An
+execution identity with no stored record is refused with `unknown execution
+identity; display labels cannot identify attempts`. The new viewer is also
+recorded as a viewer of the execution, as every reopened viewer is.
+
 For attachment diagnostics, the launcher helper can wait for the recorded thread:
 
 ```bash
@@ -247,6 +270,11 @@ execution continues through its supervised server`. Use terminal reopening for
 a live execution. Renaming a managed agent renames its herdr pane and registry
 identity without typing a session-name command into the viewer.
 
+Retiring a managed execution closes the agent's recorded pane, which after a
+reopen is the latest reopened viewer, and every other recorded viewer pane that
+herdr still lists on the terminal it was opened with. A viewer whose pane id
+herdr has since reused for another terminal is left open.
+
 The live qualification also recorded these viewer limits:
 
 - Initial launch can leave its `/rename` command in the composer while the
@@ -264,6 +292,9 @@ The live qualification also recorded these viewer limits:
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |
+| Status or retire names a pane that no longer exists after a reopen | A revision before the reopen pane write left the launch pane on the agent record. Update to a revision that contains it; the next reopen records the new pane. |
+| Reopen fails with `execution history kept changing; pane was not committed` | Every pane write attempt met a concurrent update to the same execution. The viewer is open but the agent record keeps its earlier pane. Run the reopen again. |
+| Reopen fails with `unknown execution identity; display labels cannot identify attempts` | The execution record was removed after the agent lookup, for example by a concurrent retire. Check `agentihooks swarm <id> status` for the agent's current execution. |
 | Agent runs no attachable app-server | The recorded harness or transport lacks native terminal attachment. Use its normal terminal path. |
 | Closing a viewer leaves the agent working | Expected: the viewer does not own execution lifetime or inbox delivery. |
 
