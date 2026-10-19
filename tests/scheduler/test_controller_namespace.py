@@ -2,7 +2,7 @@ import pytest
 
 from scripts.scheduler.core import Scheduler
 
-pytestmark = pytest.mark.fakeredis
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("deployment", ["cloud", "distributed"])
@@ -24,7 +24,7 @@ def test_controller_can_register_dispatch_and_retire_a_timer(monkeypatch):
 
     server = fakeredis.FakeServer()
     admin = fakeredis.FakeRedis(server=server, decode_responses=True)
-    admin.acl_setuser("controller", enabled=True, nopass=True, categories=["+@all"], keys=[f"{ROOT}:*"])
+    admin.acl_setuser("controller", enabled=True, nopass=True, categories=["+@all"], keys=[f"{ROOT}:scheduler:*"])
     controller = fakeredis.FakeRedis(server=server, decode_responses=True, username="controller")
     controller.auth("", username="controller")
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "distributed")
