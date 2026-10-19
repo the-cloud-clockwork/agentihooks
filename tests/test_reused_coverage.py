@@ -93,22 +93,22 @@ def test_a_partial_clone_fetches_every_changed_file_old_text_in_one_batch(tmp_pa
     subprocess.run(["git", "-C", str(origin), "config", "uploadpack.allowAnySHA1InWant", "true"], check=True)
     names = [f"hooks/m{index}.py" for index in range(3)]
     (origin / "hooks").mkdir()
-    for name in names:
-        (origin / name).write_text(OLD)
+    for index, name in enumerate(names):
+        (origin / name).write_text(f"{OLD}# {index}\n")
     subprocess.run(["git", "-C", str(origin), *git, "add", "."], check=True)
     subprocess.run(["git", "-C", str(origin), *git, "commit", "-qm", "dev"], check=True)
     commit = subprocess.run(
         ["git", "-C", str(origin), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
     ).stdout.strip()
-    for name in names:
-        (origin / name).write_text(NEW)
+    for index, name in enumerate(names):
+        (origin / name).write_text(f"{NEW}# {index}\n")
     subprocess.run(["git", "-C", str(origin), *git, "commit", "-qam", "head"], check=True)
     clone = tmp_path / "clone"
     subprocess.run(["git", "clone", "-q", "--filter=blob:none", origin.as_uri(), str(clone)], check=True)
     trace = tmp_path / "trace.json"
     monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
     moved = reused_coverage.moved_lines(clone, commit, "HEAD")
-    assert moved == {name: reused_coverage.line_map(OLD, NEW) for name in names}
+    assert moved == {name: reused_coverage.line_map(f"{OLD}# 0\n", f"{NEW}# 0\n") for name in names}
     events = [json.loads(line) for line in trace.read_text().splitlines()]
     fetches = [e for e in events if e.get("event") == "child_start" and "fetch" in e.get("argv", [])]
     assert len(fetches) == 1
