@@ -488,6 +488,12 @@ def test_a_runner_pod_in_phase_unknown_on_a_node_not_ready_inside_the_bound_is_l
     assert "anton-oss-light-cpwxt-runner-down1" not in cluster(pods=[pod], now=since + BOUND)
 
 
+def test_a_runner_pod_in_phase_unknown_on_a_ready_node_is_lost():
+    pod = json.loads(json.dumps(CLUSTER["pods"][0]))
+    pod["status"]["phase"] = "Unknown"
+    assert "anton-oss-light-cpwxt-runner-live1" not in cluster(pods=[pod])
+
+
 def test_a_runner_container_that_terminated_in_a_running_pod_is_lost():
     pod = json.loads(json.dumps(CLUSTER["pods"][0]))
     pod["status"]["containerStatuses"][0]["state"] = CLUSTER["pods"][1]["status"]["containerStatuses"][0]["state"]

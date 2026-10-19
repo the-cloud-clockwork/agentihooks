@@ -36,28 +36,28 @@ def live_runners(org: str) -> set[str]:
 
 class ClusterRunners:
     def __init__(self, sets: set[str], pods: list[dict], nodes: list[dict], now: datetime, bound: timedelta):
-        ready = {node["metadata"]["name"] for node in nodes if not _down(node, now, bound)}
+        states = {node["metadata"]["name"]: _state(node, now, bound) for node in nodes}
         self.sets = sets
-        self.live = {
-            pod["metadata"]["name"] for pod in pods if _alive(pod) and pod["spec"].get("nodeName") in ready | {None}
-        }
+        self.live = {pod["metadata"]["name"] for pod in pods if _alive(pod, states)}
 
     def __contains__(self, name: str) -> bool:
         return name in self.live or name.rpartition("-runner-")[0].rpartition("-")[0] not in self.sets
 
 
-def _down(node: dict, now: datetime, bound: timedelta) -> bool:
+def _state(node: dict, now: datetime, bound: timedelta) -> str:
     ready = next((c for c in node["status"].get("conditions", []) if c["type"] == "Ready"), None)
-    return (
-        bool(ready) and ready["status"] != "True" and now - datetime.fromisoformat(ready["lastTransitionTime"]) >= bound
-    )
+    if not ready or ready["status"] == "True":
+        return "ready"
+    return "grace" if now - datetime.fromisoformat(ready["lastTransitionTime"]) < bound else "down"
 
 
-def _alive(pod: dict) -> bool:
+def _alive(pod: dict, states: dict[str, str]) -> bool:
+    node = pod["spec"].get("nodeName")
+    state = states.get(node, "down") if node else "ready"
+    phase = pod["status"].get("phase")
     runner = [c for c in pod["status"].get("containerStatuses", []) if c["name"] == "runner"]
-    return pod["status"].get("phase") not in ("Failed", "Succeeded") and not any(
-        "terminated" in c["state"] for c in runner
-    )
+    ended = phase in ("Failed", "Succeeded") or any("terminated" in c["state"] for c in runner)
+    return not ended and state != "down" and (phase != "Unknown" or state == "grace")
 
 
 def _kubectl(*args: str) -> list[dict]:
