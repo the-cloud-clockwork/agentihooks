@@ -1141,8 +1141,8 @@ are refused. The tick lock prevents two ticks in the same epoch and lets a highe
 
 ### Controller lease during long steps
 
-A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and passes of 454
-seconds were observed on a busy swarm in October 2026. The pass keeps the lease in two ways.
+A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and the tick holder
+allows a pass up to nine minutes. The pass keeps the lease in two ways.
 
 - **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
   first renews the lease, extends the tick lock and records the swarm's last tick activity. Renewal happens only at
