@@ -464,20 +464,20 @@ def closes(store, rig, source, what, **extra):
     outcome = night_watch.CLEARED.format(what=what)
     assert run(store, rig, NOW, open_alert(source), **extra) == [f"closed the {source} alert: {outcome}"]
     assert rig.ledger.closed == [("a1", outcome)]
-    assert source not in night_watch.read(store, SLUG)
+    return night_watch.read(store, SLUG).get(source)
 
 
 def test_a_stopped_swarm_closes_its_spawn_alert(store):
     store.update(SLUG, state="paused")
     plant(store, spawn=RAISED)
-    closes(store, Rig(), "spawn", "the swarm is not running")
+    assert closes(store, Rig(), "spawn", "the swarm is not running") is None
 
 
 def test_ready_work_gone_closes_the_spawn_alert(store):
     rig = Rig()
     held_master(store, rig.runtime)
     plant(store, spawn=RAISED)
-    closes(store, rig, "spawn", "no ready work waits")
+    assert closes(store, rig, "spawn", "no ready work waits") is None
 
 
 def test_a_launch_closes_the_spawn_alert(store, monkeypatch):
@@ -486,27 +486,26 @@ def test_a_launch_closes_the_spawn_alert(store, monkeypatch):
     ready(monkeypatch)
     store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="working", started_at=NOW))
     plant(store, spawn=RAISED)
-    closes(store, rig, "spawn", "an agent launched")
-    assert night_watch.read(store, SLUG)["spawn"] == {"since": NOW, "launch": NOW}
+    assert closes(store, rig, "spawn", "an agent launched") == {"since": NOW, "launch": NOW}
 
 
 def test_a_stopped_swarm_closes_its_merge_alert(store):
     store.update(SLUG, state="paused")
     plant(store, merge={**RAISED, "kinds": ["merge stall"]})
-    closes(store, Rig(), "merge", "the swarm is not running")
+    assert closes(store, Rig(), "merge", "the swarm is not running") is None
 
 
 def test_a_sleeping_swarm_closes_its_merge_alert(store, monkeypatch):
     stalled(monkeypatch)
     plant(store, merge={**RAISED, "kinds": ["merge stall"]})
-    closes(store, Rig(), "merge", "the swarm is not running", sleeping=True)
+    assert closes(store, Rig(), "merge", "the swarm is not running", sleeping=True) is None
 
 
 def test_a_merge_that_lands_closes_the_merge_alert(store):
     rig = Rig()
     held_master(store, rig.runtime)
     plant(store, merge={**RAISED, "kinds": ["merge stall"]})
-    closes(store, rig, "merge", "no merge finding stands")
+    assert closes(store, rig, "merge", "no merge finding stands") is None
 
 
 def test_an_episode_without_kinds_starts_a_fresh_merge_alert(store, monkeypatch):
