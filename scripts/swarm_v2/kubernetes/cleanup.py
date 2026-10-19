@@ -130,7 +130,7 @@ class Cleanup:
         if {key: labels.get(key) for key in expected} != expected:
             return "unselected"
         if kind == "pods" and "startup" not in pinned:
-            captured = self._startup(current, pinned, journal)
+            captured = self._capture(current, pinned, journal)
             if captured is not None:
                 pinned["startup"] = captured
                 self._save(journal)
@@ -143,10 +143,10 @@ class Cleanup:
         except PreconditionFailed:
             return "replaced"
 
-    def _startup(self, pod: dict, pinned: dict, journal: dict) -> dict | None:
+    def _capture(self, pod: dict, pinned: dict, journal: dict) -> dict | None:
         try:
             return startup(pod, self.api)
-        except (ApiRefused, OSError):
+        except (ApiRefused, ConnectionError, TimeoutError):
             pinned["log_reads"] = pinned.get("log_reads", 0) + 1
             self._save(journal)
             if pinned["log_reads"] < LOG_READS:
