@@ -264,7 +264,9 @@ def _close_emptied(closed: list[PaneRecord], herdr) -> list[Emptied]:
     return done
 
 
-def sweep(environ: dict[str, str], now_ms: int, act: bool, herdr: Herdr, owners: Owners, swarm_only=False) -> list:
+def sweep(
+    environ: dict[str, str], now_ms: int, act: bool, herdr: Herdr, owners: Owners, swarm_only: bool = False
+) -> list:
     ctx = Context(environ, now_ms, act, herdr, owners)
     panes = herdr.list_panes()
     records = [record for record in herdr_panes.load(environ) if record.owner_swarm or not swarm_only]
@@ -326,7 +328,7 @@ def clean_run_dir(folder: Path, now_s: float, act: bool, alive: Callable[[int], 
     return out
 
 
-def run(environ: dict[str, str], now_ms: int, act: bool, swarm_only=False) -> list[str]:
+def run(environ: dict[str, str], now_ms: int, act: bool, swarm_only: bool = False) -> list[str]:
     out = clean_run_dir(herdr_panes.run_folder(environ), now_ms / 1000, act)
     if not herdr_host.binary() or not herdr_host.server_running(environ):
         return out
