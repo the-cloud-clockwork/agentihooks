@@ -116,7 +116,7 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 
 `python -m scripts.ci_queue_retry --repo <owner>/<repo> --run-id <id>` reads the run and its latest failed jobs, then decides:
 
-1. Every failed job must be a `unit` shard or a job that depends on the `unit` jobs, directly or through other jobs, in `.github/workflows/test.yml` (for example `shard-check` and `Gate — Required`). A failure in any other job, such as `lint`, `test-count` or `durations`, refuses the requeue. So does a run with more than 100 jobs, since the jobs beyond the first page are counted as unclassified failures.
+1. Every failed job must be a `unit` shard or a job that depends on the `unit` jobs, directly or through other jobs, in `.github/workflows/test.yml` (for example `shard-check`, `refresh-durations` and `Gate — Required`). A failure in any other job, such as `lint` or `test-count`, refuses the requeue. So does a run with more than 100 jobs, since the jobs beyond the first page are counted as unclassified failures.
 2. At least one `unit` shard must have failed. A `cancelled` shard counts as failed only when it carries a runner loss signature; other cancelled jobs are ignored.
 3. Every failed `unit` shard must carry a runner loss signature in its check annotations or in the `##[error]` lines of its job log:
    - `The runner has received a shutdown signal`
