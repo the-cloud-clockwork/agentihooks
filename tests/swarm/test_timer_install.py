@@ -266,11 +266,20 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     assert {argv[2]: kwargs for argv, kwargs in calls if argv[2] in ("show", "kill")} == {"show": plain, "kill": plain}
 
 
-def test_a_group_without_a_task_count_is_unknown():
+@pytest.mark.parametrize(
+    ("stdout", "left"),
+    [
+        ("ControlGroup=/x\n", "unknown"),
+        ("ControlGroup=/a=b\nTasksCurrent=3\n", "3"),
+        ("ControlGroup=\nTasksCurrent=[not set]\n", "0"),
+        ("", "0"),
+    ],
+)
+def test_the_group_count_reads_the_shown_properties(stdout, left):
     import subprocess
 
-    shown = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "ControlGroup=/x\n", "")  # noqa: E731
-    assert timer._left(shown) == "unknown"
+    shown = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, stdout, "")  # noqa: E731
+    assert timer._left(shown) == left
 
 
 def test_a_group_that_empties_at_the_last_look_is_drained(monkeypatch):

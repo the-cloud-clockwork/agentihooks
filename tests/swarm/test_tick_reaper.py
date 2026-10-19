@@ -44,7 +44,7 @@ def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_gro
     left = _plant(SHELL, "swarm", "tick", stdout=subprocess.PIPE)
     try:
         sibling = int(left.stdout.readline())
-        reaped = tick_reaper.reap()
+        reaped = tick_reaper.reap(grace_s=2)
         mine = [record for record in reaped if record.pid == left.pid]
         assert len(mine) == 1
         assert mine[0].command.endswith("swarm tick")
@@ -62,7 +62,7 @@ def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_gro
 
 def test_a_host_without_proc_reaps_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "proc")
-    assert tick_reaper.reap() == []
+    assert tick_reaper.reap(grace_s=2) == []
 
 
 def test_a_leftover_with_an_undecodable_environment_is_still_reaped():
@@ -70,7 +70,7 @@ def test_a_leftover_with_an_undecodable_environment_is_still_reaped():
         [sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env={**os.environ, "T1151": b"\xff"}
     )
     try:
-        assert left.pid in [record.pid for record in tick_reaper.reap()]
+        assert left.pid in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert left.wait(15) == -signal.SIGTERM
     finally:
         left.kill()
@@ -86,7 +86,7 @@ def test_a_leftover_whose_name_holds_a_parenthesis_is_read_and_reaped(tmp_path):
             if ")" in Path(f"/proc/{left.pid}/comm").read_text():
                 break
             time.sleep(0.05)
-        reaped = [record for record in tick_reaper.reap() if record.pid == left.pid]
+        reaped = [record for record in tick_reaper.reap(grace_s=2) if record.pid == left.pid]
         assert len(reaped) == 1
         assert 0 <= reaped[0].age_s < 60
         assert left.wait(15) == -signal.SIGTERM
@@ -144,6 +144,47 @@ def test_the_namespace_is_read_from_this_process_environment(tmp_path, monkeypat
     assert asked[0] is os.environ
 
 
+def test_a_zombie_or_a_gone_process_is_not_alive():
+    child = subprocess.Popen([sys.executable, "-c", "pass"])
+    for _ in range(200):
+        if Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
+            break
+        time.sleep(0.05)
+    assert tick_reaper.alive(child.pid) is False
+    child.wait()
+    assert tick_reaper.alive(child.pid) is False
+    assert tick_reaper.alive(os.getpid()) is True
+
+
+def test_an_environment_splits_on_nul_and_keeps_equals_in_values(tmp_path, monkeypatch):
+    (tmp_path / "9").mkdir()
+    (tmp_path / "9" / "environ").write_bytes(b"A=b=c\0B=x y\0broken\0")
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path)
+    assert tick_reaper._environ(9) == {"A": "b=c", "B": "x y"}
+
+
+def _fake_proc(root, pid, argv, environ=b""):
+    entry = root / str(pid)
+    entry.mkdir()
+    fields = ["S", "1", *["0"] * 17, "100", *["0"] * 10]
+    (entry / "stat").write_text(f"{pid} (python) {' '.join(fields)}\n")
+    (entry / "cmdline").write_bytes(b"".join(arg.encode() + b"\0" for arg in argv))
+    (entry / "environ").write_bytes(environ)
+
+
+def test_an_unreadable_process_is_skipped_and_the_scan_goes_on(tmp_path, monkeypatch):
+    (tmp_path / "uptime").write_text("1000.00 5.00\n")
+    (tmp_path / "100").mkdir()
+    _fake_proc(tmp_path, os.getpid(), ["pytest"])
+    _fake_proc(tmp_path, 200, ["python", "/bin/agentihooks", "swarm", "tick"])
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path)
+    found = tick_reaper._leftovers()
+    assert [(pid, argv, start) for pid, _, argv, start in found] == [
+        (200, ["python", "/bin/agentihooks", "swarm", "tick"], "100")
+    ]
+    assert found[0][1] == pytest.approx(1000 - 100 / os.sysconf("SC_CLK_TCK"))
+
+
 def test_a_leftover_that_ignores_terminate_is_killed():
     left = _plant(DEAF, "swarm", "tick", stdout=subprocess.PIPE)
     try:
@@ -159,7 +200,7 @@ def test_a_leftover_that_ignores_terminate_is_killed():
 def test_a_tick_that_started_a_moment_ago_is_reaped_too():
     young = _plant(SLEEP, "swarm", "tick")
     try:
-        assert young.pid in [record.pid for record in tick_reaper.reap()]
+        assert young.pid in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert young.wait(15) == -signal.SIGTERM
     finally:
         young.kill()
@@ -167,7 +208,7 @@ def test_a_tick_that_started_a_moment_ago_is_reaped_too():
 
 
 def test_the_reaping_tick_spares_itself_and_its_ancestors():
-    inner = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap()])"
+    inner = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap(grace_s=2)])"
     outer = (
         "import subprocess, sys; "
         f"sys.exit(subprocess.run([sys.executable, '-c', {inner!r}, 'swarm', 'tick']).returncode)"
@@ -189,7 +230,7 @@ def test_a_process_of_another_user_is_never_a_leftover(monkeypatch):
     try:
         uid = os.getuid()
         monkeypatch.setattr(tick_reaper.os, "getuid", lambda: uid + 1)
-        assert left.pid not in [record.pid for record in tick_reaper.reap()]
+        assert left.pid not in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert left.poll() is None
     finally:
         left.kill()
@@ -200,7 +241,7 @@ def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
     other = {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0"}
     left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=other)
     try:
-        assert left.pid not in [record.pid for record in tick_reaper.reap()]
+        assert left.pid not in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert left.poll() is None
     finally:
         left.kill()
@@ -210,7 +251,7 @@ def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
 def test_a_tick_started_for_a_scratch_redis_spares_the_ticks_of_the_installed_swarm():
     installed = {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6379/0"}
     left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=installed)
-    reaper = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap()])"
+    reaper = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap(grace_s=2)])"
     scratch = {**installed, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0", "PYTHONPATH": str(ROOT)}
     try:
         done = subprocess.run(

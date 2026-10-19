@@ -88,9 +88,9 @@ def _finish(tick: subprocess.Popen) -> int:
 
 def _inherited(environ: Mapping[str, str]) -> int | None:
     try:
-        fd = int(environ.get(HELD_FD, ""))
+        fd = int(environ[HELD_FD])
         same = os.path.samestat(os.fstat(fd), os.stat(runtime_dir() / f"{LOCK}.lock"))
-    except (ValueError, OSError):
+    except (KeyError, ValueError, OSError):
         return None
     return fd if same else None
 

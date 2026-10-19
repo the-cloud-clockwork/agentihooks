@@ -74,7 +74,7 @@ def _leftovers() -> list[tuple[int, float, list[str], str]]:
     started = _environ(os.getpid())
     loaded = {key: value for key, value in os.environ.items() if key not in started}
     mine = runtime_dir(os.environ)
-    for entry in PROC.iterdir():
+    for entry in sorted(PROC.iterdir()):
         if not entry.name.isdigit() or int(entry.name) in spared:
             continue
         pid = int(entry.name)
