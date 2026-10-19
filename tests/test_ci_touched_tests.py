@@ -3,9 +3,7 @@ import re
 import pytest
 
 
-@pytest.mark.parametrize(
-    ("selected", "maximum", "workers"), [(4, 8, 4), (10, 2, 2), (1, 8, 1), (None, 8, None)]
-)
+@pytest.mark.parametrize(("selected", "maximum", "workers"), [(4, 8, 4), (10, 2, 2), (1, 8, 1), (None, 8, None)])
 def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypatch, capfd, selected, maximum, workers):
     from scripts.ci_touched_tests import main
 
