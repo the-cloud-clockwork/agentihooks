@@ -69,7 +69,6 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
             if value is None:
                 return self._answer(400, {"error": bad_body})
             from redis.exceptions import ConnectionError as Unreachable
-            from redis.exceptions import RedisError
             from redis.exceptions import TimeoutError as Stalled
 
             try:
@@ -77,7 +76,7 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
             except auth.HiveError as exc:
                 if not isinstance(exc.__cause__, (Stalled, Unreachable)):
                     return self._answer(403, {"error": str(exc)})
-            except RedisError:
+            except (Stalled, Unreachable):
                 pass
             return self._answer(503, {"error": REDIS_STALLED})
 
