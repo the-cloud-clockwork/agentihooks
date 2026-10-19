@@ -33,8 +33,10 @@ def test_rotate_if_full_keeps_a_file_under_the_limit(tmp_path):
 
 
 def test_rotate_if_full_ignores_a_missing_file(tmp_path):
-    ledger_files.rotate_if_full(tmp_path / "absent.log", limit=1)
-    assert list(tmp_path.iterdir()) == []
+    folder = tmp_path / "logs"
+    folder.mkdir()
+    ledger_files.rotate_if_full(folder / "absent.log", limit=1)
+    assert list(folder.iterdir()) == []
 
 
 def test_append_capped_appends_then_rotates_at_the_limit(tmp_path):
@@ -47,9 +49,11 @@ def test_append_capped_appends_then_rotates_at_the_limit(tmp_path):
 
 
 def test_atomic_write_replaces_the_file_and_returns_the_written_stat(tmp_path):
-    target = tmp_path / "ledger.json"
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    target = folder / "ledger.json"
     target.write_text("old")
     written = ledger_files.atomic_write(target, "né")
     assert target.read_text(encoding="utf-8") == "né"
     assert (written.st_size, written.st_ino) == (len("né".encode()), target.stat().st_ino)
-    assert sorted(p.name for p in tmp_path.iterdir()) == ["ledger.json"]
+    assert sorted(p.name for p in folder.iterdir()) == ["ledger.json"]
