@@ -50,9 +50,13 @@ jobs:
         run: python -m tests.mutation_line_selection_proof prepare --folder ../line-proof
       - name: Grade with function coverage selection
         working-directory: sample
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
         run: python -m tests.mutation_line_selection_proof before --folder ../line-proof
       - name: Grade with line coverage selection
         working-directory: sample
+        env:
+          PYTEST_DISABLE_PLUGIN_AUTOLOAD: '1'
         run: python -m tests.mutation_line_selection_proof after --folder ../line-proof
       - name: Compare every sample mutation verdict
         working-directory: sample
