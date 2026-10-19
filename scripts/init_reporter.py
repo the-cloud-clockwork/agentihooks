@@ -157,4 +157,4 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
         )
     with capture_details(args.verbose):
         init_step(args.init_herdr, sys.stdin.isatty())
-    print(ledger_ca.install())
+        print(ledger_ca.install())
