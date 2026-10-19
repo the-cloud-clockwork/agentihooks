@@ -35,6 +35,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Helm kind proof input keys](ci-result-cache.md#helm-kind-proof-input-keys) | Declared chart and image inputs, due decisions, dispatch examples, cache misses and proof measurements |
 | [Helm kind registration to readiness](../ci-timing.md#helm-kind-registration-to-readiness) | Preserved recovery checks, parallel work, kind probe settings, CI dispatch and measured intervals |
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
+| [Worker hive pod image build](../ci-timing.md#worker-hive-pod-image-build) | Reuse of the published worker base, the base inputs and rebuild decisions, build output, measurements and troubleshooting |
 | [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
