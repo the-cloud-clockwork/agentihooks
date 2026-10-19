@@ -282,7 +282,7 @@ def serve_ledgers():
     import ledger_link
 
     from scripts.swarm_ledger import server_lifetime
-    from scripts.swarm_ledger.repository.sqlite import DATABASE
+    from scripts.swarm_ledger.storage import DATABASE
 
     if (
         os.environ.get("LEDGER_AUTOSTART") == "0"
@@ -325,7 +325,7 @@ def dispatch(payload):
         return
     import ledger_gate
 
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):

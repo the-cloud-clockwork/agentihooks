@@ -7,7 +7,10 @@ import pytest
 from scripts.swarm import naming
 from scripts.swarm.store import DEFAULT_URL
 from scripts.swarm_ledger import ledger_creator, new_ledger
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
+
+repository = default_repository()
+
 
 pytestmark = pytest.mark.unit
 

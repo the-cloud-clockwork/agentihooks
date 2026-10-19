@@ -106,7 +106,9 @@ def ledger_source(slug):
 
 
 def stored_ledger(slug):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.export_document(slug) if repository.exists(slug) else None
 
@@ -264,7 +266,9 @@ def restore(store, slug, live, source=None, runtime=None, has_quota=resume.accou
     store.restore(slug, doc["state"])
     store.update(slug, state="paused")
     if doc["ledger"] is not None:
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger import storage
+
+        repository = storage.default()
 
         if not repository.exists(slug):
             repository.import_document(slug, doc["ledger"])

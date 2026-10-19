@@ -118,7 +118,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
         )
 
     def ledger_task():
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         return next(t for t in repository.get_document(SLUG)["tasks"] if t["id"] == task)
 

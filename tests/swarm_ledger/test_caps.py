@@ -66,7 +66,9 @@ class EventsCap(unittest.TestCase):
         make_ledger()
 
     def test_events_are_capped_and_the_start_time_does_not_move(self):
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         state = repository.get_document(SLUG)
         state["_meta"]["events"] = [

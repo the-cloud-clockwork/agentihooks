@@ -10,10 +10,12 @@ import pytest
 from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger, ledger_gate, ledger_tasks
 from scripts.swarm_ledger import ledger_artifacts as artifacts
-from scripts.swarm_ledger.repository import repository as storage
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger.test_artifacts import MARKDOWN
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger
 from tests.swarm_ledger.test_media import png
+
+storage = default_repository()
 
 AGENT = "life-engineer"
 RULE = "proofs go on the task proof and the pull request"

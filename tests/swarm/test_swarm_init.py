@@ -126,7 +126,7 @@ def test_init_brings_up_the_stack_then_creates_the_paused_swarm_and_its_ledger_i
     assert code == 0
     started, made = up(home, "300"), compose(home, "exec", "-T", "swarm", "python")
     assert started in docker.calls and docker.calls.index(started) < docker.calls.index(made)
-    doc = new_ledger.repository.get_document("demo-swarm")
+    doc = new_ledger.storage.default().get_document("demo-swarm")
     assert (doc["size"], doc["title"], [p["title"] for p in doc["phases"]]) == ("swarm", TITLE, [TITLE])
     assert scratch.config("demo-swarm").state == "paused" and scratch.config("demo-swarm").repo == str(tmp_path)
     assert "  3. Start the swarm only when you want it: agentihooks swarm demo-swarm start\n" in out
@@ -160,7 +160,7 @@ def test_a_name_held_by_a_ledger_that_is_not_a_swarm_is_refused(scratch, plan):
     assert out.endswith(
         f"Swarm not created: demo-swarm is taken by a ledger that is not a swarm's.\n{RULE}  Try: one-way-swarm or one-swarm\n"
     )
-    assert new_ledger.repository.get_document("demo-swarm")["title"] == "Notes"
+    assert new_ledger.storage.default().get_document("demo-swarm")["title"] == "Notes"
 
 
 def test_init_refuses_before_the_stack_writes_when_this_session_may_not_create(scratch, plan, monkeypatch):
@@ -198,7 +198,7 @@ def test_a_content_file_seeds_the_ledger_and_the_suggestions_and_its_host_source
     code, out = init("--content", str(tmp_path / "content.json"))
     assert code == 1 and out.endswith("  Try: dating-app-swarm or dating-swarm\n")
     assert init("dating-swarm", "--content", str(tmp_path / "content.json"))[0] == 0
-    doc = new_ledger.repository.get_document("dating-swarm")
+    doc = new_ledger.storage.default().get_document("dating-swarm")
     assert ([p["title"] for p in doc["phases"]], doc["sources"]) == (["Build", "Ship"], [])
 
 
@@ -237,7 +237,7 @@ def test_a_swarm_ledger_left_without_its_swarm_is_free_and_init_finishes_it(scra
     assert capsys.readouterr().out == "valid: demo-swarm\n"
     assert init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path))[0] == 0
     assert scratch.slugs() == ["demo-swarm"]
-    assert new_ledger.repository.get_document("demo-swarm")["title"] == "Earlier"
+    assert new_ledger.storage.default().get_document("demo-swarm")["title"] == "Earlier"
 
 
 def test_a_typed_create_is_refused_and_names_swarm_init(monkeypatch, capsys):

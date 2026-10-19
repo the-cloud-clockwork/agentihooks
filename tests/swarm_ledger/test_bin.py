@@ -15,9 +15,12 @@ import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_bin  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
-from scripts.swarm_ledger.repository import bin_storage, repository
+from scripts.swarm_ledger.repository import bin_storage
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import browser_home
+
+repository = default_repository()
 
 DAY_MS = 24 * 60 * 60 * 1000
 

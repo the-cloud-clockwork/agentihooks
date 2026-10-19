@@ -21,8 +21,9 @@ CREATE = """
 import contextlib, io, json, sys
 from scripts.swarm import cli
 from scripts.swarm_ledger import ledger_size
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import storage
 
+repository = storage.default()
 order = json.load(sys.stdin)
 name, store = order["name"], cli.connect()
 if name in store.slugs():
@@ -40,8 +41,9 @@ TAKEN = """
 import json
 from scripts.swarm import cli
 from scripts.swarm_ledger import ledger_size
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import storage
 
+repository = storage.default()
 held = {row["slug"] for row in repository.list_summaries() if ledger_size.size_of(row) != "swarm"}
 print(json.dumps(sorted(set(cli.connect().slugs()) | held)))
 """

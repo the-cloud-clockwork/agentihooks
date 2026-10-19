@@ -32,7 +32,7 @@ import ledger_link  # noqa: E402
 import ledger_size  # noqa: E402
 
 from scripts.swarm import naming
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import storage
 
 TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
@@ -46,7 +46,7 @@ def built_slug(args):
             return naming.plan_slug(args.plan, args.date)
         if args.proof:
             return naming.proof_slug(
-                os.environ, {s["slug"] for s in repository.list_summaries() if s["slug"].startswith("proof-")}
+                os.environ, {s["slug"] for s in storage.default().list_summaries() if s["slug"].startswith("proof-")}
             )
         if args.slug is None and args.size == "small":
             return naming.small_slug(os.environ)
@@ -177,7 +177,7 @@ def build_doc(content, size="small"):
 
 
 def create(slug, content, size="small"):
-    return repository.create(slug, content, size)
+    return storage.default().create(slug, content, size)
 
 
 def main():
@@ -196,7 +196,7 @@ def main():
     slug = built_slug(args)
     if args.size == "swarm" and not naming.is_code_named_swarm(slug):
         sys.exit(f"a swarm ledger is created with its swarm by one command: {naming.SWARM_INIT}")
-    if repository.exists(slug):
+    if storage.default().exists(slug):
         print(json.dumps({"slug": slug, "created": False}))
         print(ledger_link.page_line(slug))
         return
@@ -215,7 +215,7 @@ def main():
     create(slug, content, args.size)
     out = {"slug": slug, "created": True, "size": args.size}
     if small:
-        repository.apply_ops(
+        storage.default().apply_ops(
             slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}]
         )
         out["joined"] = args.name

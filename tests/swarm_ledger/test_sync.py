@@ -8,8 +8,10 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+storage = default_repository()
 
 SLUG = "sync-2026-01-01"
 

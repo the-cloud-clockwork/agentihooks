@@ -3,7 +3,7 @@ import threading
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from scripts.swarm_ledger.repository.sqlite import Entry
+    from scripts.swarm_ledger.repository.entry import Entry
 
 
 class Publishing:

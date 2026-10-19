@@ -42,7 +42,9 @@ class FileLedger(LedgerClient):
 
     def _resource(self, slug, path, collection=False):
         from scripts.swarm_ledger.api.resources import hierarchy_read, value
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         if path.startswith("hierarchy"):
             rows, query = [], {"limit": 100}

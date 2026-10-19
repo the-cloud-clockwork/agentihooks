@@ -140,7 +140,9 @@ class Kinds(unittest.TestCase):
     def test_an_existing_ledger_without_kinds_loads_unchanged(self):
         make_ledger([{"task": "t1", "title": "a", "lane": "eng"}, {"task": "t2", "title": "b", "lane": "ci"}])
         core.sync(SLUG, ops=[done(1)])
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         before = repository.get_document(SLUG)
         for task in before["tasks"]:

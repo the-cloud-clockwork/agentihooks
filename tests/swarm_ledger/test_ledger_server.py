@@ -12,9 +12,11 @@ import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
-from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
+
+storage = default_repository()
 
 MINUTE = 60 * 1000
 SWARM_STATE = server.swarm_state

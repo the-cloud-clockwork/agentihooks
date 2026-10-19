@@ -3,8 +3,10 @@ import pytest
 from scripts.swarm_ledger import ledger, ledger_groups, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.api import schemas
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger import legacy_page
+
+repository = default_repository()
 
 SLUG = "taskgroup-2026-01-01"
 MASTER = "master@abcdef-0001"

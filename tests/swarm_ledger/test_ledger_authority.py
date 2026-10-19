@@ -19,12 +19,14 @@ from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm.store import SwarmError  # noqa: E402
 from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.mutation_trace import traced  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "authority-proof"
 WORKER = "engineer@323133-0256"

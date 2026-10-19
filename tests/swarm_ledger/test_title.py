@@ -35,7 +35,9 @@ class TitleOp(unittest.TestCase):
         make_ledger()
 
     def test_stores_the_trimmed_title_and_keeps_the_slug(self):
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         state, rejected = rename("  Renamed plan  ")
         self.assertEqual(rejected, [])
