@@ -1144,9 +1144,10 @@ are refused. The tick lock prevents two ticks in the same epoch and lets a highe
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
 input it decided on was last observed. The host room counts from its last capacity decision, the quota from the
-freshest account observation, and the ledger revision, kept as evidence, from the pass that read it; a ledger the
-tick cannot read ends the pass early, which shows as no completed pass. An input never observed is recorded as
-unknown and never judged.
+freshest account observation, and the ledger revision from the pass that last saw it change. The ledger probe
+writes the ledger every pass, so a revision that holds still is a write that never lands; a ledger the tick cannot
+read ends the pass early, which shows as no completed pass. An input never observed is recorded as unknown and
+never judged.
 
 The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
 its last pass. The tick never judges itself; two watchdogs do:

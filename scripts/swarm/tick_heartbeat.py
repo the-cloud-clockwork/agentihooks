@@ -26,15 +26,17 @@ def read(store, slug) -> Heartbeat | None:
 
 
 def write(store, slug, at: int, doc: dict) -> Heartbeat:
-    decision = capacity.read(store, slug)
+    """The ledger probe writes the ledger every pass, so a revision that holds still is a write that never lands."""
+    decision, previous = capacity.read(store, slug), read(store, slug)
     rev = (doc.get("_meta") or {}).get("rev")
     seen = [account["observed_at"] for account in decision.get("accounts", []) if account.get("observed_at")]
+    kept = previous is not None and rev is not None and previous.rev == rev and previous.observed.get(LEDGER)
     beat = Heartbeat(
         at,
         {
             HOST: decision.get("observed_at"),
             QUOTA: round(max(seen) * 1000) if seen else None,
-            LEDGER: at if rev is not None else None,
+            LEDGER: previous.observed[LEDGER] if kept else (at if rev is not None else None),
         },
         rev,
     )

@@ -70,12 +70,22 @@ def test_an_input_never_observed_is_recorded_as_unknown_and_never_judged_frozen(
     assert tick_heartbeat.stale(found, START + MINUTE) == []
 
 
-def test_the_ledger_revision_is_observed_by_the_pass_that_read_it_even_when_it_holds_still(store):
+def test_the_ledger_revision_keeps_the_time_it_last_changed(store):
+    beat(store, START, rev=3)
+    held = beat(store, START + 4 * MINUTE, rev=3)
+    moved = beat(store, START + 5 * MINUTE, rev=4)
+
+    assert held.observed["ledger revision"] == START
+    assert moved.observed["ledger revision"] == START + 5 * MINUTE
+
+
+def test_a_ledger_revision_held_ten_minutes_is_a_frozen_input(store):
     beat(store, START, rev=3)
     held = beat(store, START + LIMIT, rev=3)
 
-    assert (held.rev, held.observed["ledger revision"]) == (3, START + LIMIT)
-    assert tick_heartbeat.stale(held, START + LIMIT) == []
+    assert tick_heartbeat.stale(held, START + LIMIT) == [
+        "the ledger revision it decides on was 10 minutes old at its last pass"
+    ]
 
 
 def test_a_fresh_heartbeat_is_not_stale(store):
@@ -94,7 +104,7 @@ def test_ten_minutes_without_a_completed_pass_is_stale_with_the_last_pass_time(s
 
 def test_a_decision_input_frozen_ten_minutes_is_stale_even_while_passes_complete(store):
     beat(store, START, rev=5)
-    found = beat(store, START + LIMIT, rev=5, quota=START - MINUTE)
+    found = beat(store, START + LIMIT, rev=6, quota=START - MINUTE)
 
     assert tick_heartbeat.stale(found, START + LIMIT) == ["the quota it decides on was 11 minutes old at its last pass"]
 
