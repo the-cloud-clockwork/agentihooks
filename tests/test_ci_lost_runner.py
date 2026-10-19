@@ -579,7 +579,7 @@ def test_a_refused_or_timed_out_cluster_read_is_an_error_never_a_loss(monkeypatc
 def test_main_in_cluster_mode_acts_on_a_fresh_loss_after_a_short_confirmation(monkeypatch, capsys, no_sleep):
     pages = {
         RUNS: [json.dumps(RUN), json.dumps(RUN), json.dumps({**RUN, "status": "completed"})],
-        JOBS: [lines(job("lost", "in_progress", None, "anton-oss-light-cpwxt-runner-clfn7", ago(1)), gate())] * 2,
+        JOBS: [lines({**CLUSTER["job"], "name": "queue-fail-fast", "started_at": ago(1)}, gate())] * 2,
     }
     api = Api(pages)
     monkeypatch.setattr(ci_lost_runner, "_api", api)
@@ -600,4 +600,6 @@ def test_main_leaves_the_run_to_a_watchdog_that_holds_the_lock(monkeypatch, caps
     assert json.loads(capsys.readouterr().out)["reason"] == "another watchdog holds the lock"
     assert api.calls == []
     held.close()
-    assert ci_lost_runner._hold(str(lock)) is not None
+    again = ci_lost_runner._hold(str(lock))
+    assert again is not None
+    again.close()
