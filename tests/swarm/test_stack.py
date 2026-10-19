@@ -859,6 +859,7 @@ def test_restack_finds_a_parked_branch_kept_only_in_the_local_checkout(stacked_r
     _, ledger, repo, _ = stacked_repo
     _git(repo, "push", "origin", "--delete", "parked")
     assert _git(repo, "ls-remote", "origin", "refs/heads/parked") == ""
+    assert _git(repo, "for-each-ref", "refs/remotes/origin/parked") == ""
     assert restack() == 0
     assert _git(repo, "log", "--format=%s", "origin/dev..HEAD") == "Task work"
     assert _git(repo, "rev-parse", "HEAD^") == _git(repo, "rev-parse", "origin/dev")
