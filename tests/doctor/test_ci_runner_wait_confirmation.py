@@ -118,21 +118,12 @@ def test_a_confirmed_long_wait_remains_a_runner_wait():
     assert finding.threshold == "runner queue wait over 5 minutes"
 
 
-def test_a_recorded_concurrency_held_run_is_labelled_a_hold_not_runner_supply():
-    queued = {**STALE, "created_at": "2026-10-19T16:44:19Z", "started_at": "2026-10-19T16:44:19Z", "run_id": HELD["id"]}
+def test_a_recorded_concurrency_held_run_lists_no_jobs_and_raises_no_wait():
+    run, _ = actions([HELD], [], {})
     now = int(datetime.fromisoformat("2026-10-19T16:50:00+00:00").timestamp() * 1000)
-    [finding] = ci_speed.findings([{**HELD, "jobs": [queued]}], now - 60000, now)
-    assert finding.id == 'ci-concurrency-hold/39287956231-1-["anton-oss-light"]'
-    assert finding.threshold == "concurrency hold over 5 minutes"
-    assert "concurrency group" in finding.summary
-    [unheld] = ci_speed.findings([{**HELD, "status": "queued", "jobs": [queued]}], now - 60000, now)
-    assert unheld.kind == "ci queue age unconfirmed"
-
-
-def test_a_job_held_by_its_own_concurrency_group_is_labelled_a_hold():
-    pending = {**STALE, "status": "pending"}
-    [finding] = ci_speed.findings([{**PREFLIGHT, "jobs": [pending]}], FOUND_AT - 60000, FOUND_AT)
-    assert finding.kind == "ci concurrency hold"
+    result = ci_speed_read.read(now - 60000, now, run=run)
+    assert result["runs"] == [{**HELD, "jobs": []}]
+    assert ci_speed.findings(result["runs"], now - 60000, now) == []
 
 
 def test_rereads_stop_at_the_pass_cap_and_leave_the_rest_unconfirmed():
@@ -149,7 +140,6 @@ def test_a_late_start_supersedes_the_queue_age_but_keeps_the_runner_wait():
     late = {**REFINE, "started_at": "2026-10-19T15:37:00Z"}
     gone = ci_speed.cleared([{**PREFLIGHT, "jobs": [late]}])
     assert AGE_ID in gone
-    assert 'ci-concurrency-hold/39278021878-1-["anton-oss-light"]' in gone
     assert WAIT_ID not in gone
     assert set(ci_speed.cleared([{**PREFLIGHT, "jobs": [REFINE]}])) >= {AGE_ID, WAIT_ID}
     assert ci_speed.cleared([{**PREFLIGHT, "jobs": [STALE]}]) == []

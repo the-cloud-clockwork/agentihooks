@@ -11,12 +11,10 @@ SHORT_WAIT_MS = 300000
 JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
     "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
-    "ci concurrency hold": "{text} jobs held by a concurrency group up to {minutes} minutes, {count} jobs",
     "ci queue age unconfirmed": "{text} jobs read as queued up to {minutes} minutes with no confirmed start, {count} jobs",
 }
 THRESHOLDS = {
     "ci runner wait": "runner queue wait over 5 minutes",
-    "ci concurrency hold": "concurrency hold over 5 minutes",
     "ci queue age unconfirmed": "unconfirmed queue age over 5 minutes",
 }
 
@@ -31,14 +29,6 @@ def _subject(run, labels):
     return f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(tuple(sorted(set(labels))))}"
 
 
-def _cause(run, job):
-    if started(job):
-        return "ci runner wait"
-    if job["status"] == "pending" or run["status"] == "pending":
-        return "ci concurrency hold"
-    return "ci queue age unconfirmed"
-
-
 def _wait(run, jobs, since_ms, now_ms):
     groups = {}
     active = set()
@@ -48,7 +38,8 @@ def _wait(run, jobs, since_ms, now_ms):
         elapsed = began - created
         if elapsed <= SHORT_WAIT_MS:
             continue
-        key = (_cause(run, job), tuple(sorted(set(job["labels"]))))
+        kind = "ci runner wait" if started(job) else "ci queue age unconfirmed"
+        key = (kind, tuple(sorted(set(job["labels"]))))
         groups.setdefault(key, []).append(elapsed)
         if not started(job) or began >= since_ms:
             active.add(key)
