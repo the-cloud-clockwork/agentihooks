@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 
@@ -69,13 +70,12 @@ def test_an_input_never_observed_is_recorded_as_unknown_and_never_judged_frozen(
     assert tick_heartbeat.stale(found, START + MINUTE) == []
 
 
-def test_the_ledger_revision_keeps_the_time_it_last_changed(store):
+def test_the_ledger_revision_is_observed_by_the_pass_that_read_it_even_when_it_holds_still(store):
     beat(store, START, rev=3)
-    held = beat(store, START + 4 * MINUTE, rev=3)
-    moved = beat(store, START + 5 * MINUTE, rev=4)
+    held = beat(store, START + LIMIT, rev=3)
 
-    assert held.observed["ledger revision"] == START
-    assert moved.observed["ledger revision"] == START + 5 * MINUTE
+    assert (held.rev, held.observed["ledger revision"]) == (3, START + LIMIT)
+    assert tick_heartbeat.stale(held, START + LIMIT) == []
 
 
 def test_a_fresh_heartbeat_is_not_stale(store):
@@ -96,9 +96,15 @@ def test_a_decision_input_frozen_ten_minutes_is_stale_even_while_passes_complete
     beat(store, START, rev=5)
     found = beat(store, START + LIMIT, rev=5, quota=START - MINUTE)
 
-    assert tick_heartbeat.stale(found, START + LIMIT) == [
-        "the quota it decides on was 11 minutes old at its last pass",
-        "the ledger revision it decides on was 10 minutes old at its last pass",
+    assert tick_heartbeat.stale(found, START + LIMIT) == ["the quota it decides on was 11 minutes old at its last pass"]
+
+
+def test_a_restarted_judge_gives_a_frozen_input_ten_minutes_from_its_own_start(store):
+    found = beat(store, START, quota=START - 3 * LIMIT)
+
+    assert tick_heartbeat.stale(found, START, START - LIMIT + 1) == []
+    assert tick_heartbeat.stale(found, START, START - LIMIT) == [
+        "the quota it decides on was 30 minutes old at its last pass"
     ]
 
 
@@ -231,7 +237,7 @@ def test_the_watcher_respawns_the_master_only_while_the_tick_is_stale(store):
 
 
 def test_the_watcher_run_passes_over_every_swarm_once_a_minute(store, capsys):
-    store.create(SwarmConfig("other", "/repo"))
+    store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
     clock = [START]
     waits = []
 
@@ -328,5 +334,36 @@ def test_the_liveness_probe_judges_only_the_swarms_this_controller_ticks(store, 
     assert probe(store, age=2 * LIMIT, owner="anton") == 0
 
 
+def test_the_liveness_probe_skips_a_stopped_swarm(store, lease_clock):
+    beat(store, START - 3 * LIMIT)
+    store.update("sw", state="stopped")
+
+    assert probe(store, age=2 * LIMIT) == 0
+
+
+def test_the_liveness_probe_leaves_a_swarm_in_a_ledger_outage_to_the_watcher(store, lease_clock, tmp_path, monkeypatch):
+    from scripts.swarm import outage
+
+    monkeypatch.setattr(outage, "HOME", tmp_path)
+    beat(store, START - 3 * LIMIT)
+    outage.ledger_health("sw", START - 2 * LIMIT, lambda: False)
+
+    assert probe(store, age=2 * LIMIT) == 0
+    assert tick_watch.watch_pass(store, "sw", START, START) == [f"told {FRONT_DOOR} the tick is stale"]
+
+
+def test_the_liveness_probe_without_a_control_api_judges_the_lease_and_heartbeat_only(store, lease_clock, capsys):
+    beat(store, START - MINUTE)
+
+    assert controller_probes.live({}, store, None, "home", lambda: 2 * LIMIT) == 0
+    assert capsys.readouterr().out == "controller: live\n"
+
+
+def test_a_restarted_watcher_alerts_at_once_on_a_heartbeat_already_ten_minutes_old(store):
+    beat(store, START)
+
+    assert tick_watch.watch_pass(store, "sw", START + LIMIT, START + LIMIT) == [f"told {FRONT_DOOR} the tick is stale"]
+
+
 def test_the_process_age_reads_the_kernel_start_time():
-    assert 0 <= tick_heartbeat.process_age_ms(__import__("os").getpid()) < 3_600_000
+    assert 0 <= tick_heartbeat.process_age_ms(os.getpid()) < 3_600_000

@@ -1282,8 +1282,6 @@ def _retire_master(slug, store, runtime, master, now_ms):
 
 
 def respawn_master(slug, store, runtime, now_ms):
-    """The stale watcher's master pass, run only while the tick is stale: under this hive's lease and the tick lock, a
-    front door seat whose lead master is gone gets a master again."""
     from scripts.swarm import controller, lease
     from scripts.swarm.commands import hive_id
 

@@ -24,7 +24,7 @@ def live(
     if frozen := _frozen(store, owner, age_ms or tick_heartbeat.process_age_ms):
         print(f"controller: the tick is stale, {frozen}")
         return 1
-    error = _unanswered(environ, fetch)
+    error = _unanswered(environ, fetch) if PORT_ENV in environ else ""
     if error:
         return _standby(environ[SWARM_ENV], store, owner, error)
     print("controller: live")
@@ -32,14 +32,16 @@ def live(
 
 
 def _frozen(store: RedisStore, owner: str | None, age_ms: Callable[[], int]) -> str:
-    """Only the swarms this controller ticks are judged, each from the later of its heartbeat and this process start."""
-    from scripts.swarm import commands
+    """A restart cannot end a ledger outage, so a swarm in one is left to the stale watcher."""
+    from scripts.swarm import commands, outage
 
     now, mine = lease.now_ms(store), owner or commands.hive_id()
     since = now - age_ms()
     for slug in store.slugs():
         held = lease.current(store, slug)
-        if held is None or held.owner != mine:
+        if held is None or held.owner != mine or store.config(slug).state not in tick_heartbeat.JUDGED:
+            continue
+        if any(record["kind"] == "ledger" for record in outage.open_records(slug)):
             continue
         if evidence := tick_heartbeat.stale(tick_heartbeat.read(store, slug), now, since):
             return f"{slug}: {'; '.join(evidence)}"

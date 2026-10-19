@@ -1,7 +1,4 @@
-"""The stale tick watcher, a process apart from the tick that never runs a tick pass. Each stale episode sends one alert
-through the Redis inbox to the front door master seat and every live agent seat with the evidence, and a resolved
-notice to the same seats once a fresh pass completes. A workstation watcher also respawns an empty front door master
-while the tick is stale."""
+"""The stale tick watcher: a process apart from the tick, alerting every seat once per stale episode."""
 
 import hashlib
 import json
@@ -9,13 +6,13 @@ import sys
 from collections.abc import Callable
 
 from scripts.inbox.store import DuplicateItem, InboxStore
+from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import tick_heartbeat
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
 KEY = "tick-watch"
 SENDER = "swarm"
-WATCHED = ("running", "paused", "stopping")
 PASS_S = 60
 ALERT = (
     "The tick of swarm {slug} is stale: {evidence}. Until it recovers no swarm alert, nudge, merge or spawn happens; "
@@ -37,9 +34,10 @@ def watch_pass(
     store: RedisStore, slug: str, now: int, since: int, respawn: Callable[[str], list[str]] | None = None
 ) -> list[str]:
     episode = _read(store, slug)
-    if store.config(slug).state not in WATCHED and not episode:
+    if store.config(slug).state not in tick_heartbeat.JUDGED and not episode:
         return []
-    evidence = tick_heartbeat.stale(tick_heartbeat.read(store, slug), now, since)
+    beat = tick_heartbeat.read(store, slug)
+    evidence = tick_heartbeat.stale(beat, now, None if beat else since)
     if evidence:
         return _alert(store, slug, now, episode, evidence) + (respawn(slug) if respawn else [])
     return _resolve(store, slug, now, episode) if episode else []
@@ -84,8 +82,6 @@ def _save(store, slug, episode) -> None:
 
 
 def run(store: RedisStore, now: Callable[[], int], respawn=None, wait=None, passes: int | None = None) -> None:
-    from scripts.scheduler.process_timer import wait as scheduled_wait
-
     since, done = now(), 0
     while passes is None or done < passes:
         for slug in store.slugs():

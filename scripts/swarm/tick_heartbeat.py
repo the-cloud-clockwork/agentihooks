@@ -1,5 +1,4 @@
-"""Every completed tick pass leaves a heartbeat: when it ended and when each input it decided on was last observed.
-The liveness probe and the stale watcher judge it; the tick never judges itself."""
+"""The heartbeat each completed tick pass writes, judged by the liveness probe and the stale watcher, never the tick."""
 
 import json
 import os
@@ -11,6 +10,7 @@ from scripts.swarm import capacity
 KEY = "tick-heartbeat"
 LIMIT_MS = 600_000
 HOST, QUOTA, LEDGER = "host room", "quota", "ledger revision"
+JUDGED = ("running", "paused", "stopping", "drained")
 
 
 @dataclass(frozen=True)
@@ -26,18 +26,15 @@ def read(store, slug) -> Heartbeat | None:
 
 
 def write(store, slug, at: int, doc: dict) -> Heartbeat:
-    """The ledger revision counts as observed when it last changed: every pass writes the ledger, so a revision that
-    holds still means the tick decides on a ledger that no longer moves."""
-    decision, previous = capacity.read(store, slug), read(store, slug)
+    decision = capacity.read(store, slug)
     rev = (doc.get("_meta") or {}).get("rev")
     seen = [account["observed_at"] for account in decision.get("accounts", []) if account.get("observed_at")]
-    kept = previous is not None and rev is not None and previous.rev == rev and previous.observed.get(LEDGER)
     beat = Heartbeat(
         at,
         {
             HOST: decision.get("observed_at"),
             QUOTA: round(max(seen) * 1000) if seen else None,
-            LEDGER: previous.observed[LEDGER] if kept else (at if rev is not None else None),
+            LEDGER: at if rev is not None else None,
         },
         rev,
     )
@@ -46,8 +43,7 @@ def write(store, slug, at: int, doc: dict) -> Heartbeat:
 
 
 def stale(beat: Heartbeat | None, now: int, since: int | None = None, limit: int = LIMIT_MS) -> list[str]:
-    """since is when the judge began watching: a heartbeat older than it is judged from since, and a missing one is
-    judged only when since is given."""
+    """since, when the judge began watching, is the earliest time anything is judged from."""
     if beat is None:
         if since is None or now - since < limit:
             return []
@@ -56,13 +52,12 @@ def stale(beat: Heartbeat | None, now: int, since: int | None = None, limit: int
     if now - max(beat.at, since or 0) >= limit:
         evidence.append(f"no tick pass has completed for {_minutes(now - beat.at)}, the last ended at {clock(beat.at)}")
     for name, observed in beat.observed.items():
-        if observed is not None and beat.at - observed >= limit:
+        if observed is not None and beat.at - max(observed, since or 0) >= limit:
             evidence.append(f"the {name} it decides on was {_minutes(beat.at - observed)} old at its last pass")
     return evidence
 
 
 def process_age_ms(pid: int = 1) -> int:
-    """How long the process has run, read from the kernel so a restarted container counts from its own start."""
     with open(f"/proc/{pid}/stat") as stat:
         started = int(stat.read().rsplit(")", 1)[-1].split()[19])
     with open("/proc/uptime") as uptime:

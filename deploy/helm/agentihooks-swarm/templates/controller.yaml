@@ -226,17 +226,7 @@ spec:
           {{- end }}
           livenessProbe:
             exec:
-              {{- if $api.enabled }}
               command: [agentihooks, controller, live]
-              {{- else }}
-              command:
-                - python
-                - -c
-                - >-
-                  from scripts.swarm import lease; from scripts.swarm.store import connect;
-                  store = connect(); stale = [slug for slug in store.slugs() if not lease.current(store, slug)];
-                  assert not stale, f"no live controller lease for {stale}"
-              {{- end }}
             {{- toYaml .Values.controller.livenessProbe | nindent 12 }}
           env:
             {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}

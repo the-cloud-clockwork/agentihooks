@@ -1144,25 +1144,29 @@ are refused. The tick lock prevents two ticks in the same epoch and lets a highe
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
 input it decided on was last observed. The host room counts from its last capacity decision, the quota from the
-freshest account observation, and the ledger revision from the pass that last saw it change; every pass writes the
-ledger, so a revision that holds still means the tick decides on a ledger that no longer moves. An input never
-observed is recorded as unknown and never judged.
+freshest account observation, and the ledger revision, kept as evidence, from the pass that read it; a ledger the
+tick cannot read ends the pass early, which shows as no completed pass. An input never observed is recorded as
+unknown and never judged.
 
 The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
 its last pass. The tick never judges itself; two watchdogs do:
 
-- **Liveness probe.** `agentihooks controller live`, the controller container's liveness probe, fails while a swarm
-  whose controller lease this controller holds has a stale tick, so Kubernetes restarts the tick container. A
-  restarted container is judged from the later of its own start and the last heartbeat, so it has 10 minutes to
-  complete a pass. Swarms another hive holds are left to that hive's probe.
+- **Liveness probe.** `agentihooks controller live`, the controller container's liveness probe with or without the
+  control API, fails while a running, paused, stopping or drained swarm whose controller lease this controller
+  holds has a stale tick, so Kubernetes restarts the tick container. A restarted container is judged from the later
+  of its own start and the heartbeat, so it has 10 minutes to complete a pass with fresh inputs. A swarm in an open
+  ledger outage is left to the watcher, since a restart cannot end it, and swarms another hive holds are left to
+  that hive's probe.
 - **Stale watcher.** `agentihooks swarm tick-watch` is a process apart from the tick that never runs a tick pass. It
-  checks every running, paused or stopping swarm once a minute. A stale episode sends one information item from
-  `swarm` through the Redis inbox to the front door master seat and every live agent seat, carrying the evidence;
-  a seat that comes live during the episode gets the same alert. When a fresh pass completes, every alerted seat
-  gets one resolved notice. On a workstation install (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the watcher also
-  restarts an empty front door master while the tick is stale: under this hive's controller lease and the tick
-  lock it drops lead master records whose pane is gone and spawns the master as the tick would. A swarm that
-  another hive ticks is left alone.
+  checks every running, paused, stopping or drained swarm once a minute, judging an existing heartbeat from its
+  own time, so a restarted watcher alerts at once on a tick already stale. A stale episode sends one information
+  item from `swarm` through the Redis inbox to the front door master seat and every live agent seat, carrying the
+  evidence; a seat that comes live during the episode gets the same alert. When a fresh pass completes, every
+  alerted seat gets one resolved notice. On a workstation install (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the
+  watcher also restarts an empty front door master while the tick is stale: under this hive's controller lease and
+  the tick lock it drops lead master records whose session is gone and spawns the master as the tick would. In a
+  cluster the watcher only alerts: the probe restarts the controller, whose first pass spawns the master. A swarm
+  that another hive ticks is left alone.
 
 The workstation runs the watcher as the `agentihooks-tick-watch` user service, installed and enabled with the other
 swarm services and restarted by systemd if it exits. The Helm chart runs it as the `tick-watch` Deployment
