@@ -1515,7 +1515,7 @@ jobs:
         if: github.event.pull_request.base.ref == 'main'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
-      - name: Check every shard's test time fits the fifteen minute budget
+      - name: Check every shard's test time fits the Run tests deadline
         if: github.event_name != 'merge_group'
         env:
           REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
