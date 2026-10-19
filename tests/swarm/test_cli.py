@@ -2732,7 +2732,11 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(cli, "_tickable", lambda slug: True)
     monkeypatch.setattr(cli, "now_ms", lambda: 77)
-    monkeypatch.setattr(herdr_gc, "run", lambda environ, now, apply: swept.append((environ, now, apply)) or ["swept"])
+    monkeypatch.setattr(
+        herdr_gc,
+        "run",
+        lambda environ, now, apply, swarm_only: swept.append((environ, now, apply, swarm_only)) or ["swept"],
+    )
     counts = {}
 
     def bounded(store, slug, scheduled):
@@ -2749,7 +2753,7 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     store = types.SimpleNamespace(slugs=lambda: slugs, reconciled=reconciled)
     cli.cmd_tick(store, None)
     assert filled == [os.environ]
-    assert swept == [(dict(os.environ), 77, True)]
+    assert swept == [(dict(os.environ), 77, True, True)]
     return store
 
 

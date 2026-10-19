@@ -919,7 +919,7 @@ def test_every_tick_closes_and_journals_with_reasons(monkeypatch, capsys):
 def test_a_failing_sweep_never_breaks_the_tick(monkeypatch, capsys):
     from scripts.swarm import cli
 
-    def broken(environ, now_ms, act):
+    def broken(environ, now_ms, act, swarm_only=False):
         raise RuntimeError("boom")
 
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
