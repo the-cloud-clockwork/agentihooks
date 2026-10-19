@@ -354,7 +354,7 @@ def launched():
 
     client = fakeredis.FakeRedis(decode_responses=True)
     client.hset(NameRegistry.key("name", LAUNCHED), mapping={"swarm": "sw", "operator": "frontend", "retired_at": 0})
-    with patch.object(authority.store, "redis_client", lambda: client):
+    with patch("scripts.swarm.store.redis_client", lambda: client):
         yield
 
 
@@ -372,7 +372,7 @@ def test_the_claim_check_lets_the_claim_through_when_redis_is_down():
     def down():
         raise Down("no redis")
 
-    with patch.object(authority.store, "redis_client", down):
+    with patch("scripts.swarm.store.redis_client", down):
         assert authority.claim_refusal(LAUNCHED) == ""
 
 

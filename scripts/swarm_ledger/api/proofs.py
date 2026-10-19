@@ -4,13 +4,14 @@ import json
 import sys
 
 from scripts import agent_choice
-from scripts.swarm import naming, templates
-from scripts.swarm.store import CODEX_TRANSPORTS
+from scripts.swarm_ledger import ports
 
 from . import schemas
 from .errors import APIError
 from .services import BodyReader, Services
 
+naming, templates = ports.swarm().naming, ports.swarm().templates
+CODEX_TRANSPORTS = ports.swarm().store.CODEX_TRANSPORTS
 CREATE = {
     "type": "object",
     "required": ["agent", "task", "content"],
@@ -215,8 +216,8 @@ def _fixture_argv(payload: dict) -> list:
 
 
 def control(handler: object, services: Services, slug: str, payload: dict) -> dict:
-    from scripts.swarm import commands
-    from scripts.swarm.lifecycle import Refused
+    commands = ports.swarm().commands
+    Refused = ports.swarm().lifecycle.Refused
 
     owner = _owner(services, slug)
     token = handler.headers.get("X-Proof-Credential")

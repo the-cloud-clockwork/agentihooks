@@ -1,6 +1,6 @@
 import math
 import os
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -8,6 +8,8 @@ from hooks.context import account_sessions
 from scripts.swarm.store import SwarmConfig
 
 MEMORY_PER_AGENT_MB = 700
+SWAP_FULL_SHARE = 0.9
+MEMINFO_KEYS = frozenset({"MemAvailable", "SwapTotal", "SwapFree"})
 LOAD_HIGH = 1.5
 LOAD_LOW = 1.0
 LOAD, MEMORY, UNKNOWN = "load", "memory", "unknown"
@@ -27,6 +29,7 @@ class Thresholds:
     load_high: float = LOAD_HIGH
     load_low: float = LOAD_LOW
     memory_per_agent_mb: int = MEMORY_PER_AGENT_MB
+    swap_full_share: float = SWAP_FULL_SHARE
 
 
 @dataclass(frozen=True)
@@ -35,6 +38,10 @@ class HostSample:
     cpus: int
     available_mb: int
     agents: int
+    swap_used_mb: int = 0
+    swap_total_mb: int = 0
+    agent_mb: int = 0
+    measured_agents: int = 0
 
 
 @dataclass(frozen=True)
@@ -46,7 +53,7 @@ class Room:
 
 
 def thresholds(config: SwarmConfig) -> Thresholds:
-    return Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb)
+    return Thresholds(config.load_high, config.load_low, config.memory_per_agent_mb, config.swap_full_share)
 
 
 def spawn_room(config: SwarmConfig, sample: HostSample | Room | None, previous: int | None) -> Room:
@@ -58,7 +65,36 @@ def spawn_room(config: SwarmConfig, sample: HostSample | Room | None, previous: 
 
 
 def memory_room(sample: HostSample, thresholds: Thresholds) -> int:
-    return max(0, sample.available_mb // thresholds.memory_per_agent_mb)
+    if swap_full(sample, thresholds):
+        return 0
+    return max(0, (sample.available_mb - sample.swap_used_mb) // per_agent_mb(sample, thresholds))
+
+
+def swap_full(sample: HostSample, thresholds: Thresholds) -> bool:
+    return sample.swap_used_mb > thresholds.swap_full_share * sample.swap_total_mb
+
+
+def per_agent_mb(sample: HostSample, thresholds: Thresholds) -> int:
+    return max(sample.agent_mb, thresholds.memory_per_agent_mb)
+
+
+def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
+    if swap_full(sample, thresholds):
+        return (
+            f"swap {sample.swap_used_mb} of {sample.swap_total_mb} MB in use is above the "
+            f"{thresholds.swap_full_share:.0%} share, no memory room"
+        )
+    figure = "the configured figure"
+    if sample.measured_agents:
+        figure = (
+            f"the larger of {sample.agent_mb} MB measured over {sample.measured_agents} Claude agent trees "
+            f"and the configured {thresholds.memory_per_agent_mb} MB"
+        )
+    return (
+        f"{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB swap "
+        f"in use fits {memory} "
+        f"at {per_agent_mb(sample, thresholds)} MB each, {figure}"
+    )
 
 
 def load_room(sample: HostSample, thresholds: Thresholds) -> int | None:
@@ -72,14 +108,14 @@ def room(sample: HostSample, thresholds: Thresholds = Thresholds(), previous: in
     per_cpu = sample.load1 / max(1, sample.cpus)
     load = f"one minute load {per_cpu:.2f} per CPU"
     memory = memory_room(sample, thresholds)
-    memory_text = f"{sample.available_mb} MB available memory fits {memory} at {thresholds.memory_per_agent_mb} MB each"
+    memory_line = memory_text(sample, thresholds, memory)
     if per_cpu > thresholds.load_high:
         return Room(0, f"{load} is above the high watermark {thresholds.load_high:.2f}, no room", LOAD)
     if per_cpu >= thresholds.load_low:
         held = previous or 0
         if memory < held:
             return Room(
-                memory, f"{load} is between the watermarks; {memory_text}, below the previous room of {held}", MEMORY
+                memory, f"{load} is between the watermarks; {memory_line}, below the previous room of {held}", MEMORY
             )
         return Room(held, f"{load} is between the watermarks, the previous room of {held} holds", LOAD, True)
     projected = load_room(sample, thresholds)
@@ -90,25 +126,71 @@ def room(sample: HostSample, thresholds: Thresholds = Thresholds(), previous: in
             f"after {projected} more",
             LOAD,
         )
-    return Room(memory, f"{load} is below the low watermark; {memory_text}", MEMORY)
+    return Room(memory, f"{load} is below the low watermark; {memory_line}", MEMORY)
 
 
-def _mem_available_mb(proc: Path) -> int:
+def _memory_mb(proc: Path) -> tuple[int, int, int]:
+    fields = {}
     for line in (proc / "meminfo").read_text().splitlines():
-        if line.startswith("MemAvailable:"):
-            return int(line.split()[1]) // 1024
-    raise ValueError
+        name, _, rest = line.partition(":")
+        if name in MEMINFO_KEYS:
+            fields[name] = int(rest.split()[0]) // 1024
+    total = fields.get("SwapTotal", 0)
+    return fields["MemAvailable"], total - fields.get("SwapFree", total), total
+
+
+def _rss_kb(pid: int, proc: Path) -> int | None:
+    try:
+        lines = (proc / str(pid) / "status").read_text().splitlines()
+    except OSError:
+        return None
+    return next((int(line.split()[1]) for line in lines if line.startswith("VmRSS:")), None)
+
+
+def _children(proc: Path) -> dict[int, list[int]]:
+    children: dict[int, list[int]] = {}
+    for entry in proc.iterdir():
+        if entry.name.isdigit():
+            children.setdefault(account_sessions._ppid(int(entry.name), proc), []).append(int(entry.name))
+    return children
+
+
+def agent_memory(proc: Path, roots: Collection[int]) -> tuple[int, int]:
+    if not roots:
+        return 0, 0
+    children = _children(proc)
+    trees = []
+    for root in roots:
+        own = _rss_kb(root, proc)
+        if own is None:
+            continue
+        tree = list(children.get(root, []))
+        for pid in tree:
+            tree.extend(children.get(pid, []))
+        trees.append(own + sum(_rss_kb(pid, proc) or 0 for pid in tree))
+    return (sum(trees) // len(trees) // 1024, len(trees)) if trees else (0, 0)
 
 
 def read_host(proc: Path = Path("/proc")) -> HostSample | None:
-    agents = len(account_sessions.live_sessions(proc)) + account_sessions.live_codex_sessions(proc)
+    sessions = account_sessions.live_sessions(proc)
+    agents = len(sessions) + account_sessions.live_codex_sessions(proc)
     cpus = os.cpu_count() or 1
     try:
         load1 = float((proc / "loadavg").read_text().split()[0])
-        available_mb = _mem_available_mb(proc)
-    except (OSError, ValueError, IndexError):
+        available_mb, swap_used_mb, swap_total_mb = _memory_mb(proc)
+        agent_mb, measured = agent_memory(proc, sessions)
+    except (OSError, ValueError, IndexError, KeyError):
         return None
-    return HostSample(load1=load1, cpus=cpus, available_mb=available_mb, agents=agents)
+    return HostSample(
+        load1=load1,
+        cpus=cpus,
+        available_mb=available_mb,
+        agents=agents,
+        swap_used_mb=swap_used_mb,
+        swap_total_mb=swap_total_mb,
+        agent_mb=agent_mb,
+        measured_agents=measured,
+    )
 
 
 def deployed(environ: Mapping[str, str]) -> bool:

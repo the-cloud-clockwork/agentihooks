@@ -230,7 +230,10 @@ def server_secret() -> str:
 
 
 def main() -> None:
-    from hooks import config  # noqa: F401
+    from scripts.swarm_ledger import ports
+
+    # Loading the hooks config reads the agentihooks env files this migration's settings come from.
+    ports.hooks().config  # noqa: B018
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
@@ -263,4 +266,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

@@ -310,6 +310,9 @@ fi
     assert sum(call.startswith("build ") for call in calls) == 1
     assert (sync / "redis:7").exists()
     assert (sync / "redis:7-alpine").exists()
+    assert {call.split()[1] for call in calls if call.startswith("tag ")} == {
+        f"public.ecr.aws/docker/library/{image}" for image in ("redis:7", "redis:7-alpine") if image != failure
+    }
 
 
 def dockerfile_bases():

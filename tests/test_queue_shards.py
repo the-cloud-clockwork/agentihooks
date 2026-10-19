@@ -179,17 +179,14 @@ def test_combined_queue_plan_refuses_more_jobs_than_the_runner_pool(capsys):
         for version in ("3.11", "3.12")
         for shard in range(1, 21)
     ]
-    first = json.dumps(plan[:20])[1:-1]
-    second = json.dumps(plan[20:])[1:-1]
-    main(["combine", "--plans", first, second])
-    assert "40 queue jobs" in capsys.readouterr().out
+    main(["combine", "--plans", json.dumps(plan[:15])[1:-1], json.dumps(plan[20:35])[1:-1]])
+    assert "30 queue jobs fit one wave of 30 runners" in capsys.readouterr().out
 
-    second = json.dumps([*plan[20:], {**plan[-1], "shard": 21, "total": 21}])[1:-1]
-    with pytest.raises(SystemExit, match="41 queue jobs exceed the pool of 40"):
-        main(["combine", "--plans", first, second])
+    with pytest.raises(SystemExit, match="31 queue jobs exceed the pool of 30"):
+        main(["combine", "--plans", json.dumps(plan[:16])[1:-1], json.dumps(plan[20:35])[1:-1]])
 
 
-def _overflowing_plan(tmp_path, seconds):
+def _overflowing_plan(tmp_path, seconds, totals=(16, 30)):
     root = tmp_path / "root"
     (root / "tests").mkdir(parents=True)
     for version in ("3.11", "3.12"):
@@ -200,7 +197,7 @@ def _overflowing_plan(tmp_path, seconds):
         (folder / ".test_durations").write_text(json.dumps(durations))
     output = tmp_path / "queue-plan.txt"
     lines = []
-    for version, total in (("3.11", 16), ("3.12", 30)):
+    for version, total in zip(("3.11", "3.12"), totals):
         legs = [
             {"python-version": version, "shard": s, "total": total, "predicted_seconds": 200.0}
             for s in range(1, total + 1)
@@ -220,14 +217,29 @@ def test_an_overflowing_queue_plan_is_capped_at_the_runner_pool(tmp_path, capsys
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     assert set(outputs) == {"queue_311", "queue_312"}
     plans = {key: json.loads("[" + value + "]") for key, value in outputs.items()}
-    assert [leg["shard"] for leg in plans["queue_311"]] == list(range(1, 15))
-    assert [leg["shard"] for leg in plans["queue_312"]] == list(range(1, 27))
-    assert {leg["total"] for leg in plans["queue_311"]} == {14}
-    assert {leg["total"] for leg in plans["queue_312"]} == {26}
+    assert [leg["shard"] for leg in plans["queue_311"]] == list(range(1, 11))
+    assert [leg["shard"] for leg in plans["queue_312"]] == list(range(1, 21))
+    assert {leg["total"] for leg in plans["queue_311"]} == {10}
+    assert {leg["total"] for leg in plans["queue_312"]} == {20}
     assert all(leg["predicted_seconds"] < STEP_SECONDS for plan in plans.values() for leg in plan)
     out = capsys.readouterr().out
-    assert "46 queue jobs exceed the pool of 40; capped Python 3.11 at 14 and Python 3.12 at 26 shards" in out
-    assert "40 queue jobs fit one wave of 40 runners" in out
+    assert "46 queue jobs exceed the pool of 30; capped Python 3.11 at 10 and Python 3.12 at 20 shards" in out
+    assert "30 queue jobs fit one wave of 30 runners" in out
+
+
+def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_path, capsys):
+    from tests.queue_shards import main
+
+    root, output = _overflowing_plan(tmp_path, 1.0, (20, 20))
+
+    main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
+
+    outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+    totals = {key: {leg["total"] for leg in json.loads("[" + value + "]")} for key, value in outputs.items()}
+    assert totals == {"queue_311": {15}, "queue_312": {15}}
+    assert "40 queue jobs exceed the pool of 30; capped Python 3.11 at 15 and Python 3.12 at 15 shards" in (
+        capsys.readouterr().out
+    )
 
 
 def test_a_capped_queue_plan_that_cannot_finish_in_the_step_timeout_refuses(tmp_path):
@@ -237,7 +249,7 @@ def test_a_capped_queue_plan_that_cannot_finish_in_the_step_timeout_refuses(tmp_
 
     root, output = _overflowing_plan(tmp_path, 400.0)
 
-    with pytest.raises(SystemExit, match="cannot fit 14 queue shards below the step timeout"):
+    with pytest.raises(SystemExit, match="cannot fit 10 queue shards below the step timeout"):
         main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
 
 

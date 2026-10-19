@@ -1,4 +1,7 @@
+import json
+import shlex
 from pathlib import Path
+from string import Template
 
 import yaml
 
@@ -97,6 +100,11 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
                 step["if"]
                 == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
             )
+        elif (
+            step.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))
+            or step.get("name") == "Install dependencies"
+        ):
+            assert step["if"] == f"{gated} && steps.suite.outputs.changed != 'true'", step
         else:
             assert step["if"] == gated, step
 
@@ -116,6 +124,13 @@ def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_modul
     changed = "steps.suite.outputs.changed == 'true'"
     assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
     assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
+    reused = steps[find_at + 1 : run_at]
+    later = steps[names.index("Reuse a green report when this head only adds tests to it") + 1 :]
+    for step in reused:
+        if "uses" in step:
+            assert next(other for other in later if other.get("uses") == step["uses"])["with"] == step["with"], step
+        else:
+            assert step["run"] == steps[names.index("Install dependencies")]["run"]
     assert not any(step.get("continue-on-error") for step in steps)
 
 
@@ -132,7 +147,7 @@ def _steps(job):
     return steps, [step.get("name") for step in steps]
 
 
-def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
+def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monkeypatch):
     jobs = _workflow()["jobs"]
     plan = jobs["plan"]
     assert plan["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
@@ -154,7 +169,43 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
     assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert sized["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE" --repository "$GITHUB_REPOSITORY"'
+    from scripts.ci_mutation import plan as planner
+    from tests.test_ci_mutation_plan import _project
+
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    command = shlex.split(Template(sized["run"]).substitute(BASE="chosen-base", GITHUB_REPOSITORY="org/repo"))
+    module = command.index("-m") + 1
+    assert command[module] == "scripts.ci_mutation.plan"
+    monkeypatch.setattr("sys.argv", command[module:])
+    calls = []
+
+    def bases(root, base, head, *args):
+        calls.append((root, base, head))
+        return ["resolved-base"]
+
+    def record(repository, *args):
+        calls.append(repository)
+        return None
+
+    monkeypatch.setattr(planner, "own_bases", bases)
+    monkeypatch.setattr(planner, "find_record", record)
+    monkeypatch.setattr(planner, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert planner.main() == 0
+    assert calls == [(tmp_path, "chosen-base", "HEAD"), "org/repo"]
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
+        "scripts/sample.py": ["tests/test_sample.py"]
+    }
+    assert dict(line.split("=", 1) for line in output.read_text().splitlines()) == {
+        "shards": "[0]",
+        "stats_parts": "[0]",
+        "bases": "resolved-base",
+        "changed": "1",
+        "browser": "false",
+    }
     assert jobs["stats"]["needs"] == "plan"
     assert jobs["stats"]["strategy"] == {
         "fail-fast": False,

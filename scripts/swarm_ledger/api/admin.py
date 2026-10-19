@@ -1,3 +1,5 @@
+from scripts.swarm_ledger import ports
+
 from . import resources, schemas
 from .errors import APIError
 from .services import Services
@@ -14,10 +16,11 @@ def layout(handler: object, services: Services, payload: dict | None) -> dict:
                 "type": "object",
                 "minProperties": 1,
                 "additionalProperties": False,
-                "properties": {key: {"type": "integer"} for key in fields},
+                "properties": {key: {"type": "number"} for key in fields},
             }
             for row, fields in services.ledger.layout_rows.items()
         }
+        properties.update(dict.fromkeys(services.ledger.layout_lists, {}))
         schemas.validate({"type": "object", "additionalProperties": False, "properties": properties}, payload)
         try:
             data = services.ledger.write_layout(payload)
@@ -86,7 +89,7 @@ def lifecycle(services: Services, principal: str, slug: str, payload: dict) -> d
     if principal and payload["action"] == "bin_closed":
         raise APIError(403, "forbidden", "Conditional binning needs the operator or controller credential")
     if "controller_epoch" in payload:
-        from scripts.swarm.store import SwarmError
+        SwarmError = ports.swarm().store.SwarmError
 
         try:
             services.ledger.authority.fence(slug, payload["controller_epoch"])

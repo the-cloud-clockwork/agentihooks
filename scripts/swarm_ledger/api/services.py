@@ -37,6 +37,7 @@ class LedgerService(Protocol):
     authority: Authority
     hub: object
     layout_rows: Mapping[str, Collection[str]]
+    layout_lists: Collection[str]
 
     def home_summaries(self) -> list[dict]: ...
 
@@ -68,6 +69,8 @@ class SwarmService(Protocol):
 
     def status(self, slug: str) -> dict | None: ...
 
+    def models(self) -> dict: ...
+
     def control(self, slug: str, argv: list[str], command: str = ...) -> tuple[dict | None, str]: ...
 
     def lifecycle(self, slug: str, body: dict, operator: bool) -> tuple[dict | None, str]: ...
@@ -80,6 +83,9 @@ class SwarmService(Protocol):
 
 
 class MediaService(Protocol):
+    media_store: object
+    artifact_store: object
+
     def resolve_media(self, slug: str, operations: list) -> None: ...
 
     def resolve_artifacts(self, slug: str, operations: list) -> None: ...

@@ -1,4 +1,5 @@
 import re
+from email.message import Message
 from types import SimpleNamespace
 
 import pytest
@@ -94,3 +95,65 @@ def test_an_unsafe_task_work_folder_answers_not_found():
 )
 def test_only_the_exact_task_work_folder_path_reads_the_folder(path, routed):
     assert bool(routes.WORKSPACE_RE.fullmatch(path)) is routed
+
+
+def get_request(path, command="GET", sent=None):
+    return SimpleNamespace(
+        headers={"Host": "h"},
+        path=f"/api/v1/ledgers/{SLUG}/{path}",
+        command=command,
+        exists=lambda slug: True,
+        send_media=lambda *args: sent.append(args),
+    )
+
+
+def test_file_reads_need_no_credential_and_come_from_their_own_store():
+    sent = []
+    anonymous = SimpleNamespace(caller=lambda headers, admin, slug: None, controller=lambda credential: False)
+    server = SimpleNamespace(
+        **{**vars(fake_server([])), "authority": anonymous, "ledger_media": "media", "ledger_artifacts": "artifacts"}
+    )
+    for kind in ("media", "artifacts"):
+        assert routes.dispatch(get_request(f"files/{kind}/a.png", sent=sent), as_services(server)) is None
+    assert sent == [(SLUG, "a.png", "media"), (SLUG, "a.png", "artifacts")]
+    with pytest.raises(APIError) as caught:
+        routes.dispatch(get_request("files/media/a.png", "DELETE", sent), as_services(server))
+    assert (caught.value.status, len(sent)) == (403, 2)
+
+
+def test_the_model_list_and_swarm_reads_answer_with_their_data(monkeypatch):
+    catalog = {"claude": [{"model": "opus"}], "codex": []}
+    seen = []
+    monkeypatch.setattr(
+        resources, "swarm_read", lambda status, path, query: seen.append((status, path, query)) or {"data": status}
+    )
+    monkeypatch.setattr(resources, "read", lambda state, path, query, cache: seen.append((path, query)) or {"data": []})
+    server = SimpleNamespace(
+        **{**vars(fake_server([])), "swarm_models": lambda: catalog, "swarm_status": lambda slug: {"slug": slug}}
+    )
+    models = routes.dispatch(get_request("swarm/models"), as_services(server))
+    assert models == {"data": catalog, "revision": resources.revision(catalog)}
+    assert routes.dispatch(get_request("swarm/agents?limit=5"), as_services(server)) == {"data": {"slug": SLUG}}
+    assert routes.dispatch(get_request("chat?limit=7"), as_services(server)) == {"data": []}
+    assert seen == [({"slug": SLUG}, "swarm/agents", {"limit": 5}), ("chat", {"limit": 7})]
+
+
+def test_only_a_put_to_a_page_write_reaches_the_page_handler():
+    written = []
+    server = SimpleNamespace(**{**vars(fake_server([])), "MAX_BODY": 100})
+
+    headers = Message()
+    headers["Host"] = "h"
+
+    def request(command, path):
+        return SimpleNamespace(
+            **{**vars(get_request(path, command)), "headers": headers},
+            put_ledger=lambda slug: written.append(("saves", slug)),
+            put_swarm=lambda slug: written.append(("swarm/controls", slug)),
+        )
+
+    routes.dispatch(request("PUT", "saves"), as_services(server))
+    routes.dispatch(request("PUT", "swarm/controls"), as_services(server))
+    with pytest.raises(APIError) as caught:
+        routes.dispatch(request("POST", "saves"), as_services(server))
+    assert (caught.value.status, written) == (415, [("saves", SLUG), ("swarm/controls", SLUG)])

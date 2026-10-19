@@ -5,6 +5,8 @@ Distinct from the Priorities panel, which holds operator decisions. `next` is an
 
 import re
 
+from scripts.swarm_ledger import ports
+
 RANKS = ("urgent", "high", "normal", "low")
 ALIASES = {"next": "urgent"}
 DEFAULT = "normal"
@@ -89,9 +91,9 @@ def quoted(rank, words) -> bool:
 
 
 def urgent_refusal(task: dict, doc: dict) -> str:
-    from scripts.swarm import claim_hold
     from scripts.swarm_ledger.repository import hierarchy
 
+    claim_hold = ports.swarm().claim_hold
     if task.get("rank") != "urgent" or task.get("state", "open") != "open":
         return ""
     why = claim_hold.phased(task, doc) or claim_hold.freezes(task, doc, hierarchy.project(doc)[0])
