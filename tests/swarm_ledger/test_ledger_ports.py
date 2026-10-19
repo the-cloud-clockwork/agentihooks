@@ -1,9 +1,9 @@
 from types import SimpleNamespace
 
 import pytest
-from scripts.swarm_ledger.adapters import hive, hooks, swarm
 
 from scripts.swarm_ledger import composition, ledger_tasks, ledger_verdict, plan_shape, ports
+from scripts.swarm_ledger.adapters import hive, hooks, swarm
 
 
 class Refused(Exception):
