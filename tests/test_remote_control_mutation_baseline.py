@@ -1,7 +1,9 @@
+import faulthandler
 import time
 from pathlib import Path
 
 import pytest
+from _pytest.faulthandler import fault_handler_stderr_fd_key
 
 from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.stats import SharedStats
@@ -11,6 +13,15 @@ from scripts.ci_mutation.stats import SharedStats
 pytestmark = pytest.mark.xdist_group("remote_control_mutation")
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "scripts/swarm/commands.py"
+DEADLINE = 120
+
+
+@pytest.fixture(autouse=True)
+def hung_test_dump_past_both_passes(request):
+    # The test that builds the baseline runs both mutmut passes, each already bounded by DEADLINE, which the suite's
+    # one minute dump would interrupt.
+    if float(request.config.getini("faulthandler_timeout") or 0):
+        faulthandler.dump_traceback_later(2 * DEADLINE + 10, file=request.config.stash[fault_handler_stderr_fd_key])
 
 
 @pytest.fixture(scope="module")
@@ -33,7 +44,7 @@ def baseline(baseline_cache, tmp_path_factory, monkeypatch):
         work = folder / "baseline"
         work.mkdir()
         monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
-        results, error = mutate_files(ROOT, work, selected, time.monotonic() + 120, (0, 1), stats)
+        results, error = mutate_files(ROOT, work, selected, time.monotonic() + DEADLINE, (0, 1), stats)
         baseline_cache.append((selected, stats, work, results, error))
     return baseline_cache[0]
 
@@ -51,7 +62,7 @@ def test_remote_control_statistics_baseline_feeds_mutant_grading(baseline, tmp_p
     grading = tmp_path / "grading"
     grading.mkdir()
     results, error = mutate_files(
-        ROOT, grading, selected, time.monotonic() + 120, (0, 1), SharedStats(stats.folder, stats.head)
+        ROOT, grading, selected, time.monotonic() + DEADLINE, (0, 1), SharedStats(stats.folder, stats.head)
     )
     assert error == "", (grading / "run.log").read_text()
     assert results[SOURCE]
