@@ -8,7 +8,6 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 DOWN = 5 * 60 * 1000
 ENGINEER = "engineer@a1b2c3-0001"
 DOC = {"tasks": [], "_meta": {"events": []}}

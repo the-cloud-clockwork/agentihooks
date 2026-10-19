@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 PR = "https://github.com/o/r/pull/9"
 
@@ -585,6 +584,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "dev workflow",
         "trace",
         "runtime storage",
+        "scheduled tick",
     }
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]

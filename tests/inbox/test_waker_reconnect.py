@@ -9,7 +9,7 @@ from scripts.inbox import wake, waker
 from scripts.inbox.store import InboxStore, now_ms
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.xdist_group("fakeredis"), pytest.mark.usefixtures("recovery_deadline")]
+pytestmark = pytest.mark.usefixtures("recovery_deadline")
 
 
 @pytest.fixture

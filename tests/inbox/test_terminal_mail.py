@@ -7,7 +7,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.control_notifications import notify
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

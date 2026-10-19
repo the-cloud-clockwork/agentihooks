@@ -9,7 +9,7 @@ from hooks.observability import agent_trace, correlation, otel, signals
 from tests.observability.test_agent_trace import ENTRIES, _Exporter, _identity, _transcript
 from tests.swarm_ledger import legacy_page
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 P = correlation.PREFIX
 TOKEN_SENTINEL = "SENTINEL-not-a-real-token-value"

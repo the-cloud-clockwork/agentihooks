@@ -94,6 +94,7 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
 .plan-title { font-size: var(--fs-item); font-weight: 700; }
 .plan-count { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--accent); }
 .plan-phases { margin: 8px 0 0 22px; }
+#phases > li:not(.plan), .plan-phases > li { content-visibility: auto; contain-intrinsic-size: auto 120px; }
 .phase-slices { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
 .phase-slices-label { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
 .task-proof dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0 0; }
@@ -657,7 +658,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #quota-table .lbl.open { color: var(--positive); }
 #quota-table .lbl.closed { color: var(--destructive); }
 #quota-table .lbl.drain { color: var(--warn); }
-.sw-promoted, .sw-transport { display: inline-flex; gap: 8px; }
+.sw-promoted, .sw-transport { display: inline; }
+#agents-table .sw-sub { overflow: hidden; text-overflow: ellipsis; }
+#agents-table .sw-id { display: block; max-width: 100%; }
 .lbl.on::before, .lbl.off::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 .lbl.master { letter-spacing: .06em; }
 .lbl.master::before { content: ""; display: inline-block; margin-right: 6px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 6px solid currentColor; }

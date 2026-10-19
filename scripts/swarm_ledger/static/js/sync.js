@@ -1,4 +1,4 @@
-import { OFFLINE, PAGE, SYNC_COOLDOWN_MS } from "./config.js";
+import { OFFLINE, PAGE } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
 import { readMetadata, writeLedger } from "./api.js";
 import { applyChecks, applyOp, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
@@ -40,7 +40,7 @@ function statsCheckText(check) {
 
 function cooldown(op, kind) {
   const last = lastSync(kind);
-  const wait = SYNC_COOLDOWN_MS - (Date.now() - Math.max(sentAt[op], last ? last.at : 0));
+  const wait = ((meta.limits || {}).sync_cooldown_ms || 0) - (Date.now() - Math.max(sentAt[op], last ? last.at : 0));
   return wait > 0 ? `again in ${Math.floor(wait / 60000)}m ${Math.ceil((wait % 60000) / 1000)}s` : "";
 }
 
@@ -105,9 +105,13 @@ function applyServer(server) {
   for (const op of ops) applyOp(doc, op);
   applyChecks(doc);
   banner([meta.seed_error]);
-  render();
-  lsWrite();
-  firstState();
+  const appliedRev = rev;
+  Promise.resolve(render(null, true)).then(() => {
+    if (rev !== appliedRev) return;
+    if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
+    lsWrite();
+    firstState();
+  });
 }
 
 export async function flush(unloading) {

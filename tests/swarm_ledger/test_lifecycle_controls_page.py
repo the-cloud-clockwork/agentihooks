@@ -138,7 +138,7 @@ class LostAck(Page):
 
     def route(self, route, html):
         request = route.request
-        if "/api/swarm/" in request.url and request.method == "PUT" and self.drop:
+        if "/swarm/" in request.url and request.method == "PUT" and self.drop:
             self.drop -= 1
             self.puts.append(json.loads(request.post_data))
             return route.abort()
@@ -189,7 +189,7 @@ def test_a_refused_control_is_not_held_for_reconciling(open_page):
     payload = copy.deepcopy(with_lifecycle())
     page = open_page(payload)
     page.tab.route(
-        "**/api/swarm/**",
+        "**/swarm/controls",
         lambda route: (
             route.fulfill(status=409, body="the page is stale: this agent was replaced, finished or moved task")
             if route.request.method == "PUT"

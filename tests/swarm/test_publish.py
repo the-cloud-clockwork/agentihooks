@@ -8,7 +8,7 @@ from hooks.context.prepush_guard import check_prepush
 from hooks.hook_manager import BlockAction
 from scripts.swarm.store import AgentRecord
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def git(root, *args):

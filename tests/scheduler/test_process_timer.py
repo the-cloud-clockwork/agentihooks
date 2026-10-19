@@ -6,7 +6,7 @@ import pytest
 from scripts.scheduler import process_timer
 from scripts.scheduler.core import Scheduler
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -195,12 +195,13 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     assert not redis.exists(timers[0].key)
 
 
-def test_host_scheduler_keys_remain_unchanged_without_member_identity(redis, monkeypatch):
+def test_controller_namespace_changes_only_in_hosted_mode(redis, monkeypatch):
     from hooks._redis import redis_key
+    from scripts.swarm.keyspace import ROOT
 
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "cloud")
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
-    assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
+    assert Scheduler(redis, machine="worker").key("entries") == f"{ROOT}:scheduler:worker:entries"
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT")
     assert Scheduler(redis, machine="worker").key("entries") == redis_key("scheduler", "worker:entries")
 
@@ -238,6 +239,20 @@ def test_process_timer_records_are_bounded_across_repeated_waits(redis, monkeypa
         assert redis.hlen(scheduler.key("entries")) == 0
         assert not redis.exists(timer.key)
         assert not redis.exists(scheduler.key("retired"))
+
+
+def test_a_scheduler_that_cannot_start_leaves_no_timer_behind(redis, monkeypatch):
+    def unwritable():
+        raise PermissionError("cache folder")
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", unwritable)
+    scheduler = Scheduler(redis)
+    with pytest.raises(PermissionError):
+        process_timer.Timer(5, redis=redis)
+    assert len(redis.hkeys(scheduler.key("retired"))) == 1
+    scheduler.run_due()
+    assert redis.hlen(scheduler.key("entries")) == 0
+    assert not redis.keys(scheduler.key("wake:*"))
 
 
 def test_delivered_wake_survives_a_paused_consumer(redis, monkeypatch):

@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.x\u01c1InboxStore\u01c1return_to_pool__mutmut_46:87428ed6bb235a22410aa95dac8e489888555c339d41ebcc3627c3df14eb470b": {
+    "reader": "Standards /root/standards_reader",
+    "reason": "The fallback is compared only with a truthy expected_receiver string; both None and empty string fail equality and return None before any write."
+  }
+}

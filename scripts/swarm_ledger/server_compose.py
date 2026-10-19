@@ -4,8 +4,7 @@ import subprocess
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.swarm import stack_env, stack_init
-from scripts.swarm_ledger import ledger_link
+from scripts.swarm_ledger import ledger_link, ports
 
 
 def primary(root: Path) -> Path:
@@ -31,7 +30,8 @@ def adopted(folder: Path, environ: dict = os.environ) -> bool:
 
 
 def adoption(environ: dict = os.environ) -> str:
-    return stack_env.read_env(stack_init.stack_home(environ) / ".env").get("SWARM_ADOPT_LEDGER_DIR", "")
+    swarm = ports.swarm()
+    return swarm.stack_env.read_env(swarm.stack_init.stack_home(environ) / ".env").get("SWARM_ADOPT_LEDGER_DIR", "")
 
 
 def used(
@@ -50,6 +50,7 @@ def used(
 
 def _compose(action: list[str], folder: Path, environ: dict, run: Run) -> str:
     if adopted(folder, environ):
+        stack_init = ports.swarm().stack_init
         argv, env = stack_init.compose(stack_init.stack_home(environ), *action, ADOPTED_SERVICE), environ
     elif recorded := adoption(environ):
         return f"the swarm stack adopts {recorded}, not {folder}; the legacy ledger service stays down"

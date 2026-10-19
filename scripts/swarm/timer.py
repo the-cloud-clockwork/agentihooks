@@ -1,10 +1,13 @@
 """The swarm user services and the scheduler cron that runs `agentihooks swarm tick` every minute."""
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 UNIT = "agentihooks-swarm"
@@ -12,8 +15,14 @@ WAKER = "agentihooks-inbox-waker"
 DROPPED = ("agentihooks-alert-intake.service",)
 PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
+TICK_WATCH = "agentihooks-tick-watch"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
+DRAIN_S = 30
+KILL_WAIT_S = 10
+STOP_TIMEOUT_S = 120
+CGROUP_FILE = Path("/proc/self/cgroup")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
 def units(binary):
@@ -48,11 +57,21 @@ def units(binary):
         "[Timer]\nOnBootSec=15s\nOnUnitActiveSec=15s\nAccuracySec=1s\n\n"
         "[Install]\nWantedBy=timers.target\n"
     )
+    watch = (
+        "[Unit]\nDescription=agentihooks stale tick watcher, apart from the tick it watches\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm tick-watch\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
     return {
         f"{WAITS}.service": wait_service,
         f"{WAITS}.timer": wait_timer,
         f"{WAKER}.service": waker,
         f"{PROBER}.service": prober,
+        f"{TICK_WATCH}.service": watch,
     }
 
 
@@ -60,8 +79,91 @@ def _current(path, text):
     return path.is_file() and path.read_text() == text
 
 
+def tick_units(binary):
+    service = (
+        "[Unit]\nDescription=agentihooks swarm tick\n\n"
+        "[Service]\nType=oneshot\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm tick\n'
+        "TimeoutStartSec=540\nKillMode=process\n"
+    )
+    timer = (
+        "[Unit]\nDescription=agentihooks swarm tick every minute\n\n"
+        "[Timer]\nOnBootSec=1min\nOnUnitActiveSec=60s\nAccuracySec=5s\n\n"
+        "[Install]\nWantedBy=timers.target\n"
+    )
+    return {f"{UNIT}.service": service, f"{UNIT}.timer": timer}
+
+
 def _services(names):
-    return [name for name in names if name.endswith(".service") and name != f"{WAITS}.service"]
+    return [name for name in names if name.endswith(".service") and name not in (f"{UNIT}.service", f"{WAITS}.service")]
+
+
+def _left(run):
+    shown = run(
+        ["systemctl", "--user", "show", "-p", "ControlGroup", "-p", "TasksCurrent", f"{UNIT}.service"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if shown.returncode:
+        return "unknown"
+    props = dict(line.partition("=")[::2] for line in shown.stdout.splitlines())
+    return "0" if not props.get("ControlGroup") else props.get("TasksCurrent", "unknown")
+
+
+def _drain(run):
+    stop = ["systemctl", "--user", "stop", f"{UNIT}.service"]
+    run(stop, capture_output=True, text=True, timeout=STOP_TIMEOUT_S, check=False)
+    for name, wait_s in (("SIGTERM", DRAIN_S), ("SIGKILL", KILL_WAIT_S)):
+        if _left(run) == "0":
+            return ""
+        kill = ["systemctl", "--user", "kill", "--kill-who=all", f"--signal={name}", f"{UNIT}.service"]
+        run(kill, capture_output=True, text=True, timeout=30, check=False)
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if _left(run) == "0":
+                return ""
+            time.sleep(1)
+    left = _left(run)
+    return "" if left == "0" else left
+
+
+def _own_group():
+    try:
+        lines = CGROUP_FILE.read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        _, controllers, path = line.split(":", 2)
+        if path.endswith(f"/{UNIT}.service") and controllers in ("", "name=systemd"):
+            return CGROUP_ROOT / ("systemd" if controllers else "") / path.lstrip("/") / "cgroup.procs"
+    return None
+
+
+def _others(procs):
+    from scripts.swarm import tick_reaper
+
+    pids = {int(pid) for pid in procs.read_text().split()}
+    return {pid for pid in pids - tick_reaper.ancestors() if tick_reaper.alive(pid)}
+
+
+def _drain_inside(procs):
+    try:
+        for number, wait_s in ((signal.SIGTERM, DRAIN_S), (signal.SIGKILL, KILL_WAIT_S)):
+            for pid in _others(procs):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, number)
+            deadline = time.monotonic() + wait_s
+            while (left := _others(procs)) and time.monotonic() < deadline:
+                time.sleep(1)
+            if not left:
+                return ""
+    except OSError:
+        return "unknown"
+    return str(len(left))
 
 
 def _retire(unit_dir, run):
@@ -72,26 +174,56 @@ def _retire(unit_dir, run):
     if run(disable, capture_output=True, text=True, timeout=30, check=False).returncode:
         print(f"the {UNIT} timer could not be disabled; its unit files stay until a later pass", file=sys.stderr)
         return False
+    procs = _own_group()
+    if left := _drain_inside(procs) if procs else _drain(run):
+        print(
+            f"the {UNIT} service group did not empty ({left} processes left); its unit files stay until a later pass",
+            file=sys.stderr,
+        )
+        return False
     for path in present:
         path.unlink()
     return True
+
+
+def supervise():
+    from scripts.scheduler.service import ensure_running
+    from scripts.swarm.store import redis_url
+
+    return ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
 
 
 def schedule():
     from redis.exceptions import RedisError
 
     from scripts.scheduler.core import Scheduler
-    from scripts.scheduler.service import ensure_running
     from scripts.swarm import scheduled_tick
-    from scripts.swarm.store import redis_client, redis_url
+    from scripts.swarm.store import redis_client
 
     try:
         scheduled_tick.ensure(Scheduler(redis_client()))
     except RedisError as exc:
         print(f"the scheduled swarm tick could not be registered: {type(exc).__name__}: {exc}", file=sys.stderr)
         return False
-    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
+    supervise()
     return True
+
+
+def undelivered():
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import redis_client
+
+    return scheduled_tick.undelivered(Scheduler(redis_client()), _roots()[1], time.time())
+
+
+def _kept():
+    from redis.exceptions import RedisError
+
+    try:
+        return undelivered()
+    except RedisError as exc:
+        return f"the swarm tick delivery could not be read: {type(exc).__name__}: {exc}"
 
 
 def _worktree_run(unit_dir):
@@ -127,7 +259,13 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
-    changed, expected = _retire(unit_dir, run), units(binary)
+    kept = _kept()
+    expected = units(binary)
+    if kept:
+        print(f"the {UNIT} timer stays: {kept}", file=sys.stderr)
+        changed, expected = False, {**expected, **tick_units(binary)}
+    else:
+        changed = _retire(unit_dir, run)
     for name, text in expected.items():
         path = unit_dir / name
         if not _current(path, text):
@@ -148,10 +286,22 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "daemon-reload"], capture_output=True, text=True, timeout=30, check=False)
     procs = [
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
-        for name in [*_services(expected), f"{WAITS}.timer"]
+        for name in [*_services(expected), f"{WAITS}.timer", *([f"{UNIT}.timer"] if kept else [])]
     ]
-    scheduled = schedule()
-    return scheduled and all(proc.returncode == 0 for proc in procs)
+    return schedule() and all(proc.returncode == 0 for proc in procs)
+
+
+def guard(binary, unit_dir=None, run=subprocess.run):
+    unit_dir = unit_dir or UNIT_DIR
+    supervise()
+    if not _kept():
+        return True
+    enabled = ["systemctl", "--user", "is-enabled", "--quiet", f"{UNIT}.timer"]
+    if all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()) and not (
+        run(enabled, capture_output=True, text=True, timeout=30).returncode
+    ):
+        return True
+    return ensure(binary, unit_dir, run)
 
 
 def reconcile(binary, unit_dir=None, run=subprocess.run):

@@ -10,7 +10,7 @@ from scripts.swarm.host_budget import HostSample
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "scratch"
 NOW = 1_800_000_000_000
 TASK = {
@@ -288,6 +288,14 @@ def test_host_sample_and_quota_unknown_values_are_explicit():
         "week_known": 1,
         "sessions": 1,
     }
+
+
+def test_host_sample_carries_swap_in_use_and_the_measured_agent_figure():
+    sample = HostSample(4.0, 2, 1024, 3, swap_used_mb=3700, swap_total_mb=4096, agent_mb=430, measured_agents=2)
+    host = metrics_swarm.host_row(SLUG, NOW, sample, {})
+
+    assert [host[key] for key in ("swap_used_mb", "swap_total_mb", "agent_mb")] == [3700, 4096, 430]
+    assert {"swap_used_mb", "swap_total_mb", "agent_mb"} <= {column for column, _ in metrics_swarm.HOST.columns}
 
 
 def test_classifier_calls_are_host_scoped_with_stable_source_ids():

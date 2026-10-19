@@ -7,8 +7,6 @@ from scripts.swarm import cli, idle, mutation_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RUN = "https://github.com/org/repo/actions/runs/123"
 ENDPOINT = "repos/org/repo/actions/runs/123"
 JOBS = f"{ENDPOINT}/jobs?per_page=100"
@@ -273,6 +271,49 @@ def test_the_wait_command_accepts_an_empty_swarm_list(monkeypatch, capsys):
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
     cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
     assert capsys.readouterr() == ("", "")
+
+
+def test_every_wait_pass_guards_the_scheduled_tick(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    guarded = []
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: guarded.append(binary) or True)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert guarded == ["/installed/bin/agentihooks"] * 2
+    assert capsys.readouterr() == ("", "")
+
+
+def test_a_failed_tick_guard_is_logged_and_the_wait_pass_goes_on(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    def broken(binary):
+        raise OSError("no systemctl")
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", broken)
+    monkeypatch.setattr(cli, "run_waits", lambda store, slug: ["wait checked"])
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: ["sw"]), Namespace())
+    output = capsys.readouterr()
+    assert output.out == "sw: wait checked\n"
+    assert output.err == "the scheduled swarm tick guard failed: OSError: no systemctl\n"
+
+
+def test_a_guard_that_cannot_enable_the_tick_timer_warns(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: False)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert capsys.readouterr() == (
+        "",
+        "warning: the scheduled swarm tick guard could not enable the swarm tick timer\n",
+    )
 
 
 def test_the_wait_command_refuses_a_run_outside_the_install(monkeypatch):

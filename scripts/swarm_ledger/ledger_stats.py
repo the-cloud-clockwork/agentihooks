@@ -7,7 +7,7 @@ import math
 import statistics
 from typing import TYPE_CHECKING
 
-from scripts.swarm import freeze
+from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.repository import hierarchy
 
 if TYPE_CHECKING:
@@ -124,6 +124,7 @@ def is_stale(shown, computed):
 
 def frozen(doc: dict, pending: dict, inputs: dict) -> set:
     graph, fix = hierarchy.project(doc)[0], inputs.get("fix_phase")
+    freeze = ports.swarm().freeze
     seen = {**doc, freeze.WATCHED: inputs["watched"]} if inputs.get("watched") else doc
     held = {tid for tid, t in pending.items() if freeze.held(t, seen, graph, fix)}
     waiting = {tid: t for tid, t in pending.items() if t.get("state") == "open"}

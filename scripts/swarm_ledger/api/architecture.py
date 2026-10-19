@@ -1,15 +1,15 @@
 from collections.abc import Mapping
 from pathlib import Path
-from types import ModuleType
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
-from scripts.swarm_v2 import architecture as records
-from scripts.swarm_v2 import operator_auth
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
+from .services import Services
 
+records, operator_auth = ports.swarm().architecture, ports.swarm().operator_auth
 ROOT = Path(records.__file__).resolve().parents[2]
 RECORD_ENV = "AGENTIHOOKS_ARCHITECTURE_RECORD"
 INVENTORY_ENV = "AGENTIHOOKS_ARCHITECTURE_INVENTORY"
@@ -61,18 +61,18 @@ def view(environ: Mapping[str, str], key: Ed25519PublicKey | None = None) -> dic
     return {"data": data, "revision": resources.revision(data)}
 
 
-def operator_transport(handler: object, server: ModuleType, slug: str, principal: str) -> dict:
+def operator_transport(handler: object, services: Services, slug: str, principal: str) -> dict:
     credential = handler.headers.get("X-Ledger-Token")
-    authenticate = operator_auth.authenticator(server.repository.token)
+    authenticate = operator_auth.authenticator(services.repository.token)
     if principal or authenticate(slug, credential) is None:
         raise APIError(403, "forbidden", "Architecture changes need the operator")
     return {"slug": slug, "credential": credential, "authenticate": authenticate}
 
 
 def act(
-    handler: object, server: ModuleType, slug: str, principal: str, payload: dict, environ: Mapping[str, str]
+    handler: object, services: Services, slug: str, principal: str, payload: dict, environ: Mapping[str, str]
 ) -> dict:
-    transport = operator_transport(handler, server, slug, principal)
+    transport = operator_transport(handler, services, slug, principal)
     schemas.validate(ACTION, payload)
     record_path, inventory_path = paths(environ)
     try:

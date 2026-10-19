@@ -446,6 +446,15 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
     monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "undelivered", lambda: "")
+    monkeypatch.setattr(timer, "guard", lambda binary: True)
+
+
+@pytest.fixture(autouse=True)
+def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "no-proc")
 
 
 @pytest.fixture(autouse=True)

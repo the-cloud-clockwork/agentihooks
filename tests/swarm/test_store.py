@@ -6,8 +6,6 @@ import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -386,6 +384,32 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
 
 
+def test_the_swap_use_share_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FULL_SHARE
+
+    store.create(config(swap_full_share=0.75))
+    assert store.config("smoke").swap_full_share == 0.75
+    assert store.update("smoke", swap_full_share=1).swap_full_share == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_full_share")
+    assert store.config("smoke").swap_full_share == DEFAULT_SWAP_FULL_SHARE == 0.9
+
+
+def test_the_swap_floor_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FLOOR_MB
+
+    store.create(config(swap_floor_mb=3000))
+    assert store.config("smoke").swap_floor_mb == 3000
+    assert store.update("smoke", swap_floor_mb=1).swap_floor_mb == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_floor_mb")
+    assert store.config("smoke").swap_floor_mb == DEFAULT_SWAP_FLOOR_MB == 4096
+
+
+def test_create_refuses_a_swap_use_share_outside_zero_to_one(store):
+    with pytest.raises(SwarmError) as caught:
+        store.create(config(swap_full_share=1.5))
+    assert str(caught.value) == "swap full share must be above 0 and at most 1"
+
+
 def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
     store.create(config(api_url="https://swarm.example.test:8443"))
     assert store.config("smoke").api_url == "https://swarm.example.test:8443"
@@ -406,6 +430,13 @@ def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
         {"load_low": True},
         {"load_high": True},
         {"load_high": "2"},
+        {"swap_full_share": 0},
+        {"swap_full_share": 1.01},
+        {"swap_full_share": True},
+        {"swap_full_share": "0.5"},
+        {"swap_floor_mb": 0},
+        {"swap_floor_mb": 0.5},
+        {"swap_floor_mb": True},
     ],
 )
 def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):

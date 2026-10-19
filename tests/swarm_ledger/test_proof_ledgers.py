@@ -15,7 +15,6 @@ from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 repository = default_repository()
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 live = _authority_live
 CONTENT = {"title": "Anton launch proof", "phases": [{"title": "Launch", "description": "One worker on Anton"}]}
@@ -175,7 +174,10 @@ def client_env(live, credential, task):
 
 def test_the_remote_client_creates_and_removes_a_proof_ledger_with_the_controller_credential(live, credential):
     environ = client_env(live, credential, "tclient")
-    with patch.object(proof_ledger.urllib.request, "urlopen", wraps=urllib.request.urlopen) as opened:
+    with (
+        patch.object(proof_ledger.ledger_link, "transport", return_value={}),
+        patch.object(proof_ledger.urllib.request, "urlopen", wraps=urllib.request.urlopen) as opened,
+    ):
         assert proof_ledger.create(CONTENT, environ) == {"slug": "proof-323133-tclient-1", "created": True}
     assert opened.call_args.kwargs == {"timeout": 10}
     removed = proof_ledger.remove("proof-323133-tclient-1", environ)

@@ -4,21 +4,17 @@ import sys
 import urllib.error
 import uuid
 
-import pytest
-
-from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
-from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 import chat_ledger  # noqa: E402
 import ledger_hook  # noqa: E402
+import pytest
 
 from scripts.swarm.ledger_client import LedgerClient  # noqa: E402
 from scripts.swarm_ledger import chat_ledger as chat_ledger_module  # noqa: E402, F401
 from scripts.swarm_ledger import ledger as ledger_module  # noqa: E402
 from scripts.swarm_ledger import ledger_hook as ledger_hook_module  # noqa: E402, F401
 from scripts.swarm_ledger.api import client as api_client  # noqa: E402
+from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
+from tests.swarm_ledger.test_ledger_authority import SLUG, cli_ledger, server
 
 
 @pytest.fixture
@@ -288,7 +284,7 @@ def test_a_refusal_without_details_keeps_its_body(code, body):
 def test_the_client_timeout_reaches_the_transport(monkeypatch):
     seen = []
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         seen.append(timeout)
         return io.BytesIO(b'{"revision": "r"}')
 

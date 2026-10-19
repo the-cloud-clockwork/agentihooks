@@ -7,8 +7,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import quota_notice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 HURRY = "Your account has fifteen percent or less quota left. Finish the current step and push."
 
 

@@ -11,7 +11,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 DOC = "# Handoff v2\n## Next\nRead the saved proof.\n## Read first\nNone\n"
 
 

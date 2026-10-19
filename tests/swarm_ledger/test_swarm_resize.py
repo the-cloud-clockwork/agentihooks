@@ -191,7 +191,7 @@ def test_local_storage_paints_the_layout_while_the_server_is_unreachable(visit):
     page.drag("height", "handoff-box", dy=50)
     saved(("handoff-box",), page)
     height = page.box("handoff-box")["height"]
-    page.tab.route("**/api/layout", lambda route: route.abort())
+    page.tab.route("**/api/v1/layout", lambda route: route.abort())
     page.reload()
     assert page.box("handoff-box")["height"] == pytest.approx(height, abs=1)
 
@@ -276,11 +276,11 @@ def test_phone_width_stacks_the_panels_hides_the_handles_and_ignores_saved_sizes
     assert page.stored() == layout.read()
 
 
-def saved_columns(key, timeout=5.0):
+def saved_columns(key, timeout=5.0, settled=lambda widths: True):
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         found = layout.read().get("columns", {}).get(key)
-        if found:
+        if found and settled(found):
             return found
         time.sleep(0.05)
     raise AssertionError(f"no saved widths for {key}: {layout.read()}")
@@ -302,7 +302,7 @@ def test_a_column_grip_drags_its_width_and_the_width_survives_a_reload(visit):
     page.tab.mouse.move(x + 40, y)
     page.tab.mouse.move(x + 80, y)
     page.tab.mouse.up()
-    widths = saved_columns("health-table-7")
+    widths = saved_columns("health-table-7", settled=lambda found: abs(found[0] - (before + 80)) <= 2)
     assert abs(widths[0] - (before + 80)) <= 2
     page.reload()
     assert abs(column_width(page, "health-table") - widths[0]) <= 1
@@ -352,7 +352,7 @@ def test_home_columns_drag_and_step_and_keep_their_widths(browser, base):
         tab.mouse.up()
         grip.focus()
         tab.keyboard.press("ArrowLeft")
-        widths = saved_columns("home")
+        widths = saved_columns("home", settled=lambda found: abs(found[2] - (before[2] - 116)) <= 2)
         assert abs(widths[2] - (before[2] - 116)) <= 2
         assert widths[:2] == [round(w) for w in before[:2]]
         tab.locator(".sort[data-sort=kind]").click()

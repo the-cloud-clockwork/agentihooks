@@ -10,7 +10,7 @@ from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
 from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 _fixture = env
 
 
@@ -341,7 +341,7 @@ def test_replay_records_application_and_notifies_the_displaced_owner(priority, m
     monkeypatch.setattr(
         queue_priority,
         "InboxStore",
-        lambda redis: SimpleNamespace(send=lambda *args: sent.append(args)),
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
     )
     assert cli.main(["sw", "merge", "priority", URL]) == 0
     capsys.readouterr()
@@ -363,6 +363,7 @@ def test_replay_records_application_and_notifies_the_displaced_owner(priority, m
             "engineer@a1b2c3-0001",
             "ci@owner",
             f"Your pull request {URL[:-1]}2 was requeued in its original order after priority request {URL}.",
+            {"fyi": True},
         )
     ]
     assert records[-1] == (

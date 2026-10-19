@@ -10,7 +10,7 @@ from tests.codex_session.test_supervisor import root as root
 from tests.codex_session.test_supervisor import server as server
 from tests.codex_session.test_supervisor import store as store
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_launch_storage_does_not_grow_with_canonical_rollouts(store, server, root, tmp_path, monkeypatch):

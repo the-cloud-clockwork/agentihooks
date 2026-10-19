@@ -8,8 +8,6 @@ from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import new_ledger
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "talk-2026-01-01"
 ENG, CI, MASTER = "engineer@abcdef-0001", "ci@abcdef-0002", "master@abcdef-0003"
 

@@ -11,8 +11,6 @@ from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _resuming
 from tests.swarm.test_tick import FakeRuntime, tasks
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -62,7 +60,7 @@ def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypat
     assert reopened.generation == original.generation
     assert reopened.task == original.task
     assert reopened.pane_id == "reopened:pane"
-    assert reopened.started_at == STARTUP_GRACE_MS + 2
+    assert reopened.started_at == original.started_at
     assert reopened.launched_at == STARTUP_GRACE_MS + 2
     assert reopened.idle_ticks == 0
     assert (reopened.account, reopened.model, reopened.effort) == (original.account, original.model, original.effort)
@@ -287,6 +285,77 @@ def prepared_recovery(store):
     store.put_agent("sw", agent)
     runtime.live.discard(agent.name)
     return ledger, runtime, agent
+
+
+def test_recorded_legacy_recovery_keeps_telemetry_attributed(store, monkeypatch):
+    from dataclasses import asdict
+
+    from scripts.doctor import registry, traces
+    from scripts.swarm import dead_resume
+    from scripts.swarm.store import AgentRecord
+
+    task = "doc-c688728d8ef70155"
+    ledger, runtime = tasks((task, "eng")), ResumingRuntime()
+    agent = AgentRecord(
+        name="engineer@323133-2021",
+        lane="eng",
+        task=task,
+        pane_id="w4V:pEC",
+        harness="claude",
+        started_at=1792395207377,
+        launched_at=1792395275330,
+        seat="eng-1@rig-grade-swarm",
+        conversation_id="9a2f0f72-e3c7-4613-9dde-637079237333",
+        profile="documentation",
+    )
+    ledger.rows[task].update(state="claimed", claimed_by=agent.name)
+    store.put_agent("sw", agent)
+    store.seats.occupy(agent.seat, agent.name, agent.started_at)
+    monkeypatch.setattr(context_recycle, "_used", lambda session: 240_000)
+
+    assert dead_resume.reopen("sw", store, ledger, runtime, agent, 1792397325121)
+
+    [recovered] = store.agents("sw")
+    [binding] = registry.bindings([asdict(recovered)])
+    binding.update(
+        read=True,
+        local=None,
+        remote={"observations": 1},
+        traces=[
+            {
+                "id": "ea8dca04fa7bb6b6ff79e6b6fb8152a4",
+                "session_id": "9a2f0f72-e3c7-4613-9dde-637079237333",
+                "life": "engineer@323133-2021#1792395207377",
+                "seat": "eng-1@rig-grade-swarm",
+                "task": "doc-c688728d8ef70155",
+                "harness": "claude",
+                "profile": "documentation",
+            }
+        ],
+    )
+    record = {"now_ms": 1792398922072, "active": [binding]}
+    assert binding["life"] == "engineer@323133-2021#1792395207377"
+    assert traces.active(record, traces.Limits()) == []
+    binding.update(life="engineer@323133-2021#1792397325121", started_at=1792397325121)
+    [finding] = traces.active(record, traces.Limits())
+    assert finding.id == (
+        "telemetry-misattributed/engineer@323133-2021.1792397325121.life=engineer@323133-2021#1792395207377"
+    )
+    assert finding.measure == 1
+
+
+def test_a_fresh_conversation_starts_a_new_life(store):
+    ledger, runtime, original = prepared_recovery(store)
+    original = replace(original, conversation_id="")
+    store.put_agent("sw", original)
+
+    tick_module.tick("sw", store, ledger, runtime, STARTUP_GRACE_MS + 2)
+
+    fresh = next(agent for agent in store.agents("sw") if agent.lane == "eng")
+    assert runtime.resumed == []
+    assert fresh.name != original.name
+    assert fresh.started_at == STARTUP_GRACE_MS + 2
+    assert fresh.started_at != original.started_at
 
 
 def test_dead_retiring_agent_retries_retirement(store, monkeypatch):

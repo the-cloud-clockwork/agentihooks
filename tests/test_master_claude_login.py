@@ -539,12 +539,12 @@ def test_prepare_claims_above_the_stored_epoch_builds_restores_and_keeps(ah, ren
     monkeypatch.setattr(login, "stored", lambda bao: {"epoch": "5"} if bao == "bao" else {})
     monkeypatch.setattr(login, "restore", lambda copy, target: calls.append(("restore", copy, target)))
     monkeypatch.setattr(login, "keep", lambda bao, target, epoch: calls.append(("keep", bao, target, epoch)))
-    monkeypatch.setattr(binding, "rehome", lambda report, home: calls.append(("rehome", report, home)))
+    monkeypatch.setattr(binding, "rehome", lambda report, home, shared: calls.append(("rehome", report, home, shared)))
     environ = _environ(rendered, OPENBAO_URL="u", AGENTIHOOKS_PROFILE_REPORT="/run/report")
     target, found = login.prepare(environ, tmp_path)
     assert (target, found) == (login.home(), "masteratexample_com")
     assert calls == [
-        ("rehome", Path("/run/report"), target),
+        ("rehome", Path("/run/report"), target, False),
         ("restore", {"epoch": "5"}, target),
         ("keep", "bao", target, 6),
     ]
