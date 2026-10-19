@@ -198,6 +198,7 @@ def test_a_controller_deployment_ticks_its_swarm_on_its_own_ledger_link(store, m
     monkeypatch.setattr(commands, "hive_id", lambda: "kind")
     monkeypatch.setenv("LEDGER_URL", "https://ledger.kind.test:8765")
     monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setattr(ledger, "BASE", "")
     monkeypatch.setattr(cli.outbox, "flush", lambda *_: None)
     acquired = []
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append((slug, ledger.base(slug))))
