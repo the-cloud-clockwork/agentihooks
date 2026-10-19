@@ -46,7 +46,7 @@ def test_install_writes_the_certificate_from_openbao(tmp_path, cert):
 
     said = ledger_ca.install(bao(tmp_path), opener(answer, seen))
 
-    assert said == f"ledger CA: wrote {tmp_path / 'ledger-ca.pem'} from OpenBao k8s/agentihooks-swarm-ledger-ca"
+    assert said == f"ledger CA: {tmp_path / 'ledger-ca.pem'}"
     assert (tmp_path / "ledger-ca.pem").read_text() == pem
     assert seen == [(SECRET_URL, "bao", openbao_kv.TIMEOUT_S)]
 
@@ -67,10 +67,7 @@ def test_install_keeps_the_file_when_openbao_holds_no_certificate(tmp_path, cert
 
     said = ledger_ca.install(bao(tmp_path), opener({"data": {"data": data}}, []))
 
-    assert said == (
-        f"ledger CA: OpenBao k8s/agentihooks-swarm-ledger-ca holds no ca.crt certificate, "
-        f"kept {tmp_path / 'ledger-ca.pem'}"
-    )
+    assert said == "ledger CA: no certificate in OpenBao k8s/agentihooks-swarm-ledger-ca"
     assert (tmp_path / "ledger-ca.pem").read_text() == "kept"
 
 
@@ -79,10 +76,7 @@ def test_install_keeps_the_file_when_the_secret_is_missing(tmp_path):
 
     said = ledger_ca.install(bao(tmp_path), opener(missing, []))
 
-    assert said == (
-        f"ledger CA: OpenBao k8s/agentihooks-swarm-ledger-ca holds no ca.crt certificate, "
-        f"kept {tmp_path / 'ledger-ca.pem'}"
-    )
+    assert said == "ledger CA: no certificate in OpenBao k8s/agentihooks-swarm-ledger-ca"
     assert not (tmp_path / "ledger-ca.pem").exists()
 
 
@@ -94,7 +88,7 @@ def test_install_skips_without_openbao(tmp_path, unset):
 
     said = ledger_ca.install(environ, opener({}, seen))
 
-    assert said == f"ledger CA: OPENBAO_URL and OPENBAO_TOKEN unset, kept {tmp_path / 'ledger-ca.pem'}"
+    assert said == "ledger CA: no OpenBao"
     assert seen == []
     assert not (tmp_path / "ledger-ca.pem").exists()
 
@@ -102,7 +96,7 @@ def test_install_skips_without_openbao(tmp_path, unset):
 def test_install_reports_an_unreachable_openbao(tmp_path):
     said = ledger_ca.install(bao(tmp_path), opener(urllib.error.URLError("refused"), []))
 
-    assert said == f"ledger CA: OpenBao request failed: refused, kept {tmp_path / 'ledger-ca.pem'}"
+    assert said == "ledger CA: OpenBao unavailable"
     assert not (tmp_path / "ledger-ca.pem").exists()
 
 

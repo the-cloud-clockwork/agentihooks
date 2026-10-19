@@ -24,6 +24,10 @@ apiVersion: apps/v1
 kind: StatefulSet
 metadata:
   name: {{ $host }}
+  {{- with .Values.ledger.tls.secretName }}
+  annotations:
+    secret.reloader.stakater.com/reload: {{ . | quote }}
+  {{- end }}
   labels:
     {{- include "swarm.labels" . | nindent 4 }}
     app.kubernetes.io/component: ledger
