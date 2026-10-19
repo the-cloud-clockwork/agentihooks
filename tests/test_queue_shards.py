@@ -359,14 +359,14 @@ def test_queue_prediction_pins_the_first_shard_files_and_ignores_removed_files(t
     (tmp_path / "tests/routing/test_codex_api.py").write_text("")
     (tmp_path / "tests/test_a.py").write_text("")
     durations = {
-        "tests/routing/test_codex_api.py::test_pinned": 100.0,
+        **{f"tests/routing/test_codex_api.py::test_pinned_{i}": 100.0 for i in range(8)},
         "tests/test_gone.py::test_removed": 1000.0,
-        **{f"tests/test_a.py::test_{i}": 1.0 for i in range(8)},
+        **{f"tests/test_a.py::test_{i}": 1.0 for i in range(9)},
     }
 
     plan = matrix(tmp_path, {"3.11": durations}, {"3.11": 2})
 
-    assert {leg["predicted_seconds"] for leg in plan} == {180.0}
+    assert {leg["predicted_seconds"] for leg in plan} == {331.875}
 
 
 def test_queue_capacity_admission_precedes_the_unit_matrix():
