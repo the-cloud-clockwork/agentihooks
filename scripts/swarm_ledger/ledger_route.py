@@ -8,9 +8,12 @@ from scripts.gates import Who
 from scripts.swarm_ledger import ports
 
 CURRENT: ContextVar[tuple[str, str] | None] = ContextVar("ledger_route", default=None)
+DEPLOYMENT, LOCAL = "AGENTIHOOKS_DEPLOYMENT", "local"
 
 
 def configured(store: object, slug: str) -> str:
+    if os.environ.get(DEPLOYMENT, LOCAL) != LOCAL:
+        return ""
     return store.redis.hget(store.key(slug, "config"), "api_url") or ""
 
 

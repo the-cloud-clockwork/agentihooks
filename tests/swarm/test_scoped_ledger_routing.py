@@ -189,6 +189,26 @@ def test_an_agent_control_leaves_the_hosted_service_tick_to_its_trusted_runner(s
     assert actions
 
 
+@pytest.mark.parametrize("deployment", ["distributed", "compose"])
+def test_a_controller_deployment_ticks_its_swarm_on_its_own_ledger_link(store, monkeypatch, deployment):
+    from scripts.swarm import commands
+    from scripts.swarm_ledger import authority_context
+
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
+    monkeypatch.setattr(commands, "hive_id", lambda: "kind")
+    monkeypatch.setenv("LEDGER_URL", "https://ledger.kind.test:8765")
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setattr(ledger, "BASE", "")
+    monkeypatch.setattr(cli.outbox, "flush", lambda *_: None)
+    acquired = []
+    monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append((slug, ledger.base(slug))))
+    with authority_context.bound(None):
+        actions = cli.run_tick(store, "selected", runtime=object())
+    assert actions == ["the swarm belongs to another hive"]
+    assert acquired == [("selected", "https://ledger.kind.test:8765")]
+    assert ledger_route.configured(store, "selected") == ""
+
+
 def test_a_native_control_notice_uses_its_callers_own_authority(store, monkeypatch):
     from types import SimpleNamespace
 
