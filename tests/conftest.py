@@ -134,7 +134,6 @@ def _shard_files(config) -> frozenset[str]:
 
 def pytest_configure(config):
     _reused(config)
-    mutation_trace.trace_browser_deadlines()
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
@@ -144,6 +143,14 @@ def pytest_configure(config):
     NodeManager.setup_nodes = setup_nodes_in_parallel
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
+
+
+# Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
+# tracing for the whole coverage run; the deadlines are traced once a test has loaded it.
+@pytest.hookimpl(tryfirst=True)
+def pytest_runtest_setup(item):
+    if "playwright.sync_api" in sys.modules:
+        mutation_trace.trace_browser_deadlines(sys.modules["playwright.sync_api"])
 
 
 def pytest_unconfigure(config):
