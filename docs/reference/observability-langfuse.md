@@ -401,17 +401,19 @@ every configured value in git is `https`:
 | Deployed swarm controller | antoncore `k8s/values-overlays/agentihooks-swarm/values.yaml`, `controller.env` | `https://10.10.30.200/toolset/swarm-controller/mcp` |
 | Local sampler (timer ticks on a workstation) | agentihooks-bundle `profiles/anton-base` env for Claude, Codex and Copilot | `https://10.10.30.200/mcp/` |
 
-Each repository has a test that pins the configured scheme to `https`. The
-agentihooks Helm chart ships `controller.env.LANGFUSE_MCP_URL` empty, so a
-deployment without an overlay value runs with sampling off.
+The bundle and antoncore each have a test that pins the configured scheme to
+`https`. The agentihooks Helm chart ships `controller.env.LANGFUSE_MCP_URL`
+empty, so a deployment without an overlay value runs with sampling off.
 
-The controller reads `MCP_KEY_GATEWAY` from the `swarm-controller-gateway`
-Secret (key `key`) through `controller.secretEnv`; workers never receive it.
-Moving to the encrypted route kept the same credential and the same
-`agent-swarm` project.
+The overlay gives `MCP_KEY_GATEWAY` only to the controller, from the
+`swarm-controller-gateway` Secret (key `key`) through `controller.secretEnv`.
+The switch to the encrypted route (antoncore pull request 889, agentihooks
+issue 3731) changed only the scheme and the reader's TLS server name; the
+credential and the `agent-swarm` project stayed as they were.
 
 The Grafana alert read in the same tick reuses this endpoint, client and key
-with `x-mcp-servers: grafana`, so it uses the encrypted route too.
+with `x-mcp-servers: grafana`, so it uses the encrypted route too. Unsetting
+`LANGFUSE_MCP_URL` or `MCP_KEY_GATEWAY` turns off both reads.
 
 ### Configuration
 
@@ -450,7 +452,8 @@ minutes. Breaches are grouped by the agent's account into one standing
 threshold. After a successful read, a finding clears when its account no
 longer breaches, except an account whose agents had enough turns but no latency
 figure, which keeps its finding until a read can judge it. The tick prints
-`Langfuse summary read: <n> breaching accounts`.
+`Langfuse summary read: <n> breaching accounts`; `swarm tick` prefixes each
+line with the swarm slug, as in `<slug>: Langfuse summary read: ...`.
 
 With `LANGFUSE_MCP_URL` unset the tick prints `Langfuse sampling is off:
 configure LANGFUSE_MCP_URL` once, then stays quiet and reads nothing until the
@@ -467,7 +470,9 @@ key and changes no finding; the next attempt waits out the ten minute interval.
      -verify_return_error </dev/null 2>&1 | grep -E "subject=|Verify return code"
    ```
 
-   Expect `subject=CN = *.homeofanton.com` and `Verify return code: 0 (ok)`.
+   Observed on 2026-10-19 from a home network workstation:
+   `subject=CN = *.homeofanton.com`, issuer Let's Encrypt, and
+   `Verify return code: 0 (ok)`.
 2. The gateway answers over that route. Without a key it refuses with 401, which
    proves the TLS session and routing work:
 
@@ -477,7 +482,8 @@ key and changes no finding; the next attempt waits out the ten minute interval.
      https://llm.homeofanton.com/toolset/swarm-controller/mcp
    ```
 
-   Expect `401 0`.
+   Observed on 2026-10-19 from the same workstation: `401 0`, a refusal for
+   the missing key with certificate verification passed.
 3. The deployed value is `https`: read `controller.env.LANGFUSE_MCP_URL` in the
    antoncore overlay on the branch ArgoCD tracks.
 
@@ -487,5 +493,7 @@ key and changes no finding; the next attempt waits out the ten minute interval.
 |---|---|---|
 | `Langfuse sampling is off` in the tick output | `LANGFUSE_MCP_URL` is unset where the tick runs | Set it in the overlay or bundle profile, then redeploy or rerun `agentihooks init` |
 | No `Langfuse summary read` line and no findings | The read failed; `error` in the `langfuse-summary` key names the exception type | Run the two checks above: a failed first check points at the ingress or its certificate, a failed second at routing; with both passing, check `MCP_KEY_GATEWAY` is set for the reader |
-| Certificate verification fails | The `Host` header names a host the ingress certificate does not cover | Keep `Host: llm.homeofanton.com`; the reader takes the TLS server name from it |
+| No tick line, `error` is `KeyError` | `MCP_KEY_GATEWAY` is unset; on the controller the `swarm-controller-gateway` Secret is optional, so a missing Secret starts the Pod without the key | Create the Secret with key `key`; the next pass after the ten minute interval reads |
+| Certificate verification fails | The ingress certificate does not cover the TLS server name `llm.homeofanton.com` (not observed; the first check above shows it) | Run the first check; keep `Host: llm.homeofanton.com`, since the reader takes the TLS server name from it |
 | The gateway refuses the key | The endpoint names the public gateway address behind Cloudflare Access | Use the LAN ingress address with `https` |
+| Grafana bottleneck findings never appear | The Grafana read failed, or `LANGFUSE_MCP_URL` or `MCP_KEY_GATEWAY` is unset; that read prints nothing and stores no error | Run the two checks above and confirm both variables are set where the tick runs |
