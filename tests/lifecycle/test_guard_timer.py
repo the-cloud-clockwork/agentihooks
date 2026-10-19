@@ -4,7 +4,7 @@ import time
 import pytest
 
 from hooks.lifecycle import guard, run
-from hooks.lifecycle.lease import read_lease
+from hooks.lifecycle.lease import add_holder, read_lease
 from hooks.lifecycle.locks import being_removed, removing
 from hooks.lifecycle.model import Holder, Root
 
@@ -35,6 +35,21 @@ def test_claim_records_the_caller_on_worktrees_and_scratch_dirs(repo, tmp_path, 
     before = lease_file.stat().st_mtime_ns
     guard.claim(edit, roots_for(repo, tmp_path), tmp_path / "home")
     assert lease_file.stat().st_mtime_ns == before
+
+
+def test_claim_records_the_caller_on_a_bash_workdir(repo, tmp_path, owner):
+    path = repo.worktree("task")
+    payload = {"session_id": "sess-1", "tool_input": {"command": "git status", "workdir": str(path)}}
+    assert guard.claim(payload, roots_for(repo, tmp_path), tmp_path / "home") == ""
+    assert read_lease(path, "worktree").holders == (owner,)
+
+
+def test_claim_replaces_a_dead_holder_of_the_same_session(repo, tmp_path, owner):
+    path = repo.worktree("task")
+    add_holder(path, "worktree", Holder("sess-1", 1111, 3, "boot-1"), time.time())
+    payload = {"session_id": "sess-1", "tool_input": {"file_path": str(path / "a.py")}}
+    assert guard.claim(payload, roots_for(repo, tmp_path), tmp_path / "home") == ""
+    assert read_lease(path, "worktree").holders == (owner,)
 
 
 def test_claim_blocks_while_gc_removes_the_path(repo, tmp_path, owner):
