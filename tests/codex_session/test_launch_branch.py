@@ -27,7 +27,7 @@ def launched(tmp_path, spec, prompt="Open the task."):
         tmp_path, "engineer@abc-0001", prompt, ["-m", "gpt-6.1-sol"], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
     )
     line = next(line for line in launcher.read_text().splitlines() if line.startswith("setsid -f "))
-    server, _, _ = shlex.split(line)[4].partition("; rm -f ")
+    server, _, _ = shlex.split(line)[4].removeprefix(init_agent.LAUNCHER_PIN).partition("; rm -f ")
     return launcher, prompt_file, shlex.split(server)
 
 
