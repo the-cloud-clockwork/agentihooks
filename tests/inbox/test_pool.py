@@ -376,6 +376,42 @@ def test_an_item_of_a_gone_holder_returns_to_the_pool_for_the_last_live_master(s
     assert inbox.get(first.id).address == FRONT
 
 
+@pytest.mark.parametrize("state", ["delivered", "confirmed", "read"])
+def test_unsettled_pool_mail_of_a_gone_master_returns_with_its_id(swarm, inbox, state):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    if state == "confirmed":
+        inbox.confirm(item.id, "sw-master-1")
+    elif state == "read":
+        inbox.read(item.id, "sw-master-1")
+    operator = inbox.send("operator", FRONT, "operator work")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    inbox.pool.distribute_all()
+    moved = inbox.get(item.id)
+    assert (moved.id, moved.address, moved.state) == (item.id, SECOND, "pending")
+    assert inbox.get(operator.id).address == FRONT
+    assert item.id not in swarm.redis.zrange(inbox.key("delivered"), 0, -1)
+    assert [entry["state"] for entry in inbox.history(item.id)][-2:] == ["pending", "pending"]
+
+
+@pytest.mark.parametrize("exit_text", ["handed off its seat", "retired after the swarm idle limit"])
+def test_master_exit_returns_confirmed_pool_mail_but_keeps_operator_mail(swarm, inbox, exit_text):
+    from scripts.inbox import exits
+
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    operator = inbox.send("operator", FRONT, "operator work")
+    inbox.deliver(operator.id, "sw-master-1")
+    inbox.confirm(operator.id, "sw-master-1")
+    exits.settle(inbox, "sw-master-1", FRONT, exit_text)
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (SECOND, "pending")
+    assert (inbox.get(operator.id).address, inbox.get(operator.id).state) == (FRONT, "confirmed")
+
+
 def test_a_redirected_item_stays_where_it_was_sent(swarm, inbox):
     _masters(swarm, 2)
     item = inbox.send("swarm", FRONT, "first")
