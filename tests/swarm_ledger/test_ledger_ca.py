@@ -12,7 +12,6 @@ from scripts.swarm_ledger import ledger_ca, ledger_link
 from tests.swarm_ledger import test_ledger_tls
 from tests.swarm_ledger.test_ledger_authority import core
 
-
 cert, tls_ledger = test_ledger_tls.cert, test_ledger_tls.tls_ledger
 
 URL = "https://bao.example.test"
