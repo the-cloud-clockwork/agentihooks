@@ -3,8 +3,6 @@ import re
 from io import BytesIO
 from unittest.mock import patch
 
-import pytest
-
 from scripts.swarm import freeze
 from scripts.swarm_ledger.api.resources import revision
 from scripts.swarm_ledger.repository import hierarchy
@@ -15,7 +13,6 @@ from tests.swarm_ledger.test_api_v1 import request
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.swarm_ledger.test_ledger_authority import SLUG, send, server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 authority_live = _authority_live
 live = _live
 
