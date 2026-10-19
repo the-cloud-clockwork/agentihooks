@@ -71,7 +71,7 @@ The operator runs a PC, a VM and a set of pods:
 ```bash
 agentihooks hive set pc  ui=yes roles=master prefer=master:1
 agentihooks hive set vm  ui=yes roles=master,qa,frontend prefer=master:2,qa:1,frontend:1
-agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan max-agents=1
+agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1
 ```
 
 - The master runs on the PC while it is live, and on the VM when the PC is gone.
@@ -88,13 +88,13 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
-`eng`, `ci` and `plan` run on headless hives. When a UI hive also takes one of them, placement tries the headless
+`eng`, `ci`, `plan` and `dispatch` run on headless hives. When a UI hive also takes one of them, placement tries the headless
 hives first and takes the UI hive only when no headless hive taking the role has room or none is live. A headless
 hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The agent record
 carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI hive records the
 pin as its reason. UI roles take only UI hives; the master
-keeps its headless fallback below. The engineer, cicd and planner
-profiles place as `eng`, `ci` and `plan`; a frontend or qa profile on any lane places as its UI role.
+keeps its headless fallback below. The engineer, cicd, planner and dispatcher
+profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as its UI role.
 
 When no live hive takes the role:
 
@@ -167,7 +167,7 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 
 1. Clones the repos in `workers.repositories` under its repo root.
 2. Installs a mounted credential as `hive.env`, or joins with a mounted one time code.
-3. Sets itself `ui=no ephemeral=yes roles=eng,ci,plan max-agents=<workers.maxAgents>`.
+3. Sets itself `ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=<workers.maxAgents>`.
 4. Runs `agentihooks hive run`.
 
 Give exactly one of `workers.joinCodeSecret` or `workers.credentialSecret`. A join code runs with a persistent

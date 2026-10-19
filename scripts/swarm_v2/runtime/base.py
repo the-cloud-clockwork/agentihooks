@@ -12,7 +12,7 @@ LOCAL = "local"
 BACKEND_VARIABLE = "AGENTIHOOKS_RUNTIME_BACKEND"
 DISABLED_VARIABLE = "AGENTIHOOKS_RUNTIME_DISABLED"
 LOCAL_PROFILES = frozenset(("frontend",))
-HIVE_LANES = frozenset(("eng", "ci", "plan"))
+HIVE_LANES = frozenset(("eng", "ci", "plan", "dispatch"))
 
 
 class Capability(StrEnum):
