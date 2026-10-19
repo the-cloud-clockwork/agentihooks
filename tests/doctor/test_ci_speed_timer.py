@@ -1,6 +1,7 @@
 import functools
 import json
 import subprocess
+from datetime import datetime
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 
@@ -9,7 +10,7 @@ import pytest
 from scripts.doctor import ci_speed_read, cli, loop
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
-from tests.doctor.test_ci_speed import NOW, job, record
+from tests.doctor.test_ci_speed import NOW, job, record, stamp
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 DOCTOR = "speed-doctor"
@@ -199,3 +200,59 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
     assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in third
     assert sorted(jobs) == list(range(100))
     assert saved()["known"] == {}
+
+
+def test_a_gap_window_beyond_the_call_budget_is_read_in_slices_until_caught_up(store, monkeypatch):
+    gap = 200 * 60000
+    clock = [NOW]
+    active = [
+        {"id": 10**6 + n, "status": "in_progress", "run_attempt": 1, "event": "push", "created_at": stamp(-30000)}
+        for n in range(42)
+    ]
+
+    def created():
+        runs, n = [], 0
+        while NOW - gap + n * 12000 <= clock[0]:
+            runs.append(
+                {
+                    "id": n,
+                    "status": "completed",
+                    "run_attempt": 1,
+                    "event": "push",
+                    "created_at": stamp(n * 12 - gap // 1000),
+                }
+            )
+            n += 1
+        return runs
+
+    def api(args, **kwargs):
+        url = urlsplit(args[2])
+        query = parse_qs(url.query)
+        identity = url.path.split("/")[-1]
+        if url.path.endswith("/jobs"):
+            return SimpleNamespace(
+                stdout=json.dumps({"total_count": 1, "jobs": [job(0, created=-30, identity=url.path.split("/")[-2])]})
+            )
+        if identity.isdigit():
+            [found] = [run for run in active + created() if run["id"] == int(identity)]
+            return SimpleNamespace(stdout=json.dumps(found))
+        if "created" in query:
+            since, until = (datetime.fromisoformat(edge) for edge in query["created"][0].split(".."))
+            selected = [run for run in created() if since <= datetime.fromisoformat(run["created_at"]) <= until]
+        else:
+            selected = active if query["status"] == ["in_progress"] else []
+        page = int(query["page"][0])
+        body = {"total_count": len(selected), "workflow_runs": selected[(page - 1) * 100 : page * 100]}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    store.redis.set(store.key(DOCTOR, "ci-speed"), json.dumps({"last": NOW - gap}))
+    monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
+    reports = []
+    for minute in range(40):
+        clock[0] = NOW + minute * 60000
+        cli.timer(store, DOCTOR, clock[0], False)
+        reports.append(json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))["report"])
+    complete = [report["complete"] for report in reports]
+    assert min(start for start in range(len(complete) + 1) if all(complete[start:])) < 35
+    assert max(report["discovered_runs"] for report in reports) <= 51 + len(active)
+    assert json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))["last"] == clock[0]
