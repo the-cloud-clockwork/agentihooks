@@ -52,7 +52,7 @@ def store(monkeypatch, tmp_path):
 
 
 def enforce(store):
-    store.update(SLUG, gates={"night-watch": "enforce"})
+    store.update(SLUG, gates={"nightwatch": "enforce"})
 
 
 class Rig:
@@ -88,7 +88,7 @@ def kinds(store):
 
 
 def test_the_night_watch_gate_defaults_to_log_only():
-    assert catalog.defaults()["night-watch"] == "observe"
+    assert catalog.defaults()["nightwatch"] == "observe"
 
 
 def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode(store, tmp_path):
@@ -102,9 +102,9 @@ def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.summary == "The front door master seat has been empty for 10 minutes"
     rows = gate_log.recent(SLUG, None, tmp_path)
-    assert [(row.gate, row.kind, row.tool) for row in rows] == [
-        ("night-watch", "observe", "respawn"),
-        ("night-watch", "observe", "alert seat"),
+    assert [(row["gate"], row["kind"], row["tool"]) for row in rows] == [
+        ("nightwatch", "observe", "respawn"),
+        ("nightwatch", "observe", "alert seat"),
     ]
     assert run(store, rig, NOW + 11 * MINUTE) == []
 
@@ -132,11 +132,11 @@ def test_the_watch_respawns_an_empty_seat_at_most_three_times_an_hour(store):
 def test_the_log_counts_would_be_respawns_against_the_same_cap(store, tmp_path):
     rig = Rig()
     until(store, rig, NOW, NOW + 60 * MINUTE)
-    assert [row.tool for row in gate_log.recent(SLUG, None, tmp_path)].count("respawn") == 3
+    assert [row["tool"] for row in gate_log.recent(SLUG, None, tmp_path)].count("respawn") == 3
 
 
 def test_a_skipped_gate_logs_and_reports_nothing(store, tmp_path):
-    store.update(SLUG, gates={"night-watch": "off"})
+    store.update(SLUG, gates={"nightwatch": "off"})
     rig = Rig()
     assert until(store, rig, NOW, NOW + 30 * MINUTE) == []
     assert gate_log.recent(SLUG, None, tmp_path) == []
@@ -337,7 +337,7 @@ def test_a_logged_merge_stall_sends_no_email(store, monkeypatch, tmp_path):
     actions = run(store, rig, NOW)
     assert rig.ledger.alerts == [] and rig.mailed == []
     assert actions[0].startswith("night watch gate not at deny: would raise the merge alert: ")
-    assert [row.tool for row in gate_log.recent(SLUG, None, tmp_path)] == ["alert merge"]
+    assert [row["tool"] for row in gate_log.recent(SLUG, None, tmp_path)] == ["alert merge"]
 
 
 def test_a_merge_observation_error_raises_no_finding(store, monkeypatch):

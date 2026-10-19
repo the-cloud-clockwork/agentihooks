@@ -20,7 +20,7 @@ ORDER = [
     "trace-plan",
     "stall",
     "lane-split",
-    "night-watch",
+    "nightwatch",
     "talk",
 ]
 
