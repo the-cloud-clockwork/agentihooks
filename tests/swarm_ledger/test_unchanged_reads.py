@@ -20,7 +20,7 @@ def served(tmp_path, monkeypatch):
     hub, views = Hub(), []
     view = server.ledger_view
     monkeypatch.setattr(server, "HUB", hub)
-    monkeypatch.setattr(server, "ledger_view", lambda state: (views.append(state["_meta"]["rev"]), view(state))[1])
+    monkeypatch.setattr(server, "ledger_view", lambda state, *_: (views.append(state["_meta"]["rev"]), view(state))[1])
     hub.open(SLUG, lambda: {"ledger": view(store.get_document(SLUG))})
     return store, hub, views, SimpleNamespace(repository=Publishing(store, server.publish_ledger))
 

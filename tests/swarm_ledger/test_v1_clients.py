@@ -284,7 +284,7 @@ def test_a_refusal_without_details_keeps_its_body(code, body):
 def test_the_client_timeout_reaches_the_transport(monkeypatch):
     seen = []
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         seen.append(timeout)
         return io.BytesIO(b'{"revision": "r"}')
 

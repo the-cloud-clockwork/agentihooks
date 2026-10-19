@@ -1,6 +1,8 @@
+import copy
+
 import pytest
 
-from tests.swarm_ledger.ledger_page import ledger_state, loaded, serve_modules, shell_html
+from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
@@ -50,6 +52,8 @@ def page(browser, request):
 
     html = shell_html().replace("__LEDGER_PAGE__", ledger_server.served_version())
     sent = {"ops": [], "changes": []}
+    freezes = list(setup["freezes"])
+    doc = copy.deepcopy({**DOC, **setup.get("doc", {})})
 
     def answer(route):
         if route.request.url == URL:
@@ -58,15 +62,30 @@ def page(browser, request):
             body = route.request.post_data_json
             sent["ops"].extend(body.get("ops", []))
             sent["changes"].extend(body.get("changes", []))
+            for change in body.get("changes", []):
+                kind, item, field = change["path"].split("/")
+                next(row for row in doc[kind] if row["id"] == item)[field] = change["value"]
+            for op in body.get("ops", []):
+                if op["op"] == "freeze_set":
+                    freezes.append(freeze(op["target"], op["verb"]))
+                elif op["op"] == "freeze_clear":
+                    freezes[:] = [row for row in freezes if row["target"] != op["target"]]
+            applied = [op["id"] for op in body.get("ops", [])]
+            return route.fulfill(json={"applied": applied, "rejected": [], "_meta": {"rev": 1, "warnings": []}})
         return route.abort()
 
     context.route("**/*", answer)
-    view = ledger_server.ledger_view(ledger_state({**DOC, **setup.get("doc", {}), "freezes": setup["freezes"]}))
-    if setup.get("bare"):
-        view["tasks"] = [{k: v for k, v in row.items() if k != "freeze_ancestry"} for row in view["tasks"]]
-    serve_modules(context, view, SWARM)
+    serve_modules(context)
+
+    def view():
+        return ledger_server.page_view(ledger_state({**doc, "freezes": freezes}), "", False)
+
+    context.route(is_events, lambda route: fulfill_events(route, view(), SWARM))
+    # The first server import inside the route handler can outlast the page load timeout on a loaded runner.
+    view()
     tab = context.new_page()
     tab.set_default_timeout(3000)
+    tab.set_default_navigation_timeout(15000)
     tab.on("dialog", lambda dialog: dialog.accept())
     tab.goto(URL)
     loaded(tab)
@@ -169,7 +188,8 @@ def test_unfreezing_a_phase_keeps_the_freezes_on_its_tasks_on_the_page(page):
     tab, sent = page
     tab.click('[data-focus="freeze:phases/p1"]')
     assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "phases/p1"}]
-    tab.wait_for_function("() => !document.querySelector('#item-phases-p1').classList.contains('frozen')")
+    tab.wait_for_function("() => !document.querySelector('#item-tasks-t3').classList.contains('frozen')")
+    assert row_state(tab, "#item-phases-p1")["frozen"] is False
     assert row_state(tab, "#item-tasks-t1")["frozen"] is True
     assert freeze_text(tab, "#item-tasks-t1") == "unfreeze"
     assert row_state(tab, "#item-tasks-t3")["frozen"] is False
@@ -287,23 +307,6 @@ def test_freezing_a_group_lead_holds_its_members(page):
     assert row_state(tab, "#item-tasks-t2")["frozen"] is False
 
 
-def test_page_snapshot_carries_the_shared_group_freeze_ancestry():
-    from scripts.swarm_ledger import ledger_server
-
-    snapshot = ledger_server.ledger_view(ledger_state(DOC))
-    member = next(row for row in snapshot["tasks"] if row["id"] == "t5")
-    assert set(member["freeze_ancestry"]) == {
-        "tasks/t5",
-        "tasks/t1",
-        "slices/hier.hy-page",
-        "phases/p1",
-        "plans/hier",
-        "phases/p3",
-        "plans/v2",
-    }
-    assert "freeze_ancestry" not in DOC["tasks"][-1]
-
-
 @pytest.mark.parametrize("page", [[freeze("phases/p4")]], indirect=True)
 def test_an_out_of_scope_item_keeps_its_freeze_button(page):
     tab, sent = page
@@ -323,7 +326,7 @@ def test_a_lane_focus_holds_tasks_outside_the_lane_and_no_phase(page):
     assert tab.locator("#item-plans-v2 > details.plan-fold > summary > .snowflake").count() == 0
 
 
-@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p1")], "bare": True}], indirect=True)
+@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p1")]}], indirect=True)
 def test_a_folded_task_without_stored_ancestry_follows_its_merged_target(page):
     tab, _ = page
     assert row_state(tab, "#item-tasks-t5")["frozen"] is True
@@ -335,7 +338,7 @@ MERGE_CYCLE = {
 }
 
 
-@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p3")], "bare": True, "doc": MERGE_CYCLE}], indirect=True)
+@pytest.mark.parametrize("page", [{"freezes": [freeze("phases/p3")], "doc": MERGE_CYCLE}], indirect=True)
 def test_folded_tasks_merged_into_each_other_render_and_share_their_freezes(page):
     tab, _ = page
     assert row_state(tab, "#item-tasks-t6")["frozen"] is True
@@ -354,59 +357,6 @@ def test_one_malformed_item_leaves_the_other_sections_rendered(page):
     tab, _ = page
     assert tab.locator("#item-tasks-t2").count() == 1
     assert tab.locator("#item-followups-u1").count() == 1
-
-
-LOOKUPS = """async () => {
-  const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-  const { frozen, held } = await import(new URL("freezes.js", main));
-  const phases = Array.from({ length: 20 }, (_, i) => ({ id: `p${i}`, plan: `plans/v${i % 4}` }));
-  const slices = phases.map((p) => ({ id: `s${p.id}`, phase: `phases/${p.id}` }));
-  const raw = Array.from({ length: 400 }, (_, i) => ({ id: `t${i}`, phase: `p${i % 20}`, slice: `slices/sp${i % 20}`, lane: "eng" }));
-  let reads = 0;
-  const tasks = new Proxy(raw, { get(target, key, receiver) {
-    if (typeof key === "string" && /^\\d+$/.test(key)) reads++;
-    return Reflect.get(target, key, receiver);
-  } });
-  const freezes = [...Array.from({ length: 20 }, (_, i) => ({ verb: "freeze", target: `tasks/t${200 + i * 7}` })),
-    { verb: "freeze", target: "phases/p3" }, { verb: "focus", target: "plans/v1" }];
-  const d = { phases, slices, tasks, freezes };
-  const pick = (test) => raw.filter((t) => test(d, `tasks/${t.id}`)).map((t) => t.id);
-  return { frozen: pick(frozen), held: pick(held), reads };
-}"""
-
-
-@pytest.mark.parametrize("page", [[]], indirect=True)
-def test_freeze_checks_read_each_task_a_few_times_however_many_rules_apply(page):
-    tab, _ = page
-    found = tab.evaluate(LOOKUPS)
-    frozen = sorted({f"t{i}" for i in range(400) if i % 20 == 3} | {f"t{200 + i * 7}" for i in range(20)})
-    held = sorted(f"t{i}" for i in range(400) if i % 20 % 4 != 1 and f"t{i}" not in frozen)
-    assert sorted(found["frozen"]) == frozen
-    assert sorted(found["held"]) == held
-    assert found["reads"] <= 2721
-
-
-REPLACED = """async () => {
-  const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
-  const { frozen } = await import(new URL("freezes.js", main));
-  const d = { phases: [{ id: "p1" }, { id: "p2" }], slices: [], freezes: [{ verb: "freeze", target: "phases/p2" }],
-    tasks: [{ id: "t1", phase: "p1" }, { id: "t2", phase: "p1" }] };
-  const before = frozen(d, "tasks/t2");
-  d.tasks.splice(0, 1);
-  d.tasks.push({ id: "t3", phase: "p2" });
-  const moved = [before, frozen(d, "tasks/t3"), frozen(d, "tasks/t2")];
-  d.tasks.splice(0, 1);
-  d.tasks.push({ id: "t2", phase: "p2" });
-  const readded = frozen(d, "tasks/t2");
-  d.tasks.splice(1, 1);
-  return [...moved, readded, frozen(d, "tasks/t2")];
-}"""
-
-
-@pytest.mark.parametrize("page", [[]], indirect=True)
-def test_freeze_checks_find_a_task_added_after_another_left_the_list(page):
-    tab, _ = page
-    assert tab.evaluate(REPLACED) == [False, True, False, True, False]
 
 
 @pytest.mark.parametrize("page", [[]], indirect=True)

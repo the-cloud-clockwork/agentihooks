@@ -55,9 +55,9 @@ def test_a_stat_row_moves_by_its_grip_and_the_order_is_saved_to_the_shared_layou
     def capture(route):
         if route.request.method == "PUT":
             saved.append(json.loads(route.request.post_data))
-        route.fulfill(json=saved[-1] if saved else {})
+        route.fulfill(json={"data": saved[-1] if saved else {}})
 
-    page.context.route("**/api/layout", capture)
+    page.context.route("**/api/v1/layout", capture)
     before = keys(page)
     assert before[:2] == ["started", "elapsed"] and before[-1] == "top-bottleneck"
     assert page.tab.locator("#stats .stat dt").first.inner_text() == "STARTED"
@@ -85,7 +85,7 @@ def drag(page, key, to_key, fraction):
 
 def test_a_mouse_drag_moves_a_stat_row_down_and_back_up(open_page):
     page = open_page(width=1920)
-    page.context.route("**/api/layout", lambda route: route.fulfill(json={}))
+    page.context.route("**/api/v1/layout", lambda route: route.fulfill(json={"data": {}}))
     before = keys(page)
     drag(page, "elapsed", before[4], 0.75)
     assert keys(page) == [before[0], *before[2:5], "elapsed", *before[5:]]
