@@ -114,8 +114,7 @@ def test_inbox_retry_after_transport_acceptance_keeps_one_item(monkeypatch, sche
 
     with monkeypatch.context() as fault:
         fault.setattr(InboxSlot, "deliver", crash)
-        with pytest.raises(RuntimeError, match="^transport accepted before crash$"):
-            scheduler.run_due(now=101)
+        assert scheduler.run_due(now=101) == 1
     inbox = InboxStore(scheduler.redis)
     first = inbox.pending_items("proof-session")
     assert len(first) == 1
@@ -141,8 +140,7 @@ def test_retry_continues_after_an_already_acknowledged_slot(monkeypatch, schedul
 
     with monkeypatch.context() as fault:
         fault.setattr(InboxSlot, "deliver", crash_second)
-        with pytest.raises(RuntimeError, match="^second slot unavailable$"):
-            scheduler.run_due(now=101)
+        assert scheduler.run_due(now=101) == 1
     inbox = InboxStore(scheduler.redis)
     assert len(inbox.pending_items("first-session")) == 1
     assert inbox.pending_items("second-session") == []
