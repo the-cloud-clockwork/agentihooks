@@ -47,7 +47,7 @@
   "metrics": "restore_outcomes_by_type counts authenticated verified worker outcomes",
   "mocked": true,
   "package": "SV2-CKP-05",
-  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2773",
+  "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/4813",
   "remaining_limitations": [
     "Live capture and restore on Anton is unproven: the isolated proof controller was removed and the primary controller must be healthy first.",
     "Approved spec exception, recorded by the swarm master on ledger task vckp5 on 19 October: while restore automation is on and not paused, a spawn superseded as a legacy specification is replaced fresh without a choice, because it never applied and holds no conversation; with automation off or paused it waits for a master or operator decision like any other failure.",
@@ -64,11 +64,13 @@
       "0.162"
     ]
   },
-  "tested_commit": "47c3369d31b30f5e2b051588ac5e4bc28c8f9708",
+  "test_outputs": {
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266331075": "red before the directive fix: 1 failed, assert 'native' == 'fresh'",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266839665": "229 passed in 11.77s"
+  },
+  "tested_commit": "64671965a1f1f0e39080da80a8b0f0bd4ef5484d",
   "tests": [
-    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38191156838",
-    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38192449508",
-    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38210282982",
-    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38207793497"
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266331075",
+    "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39266839665"
   ]
 }
