@@ -456,3 +456,18 @@ def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, t
     assert run(capsys, ["--task", "mid"], environ) == numbered(5, 27)
     assert reads == [(slug, "tasks", True), (slug, "phases", True), (slug, "artifacts", True)]
     assert opened == [(f"https://ledger.test/artifacts/{slug}/{file_id}", ledger.REQUEST_TIMEOUT, environ)]
+
+
+def test_stored_plan_text_comes_from_the_given_loader(slug, tmp_path):
+    from scripts.swarm_ledger import plan_ranges
+    from scripts.swarm_ledger.storage import read_ledger
+
+    doc = read_ledger(tmp_path, slug, "phases", "artifacts")
+    asked = []
+
+    def load(name, file_id):
+        asked.append((name, file_id))
+        return b"served plan\n"
+
+    assert plan_ranges.stored_text(doc["phases"][0]["plan_ref"], doc, load) == "served plan\n"
+    assert asked == [(slug, doc["artifacts"][0]["file"]["id"])]
