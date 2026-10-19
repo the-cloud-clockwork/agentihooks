@@ -5,7 +5,7 @@ import pytest
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.inbox import cli as inbox_cli
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery
+from scripts.swarm import delivery, master_retire
 from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_v2 import master_fence, masters
@@ -151,7 +151,7 @@ def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, fron
     assert world.refusals() == 0
 
 
-@pytest.mark.parametrize("link", ["none", "other", "watched-only", "doctor-only", "retired"])
+@pytest.mark.parametrize("link", ["none", "other", "watched-only", "doctor-only", "retired", "retire-requested"])
 def test_only_a_live_linked_doctor_master_can_bypass_the_claimant_fence(doctor_world, link):
     world, doctor, sender = doctor_world
     if link == "none":
@@ -164,8 +164,12 @@ def test_only_a_live_linked_doctor_master_can_bypass_the_claimant_fence(doctor_w
         world.store.clear_peer(doctor)
     elif link == "doctor-only":
         world.store.clear_peer(SLUG)
-    else:
+    elif link == "retired":
         world.store.seats.record_exit(sender, f"master@{doctor}", "retired")
+    else:
+        agent = next(a for a in world.store.agents(doctor) if a.name == sender)
+        master_retire.hold(world.store, doctor, agent, "retired", True, 1)
+        assert master_retire.reason(world.store, doctor, sender) == "retired"
     record = {
         "op": "send",
         "by": sender,

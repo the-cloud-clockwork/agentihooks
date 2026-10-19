@@ -127,13 +127,12 @@ def check_send(inbox, sender: str, address: str) -> None:
 
 
 def _doctor_master_send(inbox, seats, sender: str, address: str) -> bool:
-    from scripts.inbox.seats import master_of
     from scripts.swarm.store import RedisStore
 
     if seats.writer(inbox.names.resolve(address)) not in seats.live:
         return False
     store = RedisStore(inbox.redis)
-    doctor = master_of(sender, inbox.names).partition("@")[2]
+    doctor = inbox.names.slug_of(sender)
     if store.peer(seats.slug) != doctor or store.peer(doctor) != seats.slug:
         return False
     return sender in masters.held(inbox.redis, doctor, store.agents(doctor)).values()
