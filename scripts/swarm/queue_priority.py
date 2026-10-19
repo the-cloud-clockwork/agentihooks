@@ -38,21 +38,27 @@ class Busy(SwarmError):
     pass
 
 
-def alive(holder: str) -> bool:
-    try:
-        os.kill(int(holder.split(":", 1)[0]), 0)
-    except ProcessLookupError:
+def stale(holder: str, hive: str) -> bool:
+    parts = holder.rsplit(":", 2)
+    if len(parts) != 3 or parts[0] != hive or not parts[1].isdigit():
         return False
-    except (PermissionError, ValueError):
+    try:
+        os.kill(int(parts[1]), 0)
+    except ProcessLookupError:
         return True
-    return True
+    except PermissionError:
+        return False
+    return False
 
 
 @contextmanager
 def exclusive(store: RedisStore, slug: str):
-    key, token = store.key(slug, ACTIVE), f"{os.getpid()}:{uuid.uuid4().hex}"
+    from scripts.swarm.commands import hive_id
+
+    hive = hive_id()
+    key, token = store.key(slug, ACTIVE), f"{hive}:{os.getpid()}:{uuid.uuid4().hex}"
     holder = store.redis.get(key)
-    if holder is not None and not alive(holder):
+    if holder is not None and stale(holder, hive):
         store.redis.delete(key)
     if not store.redis.set(key, token, nx=True, ex=ACTIVE_S):
         raise Busy("another merge queue priority is running; try again when it ends")

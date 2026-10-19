@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, queue_priority, queue_record
+from scripts.swarm import cli, commands, ledger_events, merge_queue, queue_priority, queue_record
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
@@ -644,16 +644,18 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
     monkeypatch.setattr(p.queue, "run", run)
     active = p.store.key("sw", queue_priority.ACTIVE)
     busy = "another merge queue priority is running; try again when it ends"
-    p.store.redis.set(active, f"{os.getpid()}:other")
-    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority waits: {busy}"]
-    with pytest.raises(SwarmError) as held:
-        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
-    assert str(held.value) == busy
-    assert p.store.redis.get(active) == f"{os.getpid()}:other"
-    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
+    hive = commands.hive_id()
     gone = subprocess.Popen(["true"])
     gone.wait()
-    p.store.redis.set(active, f"{gone.pid}:killed")
+    for holder in (f"{hive}:{os.getpid()}:other", f"elsewhere:{gone.pid}:other"):
+        p.store.redis.set(active, holder)
+        assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority waits: {busy}"]
+        with pytest.raises(SwarmError) as held:
+            queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+        assert str(held.value) == busy
+        assert p.store.redis.get(active) == holder
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
+    p.store.redis.set(active, f"{hive}:{gone.pid}:killed")
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [
         f"requeued {URL[:-1]}{n} left out of the merge queue by an interrupted priority" for n in (2, 3)
     ]
