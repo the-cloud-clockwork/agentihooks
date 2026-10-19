@@ -269,6 +269,10 @@ def test_every_file_pinned_to_the_first_shard_exists():
     assert FIRST_SHARD_FILES <= set(discover_test_files(_ROOT))
 
 
+def test_the_remote_control_mutation_halves_share_one_unit_shard():
+    assert "tests/test_remote_control_mutation_baseline.py" in FIRST_SHARD_FILES
+
+
 def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     from tests.shards import grouped_files
 
@@ -353,6 +357,12 @@ def test_slow_tests_run_first_and_the_rest_keep_their_order():
     durations = {"t::a": 0.01, "t::b": 0.5, "t::c": 0.02, "t::d[x]": 1.5, "t::e": 0.1}
     nodeids = ["t::a", "t::b", "t::c", "t::d[x]@probe", "t::e", "t::new"]
     assert slowest_first(nodeids, durations, 0.1) == ["t::d[x]@probe", "t::b", "t::e", "t::a", "t::c", "t::new"]
+
+
+def test_an_xdist_group_keeps_collection_order_at_its_slowest_tests_place():
+    durations = {"t::builds": 1.0, "t::reuses": 2.0, "t::other": 1.5, "t::fast": 0.01}
+    nodeids = ["t::fast", "t::builds@g", "t::reuses@g", "t::other"]
+    assert slowest_first(nodeids, durations, 0.1) == ["t::builds@g", "t::reuses@g", "t::other", "t::fast"]
 
 
 def _modified_order(tmp_path, nodeids, **config):
