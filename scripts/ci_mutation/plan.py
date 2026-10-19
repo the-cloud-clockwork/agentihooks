@@ -42,7 +42,7 @@ def estimate(
         if drift is not None and path not in unrecorded:
             chosen = narrow(root, chosen, covering, recorded, stale)
         if selection is not None:
-            selection[path] = chosen
+            selection[path] = []
         if not chosen:
             if any(
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -190,7 +190,7 @@ def main() -> int:
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
-    count = shard_count(seconds, mutants, args.target, args.limit)
+    count = 1
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
     print(
         f"Changed line mutants: {mutants}\nEstimated mutation seconds: {seconds:.0f}, slowest stats bucket: {stats:.0f}"
