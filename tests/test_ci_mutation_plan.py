@@ -594,9 +594,20 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(
         "sys.argv", ["plan", "--base", "base", "--target", "100", "--limit", "4", "--stats-target", "100"]
     )
-    monkeypatch.setattr(plan, "own_bases", lambda *args: ["earlier", "merged"])
-    monkeypatch.setattr(plan, "discover_changes", lambda *args: changes)
+    calls = []
+
+    def bases(root, base, head, *args):
+        calls.append((root, base, head))
+        return ["earlier", "merged"]
+
+    def discover(root, bases, head):
+        calls.append((root, bases, head))
+        return changes
+
+    monkeypatch.setattr(plan, "own_bases", bases)
+    monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
+    assert calls == [(tmp_path, "base", "HEAD"), (tmp_path, ["earlier", "merged"], "HEAD")]
     assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/budget.py": tests}
     assert output.read_text() == (
         "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"

@@ -42,7 +42,7 @@ def estimate(
         if drift is not None and path not in unrecorded:
             chosen = narrow(root, chosen, covering, recorded, stale)
         if selection is not None:
-            selection[path] = []
+            selection[path] = chosen
         if not chosen:
             if any(
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
