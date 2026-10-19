@@ -318,6 +318,24 @@ def test_revision_names_the_checked_out_commit_and_nothing_without_one(tmp_path)
     assert service.revision(tmp_path / "missing") == ""
 
 
+def test_revision_asks_git_once_with_a_bounded_wait(monkeypatch):
+    from scripts.scheduler import service
+
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(service.subprocess, "run", run)
+    assert service.revision("/installed") == ""
+    assert calls == [
+        (["git", "-C", "/installed", "rev-parse", "HEAD"], {"capture_output": True, "text": True, "timeout": 10})
+    ]
+    monkeypatch.setattr(service.subprocess, "run", Mock(side_effect=FileNotFoundError("git")))
+    assert service.revision("/installed") == ""
+
+
 def test_holder_reads_the_record_of_the_supervisor_holding_its_lock(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
@@ -331,6 +349,8 @@ def test_holder_reads_the_record_of_the_supervisor_holding_its_lock(monkeypatch,
         (tmp_path / "supervisor.json").write_text(json.dumps({**record, "pid": os.getpid() + 1}))
         assert service.holder({}) == {"pid": os.getpid()}
         (tmp_path / "supervisor.json").write_text("{")
+        assert service.holder({}) == {"pid": os.getpid()}
+        (tmp_path / "supervisor.json").write_text(f"[{os.getpid()}]")
         assert service.holder({}) == {"pid": os.getpid()}
     assert service.holder({}) is None
 
@@ -386,7 +406,7 @@ def test_drain_gives_up_after_its_wait_while_the_supervisor_holds_on(monkeypatch
     monkeypatch.setattr(service.os, "kill", lambda pid, number: None)
     with service.machine_lock("supervisor"):
         assert service.drain(4242, {}) is False
-    assert slept == [1] * service.DRAIN_S
+    assert slept == [1] * 30
 
 
 def test_drain_of_a_supervisor_already_gone_needs_no_wait(monkeypatch, tmp_path):
@@ -399,7 +419,7 @@ def test_drain_of_a_supervisor_already_gone_needs_no_wait(monkeypatch, tmp_path)
 
     monkeypatch.setattr(service.os, "kill", gone)
     monkeypatch.setattr(service.time, "sleep", lambda seconds: pytest.fail("drain waited"))
-    assert service.drain(4242, {}) is True
+    assert service.drain(1, {}) is True
 
 
 @pytest.mark.parametrize("pid", [0, -1])
@@ -411,7 +431,8 @@ def test_drain_never_signals_without_a_supervisor_pid(monkeypatch, tmp_path, pid
     assert service.drain(pid, {}) is False
 
 
-def test_a_terminated_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch, tmp_path):
+@pytest.mark.parametrize("number", [signal.SIGTERM, signal.SIGINT])
+def test_a_signalled_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch, tmp_path, number):
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
@@ -419,18 +440,18 @@ def test_a_terminated_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch
 
     def run_due():
         if dispatched:
-            raise AssertionError("the runner kept dispatching after terminate")
-        os.kill(os.getpid(), signal.SIGTERM)
+            raise AssertionError("the runner kept dispatching after its signal")
+        os.kill(os.getpid(), number)
         dispatched.append("finished")
 
     def unhandled(number, frame):
-        raise AssertionError("terminate reached the process handler")
+        raise AssertionError("the signal reached the process handler")
 
-    previous = signal.signal(signal.SIGTERM, unhandled)
+    previous = signal.signal(number, unhandled)
     try:
         asyncio.run(service.run(SimpleNamespace(run_due=run_due)))
     finally:
-        signal.signal(signal.SIGTERM, previous)
+        signal.signal(number, previous)
     assert dispatched == ["finished"]
     with service.machine_lock("runner"):
         pass

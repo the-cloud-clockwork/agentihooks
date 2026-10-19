@@ -849,6 +849,16 @@ def test_guard_retires_a_kept_timer_only_after_the_running_supervisor_delivered(
     assert ensured == ([("/installed/bin/agentihooks", tmp_path)] if retired else [])
 
 
+def test_guard_retires_nothing_once_the_timer_units_are_gone(tmp_path, monkeypatch):
+    from scripts.swarm import scheduled_tick
+
+    here = _delivering(monkeypatch)
+    _supervisor(monkeypatch, CURRENT, [])
+    monkeypatch.setattr(timer, "ensure", lambda *args, **kwargs: pytest.fail("ensure ran"))
+    scheduled_tick.record(here, "/installed", 2_000.0)
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+
+
 @pytest.mark.parametrize("record", [None, {"pid": 4242}])
 def test_guard_keeps_the_timer_without_a_recorded_supervisor(tmp_path, monkeypatch, record):
     from scripts.scheduler import service
