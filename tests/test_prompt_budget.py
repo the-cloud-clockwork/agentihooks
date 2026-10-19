@@ -20,6 +20,7 @@ def _swallowing_sleep(seconds):
         time.sleep(seconds)
 
 
+@pytest.mark.wall_clock
 def test_a_step_still_running_at_the_hard_budget_is_cut_and_the_rest_skipped():
     budget = PromptBudget(soft=5, hard=0.3)
     after = Mock()
@@ -437,6 +438,7 @@ runpy.run_module("hooks", run_name="__main__")
 """
 
 
+@pytest.mark.wall_clock
 @pytest.mark.parametrize("step", ["sleeping", "blocked"])
 def test_a_slow_prompt_step_cannot_push_the_hook_past_its_budget(tmp_path, step):
     env = {
