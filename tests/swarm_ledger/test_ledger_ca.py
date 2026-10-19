@@ -145,6 +145,53 @@ def test_a_named_ca_file_that_is_missing_is_refused(tmp_path):
     assert str(refused.value) == f"LEDGER_CA_FILE names no file: {missing}"
 
 
+@pytest.mark.parametrize("named", [True, False])
+def test_a_ca_file_that_holds_no_certificate_is_named(tmp_path, named):
+    bad = tmp_path / "ledger-ca.pem"
+    bad.write_text("not a certificate\n")
+    environ = {"LEDGER_CA_FILE": str(bad)} if named else {"AGENTIHOOKS_HOME": str(tmp_path)}
+
+    with pytest.raises(SystemExit) as refused:
+        ledger_link.transport(environ)
+
+    assert str(refused.value).startswith(f"the ledger CA file {bad} holds no valid certificate: ")
+
+
+def test_the_metrics_command_trusts_the_ledger_ca(monkeypatch, cert, capsys):
+    from scripts.swarm_ledger import request_metrics
+
+    seen = []
+
+    def urlopen(request, timeout, **options):
+        seen.append((request.full_url, timeout, options))
+        return io.BytesIO(b"{}")
+
+    monkeypatch.delenv("LEDGER_CA_PEM", raising=False)
+    monkeypatch.setenv("LEDGER_CA_FILE", cert[0])
+    monkeypatch.setattr(ledger_link.urllib.request, "urlopen", urlopen)
+
+    request_metrics.main(["--url", "https://ledger.example:8765"])
+
+    [(url, timeout, options)] = seen
+    assert (url, timeout) == ("https://ledger.example:8765/api/v1/metrics?hours=24.0", 10)
+    assert isinstance(options["context"], ssl.SSLContext)
+    assert capsys.readouterr().out == "{}\n"
+
+
+def test_the_metrics_command_defaults_to_the_ledger_scheme(monkeypatch, cert):
+    from scripts.swarm_ledger import request_metrics
+
+    seen = []
+    monkeypatch.setenv("LEDGER_TLS_CERT", cert[0])
+    monkeypatch.setenv("LEDGER_TLS_KEY", cert[1])
+    monkeypatch.setattr(ledger_link, "address", lambda: ("localhost", 9999))
+    monkeypatch.setattr(request_metrics, "urlopen", lambda url, timeout: seen.append(url) or io.StringIO("{}"))
+
+    request_metrics.main([])
+
+    assert seen == ["https://localhost:9999/api/v1/metrics?hours=24.0"]
+
+
 def test_a_client_verifies_the_hosted_ledger_through_the_ca_file(tls_ledger, cert, monkeypatch, tmp_path):
     monkeypatch.delenv("LEDGER_CA_PEM")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
