@@ -15,7 +15,7 @@ pytestmark = pytest.mark.unit
 def test_registered_tool_appears_without_editing_startup_catalog(tmp_path, monkeypatch):
     monkeypatch.setenv("MCP_CATEGORIES", "channels")
     monkeypatch.delenv("ALLOWED_TOOLS", raising=False)
-    assert "channel_list" in {tool["name"] for tool in list_tools()}
+    assert "channel_list" in {tool["name"] for tool in get_catalog()["channels"]}
     source = Path(__file__).resolve().parents[1] / "hooks"
     shutil.copytree(source, tmp_path / "hooks", ignore=shutil.ignore_patterns("__pycache__"))
     module = tmp_path / "hooks" / "mcp" / "channels.py"
