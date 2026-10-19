@@ -9,7 +9,7 @@ from tests.swarm_ledger.test_artifacts import JSON_DOC, MARKDOWN, SVG
 from tests.swarm_ledger.test_bin import DAY_MS
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/template.html"
+PAGES = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger"
 browser = chromium_browser
 FILES = {
     "a" * 64 + ".md": (MARKDOWN, "text/markdown"),
@@ -57,7 +57,7 @@ def page(browser, request):
     tab.route("**/artifacts/**", serve)
     doc = {"title": "Artifacts proof", "tasks": [{"id": "av1", "title": "Artifacts"}], "artifacts": ROWS}
     html = shell_html()
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    html = html.replace("__LEDGER_PALETTE__", (PAGES / "palette.css").read_text())
     html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
     show(tab, html, ledger=ledger_state(doc))
     yield tab
@@ -158,7 +158,7 @@ def trash_page(browser):
     old = {**ROWS[0], "id": "art-old", "title": "Old logo draft", "deleted_at": int(time.time() * 1000) - 2 * DAY_MS}
     doc = {"title": "Trash proof", "tasks": [], "artifacts": ROWS[1:], "artifact_trash": [old]}
     html = shell_html()
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    html = html.replace("__LEDGER_PALETTE__", (PAGES / "palette.css").read_text())
     html = html.replace("__LEDGER_PORT__", "8765").replace("__LEDGER_SLUG__", "arts")
     show(tab, html, ledger=ledger_state(doc))
     tab.get_by_role("button", name="Artifacts").click()

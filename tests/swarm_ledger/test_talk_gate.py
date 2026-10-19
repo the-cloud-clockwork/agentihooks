@@ -23,7 +23,7 @@ def redis(tmp_path, monkeypatch):
     client = fakeredis.FakeRedis(decode_responses=True)
     RedisStore(client).create(SwarmConfig(SLUG, "repo", 1, 1))
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     return client

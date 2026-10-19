@@ -18,7 +18,7 @@ core = server.core
 def ledger_page(monkeypatch):
     doc = new_ledger.build_doc({"title": "Doctor proof", "phases": [{"title": "Fix"}]})
     doc["tasks"] = [{"id": "fx-8be892c4-code", "title": "Inbox fix", "phase": "p1", "comments": []}]
-    html_path, _ = core.paths("demo")
+    html_path, _ = legacy_page.paths("demo", core)
     html_path.parent.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])

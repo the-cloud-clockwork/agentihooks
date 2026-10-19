@@ -101,7 +101,7 @@ def test_a_failed_stream_marks_the_page_offline_and_the_next_snapshot_recovers_i
 @pytest.fixture
 def live(monkeypatch):
     content = {"title": "Events", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content, "swarm"), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)

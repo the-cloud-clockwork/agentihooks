@@ -43,12 +43,12 @@ LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
 SEED_RE = re.compile(r'(<script id="ledger-data" type="application/json">)(.*?)(</script>)', re.S)
 PAGE_RE = re.compile(r'<meta name="ledger-page" content="([0-9a-f]+)">')
-TEMPLATE = Path(__file__).resolve().parent / "template.html"
-PALETTE = TEMPLATE.with_name("palette.css")
-TOOLTIPS = TEMPLATE.with_name("tooltips.js")
-MODULES = TEMPLATE.parent / "static" / "js"
-SHELL = TEMPLATE.with_name("shell.html")
-HOME = TEMPLATE.with_name("home.html")
+PAGES = Path(__file__).resolve().parent
+PALETTE = PAGES / "palette.css"
+TOOLTIPS = PAGES / "tooltips.js"
+MODULES = PAGES / "static" / "js"
+SHELL = PAGES / "shell.html"
+HOME = PAGES / "home.html"
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
 LISTS = {
@@ -126,12 +126,6 @@ EXTENSION_OPS = {
 
 def now_ms():
     return int(time.time() * 1000)
-
-
-def paths(slug):
-    if not isinstance(slug, str) or not SLUG_RE.match(slug):
-        raise ValueError(f"invalid slug: {slug!r}")
-    return LEDGER_DIR / f"{slug}.html", LEDGER_DIR / f"{slug}.json"
 
 
 def _reject_constant(name):
@@ -321,7 +315,7 @@ def static_assets():
 def page_version(assets=None):
     if assets is None:
         assets = {name: path.read_bytes() for name, path in static_assets().items()}
-    digest = hashlib.sha256(TEMPLATE.read_bytes() + SHELL.read_bytes() + HOME.read_bytes())
+    digest = hashlib.sha256(SHELL.read_bytes() + HOME.read_bytes())
     for name, data in assets.items():
         digest.update(name.encode() + b"\0" + data)
     return digest.hexdigest()[:12]

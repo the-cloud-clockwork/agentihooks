@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
     "Original sources": False,
@@ -81,7 +80,7 @@ SWARM_PANELS = {
     "freeze-fold",
     "architecture-fold",
 }
-DESIGN = TEMPLATE.parents[2] / "DESIGN.md"
+DESIGN = Path(__file__).resolve().parents[2] / "DESIGN.md"
 
 
 def in_ledger_section(node):

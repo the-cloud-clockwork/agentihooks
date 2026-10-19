@@ -20,7 +20,7 @@ def ledger_dir(tmp_path, monkeypatch):
         "sources": [],
         "phases": [{"title": "one", "description": "d"}, {"title": "two", "description": "e"}],
     }
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     state = anchored(SLUG, "old", "shared")
     url = state["phases"][0]["plan_ref"]["artifact"]
