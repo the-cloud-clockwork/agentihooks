@@ -367,6 +367,50 @@ $ agentihooks balance
 -  api (gateway)  api           OPEN    1/4       25%     4    n/a           n/a      n/a       n/a      n/a
 ```
 
+### Renamed account variables
+
+Renaming an account's variable, for example from `AH_CC_TOKEN_work` to
+`AH_CC_TOKEN_work_example_com`, leaves sessions started before the rename
+carrying the old name. The counter identifies an account by its token, not by
+the variable name, so those sessions still count against the one account:
+
+- The configured tokens are the `AH_CC_TOKEN_*` names in the environment plus
+  the managed token block. When several names hold the same token, the block's
+  name is kept, else the first name in sort order; that is the slug the
+  balancer routes the token under.
+- Each live session's `AH_CC_TOKEN_<slug>` value is matched to a configured
+  token by a SHA-256 fingerprint computed in process. A session whose token
+  matches is counted under the routed slug, whatever name it carries; one whose
+  token matches none is counted under its own name.
+- `agentihooks balance`, `agentihooks quota`, the quota policy and the swarm
+  capacity step all read the same count, so one token shows as one row with
+  the summed sessions and one cap. Distinct tokens stay separate rows even when
+  their names look alike.
+- Neither the token value nor its fingerprint is printed, logged or returned
+  to a caller.
+
+Before the rename was handled, an account with six sessions under its old name
+showed twice, once with six sessions and once under its new name with none,
+and the swarm offered the empty row's whole cap as free seats that did not
+exist. With both names
+holding the same token:
+
+```text
+$ agentihooks balance
+#  ACCOUNT            KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET
+-  -----------------  ------------  ------  --------  ------  ---  ------------  -------  --------  -------  --------
+1  work_example_com   subscription  NORMAL  6/6       -       6    54%           81%      30m       54%      5d10h
+```
+
+If the old name still shows as its own row, the reading host has the old
+token value but not the new name: neither its environment nor its managed token
+block holds `AH_CC_TOKEN_<new slug>`, so the old name is the only configured
+name for that token. With routing aggregation on, such a host also publishes
+the old name to the shared counts. Add the new name to that host's token block
+(`agentihooks claude login`, or the OpenBao load) and the rows merge on the
+next read. A session whose old name holds a token that was since replaced has
+no match and keeps its old name until it ends.
+
 `agentihooks balance --current` marks the account this session runs on. The
 session registry (`~/.agentihooks/active-sessions.json`) also records each
 session's real Claude PID and account at SessionStart.
