@@ -39,7 +39,8 @@ UNNAMED = "Promotion red: a dev job"
 NOT_DUPLICATE = (
     "The promotion watch files one task per failed dev job and run, and holds a job's cause while its task is open."
 )
-VOLATILE = re.compile(r"\b[0-9a-f]*\d[0-9a-f]*\b")
+HASH = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,}\b")
+NUMBER = re.compile(r"\d+(?:[.:]\d+)*[A-Za-z]*")
 MASTER_ITEM = (
     "Dev push run {run_id} of Tests failed on new causes, so the swarm filed {tasks} in the {lane} lane and raised a "
     "promotion alert: {url}"
@@ -84,8 +85,11 @@ def cause(repo_dir: str, job: dict, run: Callable = subprocess.run) -> str:
         detail += [
             a["message"] for a in found if a["annotation_level"] == "failure" and a["message"] not in ("", STEP_EXIT)
         ]
-    text = VOLATILE.sub("#", "; ".join(detail))
-    return f"{job['name']}: {text}" if text else job["name"]
+    return f"{job['name']}: {'; '.join(detail)}" if detail else job["name"]
+
+
+def normal(job: str, why: str) -> str:
+    return job + NUMBER.sub("#", HASH.sub("#", why.removeprefix(job)))
 
 
 def failed_jobs(found: list[dict]) -> list[str]:
@@ -106,43 +110,45 @@ def _live_alerts(doc: dict) -> list[dict]:
     return [a for a in doc.get("alerts", []) if a.get("source") == SOURCE and a.get("state") != "done"]
 
 
-def _held_jobs(redis, slug: str, doc: dict) -> set[str]:
+def _held_causes(redis, slug: str, doc: dict) -> set[str]:
     filed = redis.hgetall(key(slug, "jobs"))
     live = {t["id"] for t in _promotion_tasks(doc) if t.get("state") != "done"}
     if gone := [task_id for task_id in filed if task_id not in live]:
         redis.hdel(key(slug, "jobs"), *gone)
-    return {job for task_id, job in filed.items() if task_id in live}
+    return {why for task_id, why in filed.items() if task_id in live}
 
 
 def _red(slug, store, ledger, doc, last, causes, repo):
     redis, run_id, sha, url = store.redis, last["id"], last["head_sha"], last["html_url"]
-    held, present = _held_jobs(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
+    held, present = _held_causes(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        held.update(_held_jobs(redis, previous, ledger.state(previous)))
-    lane, actions, new = _lane(store, slug), [], []
+        held.update(_held_causes(redis, previous, ledger.state(previous)))
+    lane, actions, new = "", [], []
     for n, (job, why) in enumerate(causes):
         task_id = f"{TASK_PREFIX}{run_id}-{n}"
-        if why in held or task_id in present:
+        if normal(job, why) in held or job in held or task_id in present:
             continue
-        detail = why.removeprefix(job).removeprefix(": ")
+        detail = why.removeprefix(job).removeprefix(": ").rstrip(".")
         description = (
             f"The dev push run {run_id} of Tests failed in the job {job} at commit {sha}: {url}. "
             + (f"Its cause: {detail}. " if detail else "")
             + "Fix it on dev; the swarm closes this task when a later dev push run passes."
         )
+        lane = lane or _lane(store, slug)
         fields = {"task": task_id, "title": title(job), "lane": lane, "kind": "ci", "rank": "urgent"}
-        redis.hset(key(slug, "jobs"), task_id, why)
+        redis.hset(key(slug, "jobs"), task_id, normal(job, why))
         ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
-        new.append(task_id)
+        new.append((task_id, why))
     if new or not _live_alerts(doc):
-        where = f" in {', '.join(job for job, _ in causes)}" if causes else ""
+        named = [why.rstrip(".") for _, why in new] or [job for job, _ in causes]
+        where = f" in {', '.join(named)}" if named else ""
         ledger.raise_alert(
             slug, SOURCE, f"Dev promotion is red: push run {run_id} at commit {sha} failed{where}. {url}"
         )
         actions.append(f"raised the promotion alert for dev push run {run_id}")
     if new:
-        actions += _tell_master(slug, store, last, new, lane)
+        actions += _tell_master(slug, store, last, [task_id for task_id, _ in new], lane)
     return actions
 
 

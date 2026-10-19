@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.inbox.store import InboxStore
 from scripts.swarm import promotion_watch
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -535,13 +537,11 @@ def smoke_run(step, messages, run_id=900):
 
 
 def master_items(store):
-    from scripts.inbox.store import InboxStore
-    from scripts.swarm.ledger_events import Mail
-
-    return [item.text for item in InboxStore(store.redis).inbox(Mail(InboxStore(store.redis), store, SLUG).master)]
+    inbox = InboxStore(store.redis)
+    return [item.text for item in inbox.inbox(Mail(inbox, store, SLUG).master)]
 
 
-def test_cause_names_the_failed_steps_and_failure_messages_with_numbers_and_hashes_normalised():
+def test_cause_names_the_failed_steps_and_failure_messages():
     job = {
         "name": "coverage-ratchet",
         "check_run_url": SMOKE_URL,
@@ -553,8 +553,25 @@ def test_cause_names_the_failed_steps_and_failure_messages_with_numbers_and_hash
     messages = ["12 lines the base ran at deadbeef1234 are no longer run by any head test"]
     found = promotion_watch.cause("/repo", job, smoke_run("x", messages))
     assert found == (
-        "coverage-ratchet: Hold every line the base ran; # lines the base ran at # are no longer run by any head test"
+        "coverage-ratchet: Hold every line the base ran; "
+        "12 lines the base ran at deadbeef1234 are no longer run by any head test"
     )
+
+
+@pytest.mark.parametrize(
+    ("detail", "kept"),
+    [
+        ("12 lines at deadbeef1234 ran", "# lines at # ran"),
+        ("took 12.34s at 05:06:51Z", "took # at #"),
+        ("Build e2e tests", "Build e# tests"),
+        ("Build b2b tests", "Build b# tests"),
+        ("in the decade", "in the decade"),
+    ],
+)
+def test_normal_folds_numbers_and_hashes_in_the_cause_but_keeps_the_job_name(detail, kept):
+    job = "unit (3.11, 1)"
+    assert promotion_watch.normal(job, f"{job}: {detail}") == f"{job}: {kept}"
+    assert promotion_watch.normal(job, job) == job
 
 
 def test_cause_of_a_job_without_steps_or_check_run_is_its_name():
@@ -571,7 +588,10 @@ def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_al
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
     assert f"Its cause: {step}; swarm init refused a one task swarm." in ledger.added[1][1]["description"]
     assert len(ledger.raised) == 2
-    assert "swarm-image / smoke" in ledger.raised[1][2] and "901" in ledger.raised[1][2]
+    assert ledger.raised[1][2] == (
+        f"Dev promotion is red: push run 901 at commit {SHA} failed in swarm-image / smoke: {step}; "
+        "swarm init refused a one task swarm. https://github.com/o/r/actions/runs/901"
+    )
     assert actions == [
         "filed promo-901-0 for the failed dev job swarm-image / smoke",
         "raised the promotion alert for dev push run 901",
@@ -591,6 +611,15 @@ def test_the_same_cause_on_a_held_job_files_nothing_and_stays_quiet_while_its_al
     assert refresh(store, ledger, smoke_run("Build the image", ["layer 4 failed"], 901), NOW * 2) == []
     assert len(ledger.added) == 1 and len(ledger.raised) == 1
     assert len(master_items(store)) == 1
+
+
+def test_a_fixer_filed_before_causes_were_kept_still_holds_its_job(store):
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-800-0", "swarm-image / smoke")
+    ledger = Ledger([{"id": "promo-800-0", "title": "Promotion red: swarm-image smoke", "state": "claimed"}])
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == [
+        "raised the promotion alert for dev push run 900"
+    ]
+    assert ledger.added == [] and master_items(store) == []
 
 
 def test_a_fixer_goes_to_the_eng_lane_when_quota_capacity_gives_the_ci_lane_no_seats(store):
