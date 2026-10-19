@@ -143,7 +143,7 @@ def refused_fresh_outcome() -> dict:
             raise AssertionError("a fresh outcome was accepted for a native directive")
         replacements()
         assert protected() == before
-        assert native_cases.SESSIONS["claude"] not in refusal
+        assert refusal == "restore outcome does not match the accepted directive"
         return {
             "fresh_outcome_refusal": refusal,
             "ledger_recovery_status": ledger.rows[0]["recovery"]["status"],
@@ -170,10 +170,13 @@ def recovery_case(root: Path) -> dict:
             "checkpoint_retained": world.checkpoints.list(old.execution_id) == checkpoint != [],
             "awaiting_retained": world.occupant().state == "awaiting-decision",
         }
+        assert all(rollback.values()), rollback
         first = restarted.request(old.execution_id, "resume")
         directive = restarted.restore(first.replacement)
         attempts = world.attempts()
         repeated = world.recovery(controller).request(old.execution_id, "resume")
+        assert repeated == first
+        assert repeated.checkpoint == first.checkpoint != ""
         assert world.attempts() == attempts
         assert world.recovery(controller).restore(repeated.replacement) == directive
         try:

@@ -50,7 +50,7 @@
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2773",
   "remaining_limitations": [
     "Live capture and restore on Anton is unproven: the isolated proof controller was removed and the primary controller must be healthy first.",
-    "Approved spec exception (master ruling, 19 October): a spawn superseded as a legacy specification is replaced fresh without a choice, because it never applied and holds no conversation, so fresh is its only outcome.",
+    "Approved spec exception, recorded by the swarm master on ledger task vckp5 on 19 October: while restore automation is on and not paused, a spawn superseded as a legacy specification is replaced fresh without a choice, because it never applied and holds no conversation; with automation off or paused it waits for a master or operator decision like any other failure.",
     "Duplicate restore requests are idempotent per execution and choice; there is no separate request identity.",
     "Supported harness versions are claude 2.1 and codex 0.162; any other version refuses native resume."
   ],
