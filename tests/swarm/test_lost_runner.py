@@ -100,7 +100,7 @@ def test_every_tick_runs_the_sweep_with_its_swarm_config(monkeypatch):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", "/repo"))
+    store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0))
     calls = []
     monkeypatch.setattr(lost_runner, "sweep", lambda *args: calls.append(args) or [])
     tick.tick("sw", store, FakeLedger([]), FakeRuntime(), now_ms=1_000)
