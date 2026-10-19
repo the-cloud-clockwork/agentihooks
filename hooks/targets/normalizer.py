@@ -376,8 +376,7 @@ def _codex_answers(resp: Any) -> Any:
 
 # Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
-_EXEC_FIELD = re.compile(r"\s*,?\s*(\w+)\s*:\s*")
-_EXEC_SCALAR = re.compile(r"[^,}]*")
+_EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
 _ROLLOUT_TAIL_BYTES = 1 << 20
 
 
@@ -388,36 +387,32 @@ def _exec_calls(program: str) -> list[dict[str, Any]]:
         fields: dict[str, Any] = {}
         pos = start.end()
         while field := _EXEC_FIELD.match(program, pos):
-            if program.startswith('"', field.end()):
-                fields[field.group(1)], pos = decoder.raw_decode(program, field.end())
-            else:
-                pos = _EXEC_SCALAR.match(program, field.end()).end()
+            pos = field.end()
+            if program.startswith('"', pos):
+                fields[field.group(1)], pos = decoder.raw_decode(program, pos)
         calls.append(fields)
     return calls
 
 
-def _last_exec_program(transcript: str) -> str:
-    try:
-        with open(transcript, "rb") as handle:
-            size = handle.seek(0, os.SEEK_END)
-            handle.seek(max(size - _ROLLOUT_TAIL_BYTES, 0))
-            lines = handle.read().splitlines()
-    except OSError:
-        return ""
+def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:
+    with open(transcript, "rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(size - _ROLLOUT_TAIL_BYTES, 0))
+        lines = handle.read().splitlines()
     for line in reversed(lines):
         try:
             item = json.loads(line)["payload"]
         except (ValueError, KeyError, TypeError):
             continue
         if isinstance(item, dict) and item.get("type") == "custom_tool_call" and item.get("name") == "exec":
-            return str(item.get("input"))
-    return ""
+            return _exec_calls(str(item.get("input")))
+    return []
 
 
 def _codex_workdir(transcript: str, command: str) -> str:
     try:
-        calls = _exec_calls(_last_exec_program(transcript))
-    except ValueError:
+        calls = _last_exec_calls(transcript)
+    except (OSError, ValueError):
         return ""
     workdirs = {call.get("workdir") for call in calls if call.get("cmd") == command}
     return (workdirs.pop() or "") if len(workdirs) == 1 else ""

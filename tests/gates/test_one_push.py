@@ -455,3 +455,16 @@ def test_a_codex_payload_without_a_transcript_path_finds_its_rollout(monkeypatch
         "tool_input": {"command": "gh pr ready 1"},
     }
     assert normalize_payload(payload)["tool_input"]["workdir"] == str(work)
+
+
+@pytest.mark.parametrize("shift", [0, 4])
+def test_the_rollout_tail_holds_a_whole_exec_program(monkeypatch, tree, tmp_path, shift):
+    work = tmp_path / "command"
+    item = {"type": "custom_tool_call", "name": "exec", "input": exec_command("gh pr ready 1", work)}
+    program = (json.dumps({"type": "response_item", "payload": item}) + "\n").encode()
+    head = ('{"text": "' + "\u00e9" * (1 << 20) + '"}\n').encode()
+    rest = (1 << 20) - shift - len(program)
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_bytes(head + program + b" " * (rest - 1) + b"\n")
+    call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree)
+    assert call.tool_input["workdir"] == str(work)
