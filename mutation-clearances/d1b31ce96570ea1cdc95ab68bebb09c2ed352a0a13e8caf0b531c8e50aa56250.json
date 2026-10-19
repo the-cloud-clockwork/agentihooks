@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/merge_stall.py:scripts.swarm.health.merge_stall.x__failing__mutmut_8:0e449489d8bfdc837ef3aed45f0354d59c292e7231244543f1c0dadc38f99c21": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: the default is only read in the streak < STREAK guard, where 0 and 1 both fail (both are below 3), so the function returns [] for the same inputs, and the streak value is used only after the guard, when the key is present."
+  }
+}

@@ -123,7 +123,8 @@ def _seat(watch, state):
         return []
     from scripts.swarm.tick import spawn_holds
 
-    why = "; ".join(spawn_holds(watch.store, watch.slug)) or tick_master._launch_refusal(watch.store, watch.slug)
+    held_by = spawn_holds(watch.store, watch.slug)
+    why = held_by[0] if held_by else tick_master._launch_refusal(watch.store, watch.slug)
     episode.update(minutes=minutes, why=why)
     actions = []
     due = watch.now_ms - episode.get("respawned", episode["since"]) >= SEAT_MS
@@ -133,9 +134,9 @@ def _seat(watch, state):
         episode["respawned"] = watch.now_ms
         state["respawns"] = [*recent, watch.now_ms]
         if _allows(watch, "respawn", reason):
-            actions += watch.respawn() or [f"front door respawn refused: {why}"]
+            actions = watch.respawn() or [f"front door respawn refused: {why}"]
         else:
-            actions.append(LOGGED.format(action=f"respawn the front door master, {reason}"))
+            actions = [LOGGED.format(action=f"respawn the front door master, {reason}")]
     return actions + _alert(watch, episode, SEAT, SEAT_ALERT.format(slug=watch.slug, minutes=minutes, why=why))
 
 
@@ -193,10 +194,10 @@ def _merge(watch, state):
     if (
         episode is None
         or episode["merged"] != observed.get("merged")
-        or not set(kinds) <= set(episode.get("kinds", []))
+        or not set(kinds) <= set(episode.get("kinds", ()))
     ):
         if (episode or {}).get("raised"):
-            actions += _close(watch, MERGE, CLEARED.format(what="a new merge finding replaces it"))
+            actions = _close(watch, MERGE, CLEARED.format(what="a new merge finding replaces it"))
         episode = state[MERGE] = {"merged": observed.get("merged"), "kinds": kinds}
     summary = "; ".join(finding.summary for finding in found)
     evidence = "; ".join(line for finding in found for line in finding.evidence)
