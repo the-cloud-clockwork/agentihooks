@@ -13,7 +13,6 @@ from scripts.swarm_ledger import (
 )
 from scripts.swarm_ledger.adapters import hive, hooks, swarm
 
-
 REAL_DECIDE = ledger_duplicates.decide
 
 
