@@ -6,29 +6,35 @@ import pytest
 from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.stats import SharedStats
 
-# Each mutmut pass takes about fifteen seconds, so the baseline and grading passes run as two tests on one worker.
+# The baseline and grading passes run as two tests on one worker so neither test carries both under the one minute watchdog.
 pytestmark = pytest.mark.xdist_group("remote_control_mutation")
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "scripts/swarm/commands.py"
 
 
 @pytest.fixture(scope="module")
-def baseline(tmp_path_factory):
-    line = next(
-        number
-        for number, text in enumerate((ROOT / SOURCE).read_text().splitlines(), 1)
-        if "order = store.redis.lrange" in text
-    )
-    selected = {SOURCE: ({line}, ["tests/swarm_ledger/test_remote_control_process.py"])}
-    folder = tmp_path_factory.mktemp("remote-control")
-    stats = SharedStats(folder / "stats", "remote-control", (0, 1))
-    stats.folder.mkdir()
-    work = folder / "baseline"
-    work.mkdir()
-    with pytest.MonkeyPatch.context() as patch:
-        patch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
+def baseline_cache():
+    return []
+
+
+@pytest.fixture
+def baseline(baseline_cache, tmp_path_factory, monkeypatch):
+    if not baseline_cache:
+        line = next(
+            number
+            for number, text in enumerate((ROOT / SOURCE).read_text().splitlines(), 1)
+            if "order = store.redis.lrange" in text
+        )
+        selected = {SOURCE: ({line}, ["tests/swarm_ledger/test_remote_control_process.py"])}
+        folder = tmp_path_factory.mktemp("remote-control")
+        stats = SharedStats(folder / "stats", "remote-control", (0, 1))
+        stats.folder.mkdir()
+        work = folder / "baseline"
+        work.mkdir()
+        monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
         results, error = mutate_files(ROOT, work, selected, time.monotonic() + 120, (0, 1), stats)
-    return selected, stats, work, results, error
+        baseline_cache.append((selected, stats, work, results, error))
+    return baseline_cache[0]
 
 
 def test_remote_control_statistics_baseline_collects_without_grading(baseline):
