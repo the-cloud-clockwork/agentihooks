@@ -897,3 +897,12 @@ def test_a_job_that_only_starts_like_a_unit_shard_does_not_starve_its_consumers(
         "Promotion red: runner outage",
         "Promotion red: sonar",
     ]
+
+
+def test_a_consumer_that_lost_its_own_runner_is_named_once_among_the_lost_jobs(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("sonar", RAN, DOWNLOAD), ("unit (3.12, 1)", RAN, DOWNLOAD)]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    description = ledger.added[0][1]["description"]
+    assert "the jobs sonar, unit (3.12, 1) lost their runner infrastructure" in description
+    assert "unit shard output" not in description
