@@ -383,7 +383,7 @@ def test_freeze_checks_read_each_task_a_few_times_however_many_rules_apply(page)
     held = sorted(f"t{i}" for i in range(400) if i % 20 % 4 != 1 and f"t{i}" not in frozen)
     assert sorted(found["frozen"]) == frozen
     assert sorted(found["held"]) == held
-    assert found["reads"] <= 10 * 400
+    assert found["reads"] <= 2721
 
 
 REPLACED = """async () => {
@@ -397,14 +397,16 @@ REPLACED = """async () => {
   const moved = [before, frozen(d, "tasks/t3"), frozen(d, "tasks/t2")];
   d.tasks.splice(0, 1);
   d.tasks.push({ id: "t2", phase: "p2" });
-  return [...moved, frozen(d, "tasks/t2")];
+  const readded = frozen(d, "tasks/t2");
+  d.tasks.splice(1, 1);
+  return [...moved, readded, frozen(d, "tasks/t2")];
 }"""
 
 
 @pytest.mark.parametrize("page", [[]], indirect=True)
 def test_freeze_checks_find_a_task_added_after_another_left_the_list(page):
     tab, _ = page
-    assert tab.evaluate(REPLACED) == [False, True, False, True]
+    assert tab.evaluate(REPLACED) == [False, True, False, True, False]
 
 
 @pytest.mark.parametrize("page", [[]], indirect=True)
