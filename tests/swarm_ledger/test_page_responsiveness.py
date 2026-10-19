@@ -1,3 +1,5 @@
+import pytest
+
 from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
@@ -51,29 +53,48 @@ def test_outline_marking_does_not_read_geometry_after_writing_link_classes(brows
     page.close()
 
 
-def test_outline_updates_when_a_tall_target_top_crosses_the_activation_line(browser):
+@pytest.mark.parametrize(("height", "end_top"), [(400, 88), (20, -100)])
+def test_outline_updates_when_a_target_crosses_or_jumps_over_the_activation_line(browser, height, end_top):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     show(page, shell_html(), ledger=ledger_state({"title": "Outline crossing"}))
     page.evaluate(
-        """async () => {
-          const main = document.querySelector('script[type=module]').src;
-          const {markOutline} = await import(new URL('outline.js', main));
-          const target = document.createElement('section');
-          target.id = 'outline-crossing';
-          target.style.cssText = 'position:fixed;top:300px;left:400px;width:100px;height:400px';
+        """async (height) => {
+          const main = document.querySelector(\'script[type=module]\').src;
+          const {markOutline} = await import(new URL(\'outline.js\', main));
+          const target = document.createElement(\'section\');
+          target.id = \'outline-crossing\';
+          target.style.cssText = `position:fixed;top:300px;left:400px;width:100px;height:${height}px`;
           document.body.append(target);
-          const row = document.createElement('li');
-          row.className = 'ol-sec';
-          row.innerHTML = '<a href="#outline-crossing" data-target="outline-crossing">Crossing</a>';
-          document.querySelector('#outline > ul').append(row);
+          const row = document.createElement(\'li\');
+          row.className = \'ol-sec\';
+          row.innerHTML = \'<a href="#outline-crossing" data-target="outline-crossing">Crossing</a>\';
+          document.querySelector(\'#outline > ul\').append(row);
           markOutline();
           await new Promise(requestAnimationFrame);
           await new Promise(requestAnimationFrame);
+        }""",
+        height,
+    )
+    page.evaluate(
+        """top => {
+          document.getElementById(\'outline-crossing\').style.top = `${top}px`;
+          window.dispatchEvent(new Event(\'scroll\'));
+        }""",
+        end_top,
+    )
+    page.wait_for_function(
+        "() => document.querySelector(\'a[data-target=outline-crossing]\').classList.contains(\'on\')",
+        timeout=3000,
+    )
+    page.evaluate(
+        """() => {
+          document.getElementById(\'outline-crossing\').style.top = \'300px\';
+          window.dispatchEvent(new Event(\'scroll\'));
         }"""
     )
-    page.evaluate("document.getElementById('outline-crossing').style.top = '88px'")
     page.wait_for_function(
-        "() => document.querySelector('a[data-target=outline-crossing]').classList.contains('on')", timeout=3000
+        "() => !document.querySelector(\'a[data-target=outline-crossing]\').classList.contains(\'on\')",
+        timeout=3000,
     )
     page.close()
 
