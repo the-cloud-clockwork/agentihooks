@@ -27,8 +27,8 @@ export AH_CC_TOKEN_personal=...  # account "personal"
 
 `agenti` (alias of `agentihooks claude`) and `agentihooks init-agent` launch
 Claude on one of them. The launched session keeps only its own
-`AH_CC_TOKEN_<slug>`; that variable is how every tool below tells which
-account a session runs on. Token values are never printed or logged.
+`AH_CC_TOKEN_<slug>`; that variable carries the token every tool below uses to
+tell which account a session runs on. Token values are never printed or logged.
 
 ### Loading accounts from OpenBao
 
@@ -232,9 +232,10 @@ A Claude launch also sets `AGENTIHOOKS_ROUTE_ACCOUNT` to the account it chose
 Attribution reads variable names, plus a Claude token's SHA-256 to merge
 renamed accounts ([Renamed account variables](#renamed-account-variables));
 values are never printed. A process whose environment holds `AH_ROUTE_API`
-counts on the account `api`; otherwise it counts on the one `AH_CC_TOKEN_<slug>` (Claude) or `AH_CX_TOKEN_<slug>` (Codex) it holds,
-and on `unrouted` (Claude) or `default` (Codex) with none or several. The launch
-line names the side:
+counts on the account `api`; otherwise it counts on the one
+`AH_CC_TOKEN_<slug>` (Claude) or `AH_CX_TOKEN_<slug>` (Codex) it holds, and on
+`unrouted` (Claude) or `default` (Codex) with none or several. The launch line
+names the side:
 
 ```text
 [agenti] account=api kind=api sessions=1/1000000 source=cached
@@ -383,8 +384,8 @@ token value, so those sessions still count against the one account:
 
 - The configured tokens are the non empty `AH_CC_TOKEN_<slug>` names in the
   environment plus the managed token block, `api` excluded. Each token counts
-  once, under the name chosen by the dedupe rule in
-  [Codex accounts](#codex-accounts); that name is the slug the balancer routes
+  once, under the name chosen by the dedupe rule shared by every account list
+  (see [Codex accounts](#codex-accounts)); that name is the slug the balancer routes
   the token under.
 - A session holding exactly one `AH_CC_TOKEN_<slug>` name is matched to a
   configured token by a SHA-256 of its value, computed in process. A match
