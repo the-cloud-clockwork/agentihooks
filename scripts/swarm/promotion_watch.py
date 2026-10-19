@@ -15,9 +15,11 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from scripts.ci_budget import GATE
-from scripts.swarm import dev_red, naming, promotion_owner
+from scripts.inbox.store import InboxStore
+from scripts.swarm import capacity, dev_red, naming, promotion_owner
+from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
@@ -34,9 +36,18 @@ SOURCE = "promotion"
 SENDER = "swarm"
 TASK_PREFIX = "promo-"
 UNNAMED = "Promotion red: a dev job"
-NOT_DUPLICATE = "The promotion watch files one task per failed dev job and run, and holds a job while its task is open."
+NOT_DUPLICATE = (
+    "The promotion watch files one task per failed dev job and run, and holds a job's cause while its task is open."
+)
+HASH = re.compile(r"\b(?=[0-9a-f]*[a-f])(?=[0-9a-f]*\d)[0-9a-f]{7,}\b")
+NUMBER = re.compile(r"\d+(?:[.:]\d+)*[A-Za-z]*")
+MASTER_ITEM = (
+    "Dev push run {run_id} of Tests failed on new causes, so the swarm filed {tasks} in the {lane} lane and raised a "
+    "promotion alert: {url}"
+)
 CLOSABLE = ("open", "blocked")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
+REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
 
 
 def key(slug: str, part: str) -> str:
@@ -68,6 +79,20 @@ def superseded(repo_dir: str, job: dict, run: Callable = subprocess.run) -> bool
     return SUPERSEDED in messages and messages <= {SUPERSEDED, STEP_EXIT}
 
 
+def cause(repo_dir: str, job: dict, run: Callable = subprocess.run) -> str:
+    detail = [s["name"] for s in job.get("steps") or [] if s.get("conclusion") in FAILED]
+    if job.get("check_run_url"):
+        found = _read(repo_dir, f"{job['check_run_url']}/annotations?per_page=100", ANNOTATIONS_JQ, run)
+        detail += [
+            a["message"] for a in found if a["annotation_level"] == "failure" and a["message"] not in ("", STEP_EXIT)
+        ]
+    return f"{job['name']}: {'; '.join(detail)}"
+
+
+def normal(job: str, why: str) -> str:
+    return job + NUMBER.sub("#", HASH.sub("#", why.removeprefix(job)))
+
+
 def failed_jobs(found: list[dict]) -> list[str]:
     failed = sorted({j["name"] for j in found if j["conclusion"] in FAILED})
     return [name for name in failed if name != GATE] or failed
@@ -86,39 +111,66 @@ def _live_alerts(doc: dict) -> list[dict]:
     return [a for a in doc.get("alerts", []) if a.get("source") == SOURCE and a.get("state") != "done"]
 
 
-def _held_jobs(redis, slug: str, doc: dict) -> set[str]:
+def _held_causes(redis, slug: str, doc: dict) -> set[str]:
     filed = redis.hgetall(key(slug, "jobs"))
     live = {t["id"] for t in _promotion_tasks(doc) if t.get("state") != "done"}
     if gone := [task_id for task_id in filed if task_id not in live]:
         redis.hdel(key(slug, "jobs"), *gone)
-    return {job for task_id, job in filed.items() if task_id in live}
+    return {why for task_id, why in filed.items() if task_id in live}
 
 
-def _red(slug, redis, ledger, doc, last, failed, repo):
-    run_id, sha, url = last["id"], last["head_sha"], last["html_url"]
-    held, present = _held_jobs(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
+def _red(slug, store, ledger, doc, last, causes, repo):
+    redis, run_id, sha, url = store.redis, last["id"], last["head_sha"], last["html_url"]
+    held, present = _held_causes(redis, slug, doc), {t["id"] for t in doc.get("tasks", [])}
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        held.update(_held_jobs(redis, previous, ledger.state(previous)))
-    actions = []
-    for n, job in enumerate(failed):
+        held.update(_held_causes(redis, previous, ledger.state(previous)))
+    lane, actions, new = "", [], []
+    for n, (job, why) in enumerate(causes):
         task_id = f"{TASK_PREFIX}{run_id}-{n}"
-        if job in held or task_id in present:
+        if normal(job, why) in held or job in held or task_id in present:
             continue
+        detail = why.removeprefix(job).removeprefix(": ").removesuffix(".")
         description = (
-            f"The dev push run {run_id} of Tests failed in the job {job} at commit {sha}: {url}. Fix it on dev; "
-            "the swarm closes this task when a later dev push run passes."
+            f"The dev push run {run_id} of Tests failed in the job {job} at commit {sha}: {url}. "
+            + (f"Its cause: {detail}. " if detail else "")
+            + "Fix it on dev; the swarm closes this task when a later dev push run passes."
         )
-        fields = {"task": task_id, "title": title(job), "lane": "ci", "kind": "ci", "rank": "urgent"}
-        redis.hset(key(slug, "jobs"), task_id, job)
+        lane = lane or _lane(store, slug)
+        fields = {"task": task_id, "title": title(job), "lane": lane, "kind": "ci", "rank": "urgent"}
+        redis.hset(key(slug, "jobs"), task_id, normal(job, why))
         ledger.add_task(slug, {**fields, "description": description, "not_duplicate": NOT_DUPLICATE}, SENDER)
         actions.append(f"filed {task_id} for the failed dev job {job}")
-    if not _live_alerts(doc):
-        where = f" in {', '.join(failed)}" if failed else ""
-        ledger.raise_alert(
-            slug, SOURCE, f"Dev promotion is red: push run {run_id} at commit {sha} failed{where}. {url}"
-        )
-        actions.append(f"raised the promotion alert for dev push run {run_id}")
+        new.append((task_id, why))
+    if new or not _live_alerts(doc):
+        named = [why.removesuffix(": ").removesuffix(".") for _, why in new] or [job for job, _ in causes]
+        actions += _alert(slug, ledger, doc, last, named)
+    if new:
+        actions += _tell_master(slug, store, last, [task_id for task_id, _ in new], lane)
     return actions
+
+
+def _alert(slug, ledger, doc, last, named):
+    run_id = last["id"]
+    for alert in _live_alerts(doc):
+        ledger.close_alert(slug, alert["id"], REPLACED.format(run_id=run_id))
+    head = f"Dev promotion is red: push run {run_id} at commit {last['head_sha']} failed"
+    tail = f". {last['html_url']}"
+    where = f" in {', '.join(named)}" if named else ""
+    ledger.raise_alert(slug, SOURCE, head + where[: ledger_alerts.MAX_OUTCOME - len(head) - len(tail)] + tail)
+    return [f"raised the promotion alert for dev push run {run_id}"]
+
+
+def _tell_master(slug, store, last, new, lane):
+    mail = Mail(InboxStore(store.redis), store, slug)
+    text = MASTER_ITEM.format(run_id=last["id"], tasks=", ".join(new), lane=lane, url=last["html_url"])
+    if mail.send(f"promotion-{last['id']}", mail.master, text, ref=new[0]):
+        return [f"told the master about the new promotion causes of dev push run {last['id']}"]
+    return []
+
+
+def _lane(store, slug: str) -> str:
+    seats = capacity.read(store, slug).get("effective", {}).get("ci")
+    return "eng" if seats == 0 else "ci"
 
 
 def _green(slug, ledger, doc, last):
@@ -161,6 +213,8 @@ def _refresh(
         found = jobs(config.repo, last["id"], run) if last["conclusion"] == "failure" else []
         failed = failed_jobs(found)
         stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
+        named = {j["name"]: j for j in found}
+        causes = [] if stale else [(job, cause(config.repo, named[job], run)) for job in failed]
     except dev_red.READ_ERRORS as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"promotion watch skipped, reading dev push runs failed: {error}", file=sys.stderr)
@@ -168,7 +222,7 @@ def _refresh(
     if stale:
         actions = [f"dev push run {last['id']} was superseded before Sonar analysis"]
     elif last["conclusion"] == "failure":
-        actions = _red(slug, redis, ledger, doc, last, failed, config.repo)
+        actions = _red(slug, store, ledger, doc, last, causes, config.repo)
     else:
         actions = _recover(slug, redis, ledger, doc, last, config.repo)
     redis.set(key(slug, "seen"), last["id"])
