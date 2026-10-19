@@ -252,6 +252,50 @@ def test_a_status_count_still_holding_a_run_that_left_it_completes_once_the_coun
         )
 
 
+@pytest.mark.parametrize("elapsed,settles", [(23.5, 4), (24, 0)])
+def test_settling_reads_stop_when_the_time_budget_cannot_cover_another(monkeypatch, elapsed, settles):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, times = [], iter([100])
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+    monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: next(times, 100 + elapsed))
+
+    def run(args, **kwargs):
+        stale = parse_qs(urlsplit(args[2]).query).get("status") == ["queued"]
+        return SimpleNamespace(stdout=json.dumps({"total_count": int(stale), "workflow_runs": []}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert sleeps == [1] * settles
+    assert result["api_calls"] == 3 + settles
+    assert result["error"] == (
+        "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?status=queued; page=1; rows=0; total=1"
+    )
+
+
+def test_a_short_multi_page_status_list_is_not_settled(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, pages = [], []
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+
+    def run(args, **kwargs):
+        query = parse_qs(urlsplit(args[2]).query)
+        if query.get("status") != ["queued"]:
+            return SimpleNamespace(stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+        page = int(query["page"][0])
+        pages.append(page)
+        rows = [{"id": n} for n in range(100)] if page == 1 else [{"id": 100}]
+        return SimpleNamespace(stdout=json.dumps({"total_count": 102, "workflow_runs": rows}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert pages == [1, 2, 1, 2] and sleeps == []
+    assert result["error"] == (
+        "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?status=queued; page=2; rows=101; total=102"
+    )
+
+
 @pytest.mark.parametrize("elapsed,complete", [(24.5, True), (25, False), (25.5, False)])
 def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, elapsed, complete):
     from scripts.doctor import ci_speed_read

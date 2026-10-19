@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 REPO = "the-cloud-clockwork/agentihooks"
 ACTIVE = ("queued", "in_progress", "waiting", "pending", "requested")
 FAILURES = (subprocess.SubprocessError, ValueError, KeyError, RuntimeError)
+SETTLE_READS = 4
 
 
 class _Api:
@@ -34,8 +35,6 @@ class _Api:
     def pages(self, endpoint: str, field: str, settles: int = 0) -> list[dict]:
         separator = "&" if "?" in endpoint else "?"
         for attempt in range(2 + settles):
-            if attempt > 1:
-                time.sleep(1)
             rows, totals = {}, set()
             page = 1
             while True:
@@ -50,6 +49,10 @@ class _Api:
                         return list(rows.values())
                     break
                 page += 1
+            if 0 < attempt < 1 + settles:
+                if page > 1 or self.deadline - time.monotonic() <= 1:
+                    break
+                time.sleep(1)
         raise RuntimeError(
             "Actions API pagination ended before the full count: "
             f"endpoint={endpoint}; page={page}; rows={len(rows)}; total={total}"
@@ -80,7 +83,9 @@ def read(
         queries = [{"created": f"{since}..{until}"}]
         queries.extend({"status": status} for status in ACTIVE)
         for query in queries:
-            for workflow in api.pages(f"{root}?{urlencode(query)}", "workflow_runs", 4 if "status" in query else 0):
+            for workflow in api.pages(
+                f"{root}?{urlencode(query)}", "workflow_runs", SETTLE_READS if "status" in query else 0
+            ):
                 discovered[workflow["id"]] = workflow
         with ThreadPoolExecutor(max_workers=6) as pool:
             previous = [
