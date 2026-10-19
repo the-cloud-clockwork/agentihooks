@@ -3,8 +3,9 @@ import json
 import pytest
 import redis
 
-from scripts.swarm import redis_commands
+from scripts.swarm import code_reach, redis_commands
 from scripts.swarm.keyspace import ROOT
+from scripts.swarm.redis_wire import lua, wire
 
 pytestmark = pytest.mark.unit
 
@@ -50,7 +51,7 @@ def program(tmp_path):
     package.mkdir()
     for name, text in {"__init__": "", "app": APP, "lease": LEASE, "timer": TIMER}.items():
         (package / f"{name}.py").write_text(text)
-    return redis_commands.Program(redis_commands.parse(tmp_path))
+    return code_reach.Program(code_reach.parse(tmp_path))
 
 
 @pytest.fixture(scope="module")
@@ -59,16 +60,14 @@ def published():
 
 
 def test_a_redis_py_method_maps_to_the_command_it_sends():
-    assert redis_commands.wire(redis.Redis, "incr") == {"INCRBY"}
-    assert redis_commands.wire(redis.Redis, "blpop") == {"BLPOP"}
-    assert redis_commands.wire(redis.Redis, "zscan_iter") == {"ZSCAN"}
+    assert wire(redis.Redis, "incr") == {"INCRBY"}
+    assert wire(redis.Redis, "blpop") == {"BLPOP"}
+    assert wire(redis.Redis, "zscan_iter") == {"ZSCAN"}
+    assert wire(redis.Redis, "pipeline") == frozenset()
 
 
 def test_lua_scripts_name_the_commands_they_call():
-    assert redis_commands.lua("return redis.call('incrby', KEYS[1], 1) + redis.call( \"GET\", KEYS[1])") == {
-        "INCRBY",
-        "GET",
-    }
+    assert lua("return redis.call('incrby', KEYS[1], 1) + redis.call( \"GET\", KEYS[1])") == {"INCRBY", "GET"}
 
 
 def test_only_commands_reached_from_the_entry_point_are_issued(program):
@@ -78,6 +77,15 @@ def test_only_commands_reached_from_the_entry_point_are_issued(program):
     assert issued["INCRBY"] == {"scripts.lease:acquire"}
     assert issued["BLPOP"] == {"scripts.timer:Timer.wait"}
     assert reached["scripts.timer:Timer.wait"] == "scripts.app:main"
+
+
+def test_an_entry_point_missing_from_the_code_is_refused(program):
+    with pytest.raises(KeyError, match="scripts.app:gone"):
+        program.reach(("scripts.app:main", "scripts.app:gone"))
+
+
+def test_every_consumer_reaches_redis(published):
+    assert all(consumer["commands"] for consumer in published.values())
 
 
 def test_the_map_names_each_consumer_with_its_redis_role(published):
