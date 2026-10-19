@@ -7,10 +7,10 @@ import urllib.error
 from pathlib import Path
 
 import pytest
-import yaml
 
 from scripts.swarm import stack_env, stack_init
 from scripts.swarm_ledger import server_compose
+from tests.swarm.compose_loader import compose_file
 
 PASSWORD = "pw-test"
 HEALTHY = [
@@ -175,13 +175,6 @@ def prepared(home):
     (home / "swarm-client.env").write_text(f"AGENTIHOOKS_SWARM_REDIS_URL={shlex.quote(ADOPTED_REDIS)}\n")
 
 
-class ComposeLoader(yaml.SafeLoader):
-    pass
-
-
-ComposeLoader.add_constructor("!reset", lambda loader, node: "!reset")
-
-
 def test_adopt_records_the_ledger_folder_user_home_and_port_and_keeps_them(home, monkeypatch):
     monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
     monkeypatch.setattr(stack_init.os, "getuid", lambda: 1234)
@@ -249,16 +242,21 @@ def test_no_start_records_adoption_and_starts_no_service(home, monkeypatch):
 
 
 def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
-    text = (stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml").read_text()
-    swarm = yaml.load(text, Loader=ComposeLoader)["services"]["swarm"]
+    swarm = compose_file(stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml")["services"]["swarm"]
     assert (
         swarm["user"]
         == "${SWARM_ADOPT_UID:?run agentihooks swarm init --adopt}:${SWARM_ADOPT_GID:?run agentihooks swarm init --adopt}"
     )
     assert swarm["pid"] == "host"
     assert swarm["network_mode"] == "host"
-    assert swarm["ports"] == "!reset"
-    assert swarm["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev"
+    assert swarm["ports"] == swarm["depends_on"] == "!reset"
+    assert "image" not in swarm
+    assert (swarm["mem_limit"], swarm["memswap_limit"], swarm["cpus"], swarm["pids_limit"]) == (
+        "1536m",
+        "1536m",
+        2,
+        200,
+    )
     assert swarm["command"] == [
         "python",
         "${SWARM_ADOPT_CODE:?run agentihooks swarm init --adopt}/scripts/swarm_ledger/ledger_server.py",
@@ -269,8 +267,11 @@ def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
         "HOME": "${SWARM_ADOPT_HOME}",
         "LEDGER_DIR": "${SWARM_ADOPT_LEDGER_DIR}",
         "LEDGER_HOST": "127.0.0.1",
+        "LEDGER_TLS_CERT": "${LEDGER_TLS_CERT:-}",
+        "LEDGER_TLS_KEY": "${LEDGER_TLS_KEY:-}",
         "PYTHONPATH": "${SWARM_ADOPT_CODE}",
         "SWARM_RELOAD": "1",
+        "MALLOC_ARENA_MAX": "2",
         "AGENTIHOOKS_SWARM_REDIS_URL": "${SWARM_ADOPT_REDIS_URL:?run agentihooks swarm init --adopt}",
     }
     assert swarm["volumes"] == [
@@ -298,7 +299,8 @@ def test_adopt_refuses_without_a_prepared_client_and_records_nothing(home):
     assert "SWARM_ADOPT_LEDGER_DIR" not in stack_env.read_env(stack(home) / ".env")
 
 
-def test_adopted_client_settings_name_the_adopted_redis(home):
+def test_adopted_client_settings_name_the_adopted_redis(home, monkeypatch):
+    monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
     prepared(home)
     assert init(home, Docker(), ["--adopt", "--no-start"])[0] == 0
     client = stack_env.read_env(stack(home) / "client.env")
