@@ -188,7 +188,7 @@ jobs:
           PYTHONUNBUFFERED: "1"
         run: |
           read -ra files <<< "$FILES"
-          python -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider
+          time python -m scripts.ci_touched_tests "${files[@]}" --tb=short -p no:cacheprovider
 
   # Each leg holds a group of its own run, so a ready leg waits only on the batch runner set's ceiling, never on another branch.
   stats:
