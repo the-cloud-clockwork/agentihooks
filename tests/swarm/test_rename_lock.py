@@ -69,17 +69,21 @@ def test_a_rename_releases_the_tick_lock_it_took(store):
     assert controller.take_tick_lock(store, "sw", held, 600_000) is not None
 
 
-def test_a_rename_holds_the_tick_lock_for_the_rename_lock_time(store):
-    seen = []
+def test_a_rename_holds_the_tick_lock_for_the_rename_lock_time(store, monkeypatch):
+    taken = []
+    take = controller.take_tick_lock
+
+    def spy(store, slug, held, ttl_ms):
+        taken.append(ttl_ms)
+        return take(store, slug, held, ttl_ms)
 
     def herdr(args):
-        seen.append(store.redis.pttl(store.key("sw", "tick-lock")))
         raise SwarmError("pane gone")
 
+    monkeypatch.setattr(controller, "take_tick_lock", spy)
     with pytest.raises(SwarmError, match="pane gone"):
         rename_swarm(store, "sw", LEDGER, SimpleNamespace(herdr=herdr), 10)
-    assert len(seen) == 1
-    assert LOCK_MS - 1_000 < seen[0] <= LOCK_MS
+    assert taken == [LOCK_MS]
 
 
 def test_a_rename_leaves_a_tick_lock_it_lost_to_another_holder(store):
