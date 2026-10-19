@@ -455,7 +455,7 @@ def test_no_operator_address_sends_nothing(monkeypatch, tmp_path):
     assert mails == []
 
 
-def test_the_git_user_lookup_gives_up_after_five_seconds(monkeypatch):
+def test_the_git_user_lookup_passes_a_five_second_timeout(monkeypatch):
     calls = []
 
     def found(argv, **kwargs):
