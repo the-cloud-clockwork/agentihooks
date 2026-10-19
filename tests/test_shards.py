@@ -269,7 +269,7 @@ def test_every_file_pinned_to_the_first_shard_exists():
     assert FIRST_SHARD_FILES <= set(discover_test_files(_ROOT))
 
 
-def test_the_remote_control_mutation_halves_share_one_unit_shard():
+def test_remote_control_mutation_baseline_is_pinned_to_the_first_shard():
     assert "tests/test_remote_control_mutation_baseline.py" in FIRST_SHARD_FILES
 
 
