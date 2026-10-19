@@ -117,7 +117,7 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 `python -m scripts.ci_queue_retry --repo <owner>/<repo> --run-id <id>` reads the run and its latest failed jobs, then decides:
 
 1. Every failed job must be a `unit` shard or a job that depends on the `unit` jobs, directly or through other jobs, in `.github/workflows/test.yml` (for example `shard-check` and `Gate — Required`). A failure in any other job, such as `lint`, `test-count` or `durations`, refuses the requeue. So does a run with more than 100 jobs, since the jobs beyond the first page are counted as unclassified failures.
-2. At least one `unit` shard must have failed.
+2. At least one `unit` shard must have failed. A `cancelled` shard counts as failed only when it carries a runner loss signature; other cancelled jobs are ignored.
 3. Every failed `unit` shard must carry a runner loss signature in its check annotations or in the `##[error]` lines of its job log:
    - `The runner has received a shutdown signal`
    - `lost communication with the server`
@@ -125,9 +125,10 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 
    One red shard beside a lost one refuses the requeue.
 4. The pull request number comes from the merge group branch, `gh-readonly-queue/<base>/pr-<number>-<sha>`.
-5. The pull request must be open and outside the queue. If it left the queue since its head commit, the newest removal must be for failed checks, and there must be at most one failed checks removal. A head that already failed in the queue twice, or that last left the queue for another reason, is not requeued. Pushing a new head starts the count again.
+5. While the pull request is still in the queue, the classifier polls every 30 seconds, up to 30 minutes, for GitHub to drop it. The job's 35 minute timeout covers that wait.
+6. The pull request must be open and outside the queue. If it left the queue since its head commit, the newest removal must be for failed checks, and there must be at most one failed checks removal. A head that already failed in the queue twice, or that last left the queue for another reason, is not requeued. Pushing a new head starts the count again.
 
-The step prints one JSON line with the decision and writes `requeue` and `pull` to the step outputs:
+The step prints one JSON line with the decision and writes `requeue`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
 
 ```json
 {"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.11, 4); first failed checks removal of this head"}
@@ -139,7 +140,7 @@ The repository variable `QUEUE_RETRY_ENFORCE` controls what happens when the dec
 
 | `QUEUE_RETRY_ENFORCE` | Behaviour |
 |---|---|
-| unset, or any value other than `false` | The workflow mints a token for the TCC Main CI GitHub App (`TCC_CI_CLIENT_ID`, `TCC_CI_APP_PRIVATE_KEY`, with contents and pull request write) and runs `gh pr merge <number> --squash --auto`, which adds the pull request back to the queue. The `Requeue the pull request once` step shows the result. |
+| unset, or any value other than `false` | The workflow mints a token for the TCC Main CI GitHub App (`TCC_CI_CLIENT_ID`, `TCC_CI_APP_PRIVATE_KEY`, with contents and pull request write) and calls the GraphQL `enqueuePullRequest` mutation with the classified head as `expectedHeadOid`, which adds the pull request back to the queue. A push after classification makes the head differ and GitHub refuses the requeue. The `Requeue the pull request once` step shows the result. |
 | `false` | Log only. The workflow writes the notice `Log only, runner loss would requeue pull request <number> once` and leaves the pull request out of the queue. |
 
 Enforcement is on by default. To return to log only, without a code change:
@@ -169,11 +170,13 @@ gh run view <run id> --log | grep -E '"requeue"|Log only'
 | `"requeue": false` with `failed outside the unit shards: <jobs>` | A job other than the unit shards and their dependents failed. | Fix that job; the pull request needs a new queue entry once its checks pass. |
 | `"requeue": false` with `failed without a runner loss signature: <shards>` | A shard failed on a test, or its loss left none of the three signatures. | Read the shard log. Fix a real failure; queue again by hand for an unrecognised runner loss. |
 | `"requeue": false` with `head already left the queue 2 times on failed checks` | The same head was already requeued once and failed again. | Treat it as a real failure until the shard logs show otherwise. |
-| `"requeue": false` with `pull request is not open outside the queue` | The pull request was closed, merged or already queued again. | None. |
+| `"requeue": false` with `pull request is not open outside the queue` | The pull request was closed or merged, already queued again, or still in the queue after the 30 minute wait. | None, unless it is open and outside the queue; then queue it by hand. |
+| `"requeue": false` with `no unit shard failed` | The run failed or was cancelled with no unit shard carrying a failure or a runner loss signature. | Read the failed job; queue again by hand once it is fixed. |
+| `Classify the failed jobs` fails with `gh: HTTP 404` on `actions/jobs/<id>/logs` | GitHub kept no log for a shard, which can happen when its runner was lost. No decision is printed and nothing is requeued. | Queue the pull request by hand. |
 | The `Log only` notice | `QUEUE_RETRY_ENFORCE` is `false`. | Queue the pull request by hand, or delete the variable to turn enforcement on. |
 | A change to the retry rules has no effect | It is merged on `dev` but not promoted to `main`. | Wait for the next green promotion; see [Promotion and releases](promotion.md). |
 
-`tests/test_ci_queue_retry.py` pins the classification and the once per head guard against recorded shard logs in `tests/fixtures/queue_retry/`. Enforcement by default was delivered by pull request [3511](https://github.com/the-cloud-clockwork/agentihooks/pull/3511) under issue [3508](https://github.com/the-cloud-clockwork/agentihooks/issues/3508).
+`tests/test_ci_queue_retry.py` pins the classification and the once per head guard against recorded shard logs in `tests/fixtures/queue_retry/`. Enforcement by default was delivered by pull request [3511](https://github.com/the-cloud-clockwork/agentihooks/pull/3511) under issue [3508](https://github.com/the-cloud-clockwork/agentihooks/issues/3508). Later pull requests made the classifier wait for the queue to drop the pull request ([4166](https://github.com/the-cloud-clockwork/agentihooks/pull/4166), [4206](https://github.com/the-cloud-clockwork/agentihooks/pull/4206)), requeue through `enqueuePullRequest` ([4241](https://github.com/the-cloud-clockwork/agentihooks/pull/4241)) and count a cancelled shard that lost its runner ([4271](https://github.com/the-cloud-clockwork/agentihooks/pull/4271)).
 
 ## Coverage grading
 
