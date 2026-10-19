@@ -160,12 +160,15 @@ def test_ready_without_a_command_folder_counts_the_session_checkout(tree, tmp_pa
     assert decision.reason == open_refusal("demo", [], "commits not on origin")
 
 
-def codex_rollout(tmp_path, *programs):
+def codex_rollout(tmp_path, *programs, filler=0):
     rollout = tmp_path / "rollout.jsonl"
-    lines = [json.dumps({"type": "session_meta", "payload": {"cwd": "/elsewhere"}})]
+    lines = []
     for program in programs:
         item = {"type": "custom_tool_call", "status": "completed", "name": "exec", "input": program}
         lines.append(json.dumps({"type": "response_item", "payload": item}))
+    if filler:
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "text": "x" * filler}}))
+    lines += ["not json", "{}", "[]", json.dumps({"type": "turn_context", "payload": {"cwd": "/elsewhere"}})]
     rollout.write_text("\n".join(lines) + "\n")
     return rollout
 
@@ -177,7 +180,7 @@ def exec_command(command, workdir=None):
     return f"text(await tools.exec_command({{{fields},max_output_tokens:2000}}));\n"
 
 
-def codex_call(monkeypatch, rollout, command, cwd):
+def codex_call(monkeypatch, rollout, command, cwd, **tool_input):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
     payload = {
         "session_id": "01a15435-ba42-7c60-a0ac-3d9c038cf8c9",
@@ -186,7 +189,7 @@ def codex_call(monkeypatch, rollout, command, cwd):
         "hook_event_name": "PreToolUse",
         "permission_mode": "bypassPermissions",
         "tool_name": "Bash",
-        "tool_input": {"command": command},
+        "tool_input": {"command": command, **tool_input},
         "tool_use_id": "exec-b11bb50c-5652-4d33-85b1-d73603859b3c",
     }
     return Call.from_payload(normalize_payload(payload))
@@ -217,22 +220,43 @@ def test_ready_reads_the_latest_codex_exec_program(monkeypatch, tree, tmp_path):
     assert decision.allowed, decision.reason
 
 
-@pytest.mark.parametrize("program", ["no-workdir", "other-command", "two-workdirs"])
+@pytest.mark.parametrize(
+    "program", ["no-workdir", "other-command", "two-workdirs", "malformed", "beyond-tail", "no-rollout"]
+)
 def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypatch, tree, tmp_path, program):
     work = tmp_path / "command"
     git(tree, "worktree", "add", "--detach", str(work), "HEAD")
     (tree / "a.txt").write_text("unpublished\n")
     git(tree, "commit", "-q", "-am", "unpublished")
-    programs = {
-        "no-workdir": exec_command("gh pr ready 1"),
-        "other-command": exec_command("gh pr ready 2", work),
-        "two-workdirs": exec_command("gh pr ready 1", work) + exec_command("gh pr ready 1", tree),
+    earlier = exec_command("gh pr ready 1", work)
+    rollouts = {
+        "no-workdir": lambda: codex_rollout(tmp_path, earlier, exec_command("gh pr ready 1")),
+        "other-command": lambda: codex_rollout(tmp_path, earlier, exec_command("gh pr ready 2", work)),
+        "two-workdirs": lambda: codex_rollout(
+            tmp_path, earlier, exec_command("gh pr ready 1", work) + exec_command("gh pr ready 1", tree)
+        ),
+        "malformed": lambda: codex_rollout(tmp_path, earlier + 'exec_command({cmd:"gh pr ready 2",workdir:"open'),
+        "beyond-tail": lambda: codex_rollout(tmp_path, earlier, filler=1 << 20),
+        "no-rollout": lambda: tmp_path / "missing.jsonl",
     }
-    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", work), programs[program])
-    call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree)
+    call = codex_call(monkeypatch, rollouts[program](), "gh pr ready 1", tree)
     assert "workdir" not in call.tool_input
     decision = gate(target="codex").decide(call, ME, state(tmp_path))
     assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
+def test_a_codex_payload_workdir_wins_over_the_rollout(monkeypatch, tree, tmp_path):
+    work = tmp_path / "command"
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", tree))
+    call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree, workdir=str(work))
+    assert call.tool_input["workdir"] == str(work)
+
+
+def test_a_claude_payload_never_reads_a_codex_rollout(monkeypatch, tree, tmp_path):
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", tmp_path))
+    payload = {"transcript_path": str(rollout), "tool_name": "Bash", "tool_input": {"command": "gh pr ready 1"}}
+    assert normalize_payload(payload)["tool_input"] == {"command": "gh pr ready 1"}
 
 
 def test_a_reader_named_by_its_sub_agent_type_counts(tree, tmp_path):

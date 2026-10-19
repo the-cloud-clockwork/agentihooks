@@ -374,6 +374,56 @@ def _codex_answers(resp: Any) -> Any:
         return resp
 
 
+# Codex 0.162.1 hands a shell hook only the command and the session cwd; the
+# workdir the model passed to exec_command lives in the rollout's latest code
+# mode `exec` program, written before the hook fires (captured live).
+_EXEC_CALL = re.compile(r"exec_command\(\s*\{")
+_EXEC_FIELD = re.compile(r"\s*,?\s*(\w+)\s*:\s*")
+_EXEC_SCALAR = re.compile(r"[^,}]*")
+_ROLLOUT_TAIL_BYTES = 1 << 20
+
+
+def _exec_calls(program: str) -> list[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    calls = []
+    for start in _EXEC_CALL.finditer(program):
+        fields: dict[str, Any] = {}
+        pos = start.end()
+        while field := _EXEC_FIELD.match(program, pos):
+            if program.startswith('"', field.end()):
+                fields[field.group(1)], pos = decoder.raw_decode(program, field.end())
+            else:
+                pos = _EXEC_SCALAR.match(program, field.end()).end()
+        calls.append(fields)
+    return calls
+
+
+def _last_exec_program(transcript: str) -> str:
+    try:
+        with open(transcript, "rb") as handle:
+            handle.seek(max(handle.seek(0, os.SEEK_END) - _ROLLOUT_TAIL_BYTES, 0))
+            lines = handle.read().splitlines()
+    except OSError:
+        return ""
+    for line in reversed(lines):
+        try:
+            item = json.loads(line)["payload"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if item.get("type") == "custom_tool_call" and item.get("name") == "exec":
+            return str(item.get("input"))
+    return ""
+
+
+def _codex_workdir(transcript: str, command: str) -> str:
+    try:
+        calls = _exec_calls(_last_exec_program(transcript))
+    except ValueError:
+        return ""
+    workdirs = {call.get("workdir") for call in calls if call.get("cmd") == command}
+    return (workdirs.pop() or "") if len(workdirs) == 1 else ""
+
+
 def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if is_copilot():
         return _normalize_copilot(payload)
@@ -383,6 +433,10 @@ def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("tool_name"):
         name, args = _codex_tool_call(str(payload["tool_name"]), payload.get("tool_input"))
         payload["tool_name"] = name
+        if name == "Bash" and not args.get("workdir"):
+            workdir = _codex_workdir(str(payload.get("transcript_path")), str(args.get("command")))
+            if workdir:
+                args["workdir"] = workdir
         if args:
             payload["tool_input"] = args
 
