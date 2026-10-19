@@ -254,7 +254,7 @@ def test_a_delivery_record_resolves_both_roots(tmp_path):
     here = Scheduler(_scheduler().redis)
     (tmp_path / "real").mkdir()
     (tmp_path / "link").symlink_to(tmp_path / "real")
-    scheduled_tick.record(here.redis, tmp_path / "link", MINUTE_START)
+    scheduled_tick.record(here, tmp_path / "link", MINUTE_START)
     assert scheduled_tick.undelivered(here, tmp_path / "real", MINUTE_START) == ""
 
 

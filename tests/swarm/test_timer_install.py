@@ -5,6 +5,8 @@ import pytest
 from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
+pytestmark = pytest.mark.xdist_group("fakeredis")
+
 real_roots = timer._roots
 real_reconcile = timer.reconcile
 real_schedule = timer.schedule
@@ -337,6 +339,26 @@ def test_ensure_keeps_the_tick_timer_until_the_installed_scheduler_delivered_a_t
     assert capsys.readouterr().err == f"the agentihooks-swarm timer stays: {NONE_YET}\n"
 
 
+def test_ensure_reloads_nothing_while_the_kept_units_are_current(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    calls = []
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    argvs = [argv for argv, _ in calls]
+    assert ["systemctl", "--user", "daemon-reload"] not in argvs
+    assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"] in argvs
+
+
+def test_ensure_keeps_the_tick_timer_while_the_scheduled_tick_is_not_registered(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(timer, "schedule", lambda: False)
+    monkeypatch.setattr(timer, "undelivered", lambda: "")
+    calls = []
+    assert not timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    assert (tmp_path / "agentihooks-swarm.timer").read_text() == TICK_TIMER
+    assert not [argv for argv, _ in calls if "disable" in argv]
+    assert capsys.readouterr().err == "the agentihooks-swarm timer stays: the scheduled swarm tick is not registered\n"
+
+
 def test_ensure_restores_a_retired_tick_timer_while_delivery_fails(tmp_path, monkeypatch):
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
@@ -385,15 +407,16 @@ def test_undelivered_reads_this_machine_against_the_installed_root(monkeypatch):
 
     import fakeredis
 
+    from scripts.scheduler.core import Scheduler
     from scripts.swarm import scheduled_tick, store
 
     redis = fakeredis.FakeRedis(decode_responses=True)
     monkeypatch.setattr(store, "redis_client", lambda: redis)
     monkeypatch.setattr(time, "time", lambda: 1_000.0)
     assert real_undelivered() == NONE_YET
-    scheduled_tick.record(redis, "/installed", 900.0)
+    scheduled_tick.record(Scheduler(redis), "/installed", 900.0)
     assert real_undelivered() == ""
-    scheduled_tick.record(redis, "/main", 900.0)
+    scheduled_tick.record(Scheduler(redis), "/main", 900.0)
     assert real_undelivered() == (
         "the last swarm tick was delivered by a scheduler running /main, not the installed /installed"
     )

@@ -9,8 +9,6 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from redis.exceptions import RedisError
-
 from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
 
@@ -61,14 +59,16 @@ def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
             stderr=log,
             start_new_session=True,
         )
+    from redis.exceptions import RedisError
+
     try:
-        record(redis, ROOT, event["fired_at"])
+        record(Scheduler(redis), ROOT, event["fired_at"])
     except RedisError as exc:
         print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
-def record(redis: "Redis", root: Path | str, at: float) -> None:
-    redis.set(Scheduler(redis).key(DELIVERED), json.dumps({"root": str(root), "at": at}))
+def record(scheduler: Scheduler, root: Path | str, at: float) -> None:
+    scheduler.redis.set(scheduler.key(DELIVERED), json.dumps({"root": str(root), "at": at}))
 
 
 def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
