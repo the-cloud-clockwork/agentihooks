@@ -176,7 +176,7 @@ def _recorded_project(tmp_path, monkeypatch):
     (tmp_path / "tests/conftest.py").write_text("")
     subprocess.run([*GIT, "-C", str(tmp_path), "init", "-q"], check=True)
     commit = _commit(tmp_path, "recorded")
-    (tmp_path / "tests/test_fresh.py").write_text("from scripts.core import g\n")
+    (tmp_path / "tests/test_fresh.py").write_text("from scripts.core import g\n\n\ndef test_fresh():\n    pass\n")
     (tmp_path / "tests/test_edited.py").write_text("from scripts.core import g\n\n\ndef test_new():\n    pass\n")
     _commit(tmp_path, "head")
     monkeypatch.chdir(tmp_path)
@@ -246,7 +246,7 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
     manifest = _recorded_project(tmp_path, monkeypatch)
     edits = {
         "helper": ("tests/conftest.py", "X = 1\n"),
-        "dependency": ("pyproject.toml", '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n'),
+        "dependency": ("uv.lock", "version = 1\n"),
         "root module": ("setup.py", "X = 1\n"),
         "workflow": (".github/workflows/test.yml", "env:\n  FLAG: 1\n"),
         "new function": ("scripts/core.py", "\n\ndef h(value):\n    return value * 2\n"),
@@ -273,7 +273,7 @@ def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path,
     manifest["tests"] = {
         "tests/test_core.py::TestSpawn::test_child": {"units": [0], "escapes": False},
         "tests/test_edited.py::test_new": {"units": [0], "escapes": False},
-        "tests/test_fresh.py::test_unrelated": {"units": [2], "escapes": False},
+        "tests/test_fresh.py::test_fresh": {"units": [2], "escapes": False},
         "tests/test_gone.py::test_g": {"units": [1], "escapes": False},
     }
     selection = {}
