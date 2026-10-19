@@ -86,6 +86,7 @@ LOGO = ROOT / "media" / "agentihooks-logo.png"
 HUB = Hub()
 BIN_SWEEP_EVERY = 15
 FOLLOW_S = 0.25
+SCHEDULER_UNAVAILABLE = threading.Event()
 LOADED_STAMP = code_stamp()
 
 
@@ -1154,7 +1155,14 @@ def reloading(environ=os.environ) -> bool:
 def scheduled_wait(interval: float) -> None:
     from scripts.scheduler.process_timer import wait
 
-    wait(interval)
+    if not SCHEDULER_UNAVAILABLE.is_set():
+        try:
+            wait(interval)
+            return
+        except OSError as exc:
+            SCHEDULER_UNAVAILABLE.set()
+            sys.stderr.write(f"scheduler wait unavailable, sleeping instead: {exc}\n")
+    time.sleep(interval)
 
 
 def watch_ledgers(interval=2.0):

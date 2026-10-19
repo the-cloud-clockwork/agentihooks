@@ -196,6 +196,7 @@ def test_the_shared_follow_reads_every_watched_ledger_each_quarter_second(monkey
         slept.append(seconds)
         raise StopIteration
 
+    monkeypatch.setattr(server, "SCHEDULER_UNAVAILABLE", threading.Event())
     monkeypatch.setattr(server.HUB, "watched", lambda: ["broken", "kept"])
     monkeypatch.setattr(server.repository, "current", current)
     monkeypatch.setattr("scripts.scheduler.process_timer.wait", sleep)
