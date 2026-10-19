@@ -104,6 +104,11 @@ def test_claim_writes_no_lease_without_a_caller_agent(repo, tmp_path, monkeypatc
     assert read_lease(path, "worktree") is None
 
 
+def test_candidate_paths_reads_every_path_field_and_the_command():
+    tool_input = {"file_path": "/a", "notebook_path": "/b", "path": "/c", "workdir": "/d", "command": "ls /e"}
+    assert guard.candidate_paths(tool_input) == ["/a", "/b", "/c", "/d", "/e"]
+
+
 def test_claim_blocks_while_gc_removes_the_path(repo, tmp_path, owner):
     path = repo.worktree("task")
     home = tmp_path / "home"
