@@ -124,7 +124,7 @@ def _live_doctor_home(rendered):
     return home
 
 
-def test_a_second_front_door_binds_its_report_to_the_shared_home(ah, tmp_path, rendered):
+def test_a_second_front_door_binds_its_report_to_the_shared_home(ah, tmp_path, rendered, monkeypatch):
     home = _live_doctor_home(rendered)
     report = tmp_path / "report.json"
     binding.request(report, "master", "claude", rendered)
@@ -136,6 +136,9 @@ def test_a_second_front_door_binds_its_report_to_the_shared_home(ah, tmp_path, r
     assert target == home
     assert shared["canary"] != launched["rendered"]["canary"]
     assert json.loads(report.read_text()) == {**launched, "rendered": shared}
+    env = {"AGENTIHOOKS_PROFILE": "master", "CLAUDE_CONFIG_DIR": str(target), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", env, "default"))
+    assert binding.validate(shared["canary"])["home"] == str(home.resolve())
 
 
 def test_a_second_front_door_of_another_profile_is_refused(ah, tmp_path, rendered):
