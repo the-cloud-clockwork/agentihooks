@@ -41,6 +41,8 @@ FIXES = {
     "and keep the password in {env} as it was at the first start, {again}",
     "swarm": "read its logs; the ledger server needs Redis healthy, and if port {SWARM_PORT} is in use, "
     "set SWARM_PORT in {env} to a free port, {again}",
+    "adopted": "read its logs; the adopted ledger server serves port {SWARM_PORT} on the host network, "
+    "so stop the legacy ledger container by its id first, {again}",
     "controller": "read its logs; the controller starts once Redis and the ledger server are healthy "
     "and then holds a lease, so fix those first, {again}",
 }
@@ -226,7 +228,8 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
         return 0
     if sick := start(run, home, args.timeout, out):
         for service, state in sick:
-            fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)
+            adopted = service == "swarm" and values.get("SWARM_ADOPT_LEDGER_DIR")
+            fix = FIXES["adopted" if adopted else service].format(env=home / ".env", again=AGAIN, **values)
             failed(out, paint, f"{service} is {state}", fix, f"{logs(home)} {service}")
         return 1
     base = urllib.parse.urlunsplit(("http", f"{BIND}:{values['SWARM_PORT']}", "", "", ""))

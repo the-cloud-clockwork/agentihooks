@@ -2,6 +2,7 @@
 
 import os
 import secrets
+import shlex
 import socket
 import urllib.parse
 from pathlib import Path
@@ -57,7 +58,7 @@ def client_env(values: dict[str, str], home: Path) -> str:
     text = (
         "AGENTIHOOKS_DEPLOYMENT=compose\n"
         f"LEDGER_URL=http://{BIND}:{values['SWARM_PORT']}\n"
-        f"AGENTIHOOKS_SWARM_REDIS_URL={redis_url}\n"
+        f"AGENTIHOOKS_SWARM_REDIS_URL={shlex.quote(redis_url)}\n"
     )
     if scheme == "rediss":
         tls = home / values.get("SWARM_TLS_DIR", "./deploy/compose/tls") / "ca.pem"

@@ -304,8 +304,22 @@ def test_adopted_client_settings_name_the_adopted_redis(home, monkeypatch):
     prepared(home)
     assert init(home, Docker(), ["--adopt", "--no-start"])[0] == 0
     client = stack_env.read_env(stack(home) / "client.env")
-    assert client["AGENTIHOOKS_SWARM_REDIS_URL"] == ADOPTED_REDIS
+    assert client["AGENTIHOOKS_SWARM_REDIS_URL"] == shlex.quote(ADOPTED_REDIS)
+    assert shlex.split(client["AGENTIHOOKS_SWARM_REDIS_URL"]) == [ADOPTED_REDIS]
     assert client["LEDGER_URL"] == "http://127.0.0.1:8765"
+
+
+def test_an_unhealthy_adopted_ledger_names_the_legacy_ledger_to_stop(home):
+    prepared(home)
+    rows = [HEALTHY[0], {"Service": "swarm", "State": "running", "Health": "unhealthy"}, HEALTHY[2]]
+    code, out = init(home, Docker(rows=rows, up_code=1), ["--adopt"])
+    assert code == 1
+    assert out.endswith(
+        "Swarm stack not ready: swarm is unhealthy.\n"
+        "  Fix: read its logs; the adopted ledger server serves port 8765 on the host network, "
+        "so stop the legacy ledger container by its id first, then run agentihooks swarm init again.\n"
+        "  Logs: docker compose --project-name agentihooks-swarm logs swarm\n"
+    )
 
 
 def test_stack_folder_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):
