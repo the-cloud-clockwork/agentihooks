@@ -104,7 +104,7 @@ def stored(repository, slug: str) -> bool:
 
 def adopt_bin(repository) -> None:
     """Import the bin and restore mark files left in the ledger folder."""
-    if any((repository.directory / filename).exists() for filename in REGISTRIES.values()):
+    if repository.adopts and any((repository.directory / filename).exists() for filename in REGISTRIES.values()):
         with storage_lock(repository.directory):
             adopt_registries(repository)
 
@@ -120,7 +120,7 @@ def candidates(directory: Path, slug: str | None) -> list:
 def adopt(repository, slug: str | None = None) -> None:
     """Import every legacy ledger file present for `slug` (all when None), keeping a verified copy of each."""
     directory = repository.directory
-    if not directory.is_dir():
+    if not repository.adopts or not directory.is_dir():
         return
     pending = candidates(directory, slug)
     registries = any((directory / filename).exists() for filename in REGISTRIES.values())
