@@ -8,7 +8,7 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_master_start import StartupRuntime, startup_inside_the_down_window  # noqa: F401
 from tests.swarm.test_tick import store, tasks  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_alerted_master_relaunches_with_original_handoff_within_five_minutes(store):  # noqa: F811
