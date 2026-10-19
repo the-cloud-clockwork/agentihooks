@@ -106,7 +106,7 @@ def materialize(home: Path) -> None:
 def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
     from scripts.swarm_ledger.server_compose import ROOT
 
-    client = read_env(env_file.parent.parent / PREPARED_CLIENT).get("AGENTIHOOKS_SWARM_REDIS_URL", "")
+    client = read_env(env_file.parent.parent / PREPARED_CLIENT).get("AGENTIHOOKS_SWARM_REDIS_URL")
     if not client:
         return False
     values = read_env(env_file)
