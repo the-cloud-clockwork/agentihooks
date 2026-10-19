@@ -137,9 +137,13 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     state["known"] = {} if snapshot["complete"] else {**state.get("known", {}), **finished}
     state["report"] = report
     store.redis.set(key, json.dumps(state))
-    status = "complete" if report["complete"] else f"incomplete: {report['error']}"
-    if snapshot["complete"] and not report["complete"]:
-        status = "catching up"
+    status = (
+        "complete"
+        if report["complete"]
+        else "catching up"
+        if snapshot["complete"]
+        else f"incomplete: {report['error']}"
+    )
     return [
         f"doctor CI speed: {status}; {report['runs']} runs read of {report['discovered_runs']} discovered, "
         f"{report['jobs']} jobs, {report['crossings']} crossings, {report['api_calls']} API calls"
