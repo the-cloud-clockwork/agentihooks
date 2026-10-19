@@ -109,7 +109,7 @@ takes the claude ai login and Remote Control.
   not read. Post when an item arrived without its context or another master
   holds a fact you need. The front door answers the operator about the
   backend masters from what the channel carries.
-- `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` on (off by default) groups related
+- `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (on by default) groups related
   items: an item matching a master's last 15 items by intent goes to that
   master; a classifier error, timeout or low verdict falls back to round
   robin.

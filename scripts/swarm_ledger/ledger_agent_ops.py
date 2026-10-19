@@ -20,13 +20,7 @@ ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 MAX_TEXT = 20000
 
 
-def check(op, task_ids=()):
-    by = op.get("by")
-    if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
-        raise ValueError("agent ops need `by`, an agent name other than operator")
-    kind = op["op"]
-    check_hive(op)
-    check_task(op)
+def _check_state(op, kind):
     if kind == "join" and op.get("role", "member") not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     if kind == "ack" and not isinstance(op.get("rev"), int):
@@ -39,6 +33,13 @@ def check(op, task_ids=()):
                 raise ValueError("time left needs nonnegative whole minutes")
         elif not STATE_PATH_RE.match(str(op.get("path"))) or not isinstance(op.get("value"), bool):
             raise ValueError("set needs path <list>/<id>/done or <list>/<id>/out_of_scope and a boolean value")
+    if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
+        raise ValueError("gate_bypass needs an integer unhandled")
+    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
+        raise ValueError("gate_lift needs the gate's name")
+
+
+def _check_text(op, kind, task_ids):
     if kind == "add_item" and (
         op.get("list") not in ("followups", "questions") or not _text(op.get("text")) or "/" in op["id"]
     ):
@@ -54,10 +55,17 @@ def check(op, task_ids=()):
     if kind in ("add_item", "retext"):
         op["text"] = _screened(op["text"])
         ledger_comments.check(op["text"], "item", task_ids=task_ids)
-    if kind == "gate_bypass" and not isinstance(op.get("unhandled"), int):
-        raise ValueError("gate_bypass needs an integer unhandled")
-    if kind == "gate_lift" and not GATE_RE.match(str(op.get("gate"))):
-        raise ValueError("gate_lift needs the gate's name")
+
+
+def check(op, task_ids=()):
+    by = op.get("by")
+    if not isinstance(by, str) or not AUTHOR_RE.match(by) or by == "operator":
+        raise ValueError("agent ops need `by`, an agent name other than operator")
+    kind = op["op"]
+    check_hive(op)
+    check_task(op)
+    _check_state(op, kind)
+    _check_text(op, kind, task_ids)
     if "status" in op:
         if not _text(op["status"]):
             raise ValueError(f"status must be text up to {MAX_TEXT} characters")

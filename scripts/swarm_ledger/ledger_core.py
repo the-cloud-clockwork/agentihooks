@@ -37,7 +37,15 @@ import ledger_title
 import ledger_verdict
 import orjson
 
-from scripts.swarm_ledger import ledger_freezes, ledger_groups, ledger_phases, ledger_plans, ledger_rank, ledger_splits
+from scripts.swarm_ledger import (
+    ledger_freezes,
+    ledger_groups,
+    ledger_phases,
+    ledger_plans,
+    ledger_rank,
+    ledger_splits,
+    models,
+)
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
@@ -51,33 +59,10 @@ SHELL = PAGES / "shell.html"
 HOME = PAGES / "home.html"
 TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
-LISTS = {
-    "phases": ("title", "description", "done", "out_of_scope", "depends_on", "planning", "release"),
-    "questions": ("text", "out_of_scope"),
-    "followups": ("text", "done", "out_of_scope"),
-    "tasks": (
-        "title",
-        "description",
-        "phase",
-        "lane",
-        "state",
-        "claimed_by",
-        "issue_url",
-        "pr_url",
-        "done",
-        "out_of_scope",
-    ),
-    "plans": ("out_of_scope",),
-}
-BOOL_FIELDS = ("done", "out_of_scope")
+LISTS = models.LISTS
+BOOL_FIELDS = models.CHECKBOXES
 STATE_EVENTS = {"done": ("checked", "unchecked"), "out_of_scope": ("out of scope", "back in scope")}
-THREADS = {
-    "notes": ("comments",),
-    "phases": ("comments",),
-    "questions": ("answers", "comments"),
-    "followups": ("comments",),
-    "tasks": ("comments",),
-}
+THREADS = models.THREADS
 AGENT_OPS = ("join", "leave", "ack", "claim", "set", "add_item", "retext", "gate_bypass", "gate_lift")
 ARTIFACT_OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
@@ -229,7 +214,7 @@ def validate(doc):
         type(doc["time_left_minutes"]) is not int or time_left_value(doc["time_left_minutes"]) is None
     ):
         raise ValueError("time_left_minutes must be a nonnegative integer")
-    for key in ("title", "overview", "orchestrator", "chat_instructions"):
+    for key in models.TEXT_FIELDS:
         if not isinstance(doc.get(key, ""), str):
             raise ValueError(f"{key} must be a string")
     if not isinstance(doc.get("sources", []), list) or not all(isinstance(s, str) for s in doc.get("sources", [])):
@@ -249,7 +234,7 @@ def validate(doc):
             raise ValueError(f"every {name} item needs a unique string id without '/'")
         for item in items:
             for field in fields:
-                expected = list if field == "depends_on" else bool if field in (*BOOL_FIELDS, "release") else str
+                expected = models.field_type(name, field)
                 if field in item and not isinstance(item[field], expected):
                     raise ValueError(f"{name}/{item['id']}/{field} must be {expected.__name__}")
             for thread in THREADS[name]:

@@ -249,3 +249,54 @@ def test_a_log_read_that_fails_for_another_reason_still_fails_the_detector():
 
     with pytest.raises(subprocess.CalledProcessError):
         ci_read._attempts("o/r", [workflow], gh)
+
+
+RUNS_JQ = ".workflow_runs[] | {id, name, path, conclusion, created_at, html_url} | @json"
+DEV_PUSHES = "repos/{owner}/{repo}/actions/runs?branch=dev&event=push&status=completed&per_page=100"
+LAST_GREEN = (
+    "repos/{owner}/{repo}/actions/workflows/hive-worker.yml/runs?branch=dev&event=push&status=success&per_page=1"
+)
+
+
+@pytest.mark.parametrize("found_green", [True, False], ids=["green found", "no green"])
+def test_dev_pushes_reads_the_last_green_and_failing_jobs_of_each_red_workflow_only(found_green):
+    hive = ".github/workflows/hive-worker.yml"
+    runs = [
+        {"id": n, "name": "Worker hive pod", "path": hive, "conclusion": "failure", "created_at": "t", "html_url": "u"}
+        for n in range(10, 15)
+    ] + [{"id": 40, "name": "Pages", "path": ".github/workflows/pages.yml", "conclusion": "success"}]
+    green = {"id": 9, "name": "Worker hive pod", "path": hive, "conclusion": "success"}
+    jobs = [
+        {"name": "pod", "conclusion": "failure"},
+        {"name": "contracts", "conclusion": "timed_out"},
+        {"name": "lint", "conclusion": "success"},
+        {"name": "image", "conclusion": "skipped"},
+    ]
+    calls = []
+
+    def gh(argv, **kwargs):
+        calls.append(argv[2])
+        assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+        jq = ".jobs[] | {name, conclusion} | @json" if "/jobs?" in argv[2] else RUNS_JQ
+        assert argv == ["gh", "api", argv[2], "--jq", jq]
+        replies = {
+            DEV_PUSHES: runs,
+            LAST_GREEN: [green] if found_green else [],
+            "repos/{owner}/{repo}/actions/runs/14/jobs?per_page=100": jobs,
+        }
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(r) for r in replies[argv[2]]), "")
+
+    expected = {"runs": runs, "green": {hive: green} if found_green else {}, "jobs": {14: ["contracts", "pod"]}}
+    assert ci_read.dev_pushes("/repo", gh) == expected
+    assert len(calls) == 3
+
+
+def test_dev_pushes_without_a_red_workflow_reads_only_the_run_list():
+    calls = []
+
+    def gh(argv, **kwargs):
+        calls.append(argv[2])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    assert ci_read.dev_pushes("/repo", gh) == {"runs": [], "green": {}, "jobs": {}}
+    assert calls == [DEV_PUSHES]
