@@ -88,6 +88,8 @@ def test_unreported_recovery_is_retired_and_retried_without_another_notice(store
     assert name in runtime.killed
     assert master_start.read(store, "sw")["alerted"] is True
     assert ledger.notes == notices
+    tick("sw", store, ledger, runtime, 960_000)
+    assert len(runtime.masters) == 3
     tick("sw", store, ledger, runtime, 960_001)
     assert len(runtime.masters) == 4
 
@@ -136,3 +138,19 @@ def test_forced_master_recovery_preserves_the_alert_and_its_backoff(store, monke
         assert "master spawn failed: no master claude ai login" not in actions
     assert master_start.read(store, "sw")["alerted"] is True
     assert len([note for note in ledger.notes if "reported no hook" in note]) == 1
+
+
+def test_forced_recovery_replaces_an_unalerted_stale_start(store):  # noqa: F811
+    from scripts.swarm import tick_master
+    from scripts.swarm.tick import _master
+    from tests.swarm.test_tick_master import direct
+
+    swarm, runtime = direct()
+    master_start.save(swarm, "sw", {"name": "master@a1b2c3-0098", "task": {"id": MASTER}, "attempt": 1, "at": 0})
+    config, ledger = swarm.config("sw"), tasks()
+    tick_master.run(
+        "sw", config, swarm, ledger, runtime, 300_001, lambda: _master("sw", config, swarm, runtime, 300_001)
+    )
+    assert len(runtime.masters) == 1
+    assert runtime.masters[0][0] != "master@a1b2c3-0098"
+    assert master_start.read(swarm, "sw") == {}

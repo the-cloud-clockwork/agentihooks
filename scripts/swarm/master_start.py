@@ -49,7 +49,7 @@ def failed(store: RedisStore, slug: str, error: str, at: int) -> list[str]:
     pending = read(store, slug)
     repeated = pending.get("alerted") and master_alarm.read(store, slug).get("error") == error
     master_alarm.failed(store, slug, error, at)
-    if pending.get("alerted") or pending.get("attempt") == 1:
+    if pending.get("attempt") == 1:
         save(store, slug, {**pending, "name": "", "retry": True})
     return [] if repeated else [error]
 
@@ -89,12 +89,12 @@ def observe(slug: str, config: SwarmConfig, store: RedisStore, ledger: Ledger, r
         transfers.failed(store, slug, agent)
         store.drop_agent(slug, agent.name)
     if pending.get("alerted"):
-        save(store, slug, {**pending, "name": "", "at": at})
+        save(store, slug, {**pending, "at": at})
         return []
     if pending["attempt"] == 1 and not pending.get("retry"):
         save(store, slug, {**pending, "name": "", "retry": True, "at": at})
         return [f"lost {agent.name}"] if agent else ["master launch failed, retrying once"]
-    save(store, slug, {**pending, "name": "", "alerted": True, "at": at})
+    save(store, slug, {**pending, "alerted": True, "at": at})
     ledger.notify(
         slug,
         "The master reported no hook within two minutes on either launch. The operator has been alerted; automatic retries continue every five minutes. The original handoff is retained.",
