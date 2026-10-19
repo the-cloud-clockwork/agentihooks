@@ -386,6 +386,24 @@ def test_freeze_checks_read_each_task_once_however_many_rules_apply(page):
     assert found["reads"] <= 400
 
 
+REPLACED = """async () => {
+  const main = document.querySelector("script[type=module][src$='/js/main.js']").src;
+  const { frozen } = await import(new URL("freezes.js", main));
+  const d = { phases: [{ id: "p1" }, { id: "p2" }], slices: [], freezes: [{ verb: "freeze", target: "phases/p2" }],
+    tasks: [{ id: "t1", phase: "p1" }, { id: "t2", phase: "p1" }] };
+  const before = frozen(d, "tasks/t2");
+  d.tasks.splice(0, 1);
+  d.tasks.push({ id: "t3", phase: "p2" });
+  return [before, frozen(d, "tasks/t3"), frozen(d, "tasks/t2")];
+}"""
+
+
+@pytest.mark.parametrize("page", [[]], indirect=True)
+def test_freeze_checks_find_a_task_added_after_another_left_the_list(page):
+    tab, _ = page
+    assert tab.evaluate(REPLACED) == [False, True, False]
+
+
 @pytest.mark.parametrize("page", [[]], indirect=True)
 def test_the_page_marks_its_first_full_render_once(page):
     tab, _ = page

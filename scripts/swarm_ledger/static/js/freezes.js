@@ -16,7 +16,7 @@ const indexes = new WeakMap();
 
 function byId(list, id) {
   let index = indexes.get(list);
-  if (!index || index.length !== list.length) {
+  if (!index || index.length !== list.length || !index.items.has(id)) {
     index = { length: list.length, items: new Map() };
     for (const item of list) if (!index.items.has(item.id)) index.items.set(item.id, item);
     indexes.set(list, index);
