@@ -292,12 +292,51 @@ def test_the_watcher_run_passes_over_every_swarm_once_a_minute(store, capsys):
 
     def wait(seconds):
         waits.append(seconds)
+        assert len(waits) <= 2, "the watcher ran past its passes"
         clock[0] += LIMIT
 
     tick_watch.run(store, lambda: clock[0], None, wait, passes=2)
 
     assert waits == [tick_watch.PASS_S, tick_watch.PASS_S]
     assert "sw: told master@sw the tick is stale" in capsys.readouterr().out
+
+
+def test_the_watch_command_runs_without_a_parsed_swarm(monkeypatch):
+    ran = []
+    monkeypatch.setattr(cli, "connect", lambda: "store")
+    monkeypatch.setattr(cli, "refusal", lambda name, who: "")
+    monkeypatch.setattr(cli.signal, "signal", lambda *args: None)
+    monkeypatch.setattr(cli, "cmd_tick_watch", lambda store, args: ran.append((store, vars(args))))
+
+    assert cli.dispatch(["tick-watch"]) == 0
+    assert ran == [("store", {})]
+
+
+def test_a_pass_that_ended_at_the_epoch_is_stale_a_full_limit_later():
+    found = tick_heartbeat.Heartbeat(0, {})
+
+    assert tick_heartbeat.stale(found, LIMIT) == [
+        "no tick pass has completed for 10 minutes, the last ended at 00:00 UTC"
+    ]
+
+
+def test_every_capacity_pass_refreshes_when_the_host_room_was_observed():
+    from scripts.swarm import capacity
+    from tests.swarm.test_capacity import _store, account
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    found = _store()
+    config = SwarmConfig("sw", "/repo", max_eng=1, max_ci=0, max_plan=0)
+    found.create(config)
+    runtime = FakeRuntime()
+    runtime.quota_capacity = lambda cfg, agents, now, demand, requirements: capacity.calculate(
+        cfg, [account()], agents, demand
+    )
+    ledger = FakeLedger([{"id": "e"}])
+    capacity.apply("sw", config, found, ledger, runtime, 1000)
+    capacity.apply("sw", config, found, ledger, runtime, 2000)
+
+    assert (capacity.read(found, "sw")["at"], capacity.read(found, "sw")["observed_at"]) == (1000, 2000)
 
 
 def test_respawn_master_spawns_a_master_into_an_empty_front_door_seat(store, monkeypatch):
@@ -310,6 +349,7 @@ def test_respawn_master_spawns_a_master_into_an_empty_front_door_seat(store, mon
 
     actions = tick.respawn_master("sw", store, runtime, START)
 
+    assert lease.current(store, "sw").owner == "home"
     assert actions[0] == "dropped the gone master master@a1b2c3-0001"
     assert len(runtime.masters) == 1
     assert actions[-1].startswith("spawned master ")
@@ -511,6 +551,7 @@ def test_respawn_master_adopts_a_live_master_of_this_swarm(store, monkeypatch):
 
     assert tick.respawn_master("sw", store, runtime, START) == [f"adopted live master {name}"]
     assert runtime.masters == []
+    assert [a.started_at for a in store.agents("sw") if a.name == name] == [START]
 
 
 @pytest.mark.parametrize("state", ["stopped"])
