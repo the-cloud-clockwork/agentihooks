@@ -56,7 +56,7 @@ def _gaps(trace):
 
 
 def _partial(trace):
-    return () if trace.get("complete", True) else ("observations read up to the observation page cap only",)
+    return () if trace.get("complete", True) else ("observations read only up to where the read stopped",)
 
 
 def tool_errors(record: dict, limits: Limits) -> list[Finding]:

@@ -101,7 +101,7 @@ def test_recorded_turns_follow_each_other_and_a_planted_long_gap_is_found():
     assert any(line.startswith("turn 3 to turn 4: ") for line in found.evidence)
 
 
-PARTIAL = "observations read up to the observation page cap only"
+PARTIAL = "observations read only up to where the read stopped"
 
 
 def test_findings_on_a_trace_read_in_part_say_so_and_whole_traces_do_not():
