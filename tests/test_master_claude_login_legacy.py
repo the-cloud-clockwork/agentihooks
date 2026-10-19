@@ -1,4 +1,5 @@
 import json
+import os
 import re
 
 import pytest
@@ -113,8 +114,6 @@ def test_the_recovery_copy_wins_over_a_legacy_login(ah, rendered, tmp_path, monk
 
 
 def test_a_legacy_login_held_by_a_live_master_refuses_naming_it(ah, rendered, tmp_path):
-    import os
-
     legacy = _legacy(ah, "rig")
     (legacy / login.OWNER).write_text(json.dumps({"owner": "master@rig-1", "pid": os.getppid(), "epoch": 3}))
     message = f"the legacy master login {legacy / 'claude'} is held by master@rig-1, still running"
@@ -125,8 +124,6 @@ def test_a_legacy_login_held_by_a_live_master_refuses_naming_it(ah, rendered, tm
 
 
 def test_a_launch_beside_a_live_master_never_moves_a_legacy_login_into_its_home(ah, rendered, tmp_path):
-    import os
-
     login.build(rendered)
     legacy = _legacy(ah, "rig")
     login.claim("master@doctor-1", os.getppid())

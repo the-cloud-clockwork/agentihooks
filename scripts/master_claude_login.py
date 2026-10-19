@@ -163,7 +163,8 @@ def _adopt() -> None:
     legacy = sorted(path for path in (Path(hooks_config.AGENTIHOOKS_HOME) / LEGACY).glob("*/claude") if _private(path))
     if len(legacy) > 1:
         raise LoginRefused(SEVERAL.format(paths=", ".join(map(str, legacy))))
-    for path in legacy:
+    if legacy:
+        path = legacy[0]
         held = _read(path.parent / OWNER)
         if _alive(held.get("pid")):
             raise LoginRefused(LEGACY_HELD.format(path=path, owner=held.get("owner")))
