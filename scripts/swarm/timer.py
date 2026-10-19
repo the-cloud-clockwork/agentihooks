@@ -188,9 +188,57 @@ def _retire(unit_dir, run):
 
 def supervise():
     from scripts.scheduler.service import ensure_running
+
+    return ensure_running(_scheduler_env())
+
+
+def _scheduler_env():
     from scripts.swarm.store import redis_url
 
-    return ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
+    return {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)}
+
+
+def _off_installed(held):
+    from scripts.scheduler.service import revision
+
+    pid, root, installed = held["pid"], held.get("root"), _roots()[1]
+    if not root:
+        return f"the scheduler supervisor {pid} left no record of the code it loaded"
+    if Path(root).resolve() != Path(installed).resolve():
+        return f"the scheduler supervisor {pid} runs {root}, not the installed {installed}"
+    if (loaded := held.get("revision")) != (current := revision(installed)):
+        return f"the scheduler supervisor {pid} loaded revision {loaded}, not the installed revision {current}"
+    return ""
+
+
+def recycle():
+    from scripts.scheduler import service
+
+    env = _scheduler_env()
+    held = service.holder(env)
+    if held is None or not (why := _off_installed(held)):
+        return
+    print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
+    if not service.drain(held["pid"], env):
+        print(
+            f"the scheduler supervisor {held['pid']} still holds its lock; the next wait pass tries again",
+            file=sys.stderr,
+        )
+
+
+def _proven():
+    from redis.exceptions import RedisError
+
+    from scripts.scheduler import service
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick
+    from scripts.swarm.store import redis_client
+
+    started = (service.holder(_scheduler_env()) or {}).get("started")
+    try:
+        return started is not None and scheduled_tick.delivered_at(Scheduler(redis_client())) >= started
+    except RedisError:
+        return False
 
 
 def schedule():
@@ -293,8 +341,11 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
 
 def guard(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
+    recycle()
     supervise()
     if not _kept():
+        if any((unit_dir / name).exists() for name in RETIRED) and _left(run) == "0" and _proven():
+            return ensure(binary, unit_dir, run)
         return True
     enabled = ["systemctl", "--user", "is-enabled", "--quiet", f"{UNIT}.timer"]
     if all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()) and not (
