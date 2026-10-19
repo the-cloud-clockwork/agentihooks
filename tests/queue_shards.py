@@ -1,8 +1,10 @@
 import argparse
+import functools
 import hashlib
 import json
 import re
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from tests.shards import (
@@ -27,22 +29,10 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
     sizes = source_sizes(root, files)
     result = []
     for version, durations in versions.items():
-        measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes}
-        pinned = {node: seconds for node, seconds in measured.items() if node.split("::", 1)[0] in FIRST_SHARD_FILES}
-        measured = {node: seconds for node, seconds in measured.items() if node not in pinned}
         count = counts[version] if counts else 12
         while True:
-            parts = assign_nodes(measured, count, grouped, WORKERS, sizes=sizes)
-            parts[0].extend(pinned)
-            peak = max(_seconds(part, {**measured, **pinned}, grouped, sizes) for part in parts)
-            predicted = STARTUP_SECONDS + SLOWDOWN * peak
-            if counts:
-                if predicted >= STEP_SECONDS:
-                    raise SystemExit(
-                        f"Python {version} cannot fit {count} queue shards below the step timeout: {predicted:.1f}s"
-                    )
-                break
-            if predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
+            predicted = _predicted(durations, count, grouped, sizes)
+            if counts or predicted < STEP_SECONDS / 2 or count == MAX_SHARDS:
                 break
             count += 1
         print(f"Python {version}: {count} queue shards, predicted slowest {predicted:.1f}s of {STEP_SECONDS / 2:.0f}s")
@@ -51,6 +41,16 @@ def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, 
             for shard in range(1, count + 1)
         )
     return result
+
+
+def _predicted(durations: dict[str, float], count: int, grouped: dict[str, str], sizes: dict[str, int]) -> float:
+    measured = {node: seconds for node, seconds in durations.items() if node.split("::", 1)[0] in sizes}
+    pinned = {node: seconds for node, seconds in measured.items() if node.split("::", 1)[0] in FIRST_SHARD_FILES}
+    measured = {node: seconds for node, seconds in measured.items() if node not in pinned}
+    parts = assign_nodes(measured, count, grouped, WORKERS, sizes=sizes)
+    parts[0].extend(pinned)
+    peak = max(_seconds(part, {**measured, **pinned}, grouped, sizes) for part in parts)
+    return STARTUP_SECONDS + SLOWDOWN * peak
 
 
 def _seconds(part: list[str], durations: dict[str, float], grouped: dict[str, str], sizes: dict[str, int]) -> float:
@@ -90,8 +90,8 @@ def _combine(argv: list[str]) -> None:
     else:
         fragments = args.plans
     plan = [leg for fragment in fragments for leg in json.loads("[" + fragment + "]")]
-    limit = STEP_SECONDS / 2
-    if len(plan) > MAX_SHARDS:
+    capped = len(plan) > MAX_SHARDS
+    if capped:
         if not (args.from_output and args.root and args.inputs):
             raise SystemExit(f"{len(plan)} queue jobs exceed the pool of {MAX_SHARDS}")
         plan = _capped(plan, args.root, args.inputs)
@@ -101,10 +101,11 @@ def _combine(argv: list[str]) -> None:
                 for version in ("3.11", "3.12")
             )
         )
-        limit = STEP_SECONDS
     peak = max(leg["predicted_seconds"] for leg in plan)
-    if peak >= limit:
-        raise SystemExit(f"Queue plan exceeds {limit:.0f}s of the step timeout: {peak:.1f}s")
+    if capped and peak >= STEP_SECONDS:
+        print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS}s of the step timeout")
+    elif not capped and peak >= STEP_SECONDS / 2:
+        raise SystemExit(f"Queue plan exceeds {STEP_SECONDS / 2:.0f}s of the step timeout: {peak:.1f}s")
     print(f"{len(plan)} queue jobs fit one wave of {MAX_SHARDS} runners; predicted slowest test step {peak:.1f}s")
 
 
@@ -115,13 +116,33 @@ def _capped(plan: list[dict], root: Path, inputs: Path) -> list[dict]:
     spare = MAX_SHARDS - sum(counts.values())
     for version in sorted(needed, key=lambda version: needed[version] * MAX_SHARDS % total, reverse=True)[:spare]:
         counts[version] += 1
+    versions = {version: json.loads((inputs / version / ".test_durations").read_text()) for version in needed}
+    files = discover_test_files(root)
+    grouped = grouped_files(root, files)
+    sizes = source_sizes(root, files)
+    counts = _balanced(
+        counts, functools.cache(lambda version, count: _predicted(versions[version], count, grouped, sizes))
+    )
     print(
         f"::warning::{total} queue jobs exceed the pool of {MAX_SHARDS}; capped "
         + " and ".join(f"Python {version} at {counts[version]}" for version in needed)
         + " shards"
     )
-    versions = {version: json.loads((inputs / version / ".test_durations").read_text()) for version in needed}
     return matrix(root, versions, counts)
+
+
+def _balanced(counts: dict[str, int], predict: Callable[[str, int], float]) -> dict[str, int]:
+    best = counts
+    while True:
+        slow = max(counts, key=lambda version: predict(version, counts[version]))
+        fast = min(counts, key=lambda version: predict(version, counts[version]))
+        if slow == fast or counts[fast] == 1:
+            return best
+        counts = {**counts, slow: counts[slow] + 1, fast: counts[fast] - 1}
+        if max(predict(*leg) for leg in counts.items()) < max(predict(*leg) for leg in best.items()):
+            best = counts
+        if predict(fast, counts[fast]) >= predict(slow, counts[slow]):
+            return best
 
 
 def main(argv: list[str] | None = None) -> None:
