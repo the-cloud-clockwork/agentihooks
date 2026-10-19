@@ -288,3 +288,29 @@ branch starts no build. Proof branch publication goes only to the
 `agentihooks-worker-proof` repository. Rollback points deployment at the last
 accepted digest without rebuilding or retagging it; deployment selection belongs
 to antoncore GitOps.
+
+The candidate build reuses a layer cache in the Actions cache. Its key is
+`worker-layers-` followed by a hash of `docker/swarm-node/` and
+`scripts/swarm_v2/worker_image.py`; when no entry has that exact key, the
+newest `worker-layers-` entry seeds the build. On an exact hit the build only
+reads the cache and nothing is saved. On a miss the build also writes every
+stage's layers (`mode=max`) to a separate folder, and the job saves that folder
+under the exact key in its last steps: after the independent requalification
+matches, after the registry publication, the floating `dev` tag move and the
+release version tagging, and before the attestation upload. Every
+qualification, credential scan and requalification step still runs before the
+registry login, and a failed step stops the job, so a refused candidate or a
+failed publication saves no cache. A run that qualifies without publishing,
+such as a dispatch without `publish`, still saves the cache once the
+requalification matches. Saving took 23 to 25 seconds and used to run between
+requalification and login; qualification to a published image took 48, 47
+and 48 seconds on releases v2.17.51, v2.17.50 and v2.17.49 before the save
+moved behind publication.
+`tests/contracts/image_manifest/test_workflow.py` checks that the cache is kept
+and saved only after the requalification match and every publication step.
+
+To find whether a run saved the cache, open its job log: `Keep the qualified
+candidate layers` and `Save the qualified candidate layers` show as skipped on
+an exact hit and as run on a miss. Both run after the publication steps, so
+the published digest and tags are already in the registry whatever the save
+step reports.
