@@ -3,12 +3,10 @@ import subprocess
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import merge_queue, queue_record
+from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
 
 PENDING = "queue-priority"
-
-
-from scripts.swarm.ledger_client import LedgerClient
 
 
 def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -> dict | None:
