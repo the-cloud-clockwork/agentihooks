@@ -7,6 +7,8 @@ import re
 
 import ledger_priorities
 
+from scripts.swarm_ledger import ports
+
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks)/[^/]+$")
 OPS = ("verdict",)
 VERDICTS = ("approved", "denied")
@@ -23,7 +25,7 @@ def check(op):
 
 
 def text(verdict, ask):
-    from hooks.context.conditions import contains_condition_signal
+    contains_condition_signal = ports.hooks().conditions.contains_condition_signal
 
     if verdict == "denied" or ask is None:
         return verdict

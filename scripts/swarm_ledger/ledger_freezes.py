@@ -3,7 +3,7 @@
 import re
 import time
 
-from scripts.swarm.naming import lane_of, resolve_name
+from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -18,6 +18,14 @@ FULL = "full"
 FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
 EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
+
+
+def lane_of(name):
+    return ports.swarm().naming.lane_of(name)
+
+
+def resolve_name(name):
+    return ports.swarm().naming.resolve_name(name)
 
 
 def selector(target: str) -> bool:
@@ -42,7 +50,7 @@ def check(op):
 def autonomy(slug: str) -> str:
     from redis import RedisError
 
-    from scripts.swarm.store import SwarmError, connect
+    SwarmError, connect = ports.swarm().store.SwarmError, ports.swarm().store.connect
 
     try:
         return connect().config(slug).autonomy

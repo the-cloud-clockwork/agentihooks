@@ -4,12 +4,13 @@ import os
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from scripts.hive.auth import HiveError
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
 from .services import Services
 
+HiveError = ports.hive().auth.HiveError
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 
 

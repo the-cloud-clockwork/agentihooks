@@ -45,6 +45,7 @@ from scripts.swarm_ledger import (
     ledger_rank,
     ledger_splits,
     models,
+    ports,
 )
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
@@ -279,7 +280,7 @@ def parse_seed(html):
 
 
 def watch_path(slug, name):
-    from scripts.swarm.naming import addresses
+    addresses = ports.swarm().naming.addresses
 
     paths = [LEDGER_DIR / ".sessions" / f"{slug}.{candidate}.watch" for candidate in addresses(name)]
     return next((path for path in paths if path.exists()), paths[0])
@@ -371,7 +372,7 @@ class Context:
 
     def author(self, name: str) -> str:
         if name not in self.names:
-            from scripts.swarm.naming import resolve_name
+            resolve_name = ports.swarm().naming.resolve_name
 
             resolved = resolve_name(name)
             self.names[name] = resolved
@@ -529,8 +530,8 @@ def apply_op(doc, op, ctx):
 def _screened(op):
     if not op["thread"].endswith("/comments"):
         return op["text"]
-    from hooks.context.conditions import LEDGER_WRITE
-    from hooks.filters import check as filters
+    LEDGER_WRITE = ports.hooks().conditions.LEDGER_WRITE
+    filters = ports.hooks().filters
 
     return filters.screen(LEDGER_WRITE, op["text"])
 

@@ -3,14 +3,15 @@ import time
 
 from redis import RedisError
 
-from scripts.hive import registry
-from scripts.hive.auth import HiveError
-from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
 from .routing import _principal
 from .services import BodyReader, Services
+
+registry, HiveError = ports.hive().registry, ports.hive().auth.HiveError
+SwarmError = ports.swarm().store.SwarmError
 
 FLAG = {"enum": ["yes", "no"]}
 PATCH = {
@@ -41,7 +42,7 @@ def pairs(payload: dict) -> list[str]:
 
 
 def masters(store: object) -> dict[str, dict]:
-    from scripts.swarm import affinity
+    affinity = ports.swarm().affinity
 
     found = {}
     for slug in store.slugs():
@@ -52,8 +53,7 @@ def masters(store: object) -> dict[str, dict]:
 
 
 def view(store: object, now_ms: int) -> list[dict]:
-    from scripts.hive.launch import loaded_hives
-
+    loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
     hives = loaded_hives(store)
     for hive in hives:

@@ -10,9 +10,10 @@ import sys
 from collections.abc import Callable
 from dataclasses import asdict, dataclass
 
-from hooks.classifier import ClassifierError, code_rules, decide, runner
-from scripts.swarm_ledger import ledger_rank
+from scripts.swarm_ledger import ledger_rank, ports
 
+classifier = ports.hooks().classifier
+decide = classifier.decide
 PURPOSE = "ledger-duplicate"
 SHORTLIST = 4
 UNCHECKED = "unchecked"
@@ -51,8 +52,8 @@ def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None)
         for j, c in enumerate(found)
     ]
     try:
-        output = runner.run(PURPOSE, _state(items, shortlists), {"pairs": pairs}, decider=judge or decide)
-    except ClassifierError:
+        output = classifier.runner.run(PURPOSE, _state(items, shortlists), {"pairs": pairs}, decider=judge or decide)
+    except classifier.ClassifierError:
         return [UNCHECKED if found else None for found in shortlists]
     floor = output.thresholds["same"]
     return [_best(doc, i, found, output.raw.answers, floor) for i, found in enumerate(shortlists)]
@@ -137,7 +138,9 @@ def _verdicts(definition, state, params, answers):
     return {"duplicate": any(_yes(answers[_name(p["new"], p["slot"])].noul, floor) for p in params["pairs"])}
 
 
-RULE = code_rules.CodeRule(code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False})
+RULE = classifier.code_rules.CodeRule(
+    classifier.code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False}
+)
 
 
 def main() -> None:
