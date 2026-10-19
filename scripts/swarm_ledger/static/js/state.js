@@ -129,10 +129,24 @@ export function lsRead() {
   } catch (e) { return null; }
 }
 
+function cacheFits(value) {
+  const pending = [value];
+  let chars = 0;
+  while (pending.length) {
+    const item = pending.pop();
+    if (typeof item === "string") chars += item.length;
+    else if (item && typeof item === "object") pending.push(...Object.values(item));
+    if (chars > 2621440) return false;
+  }
+  return true;
+}
+
 export function lsWrite() {
   try {
     const at = Date.now();
     localStorage.setItem(`${LS_KEY}:pending`, JSON.stringify({ ops, checks, at }));
+    cacheVersion++;
+    if (!cacheFits({ doc, ops, checks })) return;
     if (!cacheWorker) {
       const main = document.querySelector("script[type=module]").src;
       cacheWorker = new Worker(new URL("cache_worker.js", main));
@@ -141,7 +155,7 @@ export function lsWrite() {
         try { localStorage.setItem(LS_KEY, data.value); } catch (e) { /* storage blocked */ }
       };
     }
-    cacheWorker.postMessage({ version: ++cacheVersion, value: { doc, ops, checks, at } });
+    cacheWorker.postMessage({ version: cacheVersion, value: { doc, ops, checks, at } });
   } catch (e) { /* storage blocked */ }
 }
 
