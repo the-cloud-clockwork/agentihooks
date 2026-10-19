@@ -130,7 +130,7 @@ def test_the_ca_pem_wins_over_the_ca_file(monkeypatch, cert):
 
     ledger_link.transport({"LEDGER_CA_PEM": pem, "LEDGER_CA_FILE": "/no/such/ca.pem"})
 
-    assert made == [((), {"cadata": pem})]
+    assert made == [((), {"cadata": pem.strip()})]
 
 
 def test_no_pem_and_no_ca_file_leave_the_default_transport(tmp_path):
