@@ -50,6 +50,7 @@ from scripts.swarm import (
     ledger_probe,
     lifetime,
     live_binding,
+    lost_runner,
     master_alarm,
     master_move,
     master_retire,
@@ -231,6 +232,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     with PLACING:
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
         actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
+        actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
         actions += skip_refused(ci_defects.refresh, slug, config, store, now_ms)
         actions += skip_refused(ci_flakes.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)

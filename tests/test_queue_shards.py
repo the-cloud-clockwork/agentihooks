@@ -186,14 +186,15 @@ def test_combined_queue_plan_refuses_more_jobs_than_the_runner_pool(capsys):
         main(["combine", "--plans", json.dumps(plan[:16])[1:-1], json.dumps(plan[20:35])[1:-1]])
 
 
-def _overflowing_plan(tmp_path, seconds, totals=(16, 30)):
+def _overflowing_plan(tmp_path, seconds, totals=(16, 30), tests=60):
     root = tmp_path / "root"
     (root / "tests").mkdir(parents=True)
-    for version in ("3.11", "3.12"):
+    per_version = seconds if isinstance(seconds, tuple) else (seconds, seconds)
+    for version, each in zip(("3.11", "3.12"), per_version):
         (root / f"tests/test_{version[-2:]}.py").write_text("")
         folder = tmp_path / "queue-input" / version
         folder.mkdir(parents=True)
-        durations = {f"tests/test_{version[-2:]}.py::test_{i}": seconds for i in range(60)}
+        durations = {f"tests/test_{version[-2:]}.py::test_{i}": each for i in range(tests)}
         (folder / ".test_durations").write_text(json.dumps(durations))
     output = tmp_path / "queue-plan.txt"
     lines = []
@@ -217,13 +218,13 @@ def test_an_overflowing_queue_plan_is_capped_at_the_runner_pool(tmp_path, capsys
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     assert set(outputs) == {"queue_311", "queue_312"}
     plans = {key: json.loads("[" + value + "]") for key, value in outputs.items()}
-    assert [leg["shard"] for leg in plans["queue_311"]] == list(range(1, 11))
-    assert [leg["shard"] for leg in plans["queue_312"]] == list(range(1, 21))
-    assert {leg["total"] for leg in plans["queue_311"]} == {10}
-    assert {leg["total"] for leg in plans["queue_312"]} == {20}
+    assert [leg["shard"] for leg in plans["queue_311"]] == list(range(1, 16))
+    assert [leg["shard"] for leg in plans["queue_312"]] == list(range(1, 16))
+    assert {leg["total"] for leg in plans["queue_311"]} == {15}
+    assert {leg["total"] for leg in plans["queue_312"]} == {15}
     assert all(leg["predicted_seconds"] < STEP_SECONDS for plan in plans.values() for leg in plan)
     out = capsys.readouterr().out
-    assert "46 queue jobs exceed the pool of 30; capped Python 3.11 at 10 and Python 3.12 at 20 shards" in out
+    assert "46 queue jobs exceed the pool of 30; capped Python 3.11 at 15 and Python 3.12 at 15 shards" in out
     assert "30 queue jobs fit one wave of 30 runners" in out
 
 
@@ -242,15 +243,130 @@ def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_pa
     )
 
 
-def test_a_capped_queue_plan_that_cannot_finish_in_the_step_timeout_refuses(tmp_path):
-    import pytest
-
+def test_a_capped_queue_plan_over_the_step_timeout_warns_and_still_plans_the_pool(tmp_path, capsys):
     from tests.queue_shards import main
 
     root, output = _overflowing_plan(tmp_path, 400.0)
 
-    with pytest.raises(SystemExit, match="cannot fit 10 queue shards below the step timeout"):
-        main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
+    main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
+
+    plan = [leg for line in output.read_text().splitlines() for leg in json.loads("[" + line.split("=", 1)[1] + "]")]
+    assert len(plan) == 30
+    out = capsys.readouterr().out
+    assert "::warning::The capped queue plan predicts 630.0s, over 420s of the step timeout\n" in out
+    assert "30 queue jobs fit one wave of 30 runners; predicted slowest test step 630.0s" in out
+
+
+def test_a_capped_plan_gives_the_slower_version_the_shards_it_needs_to_fit_the_step_timeout(tmp_path, capsys):
+    from tests.queue_shards import STEP_SECONDS, main
+
+    root, output = _overflowing_plan(tmp_path, (10.0, 90.0), tests=240)
+
+    main(["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")])
+
+    plans = {
+        key: json.loads("[" + value + "]")
+        for key, value in (line.split("=", 1) for line in output.read_text().splitlines())
+    }
+    assert {key: {leg["total"] for leg in legs} for key, legs in plans.items()} == {
+        "queue_311": {6},
+        "queue_312": {24},
+    }
+    assert max(leg["predicted_seconds"] for legs in plans.values() for leg in legs) == 367.5 < STEP_SECONDS
+    out = capsys.readouterr().out
+    assert "capped Python 3.11 at 6 and Python 3.12 at 24 shards" in out
+    assert "The capped queue plan predicts" not in out
+
+
+def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 630)
+    root, output = _overflowing_plan(tmp_path, 400.0)
+
+    queue_shards.main(
+        ["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")]
+    )
+
+    assert "::warning::The capped queue plan predicts 630.0s, over 630s of the step timeout\n" in (
+        capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize("seconds", [210.0, 500.0])
+def test_an_uncapped_plan_at_half_the_step_timeout_refuses(seconds):
+    from tests.queue_shards import main
+
+    plan = [{"python-version": "3.11", "shard": 1, "total": 1, "predicted_seconds": seconds}]
+
+    with pytest.raises(SystemExit, match=f"Queue plan exceeds 210s of the step timeout: {seconds:.1f}s"):
+        main(["combine", "--plans", json.dumps(plan)[1:-1], ""])
+
+
+def test_balanced_counts_pick_the_split_with_the_lowest_slowest_shard():
+    from tests.queue_shards import _balanced
+
+    work = {"3.11": 100.0, "3.12": 300.0}
+
+    assert _balanced(["3.11", "3.12"], lambda version, count: work[version] / count) == {"3.11": 8, "3.12": 22}
+
+
+def test_balanced_counts_search_past_a_split_that_stops_improving():
+    from tests.queue_shards import _balanced
+
+    def predict(version, count):
+        if version == "3.12":
+            return 10.0
+        return 1.0 if count == 17 else 20.0
+
+    assert _balanced(["3.11", "3.12"], predict) == {"3.11": 17, "3.12": 13}
+
+
+@pytest.mark.parametrize(
+    ("work", "expected"),
+    [({"3.11": 0.0, "3.12": 300.0}, {"3.11": 6, "3.12": 24}), ({"3.11": 300.0, "3.12": 0.0}, {"3.11": 18, "3.12": 12})],
+)
+def test_balanced_counts_keep_every_version_at_its_shard_floor(work, expected):
+    from tests.queue_shards import _balanced
+
+    assert _balanced(["3.11", "3.12"], lambda version, count: work[version] / count) == expected
+
+
+def test_shard_floors_match_the_unit_matrix_legs_of_a_merge_group():
+    from pathlib import Path
+
+    import yaml
+
+    from tests.queue_shards import SHARD_FLOORS
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    legs = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    merge_group = {"${{ github.event_name == 'merge_group' && '3.11' || '' }}": "3.11"}
+    excluded = {
+        (merge_group.get(leg["python-version"], leg["python-version"]), leg["shard"]) for leg in legs["exclude"]
+    }
+
+    assert {
+        version: len([shard for shard in legs["shard"] if (version, shard) not in excluded])
+        for version in legs["python-version"]
+    } == SHARD_FLOORS
+
+
+def test_queue_prediction_pins_the_first_shard_files_and_ignores_removed_files(tmp_path):
+    from tests.queue_shards import matrix
+
+    (tmp_path / "tests/routing").mkdir(parents=True)
+    (tmp_path / "tests/routing/test_codex_api.py").write_text("")
+    (tmp_path / "tests/test_a.py").write_text("")
+    durations = {
+        **{f"tests/routing/test_codex_api.py::test_pinned_{i}": 100.0 for i in range(8)},
+        "tests/test_gone.py::test_removed": 1000.0,
+        **{f"tests/test_a.py::test_{i}": 1.0 for i in range(9)},
+    }
+
+    plan = matrix(tmp_path, {"3.11": durations}, {"3.11": 2})
+
+    assert {leg["predicted_seconds"] for leg in plan} == {331.875}
 
 
 def test_queue_capacity_admission_precedes_the_unit_matrix():

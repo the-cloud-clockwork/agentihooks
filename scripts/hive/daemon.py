@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -24,6 +25,8 @@ if TYPE_CHECKING:
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
 UNIT = "agentihooks-hive.service"
+ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
+REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 
 
 def beat(redis: "Redis", local_id: str) -> None:
@@ -214,7 +217,28 @@ def repositories() -> list[str]:
         if parent.is_dir() and not (parent / ".git").exists()
         for child in parent.iterdir()
     ]
-    return sorted(str(path) for path in candidates + nested if (path / ".git").exists())
+    checkouts = [path for path in candidates + nested if (path / ".git").exists()]
+    identities = {origin(path) for path in checkouts} - {""}
+    return sorted(identities | {str(path) for path in checkouts})
+
+
+def origin(checkout: Path) -> str:
+    """The checkout's origin remote as a lowercase host/owner/name, the name a hosted swarm gives its repo."""
+    try:
+        found = ORIGIN.search((_common_gitdir(checkout) / "config").read_text())
+    except OSError:
+        return ""
+    remote = found and REMOTE.fullmatch(found.group(1).strip())
+    return f"{remote.group(1)}/{remote.group(2)}".lower() if remote else ""
+
+
+def _common_gitdir(checkout: Path) -> Path:
+    git = checkout / ".git"
+    if git.is_file():
+        git = checkout / git.read_text().removeprefix("gitdir:").strip()
+        if (git / "commondir").is_file():
+            git = git / (git / "commondir").read_text().strip()
+    return git
 
 
 def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:

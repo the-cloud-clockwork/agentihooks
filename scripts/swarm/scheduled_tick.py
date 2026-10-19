@@ -88,6 +88,13 @@ def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
     return ""
 
 
+def delivered_at(scheduler: Scheduler) -> float:
+    try:
+        return float(json.loads(scheduler.redis.get(scheduler.key(DELIVERED)))["at"])
+    except (ValueError, KeyError, TypeError):
+        return 0.0
+
+
 def command(binary: str) -> list[str]:
     tick = [binary, "swarm", "tick"]
     journal = shutil.which("systemd-cat")

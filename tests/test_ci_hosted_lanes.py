@@ -30,12 +30,14 @@ DIRECT = {
 }
 LANE_USERS = {
     "hierarchy-cpu.yml",
+    "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
     "proofs.yml",
     "test-leaks.yml",
     "swarm-node-image.yml",
     "hive-worker.yml",
+    "lost-runner.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}

@@ -142,6 +142,13 @@ def test_the_manifest_holds_the_functions_each_test_executed(tmp_path):
     }
 
 
+def test_the_manifest_preserves_each_contexts_executed_lines(tmp_path):
+    manifest = _measure(tmp_path)
+    assert manifest["lines"]["tests/test_a.py::test_double"] == {"hooks/sample.py": [7]}
+    assert manifest["lines"]["tests/test_b.py::test_grow[1]"] == {"hooks/sample.py": [14, 15, 17]}
+    assert "tests/test_c.py::test_nothing" not in manifest["lines"]
+
+
 def test_a_planted_change_to_one_function_invalidates_exactly_the_tests_that_ran_it(tmp_path):
     manifest = _measure(tmp_path)
     planted = [("hooks/sample.py", SOURCE, SOURCE.replace("value * 2", "value * 3"))]

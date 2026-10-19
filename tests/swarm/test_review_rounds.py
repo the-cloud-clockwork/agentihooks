@@ -41,13 +41,13 @@ def test_rounds_count_per_task_and_per_swarm(tmp_path):
 def test_rounds_live_in_the_swarm_home_by_default(tmp_path, monkeypatch):
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path)
     review_rounds.start("sw", "t1")
-    assert (tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds").read_text() == "1"
+    assert (tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds-before-pr").read_text() == "1"
 
 
 def test_rounds_live_in_the_home_given(tmp_path, monkeypatch):
     monkeypatch.setattr(gate_log, "swarm_home", lambda: tmp_path / "default")
     review_rounds.start("sw", "t1", tmp_path / "given")
-    assert (tmp_path / "given" / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds").read_text() == "1"
+    assert (tmp_path / "given" / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds-before-pr").read_text() == "1"
     assert not (tmp_path / "default").exists()
 
 
@@ -55,8 +55,9 @@ def test_rounds_live_in_the_home_given(tmp_path, monkeypatch):
 def test_legacy_rounds_remain_bound_to_the_first_pull_request(tmp_path, current):
     first = "https://github.com/o/r/pull/1"
     second = "https://github.com/o/r/pull/2"
-    for _ in range(3):
-        review_rounds.start("sw", "t1", tmp_path)
+    legacy = tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds"
+    legacy.parent.mkdir(parents=True)
+    legacy.write_text("3")
     if current == "first":
         with pytest.raises(SwarmError, match="no fourth review round"):
             review_rounds.start("sw", "t1", tmp_path, pr_url=first)
@@ -64,6 +65,17 @@ def test_legacy_rounds_remain_bound_to_the_first_pull_request(tmp_path, current)
     with pytest.raises(SwarmError, match="no fourth review round"):
         review_rounds.start("sw", "t1", tmp_path, pr_url=first)
     assert review_rounds.start("sw", "t1", tmp_path, pr_url=second)["round"] == 2
+
+
+def test_rounds_spent_before_any_pull_request_do_not_count_against_the_first_one(tmp_path):
+    first = "https://github.com/o/r/pull/1"
+    for _ in range(3):
+        review_rounds.start("sw", "t1", tmp_path)
+    with pytest.raises(SwarmError, match="no fourth review round"):
+        review_rounds.start("sw", "t1", tmp_path)
+    assert review_rounds.start("sw", "t1", tmp_path, pr_url=first) == {"task": "t1", "round": 1}
+    assert review_rounds.start("sw", "t1", tmp_path, pr_url=first, first_pr=first)["round"] == 2
+    assert review_rounds.counts("sw", "t1", tmp_path) == {"rounds-before-pr": 3, "rounds": 2}
 
 
 def test_counts_read_the_given_home_without_combining_pull_requests(tmp_path, monkeypatch):

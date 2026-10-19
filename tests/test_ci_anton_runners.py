@@ -28,6 +28,7 @@ def pool(label):
 
 
 MOVED = {
+    ("mutation-line-selection-proof.yml", "compare"): BATCH,
     ("test.yml", "docs"): QUEUED,
     ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
@@ -116,6 +117,7 @@ CLASSED = {
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
     ("queue-retry.yml", "retry"),
+    ("lost-runner.yml", "watch"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED

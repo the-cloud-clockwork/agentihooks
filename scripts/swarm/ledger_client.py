@@ -38,7 +38,7 @@ class LedgerClient:
 
         if ops is not None and (epoch := lease.EPOCH.get()) is not None:
             ops = [{**op, "controller_epoch": epoch} for op in ops]
-        service = self.service or all(op.get("by") in SERVICE_AUTHORS for op in ops or ())
+        service = self.service or bool(ops) and all(op.get("by") in SERVICE_AUTHORS for op in ops)
         ledger = _ledger()
         try:
             state = ledger.call(slug, ops, service=service)
@@ -158,7 +158,13 @@ class LedgerClient:
         LedgerClient(service=True)._call(slug, [op])
 
     def notify(self, slug, text):
-        self._call(slug, [_op("notice", "swarm", text=text)])
+        from scripts.gates import Who
+        from scripts.swarm.naming import lane_of
+        from scripts.swarm_ledger import ledger_link
+
+        who = Who.from_env()
+        author = who.name if ledger_link.remote(slug=slug) and who.pinned and lane_of(who.name) == "master" else "swarm"
+        self._call(slug, [_op("notice", author, text=text)])
 
     def raise_alert(self, slug, source, text):
         self._call(slug, [_op("alert_raise", "swarm", source=source, text=text)])
@@ -223,7 +229,7 @@ class LedgerClient:
         from scripts.swarm_ledger import ledger_link
 
         self._call(slug, [_op("reopen", by)])
-        if ledger_link.remote():
+        if ledger_link.remote(slug=slug):
             self._lifecycle(slug, {"action": "restore"})
             return
         _ledger()
@@ -242,7 +248,7 @@ class LedgerClient:
             payload = {**payload, "controller_epoch": epoch}
         ledger = _ledger()
         try:
-            client = ResourceClient(ledger.base(), ledger.credentials(slug, self.service))
+            client = ResourceClient(ledger.base(slug), ledger.credentials(slug, self.service))
             return client.request(slug, "lifecycle/actions", payload)["data"]
         except urllib.error.HTTPError as exc:
             error = LedgerRefused if 400 <= exc.code < 500 else SwarmError
@@ -253,7 +259,7 @@ class LedgerClient:
     def bin_closed(self, slug, closed_at):
         from scripts.swarm_ledger import ledger_link
 
-        if ledger_link.remote():
+        if ledger_link.remote(slug=slug):
             return self._lifecycle(slug, {"action": "bin_closed", "closed_at": closed_at})
         _ledger()
         import ledger_bin
@@ -266,7 +272,7 @@ class LedgerClient:
     def binned(self, slug):
         from scripts.swarm_ledger import ledger_link
 
-        if ledger_link.remote():
+        if ledger_link.remote(slug=slug):
             return self._lifecycle(slug, {"action": "binned"})
         _ledger()
         import ledger_bin

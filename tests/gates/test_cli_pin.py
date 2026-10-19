@@ -30,8 +30,18 @@ def outside_swarm(monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", ME)
 
 
+def _routing_store():
+    return SimpleNamespace(
+        names=SimpleNamespace(swarm_slug=lambda slug: slug),
+        config=lambda slug: SimpleNamespace(api_url="", pending_api_url=""),
+        redis=SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
+
+
 def run_ledger(monkeypatch, name):
     seen = []
+    monkeypatch.setattr("scripts.swarm.store.connect", _routing_store)
     monkeypatch.setattr("sys.argv", ["agentihooks ledger", "--slug", SLUG, "--as", name, "status"])
     monkeypatch.setattr(ledger, "cmd_status", seen.append)
     ledger.main()
@@ -53,9 +63,7 @@ class TestLedger:
 
 def run_swarm(monkeypatch, argv):
     seen = []
-    monkeypatch.setattr(
-        swarm_cli, "connect", lambda: SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda slug: slug))
-    )
+    monkeypatch.setattr(swarm_cli, "connect", _routing_store)
     monkeypatch.setattr(swarm_cli, "cmd_status", lambda store, args: seen.append(args.name))
     return swarm_cli.main(argv), seen
 

@@ -99,7 +99,7 @@ def test_api_requests_use_the_exact_repository_window_and_safe_subprocess_option
     monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: 100)
     run, calls = api()
     result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(60, max_seconds))
-    assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0}
+    assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0, "unverified": 0}
     first_args, _ = calls[0]
     assert first_args[:2] == ["gh", "api"]
     assert urlsplit(first_args[2]).path == "repos/the-cloud-clockwork/agentihooks/actions/runs"

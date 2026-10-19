@@ -65,11 +65,13 @@ def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_on
         assert "run 7" in item.text and "anton-oss" in item.text and "301 seconds" in item.text
     assert any("1 runs" in action and "1 jobs" in action and "7 API calls" in action for action in first)
     assert any("CI speed" in action for action in second)
-    finding, _ = loop.judged(store, DOCTOR, 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]')
+    finding, _ = loop.judged(store, DOCTOR, 'ci-queue-age-unconfirmed/7-1-["anton-oss", "self-hosted"]')
     assert finding["measure"] == 361
     assert int(store.redis.hget(store.key(DOCTOR, "doctor-timer"), "last_new")) == NOW
     seen = json.loads(
-        store.redis.hget(store.key(DOCTOR, "doctor-findings"), 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]')
+        store.redis.hget(
+            store.key(DOCTOR, "doctor-findings"), 'ci-queue-age-unconfirmed/7-1-["anton-oss", "self-hosted"]'
+        )
     )
     assert seen["seen_at"] == NOW
 
@@ -123,7 +125,10 @@ def test_a_complete_pass_records_full_counts_and_the_next_active_set(store, monk
 def test_the_timer_excludes_jobs_that_started_before_the_saved_window(store, monkeypatch):
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(301, created=-601)])]))
     actions = cli.timer(store, DOCTOR, NOW, False)
-    assert "doctor CI speed: complete; 1 runs read of 1 discovered, 1 jobs, 0 crossings, 7 API calls" in actions
+    assert (
+        "doctor CI speed: complete; 1 runs read of 1 discovered, 1 jobs, 0 crossings, 7 API calls, 0 retracted, 0 queued jobs not reread"
+        in actions
+    )
     assert InboxStore(store.redis).inbox(f"master@{WATCHED}") == []
 
 
@@ -134,17 +139,19 @@ def test_a_judged_speed_finding_returns_only_after_its_cooldown(store, monkeypat
     )
     cli.timer(store, DOCTOR, NOW, False)
     judgments = loop.verdicts(store, DOCTOR)
-    judgments.judge('ci-runner-wait/7-1-["anton-oss", "self-hosted"]', "early-real", "runner delay", "reader", NOW)
+    judgments.judge(
+        'ci-queue-age-unconfirmed/7-1-["anton-oss", "self-hosted"]', "early-real", "runner delay", "reader", NOW
+    )
     cli.timer(store, DOCTOR, NOW + 60000, False)
-    first = json.loads(store.redis.hget(judgments.key, 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]'))
+    first = json.loads(store.redis.hget(judgments.key, 'ci-queue-age-unconfirmed/7-1-["anton-oss", "self-hosted"]'))
     assert first["returned"] is False
     cli.timer(store, DOCTOR, NOW + 120000, False)
-    second = json.loads(store.redis.hget(judgments.key, 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]'))
+    second = json.loads(store.redis.hget(judgments.key, 'ci-queue-age-unconfirmed/7-1-["anton-oss", "self-hosted"]'))
     assert second["returned"] is True
 
 
 def test_persisted_notifications_suppress_a_crossing_after_a_process_restart(store, monkeypatch):
-    identity = 'ci-runner-wait/7-1-["anton-oss", "self-hosted"]'
+    identity = 'ci-queue-age-unconfirmed/7-1-["anton-oss", "self-hosted"]'
     for slug in (DOCTOR, WATCHED):
         store.redis.sadd(store.key(DOCTOR, "ci-speed-notified", slug), identity)
     monkeypatch.setattr(
@@ -190,14 +197,17 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
     assert saved()["known"][str(jobs[0])] == {
         "status": "completed",
         "run_attempt": 1,
-        "jobs": [job(0, created=-30, identity=jobs[0])],
+        "jobs": [{**job(0, created=-30, identity=jobs[0]), "runner_name": None}],
     }
     down.append(True)
     cli.timer(store, DOCTOR, NOW + 60000, False)
     assert len(saved()["known"]) == 54
     down.clear()
     third = cli.timer(store, DOCTOR, NOW + 120000, False)
-    assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in third
+    assert (
+        "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls, 0 retracted, 0 queued jobs not reread"
+        in third
+    )
     assert sorted(jobs) == list(range(100))
     assert saved()["known"] == {}
 
