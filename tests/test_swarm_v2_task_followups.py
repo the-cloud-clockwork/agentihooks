@@ -88,7 +88,6 @@ def test_a_task_id_on_a_follow_up_passes_the_check(task):
     assert op["task"] == task
 
 
-
 def test_a_follow_up_add_with_a_task_passes_the_api_schema_and_lands_on_its_owning_master(world):
     op = {"op": "add_item", "id": "on-t2", "by": ENGINEER, "list": "followups", "text": "Retry", "task": "t2"}
     assert api_checked(world, op) == [op]
