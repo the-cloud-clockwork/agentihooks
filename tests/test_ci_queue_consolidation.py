@@ -24,10 +24,13 @@ def test_container_proofs_share_one_runner_without_losing_commands():
             """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
 build=$!
 status=0
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &
 redis=$!
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
+for tag in 7 7-alpine; do
+  docker tag "public.ecr.aws/docker/library/redis:$tag" "mirror.gcr.io/library/redis:$tag" || status=$?
+done
 wait "$build" || status=$?
 exit "$status"
 """,
