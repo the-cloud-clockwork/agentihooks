@@ -140,3 +140,46 @@ def test_a_seat_title_without_an_identity_is_the_name(tmp_path):
 
 def test_another_display_name_still_names_the_process(tmp_path):
     assert _named(tmp_path, "operator-pane", "master@a1b2c3-0002") == "operator-pane"
+
+
+@pytest.mark.parametrize("kind", ["subscription", "api"])
+def test_a_front_door_on_an_exhausted_explicit_route_still_launches_on_the_login(tmp_path, kind):
+    from scripts import agent_choice
+
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    config = SimpleNamespace(
+        slug="rig",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", agent_choice.ALL_FULL))
+    task = {"id": "master", "title": "rig", "seat": "master@rig", "route_kind": kind}
+    placed = runtime.spawn(config, "master", "agent", task)
+    assert _passed(seen[0])[:2] == ["--route", master_claude_login.ROUTE]
+    assert placed.route_kind == "interactive"
+
+
+def test_a_codex_master_session_shows_its_title_while_herdr_keeps_the_agent_name(monkeypatch):
+    calls, marked = [], []
+    monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append(("agent", *args)) or True)
+    monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: True)
+    monkeypatch.setattr(init_agent, "_codex_named", lambda environ, name, since: ("index", name))
+    monkeypatch.setattr(
+        init_agent.herdr_host, "name_session", lambda *args: calls.append(("session", *args)) or "named"
+    )
+    monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
+    named = init_agent._name_in_herdr("w1:p2", ("master@a1b2c3-0002", "master 2 · rig"), "codex", {}, "", 1.0)
+    assert named == ["agent_name=master-a1b2c3-0002", "session_name=master 2 · rig"]
+    assert calls == [
+        ("agent", "w1:p2", "master@a1b2c3-0002", {}),
+        ("session", "w1:p2", "master 2 · rig", {}, ("index", "master 2 · rig")),
+    ]
+    assert marked == [{"session_name": "master 2 · rig"}]

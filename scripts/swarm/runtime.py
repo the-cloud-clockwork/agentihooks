@@ -544,7 +544,9 @@ class HerdrRuntime:
             return self._saved_choice(saved, profile, quota_transfer, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
-    def _route_kind(self, lane, harness, task):
+    def _route_kind(self, lane, harness, task, slug=""):
+        if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
+            return "interactive"
         explicit = task.get("route_kind")
         if explicit or lane != MASTER or harness not in ("", "claude"):
             return explicit or "subscription"
@@ -565,7 +567,7 @@ class HerdrRuntime:
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
-        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task)
+        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
