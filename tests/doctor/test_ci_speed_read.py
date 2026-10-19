@@ -36,7 +36,7 @@ def test_repository_runs_and_all_job_pages_are_discovered_with_full_counts():
 
     records = [{"id": n, "status": "in_progress", "event": "push"} for n in range(101)]
     run, calls = api(records, [{"id": n} for n in range(101)])
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=300)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(300, 25))
     assert result["complete"] is True
     assert len(result["runs"]) == result["discovered_runs"] == 101
     assert sum(len(r["jobs"]) for r in result["runs"]) == 10201
@@ -67,7 +67,7 @@ def test_request_budget_exhaustion_reports_an_incomplete_pass():
     from scripts.doctor import ci_speed_read
 
     run, calls = api([{"id": n} for n in range(101)])
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=1)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(1, 25))
     assert result["complete"] is False
     assert "budget" in result["error"] and result["api_calls"] == len(calls) == 1
 
@@ -98,7 +98,7 @@ def test_api_requests_use_the_exact_repository_window_and_safe_subprocess_option
 
     monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: 100)
     run, calls = api()
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_seconds=max_seconds)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(60, max_seconds))
     assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0}
     first_args, _ = calls[0]
     assert first_args[:2] == ["gh", "api"]
@@ -151,7 +151,7 @@ def test_pagination_accepts_growing_totals_and_deduplicates_ids(target):
         field = "workflow_runs" if target == "runs" else "jobs"
         return SimpleNamespace(stdout=json.dumps({"total_count": 101 if page == 1 else 103, field: rows}))
 
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=300)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(300, 25))
     assert result["complete"] is True
     rows = result["runs"] if target == "runs" else result["runs"][0]["jobs"]
     assert sorted(row["id"] for row in rows) == list(range(101))
