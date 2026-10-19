@@ -151,3 +151,15 @@ def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
     step = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_budget"))
     assert step["run"] == "python -m tests.shard_budget $REPORT shard-durations/*/durations.json"
     assert step["if"] == "github.event_name != 'merge_group'"
+
+
+def test_the_default_budget_is_the_run_tests_step_deadline(tmp_path):
+    from tests.shard_budget import RUN_TESTS_MINUTES
+
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
+    minutes = next(step for step in steps if step.get("name") == "Run tests")["timeout-minutes"]
+    assert RUN_TESTS_MINUTES == minutes
+    result = _budget(tmp_path, [100.0])
+    assert result.stdout.splitlines()[0] == (
+        f"1 shards, slowest 100.0 s of test time against the {minutes} minute Run tests deadline of {minutes * 60} s"
+    )
