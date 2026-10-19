@@ -436,9 +436,10 @@ def test_guard_restores_the_tick_timer_once_delivery_goes_stale(tmp_path, monkey
     ensured = []
     monkeypatch.setattr(timer, "supervise", lambda: True)
     monkeypatch.setattr(timer, "undelivered", lambda: "the last swarm tick was delivered 400 seconds ago")
-    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append((binary, unit_dir)) or False)
-    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is False
-    assert ensured == [("/installed/bin/agentihooks", tmp_path)]
+    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append((binary, unit_dir, run)) or False)
+    runner = _systemctl([])
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=runner) is False
+    assert ensured == [("/installed/bin/agentihooks", tmp_path, runner)]
     (tmp_path / "agentihooks-swarm.timer").write_text(TICK_TIMER)
     (tmp_path / "agentihooks-swarm.service").write_text(TICK_SERVICE)
     calls = []
