@@ -322,16 +322,21 @@ still marked exited. A folder already gone is skipped.
 A refusal leaves the binding connected and its viewer records in place, so the
 next tick retries the whole retirement; ending a server that is already gone
 does not refuse the retry. Most tick paths that retire an agent log their own
-`could not retire <agent> …, retrying next tick` line; the lost agent and idle
-stall paths log nothing on a refusal. Only the path that
-retires an ended execution counts failures: from its third failing tick,
-`agentihooks swarm <id> status` lists a `retire failed` health finding naming
-the process and the refusal. The count clears when the agent is dropped from
-the swarm.
+`could not retire <agent> …, retrying next tick` line; the lost agent path logs
+only `lost <agent>`, and the idle stall path logs nothing on a refusal. Only
+the path that retires an ended execution counts failures: from its third
+failing tick, `agentihooks swarm <id> status` lists a `retire failed` health
+finding naming the process and the refusal. The count clears when the agent is
+dropped from the swarm.
 
 Known gap: removal catches only `OSError`. A malformed `config.toml` in the
 execution home raises out of retirement with no refusal recorded; a follow up
 on the ledger tracks it.
+
+Known gap: the lost agent path drops the agent from the swarm even when its
+managed retirement is refused, so that server keeps running with its binding
+connected, no later tick retries it and no finding is raised; a follow up on
+the ledger tracks it.
 
 | Refusal | Cause |
 |---|---|
