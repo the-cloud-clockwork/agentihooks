@@ -5,11 +5,13 @@ import sys
 import pytest
 
 
-@pytest.mark.parametrize(("selected", "maximum", "workers"), [(4, 8, 4), (10, 2, 2), (1, 0, 1), (None, 8, None)])
+@pytest.mark.parametrize(
+    ("selected", "maximum", "workers"), [(4, 8, 4), (10, 2, 2), (1, 0, 1), (1, None, 1), (None, 8, None)]
+)
 def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypatch, selected, maximum, workers):
     from scripts.ci_touched_tests import worker_count
 
-    suite = tmp_path / f"test_selection_{selected}.py"
+    suite = tmp_path / f"test_selection_{selected}_{maximum}.py"
     suite.write_text(
         "invalid python!\n"
         if selected is None
@@ -17,7 +19,10 @@ def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypat
     )
     monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
-    monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", str(maximum))
+    if maximum is None:
+        monkeypatch.delenv("PYTEST_XDIST_AUTO_NUM_WORKERS", raising=False)
+    else:
+        monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", str(maximum))
     args = [str(suite), "--tb=short", "-p", "no:cacheprovider"]
     if selected is None:
         with pytest.raises(SystemExit) as failure:
