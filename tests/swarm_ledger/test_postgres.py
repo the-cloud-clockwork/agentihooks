@@ -2,6 +2,8 @@ import sqlite3
 from contextlib import contextmanager
 
 import psycopg2
+import psycopg2.errors
+import psycopg2.extras
 import pytest
 from psycopg2 import extensions
 
