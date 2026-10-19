@@ -415,6 +415,31 @@ def test_master_exit_returns_confirmed_pool_mail_but_keeps_operator_mail(swarm, 
     assert (inbox.get(operator.id).address, inbox.get(operator.id).state) == (FRONT, "confirmed")
 
 
+def test_a_stale_master_exit_leaves_pool_work_taken_by_its_successor(swarm, inbox):
+    from scripts.inbox import exits
+    from scripts.swarm.naming import NameRegistry
+
+    _masters(swarm, 2)
+    names = NameRegistry(swarm.redis)
+    swarm.redis.hset(names.key("name", "sw-master-1"), mapping={"type": "master"})
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.seats.occupy(FRONT, "successor", at=2)
+    inbox.read(item.id, "successor")
+    exits.settle(inbox, "sw-master-1", FRONT, "handed off its seat")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "read")
+
+
+def test_a_closed_pool_item_is_not_reopened_when_its_holder_leaves(swarm, inbox):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.close(item.id, "sw-master-1", "done", "answered")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "done")
+
+
 def test_a_redirected_item_stays_where_it_was_sent(swarm, inbox):
     _masters(swarm, 2)
     item = inbox.send("swarm", FRONT, "first")

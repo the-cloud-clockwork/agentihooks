@@ -114,10 +114,10 @@ class MasterPool:
         return claimed
 
     def _reclaim(self, slug, live):
-        """Items a master that is gone claimed and never took go back to the pool."""
+        """Unsettled items a master that is gone claimed go back to the pool."""
         for seat in sorted(self.redis.smembers(self.key(slug, "holders")) - set(live)):
-            for item_id in self.redis.zrange(self.inbox.key("pending", seat), 0, -1):
-                self.inbox.return_to_pool(item_id, seat)
+            for item in self.inbox.open_items(seat):
+                self.inbox.return_to_pool(item.id, seat)
             self.redis.srem(self.key(slug, "holders"), seat)
 
     def _routes(self, slug, live):
