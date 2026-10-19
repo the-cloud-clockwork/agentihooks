@@ -1,5 +1,5 @@
 {
-  "recorded": "2026-10-19 from kubectl get nodes and kubectl get pods -l actions.github.com/scale-set-name, trimmed; clfn7 is plant run 39290816342 attempt 2",
+  "recorded": "2026-10-19 from kubectl get nodes and kubectl get pods -l actions.github.com/scale-set-name, trimmed; clfn7 is plant run 39290816342 attempt 2; job is plant run 39290816342 attempt 2 job lost from the GitHub jobs API, shown as it read while in progress; sets are kubectl get autoscalingrunnersets names",
   "nodes": [
     {
       "metadata": {
@@ -25,6 +25,20 @@
             "type": "Ready",
             "status": "True",
             "lastTransitionTime": "2026-10-19T05:32:46Z"
+          }
+        ]
+      }
+    },
+    {
+      "metadata": {
+        "name": "anton-oci-vjnhihp4znsq"
+      },
+      "status": {
+        "conditions": [
+          {
+            "type": "Ready",
+            "status": "True",
+            "lastTransitionTime": "2026-10-19T05:36:12Z"
           }
         ]
       }
@@ -106,5 +120,22 @@
         ]
       }
     }
-  ]
+  ],
+  "sets": [
+    "anton",
+    "anton-batch",
+    "anton-light",
+    "anton-oss",
+    "anton-oss-batch",
+    "anton-oss-light",
+    "anton-oss-queue"
+  ],
+  "job": {
+    "conclusion": null,
+    "name": "lost",
+    "runner_group_name": "anton-oss",
+    "runner_name": "anton-oss-light-cpwxt-runner-clfn7",
+    "started_at": "2026-10-19T17:13:26Z",
+    "status": "in_progress"
+  }
 }

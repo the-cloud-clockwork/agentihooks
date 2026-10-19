@@ -453,9 +453,13 @@ LOSS = datetime(2026, 10, 19, 17, 13, 27, tzinfo=UTC)
 BOUND = timedelta(seconds=ci_lost_runner.NODE_BOUND_SECONDS)
 
 
-def cluster(pods=None, nodes=None, now=LOSS):
+def cluster(pods=None, nodes=None, now=LOSS, sets=None):
     return ci_lost_runner.ClusterRunners(
-        CLUSTER["pods"] if pods is None else pods, nodes or CLUSTER["nodes"], now, BOUND
+        set(CLUSTER["sets"]) if sets is None else sets,
+        CLUSTER["pods"] if pods is None else pods,
+        CLUSTER["nodes"] if nodes is None else nodes,
+        now,
+        BOUND,
     )
 
 
@@ -491,42 +495,71 @@ def test_a_runner_the_cluster_cannot_see_is_never_counted_lost(name):
     assert name in cluster()
 
 
-def test_no_runner_pods_means_no_loss():
-    assert "anton-oss-light-cpwxt-runner-gone1" in cluster(pods=[])
+def test_no_runner_sets_means_no_loss():
+    assert "anton-oss-light-cpwxt-runner-gone1" in cluster(sets=set())
 
 
-def test_a_pod_ended_on_a_ready_node_makes_its_job_lost_with_no_grace():
-    jobs = [job("unit (3.12, 6)", "in_progress", None, "anton-oss-light-cpwxt-runner-clfn7", stamp(LOSS)), job("lint")]
-    assert ci_lost_runner.lost_jobs(jobs, cluster(), LOSS, timedelta(0)) == [jobs[0]]
+def test_a_runner_of_a_set_with_no_pods_left_is_lost():
+    assert "anton-oss-queue-x7k2p-runner-gone1" not in cluster(pods=[])
 
 
-def test_cluster_runners_reads_labelled_pods_in_every_namespace_and_the_nodes(monkeypatch):
+def test_a_runner_pod_on_a_node_deleted_from_the_cluster_is_lost():
+    assert "anton-oss-light-cpwxt-runner-live1" not in cluster(nodes=[])
+
+
+def test_a_pending_pod_without_a_node_is_live():
+    pod = json.loads(json.dumps(CLUSTER["pods"][0]))
+    pod["spec"] = {}
+    pod["status"] = {"phase": "Pending"}
+    assert "anton-oss-light-cpwxt-runner-live1" in cluster(pods=[pod], nodes=[])
+
+
+def test_a_node_without_a_ready_condition_is_not_down():
+    node = {"metadata": {"name": "anton-oci-vjnhihp4znsq"}, "status": {}}
+    assert "anton-oss-light-cpwxt-runner-live1" in cluster(nodes=[node])
+
+
+def test_a_pod_ended_on_a_ready_node_makes_its_recorded_job_lost_with_no_grace():
+    jobs = [CLUSTER["job"], job("lint")]
+    assert ci_lost_runner.lost_jobs(jobs, cluster(), LOSS, timedelta(0)) == [CLUSTER["job"]]
+
+
+def test_cluster_runners_reads_runner_sets_labelled_pods_and_nodes(monkeypatch):
     calls = []
+    sets = [{"metadata": {"name": name}} for name in CLUSTER["sets"]]
 
     def run(command, **kwargs):
         calls.append((command, kwargs))
-        items = CLUSTER["pods"] if "pods" in command else CLUSTER["nodes"]
+        items = {"autoscalingrunnersets": sets, "pods": CLUSTER["pods"], "nodes": CLUSTER["nodes"]}[command[2]]
         return subprocess.CompletedProcess(command, 0, json.dumps({"items": items}), "")
 
     monkeypatch.setattr(ci_lost_runner.subprocess, "run", run)
     runners = ci_lost_runner.cluster_runners("o")
     assert [command for command, _ in calls] == [
+        ["kubectl", "get", "autoscalingrunnersets", "--all-namespaces", "-o", "json"],
         ["kubectl", "get", "pods", "--all-namespaces", "-l", ci_lost_runner.SCALE_SET, "-o", "json"],
         ["kubectl", "get", "nodes", "-o", "json"],
     ]
     assert all(kwargs["check"] and kwargs["timeout"] for _, kwargs in calls)
+    assert runners.sets == set(CLUSTER["sets"])
     assert runners.live == {"anton-oss-light-cpwxt-runner-live1"}
 
 
-def test_a_refused_cluster_read_is_an_error_never_a_loss(monkeypatch, capsys, no_sleep):
+@pytest.mark.parametrize(
+    "failure",
+    [subprocess.CalledProcessError(1, ["kubectl"]), subprocess.TimeoutExpired(["kubectl"], 60)],
+)
+def test_a_refused_or_timed_out_cluster_read_is_an_error_never_a_loss(monkeypatch, capsys, no_sleep, failure):
     def refused(command, **kwargs):
-        raise subprocess.CalledProcessError(1, command)
+        raise failure
 
+    api = Api({RUNS: json.dumps(RUN), JOBS: lines(CLUSTER["job"], gate())})
     monkeypatch.setattr(ci_lost_runner.subprocess, "run", refused)
-    monkeypatch.setattr(ci_lost_runner, "_api", Api({RUNS: json.dumps(RUN), JOBS: lines(lost(), gate())}))
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
     monkeypatch.chdir(ROOT)
     assert ci_lost_runner.main(["--repo", "o/r", "--run-id", "7", "--cluster"]) == 1
     assert json.loads(capsys.readouterr().out)["action"] == "error"
+    assert api.posts() == []
 
 
 def test_main_in_cluster_mode_acts_on_a_fresh_loss_after_a_short_confirmation(monkeypatch, capsys, no_sleep):

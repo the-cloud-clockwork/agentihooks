@@ -33,18 +33,22 @@ def live_runners(org: str) -> set[str]:
 
 
 class ClusterRunners:
-    def __init__(self, pods: list[dict], nodes: list[dict], now: datetime, bound: timedelta):
-        down = {node["metadata"]["name"] for node in nodes if _down(node, now, bound)}
-        self.sets = {pod["metadata"]["labels"][SCALE_SET] for pod in pods}
-        self.live = {pod["metadata"]["name"] for pod in pods if _alive(pod) and pod["spec"].get("nodeName") not in down}
+    def __init__(self, sets: set[str], pods: list[dict], nodes: list[dict], now: datetime, bound: timedelta):
+        ready = {node["metadata"]["name"] for node in nodes if not _down(node, now, bound)}
+        self.sets = sets
+        self.live = {
+            pod["metadata"]["name"] for pod in pods if _alive(pod) and pod["spec"].get("nodeName") in ready | {None}
+        }
 
     def __contains__(self, name: str) -> bool:
         return name in self.live or name.rpartition("-runner-")[0].rpartition("-")[0] not in self.sets
 
 
 def _down(node: dict, now: datetime, bound: timedelta) -> bool:
-    ready = next(c for c in node["status"]["conditions"] if c["type"] == "Ready")
-    return ready["status"] != "True" and now - datetime.fromisoformat(ready["lastTransitionTime"]) >= bound
+    ready = next((c for c in node["status"].get("conditions", []) if c["type"] == "Ready"), None)
+    return (
+        bool(ready) and ready["status"] != "True" and now - datetime.fromisoformat(ready["lastTransitionTime"]) >= bound
+    )
 
 
 def _alive(pod: dict) -> bool:
@@ -58,8 +62,9 @@ def _kubectl(*args: str) -> list[dict]:
 
 
 def cluster_runners(_org: str) -> ClusterRunners:
+    sets = {item["metadata"]["name"] for item in _kubectl("autoscalingrunnersets", "--all-namespaces")}
     pods = _kubectl("pods", "--all-namespaces", "-l", SCALE_SET)
-    return ClusterRunners(pods, _kubectl("nodes"), datetime.now(UTC), timedelta(seconds=NODE_BOUND_SECONDS))
+    return ClusterRunners(sets, pods, _kubectl("nodes"), datetime.now(UTC), timedelta(seconds=NODE_BOUND_SECONDS))
 
 
 def lost_jobs(jobs: list[dict], runners: set[str], now: datetime, grace: timedelta) -> list[dict]:
@@ -176,7 +181,7 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source=live_ru
 def guarded(step, repo: str, run: dict, workflow: dict, grace: timedelta, source=live_runners) -> dict | None:
     try:
         return step(repo, run, workflow, grace, source)
-    except subprocess.CalledProcessError as error:
+    except subprocess.SubprocessError as error:
         return report(run, "error", str(error))
 
 
