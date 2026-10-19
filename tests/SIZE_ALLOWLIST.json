@@ -252,14 +252,6 @@
  "scripts/swarm/tick.py::_spawn": {
   "PLR0913": 8
  },
- "scripts/swarm_ledger/ledger.py::cmd_task": {
-  "C901": 15,
-  "PLR0912": 14
- },
- "scripts/swarm_ledger/ledger_agent_ops.py::check": {
-  "C901": 17,
-  "PLR0912": 16
- },
  "scripts/swarm_ledger/ledger_core.py::apply_op": {
   "C901": 18,
   "PLR0912": 18
@@ -281,9 +273,6 @@
  "scripts/swarm_ledger/ledger_server.py::control_argv": {
   "C901": 19,
   "PLR0912": 18
- },
- "scripts/swarm_ledger/ledger_tasks.py::_update": {
-  "C901": 13
  },
  "scripts/targets/codex_target.py::CodexAdapter.teardown": {
   "C901": 20,
