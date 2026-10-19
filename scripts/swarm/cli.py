@@ -180,6 +180,7 @@ SCALING_KEYS = {
     "load-low": "load_low",
     "memory-per-agent": "memory_per_agent_mb",
     "swap-full-share": "swap_full_share",
+    "swap-floor": "swap_floor_mb",
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
@@ -902,9 +903,9 @@ def run_control(store, args, who, handler):
 def scaling_value(key, value):
     if key == "scaling":
         return value
-    if key == "memory-per-agent":
+    if key in ("memory-per-agent", "swap-floor"):
         if not value.isdigit():
-            raise SwarmError("memory-per-agent takes a whole number of MB")
+            raise SwarmError(f"{key} takes a whole number of MB")
         return int(value)
     try:
         return float(value)
@@ -996,7 +997,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -1030,6 +1031,7 @@ def cmd_set(store, args):
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
                 "swap_full_share": config.swap_full_share,
+                "swap_floor_mb": config.swap_floor_mb,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},

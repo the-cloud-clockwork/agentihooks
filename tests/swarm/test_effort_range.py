@@ -340,7 +340,7 @@ def test_set_names_every_key_it_takes_and_every_level(env, capsys):  # noqa: F81
     assert (
         "autonomy=manual|assist|delegate|full, effort-min=E, effort-max=E, claude-model=M, codex-model=M, "
         "scaling=auto|manual, "
-        "load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, api-url=URL, codex-inbox-transport=legacy|app_server "
+        "load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
         "or eng-role, "
     ) in err
     assert run("sw", "set", "effort-min=huge") == 1

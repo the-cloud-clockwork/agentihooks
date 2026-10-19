@@ -68,6 +68,11 @@ def _master_snapshot(environ: dict, now: float) -> dict[str, tuple[float, balanc
     return {master.slug: (at, balancer.ProbeResult(master.slug, "allowed", state, margin, five, week))}
 
 
+def _known(environ: dict) -> set[str]:
+    filed = {name.removeprefix(balancer.TOKEN_PREFIX) for name in balancer._current_tokens(environ)}
+    return filed | set(account_sessions.token_accounts(environ).values())
+
+
 def _claude(environ: dict, now: float) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
@@ -75,15 +80,14 @@ def _claude(environ: dict, now: float) -> list[Account]:
     observed.update({result.account: (now, result) for result in fresh})
     observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
-    routed = set(account_sessions.token_accounts(environ).values())
+    routed = _known(environ)
     rows = []
     for at, result in observed.values():
         token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")
-        if not token and not counts.get(result.account):
+        listed = result.account in routed
+        if not listed and (token or not counts.get(result.account)):
             continue
-        if token and result.account not in routed:
-            continue
-        cap = tokens.cap(result, now) if token and session_bands.fresh(at, now) else None
+        cap = tokens.cap(result, now) if listed and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
