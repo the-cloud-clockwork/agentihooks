@@ -116,20 +116,53 @@ def test_hierarchy_reads_use_postgres_ordering_null_comparison_and_joins():
         "((CASE n.kind WHEN 'plan' THEN 0 WHEN 'phase' THEN 1 WHEN 'slice' THEN 2 ELSE 3 END)::text"
         " || '.' || lpad(n.position::text, 9, '0'))"
     )
-    children = postgres.translate(hierarchy.CHILDREN, True)
-    assert children == (
-        "SELECT n.node_id, n.kind, n.parent_id, CASE WHEN %(node)s IS NULL THEN 0 ELSE 1 END FROM work_nodes n "
-        "WHERE n.ledger_slug=%(slug)s AND (n.parent_id IS NOT DISTINCT FROM %(node)s OR (%(node)s IS NULL AND "
-        "n.parent_id NOT IN (SELECT node_id FROM work_nodes WHERE ledger_slug=%(slug)s))) "
-        f"ORDER BY {order}"
+    root = (
+        "(n.parent_id IS NOT DISTINCT FROM %(node)s OR (%(node)s IS NULL AND "
+        "n.parent_id NOT IN (SELECT node_id FROM work_nodes WHERE ledger_slug=%(slug)s)))"
     )
-    subtree = postgres.translate(hierarchy.SUBTREE, True)
-    assert "CROSS JOIN" not in subtree
-    assert "FROM tree JOIN work_nodes n ON n.ledger_slug=%(slug)s AND n.parent_id=tree.node_id" in subtree
-    dependents = postgres.translate(hierarchy.DEPENDENTS, True)
-    assert f"GROUP BY n.node_id, n.kind, n.parent_id, n.position ORDER BY nearest, {order}" in dependents
-    for read in hierarchy.READS.values():
-        assert "printf" not in postgres.translate(read, True)
+    assert postgres.translate(hierarchy.CHILDREN, True) == (
+        "SELECT n.node_id, n.kind, n.parent_id, CASE WHEN %(node)s IS NULL THEN 0 ELSE 1 END FROM work_nodes n "
+        f"WHERE n.ledger_slug=%(slug)s AND {root} ORDER BY {order}"
+    )
+    assert (
+        postgres.translate(hierarchy.SUBTREE, True)
+        == f"""
+WITH RECURSIVE tree(node_id, kind, parent_id, depth, sort) AS (
+  SELECT n.node_id, n.kind, n.parent_id, 0, {order} FROM work_nodes n
+  WHERE n.ledger_slug=%(slug)s AND (n.node_id=%(node)s OR (%(node)s IS NULL AND {root}))
+  UNION ALL
+  SELECT n.node_id, n.kind, n.parent_id, tree.depth + 1, tree.sort || '/' || {order}
+  FROM tree JOIN work_nodes n ON n.ledger_slug=%(slug)s AND n.parent_id=tree.node_id WHERE tree.depth < 3
+)
+SELECT node_id, kind, parent_id, depth FROM tree ORDER BY sort
+"""
+    )
+    assert (
+        postgres.translate(hierarchy.ANCESTORS, True)
+        == """
+WITH RECURSIVE up(node_id, kind, parent_id, depth) AS (
+  SELECT node_id, kind, parent_id, 0 FROM work_nodes WHERE ledger_slug=%(slug)s AND node_id=%(node)s
+  UNION ALL
+  SELECT n.node_id, n.kind, n.parent_id, up.depth + 1
+  FROM work_nodes n JOIN up ON n.ledger_slug=%(slug)s AND n.node_id=up.parent_id WHERE up.depth < 3
+)
+SELECT node_id, kind, parent_id, depth FROM up WHERE depth > 0 ORDER BY depth DESC
+"""
+    )
+    assert (
+        postgres.translate(hierarchy.DEPENDENTS, True)
+        == f"""
+WITH RECURSIVE down(node_id, depth) AS (
+  SELECT node_id, 1 FROM work_dependencies WHERE ledger_slug=%(slug)s AND requires_id=%(node)s
+  UNION
+  SELECT d.node_id, down.depth + 1
+  FROM work_dependencies d JOIN down ON d.ledger_slug=%(slug)s AND d.requires_id=down.node_id WHERE down.depth < 64
+)
+SELECT n.node_id, n.kind, n.parent_id, MIN(down.depth) AS nearest
+FROM down JOIN work_nodes n ON n.ledger_slug=%(slug)s AND n.node_id=down.node_id WHERE n.node_id != %(node)s
+GROUP BY n.node_id, n.kind, n.parent_id, n.position ORDER BY nearest, {order}
+"""
+    )
 
 
 def test_the_schema_takes_64_bit_integers_and_byte_ordered_text_per_statement():
@@ -213,6 +246,8 @@ def test_a_connection_translates_statements_and_passes_their_parameters(opened):
 def test_pragmas_answer_nothing_without_reaching_the_database(opened):
     connection = postgres.Connection(ADDRESS)
     assert isinstance(connection.execute("PRAGMA foreign_keys=ON"), postgres.Empty)
+    with pytest.raises(sqlite3.OperationalError, match="^hosted fences belong to SQLite ledger folders$"):
+        connection.execute("PRAGMA table_info(fields)")
     assert opened.raws[0].log == []
 
 
@@ -221,20 +256,31 @@ def test_begin_opens_a_repeatable_read_snapshot_only_as_the_first_statement(open
     raw = opened.raws[0]
     assert isinstance(connection.execute(sqlite.BEGIN), Cursor)
     raw.status = BUSY
-    assert isinstance(connection.execute(sqlite.BEGIN), postgres.Empty)
+    with pytest.raises(sqlite3.OperationalError, match="^cannot start a transaction within a transaction$"):
+        connection.execute(sqlite.BEGIN)
     assert raw.log == [("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ())]
+    raw.get_transaction_status = lambda: (_ for _ in ()).throw(psycopg2.InterfaceError("closed"))
+    with pytest.raises(sqlite3.OperationalError, match="^closed$"):
+        connection.execute(sqlite.BEGIN)
 
 
-def test_connection_failures_and_batches_are_mapped_and_translated(opened):
+def test_connection_failures_and_batches_are_mapped_and_translated(opened, monkeypatch):
+    def batch(cursor, sql, rows):
+        cursor.executemany(sql, rows)
+
+    monkeypatch.setattr(psycopg2.extras, "execute_batch", batch)
     connection = postgres.Connection(ADDRESS)
     raw = opened.raws[0]
-    connection.executemany(hierarchy.INSERT_DEPENDENCY, [("s", "a", "b")])
+    connection.executemany(hierarchy.INSERT_DEPENDENCY, iter([("s", "a", "b")]))
     assert raw.log == [("INSERT INTO work_dependencies VALUES (%s, %s, %s) ON CONFLICT DO NOTHING", [("s", "a", "b")])]
     raw.fail = psycopg2.IntegrityError("taken")
     with pytest.raises(sqlite3.IntegrityError, match="^taken$"):
         connection.execute("SELECT 1")
     with pytest.raises(sqlite3.IntegrityError, match="^taken$"):
         connection.executemany("SELECT ?", [(1,)])
+    raw.cursor = lambda: (_ for _ in ()).throw(psycopg2.InterfaceError("cursor gone"))
+    with pytest.raises(sqlite3.OperationalError, match="^cursor gone$"):
+        connection.execute("SELECT 1")
 
 
 def test_a_script_runs_each_translated_statement(opened):
@@ -271,7 +317,7 @@ def test_closing_a_connection_returns_it_to_its_pool(opened):
     assert opened.raws[0].rollbacks == 1
 
 
-def test_the_database_folder_opens_a_pooled_connection_or_none_when_unreachable(opened, monkeypatch):
+def test_the_database_folder_opens_a_pooled_connection_and_raises_when_unreachable(opened, monkeypatch):
     database = postgres.Database(ADDRESS)
     with database.read_only() as connection:
         assert isinstance(connection, postgres.Connection)
@@ -283,8 +329,8 @@ def test_the_database_folder_opens_a_pooled_connection_or_none_when_unreachable(
 
     monkeypatch.setattr(postgres, "POOLS", {})
     monkeypatch.setattr(psycopg2, "connect", refuse)
-    with database.read_only() as connection:
-        assert connection is None
+    with pytest.raises(sqlite3.OperationalError, match="^refused$"), database.read_only():
+        pass
 
 
 def test_sqlite_read_helpers_open_an_object_that_carries_its_own_reader():
@@ -398,14 +444,64 @@ def test_storage_read_helpers_read_the_shared_database_when_its_url_is_set(monke
 
 
 def test_a_shared_database_never_adopts_files_left_in_a_host_folder(tmp_path, monkeypatch):
-    (tmp_path / "old.json").write_text("{}")
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    (folder / "old.json").write_text("{}")
     for filename in legacy.REGISTRIES.values():
-        (tmp_path / filename).write_text("{}")
+        (folder / filename).write_text("{}")
     touched = []
     monkeypatch.setattr(legacy, "storage_lock", lambda directory: touched.append(directory))
     repository = postgres.PostgresLedgerRepository(ADDRESS)
-    monkeypatch.setattr(postgres.PostgresLedgerRepository, "directory", tmp_path)
+    monkeypatch.setattr(postgres.PostgresLedgerRepository, "directory", folder)
     legacy.adopt(repository)
     legacy.adopt_bin(repository)
     assert touched == []
-    assert sorted(path.name for path in tmp_path.iterdir()) == sorted(["old.json", *legacy.REGISTRIES.values()])
+    assert sorted(path.name for path in folder.iterdir()) == sorted(["old.json", *legacy.REGISTRIES.values()])
+
+
+def test_the_controller_tasks_api_writes_the_shared_database_when_its_url_is_set(monkeypatch, tmp_path):
+    from scripts.swarm_v2 import control_service
+
+    built = []
+
+    class Lease:
+        held = True
+
+        def __init__(self, folder):
+            pass
+
+        def acquire(self, owner):
+            return self
+
+    monkeypatch.setattr(control_service.ledger_writer, "WriterLease", Lease)
+    monkeypatch.setattr(control_service.storage, "build", lambda path=None: built.append(path) or path)
+    monkeypatch.setattr(control_service, "TasksAPI", lambda grants, tasks, ledger, held: ledger)
+    service = control_service.ControlService.__new__(control_service.ControlService)
+    service.grants = service.tasks = None
+    monkeypatch.setenv(postgres.URL, ADDRESS)
+    service.mount_ledger(tmp_path)
+    monkeypatch.delenv(postgres.URL)
+    service.mount_ledger(tmp_path)
+    assert built == [None, tmp_path / storage.DATABASE]
+    assert service.tasks_api == tmp_path / storage.DATABASE
+
+
+def test_a_session_start_with_only_a_shared_database_starts_the_local_ledger_server(monkeypatch, tmp_path):
+    from scripts.swarm_ledger import ledger_hook
+
+    def closed(*args, **kwargs):
+        raise OSError("closed")
+
+    started = []
+    monkeypatch.setattr(ledger_hook, "LEDGER_DIR", tmp_path)
+    monkeypatch.delenv("LEDGER_AUTOSTART", raising=False)
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.setattr(ledger_hook.socket, "create_connection", closed)
+    monkeypatch.setattr(ledger_hook.subprocess, "Popen", lambda command, **kwargs: started.append(command[1:]))
+    monkeypatch.delenv(postgres.URL, raising=False)
+    ledger_hook.serve_ledgers()
+    assert started == []
+    monkeypatch.setenv(postgres.URL, ADDRESS)
+    ledger_hook.serve_ledgers()
+    assert started == [[str(ledger_hook.HERE / "ledger_server.py"), "--ensure"]]

@@ -29,6 +29,7 @@ REWRITES = (
     ("GROUP BY n.node_id ", "GROUP BY n.node_id, n.kind, n.parent_id, n.position "),
 )
 IGNORE = "INSERT OR IGNORE INTO "
+UNFENCEABLE = "PRAGMA table_info"
 NAMED = re.compile(r"(?<![:\w]):(\w+)")
 
 
@@ -67,6 +68,7 @@ class Empty:
 
 def errors():
     import psycopg2
+    import psycopg2.extras
 
     return psycopg2
 
@@ -127,20 +129,22 @@ class Connection:
         self.raw = self.pool.take()
 
     def execute(self, sql: str, parameters=()):
+        if sql.startswith(UNFENCEABLE):
+            raise sqlite3.OperationalError("hosted fences belong to SQLite ledger folders")
         if sql.startswith("PRAGMA"):
             return Empty()
-        if sql == BEGIN:
-            if self.raw.get_transaction_status() != errors().extensions.TRANSACTION_STATUS_IDLE:
-                return Empty()
-            sql = READ_SNAPSHOT
-        cursor = self.raw.cursor()
         with mapped():
+            if sql == BEGIN:
+                if self.raw.get_transaction_status() != errors().extensions.TRANSACTION_STATUS_IDLE:
+                    raise sqlite3.OperationalError("cannot start a transaction within a transaction")
+                sql = READ_SNAPSHOT
+            cursor = self.raw.cursor()
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
 
     def executemany(self, sql: str, rows) -> None:
         with mapped(), self.raw.cursor() as cursor:
-            cursor.executemany(translate(sql, False), rows)
+            errors().extras.execute_batch(cursor, translate(sql, False), list(rows))
 
     def executescript(self, script: str) -> None:
         for statement in ddl(script):
@@ -174,11 +178,7 @@ class Database:
 
     @contextmanager
     def read_only(self):
-        try:
-            connection = Connection(self.address)
-        except sqlite3.OperationalError:
-            yield None
-            return
+        connection = Connection(self.address)
         try:
             yield connection
         finally:
