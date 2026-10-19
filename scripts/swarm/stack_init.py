@@ -112,6 +112,13 @@ def adopt(env_file: Path, environ: Mapping[str, str]) -> None:
             "SWARM_PORT": str(LEDGER_PORT),
         }
     )
+    values.update(
+        {
+            key: environ[key]
+            for key in ("AGENTIHOOKS_SWARM_DATABASE_URL", "AGENTIHOOKS_SWARM_REDIS_URL")
+            if environ.get(key)
+        }
+    )
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
 
 
@@ -207,7 +214,7 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
     materialize(home)
     if args.adopt:
         adopt(home / ".env", environ)
-    values = settings(home / ".env")
+    values = settings(home / ".env", environ)
     write_private(home / "client.env", client_env(values, home))
     if args.no_start:
         print(f"Swarm stack settings written to {home}; no service was started.", file=out)
