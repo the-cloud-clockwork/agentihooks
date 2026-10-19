@@ -868,3 +868,29 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
         "Promotion red: sonar",
         "Promotion red: unit (3.12, 10)",
     ]
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    ["coverage-ratchet", "coverage-baseline", "flake-budget", "stage-budget", "sonar (3.12)", "refresh-durations"],
+)
+def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer):
+    ledger = Ledger()
+    found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], [])]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    assert ledger.added[0][1]["description"].endswith(
+        f"lost their runner infrastructure (Failed to resolve action download info); the jobs {consumer} failed for "
+        "want of their unit shard output. No code change is due; the swarm closes this task when a later dev push run "
+        "passes."
+    )
+
+
+def test_a_job_that_only_starts_like_a_unit_shard_does_not_starve_its_consumers(store):
+    ledger = Ledger()
+    found = [("unit-selected (3.12)", RAN, DOWNLOAD), *CONSUMERS[:1]]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: sonar",
+    ]
