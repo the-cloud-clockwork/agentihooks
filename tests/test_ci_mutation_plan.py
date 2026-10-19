@@ -112,7 +112,7 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
 
 
 def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
-    from scripts.ci_mutation.measured import measured_costs
+    from scripts.ci_mutation.measured import measured_costs, measured_splits
 
     name = "scripts.sample.x_f__mutmut_1"
     tests = {"scripts.sample.x_f": ["a", "b"]}
@@ -130,6 +130,9 @@ def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
     assert measured_costs([name], uncontended) == pytest.approx({name: 5.6 + 1.25 * 7.0})
     untimed = [{"tests": tests, "durations": {"a": 30.0, "b": 40.0}}]
     assert measured_costs([name], untimed) == pytest.approx({name: 5.6 + 1.25 * 70.0})
+    long = [{"tests": tests, "durations": {"a": 300.0, "b": 300.0}, "cpu": 200.0}]
+    assert measured_splits([name], long) == {}
+    assert measured_splits([name], [{**long[0], "cpu": 600.0}])["scripts.sample.x_f"]["head"] == ["a"]
 
 
 def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
