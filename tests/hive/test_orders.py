@@ -525,6 +525,36 @@ def test_mismatched_admission_reports_the_identity_refusal(setup):
         setup.consumer.identity(replace(setup.order, generation=9), setup.agent)
 
 
+def _outside(redis, prefix):
+    readers = {
+        "string": redis.get,
+        "hash": redis.hgetall,
+        "list": lambda key: redis.lrange(key, 0, -1),
+        "set": redis.smembers,
+        "zset": lambda key: redis.zrange(key, 0, -1, withscores=True),
+        "stream": redis.xrange,
+    }
+    return {key: readers[redis.type(key)](key) for key in redis.keys("*") if not key.startswith(prefix)}
+
+
+def test_a_joined_hive_applies_a_launch_order_writing_only_its_own_keys(setup):
+    from scripts.hive import registry
+
+    setup.orders.send("host", setup.order)
+    before = _outside(setup.redis, registry.key("host"))
+    assert setup.consumer.poll() == 1
+    assert _outside(setup.redis, registry.key("host")) == before
+    ack = setup.orders.ack(setup.order)
+    assert ack.status == "live"
+    assert ack.target == {"host_id": "host", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    assert ack.execution == {
+        "pane_id": "pane",
+        "model": "selected-model",
+        "effort": "high",
+        "profile_decision": {"validation": {"pid": 12}},
+    }
+
+
 @pytest.mark.parametrize(
     "agent_model,agent_effort,lane_model,expected_model,expected_effort",
     [

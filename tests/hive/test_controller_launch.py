@@ -1099,3 +1099,25 @@ def test_unsupported_harness_wait_records_its_lane(setup):
     config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
     assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("Codex hive placement is not enabled")
     assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
+
+
+def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
+    target = {"host_id": "remote", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    metadata = {"pane_id": "pane", "model": "selected-model", "effort": "high", "profile_decision": {"pid": 12}}
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", target, "", metadata))
+    result = setup.launcher.wait(order)
+    assert result.ok
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert live.state == "working"
+    assert live.runtime_target == target
+    assert (live.pane_id, live.model, live.effort) == ("pane", "selected-model", "high")
+    assert live.profile_decision == {"pid": 12}
+    assert result.value.execution == live
