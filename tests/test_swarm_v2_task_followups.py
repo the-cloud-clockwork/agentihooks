@@ -140,6 +140,6 @@ def test_its_raised_notice_goes_to_the_tasks_owning_master(world):
     doc = world.doc()
     added = next(e for e in doc["_meta"]["events"] if e["target"] == ON_TASK)
     ledger_events.event_pass(inbox, world.store, SLUG, doc, None, added["at"] + ledger_events.FOLLOWUP_RAISE_MS)
-    raised = [item for item in inbox.mailbox(SECOND_NAME) if "still open fifteen minutes" in item.text]
-    assert [item.address for item in raised] == [SECOND]
-    assert [item for item in inbox.mailbox(LEAD_NAME) if "still open fifteen minutes" in item.text] == []
+    raised = "A follow-up on-t2 on ledger"
+    assert [item.address for item in inbox.mailbox(SECOND_NAME) if raised in item.text] == [SECOND]
+    assert [item for item in inbox.mailbox(LEAD_NAME) if raised in item.text] == []
