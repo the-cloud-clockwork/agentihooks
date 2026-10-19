@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_materialize__mutmut_23:30c4371799c642fda8ce80999b6f10147b2a12937bc75af1d3733d35b19ae23c": {
+    "reader": "Standards reader for hiv8",
+    "reason": "materialize writes steering.md with encoding UTF-8 instead of utf-8. Codec lookup normalises UTF-8 and utf-8 to the identical utf_8 codec regardless of locale, so the bytes read and written are the same."
+  }
+}

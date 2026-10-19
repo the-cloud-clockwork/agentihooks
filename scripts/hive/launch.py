@@ -3,7 +3,7 @@ import os
 import time
 from dataclasses import dataclass, replace
 
-from scripts.hive import placement, placement_waits, registry
+from scripts.hive import orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -74,6 +74,7 @@ class HiveLaunch:
         self.store, self.slug, self.held, self.herdr = store, slug, held, herdr
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
+        self.opening = orders.build_opening
 
     def hives(self) -> list[dict]:
         return loaded_hives(self.store)
@@ -151,6 +152,9 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
+        task = orders.carried(
+            self.slug, {**request.task, "profile_decision": selected.profile.record()}, self.opening(request)
+        )
         admitted = self.admit(request, selected)
         if not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
@@ -158,7 +162,6 @@ class HiveLaunch:
             self.end(admitted, "account reservation is full")
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail="account reservation is full")
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
-        task = {**request.task, "profile_decision": selected.profile.record()}
         order = LaunchOrder(
             self.slug,
             admitted.execution_id,

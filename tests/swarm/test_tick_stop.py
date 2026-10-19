@@ -291,7 +291,7 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: swept.append(args) or [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: swept.append(args) or [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: tick_stop.STOP.wait(10) and [])
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
     monkeypatch.setattr(cli, "_tickable", lambda slug: True)

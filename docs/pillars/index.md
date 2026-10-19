@@ -8,7 +8,7 @@ has_children: true
 
 AgentiHooks is organised around four pillars: Identity, Guardrails, Context Intelligence, Fleet Command. Each pillar covers one axis of running Claude Code and Codex agents.
 
-The [swarm guide](swarm.md) covers fleet task execution, including [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks).
+The [swarm guide](swarm.md) covers fleet task execution, including [ready handoffs for tasks split across pull requests](swarm.md#ready-handoffs-for-split-tasks) and [what the ready merge pass does when a pull request leaves the merge queue](swarm.md#ready-merge-pass-queue-exits).
 
 See [stalled activity findings](swarm.md#stalled-activity-findings) for threshold configuration, wrapper loss recovery and investigation of active agents reported as stalled.
 

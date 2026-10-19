@@ -37,7 +37,7 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
     monkeypatch.setattr(cli, "_reconcile_services", lambda: None)
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: [])
 
     def run_tick(received, slug, scheduled):
         assert received is store

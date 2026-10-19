@@ -76,7 +76,7 @@ def _host_tick(monkeypatch, ticked):
     monkeypatch.setattr(cli, "_reconcile_services", lambda: ticked.append("reconcile"))
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: ticked.append("herdr") or [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: ticked.append("herdr") or [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: ticked.append(slug) or [])
     return store
 

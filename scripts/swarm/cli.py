@@ -552,7 +552,7 @@ def _tick_host(store, started):
         from scripts import herdr_gc
 
         try:
-            for line in herdr_gc.run(dict(os.environ), now_ms(), True):
+            for line in herdr_gc.run(dict(os.environ), now_ms(), True, swarm_only=True):
                 print(f"herdr: {line}")
         except Exception as exc:
             print(f"herdr: {type(exc).__name__}: {exc}", file=sys.stderr)
