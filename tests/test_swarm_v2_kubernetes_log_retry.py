@@ -59,7 +59,9 @@ def test_servable_logs_after_a_failed_read_keep_the_log(ready):
     assert name not in world.api.objects
     removed = retention.retained(world.store, cases.SLUG, old.execution_id)["removed"]["pods"][0]
     assert removed["log_reads"] == 1
-    assert removed["startup"]["containers"] == [{"name": "agent", "terminated": EXIT, "log": "worker startup refused\n"}]
+    assert removed["startup"]["containers"] == [
+        {"name": "agent", "terminated": EXIT, "log": "worker startup refused\n"}
+    ]
 
 
 def test_exit_reason_only_capture_reads_no_log():
