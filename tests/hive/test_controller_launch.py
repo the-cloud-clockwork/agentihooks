@@ -119,7 +119,18 @@ def test_publishes_fenced_order_after_host_admission(setup):
     assert outcome.value.execution.state == "working"
     assert runtime.spawn.call_count == 1
     order = setup.launcher.orders_for(task["id"])
-    assert orders.ack(order) == Ack("live", outcome.value.execution.runtime_target)
+    assert orders.ack(order) == Ack(
+        "live",
+        outcome.value.execution.runtime_target,
+        "",
+        {
+            "pane_id": "pane",
+            "model": "selected-model",
+            "effort": "high",
+            "profile_decision": {"validation": {"pid": 12}},
+        },
+    )
+    assert order.hive == "remote"
     assert json.loads(store.redis.get(order.prompt_ref)) == {
         **task,
         "profile_decision": setup.herdr._profile_decision.return_value.record(),
