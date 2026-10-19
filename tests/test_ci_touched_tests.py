@@ -13,6 +13,7 @@ def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypat
         if selected is None
         else f"import pytest\n@pytest.mark.parametrize('case', range({selected}))\ndef test_case(case):\n    pass\n"
     )
+    monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", str(maximum))
     status = main([str(suite), "--tb=short", "-p", "no:cacheprovider"])
