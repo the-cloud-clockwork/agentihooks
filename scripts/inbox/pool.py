@@ -89,7 +89,7 @@ class MasterPool:
         live = live_masters(self.redis, slug_of(master_of(holder)))
         return len(live) > 1 or holder not in live
 
-def reclaimable(self, pipe, holder: str) -> bool:
+    def reclaimable(self, pipe, holder: str) -> bool:
         self.inbox.seats.watch(pipe, holder)
         return holder not in live_masters(self.redis, slug_of(master_of(holder)))
 
