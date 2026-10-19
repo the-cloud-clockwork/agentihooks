@@ -6,6 +6,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from tests.shard_budget import RUN_TESTS_MINUTES
+
 pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -84,6 +86,7 @@ def test_the_budget_flag_moves_the_limit(tmp_path):
     result = _budget(tmp_path, [61.0], [59.0], budget=60)
     assert result.returncode == 1
     assert "::error::1 of 2 shards passed the 60 s budget" in result.stdout
+    assert result.stdout.splitlines()[0].endswith("against a budget of 60 s")
 
 
 def test_a_missing_shard_file_is_red(tmp_path):
@@ -154,8 +157,6 @@ def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
 
 
 def test_the_default_budget_is_the_run_tests_step_deadline(tmp_path):
-    from tests.shard_budget import RUN_TESTS_MINUTES
-
     steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
     minutes = next(step for step in steps if step.get("name") == "Run tests")["timeout-minutes"]
     assert RUN_TESTS_MINUTES == minutes
