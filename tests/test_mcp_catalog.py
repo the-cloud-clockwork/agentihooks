@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from hooks.mcp._stdio import list_tools
+from hooks.mcp._catalog import get_catalog
 
 pytestmark = pytest.mark.unit
 
