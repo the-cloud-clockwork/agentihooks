@@ -585,7 +585,7 @@ Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in
 
 ### Worktree verdicts
 
-Each worktree gets the first verdict that applies, checked top to bottom. The reason is the text `gc` prints in brackets after the path.
+Each worktree gets the first verdict that applies, checked top to bottom. The reason is the text `gc` prints in parentheses after the path.
 
 | Condition | Action | Reason | Due |
 |---|---|---|---|
@@ -596,7 +596,7 @@ Each worktree gets the first verdict that applies, checked top to bottom. The re
 | A live process has its cwd inside | `keep` | `a process works inside` | never |
 | A lease holder is alive | `keep` | `owner session alive` | never |
 | The machine has been up under 2 h | `keep` | `boot grace` | never |
-| Throwaway lease (`--kind ephemeral`, `wt.sh tmp`), idle 2 h | `remove` | `throwaway checkout, owner gone` | after confirmation |
+| Throwaway lease (`--kind ephemeral`, `wt.sh tmp`), idle 2 h, even with uncommitted or unpushed work | `remove` | `throwaway checkout, owner gone` | after confirmation |
 | Throwaway lease, idle under 2 h | `keep` | `throwaway, recent` | never |
 | Clean, head on a remote, lease names holders and none is alive | `remove` | `clean and on a remote, owner left` | on first sight |
 | Clean, head on a remote, no lease or a lease with no holders, idle 2 h | `remove` | `clean and on a remote` | after confirmation |
@@ -604,9 +604,9 @@ Each worktree gets the first verdict that applies, checked top to bottom. The re
 | Uncommitted changes or a head on no remote, idle 24 h | `snapshot` | `unique work, owner gone: push to wip/ then remove` | after confirmation |
 | Uncommitted changes or a head on no remote, idle under 24 h | `keep` | `unique work, recent` | never |
 
-Clean means `git status --porcelain` lists nothing, untracked files included. Head on a remote means `git rev-list HEAD --not --remotes` is empty, so a branch pushed under any name counts. Idle time runs from the newest of the worktree's index, `HEAD`, reflog and changed files. After confirmation means the action is `due` once two sweeps in the same boot, at least 1 h apart, gave it the same action.
+Clean means `git status --porcelain` lists nothing, untracked files included. Head on a remote means `git rev-list HEAD --not --remotes` is empty, so a branch pushed under any name counts. Idle time runs from the newest of the worktree's index, `HEAD`, reflog and changed files. After confirmation means the action is `due` once two sweeps in the same boot, at least 1 h apart, gave it the same action; any `gc` run, report-only included, counts as a sweep. In the report, the second column is `due` when `--enforce` acts on the line and `pending` while it waits for that confirmation.
 
-The owner left verdict ignores idle time and confirmation. `wt.sh new` and `agentihooks lease <worktree>` record the agent session as a holder, and every tool call that names a path inside the worktree adds its session. Once each of those sessions has ended, a clean pushed worktree goes at the next `gc --enforce`, usually within the hour. The process, live holder and boot grace checks above still come first, and `--enforce` repeats them against a fresh process snapshot before it removes anything. A worktree nobody leased waits the full 2 h, and the verdict never applies to unpushed or uncommitted work.
+The owner left verdict ignores idle time and confirmation. `wt.sh new` and `agentihooks lease <worktree>` record the calling agent session as a holder when one is found among the parent processes, and every tool call that names a path inside the worktree adds its session. Once each of those sessions has ended, a clean pushed worktree goes at the next `gc --enforce`, usually within the hour. The process, live holder and boot grace checks above still come first, and `--enforce` repeats them against a fresh process snapshot before it removes anything. A worktree nobody leased needs 2 h idle, then a second sweep an hour later, and the verdict never applies to unpushed or uncommitted work.
 
 A repository at the `WT_MAX_PER_REPO` cap (60) refuses `wt.sh new`. To free it:
 
@@ -616,8 +616,8 @@ agentihooks gc --enforce --path ~/dev/worktrees/agentihooks
 ```
 
 ```text
-remove    due        0.02 GB  /home/me/dev/worktrees/agentihooks/engineer-0007  (clean and on a remote, owner left)
-remove    pending    0.02 GB  /home/me/dev/worktrees/agentihooks/notes  (clean and on a remote)
+remove    due         0.02 GB  /home/me/dev/worktrees/agentihooks/engineer-0007  (clean and on a remote, owner left)
+remove    pending     0.02 GB  /home/me/dev/worktrees/agentihooks/notes  (clean and on a remote)
 ```
 
 `engineer-0007` is removed by this sweep. `notes` has no lease holder, so it waits for a second sweep an hour later. A worktree still listed as `keep` with `owner session alive` belongs to a running agent: finish that agent's work and run `wt.sh done <name>` from it.
