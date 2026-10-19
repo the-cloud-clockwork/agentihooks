@@ -30,6 +30,12 @@ class Swarm:
         return freeze
 
     @property
+    def effort_range(self):
+        from scripts.swarm import effort_range
+
+        return effort_range
+
+    @property
     def claim_hold(self):
         from scripts.swarm import claim_hold
 

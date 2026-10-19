@@ -30,6 +30,7 @@ export function withDefaults(d) {
     artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     plans: entries(d.plans), slices: entries(d.slices),
     freezes: entries(d.freezes).filter((r) => ["freeze", "focus"].includes(r.verb) && typeof r.target === "string"),
+    marks: Object.fromEntries(["frozen", "held"].map((k) => [k, (Array.isArray((d.marks || {})[k]) ? d.marks[k] : []).filter((key) => typeof key === "string")])),
     phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
     questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
     followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),
@@ -118,12 +119,45 @@ export function setState(item, field, value) {
   if (value && other in item) item[other] = false;
 }
 
+let cacheWorker = null;
+let cacheVersion = 0;
+
 export function lsRead() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { return null; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+    const pending = JSON.parse(localStorage.getItem(`${LS_KEY}:pending`) || "null");
+    return pending ? { ...saved, ...pending } : saved;
+  } catch (e) { return null; }
+}
+
+function cacheFits(value) {
+  const pending = [value];
+  let chars = 0;
+  while (pending.length) {
+    const item = pending.pop();
+    if (typeof item === "string") chars += item.length;
+    else if (item && typeof item === "object") pending.push(...Object.values(item));
+    if (chars > 2621440) return false;
+  }
+  return true;
 }
 
 export function lsWrite() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ doc, ops, checks, at: Date.now() })); } catch (e) { /* storage blocked */ }
+  try {
+    const at = Date.now();
+    localStorage.setItem(`${LS_KEY}:pending`, JSON.stringify({ ops, checks, at }));
+    cacheVersion++;
+    if (!cacheFits({ doc, ops, checks })) return;
+    if (!cacheWorker) {
+      const main = document.querySelector("script[type=module]").src;
+      cacheWorker = new Worker(new URL("cache_worker.js", main));
+      cacheWorker.onmessage = ({ data }) => {
+        if (data.version !== cacheVersion) return;
+        try { localStorage.setItem(LS_KEY, data.value); } catch (e) { /* storage blocked */ }
+      };
+    }
+    cacheWorker.postMessage({ version: cacheVersion, value: { doc, ops, checks, at } });
+  } catch (e) { /* storage blocked */ }
 }
 
 export function phaseLifecycle(phase, doc) {

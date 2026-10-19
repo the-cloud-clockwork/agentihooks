@@ -10,6 +10,7 @@ class Swarm(Protocol):
     commands: Any
     lifecycle: Any
     freeze: Any
+    effort_range: Any
     claim_hold: Any
     idle: Any
     lease: Any

@@ -94,6 +94,7 @@ details.phase-fold > summary::before, details.plan-fold > summary::before { alig
 .plan-title { font-size: var(--fs-item); font-weight: 700; }
 .plan-count { font-size: var(--fs-meta); letter-spacing: .06em; color: var(--accent); }
 .plan-phases { margin: 8px 0 0 22px; }
+#phases > li:not(.plan), .plan-phases > li { content-visibility: auto; contain-intrinsic-size: auto 120px; }
 .phase-slices { display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; font-size: var(--fs-meta); letter-spacing: .06em; color: var(--muted); }
 .phase-slices-label { font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--accent-2); }
 .task-proof dl { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 6px 0 0; }

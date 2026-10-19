@@ -114,6 +114,7 @@ def test_the_served_page_version_is_computed_once_per_process(monkeypatch):
     try:
         assert server.ledger_view({"tasks": [], "_meta": {"rev": 1, "seeds": {}, "api_operations": {}}})["_meta"] == {
             "rev": 1,
+            "limits": server.PAGE_LIMITS,
             "page_version": "v1",
             "crew": [],
         }
@@ -156,7 +157,7 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
         return state
 
     monkeypatch.setattr(server.repository, "get_document", get_document)
-    monkeypatch.setattr(server, "ledger_view", lambda given: {**given, "view": True})
+    monkeypatch.setattr(server, "ledger_view", lambda given, *_: {**given, "view": True})
     monkeypatch.setattr(
         server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "transfers": {}}
     )

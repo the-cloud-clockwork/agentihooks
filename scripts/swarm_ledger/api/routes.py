@@ -11,6 +11,7 @@ from .errors import APIError
 from .services import Services
 
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
+FILE_RE = re.compile(r"files/(media|artifacts)/[\w.-]+")
 
 
 def body(handler: object, services: Services) -> dict:
@@ -39,21 +40,32 @@ def dispatch(handler: object, services: Services) -> dict | str | None:
         raise APIError(404, "ledger_missing", "No such ledger")
     if path == "agent-token" and handler.command == "POST":
         return agent_token(handler, services, slug)
+    if handler.command == "GET" and FILE_RE.fullmatch(path):
+        _, kind, name = path.split("/")
+        media = services.media
+        return handler.send_media(slug, name, media.artifact_store if kind == "artifacts" else media.media_store)
     principal = services.ledger.authority.caller(handler.headers, services.repository.token(slug), slug)
     if principal is None and services.ledger.authority.controller(handler.headers.get("X-Controller-Credential")):
         principal = ""
     if principal is None:
         raise APIError(403, "forbidden", "Missing or wrong ledger credential")
     if handler.command == "GET":
-        query = pagination(handler.path)
-        if path == "events" and handler.headers.get("Accept") == "text/event-stream":
-            return events(handler, services, slug)
-        if path == "swarm" or path.startswith("swarm/"):
-            return resources.swarm_read(services.swarm.status(slug), path, query)
-        if WORKSPACE_RE.fullmatch(path):
-            return workspace(services, slug, path.split("/")[1])
-        return ledger_read(services, slug, path, query)
+        return ledger_get(handler, services, slug, path)
     return ledger_operation(handler, services, slug, path, principal)
+
+
+def ledger_get(handler: object, services: Services, slug: str, path: str) -> dict | None:
+    query = pagination(handler.path)
+    if path == "events" and handler.headers.get("Accept") == "text/event-stream":
+        return events(handler, services, slug)
+    if path == "swarm/models":
+        catalog = services.swarm.models()
+        return {"data": catalog, "revision": resources.revision(catalog)}
+    if path == "swarm" or path.startswith("swarm/"):
+        return resources.swarm_read(services.swarm.status(slug), path, query)
+    if WORKSPACE_RE.fullmatch(path):
+        return workspace(services, slug, path.split("/")[1])
+    return ledger_read(services, slug, path, query)
 
 
 def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
@@ -140,6 +152,8 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
         raise APIError(405, "method_not_allowed", "Use a resource operation")
     if path in ("uploads/media", "uploads/artifacts"):
         return admin.upload(handler, services, slug, path)
+    if handler.command == "PUT" and path in PAGE_WRITES:
+        return getattr(handler, PAGE_WRITES[path])(slug)
     payload = body(handler, services)
     if path == "lifecycle/actions":
         return admin.lifecycle(services, principal, slug, payload)
@@ -160,6 +174,9 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
 
         return architecture.act(handler, services, slug, principal, payload, os.environ)
     raise APIError(404, "resource_missing", "No such operation resource")
+
+
+PAGE_WRITES = {"saves": "put_ledger", "swarm/controls": "put_swarm"}
 
 
 def export_body(state: dict) -> str:

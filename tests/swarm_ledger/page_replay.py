@@ -90,20 +90,23 @@ class FakeApi:
     def handle(self, route):
         request = route.request
         path = self.note(request)
-        if path == f"/api/{SLUG}":
+        if path.startswith(f"/api/v1/ledgers/{SLUG}/files/"):
+            self.requests.pop()
+            return self.media(route) if "/files/media/" in path else self.artifact(route)
+        if path == f"/api/v1/ledgers/{SLUG}/saves":
             if request.method == "PUT":
                 self.rev += 1
             return route.fulfill(json={**self.state(), "rejected": []})
-        if path == f"/api/swarm/{SLUG}":
+        if path == f"/api/v1/ledgers/{SLUG}/swarm/controls":
             return route.fulfill(json=INPUTS["swarm"])
         if path == f"/api/v1/ledgers/{SLUG}/events":
             body = (
                 f"id: c0\nevent: snapshot\ndata: {json.dumps({'ledger': self.state(), 'swarm': INPUTS['swarm']})}\n\n"
             )
             return route.fulfill(body=body, content_type="text/event-stream")
-        if path == "/api/layout":
-            return route.fulfill(json={} if request.method == "GET" else {"ok": True})
-        if path == f"/api/media/{SLUG}":
+        if path == "/api/v1/layout":
+            return route.fulfill(json={"data": {}})
+        if path == f"/api/v1/ledgers/{SLUG}/uploads/media":
             return route.fulfill(json=INPUTS["upload"])
         return route.fulfill(status=404, body="not recorded")
 
