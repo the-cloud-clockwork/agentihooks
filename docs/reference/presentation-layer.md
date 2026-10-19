@@ -50,7 +50,8 @@ every comment that is not deleted.
 | 25, after one click | Newest 18 | `Show 7 older comments · 7 left` |
 | 25, after two clicks | All 25 | None |
 
-Comments render in their stored order, newest at the bottom, above the
+The ledger server appends each new comment to the end of its thread, so
+comments render oldest at the top and newest at the bottom, above the
 **Add comment** button.
 
 ### Behaviour while the page is open
