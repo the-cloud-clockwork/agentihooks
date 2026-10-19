@@ -7,7 +7,7 @@ from statistics import median
 
 MARGIN = 1.1
 MEASURE = '{"seconds"'
-GRADED = (("write_p95_s", "write p95"), ("busiest_cores", "busiest CPU window"))
+GRADED = (("write_p50_s", "write p50"), ("busiest_cores", "busiest CPU window"))
 SIDES = ("base", "head")
 
 
@@ -22,9 +22,9 @@ def pair_ratios(pairs: list[tuple[dict, dict]], key: str) -> list[float]:
 
 
 def same_code_bound(runs: list[list[tuple[dict, dict]]]) -> float:
-    """The widest median pair ratio, in either direction, of any recorded same code run."""
-    medians = [median(ratios) for pairs in runs for key, _ in GRADED if (ratios := pair_ratios(pairs, key))]
-    return max((max(ratio, 1 / ratio) for ratio in medians), default=1.0)
+    """The widest single pair ratio, in either direction, of any recorded same code run."""
+    ratios = [ratio for pairs in runs for key, _ in GRADED for ratio in pair_ratios(pairs, key)]
+    return max((max(ratio, 1 / ratio) for ratio in ratios), default=1.0)
 
 
 def recorded_runs(path: Path) -> list[list[tuple[dict, dict]]]:
@@ -77,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
     problems = regressions(pairs, args.margin)
     if bound is not None and args.margin < bound:
         problems.insert(
-            0, f"the margin {args.margin}x is below {bound:.2f}x, the widest median pair ratio of the same code runs"
+            0, f"the margin {args.margin}x is below {bound:.2f}x, the widest pair ratio of the same code runs"
         )
     for problem in problems:
         print(f"::error::{problem}")

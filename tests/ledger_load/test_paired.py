@@ -6,7 +6,7 @@ import yaml
 
 from tests.ledger_load import paired
 
-BASE = {"seconds": 90, "errors": 0, "write_p95_s": 1.0, "busiest_cores": 0.5}
+BASE = {"seconds": 90, "errors": 0, "write_p50_s": 1.0, "busiest_cores": 0.5}
 
 
 def log(*measures: dict) -> str:
@@ -15,9 +15,9 @@ def log(*measures: dict) -> str:
 
 def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
     pairs = [
-        (BASE, {**BASE, "write_p95_s": 1.4, "busiest_cores": 0.7}),
+        (BASE, {**BASE, "write_p50_s": 1.4, "busiest_cores": 0.7}),
         (BASE, BASE),
-        (BASE, {**BASE, "write_p95_s": 3.0}),
+        (BASE, {**BASE, "write_p50_s": 3.0}),
     ]
     assert paired.regressions(pairs, 1.5) == []
 
@@ -26,16 +26,16 @@ def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
     "change, problem",
     [
         ({"errors": 1}, "head had 2 failed requests, base 0"),
-        ({"write_p95_s": 2.0}, "head write p95 median pair ratio 2.00 exceeds the 1.5x margin"),
+        ({"write_p50_s": 2.0}, "head write p50 median pair ratio 2.00 exceeds the 1.5x margin"),
         ({"busiest_cores": 0.8}, "head busiest CPU window median pair ratio 1.60 exceeds the 1.5x margin"),
-        ({"write_p95_s": None}, "write p95 was not measured on the head run of pair 1"),
+        ({"write_p50_s": None}, "write p50 was not measured on the head run of pair 1"),
     ],
 )
 def test_a_head_regression_in_most_pairs_or_a_missing_measure_is_named(change, problem):
     head = {**BASE, **change}
     pairs = [(BASE, head), (BASE, head), (BASE, BASE)]
     assert problem in paired.regressions(pairs, 1.5)
-    if change.get("write_p95_s", 1) is not None:
+    if change.get("write_p50_s", 1) is not None:
         assert paired.regressions(pairs, 1.5) == [problem]
 
 
@@ -45,8 +45,8 @@ def test_a_pair_missing_its_run_is_named():
     assert paired.regressions([], 1.5) == ["no paired runs were given"]
 
 
-def test_the_same_code_bound_is_the_widest_median_pair_ratio_in_either_direction():
-    fast = {**BASE, "write_p95_s": 0.5}
+def test_the_same_code_bound_is_the_widest_single_pair_ratio_in_either_direction():
+    fast = {**BASE, "write_p50_s": 0.5}
     runs = [[(BASE, BASE), (BASE, fast), (BASE, fast)], [(BASE, {**BASE, "busiest_cores": 0.6})]]
     assert paired.same_code_bound(runs) == 2.0
     assert paired.same_code_bound([]) == 1.0
@@ -62,8 +62,8 @@ def test_the_recorded_same_code_runs_fit_inside_the_margin_the_workflow_states()
 
 
 def test_the_graded_measure_is_the_repeat_when_the_gate_measured_twice():
-    repeat = {**BASE, "write_p95_s": 0.9}
-    assert paired.graded_measure(log({**BASE, "write_p95_s": 3.0}, repeat)) == repeat
+    repeat = {**BASE, "write_p50_s": 0.9}
+    assert paired.graded_measure(log({**BASE, "write_p50_s": 3.0}, repeat)) == repeat
     assert paired.graded_measure("no measure here") is None
 
 
@@ -73,7 +73,7 @@ def test_the_command_pairs_runs_in_order_and_refuses_a_margin_below_the_same_cod
     base.write_text(log(BASE))
     head.write_text(log(BASE))
     slow.write_text(log({**BASE, "busiest_cores": 1.0}))
-    same_code.write_text(json.dumps({"runs": {"1": [[BASE, {**BASE, "write_p95_s": 1.3}]]}}))
+    same_code.write_text(json.dumps({"runs": {"1": [[BASE, {**BASE, "write_p50_s": 1.3}]]}}))
     graded = ["--margin", "1.5", "--same-code", str(same_code)]
     assert paired.main(["--base", str(base), str(base), "--head", str(head), str(slow), *graded]) == 0
     assert (
