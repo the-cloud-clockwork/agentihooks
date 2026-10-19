@@ -600,15 +600,30 @@ def test_refresh_drops_a_deferred_priority_for_a_draft(priority, monkeypatch, ca
 
 
 def test_refresh_requeues_entries_an_interrupted_priority_left_out(priority, monkeypatch):
+    from scripts.swarm import staged_compatibility
+
     p = priority
-    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+
+    def graphql(query, variables, run):
+        assert run is subprocess.run
+        found = GRAPHQL(query, variables, p.queue.run)
+        if found.get("resource") and found["resource"].get("id") == "P2":
+            found["resource"]["body"] = "declared"
+        return found
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
     monkeypatch.setattr(p.queue, "run", draft_target(p.queue.run, "P5"))
-    sent = []
+    checked, writes, sent = [], [], []
+    monkeypatch.setattr(staged_compatibility, "require", lambda *args: checked.append(args))
     monkeypatch.setattr(
-        queue_priority,
-        "InboxStore",
-        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
+        queue_record.Journal, "write", lambda self, *args, **extra: writes.append((self.url, args, extra))
     )
+
+    def inbox(redis):
+        assert redis is p.store.redis
+        return SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags)))
+
+    monkeypatch.setattr(queue_priority, "InboxStore", inbox)
     p.tasks += [{"pr_url": URL[:-1] + n, "claimed_by": f"eng@{n}"} for n in ("4", "5")]
     p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] not in ("P2", "P4", "P5")]
     displaced = queue_priority.Displaced(p.store, "sw")
@@ -621,10 +636,88 @@ def test_refresh_requeues_entries_an_interrupted_priority_left_out(priority, mon
     ]
     assert p.queue.mutations == [("queue", 2)]
     assert displaced.pulls() == []
-    assert [(recipient, text.rsplit("because ", 1)[1]) for _, recipient, text, _ in sent] == [
-        ("eng@5", "it became a draft. Queue it again once its checks pass."),
-        ("eng@4", "its head moved. Queue it again once its checks pass."),
+    assert checked == [(URL[:-1] + "2", "head2", "declared", subprocess.run)]
+    assert writes == [
+        (
+            URL[:-1] + "5",
+            ("priority-requeue-skipped", URL[:-1] + "5", "head5", None, None),
+            {"reason": "it became a draft"},
+        ),
+        (
+            URL[:-1] + "4",
+            ("priority-requeue-skipped", URL[:-1] + "4", "moved", None, None),
+            {"reason": "its head moved"},
+        ),
+        (URL[:-1] + "2", ("priority-requeue", URL[:-1] + "2", "head2", None, None), {}),
     ]
+    assert sent == [
+        (
+            "swarm",
+            f"eng@{n}",
+            f"Your pull request {URL[:-1]}{n} left the merge queue in an interrupted priority and stays out "
+            f"because {reason}. Queue it again once its checks pass.",
+            {"fyi": True},
+        )
+        for n, reason in (("5", "it became a draft"), ("4", "its head moved"))
+    ]
+
+
+def test_displaced_records_stay_with_their_swarm(priority):
+    p = priority
+    queue_priority.Displaced(p.store, "sw").add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": "head2"})
+    assert queue_priority.Displaced(p.store, "other").pulls() == []
+    assert list(p.store.redis.hgetall(p.store.key("sw", queue_priority.DISPLACED))) == [URL[:-1] + "2"]
+    assert p.store.redis.get(p.store.key("sw", queue_priority.ORDER)) == "1"
+
+
+def test_apply_passes_the_entries_already_ahead(priority, monkeypatch):
+    p = priority
+    seen = []
+    monkeypatch.setattr(
+        merge_queue,
+        "prioritize",
+        lambda url, **kwargs: seen.append(kwargs.get("ahead")) or {"displaced": [], "errors": []},
+    )
+    queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL), [URL[:-1] + "3"])
+    assert seen == [[URL[:-1] + "3"]]
+
+
+@pytest.mark.parametrize(
+    "raw, settled",
+    [
+        (None, True),
+        ({"state": "MERGED", "baseRefName": "dev", "mergeQueueEntry": None}, True),
+        ({"state": "OPEN", "baseRefName": "main", "mergeQueueEntry": None}, True),
+        ({"state": "OPEN", "baseRefName": "dev", "mergeQueueEntry": {"id": "E2"}}, True),
+        ({"state": "OPEN", "baseRefName": "dev", "mergeQueueEntry": None}, False),
+    ],
+)
+def test_settled_entries_need_no_requeue(raw, settled):
+    assert queue_priority.settled(raw) is settled
+
+
+@pytest.mark.parametrize(
+    "holder, failure, stale",
+    [
+        ("a:b:123:x", ProcessLookupError, True),
+        ("a:b:123:x", PermissionError, False),
+        ("a:b:123:x", None, False),
+        ("c:123:x", ProcessLookupError, False),
+        ("a:b:pid:x", ProcessLookupError, False),
+        ("x", ProcessLookupError, False),
+    ],
+)
+def test_a_holder_is_stale_only_when_its_process_on_this_hive_is_gone(monkeypatch, holder, failure, stale):
+    probes = []
+
+    def kill(pid, signal):
+        probes.append((pid, signal))
+        if failure:
+            raise failure
+
+    monkeypatch.setattr(queue_priority.os, "kill", kill)
+    assert queue_priority.stale(holder, "a:b") is stale
+    assert probes == ([(123, 0)] if holder.startswith("a:b:1") else [])
 
 
 def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypatch):
