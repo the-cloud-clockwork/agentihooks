@@ -99,7 +99,11 @@ def _foreign_run(unit_dir):
 
     _i = _install_module()
     running, installed = _i.AGENTIHOOKS_ROOT.resolve(), _i.install_root().resolve()
-    if running == installed or unit_dir.resolve() != UNIT_DIR.resolve():
+    if unit_dir.resolve() != UNIT_DIR.resolve():
+        return ""
+    if (running / ".git").is_file():
+        return f"this run comes from the git worktree {running}, so it leaves the shared swarm timer units in {unit_dir} alone"
+    if running == installed:
         return ""
     return (
         f"this run comes from {running}, not the installed agentihooks at {installed}, "
@@ -143,6 +147,9 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
 
 def reconcile(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
+    if refusal := _foreign_run(unit_dir):
+        print(refusal, file=sys.stderr)
+        return False
     expected = units(binary)
     current = all(_current(unit_dir / name, text) for name, text in expected.items())
     if current and not any((unit_dir / name).exists() for name in (*RETIRED, *DROPPED)):
