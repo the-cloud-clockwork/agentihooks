@@ -105,10 +105,13 @@ function applyServer(server) {
   for (const op of ops) applyOp(doc, op);
   applyChecks(doc);
   banner([meta.seed_error]);
-  render();
-  if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
-  lsWrite();
-  firstState();
+  const appliedRev = rev;
+  Promise.resolve(render(null, true)).then(() => {
+    if (rev !== appliedRev) return;
+    if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
+    lsWrite();
+    firstState();
+  });
 }
 
 export async function flush(unloading) {

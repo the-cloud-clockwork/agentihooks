@@ -1,5 +1,6 @@
 import { ACTIVE_MS, PHASE_LABELS } from "./config.js";
-import { $, closedText, excerpt, grow, h, headCount, newId, span, when } from "./dom.js";
+import { $, closedText, excerpt, h, headCount, newId, span, when } from "./dom.js";
+import { renderCycle } from "./render_cycle.js";
 import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state.js";
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
@@ -111,10 +112,12 @@ function phaseRow(item, n) {
   return h("li", { class: itemClass(item, key), id: `item-phases-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
+const sliceTaskCounts = new Map();
+
 function phaseSlices(phase) {
   const rows = viewItems("slices", doc.slices).filter((s) => s.phase === `phases/${phase.id}`);
   if (!rows.length) return null;
-  const count = (s) => doc.tasks.filter((t) => !t.deleted && t.slice === `slices/${s.id}`).length;
+  const count = (s) => sliceTaskCounts.get(`slices/${s.id}`) || 0;
   return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
     ...rows.map((s) => h("span", { class: "slice" + holdClass(`slices/${s.id}`), id: `item-slices-${s.id}` }, holdMark(`slices/${s.id}`),
       h("span", { class: "slice-name", text: `${s.anchor} ${count(s)}` }), freezeButton(`slices/${s.id}`))));
@@ -144,13 +147,30 @@ function planRow({ key, id, title, phases, plan }) {
   return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, fold);
 }
 
-function phaseList() {
+function phaseList(cooperative = false, current = () => true) {
+  sliceTaskCounts.clear();
+  for (const task of doc.tasks) if (!task.deleted && task.slice) sliceTaskCounts.set(task.slice, (sliceTaskCounts.get(task.slice) || 0) + 1);
   if (!doc.plans.length) return listInto("phases", viewItems("phases", doc.phases), (p, i) => phaseRow(p, i + 1));
-  if (sectionOpen("phases")) {
-    const groups = planGroups();
-    $("phases").replaceChildren(...groups.map(planRow));
-    if (!groups.length) $("phases").append(h("li", { class: "empty", text: "All phases are hidden." }));
+  if (!sectionOpen("phases")) return;
+  const groups = planGroups();
+  const target = $("phases");
+  const finish = () => { if (!groups.length) target.append(h("li", { class: "empty", text: "All phases are hidden." })); };
+  if (!cooperative) {
+    target.replaceChildren(...groups.map(planRow));
+    return finish();
   }
+  const paint = async () => {
+    const rows = document.createDocumentFragment();
+    for (const group of groups) {
+      await scheduler.postTask(() => {}, { priority: "background" });
+      if (!current()) return;
+      rows.append(planRow(group));
+    }
+    if (!current()) return;
+    target.replaceChildren(rows);
+    finish();
+  };
+  return paint();
 }
 
 function questionRow(item, n) {
@@ -267,61 +287,45 @@ function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
   if (!items.length) el.append(h("li", { class: "empty", text: doc[id].some((i) => !i.deleted) ? "All items are hidden." : "None." }));
 }
 
-export function render(focusKey) {
+export function render(focusKey, cooperative = false) {
   prepareFrozenView(doc);
-  const active = document.activeElement;
-  const key = focusKey || (active && active.dataset ? active.dataset.focus : null);
-  const caret = !focusKey && active && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
-  document.title = doc.title;
-  $("title").textContent = doc.title;
-  $("overview").textContent = excerpt(doc.overview, 200);
-  $("closed-label").textContent = closedText(doc.closed_at);
-  $("closed-banner").hidden = !doc.closed_at;
-  const sections = [
-    () => {
-      $("sources-count").textContent = headCount([[doc.sources.length]]);
-      listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
-    },
-    () => {
-      $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" }) + viewCount("phases", doc.phases);
-      phaseList();
-    },
-    () => {
-      $("tasks-count").textContent = taskCounts(doc.tasks) + viewCount("tasks", doc.tasks);
-      groupedWork("tasks", viewItems("tasks", doc.tasks), (t) => taskRow(t, doc.tasks));
-    },
-    () => {
-      $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
-      listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
-    },
-    () => {
-      $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
-      if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
-    },
-    () => {
-      $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" }) + viewCount("followups", doc.followups);
-      groupedWork("followups", viewItems("followups", doc.followups), (f) => checkRow("followups", f, 0, f.text, ""));
-    },
-    () => { renderSync(); }, () => { renderPriorities(); }, () => { renderNotifications(); }, () => { renderAlerts(); },
-    () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
-    () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
-  ];
-  for (const section of sections) {
-    try {
-      section();
-    } catch (error) {
-      console.error(error);
-    }
-  }
-
-  const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
-  if (!again) return;
-  again.focus();
-  if (again.tagName === "TEXTAREA") {
-    grow(again);
-    const end = again.value.length;
-    again.setSelectionRange(caret ? caret[0] : end, caret ? caret[1] : end);
-  }
+  return renderCycle(focusKey, cooperative, (current) => {
+    document.title = doc.title;
+    $("title").textContent = doc.title;
+    $("overview").textContent = excerpt(doc.overview, 200);
+    $("closed-label").textContent = closedText(doc.closed_at);
+    $("closed-banner").hidden = !doc.closed_at;
+    const sections = [
+      () => {
+        $("sources-count").textContent = headCount([[doc.sources.length]]);
+        listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
+      },
+      () => {
+        $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" }) + viewCount("phases", doc.phases);
+        return phaseList(cooperative, current);
+      },
+      () => {
+        $("tasks-count").textContent = taskCounts(doc.tasks) + viewCount("tasks", doc.tasks);
+        groupedWork("tasks", viewItems("tasks", doc.tasks), (t) => taskRow(t, doc.tasks));
+      },
+      () => {
+        $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
+        listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
+      },
+      () => {
+        $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
+        if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
+      },
+      () => {
+        $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" }) + viewCount("followups", doc.followups);
+        groupedWork("followups", viewItems("followups", doc.followups), (f) => checkRow("followups", f, 0, f.text, ""));
+      },
+      () => { renderSync(); }, () => { renderPriorities(); }, () => { renderNotifications(); }, () => { renderAlerts(); },
+      () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
+      () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
+    ];
+    return sections;
+  });
 }
 
 const NOUNS = { tasks: "tasks", followups: "follow-ups" };

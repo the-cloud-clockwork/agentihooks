@@ -26,6 +26,9 @@ tasks of one swarm ledger (`agentihooks ledger`), and every task belongs to a la
 | `ci` | A CI engineer whose only job is CI speed; it proposes each further bottleneck as a follow up. |
 | `master` | The one agent the operator talks to. It troubleshoots with read only diagnostics, plans with the operator and configures the swarm, the ledger and the operator's environment with him through the agentihooks commands and tools. It works no task and never edits code or config files in a repository, commits or merges. |
 
+Agents run on [hives](hives.md), the machines joined to the swarm; [Deployment modes](../reference/deployment-modes.md)
+says where the controller, ledger and Redis run.
+
 ## Agent names
 
 Run `agentihooks swarm rename` to rename every live registered swarm's agents and spaces, or
