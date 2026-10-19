@@ -906,8 +906,9 @@ def test_every_tick_closes_and_journals_with_reasons(monkeypatch, capsys):
     monkeypatch.setattr(
         herdr_gc,
         "run",
-        lambda environ, now_ms, act, swarm_only=False: calls.append((environ, now_ms, act, swarm_only))
-        or ["closed pane w1:p2 of a: why"],
+        lambda environ, now_ms, act, swarm_only=False: (
+            calls.append((environ, now_ms, act, swarm_only)) or ["closed pane w1:p2 of a: why"]
+        ),
     )
     cli.cmd_tick(SimpleNamespace(slugs=lambda: []), None)
     [(environ, now, act, swarm_only)] = calls
