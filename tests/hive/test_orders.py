@@ -562,6 +562,22 @@ def test_a_joined_hive_applies_a_launch_order_writing_only_its_own_keys(setup):
     }
 
 
+def test_a_joined_hive_acknowledges_an_unknown_execution_when_redis_denies_the_conflict_count(setup, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive.orders import Ack
+
+    def denied(*args, **kwargs):
+        raise NoPermissionError("No permissions to access a key")
+
+    order = replace(setup.order, execution_id="unknown")
+    setup.orders.send("host", order)
+    monkeypatch.setattr(setup.redis, "incr", denied)
+    assert setup.consumer.poll() == 1
+    assert setup.orders.ack(order) == Ack("failed", {}, "identity")
+    setup.runtime.spawn.assert_not_called()
+
+
 @pytest.mark.parametrize(
     "agent_model,agent_effort,lane_model,expected_model,expected_effort",
     [

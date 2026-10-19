@@ -221,10 +221,12 @@ class Consumer:
             lease.require_epoch(self.store, order.slug, order.epoch)
         except SwarmError:
             return Ack("failed", {}, "stale_epoch")
+        from redis.exceptions import NoPermissionError
+
         try:
             agent = self.store.execution_registry.get(order.slug, order.execution_id)
             self.identity(order, agent)
-        except SwarmError:
+        except (SwarmError, NoPermissionError):
             return Ack("failed", {}, "identity")
         raw = self.store.redis.get(order.prompt_ref)
         if raw is None:

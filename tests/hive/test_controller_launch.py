@@ -465,7 +465,9 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     )
 
 
-@pytest.mark.parametrize("bad", ["target", "generation", "state", "missing occupant", "replaced occupant"])
+@pytest.mark.parametrize(
+    "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
+)
 def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad):
     from unittest.mock import patch
 
@@ -477,6 +479,11 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     if bad == "target":
         setup.launcher.complete(order, ack)
         ack = replace(ack, target={**ack.target, "pid": 99})
+    elif bad == "pane":
+        setup.launcher.complete(order, ack)
+        ack = replace(ack, execution={**ack.execution, "pane_id": "other"})
+    elif bad == "host":
+        ack = replace(ack, target={**ack.target, "host_id": "elsewhere"})
     elif bad == "generation":
         order = replace(order, generation=order.generation + 1)
     elif bad == "state":
@@ -1134,3 +1141,23 @@ def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
     assert (live.pane_id, live.model, live.effort) == ("pane", "selected-model", "high")
     assert live.profile_decision == {"pid": 12}
     assert result.value.execution == live
+
+
+def test_an_acknowledgement_without_metadata_keeps_the_admitted_fields(setup):
+    from scripts.hive.orders import Ack
+
+    _, order, ack = live_order(setup)
+    admitted = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert setup.launcher.complete(order, Ack("live", ack.target)).ok
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert live == replace(admitted, runtime_target=ack.target, state="working", profile_decision={})
+
+
+def test_a_malformed_profile_decision_is_refused_before_recording(setup):
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    with pytest.raises(SwarmError) as error:
+        setup.launcher.complete(order, replace(ack, execution={**ack.execution, "profile_decision": []}))
+    assert str(error.value) == "hive launch acknowledgement does not match the live execution"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"

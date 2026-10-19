@@ -233,8 +233,12 @@ class HiveLaunch:
         if current is None or current.execution_id != order.execution_id or agent.generation != order.generation:
             raise SwarmError("hive launch acknowledgement does not match the live execution")
         if agent.state == "launching":
-            agent = self.record(agent, ack)
-        if agent.runtime_target != ack.target or agent.state != "working":
+            agent = self.record(agent, order, ack)
+        if (
+            agent.runtime_target != ack.target
+            or agent.pane_id != ack.execution.get("pane_id", agent.pane_id)
+            or agent.state != "working"
+        ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
         if not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
@@ -252,9 +256,12 @@ class HiveLaunch:
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 
-    def record(self, agent: AgentRecord, ack: Ack) -> AgentRecord:
+    def record(self, agent: AgentRecord, order: LaunchOrder, ack: Ack) -> AgentRecord:
         """A joined hive cannot write the swarm keyspace, so the controller records what it acknowledged."""
-        placement = (
+        decision = ack.execution.get("profile_decision", {})
+        if ack.target.get("host_id") != order.hive or not isinstance(decision, dict):
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        kept = (
             {"master_placement": agent.profile_decision["master_placement"]}
             if "master_placement" in agent.profile_decision
             else {}
@@ -266,7 +273,7 @@ class HiveLaunch:
             pane_id=ack.execution.get("pane_id", agent.pane_id),
             model=ack.execution.get("model", agent.model),
             effort=ack.execution.get("effort", agent.effort),
-            profile_decision={**placement, **ack.execution.get("profile_decision", {})},
+            profile_decision={**decision, **kept},
         )
         with lease.fencing(self.held.epoch):
             self.store.execution_registry.update(self.slug, live)
