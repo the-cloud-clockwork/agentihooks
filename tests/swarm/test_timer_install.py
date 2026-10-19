@@ -317,6 +317,16 @@ def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_
     assert timer._drain_inside(procs) == "1"
 
 
+def test_an_unreadable_own_group_keeps_the_units(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(timer, "_own_group", lambda: tmp_path / "gone" / "cgroup.procs")
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert (tmp_path / "agentihooks-swarm.service").exists()
+    assert "the agentihooks-swarm service group did not empty (unknown processes left)" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize(
     ("lines", "procs"),
     [

@@ -118,23 +118,23 @@ def _own_group():
 def _others(procs):
     from scripts.swarm import tick_reaper
 
-    try:
-        pids = {int(pid) for pid in procs.read_text().split()}
-    except OSError:
-        return set()
+    pids = {int(pid) for pid in procs.read_text().split()}
     return {pid for pid in pids - tick_reaper.ancestors() if tick_reaper.alive(pid)}
 
 
 def _drain_inside(procs):
-    for number, wait_s in ((signal.SIGTERM, DRAIN_S), (signal.SIGKILL, KILL_WAIT_S)):
-        for pid in _others(procs):
-            with contextlib.suppress(ProcessLookupError):
-                os.kill(pid, number)
-        deadline = time.monotonic() + wait_s
-        while (left := _others(procs)) and time.monotonic() < deadline:
-            time.sleep(1)
-        if not left:
-            return ""
+    try:
+        for number, wait_s in ((signal.SIGTERM, DRAIN_S), (signal.SIGKILL, KILL_WAIT_S)):
+            for pid in _others(procs):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, number)
+            deadline = time.monotonic() + wait_s
+            while (left := _others(procs)) and time.monotonic() < deadline:
+                time.sleep(1)
+            if not left:
+                return ""
+    except OSError:
+        return "unknown"
     return str(len(left))
 
 
