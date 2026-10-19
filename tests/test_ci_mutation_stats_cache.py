@@ -393,6 +393,9 @@ def test_stats_reuse_tracks_only_applicable_import_and_fixture_inputs(tmp_path, 
     "loader",
     [
         "from importlib import import_module as load\nload('scripts.a')\n",
+        "from builtins import __import__ as load\nload('scripts.a')\n",
+        "from importlib.util import spec_from_file_location as load\nload('virtual', location)\n",
+        "import importlib.util\nimportlib.util.spec_from_file_location('virtual', location)\n",
         "import importlib\nimportlib.import_module('.a', package='scripts')\n",
         "import importlib\nload = importlib.import_module\nload('scripts.a')\n",
     ],
@@ -421,6 +424,71 @@ def test_dynamic_import_dependencies_invalidate_stats_alongside_static_imports(t
     (root / "scripts/a.py").write_text("value = 2\n")
     collect_cached_stats(root, cache, {}, files, [], collect)
     assert calls == [files, files]
+
+
+@pytest.mark.parametrize(
+    "loader",
+    [
+        "from importlib import import_module as load\nload('scripts.a')\n",
+        "from builtins import __import__ as load\nload('scripts.a')\n",
+        "import importlib\nimportlib.import_module('scripts.a')\n",
+    ],
+)
+def test_literal_dynamic_imports_reuse_stats_after_unrelated_source_changes(tmp_path, loader):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import scripts.other\n" + loader,
+            "scripts/a.py": "value = 1\n",
+            "scripts/other.py": "value = 1\n",
+            "scripts/unrelated.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/unrelated.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+
+
+def test_implicit_source_stats_track_resources_and_recollect_when_a_resource_is_deleted(tmp_path):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "def test_sample():\n    pass\n",
+            "scripts/a.py": "from pathlib import Path\nvalue = Path('assets/data').read_text()\n",
+            "assets/data": "original",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0 if (root / "assets/data").exists() else 1, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    scope = {"scripts/a.py": [2]}
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    (root / "assets/data").write_text("changed")
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    (root / "assets/data").unlink()
+    with pytest.raises(SystemExit):
+        collect_cached_stats(root, cache, scope, files, [], collect)
+    assert calls == [files, files, files]
 
 
 @pytest.mark.parametrize(

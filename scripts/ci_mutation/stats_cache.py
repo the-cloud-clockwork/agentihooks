@@ -20,6 +20,14 @@ report = functools.partial(print, flush=True)
 encode = functools.partial(json.dumps, sort_keys=True)
 
 
+def loader_name(node: ast.AST) -> str | None:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return None
+
+
 def test_inputs(
     root: Path,
     path: str,
@@ -48,22 +56,10 @@ def test_inputs(
                     if alias.name in DYNAMIC_IMPORTS
                 }
                 dynamic = [
-                    node
-                    for node in ast.walk(tree)
-                    if isinstance(node, ast.Call)
-                    and (getattr(node.func, "id", "") in loaders or getattr(node.func, "attr", "") in DYNAMIC_IMPORTS)
+                    node for node in ast.walk(tree) if isinstance(node, ast.Call) and loader_name(node.func) in loaders
                 ]
                 called = {id(node.func) for node in dynamic}
-                if any(
-                    id(node) not in called
-                    and (
-                        isinstance(node, ast.Name)
-                        and node.id in loaders
-                        or isinstance(node, ast.Attribute)
-                        and node.attr in DYNAMIC_IMPORTS
-                    )
-                    for node in ast.walk(tree)
-                ):
+                if any(id(node) not in called and loader_name(node) in loaders for node in ast.walk(tree)):
                     dependencies.update(modules.values())
                 for node in dynamic:
                     if (
@@ -71,19 +67,18 @@ def test_inputs(
                         and isinstance(node.args[0], ast.Constant)
                         and isinstance(node.args[0].value, str)
                         and not node.args[0].value.startswith(".")
-                        and (getattr(node.func, "attr", "") or loaders.get(getattr(node.func, "id", ""), ""))
-                        not in ("spec_from_file_location", "module_from_spec")
+                        and loaders[loader_name(node.func)] != "spec_from_file_location"
                     ):
                         names.add(node.args[0].value)
                     else:
                         dependencies.update(modules.values())
                 for name in names:
-                    parts = name.split(".")
-                    dependencies.update(
-                        modules[prefix]
-                        for index in range(1, len(parts) + 1)
-                        if (prefix := ".".join(parts[:index])) in modules
-                    )
+                    parts = []
+                    for part in name.split("."):
+                        parts.append(part)
+                        prefix = ".".join(parts)
+                        if prefix in modules:
+                            dependencies.add(modules[prefix])
                 literals = {
                     node.value
                     for node in ast.walk(tree)
@@ -133,7 +128,7 @@ def collect_cached_stats(
                 {
                     **context,
                     **dict(zip(KEY_FIELDS, (path, dependencies))),
-                    "scope": {source: lines for source, lines in changes.items() if source in dependencies},
+                    **{source: lines for source, lines in changes.items() if source in dependencies},
                 }
             ).encode()
         ).hexdigest()
