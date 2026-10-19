@@ -737,12 +737,12 @@ the corrected publication and continuation cases passed afterward
 
 ## One push per pull request
 
-Every push to an open pull request starts a new check run and cancels the one
-in progress. The `one-push` gate keeps a swarm worker's pull request to one
-push in the normal case: the pull request opens only after review closes and
-the reviewed work is on origin, and no push lands while its checks still run
-unless one is already red. Before the gate, pushes to open pull requests while
-their checks ran had cancelled thirty nine runs.
+In this repository the Tests workflow sets `cancel-in-progress` for
+`pull_request` events, so every push to an open pull request cancels the Tests
+run in progress and starts another. The `one-push` gate keeps a swarm worker's
+pull request to one push in the normal case: the pull request opens only after
+review closes and the reviewed work is on origin, and no push lands while its
+checks still run unless one is already red.
 
 The gate ships as the condition `pre-bash.git+bash.gh-one_push.py` in the
 `engineer`, `cicd` and `qa` package roles. It runs on every Bash call whose
@@ -756,8 +756,10 @@ folder joined with the call's `workdir` and any `cd` or `git -C` in the command.
 The gate decides only for a session pinned to a swarm task: it has a swarm and
 an agent name (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_AGENT_NAME`, or the session
 registry), a task (`AGENTIHOOKS_SWARM_TASK`), and its agent name is in the `eng`
-or `ci` lane. The master, planners, the operator's own sessions and any session
-outside a swarm pass every call.
+or `ci` lane. The lane comes from the agent name, never the role, so a session
+running the `qa` or `cicd` role is gated when it holds an `eng` or `ci` seat.
+The master, planners, the operator's own sessions and any session outside a
+swarm pass every call.
 
 ### Opening a pull request after review
 
@@ -775,7 +777,9 @@ outside a swarm pass every call.
   git checkout passes.
 
 A draft stays open for the block path: `gh pr create --draft` (or `-d`) and
-`gh pr ready --undo` pass. The refusal names what is owed and the draft path:
+`gh pr ready --undo` pass. The refusal names what is owed and the draft path.
+The gate prints each refusal on one line; the examples here are wrapped for
+width:
 
 ```text
 open the pull request once review closes, so one push carries it: launch the
@@ -802,18 +806,22 @@ A `git push` from a task session is refused when all of these hold:
 1. The task records a pull request URL (`swarm pr`).
 2. The push goes to that pull request's repository. The remote is the first
    positional argument, as a URL or a remote name, and `origin` when none is
-   given. A push to another GitHub repository passes.
+   given. A push to another GitHub repository passes; a remote that is not a
+   GitHub URL is treated like the pull request's repository.
 3. The push writes the task's recorded branch. Each refspec's destination
    counts; no refspec, or `HEAD`, means the current branch. A task with no
    recorded branch skips this test.
-4. The pull request is open and no check is red.
+4. The pull request is open and nothing is red: no required check failed, and
+   the required gate job did not end skipped with nothing left running.
 5. The pull request waits in the merge queue, or its checks are running. Checks
    run while a current workflow suite has not completed, a check result is
    pending, or a required check has not reported yet.
 
 `git push --dry-run` (`-n`) and `git push --delete` (`-d`) always pass. A red
 check lifts the refusal at once, so the agent can push its fix without waiting
-for the other checks to finish.
+for the other checks to finish. The push also passes when the task's pull
+request URL is not a GitHub pull request link or GitHub cannot be read: the gate
+refuses only on a pull request state it has seen.
 
 While checks run, the refusal points to a checked wait:
 
@@ -850,9 +858,15 @@ agentihooks swarm <swarm> set one-push-gate=skip        # do not run the check
 
 `swarm status` reports the mode in `gate_modes`. Inside a swarm the gate reads
 only the swarm config; `AGENTIHOOKS_GATE_ONE_PUSH` picks the mode only outside a
-swarm or when the config cannot be read. To let one agent past the gate for an
-hour, the operator or the master runs `agentihooks swarm <swarm> lift <agent>
-one-push`, or the operator types `lift the one-push gate` in that agent's pane.
+swarm or when the config cannot be read.
+
+To let an agent past the gate, the operator or the master runs
+`agentihooks swarm <swarm> lift <agent> one-push`. When the agent's task records
+a pull request, the lift belongs to the task and holds until that pull request's
+head moves, so the first push it lets through ends it; the command prints the
+head it is bound to. A task with no pull request gets a one hour lift. The
+operator can also type `lift the one-push gate` in the agent's pane, which lifts
+the gate for that session for one hour.
 Every refusal, logged would-be refusal and lift is a row in the swarm gate log.
 A gate that raises lets the call through and records a `fail-open` row.
 
@@ -863,8 +877,8 @@ A gate that raises lets the call through and records a `fail-open` row.
 | `gh pr create` refused although both readers reviewed | The readers were launched under another name. Launch them with `name` or `subagent_type` set to `standards-reader` and `spec-reader`. A launch is counted only while the `subagents` gate runs: with `subagents-gate=skip` no reader is counted and every non draft open is refused, so set `one-push-gate` to `log only` or `skip` too. |
 | Refused for `uncommitted changes` with nothing to commit | A tracked file changed in the checkout the command runs in. Check `git status` in the folder named by `workdir`, `cd` or `git -C`, not the session's starting folder. |
 | Refused for `commits not on origin` | `HEAD` holds a commit no `origin` branch has. Publish it with `swarm publish`, then open the pull request. |
-| A push is refused although the checks look finished | A required check has not reported yet, or a workflow suite of the newest commit is still queued. Wait with `--on checks`. |
-| A push to another branch or repository is refused | The task's recorded branch matches the refspec destination, or the remote resolves to the pull request's repository. Name the destination explicitly. |
+| A push is refused although the checks look finished | The gate counts as running a required check that has not reported yet, a check result still pending, and a current workflow suite that has not completed, including one still queued. Wait with `--on checks`. |
+| A push to another branch is refused | The task records no branch, so every push to the pull request's repository is checked. Once the task records its branch (`swarm publish` and the `push-stop` gate record it), a push whose destination is another branch passes. A push to another GitHub repository always passes. |
 | The gate never refuses | The session is not pinned to an `eng` or `ci` task, the mode is `skip` or `log only`, or a lift holds. Check `swarm status --json` for `gate_modes` and the agent's `gates`. |
 
 The gate was delivered in [pull request 2116](https://github.com/the-cloud-clockwork/agentihooks/pull/2116);
