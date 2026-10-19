@@ -28,7 +28,7 @@ def make_ledger():
         "phases": [{"title": "one", "description": "d"}],
         "questions": [{"text": "which broker?"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -74,6 +74,9 @@ def test_a_worker_answer_is_refused_and_the_priority_stays():
     assert rejected == ["an-1"]
     assert state["questions"][0]["answers"] == []
     assert question in [p["item"] for p in state["priorities"]]
+    assert state["_meta"]["warnings"] == [
+        f"answer on {question} refused: only the swarm master answers questions, and {WORKER} joined as member"
+    ]
 
 
 def test_an_answer_from_outside_the_crew_is_refused():
@@ -81,6 +84,25 @@ def test_an_answer_from_outside_the_crew_is_refused():
     state, rejected = core.sync(SLUG, ops=[answer(1, question, by="stranger@a1-9")])
     assert rejected == ["an-1"]
     assert state["questions"][0]["answers"] == []
+    assert state["_meta"]["warnings"] == [f"answer on {question} refused: stranger@a1-9 has not joined this ledger"]
+
+
+def test_a_master_seat_that_joined_as_member_answers():
+    question = make_ledger()
+    seat = "master@a1b2c3-0148"
+    core.sync(SLUG, ops=[{"op": "join", "id": "j3", "by": seat, "role": "member"}])
+    state, rejected = core.sync(SLUG, ops=[answer(1, question, by=seat)])
+    assert rejected == []
+    assert [(a["by"], a["text"]) for a in state["questions"][0]["answers"]] == [(seat, "Use the queue.")]
+    assert state["_meta"]["warnings"] == []
+
+
+def test_a_master_seat_outside_the_crew_is_refused():
+    question = make_ledger()
+    seat = "master@a1b2c3-0148"
+    state, rejected = core.sync(SLUG, ops=[answer(1, question, by=seat)])
+    assert rejected == ["an-1"]
+    assert state["_meta"]["warnings"] == [f"answer on {question} refused: {seat} has not joined this ledger"]
 
 
 def test_a_replayed_answer_is_accepted_once_and_an_unknown_question_is_rejected():
@@ -89,8 +111,9 @@ def test_a_replayed_answer_is_accepted_once_and_an_unknown_question_is_rejected(
     state, rejected = core.sync(SLUG, ops=[answer(1, question, text="Something else.")])
     assert rejected == []
     assert [a["text"] for a in state["questions"][0]["answers"]] == ["Use the queue."]
-    _, rejected = core.sync(SLUG, ops=[answer(2, "questions/missing")])
+    state, rejected = core.sync(SLUG, ops=[answer(2, "questions/missing")])
     assert rejected == ["an-2"]
+    assert state["_meta"]["warnings"] == ["answer on questions/missing refused: no such question"]
 
 
 @pytest.mark.parametrize(
@@ -154,7 +177,9 @@ def test_cli_refuses_a_worker(monkeypatch):
     question = make_ledger()
     with pytest.raises(SystemExit) as refused:
         _cli(monkeypatch, FULL, WORKER, question)
-    assert refused.value.code == ledger.unexplained({"op": "answer", "item": question})
+    assert refused.value.code == (
+        f"answer on {question} refused: only the swarm master answers questions, and {WORKER} joined as member"
+    )
     state, _ = core.sync(SLUG)
     assert state["questions"][0]["answers"] == []
 

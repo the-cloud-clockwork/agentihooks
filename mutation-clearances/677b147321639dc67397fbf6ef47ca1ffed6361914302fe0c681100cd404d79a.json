@@ -1,0 +1,6 @@
+{
+  "scripts/ci_wall_clock.py:scripts.ci_wall_clock.x\u01c1Timing\u01c1bounds__mutmut_9:322346bd49c025c96fb2018cd03643467320a9eed1b0d13217de141561251bae": {
+    "reader": "standards-reader",
+    "reason": "Only the last component of the dot split is consumed. Splitting from the right once, twice or without a limit produces the same final component for every qualified name."
+  }
+}

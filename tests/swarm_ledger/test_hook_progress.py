@@ -4,8 +4,6 @@ import pytest
 
 from scripts.gates import progress
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG, ME = "hookprogress-2026-01-01", "engineer@abcdef-0001"
 
 
@@ -163,3 +161,101 @@ def test_the_progress_signal_reads_the_sessions_swarm(monkeypatch):
     monkeypatch.setattr(store, "redis_client", lambda: client)
     marks = ledger_hook.progress_of(ledger_hook.new_session(SLUG, ME, "member"))
     assert (marks.redis, marks.slug) == (client, SLUG)
+
+
+@pytest.mark.parametrize("kind", ["checks", "reply", "task", None])
+def test_a_live_declared_wait_holds_the_progress_budget(hook, monkeypatch, capsys, kind):
+    from scripts.swarm import idle, store
+
+    redis = hook.marks.redis
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    now = int(hook.module.time.time() * 1000)
+    idle.declare_wait(redis, SLUG, ME, now + 60_000, "waiting for the declared target", now, on=kind)
+    for _ in range(30):
+        hook()
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert capsys.readouterr().out == ""
+
+    idle.end_wait(redis, SLUG, ME, now + 1)
+    for _ in range(24):
+        hook()
+    assert capsys.readouterr().out == ""
+    hook()
+    assert "25 tool calls without recording progress" in capsys.readouterr().out
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert "tool calls since you last recorded progress" in capsys.readouterr().out
+
+
+def test_a_live_wait_clears_an_existing_stop_progress_demand(hook, monkeypatch, capsys):
+    from scripts.swarm import idle, store
+
+    redis = hook.marks.redis
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    now = int(hook.module.time.time() * 1000)
+    hook.session.update(calls=30, nudge_calls=25, blocks=1, bypass_posted=True)
+    idle.declare_wait(redis, SLUG, ME, now + 60_000, "awaiting checks", now, on="checks")
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert capsys.readouterr().out == ""
+    assert [hook.session[k] for k in ("calls", "nudge_calls", "blocks", "bypass_posted")] == [0, 0, 0, False]
+
+
+@pytest.mark.parametrize("until_offset", [-1, 0])
+def test_an_expired_wait_keeps_the_progress_demand(hook, monkeypatch, capsys, until_offset):
+    from scripts.swarm import idle, store
+
+    redis = hook.marks.redis
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    now = 1_792_042_452_000
+    monkeypatch.setattr(hook.module.time, "time", lambda: now / 1000)
+    redis.set(idle.key(SLUG, "wait", ME), json.dumps({"until": now + until_offset, "on": "checks"}))
+    for _ in range(25):
+        hook()
+    assert "25 tool calls without recording progress" in capsys.readouterr().out
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert "tool calls since you last recorded progress" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("other_slug,other_name", [("another-swarm", ME), (SLUG, "another-agent")])
+def test_another_agents_wait_keeps_the_progress_demand(hook, monkeypatch, capsys, other_slug, other_name):
+    from scripts.swarm import idle, store
+
+    redis = hook.marks.redis
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    now = int(hook.module.time.time() * 1000)
+    idle.declare_wait(redis, other_slug, other_name, now + 60_000, "awaiting checks", now, on="checks")
+    for _ in range(25):
+        hook()
+    assert "25 tool calls without recording progress" in capsys.readouterr().out
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert "tool calls since you last recorded progress" in capsys.readouterr().out
+
+
+def test_a_wait_one_millisecond_in_the_future_still_holds(hook, monkeypatch, capsys):
+    from scripts.swarm import idle, store
+
+    redis = hook.marks.redis
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    now = 1_792_042_452_000
+    monkeypatch.setattr(hook.module.time, "time", lambda: now / 1000)
+    redis.set(idle.key(SLUG, "wait", ME), json.dumps({"until": now + 1, "on": "checks"}))
+    hook.session["calls"] = 30
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert capsys.readouterr().out == ""
+
+
+@pytest.mark.parametrize("raw", ["not-json", "{}", '{"on": "checks"}'])
+def test_an_unreadable_or_incomplete_wait_keeps_the_progress_demand(hook, monkeypatch, capsys, raw):
+    from scripts.swarm import idle, store
+
+    redis = hook.marks.redis
+    monkeypatch.setattr(store, "redis_client", lambda: redis)
+    messages = []
+    monkeypatch.setattr(hook.module, "log", messages.append)
+    redis.set(idle.key(SLUG, "wait", ME), raw)
+    for _ in range(25):
+        hook()
+    assert "25 tool calls without recording progress" in capsys.readouterr().out
+    hook.module.on_stop({}, hook.session, hook.state, hook.sfile)
+    assert "tool calls since you last recorded progress" in capsys.readouterr().out
+    if raw == "not-json":
+        assert messages[0] == "wait unreadable: Expecting value: line 1 column 1 (char 0)"

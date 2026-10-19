@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_encode__mutmut_2:377000132757b1dbf29714d3e46841ce5adaa892886ec0426acfe89b6a214f4f": {
+    "reader": "Standards",
+    "reason": "ensure_ascii None and False select the same non escaping JSON encoder and yield identical canonical bytes."
+  }
+}

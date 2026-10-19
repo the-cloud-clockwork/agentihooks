@@ -88,7 +88,7 @@ def test_command_defaults_to_dry_run(tmp_path, monkeypatch, capsys):
     before = repo.export_document(SLUG)
     args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", "planner", "hierarchy", "backfill"])
     assert args.apply is False
-    monkeypatch.setattr(hierarchy_backfill, "repository", repo)
+    monkeypatch.setattr(hierarchy_backfill.storage, "default", lambda: repo)
     ledger.cmd_hierarchy(args)
     assert json.loads(capsys.readouterr().out)["applied"] is False
     assert repo.export_document(SLUG) == before
@@ -729,7 +729,7 @@ def test_hierarchy_needs_its_backfill_action():
 
 def test_command_refuses_a_remote_ledger_host(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "remote")
-    monkeypatch.setattr(hierarchy_backfill, "repository", repository(tmp_path))
+    monkeypatch.setattr(hierarchy_backfill.storage, "default", lambda: repository(tmp_path))
     with pytest.raises(SystemExit) as refused:
         hierarchy_backfill.run(parse("--as", "planner", "hierarchy", "backfill", "--apply"))
     assert refused.value.code == "hierarchy backfill must run on the local ledger host"
@@ -739,7 +739,7 @@ def test_dry_run_needs_no_name_and_prints_the_report_with_sorted_keys(tmp_path, 
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     repo = repository(tmp_path)
-    monkeypatch.setattr(hierarchy_backfill, "repository", repo)
+    monkeypatch.setattr(hierarchy_backfill.storage, "default", lambda: repo)
     monkeypatch.setattr("sys.argv", ["ledger", "--slug", SLUG, "hierarchy", "backfill"])
     ledger.main()
     assert capsys.readouterr().out == json.dumps(hierarchy_backfill.backfill(repo, SLUG, ""), sort_keys=True) + "\n"
@@ -750,7 +750,7 @@ def test_apply_without_any_name_is_refused(tmp_path, monkeypatch):
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
     repo = repository(tmp_path)
     before = repo.export_document(SLUG)
-    monkeypatch.setattr(hierarchy_backfill, "repository", repo)
+    monkeypatch.setattr(hierarchy_backfill.storage, "default", lambda: repo)
     with pytest.raises(SystemExit) as refused:
         hierarchy_backfill.run(parse("hierarchy", "backfill", "--apply"))
     assert refused.value.code == "--as is required to apply the hierarchy backfill"
@@ -762,7 +762,7 @@ def test_apply_records_the_named_actor_or_the_session_name(tmp_path, monkeypatch
     monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@session")
     repo = repository(tmp_path)
-    monkeypatch.setattr(hierarchy_backfill, "repository", repo)
+    monkeypatch.setattr(hierarchy_backfill.storage, "default", lambda: repo)
     hierarchy_backfill.run(parse(*argv, "hierarchy", "backfill", "--apply"))
     assert json.loads(capsys.readouterr().out)["applied"] is True
     assert repo.export_document(SLUG)["_meta"]["events"][-1]["by"] == by

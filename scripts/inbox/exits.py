@@ -24,6 +24,8 @@ def settle(inbox, name, seat, exit_text):
     inbox.seats.record_exit(name, seat, exit_text)
     names = NameRegistry(inbox.redis)
     successor = names.successor(name) if names.entry(name).get("type") == "master" else ""
+    if names.entry(name).get("type") == "master":
+        _return_pool_mail(inbox, name)
     for item in inbox.open_items(name):
         if item.state in CLOSED:
             continue
@@ -41,6 +43,13 @@ def settle(inbox, name, seat, exit_text):
             inbox.send(BY, notice_address(inbox, item.sender), _told(item, name, exit_text), fyi=True)
     if names.entry(name).get("type") != "master":
         _settle_taken_seat_mail(inbox, name, exit_text, bool(seat))
+
+
+def _return_pool_mail(inbox: "InboxStore", name: str) -> None:
+    held = inbox.seats.known_seat(name)
+    if held:
+        for item in inbox.open_items(held):
+            inbox.return_to_pool(item.id, held, name)
 
 
 def _settle_taken_seat_mail(inbox: "InboxStore", name: str, exit_text: str, goes_on: bool) -> None:
@@ -116,10 +125,10 @@ def notice_address(inbox: "InboxStore", sender: str) -> str:
 
 def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Callable[[], dict]") -> None:
     """live_rows reads the ledger's tasks at sweep time: a task closed after the tick's own read settles as closed."""
+    seats = store.seats.agent_seats(slug)
     live = [agent for agent in store.agents(slug) if agent.state != "finished"]
     active = {agent.name for agent in live}
     tasks = {row.get("claimed_by"): row for row in live_rows().values()}
-    seats = store.seats.agent_seats(slug)
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
     pending = gone

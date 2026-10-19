@@ -26,7 +26,7 @@ def hierarchy_ledger(tmp_path, monkeypatch):
         "sources": [],
         "phases": [{"title": "Build"}, {"title": "Ship"}],
     }
-    html, json_path = core.paths(SLUG)
+    html, json_path = legacy_page.paths(SLUG, core)
     json_path.unlink(missing_ok=True)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     core.sync(SLUG)
@@ -280,7 +280,7 @@ def test_a_task_naming_its_slice_needs_no_plan_slice_in_an_anchored_phase():
     assert rejected == []
     assert (state["tasks"][-1]["plan_slice"], state["tasks"][-1]["plan_lines"]) == ("first", "4-6")
     assert ledger_tasks.unsliced_refusal(state, {"phase": "p1", "slice": "slices/a.first"}, "planner") == ""
-    run("task_add", task="t2", title="Build", lane="eng", phase="p1", plan_slice="first")
+    assert run("task_add", task="t2", title="Build", lane="eng", phase="p1", plan_slice="second")[1] == []
     _, rejected, refusal = run("task_update", item="tasks/t2", fields={"slice": "slices/a.second"})
     assert rejected and "task t2 names an unknown slice slices/a.second" in refusal
     run("slice_add", phase="phases/p1", anchor="second")

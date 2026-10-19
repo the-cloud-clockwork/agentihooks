@@ -1,0 +1,6 @@
+{
+  "scripts/gates/lift.py:scripts.gates.lift.x_task_lifted__mutmut_1:4be41ec7cd2df41c2ff39684a371ef0e0308a3c795b8d5a893c52e30673ea151": {
+    "reader": "Standards",
+    "reason": "When command is omitted, both the original empty string and XXXX produce zero merge targets: _merge_target recognizes only gh pr merge or swarm merge queue. all() consequently remains true, and the same saved URL/head check decides the lift. Explicit command arguments are unaffected."
+  }
+}

@@ -1,0 +1,56 @@
+name: Ledger row memory
+
+on:
+  workflow_call:
+    inputs:
+      base:
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        revision: [base, head]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: proof
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.revision == 'base' && inputs.base || github.sha }}
+          path: replay
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+      - name: Install the revision under measurement
+        working-directory: replay
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Replay the same requests for twenty minutes
+        working-directory: replay
+        env:
+          ROW_REPLAY_BATCHES: '400'
+          ROW_REPLAY_INTERVAL: '3'
+          ROW_MEMORY_REPORT: ${{ github.workspace }}/row-memory-${{ matrix.revision }}.json
+          PYTHONUNBUFFERED: '1'
+        run: |
+          cp ../proof/tests/swarm_ledger/row_memory_replay.py tests/swarm_ledger/row_memory_replay.py
+          python -m pytest tests/swarm_ledger/row_memory_replay.py -n 0 -s --tb=short
+      - name: Retain every RSS sample
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: row-memory-${{ matrix.revision }}
+          path: row-memory-${{ matrix.revision }}.json
+          if-no-files-found: error

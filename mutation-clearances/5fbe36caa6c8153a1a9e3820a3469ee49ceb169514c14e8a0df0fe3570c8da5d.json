@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_read.py:scripts.swarm.ledger_read.x__hosted__mutmut_8:f05cc30ee661f6c29a6553ffe0916a6ee960d7429e251a4eedb988ee6ced6d98": {
+    "reader": "Standards reader",
+    "reason": "HTTP header names are case insensitive; ResourceClient passes the header through urllib and the server uses case insensitive header lookup."
+  }
+}

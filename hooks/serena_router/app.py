@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import html
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from mcp.server.streamable_http_manager import StreamableHTTPSessionManager
@@ -16,6 +16,7 @@ from starlette.types import Receive, Scope, Send
 
 from hooks.serena_router.pool import Pool
 from hooks.serena_router.server import build_server
+from scripts.scheduler.process_timer import async_wait as scheduled_wait
 
 SESSION_IDLE_SECONDS = 4 * 3600
 EVICT_EVERY_SECONDS = 60
@@ -31,7 +32,7 @@ class _MCPEndpoint:
 
 async def _evict_forever(pool: Pool) -> None:
     while True:
-        await asyncio.sleep(EVICT_EVERY_SECONDS)
+        await scheduled_wait(EVICT_EVERY_SECONDS)
         await pool.evict_idle()
 
 
@@ -78,7 +79,11 @@ def build_app(pool: Pool, tools: list[Tool]) -> Starlette:
                 yield
             finally:
                 evictor.cancel()
-                await pool.close()
+                try:
+                    with suppress(asyncio.CancelledError):
+                        await evictor
+                finally:
+                    await pool.close()
 
     app = Starlette(
         routes=[

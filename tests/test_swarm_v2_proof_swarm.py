@@ -7,7 +7,7 @@ import pytest
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import proof_swarm, retention
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "proof-323133-t351-1"
 OTHER = "proof-323133-t351-2"
 SETTING = json.dumps({"agent": "engineer@323133-1068", "task": "t351"})
@@ -64,6 +64,7 @@ def test_a_set_proof_creates_its_ledger_and_a_one_engineer_swarm(store):
     assert content == proof_swarm.CONTENT
     assert [(task["lane"], task["phase"], task["profile"]) for task in content["tasks"]] == [("eng", "p1", "engineer")]
     config = store.config(SLUG)
+    assert config.scratch is True
     assert (config.repo, config.max_eng, config.max_ci, config.state) == (PROJECT, 1, 0, "running")
     assert store.slugs() == [SLUG]
 
@@ -97,6 +98,57 @@ def test_a_served_proof_swarm_that_exists_is_kept_without_a_ledger_call(store):
     assert proof_swarm.reconcile(ENV, store, SLUG, ledger) == []
     assert (ledger.asked, ledger.created, ledger.removed) == ([], [], [])
     assert store.slugs() == [SLUG]
+
+
+def test_explicit_parent_migrates_the_existing_served_proof_before_control(store):
+    swarm(store, SLUG)
+    ledger = Ledger()
+    calls = []
+    setting = {**json.loads(SETTING), "parent": "external-parent", "control": {"control": "pause"}}
+    ledger.migrate = lambda slug, owner, environ: calls.append(("migrate", slug, owner, environ))
+    ledger.controller_control = lambda slug, owner, request, environ: calls.append(
+        ("control", slug, owner, request, environ)
+    )
+    environ = {**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}
+    proof_swarm.reconcile(environ, store, SLUG, ledger)
+    owner = {key: setting[key] for key in ("agent", "task", "parent")}
+    assert calls == [
+        ("migrate", SLUG, owner, environ),
+        ("control", SLUG, owner, {"control": "pause"}, environ),
+    ]
+    assert ledger.created == []
+
+
+def test_explicit_parent_alone_migrates_without_a_control(store):
+    swarm(store, SLUG)
+    ledger = Ledger()
+    calls = []
+    setting = {**json.loads(SETTING), "parent": "external-parent"}
+    ledger.migrate = lambda slug, owner, environ: calls.append((slug, owner, environ))
+    environ = {**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}
+    proof_swarm.reconcile(environ, store, SLUG, ledger)
+    assert calls == [(SLUG, setting, environ)]
+
+
+def test_configured_control_without_parent_is_refused(store):
+    swarm(store, SLUG)
+    setting = {**json.loads(SETTING), "control": {"control": "pause"}}
+    with pytest.raises(SwarmError) as refused:
+        proof_swarm.reconcile({**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}, store, SLUG, Ledger())
+    assert str(refused.value) == "proof controls need an explicit requester parent"
+
+
+def test_configured_migration_and_control_each_check_the_lease(store):
+    swarm(store, SLUG)
+    ledger = Ledger()
+    calls = []
+    setting = {**json.loads(SETTING), "parent": "external-parent", "control": {"control": "pause"}}
+    ledger.migrate = lambda *args: calls.append("migration")
+    ledger.controller_control = lambda *args: calls.append("control")
+    proof_swarm.reconcile(
+        {**ENV, proof_swarm.PROOF_ENV: json.dumps(setting)}, store, SLUG, ledger, lambda: calls.append("lease")
+    )
+    assert calls == ["lease", "migration", "lease", "control"]
 
 
 def test_a_proof_named_other_than_the_served_swarm_is_removed_and_refused(store):
@@ -327,6 +379,7 @@ def test_the_controller_runs_a_pass_at_start_and_after_each_tick(store, monkeypa
 
     order = []
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(proof_swarm, "run", lambda environ, given, *lease: order.append(("proof", given, *lease)))
@@ -345,6 +398,7 @@ def test_every_pass_after_the_service_starts_holds_its_controller_lease_check(st
     service = SimpleNamespace(controller=SimpleNamespace(require=lambda: None), tick=lambda: None, stop=lambda: None)
     passes = []
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
+    monkeypatch.setattr(operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(commands, "hive_id", lambda: "hive-fixture")
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(proof_swarm, "run", lambda environ, given, *lease: passes.append(lease))

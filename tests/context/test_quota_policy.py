@@ -82,6 +82,8 @@ def test_handoff_targets_are_judged_by_their_band_caps_alone():
 
 
 def test_other_accounts_carry_their_band_cap(monkeypatch):
+    for account in ("beta", "gamma", "delta", "eps"):
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", account)
     from scripts import claude_quota_balancer as balancer
 
     def result(account, five_used, week_used):
@@ -125,6 +127,7 @@ def test_a_stale_target_has_no_session_cap_until_the_router_refreshes_it():
 
 
 def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     beta = balancer.ProbeResult(
@@ -137,6 +140,7 @@ def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatc
 
 
 def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refresh(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     beta = balancer.ProbeResult(
@@ -149,6 +153,7 @@ def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refre
 
 
 def test_a_newer_fleet_observation_outranks_the_local_cache(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     def beta(five_used):
@@ -165,6 +170,7 @@ def test_a_newer_fleet_observation_outranks_the_local_cache(monkeypatch):
 
 
 def test_a_fleet_observation_wins_a_tie_with_the_local_cache(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     def beta(five_used):
@@ -299,6 +305,7 @@ def test_spent_windows_reset_after_their_reset_time():
 
 
 def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from hooks.context import quota_usage
     from scripts import claude_quota_balancer as balancer
 
@@ -342,6 +349,75 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     assert d.trigger == "week"
     assert d.target.account == "beta"
     assert d.target.sessions == 1
+
+
+@pytest.mark.parametrize("source", ["cache", "fleet"])
+@pytest.mark.parametrize("credentials", ["missing", "empty", "environment", "operator"])
+def test_handoff_ignores_cached_accounts_without_credentials(tmp_path, monkeypatch, source, credentials):
+    from dataclasses import replace
+
+    from hooks.context import account_sessions, quota_usage
+    from scripts import claude_quota_balancer as balancer
+    from scripts.swarm_v2 import quota
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    for name in tuple(qp.os.environ):
+        if name.startswith(balancer.TOKEN_PREFIX):
+            monkeypatch.delenv(name)
+    available = credentials in ("environment", "operator")
+    if credentials == "environment":
+        monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
+    elif credentials == "empty":
+        monkeypatch.setenv("AH_CC_TOKEN_beta", "")
+    elif credentials == "operator":
+        monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {"AH_CC_TOKEN_beta": "available"})
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    now = time.time()
+    quota_usage.record_rate_limits(
+        "stale-target",
+        {
+            "five_hour": {"used_percentage": 40, "resets_at": now + 3600},
+            "seven_day": {"used_percentage": 99, "resets_at": now + 86400},
+        },
+    )
+    beta = balancer.ProbeResult(
+        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
+    )
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "version": 1,
+            "modes": {
+                "normal": {
+                    "accounts": {
+                        "AH_CC_TOKEN_removed": {
+                            "observed_at": now,
+                            "result": balancer._result_data(replace(beta, account="removed")),
+                        },
+                        "AH_CC_TOKEN_beta": {"observed_at": now, "result": balancer._result_data(beta)},
+                    }
+                }
+            },
+        }
+        if source == "cache"
+        else {},
+    )
+    monkeypatch.setattr(
+        quota,
+        "fleet_observations",
+        lambda environ: [(now, replace(beta, account="removed")), (now, beta)] if source == "fleet" else [],
+    )
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "alpha")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {"alpha": 1, "beta": 1})
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+
+    decision = qp.evaluate("stale-target")
+    assert decision.action == ("handoff" if available else "stop")
+    assert (decision.target.account if decision.target else None) == ("beta" if available else None)
 
 
 def test_pre_tool_use_raises_the_stop_block():
@@ -656,7 +732,7 @@ def _evaluate(monkeypatch, five_used, week_used, held=None, agent=""):
     monkeypatch.setattr(qp, "_session_windows", lambda session_id: (five_used, week_used, None, None))
     monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
     monkeypatch.setattr(account_sessions, "session_account", lambda pid: "main")
-    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(quota, "fleet_observations", lambda environ: {})
     main = qp.Candidate("main", 10.0, 75.0, 0, 0.0, 6)
     monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: [main])
@@ -694,3 +770,40 @@ def test_evaluate_hands_a_worker_off_at_the_ceiling(monkeypatch):
 
 def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
+
+
+@pytest.mark.parametrize("five_used", [None, 100.0])
+@pytest.mark.parametrize("week_used", [10.0, 98.0])
+def test_codex_handoff_policy_uses_only_current_and_target_weeks(monkeypatch, five_used, week_used):
+    from hooks.context import account_sessions
+    from scripts import codex_quota, codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.routing import reservation
+
+    current = codex_quota.CodexQuota(100, "pro", QuotaWindow(five_used, 500), QuotaWindow(week_used, 600))
+    target = codex_quota.CodexQuota(100, "pro", QuotaWindow(100.0, 500), QuotaWindow(27.0, 600))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.setattr(qp.time, "time", lambda: 100)
+    monkeypatch.setattr(codex_quota, "session_quota", lambda environ, session: current)
+    monkeypatch.setattr(codex_router.CodexAccountSource, "pool", lambda self, environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"target": target})
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "self")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"target": 0})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: None)
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+    observed = qp.evaluate("s")
+    if week_used == 10.0:
+        assert observed is None
+    else:
+        assert (observed.action, observed.trigger, observed.five_used, observed.five_reset) == (
+            "handoff",
+            "week",
+            0.0,
+            None,
+        )
+        assert observed.target.account == "target"
+        assert observed.target.routing_left == 73.0

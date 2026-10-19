@@ -1,11 +1,11 @@
-import re
+import json
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_every_script_a_settings_hook_runs_exists():
-    text = (ROOT / "profiles/_base/settings.base.json").read_text()
-    paths = set(re.findall(r"/app/(scripts/[\w/]+\.py)", text))
-    assert paths
-    assert [p for p in sorted(paths) if not (ROOT / p).is_file()] == []
+def test_every_settings_hook_runs_the_shared_hooks_entry():
+    hooks = json.loads((ROOT / "profiles/_base/settings.base.json").read_text())["hooks"]
+    commands = {h["command"] for groups in hooks.values() for g in groups for h in g["hooks"]}
+    assert hooks
+    assert commands == {"cd /app && __PYTHON__ -m hooks"}

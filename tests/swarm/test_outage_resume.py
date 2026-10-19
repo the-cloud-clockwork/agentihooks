@@ -208,7 +208,9 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
 
 
 @pytest.mark.parametrize("error_state", ["idle", "waiting"])
-def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store, error_state):
+def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_free_the_seat(
+    store, error_state
+):
     from scripts.swarm.store import RedisStore
 
     ledger, runtime, agents = three_owners(store)
@@ -228,10 +230,13 @@ def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_tim
         tick("sw", store, ledger, runtime, at * MINUTE)
         idle.beat(store.redis, "sw", stuck.name, "idle", at * MINUTE + 1)
     assert runtime.nudged.count(stuck.name) == 3
+    assert store.claimant("sw", stuck.task) == stuck.name
     tick("sw", store, ledger, runtime, 13 * MINUTE)
     assert runtime.nudged.count(stuck.name) == 3
-    assert next(agent for agent in store.agents("sw") if agent.name == stuck.name).idle_ticks == 1
-    assert store.claimant("sw", stuck.task) == stuck.name
+    assert stuck.name in runtime.killed
+    assert stuck.name not in {agent.name for agent in store.agents("sw")}
+    assert store.claimant("sw", stuck.task) is None
+    assert ledger.rows[stuck.task]["state"] == "open"
 
 
 def test_a_new_task_generation_fences_the_recovery_pass(store):
@@ -438,7 +443,10 @@ def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
     assert runtime.nudged.count(stuck.name) == 1
 
 
-def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize("conversation", ["fresh-conversation", ""])
+def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(
+    store, tmp_path, monkeypatch, conversation
+):
     from scripts.handoff import transfers
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
@@ -447,6 +455,12 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     handoff = "## Next\nContinue from the saved proof.\n"
     transfers.record(store, "sw", dead, "quota", handoff, 2 * MINUTE)
     store.put_agent("sw", replace(dead, idle_ticks=2))
+    native_spawn = runtime.spawn
+
+    def spawn(config, lane, name, task):
+        return replace(native_spawn(config, lane, name, task), conversation_id=conversation)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
     launches = len(runtime.spawned)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name}" in actions
@@ -459,7 +473,7 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (restarted.pane_id, restarted.conversation_id, restarted.started_at, restarted.idle_ticks) == (
         f"w1:p{launches + 1}",
-        "",
+        conversation,
         9 * MINUTE,
         0,
     )

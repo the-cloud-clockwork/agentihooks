@@ -15,6 +15,8 @@ parent: Getting Started
 
 ---
 
+For the packaged service stack, use the [Docker Compose bundle quick start](compose-quick-start.md). The native installation below configures **Claude Code and Codex** on an agent host. Plain `agentihooks init` installs both; `--target claude` or `--target codex` selects one. Claude-specific paths below describe its native configuration; Codex uses `config.toml`, `hooks.json` and `AGENTS.md` as detailed in the [Codex reference](../reference/CODEX-COMPAT.md).
+
 ## 1. Install uv
 
 AgentiHooks uses [uv](https://github.com/astral-sh/uv) for dependency management.
@@ -85,6 +87,37 @@ The install is **idempotent** -- re-running is safe. Settings are only backed up
 {: .note }
 If you ever recreate the venv or change its location, re-run the installer from the new Python. The hook commands in `settings.json` will be updated automatically.
 
+### Installed tool and Codex app-server dependencies
+
+The global CLI has its own uv tool environment. A normal install includes
+`websockets>=15.0`, the runtime dependency used by the managed Codex app-server
+client; neither `[dev]` nor `[all]` is required for that client dependency.
+To install the tool from this checkout without optional extras:
+
+```bash
+uv tool install --editable .
+```
+
+After updating the checkout, refresh an existing installation with:
+
+```bash
+uv tool install --reinstall --editable .
+```
+
+Verify imports with the **tool environment's Python**, since a successful
+import in the workspace venv does not verify the installed CLI:
+
+```bash
+tool_dir="$(uv tool dir)"
+"$tool_dir/agentihooks/bin/python" -c \
+  'import websockets; import websockets.sync.client; import scripts.codex_session.protocol; print("Codex client dependencies import successfully")'
+```
+
+This checks the Python dependencies only. A connected execution also needs the
+Codex executable, routed authentication and an admitted swarm seat. See
+[Managed Codex terminals](../reference/codex-managed-terminal.md#runtime-dependencies)
+for transport configuration, connection checks and failure recovery.
+
 ---
 
 ## 5. Verify
@@ -102,7 +135,7 @@ Confirm the MCP server is registered:
 cat ~/.claude.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(list(d.get('mcpServers',{}).keys()))"
 ```
 
-Start a Claude Code session and verify by asking:
+Start a Claude Code or Codex session and verify by asking:
 
 ```
 What MCP tools do you have available?

@@ -10,7 +10,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 from tests.swarm.test_tick_master import BROKEN, DOWN, ENGINEER, BrokenMaster
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 DOCTOR = "sw-doctor"
 DOCTOR_MASTER = f"master@{DOCTOR}"
 

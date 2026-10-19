@@ -1,0 +1,62 @@
+name: Weekly runner access audit
+
+on:
+  push:
+    branches: [dev]
+  schedule:
+    - cron: '17 7 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dev
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install workflow parser
+        run: python -m pip install 'pyyaml>=6.0'
+      - name: Mint the TCC Main CI audit token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-metadata: read
+          permission-members: read
+          permission-organization-administration: read
+      - name: List collaborators and installed apps against protected approvals
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: python -m scripts.ci_access_audit --repo "$GITHUB_REPOSITORY"
+      - name: Notify the operator of unapproved or unreadable access
+        if: ${{ always() }}
+        run: |
+          if [[ ! -f access-alert.txt ]]; then
+            printf '%s\n' "GitHub access audit could not complete for $GITHUB_REPOSITORY; inspect this run." > access-alert.txt
+          fi
+          if [[ -s access-alert.txt ]]; then
+            curl --fail --silent --show-error \
+              -H 'Title: GitHub runner access requires approval' \
+              -H 'Priority: high' \
+              --data-binary @access-alert.txt \
+              'https://ntfy.homeofanton.com/anton-alerts'
+          fi
+      - name: Preserve complete access inventory
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: runner-access-inventory
+          path: access-report.json
+          if-no-files-found: error
+          retention-days: 90

@@ -43,13 +43,17 @@ def reuse_repo(tmp_path, request):
             "reuse": {},
             "unit": {"strategy": {"matrix": {"python-version": ["3.11", "3.12"], "shard": [1]}}},
             "lint": {},
-            "queue-baseline": {},
-            "gate-required": {"name": "Gate — Required", "needs": ["reuse", "unit", "lint", "queue-baseline"]},
+            "gate-required": {"name": "Gate — Required", "needs": ["reuse", "unit", "lint"]},
         }
     }
     if getattr(request, "param", None) == "dynamic":
         workflow["jobs"]["mutation"] = {"strategy": {"matrix": {"shard": "${{ fromJSON(needs.plan.outputs.shards) }}"}}}
         workflow["jobs"]["gate-required"]["needs"].append("mutation")
+    if getattr(request, "param", None) == "selected":
+        workflow["jobs"]["unit-selected"] = {
+            "strategy": {"matrix": {"leg": "${{ fromJSON(needs.select.outputs.legs) }}"}}
+        }
+        workflow["jobs"]["gate-required"]["needs"].append("unit-selected")
     (workflows / "test.yml").write_text(yaml.safe_dump(workflow))
     git(root, "add", ".github/workflows/test.yml")
     git(root, "commit", "-m", "base")
@@ -136,7 +140,8 @@ def full_source(reuse_repo, tmp_path):
     jobs = [{"id": 91 + n, "name": name, "conclusion": "success"} for n, name in enumerate(names)]
     if "mutation" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
         jobs.extend([{"id": 98 + n, "name": f"mutation ({n})", "conclusion": "success"} for n in range(2)])
-    jobs.append({"id": 97, "name": "queue-baseline", "conclusion": "skipped"})
+    if "unit-selected" in yaml.safe_load((root / ".github/workflows/test.yml").read_text())["jobs"]:
+        jobs.append({"id": 96, "name": "unit-selected", "conclusion": "skipped"})
     artifacts = [{"id": 42, "name": "required-tree-1", "expired": False}]
     artifacts.append({"id": 51, "name": "coverage-3.12-1", "expired": False})
     artifacts.append({"id": 52, "name": "split-3.12", "expired": False})
@@ -164,7 +169,15 @@ def full_source(reuse_repo, tmp_path):
         "from pathlib import Path\n"
         "allow = '--allow-escape-sequences' in sys.argv\n"
         "args = [arg for arg in sys.argv[2:] if arg not in ('--paginate', '--allow-escape-sequences')]\n"
-        "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[args[0]]\n"
+        "from urllib.parse import parse_qs, urlsplit\n"
+        "query = parse_qs(urlsplit(args[0]).query)\n"
+        "paged = '/attempts/' in args[0] and 'page' in query\n"
+        "endpoint = args[0].split('?')[0] + '?per_page=100' if paged else args[0]\n"
+        "value = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[endpoint]\n"
+        "if paged:\n"
+        "    size, page = int(query['per_page'][0]), int(query['page'][0])\n"
+        "    start = (page - 1) * size\n"
+        "    value['jobs'] = value['jobs'][start:start + size]\n"
         "data = base64.b64decode(value.get('binary', ''))\n"
         "if args[0].endswith('/logs') and b'\\x1b' in data and not allow:\n"
         "    sys.exit('the response contains terminal escape sequences; '\n"
@@ -190,6 +203,14 @@ def test_an_identical_queue_tree_reuses_a_full_passed_run(full_source, tmp_path)
     assert "reused=true" in result.stdout
     assert "run=7" in result.stdout
     assert json.loads(output.read_text())["tree"] == git(root, "rev-parse", f"{head}^{{tree}}")
+
+
+def test_an_identical_queue_tree_reuses_a_full_passed_run_with_the_paged_reader(full_source, tmp_path, monkeypatch):
+    from scripts import ci_reuse
+
+    job = ci_reuse.paged_reuse_job()
+    monkeypatch.setattr(ci_reuse, "reuse_job", lambda: job)
+    test_an_identical_queue_tree_reuses_a_full_passed_run(full_source, tmp_path)
 
 
 def test_a_passed_run_behind_a_hundred_newer_runs_still_reuses(full_source, tmp_path):
@@ -233,17 +254,36 @@ def test_overwritten_metadata_cannot_claim_the_planted_tree_passed(full_source, 
 
 
 def test_the_required_workflow_uses_the_protected_canonical_aggregation():
-    from scripts import ci_reuse
+    from scripts import ci_reuse, gate_protected
 
-    workflow = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())
-    assert workflow["jobs"]["gate-required"]["steps"] == ci_reuse.gate_steps()
-    assert workflow["jobs"]["reuse"] == ci_reuse.reuse_job()
+    root = PROGRAM.parents[1]
+    workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
+    policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
+    steps = workflow["jobs"]["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
+    forms = (
+        ({"selected": True}, {}, {"queue_tier": True}, {"queue_tier": True, "promotion": True})
+        if "durations" in workflow["jobs"]
+        else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
+    )
+    assert steps in [ci_reuse.gate_steps(**form, summary=summary) for form in forms for summary in (False, True)]
+
+    assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
+    assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
 
 
 @pytest.mark.parametrize("reuse_repo", ["dynamic"], indirect=True)
 def test_a_full_pass_with_dynamic_mutation_shards_reuses(full_source, tmp_path):
     root, base, _, queue, env, _, _ = full_source
     result = invoke(root, base, queue, "merge_group", tmp_path / "dynamic.json", env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "reused=true" in result.stdout
+
+
+@pytest.mark.parametrize("reuse_repo", ["selected"], indirect=True)
+def test_a_full_pull_request_pass_whose_selected_tests_were_not_due_reuses(full_source, tmp_path):
+    root, base, _, queue, env, _, _ = full_source
+    result = invoke(root, base, queue, "merge_group", tmp_path / "selected.json", env)
     assert result.returncode == 0, result.stdout + result.stderr
     assert "reused=true" in result.stdout
 
@@ -460,6 +500,22 @@ def test_the_record_names_every_trusted_grading_input(reuse_repo, tmp_path, monk
     )
 
 
+def test_a_pull_request_record_names_the_merge_base_with_current_dev_not_the_frozen_event_base(reuse_repo, tmp_path):
+    root, base, head, _ = reuse_repo
+    git(root, "switch", "-q", "-c", "newer", base)
+    (root / "dev.txt").write_text("newer dev\n")
+    git(root, "add", "dev.txt")
+    git(root, "commit", "-m", "newer dev")
+    newer = git(root, "rev-parse", "HEAD")
+    git(root, "switch", "-q", "--detach", head)
+    git(root, "merge", "-q", "--no-edit", "newer")
+    merged = git(root, "rev-parse", "HEAD")
+    git(root, "switch", "-q", "--detach", newer)
+    output = tmp_path / "record.json"
+    invoke(root, base, merged, "pull_request", output)
+    assert json.loads(output.read_text())["inputs"]["base"] == git(root, "rev-parse", f"{newer}^{{tree}}")
+
+
 def test_an_unreadable_run_list_names_why_it_runs_fully(full_source, tmp_path):
     root, base, head, queue, env, responses, _ = full_source
     responses.pop(RUNS.format(head))
@@ -529,8 +585,8 @@ def test_a_pass_reads_display_names_and_only_optional_skips():
 
     workflow = {
         "jobs": {
-            "gate-required": {"name": "Gate — Required", "needs": ["queue-baseline", "helm-kind", "sonar", "unit"]},
-            "queue-baseline": {},
+            "gate-required": {"name": "Gate — Required", "needs": ["unit-selected", "helm-kind", "sonar", "unit"]},
+            "unit-selected": {},
             "helm-kind": {},
             "sonar": {"name": "SonarQube"},
             "unit": {"strategy": {"matrix": {"shard": [1, 2]}}},
@@ -538,7 +594,7 @@ def test_a_pass_reads_display_names_and_only_optional_skips():
     }
     jobs = [
         {"name": "Gate — Required", "conclusion": "success"},
-        {"name": "queue-baseline", "conclusion": "skipped"},
+        {"name": "unit-selected", "conclusion": "skipped"},
         {"name": "helm-kind", "conclusion": "skipped"},
         {"name": "SonarQube", "conclusion": "success"},
         {"name": "unit (1)", "conclusion": "success"},
@@ -797,3 +853,307 @@ def test_an_unreadable_run_list_says_which_head(full_source, tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
     assert result.stdout == f"No reuse: cannot list the passed runs of head {head}\n"
     assert not (temp / "evidence/runs.json").exists()
+
+
+@pytest.mark.parametrize(
+    ("failures", "status", "calls", "kept"),
+    [
+        (0, 502, 11, True),
+        (1, 500, 27, True),
+        (2, 503, 53, True),
+        (4, 504, 4, False),
+        (1, 400, 1, False),
+        (1, 403, 1, False),
+        (1, 429, 1, False),
+    ],
+)
+def test_attempt_jobs_use_five_job_pages_and_bounded_server_retries(
+    full_source, tmp_path, failures, status, calls, kept
+):
+    from scripts import ci_reuse
+
+    _, _, _, _, env, responses, _ = full_source
+    jobs = responses[JOBS]["jobs"]
+    jobs.extend({"id": 200 + n, "name": f"extra {n}", "conclusion": "success"} for n in range(45))
+    Path(env["REUSE_FIXTURE"]).write_text(json.dumps(responses))
+    bin_dir = Path(env["PATH"].split(":")[0])
+    (bin_dir / "gh").rename(bin_dir / "original-gh")
+    requests = tmp_path / "requests.jsonl"
+    (bin_dir / "gh").write_text(
+        "#!/usr/bin/env python3\n"
+        "import json, os, subprocess, sys\n"
+        "from pathlib import Path\n"
+        "from urllib.parse import parse_qs, urlsplit\n"
+        "endpoint = next(arg for arg in sys.argv[2:] if arg.startswith('repos/'))\n"
+        "if '/attempts/' not in endpoint:\n"
+        "    sys.exit(subprocess.call([str(Path(__file__).with_name('original-gh')), *sys.argv[1:]]))\n"
+        "query = parse_qs(urlsplit(endpoint).query)\n"
+        "size, page = int(query['per_page'][0]), int(query['page'][0])\n"
+        "requests = Path(os.environ['REQUESTS'])\n"
+        "calls = len(requests.read_text().splitlines()) if requests.exists() else 0\n"
+        "with requests.open('a') as stream: stream.write(json.dumps([size, page]) + '\\n')\n"
+        "if size > 5: sys.exit('expected at most five jobs per page')\n"
+        "jobs = json.loads(Path(os.environ['REUSE_FIXTURE']).read_text())[endpoint.split('?')[0] + '?per_page=100']['jobs']\n"
+        "start = (page - 1) * size\n"
+        "rows = jobs[start:start + size]\n"
+        "print(json.dumps({'total_count': len(jobs), 'jobs': rows}), flush=True)\n"
+        "if calls < int(os.environ['FAILURES']):\n"
+        "    print(f'gh: server error (HTTP {os.environ[\"STATUS\"]})', file=sys.stderr)\n"
+        "    sys.exit(1)\n"
+    )
+    (bin_dir / "gh").chmod(0o755)
+    runner = tmp_path / "runner"
+    runner.mkdir()
+    [step] = [step for step in ci_reuse.paged_reuse_job()["steps"] if step.get("name") == FETCH]
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        env=dict(
+            env,
+            GITHUB_REPOSITORY="o/r",
+            RUNNER_TEMP=str(runner),
+            QUEUE_REF=QUEUE_REF,
+            REQUESTS=str(requests),
+            FAILURES=str(failures),
+            STATUS=str(status),
+        ),
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    attempts = [json.loads(line) for line in requests.read_text().splitlines()]
+    assert len(attempts) == calls
+    assert attempts[0] == [5, 1]
+    evidence = runner / "evidence" / "7"
+    if kept:
+        assert [json.loads(line) for line in (evidence / "jobs.jsonl").read_text().splitlines()] == jobs
+        assert (evidence / "reuse.log").is_file()
+    else:
+        assert not (evidence / "jobs.jsonl").exists()
+        assert not (evidence / "reuse.log").exists()
+
+
+def _queue_needs(baseline="success", ratchet="success", ratchet_job="skipped", queue_job="success"):
+    needs = {name: {"result": "success"} for name in ("unit", "lint", "sonar", "stage-budget")}
+    needs["reuse"] = {"result": "success", "outputs": {"reused": "false"}}
+    needs["coverage-ratchet"] = {"result": ratchet_job}
+    needs["queue-baseline"] = {"result": queue_job, "outputs": {"baseline": baseline, "ratchet": ratchet}}
+    return needs
+
+
+def _gate(steps, needs, event="merge_group"):
+    [step] = steps
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND="false", EVENT=event, REUSED="false")
+    return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+def test_queue_gate_keeps_legacy_duration_admission_by_default():
+    from scripts import ci_reuse
+
+    implicit = ci_reuse.gate_steps(queue_tier=True)
+    assert implicit == ci_reuse.gate_steps(queue_tier=True, consolidated=False)
+    assert implicit != ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+
+
+@pytest.mark.parametrize("event", ["merge_group", "pull_request"])
+@pytest.mark.parametrize("promotion", [False, True])
+@pytest.mark.parametrize("admission", ["success", "failure", "skipped", "cancelled", None])
+def test_consolidated_gate_requires_the_shared_admission(event, promotion, admission):
+    from scripts import ci_reuse
+
+    required = (
+        {"select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"}
+        if event == "merge_group"
+        else {"select", "test-count", "lint", "semgrep", "sonar"}
+    )
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if admission is None:
+        del needs["select"]
+    else:
+        needs["select"]["result"] = admission
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, promotion=promotion, consolidated=True), needs, event)
+    assert (result.returncode == 0) == (admission == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_documentation_gate_requires_a_successful_build_on_pull_requests(status):
+    from scripts import ci_reuse
+
+    required = {"select", "test-count", "lint", "semgrep", "sonar"}
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["docs"] = {"result": status}
+    result = _gate(
+        ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True),
+        needs,
+        event="pull_request",
+    )
+    assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
+
+
+def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():
+    from scripts import ci_reuse
+
+    assert _gate(ci_reuse.gate_steps(), _queue_needs()).returncode == 1
+    assert _gate(ci_reuse.gate_steps(), _queue_needs(ratchet_job="success")).returncode == 0
+
+
+FULL_SUITE_JOBS = ("split", "unit", "shard-check", "coverage-ratchet")
+
+
+def _selected_needs(scope="selected", selected_job="success", skipped=FULL_SUITE_JOBS):
+    needs = {name: {"result": "success"} for name in ("lint", "sonar", "stage-budget", *FULL_SUITE_JOBS)}
+    needs.update({name: {"result": "skipped"} for name in skipped})
+    needs["reuse"] = {"result": "success", "outputs": {"reused": "false"}}
+    needs["queue-baseline"] = {"result": "skipped"}
+    needs["select"] = {"result": "success", "outputs": {"scope": scope}}
+    needs["unit-selected"] = {"result": selected_job}
+    return needs
+
+
+def test_the_selected_gate_accepts_a_pull_request_that_ran_only_its_selected_tests():
+    from scripts import ci_reuse
+
+    steps = ci_reuse.gate_steps(selected=True)
+    result = _gate(steps, _selected_needs(), event="pull_request")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_selected_gate_accepts_a_pull_request_whose_change_selects_nothing():
+    from scripts import ci_reuse
+
+    needs = _selected_needs(scope="none", selected_job="skipped")
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("event", ["merge_group", "push", "workflow_dispatch"])
+@pytest.mark.parametrize("job", FULL_SUITE_JOBS)
+def test_the_selected_gate_refuses_a_skipped_full_suite_job_outside_pull_requests(event, job):
+    from scripts import ci_reuse
+
+    needs = _selected_needs(selected_job="skipped", skipped=(job,))
+    needs["queue-baseline"] = {"result": "success", "outputs": {"baseline": "success", "ratchet": "success"}}
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event=event)
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout
+
+
+@pytest.mark.parametrize("scope", ["full", "", None])
+@pytest.mark.parametrize("job", FULL_SUITE_JOBS)
+def test_the_selected_gate_refuses_a_skipped_full_suite_job_on_a_full_scope_pull_request(scope, job):
+    from scripts import ci_reuse
+
+    needs = _selected_needs(scope=scope, selected_job="skipped", skipped=(job,))
+    if scope is None:
+        del needs["select"]["outputs"]
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout
+
+
+@pytest.mark.parametrize("selected_job", ["skipped", "failure", "cancelled"])
+def test_the_selected_gate_refuses_selected_tests_that_did_not_pass_when_they_were_due(selected_job):
+    from scripts import ci_reuse
+
+    needs = _selected_needs(selected_job=selected_job)
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout
+
+
+@pytest.mark.parametrize("result", ["failure", "skipped", "cancelled"])
+def test_the_selected_gate_refuses_a_selection_that_did_not_succeed(result):
+    from scripts import ci_reuse
+
+    needs = _selected_needs()
+    needs["select"]["result"] = result
+    outcome = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert outcome.returncode == 1
+
+
+def test_the_selected_gate_refuses_a_selected_pull_request_whose_gate_lacks_the_selected_tests():
+    from scripts import ci_reuse
+
+    needs = _selected_needs()
+    del needs["unit-selected"]
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout
+
+
+@pytest.mark.parametrize("selection", ["absent", "empty", "unknown"])
+def test_the_selected_gate_refuses_skipped_selected_tests_without_a_known_scope(selection):
+    from scripts import ci_reuse
+
+    needs = _selected_needs(scope="full", selected_job="skipped", skipped=())
+    if selection == "absent":
+        del needs["select"]
+    else:
+        needs["select"]["outputs"]["scope"] = "" if selection == "empty" else "partial"
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout
+
+
+def test_the_selected_gate_accepts_skipped_selected_tests_on_a_full_scope_pull_request():
+    from scripts import ci_reuse
+
+    needs = _selected_needs(scope="full", selected_job="skipped", skipped=())
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("event", ["merge_group", "push"])
+def test_the_selected_gate_grades_a_full_run_as_the_canonical_gate(event):
+    from scripts import ci_reuse
+
+    needs = _selected_needs(scope="full", selected_job="skipped", skipped=())
+    needs["queue-baseline"] = {"result": "success", "outputs": {"baseline": "success", "ratchet": "success"}}
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event=event)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+def test_the_selected_variant_leaves_the_canonical_aggregation_unchanged():
+    from scripts import ci_reuse
+
+    [plain] = ci_reuse.gate_steps()
+    [selected] = ci_reuse.gate_steps(selected=True)
+    assert plain != selected
+    assert plain["env"] == selected["env"]
+
+
+@pytest.mark.parametrize("outcome", ["failure", "cancelled"])
+@pytest.mark.parametrize("job", FULL_SUITE_JOBS)
+def test_the_selected_gate_refuses_a_full_suite_job_that_ran_and_did_not_pass(job, outcome):
+    from scripts import ci_reuse
+
+    needs = _selected_needs()
+    needs[job] = {"result": outcome}
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout
+
+
+@pytest.mark.parametrize("event", ["merge_group", "push"])
+def test_the_selected_gate_ignores_a_selected_scope_outside_pull_requests(event):
+    from scripts import ci_reuse
+
+    needs = _selected_needs(selected_job="skipped", skipped=())
+    needs["queue-baseline"] = {"result": "success", "outputs": {"baseline": "success", "ratchet": "success"}}
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event=event)
+    assert result.returncode == 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("outcome", ["failure", "cancelled"])
+@pytest.mark.parametrize("scope", ["full", "none"])
+def test_the_selected_gate_refuses_selected_tests_that_ran_and_did_not_pass_when_not_due(scope, outcome):
+    from scripts import ci_reuse
+
+    skipped = FULL_SUITE_JOBS if scope == "none" else ()
+    needs = _selected_needs(scope=scope, selected_job=outcome, skipped=skipped)
+    result = _gate(ci_reuse.gate_steps(selected=True), needs, event="pull_request")
+    assert result.returncode == 1
+    assert "::error::Every required gate must succeed." in result.stdout

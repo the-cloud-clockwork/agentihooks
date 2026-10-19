@@ -25,7 +25,7 @@ def launch(monkeypatch):
     monkeypatch.setattr(install, "_load_claude_runtime_env", loader)
     monkeypatch.setattr(operator_env, "accounts", Mock(return_value={}))
     monkeypatch.setattr(skill_eval.shutil, "which", Mock(return_value="/usr/bin/claude"))
-    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {"winner": 1, "peer": 3})
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {"winner": 1, "peer": 3})
     result = balancer.ProbeResult(
         account="winner",
         provider_status="allowed",

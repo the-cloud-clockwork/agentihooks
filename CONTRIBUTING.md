@@ -73,7 +73,7 @@ per-file isolation — that is exactly how the gap reopened twice.
 
 1. Keep PRs focused -- one feature or fix per PR
 2. Update the README if you add a new category or change the profile system
-3. Add a CHANGELOG entry under `[Unreleased]`
+3. Add a changelog fragment named from your branch, `changelog.d/<branch>.md` (see `changelog.d/README.md`)
 4. Ensure all Python files pass syntax checking
 
 ## Commit Messages

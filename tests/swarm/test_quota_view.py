@@ -1,3 +1,5 @@
+import pytest
+
 from scripts.swarm import quota_view
 
 MINUTE = 60_000
@@ -36,6 +38,17 @@ def test_status_lines_name_each_lane_cap_the_reason_the_change_age_and_every_acc
         "quota account claude beta  open  routing 60% left  sessions 1",
         "quota account codex main  unknown  routing unknown  sessions 0",
     ]
+
+
+def test_codex_routing_left_is_its_week_left():
+    codex = row("personal", "REDUCE", 3, None, 35.0, "codex")
+    assert quota_view.routing_left(codex) == 35.0
+    assert quota_view.routing_left({**codex, "five_left": 20.0}) == 35.0
+    assert quota_view.routing_left(row("alpha", five=None)) is None
+    assert quota_view.lines({**DECISION, "accounts": [codex]}, 1_000_000)[1] == (
+        "quota account codex personal  reduce  routing 35% left  sessions 3"
+    )
+    assert quota_view.page({**DECISION, "accounts": [codex]})["accounts"][0]["routing"] == 35.0
 
 
 def test_a_change_under_a_minute_old_reads_just_now_and_one_minute_is_singular():
@@ -110,3 +123,29 @@ def test_the_page_carries_each_api_share():
 def test_the_api_share_rounds_the_api_percent_of_its_harness_sessions():
     rows = [row("a", sessions=1), api_row(sessions=3), row("cx", sessions=5, harness="codex")]
     assert quota_view.api_share(rows[1], rows) == (75, 4)
+
+
+@pytest.mark.parametrize("five", [None, 0.0, 90.0])
+def test_codex_status_and_page_report_week_remaining(five):
+    account = row("a", five=five, week=73.0, harness="codex")
+    decision = {**DECISION, "accounts": [account]}
+    assert quota_view.routing_left(account) == 73.0
+    assert quota_view.lines(decision, decision["at"])[-1] == (
+        "quota account codex a  open  routing 73% left  sessions 0"
+    )
+    assert quota_view.page(decision)["accounts"][0]["routing"] == 73.0
+
+
+def test_codex_status_keeps_a_missing_week_unknown():
+    assert quota_view.routing_left(row("a", five=90.0, week=None, harness="codex")) is None
+
+
+def test_each_read_account_line_names_its_reading_age_and_an_unread_one_names_none():
+    read = {**row("alpha", sessions=2), "observed_at": 1_000.0}
+    reserved = {**row("beta", week=30.0), "observed_at": 400.0, "reserved": "held"}
+    decision = {**DECISION, "accounts": [read, reserved, row("gamma")]}
+    assert quota_view.lines(decision, 1_000_000 + 2 * MINUTE)[1:] == [
+        "quota account claude alpha  open  routing 60% left, read 2m ago  sessions 2",
+        "quota account claude beta  open  routing 30% left, held, read 12m ago  sessions 0",
+        "quota account claude gamma  open  routing 60% left  sessions 0",
+    ]

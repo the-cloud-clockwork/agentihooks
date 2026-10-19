@@ -8,8 +8,6 @@ from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger import new_ledger
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "talk-2026-01-01"
 ENG, CI, MASTER = "engineer@abcdef-0001", "ci@abcdef-0002", "master@abcdef-0003"
 
@@ -23,7 +21,7 @@ def redis(tmp_path, monkeypatch):
     client = fakeredis.FakeRedis(decode_responses=True)
     RedisStore(client).create(SwarmConfig(SLUG, "repo", 1, 1))
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     return client
@@ -285,7 +283,8 @@ def test_the_server_gates_only_requests_that_carry_ops(monkeypatch, ops, gated):
     assert handler.reply_state(SLUG, changes=changes, ops=ops) == 200
     assert [type(gate).__name__ for gate in seen] == (["Fence"] if gated else ["NoneType"])
     assert seen_changes == [changes]
-    assert not gated or (seen[0].slug, type(seen[0].inner).__name__, seen[0].inner.slug) == (SLUG, "Budget", SLUG)
+    budget = seen[0].inner.inner if gated else None
+    assert not gated or (seen[0].slug, type(budget).__name__, budget.slug) == (SLUG, "Budget", SLUG)
 
 
 @pytest.mark.parametrize(

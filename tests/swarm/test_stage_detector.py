@@ -7,7 +7,7 @@ from scripts.swarm.health import standing
 from tests.swarm.test_stages import agent, delivery, rows, run, stage
 from tests.swarm.test_stages import store as store
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 H = 3_600_000
 NOW = 1_791_744_000_000
@@ -55,7 +55,7 @@ def test_the_detector_measures_claim_wait_against_claimable_tasks_only():
     ready = stages.claimable({"tasks": tasks, "freezes": [{"verb": "freeze", "target": "tasks/t2"}]}, "")
     found = stage_detector.report(source, tasks, NOW, 4 * H, ready)
     assert [(row["stage"], row["seconds"], row["previous_seconds"], row["episodes"]) for row in found["stages"]] == [
-        ("claim_wait", 14400.0, 3600.0, [f"claim_wait:t1:{NOW - 5 * H}"])
+        ("seat_wait", 14400.0, 3600.0, [f"seat_wait:t1:{NOW - 5 * H}"])
     ]
 
 
@@ -76,7 +76,7 @@ def test_record_measures_with_the_readiness_it_is_given(tmp_path, store, monkeyp
 
 
 FIRST_LIVE_PASS = {
-    "claim_wait": 579440.0,
+    "seat_wait": 579440.0,
     "quota_hold": 303960.0,
     "build": 66013.0,
     "review": 47969.0,
@@ -113,11 +113,11 @@ def test_first_live_pass_finds_only_stages_over_a_nonzero_threshold(store):
     assert sorted(found) == [
         "ci_overrun",
         "ci_queue",
-        "claim_wait",
         "intent_fix",
         "merge_queue",
         "quota_hold",
         "review",
+        "seat_wait",
     ]
     assert {name: row["threshold"] for name, row in found.items()} == {
         name: stage_detector.THRESHOLD_HOURS[name] for name in found
@@ -141,7 +141,7 @@ def test_first_live_pass_clears_the_zero_threshold_findings_it_raised(store):
 def test_productive_stages_have_no_threshold_and_every_other_threshold_is_above_zero():
     assert not {"build", "ci_run", "launch"} & set(stage_detector.THRESHOLD_HOURS)
     assert stage_detector.THRESHOLD_HOURS == {
-        "claim_wait": 4.0,
+        "seat_wait": 4.0,
         "review": 4.0,
         "quota_hold": 2.0,
         "host_hold": 2.0,
@@ -203,11 +203,11 @@ def test_clearing_a_detector_finding_leaves_alert_findings_and_reports_what_it_d
     assert sorted(standing.read(store.redis, "scratch")) == [
         "ci_overrun",
         "ci_queue",
-        "claim_wait",
         "intent_fix",
         "launch",
         "merge_queue",
         "quota_hold",
+        "seat_wait",
     ]
 
 
@@ -397,7 +397,7 @@ def test_standing_detector_retains_episode_counts_when_recent_history_rolls_over
     assert row["fired"] == 31
     assert row["episodes"] == [str(n) for n in range(11, 31)]
     assert row["first_at"] == NOW
-    assert row["updated_at"] == NOW + 60_000
+    assert row["updated_at"] == NOW
     assert (row["value"], row["threshold"], row["unit"], row["detail"]) == (19, 15, "minutes", "old run")
     row = standing.update_detector(store.redis, "scratch", {**changed, "seconds": 10800}, NOW + 120_000, 0.25)
     assert row["fired"] == 31
@@ -481,7 +481,7 @@ def test_two_ready_tasks_count_as_distinct_claim_wait_observations(store):
     tasks = [{"id": task, "state": "open"} for task in ("a", "b")]
     found = stage_detector.report(source, tasks, NOW)
     stage_detector.update_findings(store, "scratch", found, NOW)
-    row = standing.read(store.redis, "scratch")["claim_wait"]
+    row = standing.read(store.redis, "scratch")["seat_wait"]
     assert (row["fired"], row["value"], row["threshold"]) == (2, 6.0, 4.0)
 
 
@@ -490,7 +490,21 @@ def test_claim_wait_at_its_threshold_raises_no_finding_and_one_second_over_does(
     stage_detector.update_findings(store, "scratch", {"stages": [reading]}, NOW)
     assert standing.read(store.redis, "scratch") == {}
     stage_detector.update_findings(store, "scratch", {"stages": [{**reading, "seconds": 4 * 3600.0 + 1}]}, NOW)
-    assert standing.read(store.redis, "scratch")["claim_wait"]["threshold"] == 4.0
+    assert standing.read(store.redis, "scratch")["seat_wait"]["threshold"] == 4.0
+
+
+def test_queue_wait_raises_no_finding_however_deep_the_queue(store):
+    reading = {**live_pass()["stages"][0], "stage": "queue_wait", "seconds": 40 * 3600.0}
+    stage_detector.update_findings(store, "scratch", {"stages": [reading]}, NOW)
+    assert standing.read(store.redis, "scratch") == {}
+
+
+def test_a_detector_finding_for_a_stage_no_longer_reported_clears_and_alert_findings_stay(store):
+    retired = {**live_pass()["stages"][0], "stage": "claim_wait", "seconds": 9 * 3600.0}
+    standing.update_detector(store.redis, "scratch", retired, NOW, 4.0)
+    standing.fire(store.redis, "scratch", "review", standing.Reading(5.0, 4.0, "task hours in the window", "a"), NOW)
+    stage_detector.update_findings(store, "scratch", {"stages": []}, NOW)
+    assert sorted(standing.read(store.redis, "scratch")) == ["review"]
 
 
 def test_under_budget_runs_do_not_count_as_overruns_but_one_second_does(store):

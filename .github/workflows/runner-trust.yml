@@ -1,0 +1,30 @@
+name: Protected runner actors
+
+on:
+  workflow_call:
+    outputs:
+      actors:
+        value: ${{ jobs.actors.outputs.actors }}
+      queue_actor:
+        value: ${{ jobs.actors.outputs.queue_actor }}
+
+permissions:
+  contents: read
+
+jobs:
+  actors:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    outputs:
+      actors: ${{ steps.actors.outputs.actors }}
+      queue_actor: ${{ steps.actors.outputs.queue_actor }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: the-cloud-clockwork/agentihooks
+          ref: dev
+          persist-credentials: false
+      - name: Read protected actor approvals
+        id: actors
+        run: >-
+          python3 -I -c 'import json; from pathlib import Path; p=json.loads(Path(".github/workflows/trusted-actors.json").read_text()); print("actors=" + json.dumps(p["actors"] + [p["queue_actor"]], separators=(",", ":"))); print("queue_actor=" + json.dumps(p["queue_actor"]))' >> "$GITHUB_OUTPUT"

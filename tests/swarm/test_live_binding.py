@@ -1,12 +1,11 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from scripts.swarm import live_binding
 from scripts.swarm.store import AgentRecord
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 EVENTS = (
     "SessionStart",
@@ -173,6 +172,69 @@ def test_codex_home_hooks_and_native_effort(mounted):
     assert live_binding.read(agent, 42, proc)["hooks"] is False
 
 
+@pytest.fixture
+def captured_codex(mounted, monkeypatch):
+    from functools import partial
+
+    from scripts import terminate_agent
+
+    agent, proc, home = mounted
+    capture = json.loads((Path(__file__).parents[1] / "fixtures" / "live_binding_codex.json").read_text())
+    for row in capture["processes"]:
+        root = proc / str(row["pid"])
+        root.mkdir()
+        for field in ("comm", "stat", "status"):
+            (root / field).write_text(row[field])
+        (root / "cmdline").write_bytes("\0".join(row["argv"]).encode())
+        (root / "environ").write_bytes(b"")
+    pid = capture["processes"][0]["pid"]
+    root = proc / str(pid)
+    (root / "environ").write_bytes(
+        f"CODEX_HOME={home}\0AGENTIHOOKS_PROFILE=engineer\0AGENTIHOOKS_AGENT_NAME=engineer\0".encode()
+    )
+    (home / "config.toml").write_text("[features]\nhooks = true\n")
+    (home / "hooks.json").write_text((home / "settings.json").read_text())
+    agent = replace(
+        agent,
+        harness="codex",
+        model="gpt-6.1-sol",
+        account="default",
+        conversation_id="conversation",
+        profile_decision={"validation": {"pid": pid, "home": str(home), "model": "gpt-6.1-sol", "effort": "high"}},
+    )
+    registry = {"conversation": {"pid": pid, "name": agent.name, "status": "alive"}}
+    monkeypatch.setattr(terminate_agent, "sessions", partial(terminate_agent.sessions, proc, registry, "local"))
+    monkeypatch.setattr(live_binding, "read", partial(live_binding.read, proc=proc))
+    return agent, root
+
+
+@pytest.mark.parametrize(
+    "condition, expected",
+    [
+        ("live", {}),
+        ("missing", {"process": {"expected": True, "actual": False}}),
+        ("zombie", {"process": {"expected": True, "actual": False}}),
+        ("model", {"model": {"expected": "gpt-6.1-sol", "actual": "gpt-7"}}),
+        ("effort", {"effort": {"expected": "high", "actual": "low"}}),
+    ],
+)
+def test_captured_codex_process_matches_only_its_live_assigned_launch(captured_codex, condition, expected):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    agent, root = captured_codex
+    if condition == "missing":
+        (root / "stat").unlink()
+    elif condition == "zombie":
+        (root / "stat").write_text((root / "stat").read_text().replace(") S ", ") Z "))
+    elif condition == "model":
+        (root / "cmdline").write_bytes((root / "cmdline").read_bytes().replace(b"gpt-6.1-sol", b"gpt-7"))
+    elif condition == "effort":
+        (root / "cmdline").write_bytes((root / "cmdline").read_bytes().replace(b"high", b"low"))
+    facts = HerdrRuntime().bindings([agent])
+    assert agent.name in facts
+    assert live_binding.compare(agent, facts[agent.name]) == expected
+
+
 def test_flagless_claude_session_reads_model_and_effort_from_its_home(mounted):
     agent, proc, home = mounted
     path = home / "settings.json"
@@ -302,7 +364,7 @@ def test_tick_reclaims_each_mismatched_agent_on_its_task(ticking, field):
     assert runtime.tasks[-1]["launch_assignment"]["account"] == old.account
     assert any(field in action for action in actions)
     found = live_binding.findings(store, "sw")
-    assert any(f.subject == f"{old.name}/{field}" for f in found)
+    assert not any(f.subject.startswith(f"{old.name}/") for f in found)
     assert ledger.rows["one"]["claimed_by"] == new.name
 
 
@@ -440,6 +502,7 @@ def test_reports_are_visible_in_swarm_health(ticking):
 
     store, _, ledger = ticking
     agent = AgentRecord("engineer", "eng", "one", profile="engineer", harness="claude")
+    store.put_agent("sw", agent)
     live_binding.record(store, "sw", agent, {**live_binding.assignment(agent), "hooks": False}, 10)
     found = findings(store, "sw", store.config("sw"), ledger.tasks("sw"), [])
     assert any(f["id"] == "live-binding/engineer/hooks" for f in found)
@@ -548,6 +611,7 @@ def test_legacy_assignment_uses_the_profile_home_and_saved_fields(tmp_path, monk
 def test_mismatch_report_and_health_evidence_are_complete(ticking):
     store, _, _ = ticking
     agent = AgentRecord("engineer", "eng", "one", harness="claude", profile="engineer")
+    store.put_agent("sw", agent)
     differences = live_binding.record(store, "sw", agent, {"pane": "open"}, 123)
     assert differences == {"pane": {"expected": "closed", "actual": "open"}}
     assert json.loads(store.redis.hget(store.key("sw", "live-bindings"), "engineer")) == {
@@ -566,6 +630,21 @@ def test_mismatch_report_and_health_evidence_are_complete(ticking):
         "threshold": "assigned launch must match",
     }
     assert found[0].measure == 1
+
+
+def test_departed_agents_raise_no_finding_while_a_seated_mismatch_does(ticking):
+    store, _, _ = ticking
+    seated = AgentRecord("seated", "eng", "one", harness="claude", profile="engineer", started_at=2)
+    superseded = AgentRecord("superseded", "eng", "one", harness="claude", profile="engineer", started_at=1)
+    finished = AgentRecord("finished", "eng", "two", harness="claude", profile="engineer", state="finished")
+    dropped = AgentRecord("dropped", "eng", "three", harness="claude", profile="engineer")
+    older = AgentRecord("older", "eng", "four", harness="claude", profile="engineer", started_at=1)
+    ended = AgentRecord("ended", "eng", "four", harness="claude", profile="engineer", started_at=2, state="finished")
+    for agent in (seated, superseded, finished, older, ended):
+        store.put_agent("sw", agent)
+    for agent in (superseded, seated, finished, dropped, older, ended):
+        live_binding.record(store, "sw", agent, {"process": False}, 10)
+    assert [f.subject for f in live_binding.findings(store, "sw")] == ["seated/process"]
 
 
 def test_relaunch_never_reclassifies_the_assigned_profile(tmp_path, monkeypatch):

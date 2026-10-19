@@ -10,6 +10,8 @@ from pathlib import Path
 
 import ledger_core as core
 
+from scripts.swarm_ledger import request_metrics
+
 from .sqlite import BEGIN_IMMEDIATE, STORED
 
 BACKUP = ".imported"
@@ -21,7 +23,8 @@ FAILED = {}
 def storage_lock(directory: Path):
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / ".ledger-storage.lock").open("a") as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
+        with request_metrics.waiting():
+            fcntl.flock(handle, fcntl.LOCK_EX)
         try:
             yield
         finally:
@@ -80,7 +83,7 @@ def adopt_registries(repository) -> None:
         entries = registry_file(path)
         backup(repository.directory, name, [path])
         with repository.connect() as connection, connection:
-            connection.execute(BEGIN_IMMEDIATE)
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             current = repository.registry(name, connection)
             repository.save_registry(connection, name, {**entries, **current})
         path.unlink()
@@ -101,7 +104,7 @@ def stored(repository, slug: str) -> bool:
 
 def adopt_bin(repository) -> None:
     """Import the bin and restore mark files left in the ledger folder."""
-    if any((repository.directory / filename).exists() for filename in REGISTRIES.values()):
+    if repository.adopts and any((repository.directory / filename).exists() for filename in REGISTRIES.values()):
         with storage_lock(repository.directory):
             adopt_registries(repository)
 
@@ -117,7 +120,7 @@ def candidates(directory: Path, slug: str | None) -> list:
 def adopt(repository, slug: str | None = None) -> None:
     """Import every legacy ledger file present for `slug` (all when None), keeping a verified copy of each."""
     directory = repository.directory
-    if not directory.is_dir():
+    if not repository.adopts or not directory.is_dir():
         return
     pending = candidates(directory, slug)
     registries = any((directory / filename).exists() for filename in REGISTRIES.values())

@@ -26,6 +26,8 @@ def write_events(connection, slug: str, events: list) -> None:
     desired = {}
     occurrences = {}
     for position, event in enumerate(events):
+        if "rev" not in event:
+            raise ValueError("ledger event must have a revision")
         value = encode(event)
         digest = hashlib.sha256(value.encode("utf-8")).hexdigest()
         occurrence = occurrences.get(digest, 0)
@@ -56,6 +58,8 @@ def append_events(connection, slug: str, events: list, kept: int) -> None:
     (last,) = connection.execute(LAST, (slug,)).fetchone()
     start = -1 if last is None else last
     for offset, event in enumerate(events, 1):
+        if "rev" not in event:
+            raise ValueError("ledger event must have a revision")
         connection.execute(APPEND, (slug, f"p{start + offset}", event.get("rev"), start + offset, encode(event)))
     connection.execute(TRIM, (slug, slug, kept))
 

@@ -43,6 +43,10 @@ ledger:
   tolerations: []
   port: 8765
   publicUrl: ""
+  # Secret with tls.crt, tls.key and ca.crt; clients refuse to send ledger credentials over plain http off loopback.
+  # The certificate must name <fullname>-ledger, the service and ingress backend name, as a SAN.
+  tls:
+    secretName: ""
   persistence:
     size: 1Gi
     storageClassName: ""
@@ -179,6 +183,38 @@ controller:
     limits:
       memory: 512Mi
       ephemeral-storage: 256Mi
+
+workers:
+  replicas: 0
+  maxAgents: 1
+  roles: [eng, ci, plan]
+  image:
+    repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
+    tag: dev
+    pullPolicy: Always
+  repositories: []
+  joinUrl: ""
+  joinCodeSecret:
+    name: ""
+    key: ""
+  credentialSecret:
+    name: ""
+    key: ""
+  caSecret:
+    name: ""
+    key: ""
+  envFromSecrets: []
+  persistence:
+    size: 1Gi
+    storageClassName: ""
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+      ephemeral-storage: 1Gi
+    limits:
+      memory: 2Gi
+      ephemeral-storage: 10Gi
 
 worker:
   enabled: false

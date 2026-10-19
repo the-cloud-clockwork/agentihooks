@@ -11,6 +11,7 @@ import { openHash, startLayout, wireRail, wireTabs } from "./layout.js";
 import { showChat, wireChat, wireChatInput } from "./chat.js";
 import { refreshQuota, wireSwarm } from "./controls.js";
 import { connectEvents } from "./events.js";
+import { loadArchitecture } from "./architecture.js";
 
 function start() {
   loadSaved();
@@ -74,7 +75,7 @@ function start() {
   document.querySelector(".col").addEventListener("toggle", (ev) => {
     if (!sectionBoxes().includes(ev.target)) return;
     rememberUnanimous("sections", sectionBoxes());
-    if (ev.target.open) render();
+    if (ev.target.open) render(null, true);
     else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {
@@ -93,6 +94,7 @@ function start() {
 }
 
 wireSwarm();
+loadArchitecture();
 window.addEventListener("pagehide", () => flush(true));
 document.addEventListener("visibilitychange", () => { if (document.hidden) flush(true); });
 start();

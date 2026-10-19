@@ -113,7 +113,7 @@ def test_the_seed_watcher_reloads_code_only_when_asked(monkeypatch, value, calls
     monkeypatch.setattr(server.ledger_bin, "tidy", Mock())
     monkeypatch.setattr(server, "bin_closed_without_swarm", Mock())
     monkeypatch.setattr(server, "sample_streams", Mock())
-    monkeypatch.setattr(server.time, "sleep", Mock(side_effect=Stop))
+    monkeypatch.setattr(server, "scheduled_wait", Mock(side_effect=Stop))
     with pytest.raises(Stop):
         server.watch_ledgers()
     assert server.reload_if_changed.call_args_list == calls
@@ -142,7 +142,7 @@ def test_a_folder_other_than_the_shared_one_may_serve_on_8765(monkeypatch, tmp_p
     monkeypatch.setattr(server, "ThreadingHTTPServer", Mock())
     monkeypatch.setattr(server.threading, "Thread", Mock())
     server.serve()
-    server.ThreadingHTTPServer.assert_called_once_with((server.HOST, 8765), server.Handler)
+    server.ThreadingHTTPServer.assert_called_once_with((server.HOST, 8765), server.Handler, bind_and_activate=False)
 
 
 def test_files_under_the_agentihooks_home_never_configure_the_server(tmp_path):

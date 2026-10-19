@@ -1,6 +1,7 @@
 import functools
 import http.client
 import importlib.util
+import io
 import json
 import os
 import shutil
@@ -102,8 +103,17 @@ class Boot:
 
     def __call__(self, request: worker_home.Request) -> dict:
         self.requests.append(request)
-        (request.root / request.attempt / "run").mkdir(parents=True)
-        return {}
+        from scripts.profiles import binding
+
+        attempt = request.root / request.attempt
+        (attempt / "run").mkdir(parents=True)
+        for target, profile in request.profiles.items():
+            home = attempt / "homes" / target / f".{target}"
+            home.mkdir(parents=True)
+            (home.parent / f"{target}.sources.json").write_text("[]")
+            (home / binding.PERSONAS[target]).write_text(binding.persona(profile))
+            binding.write(home, profile, target)
+        return {"homes": {target: f"homes/{target}" for target in request.profiles}}
 
 
 def shipped(tmp_path: Path) -> Path:
@@ -297,7 +307,7 @@ def test_a_bundle_seat_records_the_delivered_bundle_revision_and_digest(tmp_path
 
 
 def test_a_bundle_seat_runs_the_local_browser_server_and_keeps_its_header_references(tmp_path):
-    _, home = bundled(tmp_path, "engineer")
+    _, home = bundled(tmp_path, "frontend")
 
     servers = json.loads((home / ".claude.json").read_text())["mcpServers"]
     assert servers["playwright-cmd"]["command"] != "cmd.exe"
@@ -887,7 +897,7 @@ class Bootstrap(Boot):
     def __call__(self, request: worker_home.Request) -> dict:
         super().__call__(request)
         attempt = request.root / request.attempt
-        (attempt / "homes" / "claude").mkdir(parents=True)
+        (attempt / "homes" / "claude").mkdir(parents=True, exist_ok=True)
         layout = filesystem.mapping(filesystem.load())
         record = {"attempt": request.attempt, "homes": {"claude": "homes/claude"}, "layout": layout}
         (attempt / "execution.json").write_text(json.dumps(record))
@@ -923,6 +933,9 @@ def test_the_started_supervisor_loads_a_prepared_attempt_only_the_worker_can_rea
     assert stat.S_IMODE(attempt.parent.stat().st_mode) == 0o700
     printed = {"worker_start": "prepared", "attempt": EXECUTION, "uid": os.getuid()}
     lines = capsys.readouterr().out.splitlines()
+    passed = json.dumps({"profile_binding": "passed", "profile": "engineer", "harness": "claude"})
+    assert lines.count(passed) == 1
+    lines = [line for line in lines if line != passed]
     assert lines[-1] == json.dumps(printed)
     assert [json.loads(line)["lease"] for line in lines[:-1]] == ["renewed"] * (len(lines) - 1)
 
@@ -936,6 +949,84 @@ def test_the_start_prints_the_rendered_chain_when_bootstrap_names_one(monkeypatc
 
     printed = {"worker_start": "prepared", "attempt": "a", "uid": os.getuid(), "chains": chains}
     assert capsys.readouterr().out == json.dumps(printed) + "\n"
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_the_worker_logs_a_passed_profile_binding_before_starting_its_task(tmp_path, monkeypatch, target):
+    output = io.BytesIO()
+    stream = io.TextIOWrapper(output)
+    monkeypatch.setattr(sys, "stdout", stream)
+    launch = material(tmp_path, {**RECORD, "harness": target, "agent": [target]})
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    original = start.prepare
+    monkeypatch.setattr(
+        start, "prepare", lambda a, l: original(a, l, controller.send, controller.sleep, Boot(), shipped(tmp_path))
+    )
+
+    def supervise(argv):
+        report = attempt / "run" / "profile-binding.json"
+        evidence = json.loads(report.read_text())
+        assert evidence["state"] == "passed"
+        assert evidence["profile"] == "engineer" and evidence["harness"] == target
+        assert evidence["rendered"]["home"] == str(attempt / "homes" / target / f".{target}")
+        assert stat.S_IMODE(report.stat().st_mode) == 0o600
+        assert b'"profile_binding": "passed"' in output.getvalue()
+        stream.flush()
+        logs = [json.loads(line) for line in output.getvalue().decode().splitlines()]
+        logs = [row for row in logs if "profile_binding" in row or "worker_start" in row]
+        assert logs[0] == {"profile_binding": "passed", "profile": "engineer", "harness": target}
+        assert logs[1]["worker_start"] == "prepared"
+        return 70
+
+    monkeypatch.setattr(start.supervision_runtime, "main", supervise)
+    assert start.main([str(attempt), str(launch)]) == 70
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+@pytest.mark.parametrize("fault", ["persona", "sources", "binding", "profile", "home", "null", "list"])
+def test_a_failed_worker_binding_is_reported_and_refuses_the_task(tmp_path, monkeypatch, capsys, target, fault):
+    from scripts.profiles import binding
+
+    class Damaged(Boot):
+        def __call__(self, request):
+            record = super().__call__(request)
+            home = request.root / request.attempt / record["homes"][target] / f".{target}"
+            if fault == "persona":
+                (home / binding.PERSONAS[target]).write_text("changed persona")
+            elif fault == "sources":
+                (home.parent / f"{target}.sources.json").write_text("[{}]")
+            elif fault == "binding":
+                (home / binding.FILE).unlink()
+            elif fault == "profile":
+                binding.write(home, "frontend", target)
+            elif fault in ("null", "list"):
+                (home / binding.FILE).write_text("null" if fault == "null" else "[]")
+            else:
+                record["homes"][target] = "missing-home"
+            return record
+
+    launch = material(tmp_path, {**RECORD, "harness": target, "agent": [target]})
+    attempt = tmp_path / "attempts" / EXECUTION
+    controller = Controller((200, ANSWER))
+    original = start.prepare
+    monkeypatch.setattr(
+        start, "prepare", lambda a, l: original(a, l, controller.send, controller.sleep, Damaged(), shipped(tmp_path))
+    )
+    monkeypatch.setattr(
+        start.supervision_runtime, "main", lambda argv: pytest.fail("task started after failed binding")
+    )
+
+    assert start.main([str(attempt), str(launch)]) == 64
+
+    logs = capsys.readouterr()
+    assert "profile_binding" not in logs.out and "worker_start" not in logs.out
+    assert "ERROR worker start refused: profile binding failed:" in logs.err
+    evidence = json.loads((attempt / "run" / "profile-binding.json").read_text())
+    assert evidence["state"] == "failed" and evidence["reason"]
+    assert logs.err == f"ERROR worker start refused: profile binding failed: {evidence['reason']}\n"
+    assert evidence["profile"] == "engineer" and evidence["harness"] == target
+    assert not (attempt / start.RECORD).exists()
 
 
 def test_the_image_supervisor_entry_is_the_worker_start_step():
@@ -996,7 +1087,10 @@ def test_the_start_prepares_the_permitted_project_checkout_on_its_branch_before_
     origin = "https://github.com/the-cloud-clockwork/agentihooks.git"
     attempt = tmp_path / "attempts" / EXECUTION
     assert prepared.calls == [(attempt, workspaces.Request(origin, "t1", 3, AGENT), False)]
-    assert record == {"checkout": {"project": PROJECT, "branch": BRANCH, "base": "dev", "base_commit": BASE_COMMIT}}
+    assert record == {
+        "homes": {"claude": "homes/claude"},
+        "checkout": {"project": PROJECT, "branch": BRANCH, "base": "dev", "base_commit": BASE_COMMIT},
+    }
     assert json.loads((attempt / "registration.json").read_text()) == AUTHORITY
 
 
@@ -1017,7 +1111,7 @@ def test_worker_configures_scoped_app_askpass_before_checkout(tmp_path, monkeypa
 def test_a_launch_record_without_a_checkout_prepares_none(tmp_path, monkeypatch):
     prepared = Workspaces()
 
-    assert checked_out(tmp_path, monkeypatch, prepared, RECORD) == {}
+    assert checked_out(tmp_path, monkeypatch, prepared, RECORD) == {"homes": {"claude": "homes/claude"}}
 
     assert prepared.calls == []
 

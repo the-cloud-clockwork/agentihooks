@@ -5,7 +5,7 @@ import pytest
 
 from scripts.hive import daemon, registry
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -64,6 +64,27 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     assert redis.exists(registry.key("machine"))
 
 
+@pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
+def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm.keyspace import ROOT
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon, "_executions", lambda redis, local_id, processes: {"claude:one": ["first"]})
+    slots = LaunchSlots(redis)
+    assert slots.reserve("claude:one", "first", 1, 10000)
+    assert slots.acknowledge("first")
+    redis.pexpire(f"{ROOT}:launch-slot:first", 10000)
+
+    daemon.beat(redis, "machine")
+
+    assert redis.smembers(registry.INDEX) == indexed
+    assert round(redis.pttl(f"{ROOT}:launch-slot:first") / 1000) == ttl
+
+
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     events = []
     connection = object()
@@ -75,7 +96,7 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
         events.append(seconds)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connection)
     assert events == [(connection, "local"), 15]
@@ -87,7 +108,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     timestamps = iter([100, 103])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(object())
     sleep.assert_called_once_with(12)
@@ -333,7 +354,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     timestamps = iter([100, 116])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(object())
     sleep.assert_called_once_with(0)
@@ -425,6 +446,24 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     balancer.cached_observations.assert_called_once_with(environ=environ)
     daemon.codex_router.accounts.assert_called_once_with(environ)
     daemon.codex_router.quotas.assert_called_once_with([account], environ)
+
+
+def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
+    from scripts.codex_quota import CodexQuota
+
+    balancer = observations
+    balancer.cached_observations.return_value = []
+    account = daemon.codex_router.CodexAccount("two", "AH_CX_TOKEN_two")
+    daemon.codex_router.accounts.return_value = [account]
+    reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000), expired=True)
+    daemon.codex_router.quotas.return_value = {"two": reading}
+    slots, quota = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 122)
+    assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
+    assert quota["codex:two"] == {
+        "five_hour": {"used": None, "resets_at": None},
+        "seven_day": {"used": None, "resets_at": None},
+        "observed_at": None,
+    }
 
 
 def test_stale_claude_reading_does_not_advertise_capacity(observations):
@@ -659,3 +698,78 @@ def test_execution_report_deduplicates_processes_and_skips_stale_records(redis, 
     assert daemon._executions(redis, "hive", processes) == {
         "claude:one": [agents[0].execution_id, agents[2].execution_id, agents[6].execution_id]
     }
+
+
+def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeypatch):
+    from dataclasses import replace
+
+    from scripts.hive import orders, reports
+    from scripts.swarm.pane import PaneObservation
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+
+    store = RedisStore(redis)
+    store.create(SwarmConfig("swarm", "repo", 8, 0))
+    here = AgentRecord(
+        store.next_name("swarm", "eng"), "eng", "one", pane_id="w1:p1", runtime_target={"host_id": "machine"}
+    )
+    elsewhere = AgentRecord(
+        store.next_name("swarm", "eng"), "eng", "two", pane_id="w1:p2", runtime_target={"host_id": "other"}
+    )
+    here = store.start_execution("swarm", replace(here, seat="eng-1@swarm"))
+    store.put_agent("swarm", here)
+    store.put_agent("swarm", store.start_execution("swarm", replace(elsewhere, seat="eng-2@swarm")))
+    herdr = Mock()
+    herdr.live_names.return_value = {here.name, "engineer@stray-0001"}
+    herdr.bindings.return_value = {here.name: {"process": False}}
+    herdr.conversations.return_value = {"w1:p1": "conversation"}
+    herdr.observe.return_value = PaneObservation("idle", typed="half")
+    herdr.reported.return_value = True
+    consumer = Mock(runtime=Mock(herdr=herdr))
+    monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: consumer)
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    daemon.beat(redis, "machine")
+    assert [a.name for a in herdr.bindings.call_args.args[0]] == [here.name]
+    assert herdr.reported.call_args.args[0].execution_id == here.execution_id
+    assert herdr.observe.call_args.args[0].execution_id == here.execution_id
+    assert json.loads(redis.get(reports.key("machine"))) == {
+        "names": sorted({here.name, "engineer@stray-0001"}),
+        "panes": {"w1:p1": "conversation"},
+        "executions": {
+            here.execution_id: {
+                "slug": "swarm",
+                "name": here.name,
+                "generation": here.generation,
+                "reported": True,
+                "binding": {"process": False},
+                "pane": {
+                    "state": "idle",
+                    "prompt_title": "",
+                    "typed": "half",
+                    "provider_error": "",
+                    "provider_checked": False,
+                    "provider_error_id": "",
+                    "content_refusal": False,
+                },
+            }
+        },
+    }
+    assert redis.ttl(reports.key("machine")) == 45
+    consumer.poll.assert_called_once_with()
+    consumer.poll_commands.assert_called_once_with()
+
+
+def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis, monkeypatch):
+    from scripts.hive import orders, reports
+
+    herdr = Mock()
+    herdr.live_names.return_value = set()
+    monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: Mock(runtime=Mock(herdr=herdr)))
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    daemon.beat(redis, "machine")
+    assert json.loads(redis.get(reports.key("machine"))) == {"names": [], "panes": {}, "executions": {}}
+    herdr.bindings.assert_not_called()
+    herdr.conversations.assert_not_called()

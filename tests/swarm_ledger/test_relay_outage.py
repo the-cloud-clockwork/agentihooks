@@ -1,3 +1,4 @@
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -13,8 +14,6 @@ from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # noqa: E402
 from scripts.swarm_ledger import ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SLUG = "relay-outage-2026-01-01"
 ENG = AgentRecord("ro-eng-1", "eng", "t1", pane_id="p1", seat=f"eng-1@{SLUG}")
@@ -65,7 +64,7 @@ def make_ledger(description="d"):
         "phases": [{"title": "one", "description": description}],
         "questions": [{"text": "which broker?"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -279,9 +278,9 @@ def watch_passes(monkeypatch, held, replay, count=6):
         monkeypatch.setattr(ledger_server, name, lambda: None)
     monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
-    monkeypatch.setattr(ledger_server, "unrelayed_path", lambda: held)
+    monkeypatch.setattr(ledger_server, "unrelayed", lambda: held)
     monkeypatch.setattr(ledger_server, "replay_unrelayed", lambda: replay(len(passes)))
-    monkeypatch.setattr(ledger_server.time, "sleep", sleep)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", sleep)
     with pytest.raises(Stop):
         ledger_server.watch_ledgers()
 
@@ -289,8 +288,7 @@ def watch_passes(monkeypatch, held, replay, count=6):
 def test_the_watch_loop_replays_held_revisions_every_fifth_pass_and_survives_a_failed_replay(
     monkeypatch, tmp_path, capsys
 ):
-    held, replayed = tmp_path / "held.json", []
-    held.write_text("{}")
+    held, replayed = {ledger_server.RELAY: {SLUG: [1]}}, []
 
     def replay(at):
         replayed.append(at)
@@ -302,8 +300,41 @@ def test_the_watch_loop_replays_held_revisions_every_fifth_pass_and_survives_a_f
 
 def test_the_watch_loop_never_replays_when_nothing_is_held(monkeypatch, tmp_path):
     replayed = []
-    watch_passes(monkeypatch, tmp_path / "absent.json", replayed.append)
+    watch_passes(monkeypatch, {}, replayed.append)
     assert replayed == []
+
+
+class Unreadable:
+    def held_revisions(self):
+        raise sqlite3.OperationalError("database is locked")
+
+
+def test_an_unreadable_relay_journal_reads_as_nothing_held(monkeypatch):
+    monkeypatch.setattr(ledger_server, "stored", Unreadable())
+    assert ledger_server.unrelayed() == {}
+
+
+def test_the_watch_loop_survives_a_failed_journal_read(monkeypatch, capsys):
+    replayed = []
+
+    def unreadable():
+        raise OSError("disk gone")
+
+    monkeypatch.setattr(ledger_server, "unrelayed", unreadable)
+    passes = []
+    monkeypatch.setattr(ledger_server, "scheduled_wait", lambda _: passes.append(1) or len(passes) == 6 and stop())
+    for name in ("bin_closed_without_swarm", "expire_alerts", "sample_streams"):
+        monkeypatch.setattr(ledger_server, name, lambda: None)
+    monkeypatch.setattr(ledger_server.ledger_bin, "tidy", lambda: None)
+    monkeypatch.setattr(ledger_server, "reloading", lambda *args: False)
+    monkeypatch.setattr(ledger_server, "replay_unrelayed", lambda: replayed.append(1))
+    with pytest.raises(Stop):
+        ledger_server.watch_ledgers()
+    assert replayed == [] and capsys.readouterr().err.count("unrelayed replay: disk gone") == 2
+
+
+def stop():
+    raise Stop
 
 
 def test_each_operator_write_trimmed_before_its_relay_leaves_one_notice_for_the_operator(outage, monkeypatch):
@@ -319,3 +350,24 @@ def test_each_operator_write_trimmed_before_its_relay_leaves_one_notice_for_the_
     notices = [row["text"] for row in state.get("notifications", []) if "left the ledger history" in row["text"]]
     assert len(notices) == len(set(notices)) == 2 and ledger_server.unrelayed() == {}
     assert len(mentions(outage.texts(BOSS.seat), "use the queue")) == 1
+
+
+def test_a_journal_an_older_server_left_in_its_own_file_is_held_once_and_the_file_removed(monkeypatch, tmp_path):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path))
+    legacy = tmp_path / ledger_server.UNRELAYED
+    legacy.write_text('{"relay": {"%s": [3, 5]}, "alerts": {"%s": [4]}}' % (SLUG, SLUG))
+    ledger_server.adopt_unrelayed()
+    assert not legacy.exists()
+    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3, 5]}, ledger_server.ALERTS: {SLUG: [4]}}
+    ledger_server.adopt_unrelayed()
+    assert ledger_server.unrelayed() == {ledger_server.RELAY: {SLUG: [3, 5]}, ledger_server.ALERTS: {SLUG: [4]}}
+
+
+@pytest.mark.parametrize(
+    "text", ["not json", "[3]", '{"relay": []}', '{"relay": {"s": "x"}}', '{"relay": {"s": ["x"]}}']
+)
+def test_an_unreadable_or_foreign_journal_file_holds_nothing(monkeypatch, tmp_path, text):
+    monkeypatch.setattr("hooks.config.AGENTIHOOKS_HOME", str(tmp_path))
+    (tmp_path / ledger_server.UNRELAYED).write_text(text)
+    ledger_server.adopt_unrelayed()
+    assert ledger_server.unrelayed() == {}

@@ -1,0 +1,6 @@
+{
+  "scripts/hive/launch.py:scripts.hive.launch.x\u01c1HiveLaunch\u01c1select__mutmut_18:5950ee598ba9a97487b3568f9d76b2dfe5375525cc53dd923de8d0da3fb90e68": {
+    "reader": "/root/standards",
+    "reason": "On successful selection the reason is empty, so observe skips lane comparisons and deletes only the task wait. Passing None for lane changes neither Redis state nor the returned Selection."
+  }
+}

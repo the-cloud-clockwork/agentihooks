@@ -1,0 +1,51 @@
+name: GitHub access audit
+
+on:
+  push:
+    branches: [dev]
+  schedule:
+    - cron: "17 3 * * 1"
+  workflow_call:
+    secrets:
+      TCC_CI_CLIENT_ID:
+        required: true
+      TCC_CI_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: github-access-audit
+  cancel-in-progress: false
+
+jobs:
+  read-back:
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/dev' || (github.event_name == 'schedule' && github.ref_name == github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Mint the TCC Main CI audit token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          permission-actions: read
+          permission-contents: read
+          permission-administration: read
+          permission-organization-administration: read
+          permission-members: read
+          permission-organization-self-hosted-runners: read
+
+      - name: Read effective access controls
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          [[ -n "$GH_TOKEN" ]] || { echo '::error::The app audit token is unavailable'; exit 1; }
+          bash scripts/github_access.sh check

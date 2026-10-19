@@ -10,8 +10,6 @@ from scripts.swarm_v2.runtime import codex
 from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def storage(tmp_path, monkeypatch):
@@ -67,6 +65,22 @@ def test_legacy_admission_replaces_the_predecessor_and_records_process_identity(
     assert admitted.runtime_target == {"process_namespace": "namespace", "pid": 123, "pid_start": 456}
     assert storage.execution_occupants("sw")[agent.seat] == admitted
     assert retired == []
+
+
+def test_reopening_a_managed_viewer_records_its_new_pane_on_the_execution(storage, monkeypatch):
+    from scripts.codex_session import attach
+    from scripts.swarm import live_binding
+
+    managed = replace(legacy_agent(storage), transport="app_server", pane_id="w1:p1")
+    admitted = storage.start_execution("sw", managed)
+    record = SimpleNamespace(state=attach.CONNECTED, thread_id="thread-1", endpoint_ref="unix:///run/codex.sock")
+    monkeypatch.setattr(live_binding, "transport", lambda store, agent: record)
+    storage.put_agent("sw", replace(admitted, state="idle", idle_ticks=3))
+    attach.reopen(storage, "sw", admitted, lambda title, argv: SimpleNamespace(pane_id="w2:p7"), "codex")
+    assert storage.execution_occupants("sw")[admitted.seat] == replace(
+        admitted, state="idle", idle_ticks=3, pane_id="w2:p7"
+    )
+    assert [(agent.name, agent.pane_id) for agent in storage.agents("sw")] == [(admitted.name, "w2:p7")]
 
 
 @pytest.mark.parametrize(

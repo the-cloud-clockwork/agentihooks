@@ -32,6 +32,8 @@ def test_the_server_and_the_swarm_share_one_list_of_code_folders():
         "doctor",
         "gates",
         "hive",
+        "codex_session",
+        "scheduler",
         "hooks",
     ]
 
@@ -92,7 +94,13 @@ def test_serve_records_the_code_it_loaded_beside_its_pid_file(monkeypatch, tmp_p
     recorded = []
 
     class Server:
-        def __init__(self, *args):
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def server_bind(self):
+            pass
+
+        def server_activate(self):
             pass
 
         def serve_forever(self):

@@ -10,7 +10,10 @@ if TYPE_CHECKING:
 SCHEMA_VERSION = 1
 TRANSPORT = "codex_app_server"
 STARTING, CONNECTED, FAILED, EXITED, DEGRADED = "starting", "connected", "failed", "exited", "degraded"
+STOOD_DOWN = "stood_down"
 RECORDS, ENDPOINTS, OPENINGS = "codex-transport", "codex-endpoints", "codex-openings"
+VIEWERS = "codex-viewers"
+PUBLISHING = "execution-publishing"
 IDENTITY = ("execution_id", "execution_generation", "seat", "agent_name", "task_id", "endpoint_ref", "transport")
 
 
@@ -97,9 +100,34 @@ class BindingStore:
         self.redis.hset(self.store.key(slug, RECORDS), record.execution_id, json.dumps(asdict(record)))
 
     def release(self, slug: str, record: TransportRecord) -> None:
+        from scripts.inbox.receipts import transact
+
         endpoints = self.store.key(slug, ENDPOINTS)
-        if self.redis.hget(endpoints, record.endpoint_ref) == record.execution_id:
-            self.redis.hdel(endpoints, record.endpoint_ref)
+        publishing = self.store.key(slug, PUBLISHING)
+
+        def release(pipe):
+            pipe.watch(endpoints, publishing, self.store.key(slug, RECORDS))
+            endpoint = pipe.hget(endpoints, record.endpoint_ref)
+            held = pipe.hget(publishing, record.seat)
+            current = self.get(slug, record.execution_id)
+            pipe.multi()
+            if endpoint == record.execution_id:
+                pipe.hdel(endpoints, record.endpoint_ref)
+            if held == record.execution_id and current.state in {EXITED, FAILED}:
+                pipe.hdel(publishing, record.seat)
+
+        transact(self.redis, release)
 
     def claim_opening(self, slug: str, execution_id: str, at: int) -> bool:
         return bool(self.redis.hsetnx(self.store.key(slug, OPENINGS), execution_id, at))
+
+    def add_viewer(self, slug: str, execution_id: str, pane_id: str, terminal_id: str) -> None:
+        self.redis.hset(self.store.key(slug, VIEWERS), pane_id, json.dumps([execution_id, terminal_id]))
+
+    def viewers(self, slug: str, execution_id: str) -> dict[str, str]:
+        rows = {pane: json.loads(raw) for pane, raw in self.redis.hgetall(self.store.key(slug, VIEWERS)).items()}
+        return {pane: terminal for pane, (owner, terminal) in sorted(rows.items()) if owner == execution_id}
+
+    def forget_viewers(self, slug: str, panes: list[str]) -> None:
+        if panes:
+            self.redis.hdel(self.store.key(slug, VIEWERS), *panes)

@@ -6,6 +6,7 @@ import select
 import subprocess
 import sys
 import uuid
+from types import SimpleNamespace
 from unittest.mock import patch
 
 import pytest
@@ -25,8 +26,6 @@ from tests.swarm_ledger.test_ledger_authority import (
     send,
 )
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 authority_live = _authority_live
 REPEAT = "Publish the package to PyPI from the main branch"
@@ -64,7 +63,7 @@ def live(authority_live, monkeypatch):
         ],
     }
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     state, _ = core.sync(SLUG)
     first, second = (phase["id"] for phase in state["phases"])
     seed = [
@@ -279,15 +278,115 @@ def test_a_timeout_error_inside_the_check_is_named_not_counted_as_slow(live, mon
     )
 
 
-def test_a_refused_repeat_still_needs_a_current_revision(live, monkeypatch):
+def test_a_repeat_is_refused_whatever_tasks_landed_since_the_list_was_read(live, monkeypatch):
     stale = guards(live)
     core.sync(SLUG, ops=[task("t8", "Rename the ledger page title", live["phases"][1])])
     judge = judged(monkeypatch, Judge(yes={"t1"}))
     body = {"operation_id": uuid.uuid4().hex, "ops": [task("t9", REPEAT, live["phases"][0])], "guards": stale}
     headers = {"X-Ledger-Token": live["admin"], "Content-Type": "application/json"}
     status, data, _ = send(live, "POST", f"/api/v1/ledgers/{SLUG}/operations", json.dumps(body).encode(), **headers)
-    assert status == 409 and json.loads(data)["error"]["code"] == "revision_conflict"
+    assert status == 200 and OPEN_REFUSAL in json.loads(data)["_meta"]["warnings"]
     assert judge.asked == ["ledger-duplicate"] and stored("t9") is None
+
+
+class Inner:
+    def __init__(self, accepted=True):
+        self.applied, self.accepted = [], accepted
+
+    def apply(self, doc, op, ctx, apply_op):
+        self.applied.append((op["id"], apply_op))
+        return self.accepted
+
+
+def gate_for(screen, accepted=True):
+    return ledger_task_duplicates.Gate(screen, Inner(accepted))
+
+
+def test_the_screen_remembers_the_tasks_it_compared_and_the_adds_it_screened(monkeypatch):
+    monkeypatch.setattr(ledger_task_duplicates, "find", lambda doc, adds: [None] * len(adds))
+    doc = {"tasks": [{"id": "t1"}, {"id": "t2"}]}
+    ops = [task("t9", REPEAT, "p1"), {"op": "task_update", "id": "u", "by": "swarm", "item": "tasks/t1"}]
+    assert ledger_task_duplicates.screen(doc, ops) == ledger_task_duplicates.Screen(
+        {}, {}, frozenset({"t1", "t2", "t9"})
+    )
+    assert ledger_task_duplicates.screen(doc, ops[1:]) == ledger_task_duplicates.Screen()
+    assert ledger_task_duplicates.screen({}, ops).seen == frozenset({"t9"})
+
+
+def test_an_add_names_the_tasks_that_landed_while_its_check_ran():
+    gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset({"t1", "t9"})))
+    add = task("t9", REPEAT, "p1")
+    add_id = add["id"]
+    doc = {"tasks": [{"id": "t1", "title": REPEAT}, {"id": "t4", "title": "Other"}, {"id": "t5", "title": "More"}]}
+    assert gate.apply(doc, add, None, "apply") is True
+    landed = "the duplicate check did not compare task t9 with t4, t5, added while it ran, so check them for repeats"
+    assert gate.screen.warnings == {add_id: landed}
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
+@pytest.mark.parametrize(
+    "screen,fields",
+    [
+        (ledger_task_duplicates.Screen(seen=frozenset({"t1", "t9"})), {}),
+        (ledger_task_duplicates.Screen(seen=frozenset({"t9"})), {"not_duplicate": "a different change"}),
+        (ledger_task_duplicates.Screen(warnings={"w": "unchecked"}, seen=frozenset({"t9"})), {"id": "w"}),
+    ],
+)
+def test_an_add_is_not_flagged_when_nothing_landed_it_was_not_screened_or_already_warned(screen, fields):
+    gate = gate_for(screen)
+    before = dict(screen.warnings)
+    add = {**task("t9", REPEAT, "p1"), **fields}
+    gate.apply({"tasks": [{"id": "t1", "title": "Other"}]}, add, None, "apply")
+    assert screen.warnings == before
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
+def test_an_add_the_locked_apply_refuses_is_not_flagged():
+    gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset({"t9"})), accepted=False)
+    add = task("t9", REPEAT, "p1", depends_on=["t404"])
+    assert gate.apply({"tasks": [{"id": "t4", "title": "Other"}]}, add, None, "apply") is False
+    assert gate.screen.warnings == {}
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
+def test_an_add_repeating_a_title_that_landed_during_its_check_is_refused():
+    gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset({"t9"})), accepted=False)
+    add = task("t9", REPEAT, "p1")
+    landed = {"id": "t4", "title": f"  {REPEAT.upper()} "}
+    assert gate.apply({"tasks": [landed]}, add, None, "apply") is False
+    (applied_id, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
+    assert applied_id == add["id"] and refuse({}, add, ctx) is False
+    assert ctx.refused == [
+        f'task t9 repeats task t4 "{landed["title"]}", added while its duplicate check ran. '
+        'If it is a different change, add it with --not-duplicate "<why it differs>"'
+    ]
+
+
+@pytest.mark.parametrize(
+    "seen,fields",
+    [({"t9", "t4"}, {}), ({"t9"}, {"not_duplicate": "a different change"}), ({"t9"}, {"title": REPEAT + " now"})],
+)
+def test_an_add_is_not_refused_for_a_compared_task_an_override_or_another_title(seen, fields):
+    gate = gate_for(ledger_task_duplicates.Screen(seen=frozenset(seen)))
+    add = {**task("t9", REPEAT, "p1"), **fields}
+    gate.apply({"tasks": [{"id": "t4", "title": REPEAT}]}, add, None, "apply")
+    assert gate.inner.applied == [(add["id"], "apply")]
+
+
+def test_a_refused_add_is_not_flagged_and_gets_the_refusal():
+    add = task("t9", REPEAT, "p1")
+    gate = gate_for(ledger_task_duplicates.Screen(refused={add["id"]: "repeat"}, seen=frozenset({"t9"})), False)
+    assert gate.apply({"tasks": [{"id": "t4", "title": REPEAT}]}, add, None, "apply") is False
+    assert gate.screen.warnings == {}
+    (applied_id, refuse), ctx = gate.inner.applied[0], SimpleNamespace(refused=[])
+    assert applied_id == add["id"] and refuse({}, add, ctx) is False and ctx.refused == ["repeat"]
+
+
+def test_the_cli_prints_the_warning_when_tasks_landed_during_the_check(monkeypatch, capsys):
+    warning = ledger_task_duplicates.CONCURRENT.format(new="t9", ids="t4")
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: {"applied": ["x"], "_meta": {"warnings": [warning]}})
+    ledger.send(SimpleNamespace(slug=SLUG, name=MASTER), "task_add", task="t9", title=REPEAT, lane="eng")
+    assert capsys.readouterr().err.strip() == warning
 
 
 def test_a_plan_id_from_any_writer_but_the_tick_is_checked(live, monkeypatch):

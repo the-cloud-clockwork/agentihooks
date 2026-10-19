@@ -77,7 +77,7 @@ def test_rule_for_ignores_a_registered_name_without_a_code_rule(definition_home,
 def test_the_packaged_intent_definitions_resolve_the_intent_rule():
     from scripts.gates import intent
 
-    for name in ("intent-check", "intent-check-tests-first"):
+    for name in ("intent-check", "intent-check-plan", "intent-check-tests-first"):
         assert code_rules.rule_for(definitions.load(name)) is intent.RULE
 
 

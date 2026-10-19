@@ -1,0 +1,104 @@
+name: Promote
+
+on:
+  workflow_call:
+    secrets:
+      TCC_CI_CLIENT_ID:
+        required: true
+      TCC_CI_APP_PRIVATE_KEY:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  promote:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/dev'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: release
+    concurrency:
+      group: release-version
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Mint the promotion App token
+        id: app-token
+        uses: actions/create-github-app-token@v3.2.0
+        with:
+          client-id: ${{ secrets.TCC_CI_CLIENT_ID }}
+          private-key: ${{ secrets.TCC_CI_APP_PRIVATE_KEY }}
+          repositories: ${{ github.event.repository.name }}
+          permission-metadata: read
+          permission-actions: read
+          permission-contents: write
+          permission-pull-requests: write
+          permission-workflows: write
+
+      - name: Squash the graded tree snapshot into main
+        id: promote
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const promote = require('./.github/scripts/promote.cjs');
+            await promote({ github, context, core });
+
+      - name: Check out the promoted commit for release
+        if: steps.promote.outputs.main != ''
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.promote.outputs.main }}
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - uses: actions/setup-python@v5
+        if: steps.promote.outputs.main != ''
+        with:
+          python-version: '3.12'
+
+      - name: Compute the patch release or reuse its tree tag
+        id: version
+        if: steps.promote.outputs.main != ''
+        env:
+          BUMP: patch
+          REUSE_TREE: 'true'
+        run: bash scripts/ci_release.sh version
+
+      - name: Tag and verify the promoted package
+        if: steps.promote.outputs.main != '' && steps.version.outputs.existing != 'true'
+        env:
+          RELEASE_SHA: ${{ steps.promote.outputs.main }}
+          NEXT: ${{ steps.version.outputs.next }}
+        run: |
+          bash scripts/ci_release.sh tag "$RELEASE_SHA" "$NEXT"
+          bash scripts/ci_release.sh verify "$RELEASE_SHA" "$NEXT"
+          git push origin "refs/tags/v$NEXT"
+
+      - name: Create the release with generated notes
+        if: steps.promote.outputs.main != ''
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          NEXT: ${{ steps.version.outputs.next }}
+          RELEASE_SHA: ${{ steps.promote.outputs.main }}
+        run: |
+          if ! gh release view "v$NEXT" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            bash scripts/ci_release.sh notes "$RELEASE_SHA" "$NEXT" "$RUNNER_TEMP/notes.md"
+            gh release create "v$NEXT" --repo "$GITHUB_REPOSITORY" --title "v$NEXT" --notes-file "$RUNNER_TEMP/notes.md" --generate-notes --latest --verify-tag
+          fi
+
+      - name: Close abandoned promotion pull requests
+        if: "!cancelled() && steps.app-token.outcome == 'success'"
+        uses: actions/github-script@v7
+        env:
+          PROMOTION_APP: ${{ steps.app-token.outputs.app-slug }}
+        with:
+          github-token: ${{ steps.app-token.outputs.token }}
+          script: |
+            const { closeAbandoned } = require('./.github/scripts/promote.cjs');
+            await closeAbandoned({ github, context, core, app: process.env.PROMOTION_APP, deadline: Date.now() + 180000 });

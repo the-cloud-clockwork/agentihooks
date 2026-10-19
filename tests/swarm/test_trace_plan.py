@@ -10,8 +10,6 @@ from scripts.gates import Who
 from scripts.gates import log as gate_log
 from scripts.swarm import trace_plan
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DOGHOUSE = (
     "# Plan\n\n"
     "Pieces of the doghouse task.\n"
@@ -115,9 +113,9 @@ def test_parse_refuses_a_piece_the_ledger_would_refuse_as_a_follow_up():
     assert "file name or path" in str(refused.value)
 
 
-def test_parse_refuses_a_task_id_the_ledger_would_refuse_in_a_follow_up():
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.parse("- a light | a | b", "my_task")
+@pytest.mark.parametrize("task_id", ["my_task", "promo-38842603017-0"])
+def test_parse_accepts_task_identifiers_the_ledger_would_refuse_in_prose(task_id):
+    assert trace_plan.parse("- a light | a | b", task_id) == [trace_plan.Piece("a light", ("a",), "b")]
 
 
 def test_parse_names_every_problem_of_a_piece():
@@ -133,8 +131,11 @@ def test_parse_caps_the_number_of_pieces():
         trace_plan.parse(allowed + "- one more | a | b\n", "t1")
 
 
-def test_followup_text_names_the_task_and_the_piece():
-    assert trace_plan.followup_text("t1", "a generator") == "Cut from the plan of task t1: a generator"
+@pytest.mark.parametrize("task_id", ["t1", "promo-38842603017-0"])
+def test_followup_text_keeps_the_piece_without_the_task_identifier(task_id):
+    text = trace_plan.followup_text(task_id, "a generator")
+    assert text == "Cut from the plan: a generator"
+    assert trace_plan.ledger_comments.problems(text, "item") == []
 
 
 def test_plan_hash_changes_with_any_field_and_ignores_nothing():
@@ -163,10 +164,125 @@ def test_intent_reads_project_phase_and_task():
         "task": "Doghouse",
         "task intent": "A house for the dog.",
         "task ids": ["t0", "t1"],
+        "scope authorizations": [],
     }
-    blank = dict.fromkeys(("project intent", "phase", "phase intent", "task", "task intent"), "")
+    blank = {
+        **dict.fromkeys(("project intent", "phase", "phase intent", "task", "task intent"), ""),
+        "scope authorizations": [],
+    }
     assert trace_plan.intent({}, "t1") == {**blank, "task ids": []}
     assert trace_plan.intent(doc, "t9") == {**blank, "project intent": "Keep the dog warm.", "task ids": ["t0", "t1"]}
+
+
+AUTHORIZED = {"id": "c-41a905ae9d", "by": "master@1-0", "text": "In scope: remove the obsolete allowance entries"}
+
+
+def test_intent_carries_the_scope_authorizations_the_master_or_operator_recorded_on_the_task():
+    relay = {
+        "id": "relay-80db2c4f89",
+        "by": "operator",
+        "text": "Approved: a dog bed too.",
+        "relayed_by": "master@1-0",
+        "quote": "a dog bed too",
+    }
+    comments = [
+        {"id": "c-1", "by": "operator", "text": "approved, set a condition"},
+        {"id": "c-5", "by": "operator", "text": "In scope: a water bowl"},
+        relay,
+        AUTHORIZED,
+        {"id": "c-2", "by": "master@1-0", "text": "Master proof: the walls stand."},
+        {"id": "c-3", "by": "engineer@1-1", "text": "In scope: a diesel generator"},
+        {"id": "c-4", "by": "master@1-0", "text": "  in scope: the roof paint"},
+        {"id": "c-6", "by": "master@1-0", "text": "In scope: a dog door", "deleted": True},
+    ]
+    doc = {"tasks": [{"id": "t1", "description": "A house for the dog.", "comments": comments}]}
+    assert trace_plan.intent(doc, "t1")["scope authorizations"] == [
+        {"id": "c-5", "by": "operator", "text": "In scope: a water bowl"},
+        {"id": "relay-80db2c4f89", "by": "operator", "text": "Approved: a dog bed too."},
+        AUTHORIZED,
+        {"id": "c-4", "by": "master@1-0", "text": "  in scope: the roof paint"},
+    ]
+
+
+def test_intent_keeps_the_latest_five_scope_authorizations():
+    comments = [{"id": f"c-{n}", "by": "operator", "text": f"In scope: piece {n}"} for n in range(7)]
+    doc = {"tasks": [{"id": "t1", "comments": comments}]}
+    assert [a["id"] for a in trace_plan.intent(doc, "t1")["scope authorizations"]] == [f"c-{n}" for n in range(2, 7)]
+
+
+def covered(monkeypatch, *p_yes, covers=(), **kwargs):
+    found = answers(*p_yes, **kwargs) | {key: needed(p) for key, p in covers}
+    fake = Recorder(found)
+    monkeypatch.setattr(trace_plan, "decide", fake)
+    return fake
+
+
+SECOND = {"id": "relay-80db2c4f89", "by": "operator", "text": "Approved: a dog bed too."}
+
+
+def test_a_piece_the_description_omits_is_kept_by_the_authorization_that_covers_it(monkeypatch):
+    covers = [("covers_0_0", 0.9), ("covers_1_0", 0.0), ("covers_2_0", 0.1)]
+    fake = covered(monkeypatch, 0.0, 0.9, 0.0, covers=covers)
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    pieces = [
+        piece("drop the obsolete allowance entries"),
+        piece("walls and roof"),
+        piece("a diesel generator", why="the master authorized it in c-41a905ae9d"),
+    ]
+    record = trace_plan.trace(pieces, state, None)
+    [(sent, questions, _)] = fake.calls
+    assert sent["scope authorizations"] == [AUTHORIZED]
+    assert list(questions) == ["piece_0", "piece_1", "piece_2", "covers_0_0", "covers_1_0", "covers_2_0", "size"]
+    assert questions["covers_0_0"].instructions == (
+        "Does scope authorization c-41a905ae9d, recorded on the task by its master or operator, "
+        "cover piece 1, drop the obsolete allowance entries?"
+    )
+    assert record["verdict"] == "pass"
+    assert [row["kept"] for row in record["pieces"]] == [True, True, False]
+    assert record["pieces"][0]["authorized"] == "c-41a905ae9d"
+    assert "authorized" not in record["pieces"][1] and "authorized" not in record["pieces"][2]
+    assert record["authorizations"] == ["c-41a905ae9d"]
+
+
+def test_the_first_covering_authorization_is_named(monkeypatch):
+    covered(monkeypatch, 0.0, covers=[("covers_0_0", 0.69), ("covers_0_1", 0.7)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED, SECOND]}
+    record = trace_plan.trace([piece("a dog bed")], state, None)
+    assert record["pieces"][0]["kept"] is True
+    assert record["pieces"][0]["authorized"] == "relay-80db2c4f89"
+
+
+def test_a_clearance_piece_asks_no_coverage_question(monkeypatch):
+    fake = covered(monkeypatch, 0.0, 0.9, covers=[("covers_1_0", 0.0)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    trace_plan.trace([piece("append the rulings", "mutation-cleared.txt"), piece("b")], state, None)
+    [(_, questions, _)] = fake.calls
+    assert list(questions) == ["piece_0", "piece_1", "covers_1_0", "size"]
+
+
+def test_authorized_pieces_never_count_as_cut_toward_a_failed_plan(monkeypatch):
+    covers = [("covers_0_0", 0.9), ("covers_1_0", 0.0), ("covers_2_0", 0.0)]
+    covered(monkeypatch, 0.0, 0.0, 0.9, covers=covers)
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    assert trace_plan.trace([piece("a"), piece("b"), piece("c")], state, None)["verdict"] == "pass"
+    covered(monkeypatch, 0.0, 0.0, 0.9, covers=[(key, 0.0) for key, _ in covers])
+    assert trace_plan.trace([piece("a"), piece("b"), piece("c")], state, None)["verdict"] == "fail"
+
+
+def test_a_piece_appended_under_the_same_authorizations_is_traced_alone(monkeypatch):
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    covered(monkeypatch, 0.9, 0.0, covers=[("covers_0_0", 0.0), ("covers_1_0", 0.9)])
+    passed = trace_plan.trace([piece("a"), piece("b")], state, None)
+    fake = covered(monkeypatch, 0.9, score=None, start=2, covers=[("covers_2_0", 0.0)])
+    later = trace_plan.trace([piece("a"), piece("b"), piece("c")], state, passed)
+    [(_, questions, _)] = fake.calls
+    assert list(questions) == ["piece_2", "covers_2_0"]
+    assert later["pieces"][:2] == passed["pieces"] and later["pieces"][1]["authorized"] == "c-41a905ae9d"
+
+
+def test_a_trace_without_authorizations_records_none(ask):
+    ask(0.9)
+    assert "authorizations" not in trace_plan.trace([piece("a")], INTENT, None)
 
 
 # trace
@@ -197,7 +313,7 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         ],
     }
     assert list(questions) == ["piece_0", "piece_1", "piece_2", "size"]
-    assert questions["piece_2"].instructions == "Is piece 3, a diesel generator, needed to deliver the task?"
+    assert questions["piece_2"].instructions.startswith("Is piece 3, a diesel generator, needed to deliver the task?")
     assert (questions["piece_2"].true, questions["piece_2"].false) == ("the task needs it", "it serves something else")
     assert questions["size"].instructions == (
         "How much source work is the plan? Judge only pieces with nonempty areas; "
@@ -238,6 +354,27 @@ def test_trace_asks_one_needed_question_per_piece_and_one_size_question(ask):
         "filed": [],
         "at": 5,
     }
+
+
+def test_scope_questions_keep_required_runner_registration_without_allowing_unrelated_workflows(ask):
+    fake = ask(0.95, 0.95, 0.05)
+    pieces = [
+        piece("Add the receipt replay CI job", ".github/workflows/proofs.yml"),
+        piece("Register the receipt replay job in the runner class table", "scripts/ci_runner_classes.py"),
+        piece("Change the release workflow schedule", ".github/workflows/release.yml"),
+    ]
+    state = {**INTENT, "task": "Add a CI job that replays receipt requests"}
+    record = trace_plan.trace(pieces, state, None, now_ms=5)
+    [(sent, questions, _)] = fake.calls
+    assert sent["task"] == state["task"]
+    for key in ("piece_0", "piece_1", "piece_2"):
+        assert (
+            "Registering a CI job added by the task in the runner class table is required"
+            in questions[key].instructions
+        )
+        assert "Unrelated workflow edits remain out of scope" in questions[key].instructions
+    assert [row["kept"] for row in record["pieces"]] == [True, True, False]
+    assert record["verdict"] == "pass"
 
 
 @pytest.mark.parametrize(
@@ -518,7 +655,7 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     ask(0.9, 0.8, 0.1)
     record, block = run(folder, ledger, home)
     assert (block, record["at"]) == (False, 11)
-    assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
     assert record["filed"] == ["a diesel generator | power/generator | it powers the light"]
     assert json.loads((folder / "plan-verdict.json").read_text()) == record
     [row] = rows(home)
@@ -533,8 +670,53 @@ def test_run_files_each_cut_piece_once_and_writes_the_verdict(ask, tmp_path):
     fake = ask(0.9, score=None, start=3)
     record, _ = run(folder, ledger, home)
     assert len(fake.calls) == 1
-    assert ledger.followups == ["Cut from the plan of task t1: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
     assert len(record["pieces"]) == 4 and len(rows(home)) == 1
+
+
+def test_run_files_no_cut_for_a_piece_the_master_authorized_outside_the_description(monkeypatch, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(folder)
+    covered(monkeypatch, 0.9, 0.8, 0.0, covers=[("covers_0_0", 0.0), ("covers_1_0", 0.0), ("covers_2_0", 0.8)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    record, block = trace_plan.run(folder, state, ledger, WHO, "enforce", home=home, now_ms=11)
+    assert (block, record["verdict"], record["filed"]) == (False, "pass", [])
+    assert ledger.followups == [] and rows(home) == []
+    assert record["pieces"][2] == {
+        "what": "a diesel generator",
+        "areas": ["power/generator"],
+        "why": "it powers the light",
+        "probability": 0.0,
+        "kept": True,
+        "authorized": "c-41a905ae9d",
+    }
+    assert trace_plan.report("t1", record, block)["authorized"] == [
+        {"what": "a diesel generator", "authorization": "c-41a905ae9d"}
+    ]
+
+
+def test_a_new_authorization_retraces_an_unchanged_plan(monkeypatch, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(folder)
+    covered(monkeypatch, 0.9, 0.8, 0.0)
+    run(folder, ledger, home)
+    fake = covered(monkeypatch, 0.9, 0.8, 0.0, covers=[("covers_0_0", 0.0), ("covers_1_0", 0.0), ("covers_2_0", 0.8)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    record, _ = trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=12)
+    assert len(fake.calls) == 1 and [row["kept"] for row in record["pieces"]] == [True, True, True]
+    assert trace_plan.run(folder, state, ledger, WHO, "observe", home=home, now_ms=13)[0] == record
+    assert len(fake.calls) == 1
+
+
+def test_a_retrace_for_a_new_authorization_counts_no_new_failed_plan(monkeypatch, tmp_path):
+    folder, home, ledger = tmp_path / "t1", tmp_path / "home", Ledger()
+    write_plan(folder)
+    covered(monkeypatch, 0.0, 0.0, 0.9)
+    assert run(folder, ledger, home, mode="enforce")[0]["failures"] == 1
+    covered(monkeypatch, 0.0, 0.0, 0.9, covers=[(f"covers_{n}_0", 0.0) for n in range(3)])
+    state = {**INTENT, "scope authorizations": [AUTHORIZED]}
+    record, block = trace_plan.run(folder, state, ledger, WHO, "enforce", home=home, now_ms=12)
+    assert (record["verdict"], record["failures"], block) == ("fail", 1, False)
 
 
 def test_run_saves_the_filed_cut_before_its_follow_up(ask, tmp_path):
@@ -624,17 +806,39 @@ def test_run_needs_a_plan_file(tmp_path):
     assert str(refused.value) == f"write the plan first: {tmp_path / 't1' / 'plan.md'}, {trace_plan.FORMAT}"
 
 
-def test_run_checks_follow_ups_against_its_own_task(ask, tmp_path):
+@pytest.mark.parametrize(("mode", "kind"), [("enforce", "deny"), ("observe", "observe"), ("off", None)])
+@pytest.mark.parametrize(
+    ("text", "refusal"),
+    [
+        (None, "write the plan first"),
+        ("- a light\n", "plan line 1 is not a piece"),
+        ("- fix Run 38842603017 failed | a | b\n", "plan line 1: the ledger would refuse its follow up"),
+        ("prose only\n", "the plan holds no pieces"),
+    ],
+)
+def test_run_logs_every_refusal_by_its_mode_before_raising(ask, tmp_path, mode, kind, text, refusal):
+    folder, home = tmp_path / "t1", tmp_path / "home"
+    if text is not None:
+        write_plan(folder, text)
+    fake = ask(0.9)
+    with pytest.raises(ValueError) as refused:
+        trace_plan.run(folder, INTENT, Ledger(), WHO, mode, home=home)
+    assert str(refused.value).startswith(refusal) and fake.calls == []
+    expected = [("trace-plan", kind, WHO.name, WHO.task, str(refused.value))] if kind else []
+    assert [(r["gate"], r["kind"], r["agent"], r["task"], r["reason"]) for r in rows(home)] == expected
+
+
+def test_run_accepts_a_task_identifier_the_ledger_would_refuse_in_prose(ask, tmp_path):
     folder = tmp_path / "t1"
     write_plan(folder, "- a light | a | b\n")
     fake = ask(0.9)
     who = Who(name="engineer@1-1", swarm="sw", task="my_task")
-    with pytest.raises(ValueError, match="^plan line 1: the ledger would refuse its follow up"):
-        trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
-    assert fake.calls == []
+    record, block = trace_plan.run(folder, INTENT, Ledger(), who, "observe", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert len(fake.calls) == 1
 
 
-@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause"])
+@pytest.mark.parametrize("task_id", ["fx-8be892c4", "fx-8be892c4-code", "fx-8be892c4-cause", "promo-38842603017-0"])
 def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, task_id):
     folder = tmp_path / "task"
     write_plan(folder)
@@ -648,13 +852,32 @@ def test_run_accepts_registered_doctor_task_and_files_cut_piece(ask, tmp_path, t
 
     class CheckedLedger(Ledger):
         def followup(self, slug, text):
-            trace_plan.ledger_comments.check(text, "item", task_ids=[task["id"] for task in doc["tasks"]])
+            trace_plan.ledger_comments.check(text, "item")
             super().followup(slug, text)
 
     ledger = CheckedLedger()
     record, block = trace_plan.run(folder, state, ledger, who, "observe", home=tmp_path / "home")
     assert record["verdict"] == "pass" and not block
-    assert ledger.followups == [f"Cut from the plan of task {task_id}: a diesel generator"]
+    assert ledger.followups == ["Cut from the plan: a diesel generator"]
+
+
+@pytest.mark.parametrize("task_id", ["fx-8be892c4-code", "promo-38842603017-0"])
+def test_run_accepts_registered_task_identifiers_in_piece_text(ask, tmp_path, task_id):
+    folder = tmp_path / "task"
+    write_plan(folder, f"- fix {task_id} | a | keep the task working\n")
+    ask(0.9)
+    state = {**INTENT, "task ids": [task_id]}
+    record, block = trace_plan.run(folder, state, Ledger(), WHO, "enforce", home=tmp_path / "home")
+    assert record["verdict"] == "pass" and not block
+    assert record["pieces"][0]["what"] == f"fix {task_id}"
+
+
+@pytest.mark.parametrize(
+    "text", ["Run 38842603017 failed", "promo-38842603017-1", "promo-38842603017-0 Run 38842603017 failed"]
+)
+def test_promotion_task_context_still_refuses_free_run_numbers(text):
+    found = trace_plan.ledger_comments.problems(text, "item", task_ids=["promo-38842603017-0"])
+    assert any("run or job id" in problem for problem in found)
 
 
 def test_run_reads_a_broken_verdict_file_as_no_verdict(ask, tmp_path):
@@ -678,6 +901,7 @@ def test_report_tells_the_agent_what_comes_next():
         "verdict": "pass",
         "kept": ["a"],
         "cut": ["b"],
+        "authorized": [],
         "reasons": [],
         "next": "edit only inside the kept pieces' areas; each cut piece is a ledger follow up",
     }

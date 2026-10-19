@@ -5,6 +5,8 @@ import re
 import sys
 from pathlib import Path
 
+from scripts import gh_config
+
 # A name outside this shape cannot be a shell variable, and a mistyped line can
 # put a secret in the name, so such a line is reported by position only.
 _VALID_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -232,7 +234,7 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
     _pass_keys: set[str] = set()
 
     # 1. Main .env first
-    blocked = set(_BRAIN_KEYS_FROM_KERNEL)
+    blocked = set(_BRAIN_KEYS_FROM_KERNEL) | {"SWARM_SECRET"}
     multiline = _parse_env_file(
         _home / ".env",
         override_file_owned=override_file_owned,
@@ -294,6 +296,9 @@ def _env_files_fingerprint() -> tuple:
 _load_user_env()
 _load_brain_env()
 _ENV_FINGERPRINT = _env_files_fingerprint()
+# The scripts package pin ran before the env files above could set XDG_CONFIG_HOME.
+gh_config.pin(os.environ)
+gh_config.persist(os.environ)
 
 
 def reload_brain_env(force: bool = False) -> dict:
@@ -412,6 +417,9 @@ LOG_USE_COLORS = _env_bool("LOG_USE_COLORS", "true")
 # Captures session digest and stores it via MemoryStore
 MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
 
+# The front door master of every swarm launches on the one claude ai master login
+MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
+
 # =============================================================================
 # SECRETS SCANNING MODE
 # =============================================================================
@@ -483,7 +491,10 @@ RETRY_BREAKER_TTL = int(os.getenv("RETRY_BREAKER_TTL", "3600"))
 KUBECTL_MUTATION_GUARD_ENABLED = _env_bool("KUBECTL_MUTATION_GUARD_ENABLED", "true")
 
 # Python in a linked worktree is edited through Serena (Development Manifesto §7).
-SERENA_EDIT_GUARD_ENABLED = _env_bool("SERENA_EDIT_GUARD_ENABLED", "true")
+# AGENTIHOOKS_SERENA=false is the one off switch for every session or machine: the
+# guard lets every edit through and injects no Serena directive. Unset or any other
+# value keeps it on.
+SERENA_EDIT_GUARD_ENABLED = os.getenv("AGENTIHOOKS_SERENA", "true") != "false"
 
 # =============================================================================
 # BRAIN ADAPTER
@@ -659,6 +670,8 @@ BROADCAST_MAX_PER_PROMPT: int = int(os.getenv("BROADCAST_MAX_PER_PROMPT", "8"))
 # envelope headroom.
 BROADCAST_MAX_BYTES_PRETOOL: int = int(os.getenv("BROADCAST_MAX_BYTES_PRETOOL", "0"))
 BROADCAST_MAX_BYTES_PROMPT: int = int(os.getenv("BROADCAST_MAX_BYTES_PROMPT", "0"))
+# Characters one Claude hook event may inject in total; 0 turns the budget off.
+HOOK_INJECTION_MAX_CHARS: int = int(os.getenv("HOOK_INJECTION_MAX_CHARS", "9000"))
 BROADCAST_PERSISTENT_THROTTLE = _env_bool("BROADCAST_PERSISTENT_THROTTLE", "true")
 BROADCAST_DELIVERY_STATE_FILE: str = os.getenv(
     "BROADCAST_DELIVERY_STATE_FILE",

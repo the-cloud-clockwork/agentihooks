@@ -1,16 +1,18 @@
 ARG BASE_IMAGE=public.ecr.aws/docker/library/python:3.12.12-slim-bookworm@sha256:2986c55feb36e6cae00fa1fefb454283e4b33f35e75ff8bdd123b134130be301
-FROM ${BASE_IMAGE} AS downloads
+FROM ${BASE_IMAGE} AS python-downloads
+COPY docker/swarm-node/requirements.lock /opt/swarm-node/
+RUN pip download --no-cache-dir --require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock
+
+FROM ${BASE_IMAGE} AS tool-downloads
 ARG TARGETARCH
 COPY docker/swarm-node/versions.lock docker/swarm-node/requirements.lock /opt/swarm-node/
 COPY scripts/swarm_v2/worker_image.py /opt/swarm-node/worker_image.py
 RUN mkdir -p /downloads/tools \
-    && pip download --no-cache-dir --require-hashes -d /downloads/pip -r /opt/swarm-node/requirements.lock \
     && python /opt/swarm-node/worker_image.py download --architecture "$TARGETARCH" --cache /downloads/tools
 
 FROM ${BASE_IMAGE} AS worker
 ARG BASE_IMAGE
 ARG TARGETARCH
-ARG SOURCE_REVISION=unknown
 ENV PATH=/opt/venv/bin:$PATH \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -28,11 +30,13 @@ RUN python /opt/swarm-node/worker_image.py validate --architecture "$TARGETARCH"
     && apt-get install -y --no-install-recommends $(python /opt/swarm-node/worker_image.py shell-packages) \
     && rm -r /var/lib/apt/lists/* \
     && rm -f /etc/ssh/ssh_host_*
-RUN --mount=type=bind,from=downloads,source=/downloads,target=/downloads \
+RUN --mount=type=bind,from=python-downloads,source=/downloads/pip,target=/downloads/pip \
+    --mount=type=bind,from=tool-downloads,source=/downloads/tools,target=/downloads/tools \
     python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --no-index --find-links /downloads/pip --require-hashes \
         -r /opt/swarm-node/requirements.lock \
-    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools
+    && python /opt/swarm-node/worker_image.py install --architecture "$TARGETARCH" --cache /downloads/tools \
+    && chmod -R a-w /opt/venv
 COPY pyproject.toml README.md ./
 COPY hooks/ hooks/
 COPY scripts/ scripts/
@@ -41,8 +45,10 @@ RUN SETUPTOOLS_SCM_PRETEND_VERSION_FOR_AGENTIHOOKS=0.0.0 pip install --no-cache-
 COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
 COPY profiles/ /opt/agentihooks/templates/
 COPY profiles/package/roles/ /opt/agentihooks/templates/
+ARG SOURCE_REVISION=unknown
 RUN python /opt/swarm-node/worker_image.py manifest --architecture "$TARGETARCH" --source-revision "$SOURCE_REVISION" \
-    && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node /opt/venv \
+    && chmod -R a-w /opt/agentihooks/templates /opt/swarm-node \
+    && find /opt/venv \! -type l -perm /222 -exec chmod a-w {} + \
     && chmod a+x /opt/swarm-node/entrypoint.sh /opt/swarm-node/ssh/start.sh \
     && groupadd --gid 10001 worker \
     && useradd --uid 10001 --gid worker --create-home worker \

@@ -1,0 +1,6 @@
+{
+  "hooks/context/prod_lockdown.py:hooks.context.prod_lockdown.x__production_operands__mutmut_26:e5955444b208ccfde85c0bf957982129b3781a89d03b9a7de68d41ea5d9e456d": {
+    "reader": "standards_reader",
+    "reason": "equivalent. Changing split maxsplit from one to two cannot change element zero, which alone is consumed."
+  }
+}

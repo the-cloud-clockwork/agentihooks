@@ -15,6 +15,7 @@ from scripts.gates.build import BuildGate
 from scripts.gates.claim_stop import ClaimStop
 from scripts.gates.identity import PinnedIdentity
 from scripts.gates.intent import IntentGate
+from scripts.gates.one_push import OnePush
 from scripts.gates.placement import PlacementGate
 from scripts.gates.prompts import PromptGuard
 from scripts.gates.push_stop import PushStop
@@ -38,6 +39,7 @@ GATES = {
         ClaimStop(),
         PushStop(),
         QuietClaim(),
+        OnePush(),
     )
 }
 HOST_GATES = {gate.name: gate for gate in (PlacementGate(), PromptGuard())}
@@ -62,8 +64,8 @@ def main(argv=None, stdin=None, environ=None, home=None):
     decision = _decide(gate, call, who, home, mode)
     if decision.allowed:
         return 0
-    if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home) or lift.agent_lifted(
-        who.swarm, who.name, gate.name, home
+    if lift.lifted(who.swarm, payload.get("session_id"), gate.name, home) or lift.held(
+        who.swarm, who.name, who.task, gate.name, home, command=call.command
     ):
         _record(who, log.Row.of(gate.name, "observe", who, call.tool, LIFTED + decision.reason), home)
         return 0

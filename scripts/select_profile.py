@@ -41,11 +41,20 @@ def prepare(
         agent, model or native_model or default_model, _effort(agent, effort or native_effort or default_effort)
     )
     revision = environ.get(BUNDLE_REVISION, "")
-    profiles.render(agent, name, overlays=overlays, bundle_revision=revision)
+    isolate = agent == "codex" and bool(environ.get("AGENTIHOOKS_SWARM"))
+    options = {"isolate": True} if isolate else {}
+    profiles.render(agent, name, overlays=overlays, bundle_revision=revision, **options)
     env = {"AGENTIHOOKS_PROFILE": name, profiles.CHANNELS: profiles.channels(name), OVERLAYS: ",".join(overlays)}
     env[BUNDLE_REVISION] = revision
     home = "CLAUDE_CONFIG_DIR" if agent == "claude" else "CODEX_HOME"
     env[home] = str(profiles.profile_dir(name, overlays) / agent)
+    if isolate and Path(env[home]).resolve() == profiles.operator_codex_home().resolve():
+        raise ValueError("swarm codex profile resolves to the operator Codex home")
+    if agent == "claude":
+        from scripts.inbox import channel
+
+        if channel.FLAG in remaining:
+            channel.register({**environ, **env})
     return env, [*flags, *remaining]
 
 

@@ -1,4 +1,5 @@
 import hashlib
+import json
 import os
 import subprocess
 import zipfile
@@ -30,32 +31,49 @@ def _run(step, cwd, bin_dir, **env):
     return subprocess.run(
         ["bash", "-e", "-c", step["run"]],
         cwd=cwd,
-        env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}", **env},
+        env={
+            **os.environ,
+            "PATH": f"{bin_dir}:{os.environ['PATH']}",
+            "GITHUB_WORKSPACE": str(_ROOT),
+            "GITHUB_EVENT_NAME": "pull_request",
+            **env,
+        },
         capture_output=True,
         text=True,
         timeout=30,
     )
 
 
-def _gate(tmp_path, statuses, gate="OK"):
+def _gate(tmp_path, statuses, gate="OK", message="", event="push"):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     (tmp_path / ".scannerwork").mkdir()
     (tmp_path / ".scannerwork/report-task.txt").write_text("ceTaskId=T1\ndashboardUrl=http://sonar/dash\n")
     (tmp_path / "statuses").write_text("\n".join(statuses) + "\n")
+    task = {"status": "STATUS", "analysisId": "A1", **({"errorMessage": message} if message else {})}
+    (tmp_path / "task.json").write_text(json.dumps({"task": task}))
     _tool(
         bin_dir,
         "curl",
         f'url="${{@: -1}}"; echo "$url" >> "{tmp_path}/urls"\n'
         'case "$url" in\n'
         f'  */ce/task?id=T1) s=$(head -n1 "{tmp_path}/statuses"); sed -i 1d "{tmp_path}/statuses"\n'
-        '    echo "{\\"task\\":{\\"status\\":\\"$s\\",\\"analysisId\\":\\"A1\\"}}" ;;\n'
+        f'    sed "s/STATUS/$s/" "{tmp_path}/task.json" ;;\n'
         f'  */qualitygates/project_status?analysisId=A1) echo \'{{"projectStatus":{{"status":"{gate}"}}}}\' ;;\n'
         "  *) exit 22 ;;\n"
         "esac",
     )
     _tool(bin_dir, "sleep", f'echo "$1" >> "{tmp_path}/sleeps"')
-    result = _run(_step("SonarQube Quality Gate"), tmp_path, bin_dir, SONAR_TOKEN="t")
+    output = tmp_path / "output"
+    output.write_text("")
+    result = _run(
+        _step("SonarQube Quality Gate"),
+        tmp_path,
+        bin_dir,
+        SONAR_TOKEN="t",
+        GITHUB_EVENT_NAME=event,
+        GITHUB_OUTPUT=str(output),
+    )
     sleeps = (tmp_path / "sleeps").read_text().split() if (tmp_path / "sleeps").exists() else []
     return result, sleeps
 
@@ -67,18 +85,62 @@ def test_the_quality_gate_is_polled_every_second_until_the_analysis_is_processed
     assert "Quality Gate has PASSED" in result.stdout
 
 
-@pytest.mark.parametrize(("statuses", "gate"), [(["SUCCESS"], "ERROR"), (["FAILED"], "OK"), (["CANCELED"], "OK")])
-def test_a_failed_gate_or_background_task_is_red(tmp_path, statuses, gate):
-    result, _ = _gate(tmp_path, statuses, gate)
+_OLDER = (
+    "Date of analysis cannot be older than the date of the last known analysis on this project. "
+    'Value: "2026-10-08T01:09:38+0000". Latest analysis: "2026-10-08T01:09:50+0000". '
+    "It's only possible to rebuild the past in a chronological order."
+)
+
+
+@pytest.mark.parametrize(
+    ("statuses", "gate", "message", "event"),
+    [
+        (["SUCCESS"], "ERROR", "", "push"),
+        (["FAILED"], "OK", "", "push"),
+        (["CANCELED"], "OK", "", "push"),
+        (["FAILED"], "OK", "Unrecoverable indexing failure", "push"),
+        (["CANCELED"], "OK", _OLDER, "push"),
+        (["FAILED"], "OK", _OLDER, "pull_request"),
+    ],
+)
+def test_a_failed_gate_or_background_task_is_red(tmp_path, statuses, gate, message, event):
+    result, _ = _gate(tmp_path, statuses, gate, message, event)
     assert result.returncode != 0
     assert "::error::" in result.stdout
+    assert (tmp_path / "output").read_text() == ""
+
+
+def test_a_passed_gate_names_the_analysis_that_grades_the_promoted_revision(tmp_path):
+    result, _ = _gate(tmp_path, ["SUCCESS"])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (tmp_path / "output").read_text() == "analysis=A1\n"
+
+
+def test_a_dev_push_analysis_sonar_refuses_as_older_ends_superseded_and_ungraded(tmp_path):
+    result, _ = _gate(tmp_path, ["FAILED"], message=_OLDER)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "::error::" not in result.stdout
+    assert "::notice::" in result.stdout
+    assert (tmp_path / "output").read_text() == "superseded=true\n"
+    assert not any("project_status" in url for url in (tmp_path / "urls").read_text().splitlines())
+
+
+def test_the_condition_hold_skips_a_superseded_analysis_and_only_the_gate_names_one():
+    hold = _step("Hold the Delivery L2 conditions")
+    assert hold["if"] == "always() && steps.proxy.outcome == 'success' && steps.gate.outputs.superseded != 'true'"
+    writers = [
+        step.get("name")
+        for step in _sonar()["steps"]
+        if "analysis=" in step.get("run", "") and "GITHUB_OUTPUT" in step.get("run", "")
+    ]
+    assert writers == ["SonarQube Quality Gate"]
 
 
 def test_the_gate_step_replaces_the_quality_gate_action():
     sonar = _sonar()
     assert not any("sonarqube-quality-gate-action" in step.get("uses", "") for step in sonar["steps"])
     gate = _step("SonarQube Quality Gate")
-    assert gate["if"] == "steps.current.outputs.superseded != 'true'"
+    assert "if" not in gate
     assert gate["timeout-minutes"] == 5
     assert not gate.get("continue-on-error")
 
@@ -90,7 +152,7 @@ def _scanner_zip(path):
         archive.writestr(info, '#!/usr/bin/env bash\necho "$0 $*" > "$SCAN_LOG"\n')
 
 
-def _scan(tmp_path, cached, partial=False, checksum=None):
+def _scan(tmp_path, cached, partial=False, checksum=None, node=""):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     tool_cache = tmp_path / "toolcache"
@@ -121,6 +183,7 @@ def _scan(tmp_path, cached, partial=False, checksum=None):
         SONAR_SCANNER_SHA256=checksum or hashlib.sha256(archive.read_bytes()).hexdigest(),
         ARGS="-Dsonar.pullrequest.key=7 -Dsonar.pullrequest.base=dev",
         SCAN_LOG=str(tmp_path / "scan"),
+        SONAR_NODE=node,
     )
     downloads = (tmp_path / "downloads").read_text() if (tmp_path / "downloads").exists() else ""
     return result, scanner, downloads
@@ -130,12 +193,22 @@ def test_a_restored_scanner_runs_without_a_download(tmp_path):
     result, scanner, downloads = _scan(tmp_path, cached=True)
     assert result.returncode == 0, result.stdout + result.stderr
     assert downloads == ""
+    quota = subprocess.run(
+        ["python", str(_ROOT / "scripts/ci_cpu_quota.py")], capture_output=True, text=True, check=True
+    ).stdout.strip()
     assert (tmp_path / "scan").read_text().split() == [
         f"{scanner}/bin/sonar-scanner",
         "-Dsonar.projectBaseDir=.",
+        f"-Dsonar.python.analysis.threads={quota}",
         "-Dsonar.pullrequest.key=7",
         "-Dsonar.pullrequest.base=dev",
     ]
+
+
+def test_the_scanner_heap_is_raised_and_its_pauses_logged():
+    opts = _step("SonarQube Scan")["env"]["SONAR_SCANNER_JAVA_OPTS"].split()
+    assert "-Xmx3g" in opts
+    assert any(opt.startswith("-Xlog:gc:file=") for opt in opts)
 
 
 def test_a_missing_scanner_is_downloaded_into_the_cached_path(tmp_path):
@@ -164,16 +237,20 @@ def test_the_pinned_checksum_tracks_the_scanner_version():
     assert env["SONAR_SCANNER_SHA256"] == "da9f4e64a3d555f08ce38b5469ebd91fe2b311af473f7001a5ee5c1fd58b004b"
 
 
-def test_the_node_runtime_has_its_own_cache_so_the_downloads_entry_keeps_its_version():
-    names = [step.get("name") for step in _sonar()["steps"]]
-    node = _step("Restore the SonarJS Node runtime")
-    assert node["uses"] == "actions/cache@v4"
-    assert node["with"]["path"] == "~/.sonar/js/node-runtime"
-    assert "${{ steps.proxy.outputs.version }}" in node["with"]["key"]
-    assert "if" not in node
-    assert names.index("Start Cloudflare Access proxy") < names.index("Restore the SonarJS Node runtime")
-    assert names.index("Restore the SonarJS Node runtime") < names.index("SonarQube Scan")
-    assert "node-runtime" not in _step("Restore Sonar downloads")["with"]["path"]
+def test_the_runner_image_node_is_handed_to_sonarjs(tmp_path):
+    node = tmp_path / "node"
+    node.write_text("#!/usr/bin/env bash\n")
+    node.chmod(0o755)
+    result, _, downloads = _scan(tmp_path, cached=True, node=str(node))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert downloads == ""
+    assert f"-Dsonar.nodejs.executable={node}" in (tmp_path / "scan").read_text().split()
+
+
+def test_a_runner_without_the_image_node_lets_sonarjs_use_its_own(tmp_path):
+    result, _, _ = _scan(tmp_path, cached=True, node=str(tmp_path / "missing"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "sonar.nodejs.executable" not in (tmp_path / "scan").read_text()
 
 
 def _merge_tree(tmp_path, combine_body):
@@ -189,7 +266,11 @@ def _merge_tree(tmp_path, combine_body):
 
 def _start_merge(tree, temp, bin_dir):
     output = temp / "output"
-    started = _run(_step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp), GITHUB_OUTPUT=str(output))
+    unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    shards = str(unit["strategy"]["matrix"]["shard"][-1])
+    started = _run(
+        _step("Merge shard coverage"), tree, bin_dir, RUNNER_TEMP=str(temp), GITHUB_OUTPUT=str(output), SHARDS=shards
+    )
     assert started.returncode == 0, started.stdout + started.stderr
     return output.read_text().strip().removeprefix("pid=")
 
@@ -207,7 +288,8 @@ def test_the_coverage_merge_runs_behind_the_setup_and_the_scan_waits_for_it(tmp_
     release.touch()
     waited = _wait_merge(tree, temp, bin_dir, pid)
     assert waited.returncode == 0, waited.stdout + waited.stderr
-    assert "merged --downloaded 8" in waited.stdout
+    unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
+    assert f"merged --downloaded {unit['strategy']['matrix']['shard'][-1]}" in waited.stdout
 
 
 def test_a_failed_background_merge_fails_the_wait(tmp_path):
@@ -232,7 +314,6 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
         "Download shard coverage",
         "Merge shard coverage",
         "Start Cloudflare Access proxy",
-        "Restore Sonar downloads",
         "Wait for the coverage merge",
         "SonarQube Scan",
         "Upload coverage and analysis evidence",
@@ -240,9 +321,9 @@ def test_setup_and_evidence_upload_overlap_existing_waits():
         "Hold the Delivery L2 conditions",
     ]
     assert [names.index(name) for name in order] == sorted(names.index(name) for name in order)
-    assert names.index("Check dev still points at this commit") < names.index("Download shard coverage")
+    assert "Check dev still points at this commit" not in names
     wait = _step("Wait for the coverage merge")
-    assert wait["if"] == "always() && steps.current.outputs.superseded != 'true'"
+    assert wait["if"] == "always() && needs.select.outputs.scope != 'none'"
     assert wait["timeout-minutes"] == 5
 
 
@@ -253,9 +334,9 @@ def test_sonar_evidence_does_not_upload_shard_databases_twice():
         "lcov.info",
         ".scannerwork/report-task.txt",
     ]
-    assert upload["if"] == "always() && steps.current.outputs.superseded != 'true'"
+    assert upload["if"] == "always()"
     assert upload["with"]["if-no-files-found"] == "error"
     unit = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]
     shards = next(step for step in unit["steps"] if step.get("name") == "Upload coverage")
-    assert shards["with"]["path"].splitlines() == [".coverage", "js-coverage/"]
+    assert shards["with"]["path"].splitlines() == [".coverage", "js-coverage/", "dep-inputs/", "reused-coverage/"]
     assert shards["with"]["include-hidden-files"] is True

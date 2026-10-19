@@ -94,13 +94,18 @@ method (the `Backend` protocol) that raises `BackendFailure` when it cannot answ
 | `AGENTIHOOKS_CLASSIFIER_URL` | none | LiteLLM base address; `/v1/decisions` is appended. Unset means the API is not tried |
 | `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY` | none | The LiteLLM key, read at call time and sent only in the Authorization header. Unset means the API is not tried |
 | `AGENTIHOOKS_CLASSIFIER_MODELS` | `liquid-d1,jev-1.13,pplx-decider-v1-27b` | Model order |
-| `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call |
+| `AGENTIHOOKS_CLASSIFIER_TIMEOUT_S` | `5` | Timeout per API call for an input up to 35,000 estimated tokens; a larger input gets one second per 7,000 tokens, capped at 30 seconds unless this value is higher |
 | `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` | `120` | How long a failed API stays marked down |
 | `AGENTIHOOKS_CLASSIFIER_FALLBACK_TIMEOUT_S` | `60` | Timeout per CLI fallback |
 | `AGENTIHOOKS_CLASSIFIER_LUNA_MODEL` | model catalog, then `gpt-6-luna` | Override the Codex fallback model |
 
 The key never appears in a log line, an exception text or the decision log. It comes
 from the shell (loaded from OpenBao), never from a bundle file.
+
+The swarm tick and the controller run outside an agent session, so at start they add
+each `AGENTIHOOKS_CLASSIFIER_*` name they lack from the installed Claude settings env,
+then, while the address or the key is still missing, from the operator's login shell,
+as the hooks of an agent session see them.
 
 ## Decision log and stats
 

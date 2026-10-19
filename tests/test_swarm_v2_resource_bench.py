@@ -231,7 +231,7 @@ def test_run_measures_each_child_count_and_repeat_in_a_fresh_workdir(tmp_path, m
     root = tmp_path / "work" / "nested"
     result = bench.run(path, root, generation=7, tools={"python": [sys.executable, "--version"]}, source="s1")
     assert result["suite"] == "fixture" and result["generation"] == 7 and result["source"] == "s1"
-    assert result["tools"] == {
+    assert {key: value for key, value in result["tools"].items() if not key.startswith("workload-command:")} == {
         "python": f"Python {sys.version.split()[0]}",
         "workload:memory": "1",
         "workload:probe": "2",
@@ -263,6 +263,35 @@ def test_run_measures_each_child_count_and_repeat_in_a_fresh_workdir(tmp_path, m
     assert "fake-token-value" not in json.dumps(result)
     assert list(root.iterdir()) == []
     bench.run(path, root, generation=8, tools={}, source="s2")
+
+
+@pytest.mark.parametrize("argument", ["literal", "children"])
+def test_changed_workload_argument_holds_promotion_without_a_version_bump(tmp_path, monkeypatch, argument):
+    fixed_host(monkeypatch)
+    workload = {
+        "name": "memory",
+        "class": "memory",
+        "version": "1",
+        "children": [1],
+        "command": ["{python}", "-c", "pass", "{children}", "16"],
+    }
+    path = suite(tmp_path, [workload])
+    monkeypatch.setattr(bench.sampling, "measure", lambda *args: {})
+    first = bench.run(path, tmp_path / "work", 1, {}, "first")
+    same = bench.run(path, tmp_path / "work", 2, {}, "same")
+    if argument == "literal":
+        workload["command"][-1] = "32"
+    else:
+        workload["children"] = [2]
+    suite(tmp_path, [workload])
+    changed = bench.run(path, tmp_path / "work", 2, {}, "changed")
+    assert first["tools"] == same["tools"]
+    assert first["tools"] != changed["tools"]
+    accepted, candidate = report_with(1, 100), report_with(2, 100)
+    accepted["tools"], candidate["tools"] = first["tools"], changed["tools"]
+    outcome = bench.profiles.promote(accepted, candidate, bench.profiles.Policy(), "")
+    assert outcome["decision"] == "requalify"
+    assert outcome["changes"]["tools_changed"]
 
 
 def test_run_stops_a_workload_at_its_timeout(tmp_path):
@@ -304,7 +333,7 @@ def test_cli_runs_reads_nodes_derives_and_renders(tmp_path):
     measured = json.loads(measurements.read_text())
     assert measurements.read_text() == json.dumps(measured, indent=2) + "\n"
     assert (measured["generation"], measured["source"]) == (3, "s3")
-    assert set(measured["tools"]) == {*bench.TOOLS, "workload:memory"}
+    assert set(measured["tools"]) == {*bench.TOOLS, "workload:memory", "workload-command:memory"}
     (files / "listing.json").write_text(json.dumps(NODE_LISTING))
     (files / "pods.json").write_text(json.dumps({"items": []}))
     nodes = files / "nodes.json"
@@ -359,21 +388,40 @@ def test_cli_derive_refuses_an_idle_only_measurement(tmp_path, capsys):
 def test_cli_promote_prints_the_decision_and_keeps_the_accepted_file(tmp_path, capsys):
     accepted = tmp_path / "accepted.json"
     candidate = tmp_path / "candidate.json"
-    candidate.write_text(json.dumps({"generation": 1, "profiles": {}, "tools": {}}))
+    candidate.write_text(json.dumps(report_with(1, 100)))
     promote = ["promote", "--accepted", str(accepted), "--candidate"]
     assert bench.main([*promote, str(candidate)]) == 0
     assert capsys.readouterr().out == '{"decision": "promoted", "changes": null}\n'
     assert bench.main([*promote, str(candidate)]) == 0
     assert json.loads(capsys.readouterr().out)["decision"] == "replayed"
     stale = tmp_path / "stale.json"
-    stale.write_text(json.dumps({"generation": 0, "profiles": {}, "tools": {}}))
+    stale.write_text(json.dumps(report_with(0, 100)))
     assert bench.main([*promote, str(stale)]) == 1
     assert json.loads(capsys.readouterr().out)["decision"] == "stale"
 
 
 def report_with(generation, peak):
-    measured = {metric: {"max": peak} for metric in bench.profiles.COMPARED}
-    return {"generation": generation, "tools": {}, "profiles": {"memory": {"measured": measured}}}
+    runs = [
+        {
+            "workload": "memory",
+            "class": "memory",
+            "children": 1,
+            "repeat": repeat,
+            "exit_code": 0,
+            "timed_out": False,
+            **dict.fromkeys(bench.profiles.METRICS, peak),
+        }
+        for repeat in range(1, 4)
+    ]
+    measured = {
+        "suite": "fixture",
+        "generation": generation,
+        "source": "fixture",
+        "host": {},
+        "tools": {},
+        "runs": runs,
+    }
+    return bench.profiles.derive(measured, [], bench.profiles.Policy())
 
 
 def test_cli_promote_holds_a_material_change_with_the_default_tolerance(tmp_path, capsys):
@@ -390,12 +438,35 @@ def test_cli_promote_holds_a_material_change_with_the_default_tolerance(tmp_path
     assert json.loads(accepted.read_text())["generation"] == 2
 
 
-def test_cli_requalifies_a_held_report_for_a_named_reviewer_and_rolls_it_back(tmp_path, capsys):
+def test_cli_operator_authentication_refuses_worker_identity(tmp_path, monkeypatch):
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
+
+    monkeypatch.setattr(repository, "token", lambda slug: {"fixture": "fixture-credential"}.get(slug))
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_SWARM", raising=False)
+    assert bench._reviewer("") is None
+    principal = bench._reviewer("fixture")
+    assert principal == bench.operator_auth.OPERATOR
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "worker")
+    assert bench._reviewer("fixture") is None
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "fixture")
+    assert bench._reviewer("") is None
+
+
+def test_cli_requalifies_a_held_report_for_a_named_reviewer_and_rolls_it_back(tmp_path, capsys, monkeypatch):
+    monkeypatch.setattr(
+        bench,
+        "_reviewer",
+        lambda slug: bench.profiles.Principal("operator", bench.profiles.Role.OPERATOR) if slug == "fixture" else None,
+    )
     accepted, candidate = tmp_path / "accepted.json", tmp_path / "candidate.json"
     accepted.write_text(json.dumps(report_with(1, 100)))
     candidate.write_text(json.dumps(report_with(2, 200)))
     promote = ["promote", "--accepted", str(accepted), "--candidate", str(candidate)]
-    assert bench.main([*promote, "--requalified-by", "operator"]) == 0
+    assert bench.main([*promote, "--swarm", "fixture", "--requalified-by", "operator"]) == 0
     printed = json.loads(capsys.readouterr().out)
     assert printed["decision"] == "requalified" and printed["changes"]["requalified_by"] == "operator"
     assert json.loads(accepted.read_text())["generation"] == 2

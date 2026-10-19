@@ -1,0 +1,6 @@
+{
+  "hooks/lifecycle/refresh.py:hooks.lifecycle.refresh.x__retain_exit__mutmut_24:21f041e37bd7c191adadb17e5943b97e0d5604160c70afacbc79097a1766d4f6": {
+    "reader": "Standards /root/standards_reader round two",
+    "reason": "json.dumps defaults ensure_ascii=True. Its output is ASCII even for Unicode pane fields, yielding identical bytes with explicit UTF-8 or the supported ASCII-compatible locale encoding."
+  }
+}

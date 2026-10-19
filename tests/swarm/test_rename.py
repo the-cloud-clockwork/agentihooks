@@ -6,10 +6,10 @@ import pytest
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm.naming import NamingError
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
 from scripts.terminate_agent import Session, resolve
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -127,13 +127,20 @@ def test_rename_is_idempotent_and_preserves_claim_seat_and_crew(store):
     assert len(store.names.names("sw")) == 1
 
 
-@pytest.mark.parametrize(("harness", "typed"), [("codex", True), ("claude", False), ("", False)])
-def test_rename_names_a_running_codex_session_after_its_new_name(store, harness, typed):
+@pytest.mark.parametrize(
+    ("harness", "transport", "typed"),
+    [("codex", "", True), ("codex", APP_SERVER_TRANSPORT, False), ("claude", "", False), ("", "", False)],
+)
+def test_rename_names_a_running_codex_session_after_its_new_name(store, harness, transport, typed):
     from scripts.swarm.rename import rename_swarm
     from scripts.swarm.runtime import HerdrRuntime
 
-    old = "sw-eng-1"
-    store.put_agent("sw", AgentRecord(old, "eng", "t1", pane_id="w1:p1", harness=harness))
+    old = store.next_name("sw", "eng") if transport else "sw-eng-1"
+    agent = AgentRecord(old, "eng", "t1", pane_id="w1:p1", harness=harness, seat="eng-1@sw", transport=transport)
+    if transport:
+        store.start_execution("sw", agent)
+    else:
+        store.put_agent("sw", agent)
     pane = {"pane_id": "w1:p1", "name": old, "workspace_id": "w1"}
     mutations = []
 

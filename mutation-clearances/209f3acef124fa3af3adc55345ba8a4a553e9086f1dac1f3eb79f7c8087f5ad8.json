@@ -1,0 +1,6 @@
+{
+  "scripts/gates/intent.py:scripts.gates.intent.x__bind_pulls__mutmut_20:066e0a3d825d0b69684c72d8c164af85af27cdfb71bec941af1ff5389f3fe430": {
+    "reader": "Standards",
+    "reason": "The registry reason is descriptive metadata with no production reader. Replacing it with None preserves the registered pull list and expected fingerprints, and no actual per-pull verdict or refusal reason is changed."
+  }
+}

@@ -147,6 +147,7 @@ export function bottleneckStat(top) {
     h("dt", {}, statGrip("Top bottleneck"), top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck"),
     h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
       h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
-      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }))));
+      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }),
+      ...((top && top.waits) || []).map((text) => h("li", { class: "bottleneck-wait", text })))));
 }
 

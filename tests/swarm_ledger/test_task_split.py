@@ -16,7 +16,7 @@ ENGINEER = "engineer@abcdef-0002"
 def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     ops = [
         {"op": "task_add", "id": "seed-1", "by": "swarm", "task": "t1", "title": "task one", "lane": "eng"},
@@ -81,6 +81,13 @@ def test_a_split_with_bound_pull_requests_is_not_rewritten():
     assert "tasks/t1: a half has a pull request" in state["_meta"]["warnings"][-1]
 
 
+def test_a_task_with_a_recorded_pull_request_is_not_split():
+    update("t1", {"pr_url": "https://github.com/o/r/pull/9"}, by=ENGINEER)
+    state, rejected = split("t1", ["1-2", "3-4"])
+    assert rejected == ["split-1"] and "split" not in row(state, "t1")
+    assert "tasks/t1: the task has a pull request outside the split" in state["_meta"]["warnings"][-1]
+
+
 def test_an_unknown_task_is_skipped():
     _, rejected = split("t9", ["1-2", "3-4"])
     assert rejected == ["split-1"]
@@ -95,6 +102,9 @@ def test_an_unknown_task_is_skipped():
         (["1-2", "x"], "halves: plan line ranges"),
         (["4-5", "1-2"], "halves: ordered, not overlapping"),
         (["1-3", "3-4"], "halves: ordered, not overlapping"),
+        (["repair", "1-2"], "halves: plan line ranges"),
+        (["repair", ""], "halves: plan line ranges"),
+        (["repair", "repair"], "halves: distinct labels"),
     ],
 )
 def test_a_malformed_split_is_refused(halves, reason):
@@ -129,6 +139,53 @@ def test_split_pulls_is_a_list_field_a_worker_updates():
     assert "split_pulls" in ledger_tasks.UPDATABLE and "split_pulls" in ledger_tasks.LIST_FIELDS
     state, rejected = update("t1", {"split_pulls": ["https://github.com/o/r/pull/9"]}, by=ENGINEER)
     assert rejected == [] and row(state, "t1")["split_pulls"] == ["https://github.com/o/r/pull/9"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "https://github.com/o/r/pull/9,https://github.com/o/r/pull/10",
+        '["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]',
+        '  ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]',
+    ],
+    ids=["comma", "json", "indented-json"],
+)
+def test_task_set_stores_split_pull_addresses_as_a_list(value, monkeypatch, capsys):
+    from scripts.swarm_ledger import ledger
+
+    def send(args, kind, **fields):
+        assert args.slug == SLUG
+        operation = ledger.op(kind, args, **fields)
+        ledger_tasks.check(operation)
+        state, rejected = core.sync(SLUG, ops=[operation])
+        assert rejected == []
+        assert row(state, "t1")["split_pulls"] == [
+            "https://github.com/o/r/pull/9",
+            "https://github.com/o/r/pull/10",
+        ]
+
+    monkeypatch.setattr(ledger, "send", send)
+    args = ledger.build_parser().parse_args(
+        ["--slug", SLUG, "--as", ENGINEER, "task", "set", "t1", f"split_pulls={value}"]
+    )
+    ledger.cmd_task(args)
+    assert row(core.sync(SLUG)[0], "t1")["split_pulls"] == [
+        "https://github.com/o/r/pull/9",
+        "https://github.com/o/r/pull/10",
+    ]
+    assert (
+        '"split_pulls": ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]' in capsys.readouterr().out
+    )
+
+
+def test_task_set_preserves_bracketed_territory_as_a_comma_list(monkeypatch):
+    from scripts.swarm_ledger import ledger
+
+    sent = []
+    monkeypatch.setattr(ledger, "send", lambda args, kind, **fields: sent.append(fields))
+    args = ledger.build_parser().parse_args(["task", "set", "t1", "territory=[local],remote"])
+    ledger.cmd_task(args)
+    assert sent == [{"item": "tasks/t1", "fields": {"territory": ["[local]", "remote"]}}]
 
 
 def test_task_split_cli_sends_the_ordered_halves(monkeypatch, capsys):
@@ -174,3 +231,17 @@ def test_the_ledger_refuses_a_split_that_misses_plan_lines(monkeypatch):
     assert "tasks/t1: halves: cover plan lines 1-4" in state["_meta"]["warnings"][-1]
     state, rejected = split("t1", ["1-2", "3-4"], n=2)
     assert rejected == [] and row(state, "t1")["split"] == ["1-2", "3-4"]
+
+
+def test_a_task_without_a_plan_records_labelled_halves_in_order():
+    state, rejected = split("t1", ["compatibility", "repair"])
+    assert rejected == [] and row(state, "t1")["split"] == ["compatibility", "repair"]
+    pulls = ["https://github.com/o/r/pull/9", "https://github.com/o/r/pull/10"]
+    state, rejected = update("t1", {"split_pulls": pulls}, by=ENGINEER)
+    assert rejected == [] and row(state, "t1")["split_pulls"] == pulls
+
+
+@pytest.mark.parametrize("plan", [{"plan_lines": "12-20"}, {"plan_slice": "SV2-01"}])
+def test_a_planned_task_still_needs_plan_line_ranges(plan):
+    assert ledger_splits.refusal({"kind": "code", **plan}, ["compatibility", "repair"]) == "halves: plan line ranges"
+    assert ledger_splits.refusal({"kind": "code"}, ["compatibility", "repair"]) == ""

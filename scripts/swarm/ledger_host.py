@@ -29,6 +29,26 @@ def _stat(pid: int, proc: Path) -> tuple[int, int]:
     return int(tail[11]) + int(tail[12]), int(tail[19])
 
 
+def snapshot() -> dict | None:
+    pid = server_pid(folder(os.environ))
+    if pid is None:
+        return None
+    try:
+        ticks, start = _stat(pid, PROC)
+    except (OSError, ValueError, IndexError):
+        return None
+    return {"pid": pid, "start": start, "ticks": ticks, "hertz": os.sysconf("SC_CLK_TCK")}
+
+
+def cpu_over_pass(before: dict | None, after: dict | None, elapsed: float) -> float | None:
+    if before is None or after is None or elapsed <= 0:
+        return None
+    if any(before[field] != after[field] for field in ("pid", "start", "hertz")):
+        return None
+    ticks = after["ticks"] - before["ticks"]
+    return ticks / before["hertz"] / elapsed * 100 if ticks >= 0 else None
+
+
 def server(
     pid: int | None,
     proc: Path = PROC,

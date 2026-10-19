@@ -14,7 +14,7 @@ from scripts.codex_session.binding import CONNECTED, ENDPOINTS, EXITED, FAILED, 
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.codex_session.fakes import FIRST_PID, OWN_START, SERVER_START, Clock, Process, Server, hooks
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 SEAT = f"eng-1@{SLUG}"
@@ -153,7 +153,9 @@ def test_a_launch_admits_one_server_binds_its_thread_and_opens_once(store, serve
     assert server.params("turn/start") == [
         {"threadId": "thread-new", "input": [{"type": "text", "text": "Start the task."}]}
     ]
-    assert server.methods().index("thread/start") < server.methods().index("turn/start")
+    assert server.params("thread/name/set") == [{"threadId": "thread-new", "name": agent.name}]
+    assert server.methods().index("thread/start") < server.methods().index("thread/name/set")
+    assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
     assert not BindingStore(store).claim_opening(SLUG, agent.execution_id, 2000)
     assert all(connection.closed for connection in server.connections)
 
@@ -217,6 +219,96 @@ def test_a_resume_binds_the_existing_thread_without_starting_one(store, server, 
     assert (started.record.thread_id, started.record.session_id) == ("thread-kept", "session-resumed")
     assert "thread/start" not in server.methods()
     assert server.params("thread/resume") == [{"threadId": "thread-kept"}]
+    assert server.params("thread/name/set") == [{"threadId": "thread-kept", "name": spec.agent.name}]
+
+
+def test_a_launch_without_an_opening_still_names_its_thread(store, server, clock, root, tmp_path):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path, opening=""), deps(server, clock, root))
+    assert server.params("thread/name/set") == [{"threadId": "thread-new", "name": started.agent.name}]
+
+
+def test_a_refused_thread_name_still_opens_the_turn(store, server, clock, root, tmp_path):
+    server.refuse = {"thread/name/set"}
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert (started.record.state, started.record.active_turn_id) == (CONNECTED, "turn-opening")
+    assert server.methods().index("thread/name/set") < server.methods().index("turn/start")
+
+
+def test_a_connection_lost_while_naming_the_thread_fails_the_launch(store, server, clock, root, tmp_path):
+    server.lose = {"thread/name/set"}
+    failure = failed(store, server, clock, root, launch_spec(store, server, tmp_path, opening=""), "protocol")
+    assert str(failure) == "thread/name/set lost the connection: scripted"
+    assert server.processes[-1].poll() is not None
+
+
+@pytest.mark.parametrize("account", ["default", "quota-successor"])
+def test_handoff_and_quota_successors_admit_a_new_server_and_resume_the_thread(
+    store, server, clock, root, tmp_path, account
+):
+    from scripts.inbox.codex import StaleExecution, Transport
+
+    first = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    next_spec = launch_spec(
+        store,
+        server,
+        tmp_path,
+        resume_thread=first.record.thread_id,
+        previous_execution_id=first.agent.execution_id,
+    )
+    next_spec = replace(next_spec, agent=replace(next_spec.agent, account=account))
+    successor = supervisor.launch(store, next_spec, deps(server, clock, root))
+    assert successor.agent.generation == first.agent.generation + 1
+    assert successor.record.server_pid != first.record.server_pid
+    assert successor.record.thread_id == first.record.thread_id
+    assert successor.record.account == account
+    assert store.execution_occupants(SLUG)[SEAT].execution_id == successor.agent.execution_id
+    assert server.params("thread/resume") == [{"threadId": first.record.thread_id}]
+    with pytest.raises(StaleExecution):
+        Transport(BindingStore(store), SLUG, first.agent.execution_id).require()
+    supervisor.finish(store, SLUG, first, 2000)
+    assert store.execution_occupants(SLUG)[SEAT].execution_id == successor.agent.execution_id
+
+
+def test_finish_clears_a_dead_bridges_abandoned_publication(store, server, clock, root, tmp_path):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    key = store.key(SLUG, "execution-publishing")
+    store.redis.hset(key, SEAT, started.agent.execution_id)
+    supervisor.finish(store, SLUG, started, 2000)
+    assert not store.redis.hgetall(key)
+
+
+@pytest.mark.parametrize("resource", ["endpoint", "publication", "transport"])
+def test_terminal_cleanup_keeps_resources_that_change_during_release(
+    store, server, clock, root, tmp_path, monkeypatch, resource
+):
+    started = supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    bindings = BindingStore(store)
+    record = replace(started.record, state=EXITED)
+    bindings.put(SLUG, record)
+    endpoints, publishing = store.key(SLUG, ENDPOINTS), store.key(SLUG, "execution-publishing")
+    store.redis.hset(publishing, SEAT, record.execution_id)
+    original, changed = bindings.get, []
+
+    def get(*args):
+        observed = original(*args)
+        if not changed:
+            changed.append(True)
+            if resource == "endpoint":
+                store.redis.hset(endpoints, record.endpoint_ref, "successor")
+            elif resource == "publication":
+                store.redis.hset(publishing, SEAT, "successor")
+            else:
+                bindings.put(SLUG, replace(record, state=CONNECTED))
+        return observed
+
+    monkeypatch.setattr(bindings, "get", get)
+    bindings.release(SLUG, record)
+    if resource == "endpoint":
+        assert store.redis.hget(endpoints, record.endpoint_ref) == "successor"
+    elif resource == "publication":
+        assert store.redis.hget(publishing, SEAT) == "successor"
+    else:
+        assert store.redis.hget(publishing, SEAT) == record.execution_id
 
 
 def test_a_thread_without_an_id_fails_as_a_protocol_error(store, server, clock, root, tmp_path):
@@ -240,10 +332,24 @@ def test_a_server_running_from_another_codex_home_is_refused(store, server, cloc
     assert_failed_cleanly(store, server, "wrong_profile")
 
 
-def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(store, server, clock, root, tmp_path):
-    server.info = {}
-    spec = launch_spec(store, server, tmp_path, codex_home=os.getcwd())
+@pytest.mark.parametrize("info", [{}, {"codexHome": ""}] * 10)
+def test_a_server_that_names_no_codex_home_is_refused_even_from_the_cwd(
+    store, server, clock, root, tmp_path, monkeypatch, info
+):
+    server.info = info
+    spec = launch_spec(store, server, tmp_path)
+    assert Path(spec.codex_home).is_relative_to(tmp_path)
+    check_binding = supervisor.check_binding
+
+    def check_from_home(connection, info, launch):
+        with monkeypatch.context() as scoped_patch:
+            scoped_patch.chdir(server.runtime_home)
+            assert Path.cwd() == Path(server.runtime_home)
+            return check_binding(connection, info, launch)
+
+    monkeypatch.setattr(supervisor, "check_binding", check_from_home)
     failed(store, server, clock, root, spec, "wrong_profile")
+    assert_failed_cleanly(store, server, "wrong_profile")
 
 
 def test_a_server_signed_in_with_another_account_kind_is_refused(store, server, clock, root, tmp_path):
@@ -328,7 +434,7 @@ def test_a_server_that_came_up_but_never_answered_times_out_and_is_stopped(store
     assert str(failure) == supervisor.NEVER_ANSWERED
     record = only_record(store)
     assert (record.server_pid, record.server_start_identity) == (FIRST_PID, SERVER_START)
-    assert Path(record.endpoint_ref.removeprefix("unix://")).exists()
+    assert not Path(record.endpoint_ref.removeprefix("unix://")).exists()
     assert server.processes[0].stopped
     assert clock.now == 2.0
     assert [timeout for _, timeout in server.connects] == [2.0 - 0.25 * step for step in range(8)]
@@ -490,6 +596,62 @@ def test_execution_home_keeps_profile_binding_and_manifests(server, tmp_path):
     assert json.loads(original)["home"] == str(profile)
 
 
+@pytest.mark.parametrize("reported", [True, False])
+def test_execution_home_rerecords_the_profile_report_for_the_copy(server, tmp_path, reported):
+    import json
+
+    from scripts.profiles import binding
+
+    profile = Path(server.codex_home)
+    (profile / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (profile.parent / "codex.sources.json").write_text("[]")
+    binding.write(profile, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", profile)
+    launched = report.read_bytes()
+    directory = tmp_path / "execution"
+    directory.mkdir()
+    environ = {binding.REPORT: str(report)} if reported else {}
+    spec = supervisor.Launch("fixture", AgentRecord("fixture", "eng", "task"), str(tmp_path), str(profile), environ)
+
+    home = Path(supervisor.execution_home(spec, directory).codex_home)
+
+    if not reported:
+        assert report.read_bytes() == launched
+        return
+    rendered = json.loads(report.read_text())["rendered"]
+    assert rendered["home"] == str(home.resolve())
+    assert rendered["canary"] == json.loads(launched)["rendered"]["canary"]
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_execution_home_shares_package_binaries_without_copying(server, tmp_path, linked):
+    profile = Path(server.codex_home)
+    package = tmp_path / "package" if linked else profile / "bin"
+    package.mkdir()
+    binary = package / "codex"
+    binary.write_bytes(b"fixture package binary")
+    skill_bin = profile / "skills" / "tool" / "bin"
+    skill_bin.mkdir(parents=True)
+    (skill_bin / "tool").write_text("private skill tool")
+    if linked:
+        (profile / "bin").symlink_to(package, target_is_directory=True)
+    directory = tmp_path / "execution"
+    directory.mkdir()
+    spec = supervisor.Launch("fixture", AgentRecord("fixture", "eng", "task"), str(tmp_path), str(profile), {})
+
+    private = supervisor.execution_home(spec, directory)
+
+    home = Path(private.codex_home)
+    assert (home / "bin").is_symlink()
+    assert (home / "bin").resolve() == package.resolve()
+    assert (home / "bin" / "codex").samefile(binary)
+    assert binary.read_bytes() == b"fixture package binary"
+    private_tool = home / "skills" / "tool" / "bin" / "tool"
+    assert private_tool.read_text() == "private skill tool"
+    assert not private_tool.samefile(skill_bin / "tool")
+
+
 def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server, clock, root, tmp_path):
     spec = launch_spec(store, server, tmp_path, codex_home=str(tmp_path / "missing"))
     with pytest.raises(FileNotFoundError):
@@ -501,13 +663,118 @@ def test_a_home_seed_failure_spawns_nothing_and_frees_the_endpoint(store, server
     assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
 
 
+@pytest.mark.parametrize("stage", ["seed", "spawn", "startup", "registry"])
+def test_failed_launch_removes_only_its_execution_folder(store, server, clock, root, tmp_path, monkeypatch, stage):
+    neighbor = root / "another-execution"
+    neighbor.mkdir(parents=True)
+    (neighbor / "keep").write_text("other session")
+    profile = Path(server.codex_home)
+    (profile / "config.toml").write_text("private seed")
+    package = tmp_path / "package"
+    package.mkdir()
+    (package / "codex").write_text("shared binary")
+    (profile / "bin").symlink_to(package, target_is_directory=True)
+    spec = launch_spec(store, server, tmp_path)
+    built = deps(server, clock, root)
+    if stage == "seed":
+        copytree = shutil.copytree
+
+        def partial_seed(source, destination, **kwargs):
+            copytree(source, destination, **kwargs)
+            raise OSError("home seed failed")
+
+        monkeypatch.setattr(supervisor.shutil, "copytree", partial_seed)
+    elif stage == "spawn":
+
+        def refused_spawn(*args, **kwargs):
+            raise OSError("spawn failed")
+
+        built = replace(built, popen=refused_spawn)
+    elif stage == "startup":
+        server.answers = False
+    else:
+
+        def refused_registry(*args):
+            raise SwarmError("registry failed")
+
+        monkeypatch.setattr(store, "put_agent", refused_registry)
+
+    with pytest.raises((OSError, supervisor.LaunchFailure, SwarmError)):
+        supervisor.launch(store, spec, built)
+
+    assert list(root.iterdir()) == [neighbor]
+    assert (neighbor / "keep").read_text() == "other session"
+    assert (profile / "config.toml").read_text() == "private seed"
+    assert (package / "codex").read_text() == "shared binary"
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
+    assert all(process.poll() is not None for process in server.processes)
+
+
+def test_failed_execution_directory_permissions_leave_no_folder(store, server, clock, root, tmp_path, monkeypatch):
+    chmod = Path.chmod
+
+    def refused_permissions(path, mode):
+        if path.parent == root:
+            raise OSError("directory permissions failed")
+        chmod(path, mode)
+
+    monkeypatch.setattr(Path, "chmod", refused_permissions)
+    with pytest.raises(OSError, match="directory permissions failed"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root))
+    assert list(root.iterdir()) == []
+    assert not server.spawns
+
+
+def test_failed_process_stop_still_removes_execution_folder(store, server, clock, root, tmp_path, monkeypatch):
+    server.answers = False
+    popen = server.popen
+
+    def spawn(command, **kwargs):
+        process = popen(command, **kwargs)
+
+        def refused_wait(timeout=None):
+            raise OSError("process wait failed")
+
+        monkeypatch.setattr(process, "wait", refused_wait)
+        return process
+
+    with pytest.raises(OSError, match="process wait failed"):
+        supervisor.launch(store, launch_spec(store, server, tmp_path), deps(server, clock, root, popen=spawn))
+    assert server.processes[0].poll() is not None
+    assert list(root.iterdir()) == []
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
+
+
+@pytest.mark.parametrize("stage", ["endpoint", "reservation"])
+def test_failure_before_transport_reservation_ends_admitted_execution(
+    store, server, clock, root, tmp_path, monkeypatch, stage
+):
+    spec = launch_spec(store, server, tmp_path)
+    failure = RuntimeError("reservation unavailable")
+
+    def refuse(*args):
+        raise failure
+
+    monkeypatch.setattr(supervisor, "socket_path" if stage == "endpoint" else "_record", refuse)
+    with pytest.raises(RuntimeError) as caught:
+        supervisor.launch(store, spec, deps(server, clock, root))
+    assert caught.value is failure
+    assert not server.spawns
+    assert not store.agents(SLUG)
+    assert store.execution_occupants(SLUG)[SEAT].state == "finished"
+    import json
+
+    assert json.loads(store.redis.lrange(store.key(SLUG, "history"), 0, -1)[0])["ended_at"] == 1000
+    assert not store.redis.hgetall(store.key(SLUG, ENDPOINTS))
+
+
 def test_the_runtime_root_comes_from_the_launch_environment_when_deps_name_none(store, server, clock, tmp_path):
     runtime = Path(tempfile.mkdtemp(prefix="rt-"))
     try:
         spec = launch_spec(store, server, tmp_path)
-        spec = replace(spec, environ={**spec.environ, "XDG_RUNTIME_DIR": str(runtime)})
+        spec = replace(spec, environ={**spec.environ, "HOME": str(runtime), "XDG_RUNTIME_DIR": "/run/user/7"})
         started = supervisor.launch(store, spec, deps(server, clock, None))
-        assert started.record.endpoint_ref.startswith(f"unix://{runtime}/cx/")
+        assert started.record.endpoint_ref.startswith(f"unix://{runtime}/.agentihooks/cx/")
     finally:
         shutil.rmtree(runtime)
 
@@ -548,8 +815,10 @@ def test_a_socket_path_past_the_limit_is_refused_and_one_at_it_is_kept(tmp_path)
         shutil.rmtree(short)
 
 
-def test_the_runtime_root_prefers_the_user_runtime_dir(monkeypatch):
-    assert supervisor.runtime_root({"XDG_RUNTIME_DIR": "/run/user/7", "HOME": "/home/u"}) == Path("/run/user/7/cx")
+def test_the_runtime_root_ignores_the_memory_backed_user_runtime_dir(monkeypatch):
+    assert supervisor.runtime_root({"XDG_RUNTIME_DIR": "/run/user/7", "HOME": "/home/u"}) == Path(
+        "/home/u/.agentihooks/cx"
+    )
     assert supervisor.runtime_root({"HOME": "/home/u"}) == Path("/home/u/.agentihooks/cx")
     monkeypatch.setattr(supervisor.Path, "home", classmethod(lambda cls: Path("/home/fallback")))
     assert supervisor.runtime_root({}) == Path("/home/fallback/.agentihooks/cx")

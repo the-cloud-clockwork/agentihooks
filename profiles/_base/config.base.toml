@@ -19,6 +19,9 @@ model_context_window = 1050000
 # is what makes a repo's own instructions reach codex at all.
 project_doc_fallback_filenames = ["CLAUDE.md"]
 
+[notice]
+hide_rate_limit_model_nudge = true
+
 [features]
 # The whole hook layer is dead weight without this.
 hooks = true

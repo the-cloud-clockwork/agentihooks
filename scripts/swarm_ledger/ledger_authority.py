@@ -6,6 +6,11 @@ binding governs the transport a session selects; any process of the operator's u
 
 import hashlib
 import hmac
+import time
+from functools import lru_cache
+from os import environ
+
+import jwt
 
 from scripts.hive import auth
 from scripts.swarm import store
@@ -22,6 +27,27 @@ def _same(given, expected):
     return hmac.compare_digest(given.encode(), expected.encode())
 
 
+TICK_TTL = 900
+
+
+def tick_token(secret: str, slug: str, expires: int) -> str:
+    message = f"ledger-tick:{slug}:{expires}".encode()
+    return f"{expires}.{hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()}"
+
+
+def tick_principal(token: str, slug: str) -> str | None:
+    secret = environ.get("SWARM_SECRET")
+    if not secret:
+        return None
+    try:
+        expires = int(token.split(".", 1)[0])
+    except ValueError:
+        return None
+    if not 0 < expires - int(time.time()) <= TICK_TTL:
+        return None
+    return "" if _same(token, tick_token(secret, slug, expires)) else None
+
+
 def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
     """'' for the operator, the agent's name for a bound agent, None for a refused credential."""
     if not admin or not token:
@@ -29,11 +55,61 @@ def principal(admin: str, slug: str, token: str, agent: str) -> str | None:
     if _same(token, admin):
         return ""
     if token.startswith("hive."):
-        member = auth.agent_member(store.redis_client(), token, slug, agent)
-        return agent if member and hive_agent(member, slug, agent) else None
+        return hive_principal(slug, token, agent)
     if not remote() and agent and _same(token, agent_token(admin, slug, agent)):
         return agent
     return None
+
+
+def hive_principal(slug: str, token: str, agent: str) -> str | None:
+    member = auth.agent_member(store.redis_client(), token, slug, agent)
+    return agent if member and hive_agent(member, slug, agent) else None
+
+
+def caller(headers, admin: str, slug: str) -> str | None:
+    """principal for this request under SWARM_AUTH_MODE: local reads the page credential, edge never does."""
+    token, agent = headers.get("X-Ledger-Token"), headers.get("X-Ledger-Agent")
+    if environ.get("SWARM_AUTH_MODE") != "edge":
+        return principal(admin, slug, token, agent)
+    tick = headers.get("X-Ledger-Tick")
+    if tick is not None:
+        return tick_principal(tick, slug)
+    if access_operator(headers.get("Cf-Access-Jwt-Assertion")):
+        return ""
+    if not token or not agent:
+        return None
+    if token.startswith("hive."):
+        return hive_principal(slug, token, agent)
+    secret = environ.get("SWARM_SECRET")
+    if not secret:
+        return None
+    return agent if _same(token, agent_token(secret, slug, agent)) else None
+
+
+def access_operator(assertion) -> bool:
+    team = environ.get("SWARM_ACCESS_TEAM", "").removeprefix("https://")
+    audience = environ.get("SWARM_ACCESS_AUD")
+    if not assertion or not team or not audience:
+        return False
+    issuer = f"https://{team if '.' in team else team + '.cloudflareaccess.com'}"
+    try:
+        key = access_keys(f"{issuer}/cdn-cgi/access/certs").get_signing_key_from_jwt(assertion)
+        jwt.decode(
+            assertion,
+            key.key,
+            algorithms=["RS256"],
+            audience=audience,
+            issuer=issuer,
+            options={"require": ["exp", "iat"]},
+        )
+    except (jwt.PyJWTError, OSError, ValueError):
+        return False
+    return True
+
+
+@lru_cache(maxsize=4)
+def access_keys(url: str) -> jwt.PyJWKClient:
+    return jwt.PyJWKClient(url, cache_keys=True, timeout=10)
 
 
 def hive_member(credential):

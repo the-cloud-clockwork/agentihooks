@@ -3,13 +3,17 @@ import json
 import pytest
 
 from scripts.inbox.seats import SeatRegistry
+from scripts.inbox.store import InboxStore
 from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters_channel import MastersChannel, Post
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 LEAD, SECOND, ENG = f"master@{SLUG}", f"master-2@{SLUG}", f"eng-1@{SLUG}"
+CI, PLANNER = f"ci-1@{SLUG}", f"plan-1@{SLUG}"
+OTHER = "master@ot"
+HELD = {"sw-eng-1": ENG, "sw-ci-1": CI, "sw-plan-1": PLANNER, "ot-master-1": OTHER, "stranger": "no seat"}
 
 
 @pytest.fixture
@@ -22,7 +26,39 @@ def channel():
     seats.occupy(LEAD, "sw-master-1", 1)
     seats.occupy(SECOND, "sw-master-2", 1)
     seats.occupy(ENG, "sw-eng-1", 1)
+    seats.occupy(CI, "sw-ci-1", 1)
+    seats.occupy(PLANNER, "sw-plan-1", 1)
+    masters.MasterSeats(redis).set_count("ot", 1)
+    seats.occupy(OTHER, "ot-master-1", 1)
     return MastersChannel(redis)
+
+
+def _inbox(channel):
+    return InboxStore(channel.redis)
+
+
+def _notice(post):
+    return (
+        f"masters channel post {post.number} from {post.seat}: "
+        f"read it with agentihooks swarm {SLUG} masters-channel read"
+    )
+
+
+def test_two_masters_exchange_an_inbox_item_that_keeps_the_text_in_the_channel(channel):
+    masters.MasterSeats(channel.redis).set_count(SLUG, 3)
+    inbox = _inbox(channel)
+
+    asked = channel.post(SLUG, "sw-master-1", "who holds the deploy phase", 10)
+
+    [item] = inbox.inbox(SECOND)
+    assert (item.sender, item.address, item.text, item.fyi) == ("sw-master-1", SECOND, _notice(asked), True)
+    assert inbox.inbox(LEAD) == []
+    assert inbox.inbox(f"master-3@{SLUG}") == []
+    answered = channel.post(SLUG, "sw-master-2", "I hold it", 11)
+    assert [(i.sender, i.text) for i in inbox.inbox(LEAD)] == [("sw-master-2", _notice(answered))]
+    assert len(inbox.inbox(SECOND)) == 1
+    assert [p.text for p in channel.unread(SLUG, "sw-master-2")] == ["who holds the deploy phase", "I hold it"]
+    assert [p.text for p in channel.unread(SLUG, "sw-master-1")] == ["who holds the deploy phase", "I hold it"]
 
 
 def test_two_masters_post_and_read_each_others_posts(channel):
@@ -39,11 +75,10 @@ def test_two_masters_post_and_read_each_others_posts(channel):
     assert channel.read(SLUG, "sw-master-2") == expected
 
 
-@pytest.mark.parametrize("name", ["sw-eng-1", "stranger"])
-def test_an_engineer_or_unseated_session_can_neither_post_nor_read(channel, name):
+@pytest.mark.parametrize("name", list(HELD))
+def test_an_engineer_ci_planner_or_unseated_session_can_neither_post_nor_read(channel, name):
     channel.post(SLUG, "sw-master-1", "private", 10)
-    held = ENG if name == "sw-eng-1" else "no seat"
-    refusal = f"only master seats of {SLUG} read and write its masters channel; {name} holds {held}"
+    refusal = f"only master seats of {SLUG} read and write its masters channel; {name} holds {HELD[name]}"
 
     for act in (lambda: channel.post(SLUG, name, "let me in", 11), lambda: channel.read(SLUG, name)):
         with pytest.raises(masters.MasterError) as refused:
@@ -52,6 +87,10 @@ def test_an_engineer_or_unseated_session_can_neither_post_nor_read(channel, name
     with pytest.raises(masters.MasterError):
         channel.unread(SLUG, name)
     assert [p.text for p in channel.read(SLUG, "sw-master-1")] == ["private"]
+    inbox = _inbox(channel)
+    assert inbox.inbox(LEAD) == []
+    assert [i.sender for i in inbox.inbox(SECOND)] == ["sw-master-1"]
+    assert all(inbox.inbox(seat) == [] for seat in (ENG, CI, PLANNER, OTHER, name))
 
 
 def test_a_seat_beyond_the_master_count_is_refused(channel):

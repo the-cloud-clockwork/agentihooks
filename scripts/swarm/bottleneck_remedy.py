@@ -9,7 +9,7 @@ from functools import partial
 
 from scripts import agent_choice
 from scripts.inbox.store import InboxStore
-from scripts.swarm import bottleneck, bottleneck_status, dispatcher, lane_split, templates
+from scripts.swarm import bottleneck, bottleneck_status, dispatcher, lane_split, stage_cover, templates
 from scripts.swarm.health import standing
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import SENDER, Mail
@@ -18,7 +18,7 @@ from scripts.swarm.store import DELEGATE, FULL, RedisStore, SwarmError
 KEY = "bottleneck-remedies"
 RULE = "bottleneck-remedy"
 URGENT = "urgent"
-SEATS = {"claim_wait": ("ci", "eng")}
+SEATS = {"seat_wait": ("ci", "eng")}
 HARNESS = ("launch_failure", "quota_hold")
 PINNABLE = ("eng", "ci")
 FIX = "Bottleneck fix for the {label} stage"
@@ -67,9 +67,9 @@ def remedy_pass(
     done = []
     try:
         for row in standing.read(store.redis, slug).values():
-            if not _due(row, last, now_ms):
+            if not _due(row, last, now_ms) or stage_cover.covered(store, slug, doc, row["stage"]):
                 continue
-            action = _remedy(slug, store, ledger, doc, lanes, _stage(row))
+            action = _remedy(slug, store, ledger, doc, lanes, _stage(row), now_ms)
             if action is None:
                 continue
             store.redis.hset(key, row["stage"], now_ms)
@@ -92,11 +92,11 @@ def _due(row: dict, last: dict, now_ms: int) -> bool:
     return row["stage"] not in last or now_ms - int(last[row["stage"]]) >= bottleneck.WINDOW_MS
 
 
-def _remedy(slug, store, ledger, doc, lanes, stage):
+def _remedy(slug, store, ledger, doc, lanes, stage, now_ms):
     config, fixer = store.config(slug), _fixer(doc, stage)
     if config.autonomy not in (DELEGATE, FULL):
         return None if _settled(fixer) else _propose(slug, store, stage, BELOW.format(autonomy=config.autonomy), fixer)
-    found = _mechanical(slug, config, store, lanes, stage)
+    found = _mechanical(slug, config, store, lanes, stage, now_ms)
     if isinstance(found, dispatcher.Action) or _settled(fixer):
         return _taken(found)
     if fixer is not None:
@@ -112,10 +112,10 @@ def _settled(fixer):
     return fixer is not None and fixer.get("rank") == URGENT
 
 
-def _mechanical(slug, config, store, lanes, stage):
+def _mechanical(slug, config, store, lanes, stage, now_ms):
     try:
         if stage.name in SEATS:
-            return _shift(slug, config, store, lanes, stage)
+            return _shift(slug, config, store, lanes, stage, now_ms)
         if stage.name in HARNESS:
             return _move(slug, config, store, stage)
     except SwarmError as exc:
@@ -137,14 +137,16 @@ def _raise(slug, ledger, task, stage):
     return dispatcher.Action(RULE, "apply", text + dispatcher._comment(slug, ledger, task, text), task)
 
 
-def _shift(slug, config, store, lanes, stage):
+def _shift(slug, config, store, lanes, stage, now_ms):
     giver, taker = SEATS[stage.name]
     caps, shift = lane_split._capacity(config, store, slug)
-    if reason := lane_split.refusal(caps, giver, taker, lanes()):
-        return reason
     moved = {giver: caps[giver] - 1, taker: caps[taker] + 1}
-    lane_split._apply(slug, config, store, moved, shift + moved["ci"] - caps["ci"])
     text = SHIFTED.format(giver=giver, taker=taker, targeted=stage.targeted, eng=moved["eng"], ci=moved["ci"])
+    if reason := lane_split.refusal(config, caps, giver, taker, lanes()) or lane_split.gate_hold(
+        slug, config, text, now_ms
+    ):
+        return reason
+    lane_split._apply(slug, config, store, moved, shift + moved["ci"] - caps["ci"])
     return dispatcher.Action(RULE, "apply", text, {})
 
 

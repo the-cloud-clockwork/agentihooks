@@ -37,7 +37,7 @@ def run(slug: str, store: RedisStore, runtime: "Runtime", doc: dict, now_ms: int
             store.redis.delete(key)
             continue
         observed = runtime.observe(agent)
-        if observed.state != "idle":
+        if observed.state not in {"idle", "done"}:
             store.redis.delete(key)
             continue
         store.redis.hsetnx(key, "idle_since", now_ms)

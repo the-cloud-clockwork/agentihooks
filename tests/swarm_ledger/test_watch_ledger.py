@@ -17,15 +17,17 @@ from scripts.inbox import seen  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, Hub, stream  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "watchstream-2026-01-01"
 
 
 def make_ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
@@ -127,10 +129,15 @@ def test_stream_raises_expired_for_a_lost_cursor(live):
 def run_watch(monkeypatch, capsys, take, *flags):
     calls = []
     real_stream = watch_ledger.stream
+    streams = []
 
     def recorded(slug, cursor=None, headers=None):
+        if streams:
+            streams[-1].close()
         calls.append(cursor)
-        return real_stream(slug, cursor, headers)
+        frames = real_stream(slug, cursor, headers)
+        streams.append(frames)
+        return frames
 
     sleeps = []
 
@@ -143,8 +150,12 @@ def run_watch(monkeypatch, capsys, take, *flags):
     monkeypatch.setattr(watch_ledger, "time", types.SimpleNamespace(sleep=sleep))
     monkeypatch.setattr(watch_ledger.Watch, "take", take)
     monkeypatch.setattr(sys, "argv", ["watch_ledger.py", SLUG, "--interval", "0.05", *flags])
-    with pytest.raises(SystemExit):
-        watch_ledger.main()
+    try:
+        with pytest.raises(SystemExit):
+            watch_ledger.main()
+    finally:
+        for frames in streams:
+            frames.close()
     return calls, capsys.readouterr().out
 
 
@@ -155,6 +166,8 @@ def test_the_watcher_prints_live_changes_and_replays_what_it_missed_after_a_drop
 
     def take(self, name, data):
         original(self, name, data)
+        if name not in {"snapshot", "ledger"}:
+            return
         seen_names.append(name)
         if seen_names == ["snapshot"]:
             server.repository.apply_ops(SLUG, ops=[note(1)])

@@ -7,8 +7,6 @@ from hooks import config
 from scripts.inbox import cli, outbox
 from scripts.inbox.store import Contended, DuplicateItem, InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def lost(text):
     import redis
@@ -483,3 +481,93 @@ def test_a_kept_tail_is_staged_beside_the_outbox_so_its_replace_is_atomic(outage
     assert outbox.flush(InboxStore(outage.redis)).left == 1
     assert staged == [{"dir": outbox.home()}]
     assert list(outbox.home().glob("tmp*")) == []
+
+
+def poisoned(monkeypatch, failing):
+    send = cli.APPLY["send"]
+
+    def apply(store, me, record):
+        if record["args"]["text"] in failing:
+            raise RuntimeError("disk gone")
+        return send(store, me, record)
+
+    monkeypatch.setitem(cli.APPLY, "send", apply)
+
+
+def test_a_record_that_keeps_failing_unexpectedly_is_set_aside_after_its_attempts_and_the_rest_replays(
+    outage, monkeypatch, capsys
+):
+    outage.down = True
+    assert run("send", "bob", "poison") == 0
+    assert run("send", "bob", "behind") == 0
+    poison = outbox.path().read_text().splitlines(keepends=True)[0]
+    item = json.loads(poison)["item"]
+    outage.down = False
+    poisoned(monkeypatch, {"poison"})
+    capsys.readouterr()
+    for attempt in (1, 2):
+        report = outbox.flush(InboxStore(outage.redis))
+        assert (report.applied, report.rejected, report.left) == ([], [], 2)
+        assert capsys.readouterr().err == (
+            "agentihooks msg: outbox replay stopped (RuntimeError: disk gone)\n"
+            f"agentihooks msg: 2 queued messages wait in {outbox.path()} for Redis or the ledger server\n"
+        )
+        assert json.loads(outbox.attempts_path().read_text()) == {json.loads(poison)["sum"]: attempt}
+        assert outbox.status() == {"queued": 2, "retrying": 1, "set_aside": 0}
+        assert outbox.status_lines() == ["inbox outbox  queued 2  retrying 1  set aside 0"]
+    report = outbox.flush(InboxStore(outage.redis))
+    reason = "RuntimeError: disk gone on 3 replays (AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS)"
+    assert (report.rejected, len(report.applied), report.left) == ([(item, reason)], 1, 0)
+    assert capsys.readouterr().err == (
+        f"agentihooks msg: queued message {item} was refused on replay ({reason}); kept in {outbox.skipped_path()}\n"
+    )
+    assert outage.texts("bob") == ["behind"]
+    assert records() == []
+    assert json.loads(outbox.skipped_path().read_text()) == {"reason": reason, "line": poison}
+    assert outbox.status() == {"queued": 0, "retrying": 0, "set_aside": 1}
+    assert outbox.status_lines() == ["inbox outbox  queued 0  retrying 0  set aside 1"]
+    assert not outbox.attempts_path().exists()
+
+
+def test_a_record_that_replays_after_an_unexpected_failure_forgets_its_attempts(outage, monkeypatch):
+    outage.down = True
+    assert run("send", "bob", "flaky") == 0
+    assert run("send", "bob", "steady") == 0
+    outage.down = False
+    failing = {"flaky"}
+    poisoned(monkeypatch, failing)
+    outbox.flush(InboxStore(outage.redis))
+    assert json.loads(outbox.attempts_path().read_text()) == {records()[0]["sum"]: 1}
+    failing.clear()
+    report = outbox.flush(InboxStore(outage.redis))
+    assert (len(report.applied), report.rejected, report.left) == (2, [], 0)
+    assert outage.texts("bob") == ["flaky", "steady"]
+    assert not outbox.attempts_path().exists()
+    assert outbox.status() == {"queued": 0, "retrying": 0, "set_aside": 0}
+    assert outbox.status_lines() == []
+
+
+def test_the_attempt_cap_defaults_and_reads_the_environment(monkeypatch):
+    assert outbox.max_attempts({}) == 3
+    assert outbox.max_attempts({"AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS": ""}) == 3
+    assert outbox.max_attempts({"AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS": "5"}) == 5
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS", "1")
+    assert outbox.max_attempts() == 1
+    assert (outbox.attempts_path().parent, outbox.attempts_path().name) == (
+        config.AGENTIHOOKS_HOME,
+        "inbox-outbox.attempts.json",
+    )
+
+
+def test_a_cap_of_one_sets_aside_on_the_first_unexpected_failure(outage, monkeypatch):
+    outage.down = True
+    assert run("send", "bob", "poison") == 0
+    outage.down = False
+    poisoned(monkeypatch, {"poison"})
+    monkeypatch.setenv("AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS", "1")
+    report = outbox.flush(InboxStore(outage.redis))
+    assert [reason for _, reason in report.rejected] == [
+        "RuntimeError: disk gone on 1 replays (AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS)"
+    ]
+    assert records() == []
+    assert not outbox.attempts_path().exists()

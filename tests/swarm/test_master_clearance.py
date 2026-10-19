@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from scripts.gates import catalog, entry, lift, modes
+from scripts.gates import catalog, entry, intent, lift, modes
 from scripts.swarm import clearance, cli
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MASTER, ENGINEER, PLANNER, STRANGER = (
     "master@a1b2c3-0001",
@@ -85,6 +85,20 @@ def test_the_master_of_the_swarm_uses_each_control_and_the_ledger_records_it(swa
     assert ledger.notes == [record]
 
 
+def test_the_master_lift_reads_the_task_lift_against_its_pull_request_head(swarm, monkeypatch):
+    store, ledger = swarm
+    ledger.rows["t1"] = {"id": "t1", "pr_url": "https://github.com/o/r/pull/7"}
+    head = ["a1"]
+    monkeypatch.setattr(intent, "pr_head", lambda url: head[0])
+    acting(monkeypatch, MASTER, "demo")
+    assert cli.main(["demo", "lift", ENGINEER, "watch"]) == 0
+    head[0] = "b2"
+    assert cli.main(["demo", "lift", ENGINEER, "watch"]) == 0
+    assert cli.main(["demo", "lift", ENGINEER, "talk"]) == 0
+    record = "master a1b2c3 0001 changed {} gate lift for engineer a1b2c3 0002 from not lifted to lifted."
+    assert ledger.notes == [record.format("watch"), record.format("watch"), record.format("talk")]
+
+
 @pytest.mark.parametrize(
     "name,swarm_of", [(ENGINEER, "demo"), (PLANNER, "demo"), (STRANGER, "other"), (STRANGER, ""), ("worker-2", "")]
 )
@@ -143,6 +157,13 @@ def test_a_finished_master_holds_no_clearance(swarm, monkeypatch, capsys):
     acting(monkeypatch, MASTER, "demo")
     assert cli.main(["demo", "pause"]) == 1
     assert capsys.readouterr().err == refused(MASTER)
+
+
+def test_the_holder_judges_the_operator_by_the_environment_it_is_given(swarm, monkeypatch):
+    from scripts.gates import Who
+
+    acting(monkeypatch, "engineer@unregistered-0009", "")
+    assert clearance.holder(swarm[0], "demo", Who(), {}) == clearance.OPERATOR
 
 
 @pytest.mark.parametrize("argv", [["pause"], ["--as", MASTER, "pause"], ["set", "intent-gate=coach"]])

@@ -12,8 +12,6 @@ from scripts.swarm_v2.runtime.routed import routed
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("transport,harness", [("legacy", "codex"), ("app_server", "codex"), ("app_server", "claude")])
 @pytest.mark.parametrize("lane", ["eng", "master"])
@@ -29,6 +27,10 @@ def test_tick_selects_and_records_codex_transport(tmp_path, monkeypatch, transpo
     calls, admitted = [], []
 
     def run(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         calls.append(argv)
         name = argv[argv.index("--name") + 1]
         fake.live.add(name)
@@ -99,6 +101,10 @@ def test_failed_transport_admission_retires_the_launched_pane(tmp_path, monkeypa
     ended = []
 
     def run(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         name = argv[argv.index("--name") + 1]
         fake.live.add(name)
         output = "status=started\nroute_status=routed\npane_id=w1:p2\nagent=codex\n"

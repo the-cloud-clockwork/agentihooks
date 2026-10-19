@@ -10,8 +10,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 1_800_000_000_000
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer"}
 
@@ -76,6 +74,36 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, re
     )
     assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
     assert acks == [("sw", 1)]
+
+
+def test_record_pass_uses_its_tick_document_and_client_without_reading_a_new_revision(
+    spool, sent, monkeypatch, real_ledger_record
+):
+    import fakeredis
+
+    from tests.swarm.test_metrics_ledger import Ledger
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    ledger = Ledger()
+    ledger.move("claimed", 1, NOW - 1)
+    doc = ledger.state("sw")
+    ledger.move("done", 2, NOW)
+    ledger.calls.clear()
+    monkeypatch.setattr(metrics, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(metrics.metrics_ledger, "record", real_ledger_record)
+    swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, ledger)
+
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+
+    events = [
+        json.loads(line)
+        for _, query, body in sent
+        if query == "INSERT INTO swarm.ledger_events FORMAT JSONEachRow"
+        for line in body.splitlines()
+    ]
+    assert [(row["ledger"], row["state"], row["revision"]) for row in events] == [("sw", "claimed", 1)]
+    assert ledger.calls == [("ack", "sw", 1)]
 
 
 @pytest.mark.parametrize("error", [OSError, LedgerGone, SwarmError])
@@ -216,6 +244,60 @@ def test_a_ledger_without_tasks_still_names_the_bottleneck(spool, sent, monkeypa
     assert bottleneck.read(store, "sw")["bottleneck"] == ""
 
 
+def test_a_swarm_pass_ships_the_worker_pool_reading_of_its_environment_to_the_sink(spool, sent, monkeypatch):
+    import fakeredis
+
+    from scripts.swarm_v2 import deployed
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    seen = []
+    reading = [{"pool": "swarm-workers", "configured_maximum": 4, "nodes": 3}]
+    monkeypatch.setattr(
+        deployed, "worker_pools", lambda environ, slug: seen.append((environ, slug)) or (lambda: reading)
+    )
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
+    monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+    assert seen == [(ON, "sw")]
+    shipped = [
+        json.loads(line)
+        for _, query, body in sent
+        if query == "INSERT INTO swarm.fleet_panels FORMAT JSONEachRow"
+        for line in body.decode().splitlines()
+    ]
+    assert {(row["series"], row["value"]) for row in shipped if row["panel"] == "capacity"} >= {
+        ("configured_maximum", 4.0),
+        ("observed_nodes", 3.0),
+    }
+
+
+def test_a_swarm_pass_ships_the_newest_checkpoint_of_an_active_execution_to_the_sink(spool, sent, monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import AgentRecord
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "t1", seat="eng-1@sw")
+    execution = store.execution_registry.start("sw", agent, "").execution_id
+    metrics.metrics_fleet.record_checkpoint(store, "sw", execution, "eng-1@sw", NOW - 2_000_000)
+    monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
+    monkeypatch.setattr(metrics.metrics_swarm, "record_pass", lambda *args: None)
+    swarm = metrics.metrics_swarm.TickInput(store, {"tasks": []}, [], lambda url: None, None)
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+
+    def shipped(table):
+        query = f"INSERT INTO swarm.{table} FORMAT JSONEachRow"
+        return [json.loads(line) for _, sent_query, body in sent if sent_query == query for line in body.splitlines()]
+
+    ages = {row["series"]: row["value"] for row in shipped("fleet_panels") if row["panel"] == "checkpoint_age"}
+    assert ages == {"stale": 1.0, "oldest_age_ms": 2_000_000.0}
+    sources = {row["source"]: (row["available"], row["readings"]) for row in shipped("fleet_sources")}
+    assert (sources["checkpoints"], sources["pools"]) == ((1, 1), (0, 0))
+
+
 def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_fleet_failure(spool, sent, monkeypatch):
     import fakeredis
 
@@ -223,7 +305,7 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     store.create(SwarmConfig("sw", "/repo", 0, 0, template="doctor"))
     seen = []
 
-    def broken(*args):
+    def broken(*args, **kwargs):
         raise SwarmError("registry down")
 
     monkeypatch.setattr(metrics.metrics_swarm, "pull_rows", lambda box, now_ms, swarm: {})
@@ -231,7 +313,9 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     monkeypatch.setattr(
         metrics.stage_detector,
         "record",
-        lambda box, store, slug, now_ms, tasks, environ, ready: seen.append((tasks, [ready(t) for t in tasks])),
+        lambda box, store, slug, now_ms, tasks, environ, ready: seen.append(
+            (tasks, [ready(t) for t in tasks], ready.seats)
+        ),
     )
     monkeypatch.setattr(metrics.metrics_fleet, "record", broken)
     tasks = [{"id": f"t{n}", "state": "open", "phase": phase} for n, phase in ((1, "p2"), (2, "p2"), (3, "p1"))]
@@ -243,4 +327,4 @@ def test_a_swarm_pass_measures_the_stages_of_the_ledger_tasks_and_reports_a_flee
     )
     swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, None)
     assert metrics.record_pass("sw", NOW, 0, ON, swarm) == ["fleet metrics failed: registry down"]
-    assert seen == [(tasks, [True, False, False])]
+    assert seen == [(tasks, [True, False, False], {"eng": 0, "ci": 0, "plan": 1})]

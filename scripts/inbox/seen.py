@@ -5,11 +5,9 @@ Whichever path shows a write first marks it; the others skip it, so each write r
 
 import os
 
-from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, redelivery_ms
-from scripts.swarm.keyspace import ROOT
+from scripts.inbox.store import MOVE_ATTEMPTS, InboxError, now_ms, owner_key, prefix, redelivery_ms
 from scripts.swarm.naming import NameRegistry
 
-PREFIX = f"{ROOT}:inbox:seen"
 TTL_S = 30 * 24 * 3600
 SEEN_ON_LEDGER = "already shown through the ledger"
 UNSETTLED = "returned to pending: its seen mark kept changing"
@@ -25,7 +23,9 @@ class SeenMarks:
 
     @staticmethod
     def key(name):
-        return f"{PREFIX}:{name}"
+        from scripts.hive import scope
+
+        return f"{prefix(scope.member())}:seen:{name}"
 
     def mark(self, name, ref):
         """True when this call is the first to show the write to name; False while a delivery owner holds name."""
@@ -76,11 +76,11 @@ def first_showing(marks, name, slug, events):
 
 
 def claim(store, me):
-    """Deliver each item pending for me, its seat and aliases included; a ledger write already shown closes instead."""
+    """Deliver at most five oldest pending items across me, my seat and aliases; close ledger writes already shown."""
     store.redeliver(now_ms(), redelivery_ms())
     marks = SeenMarks(store.redis)
     shown = []
-    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me))):
+    for item in filter(None, (store.deliver(item.id, me) for item in store.pending_mail(me)[:5])):
         try:
             elsewhere = item.ref and _shown_elsewhere(marks, store, item, me)
         except InboxError:

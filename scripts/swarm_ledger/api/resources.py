@@ -1,6 +1,8 @@
 import hashlib
 import json
 
+from scripts.swarm_ledger import models
+
 from .errors import APIError
 
 
@@ -42,6 +44,9 @@ def metadata(doc: dict) -> dict:
 
 
 def resource_revision(doc: dict, path: str) -> str:
+    if path == "tasks":
+        meta = doc.get("_meta", {})
+        return f"{meta.get('task_revision', meta.get('rev', 0)):064x}"
     raw = value(doc, path)
     if path == "metadata":
         raw = {**raw, "_meta": {key: item for key, item in raw["_meta"].items() if key not in ("rev", "updated_at")}}
@@ -58,36 +63,36 @@ def thread_rows(doc: dict) -> list:
     ]
 
 
-def read(doc: dict, path: str, query: dict | None = None) -> dict:
+def collection_revisions(rows: list) -> tuple[str, list]:
+    digest = hashlib.sha256(b"[")
+    items = []
+    for index, row in enumerate(rows):
+        encoded = json.dumps(row, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+        if index:
+            digest.update(b",")
+        digest.update(encoded)
+        items.append(hashlib.sha256(encoded).hexdigest() if isinstance(row, dict) else None)
+    digest.update(b"]")
+    return digest.hexdigest(), items
+
+
+def read(doc: dict, path: str, query: dict | None = None, cache: dict | None = None) -> dict:
     raw = value(doc, path)
-    rev = resource_revision(doc, path)
     if isinstance(raw, list):
-        return page(raw, rev, query or {})
-    return bounded({"data": project(raw), "revision": rev})
+        hash_page = path == "tasks"
+        if cache is None:
+            return page(raw, resource_revision(doc, path), query or {}, hash_page=hash_page)
+        key = (collection_revisions, path)
+        if key not in cache:
+            cache[key] = collection_revisions(raw)
+        digest, items = cache[key]
+        rev = resource_revision(doc, path) if hash_page else digest
+        return page(raw, rev, query or {}, items, hash_page)
+    return bounded({"data": project(raw), "revision": resource_revision(doc, path)})
 
 
-COLLECTIONS = (
-    "tasks",
-    "phases",
-    "questions",
-    "followups",
-    "notes",
-    "chat",
-    "priorities",
-    "notifications",
-    "artifacts",
-    "artifact_trash",
-    "sources",
-    "alerts",
-    "freezes",
-)
-THREADS = {
-    "tasks": ("comments",),
-    "phases": ("comments",),
-    "questions": ("comments", "answers"),
-    "followups": ("comments",),
-    "notes": ("comments",),
-}
+COLLECTIONS = models.COLLECTIONS
+THREADS = models.THREADS
 MAX_REPLY = 262144
 
 
@@ -130,7 +135,7 @@ def project(raw: object) -> object:
     return result
 
 
-def page(rows: list, rev: str, query: dict) -> dict:
+def page(rows: list, rev: str, query: dict, revisions: list | None = None, hash_page: bool = False) -> dict:
     from .schemas import PAGINATION, validate
 
     validate(PAGINATION, query)
@@ -142,23 +147,32 @@ def page(rows: list, rev: str, query: dict) -> dict:
             raise APIError(409, "revision_conflict", "Collection changed; restart pagination")
         offset = int(offset_text)
     selected = []
+    size = reply_size(envelope([], rev, None, hash_page))
     for row in rows[offset : offset + query.get("limit", 50)]:
         item = project(row)
-        if isinstance(item, dict):
-            item = {**item, "revision": revision(row)}
         end = offset + len(selected) + 1
-        candidate = {
-            "data": [*selected, item],
-            "revision": rev,
-            "next_cursor": f"{rev}:{end}" if end < len(rows) else None,
-        }
-        if reply_size(candidate) > MAX_REPLY:
+        if isinstance(item, dict):
+            item = {**item, "revision": revisions[end - 1] if revisions is not None else revision(row)}
+        next_cursor = f"{rev}:{end}" if end < len(rows) else None
+        item_size = reply_size(item) + (2 if selected else 0)
+        cursor_size = reply_size(next_cursor) - 4
+        if size + item_size + cursor_size > MAX_REPLY:
             if not selected:
                 raise APIError(413, "resource_too_large", "Use the explicit export operation for this resource")
             break
         selected.append(item)
+        size += item_size
     end = offset + len(selected)
-    return bounded({"data": selected, "revision": rev, "next_cursor": f"{rev}:{end}" if end < len(rows) else None})
+    next_cursor = f"{rev}:{end}" if end < len(rows) else None
+    reply = envelope(selected, rev, next_cursor, hash_page)
+    return reply if selected else bounded(reply)
+
+
+def envelope(rows: list, rev: str, next_cursor: str | None, hash_page: bool) -> dict:
+    reply = {"data": rows, "revision": rev, "next_cursor": next_cursor}
+    if hash_page:
+        reply["page_hash"] = revision(rows)
+    return reply
 
 
 def swarm_read(status: dict | None, path: str, query: dict) -> dict:
@@ -185,7 +199,7 @@ def hierarchy_read(repository, slug: str, path: str, query: dict) -> dict:
         rows = repository.nodes(slug, name or "subtree", node or None)
     except KeyError:
         raise APIError(404, "resource_missing", "No such node") from None
-    doc = {"tasks": [], **repository.read(slug, *KINDS)}
+    doc = {"tasks": [], **repository.current(slug).state}
     items = {
         f"{key}/{item['id']}": item
         for key in KINDS

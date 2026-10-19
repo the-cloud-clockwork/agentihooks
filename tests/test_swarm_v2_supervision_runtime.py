@@ -157,7 +157,7 @@ def test_ready_retries_transport_failure_until_stopped(supervisor, monkeypatch):
     monkeypatch.setattr(supervisor, "herdr", herdr)
     monkeypatch.setattr(supervisor, "wait", lambda: setattr(supervisor, "stop", signal.SIGTERM))
     assert not supervisor.ready("herdr", 1)
-    herdr.assert_called_once_with(["workspace", "list"])
+    herdr.assert_called_once_with(["workspace", "list"], 0.5)
 
 
 def test_ready_fails_on_service_exit(supervisor, monkeypatch):
@@ -202,6 +202,7 @@ def test_start_handshakes_before_launching_agent(supervisor, monkeypatch, failed
             str(supervisor.launch.attempt),
             "--no-focus",
         ]
+        assert [call.args[1] for call in herdr.call_args_list] == [2, 2]
         assert herdr.call_args_list[1].args[0][:3] == ["pane", "run", "pane"]
         assert shlex.split(herdr.call_args_list[1].args[0][3]) == [
             sys.executable,
@@ -626,15 +627,54 @@ def test_herdr_command_preserves_prefix_environment_and_call_budget(supervisor, 
     )
     run = Mock(return_value=SimpleNamespace(stdout=b'{"result": {"ready": true}}'))
     monkeypatch.setattr(runtime.subprocess, "run", run)
-    assert supervisor.herdr(["workspace", "list"]) == {"result": {"ready": True}}
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 3)
+    assert supervisor.herdr(["workspace", "list"], 10) == {"result": {"ready": True}}
     run.assert_called_once_with(
         ["python", "fixture", "herdr", "workspace", "list"],
         env=supervisor.environment,
         stdin=subprocess.DEVNULL,
         capture_output=True,
-        timeout=0.5,
+        timeout=7,
         check=True,
     )
+
+
+def test_a_delayed_workspace_command_succeeds_within_the_remaining_startup_budget(supervisor):
+    script = "import json, time; time.sleep(1); print(json.dumps({'result': {'root_pane': {'pane_id': 'pane'}}}))"
+    supervisor.launch = replace(supervisor.launch, herdr=(sys.executable, "-c", script, "server"))
+    reply = supervisor.herdr(["workspace", "create"], runtime.time.monotonic() + 10)
+    assert reply == {"result": {"root_pane": {"pane_id": "pane"}}}
+
+
+@pytest.mark.parametrize("now", [10, 11])
+def test_a_spent_startup_budget_refuses_the_workspace_command_without_running_it(supervisor, monkeypatch, now):
+    run = Mock()
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: now)
+    with pytest.raises(subprocess.TimeoutExpired) as refused:
+        supervisor.herdr(["workspace", "create"], 10)
+    run.assert_not_called()
+    assert refused.value.cmd == ["herdr", "workspace", "create"]
+    assert refused.value.timeout == 0
+
+
+def test_a_sliver_of_startup_budget_still_runs_the_workspace_command(supervisor, monkeypatch):
+    run = Mock(return_value=SimpleNamespace(stdout=b""))
+    monkeypatch.setattr(runtime.subprocess, "run", run)
+    monkeypatch.setattr(runtime.time, "monotonic", lambda: 9.75)
+    assert supervisor.herdr(["workspace", "create"], 10) == {}
+    assert run.call_args.kwargs["timeout"] == 0.25
+
+
+@pytest.mark.wall_clock
+def test_a_hanging_workspace_command_still_fails_at_the_startup_deadline(supervisor):
+    supervisor.launch = replace(
+        supervisor.launch, herdr=(sys.executable, "-c", "import time; time.sleep(60)", "server")
+    )
+    started = runtime.time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        supervisor.herdr(["workspace", "create"], started + 1)
+    assert runtime.time.monotonic() - started < 10
 
 
 def test_ready_accepts_agent_handshake_even_after_agent_exit(supervisor, monkeypatch):
@@ -655,11 +695,11 @@ def test_exporter_readiness_cannot_mask_service_failure(supervisor, monkeypatch)
 
 def test_ready_accepts_successful_herdr_transport(supervisor, monkeypatch):
     monkeypatch.setattr(supervisor, "observe", lambda: None)
-    monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0]))
+    monkeypatch.setattr(runtime.time, "monotonic", Mock(side_effect=[0, 0.75]))
     transport = Mock(return_value={})
     monkeypatch.setattr(supervisor, "herdr", transport)
     assert supervisor.ready("herdr", 1)
-    transport.assert_called_once_with(["workspace", "list"])
+    transport.assert_called_once_with(["workspace", "list"], 1)
 
 
 def test_readiness_closes_at_deadline(supervisor, monkeypatch):
@@ -731,30 +771,38 @@ def test_remote_validation_cannot_extend_the_checkpoint_deadline(supervisor, mon
 
     release = threading.Event()
     finished = threading.Event()
+    joins = []
+
+    class Recorded(threading.Thread):
+        def join(self, timeout=None):
+            joins.append((self.daemon, timeout))
+            super().join(timeout)
 
     def validate(*_):
-        assert threading.current_thread().daemon is True
-        release.wait(0.5)
+        release.wait(30)
         finished.set()
         return True
 
     supervisor.launch = replace(supervisor.launch, budgets=Budgets(checkpoint=0.05))
     supervisor.environment[runtime.checkpoint_runtime.REMOTE] = "true"
+    monkeypatch.setattr(runtime, "threading", SimpleNamespace(Event=threading.Event, Thread=Recorded))
     monkeypatch.setattr(supervisor, "quiesce", lambda: True)
     monkeypatch.setattr(runtime, "checkpoint", lambda *_: "checkpoint")
     monkeypatch.setattr(runtime.checkpoint_runtime, "validate_export", validate)
     cleanup = Mock()
     monkeypatch.setattr(runtime.trees, "cleanup", cleanup)
-    started = runtime.time.monotonic()
     try:
         result = supervisor.drain("termination")
-        assert runtime.time.monotonic() - started < 0.3
+        assert len(joins) == 1
+        daemon, timeout = joins[0]
+        assert daemon is True
+        assert 0 <= timeout <= 0.05
+        assert not finished.is_set()
         assert result["checkpoint_status"] == "incomplete"
         assert result["checkpoint_id"] is None
         cleanup.assert_called_once()
     finally:
         release.set()
-        assert finished.wait(1)
 
 
 def test_remote_validation_finishing_at_the_checkpoint_deadline_is_incomplete(supervisor, monkeypatch):

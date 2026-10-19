@@ -9,8 +9,9 @@ import functools
 import json
 
 from scripts.inbox import links, outbox
-from scripts.inbox.store import DuplicateItem, InboxError, InboxStore
+from scripts.inbox.store import Contended, DuplicateItem, InboxError, InboxStore, Item
 from scripts.swarm.store import RedisStore, SwarmError
+from scripts.swarm_v2 import master_fence
 
 READY = ("idle", "done")
 OPERATOR = "operator"
@@ -33,21 +34,42 @@ class HerdrMessenger:
     def agent_status(self, agent):
         result = self.herdr(["agent", "get", self.target(agent)])
         found = result.get("agent", result)
-        return found.get("agent_status") or found.get("status") or "unknown"
+        state = found.get("agent_status") or found.get("status") or "unknown"
+        if agent.harness == "codex" and state == "blocked":
+            from scripts.swarm.pane import content_refusal, refusal_input
+
+            capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+            if content_refusal(agent.harness, capture["text"]) and not refusal_input(capture["text"]):
+                return "idle"
+        return state
 
     def prompt(self, agent, text):
         self.herdr(["agent", "prompt", self.target(agent), marked(text)])
 
     def typed_input(self, agent):
-        from scripts.swarm.pane import typed_input
+        from scripts.swarm.pane import content_refusal, refusal_input, typed_input
 
         capture = self.herdr(["pane", "read", agent.pane_id, "--source", "visible", "--format", "ansi"])
+        if content_refusal(agent.harness, capture["text"]):
+            return refusal_input(capture["text"])
         return typed_input(capture["text"])
 
 
 def marked(text):
     """A prompt the swarm types into a pane, marked so the hooks never count it as the operator's."""
     return f"{MARK} {text}"
+
+
+def envelope(item: Item, delivery_id: str, recipient: str) -> str:
+    metadata = {
+        "item_id": item.id,
+        "delivery_id": delivery_id,
+        "sender": item.sender,
+        "recipient": recipient,
+        "task": item.task,
+        "kind": "fyi" if item.fyi else "message",
+    }
+    return f"{MARK}\n{json.dumps(metadata)}\n\n{item.text}"
 
 
 def recipients(store, slug, to, sender):
@@ -66,6 +88,7 @@ def send(store, slug, text, sender, to, fyi=False):
     inbox = InboxStore(store.redis)
     for agent in found:
         links.check_send(inbox, sender, agent.name)
+        master_fence.check_send(inbox, sender, agent.name)
     for agent in found:
         outbox.post(inbox, outbox.Post(sender, agent.name, text, fyi=fyi, task=agent.task))
     return [a.name for a in found]
@@ -86,6 +109,7 @@ def apply_say(inbox, sender, entry):
         raise InboxError(str(exc)) from exc
     for agent in found:
         links.check_send(inbox, sender, agent.name)
+        master_fence.check_send(inbox, sender, agent.name)
     for agent in found:
         item = outbox.stable_id(entry["item"], agent.name)
         with contextlib.suppress(DuplicateItem):
@@ -110,7 +134,7 @@ def relay_to_page(inbox, slug, agents, ledger):
 def show(ledger, slug, item, sender, entry):
     if entry:
         return ledger.relay_comment(slug, entry, item.text, sender, item.id)
-    return ledger.relay(slug, item.text, sender)
+    return ledger.relay(slug, item.text, sender, item.id)
 
 
 def post(inbox, item, write):
@@ -120,9 +144,22 @@ def post(inbox, item, write):
     except SwarmError as exc:
         refused = exc
     if refused:
+        if not may_cancel(inbox, item, refused):
+            return False
         inbox.close(item.id, item.address, "cancel", f"refused by the ledger page: {refused}")
         if item.sender != BY:
             inbox.send(BY, item.sender, REFUSED.format(id=item.id, reason=refused))
+        return False
+    return True
+
+
+def may_cancel(inbox, item, refused):
+    """False while the entry item a refused answer closed cannot be reopened yet: the answer waits for the next pass."""
+    if not (item.ref and inbox.entry_of(item.id)):
+        return True
+    try:
+        inbox.reopen(item, BY, f"reopened: the answer was refused by the ledger page: {refused}")
+    except Contended:
         return False
     return True
 

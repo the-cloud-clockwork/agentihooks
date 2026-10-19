@@ -158,7 +158,10 @@ def test_a_listening_silent_port_waits_out_the_deadline_without_starting(isolate
             pytest.raises(SystemExit) as refused,
         ):
             server.ensure()
-    assert str(refused.value) == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE}"
+    assert (
+        str(refused.value)
+        == f"ledger server did not answer on {server.BASE}; see {server.LOGFILE} or docker compose logs ledger"
+    )
     held.assert_called_once_with()
     start.assert_not_called()
 
@@ -267,7 +270,9 @@ def test_health_requests_use_short_timeouts(isolated_server):
     with patch.object(server.ledger_link.urllib.request, "urlopen") as health:
         health.return_value.__enter__.return_value.read.return_value = f'{{"dir": "{isolated_server}"}}'.encode()
         server.ensure()
-        health.assert_called_once_with(f"{server.BASE}/healthz", timeout=1)
+        health.assert_called_once()
+        assert health.call_args.args[0].full_url == f"{server.BASE}/healthz"
+        assert health.call_args.kwargs == {"timeout": 1}
     with (
         patch.object(server.time, "monotonic", return_value=100),
         patch.object(server, "SERVER_WAIT", 5),

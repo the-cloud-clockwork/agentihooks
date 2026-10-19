@@ -10,10 +10,13 @@ import pytest
 from scripts.swarm import prompt
 from scripts.swarm_ledger import ledger, ledger_gate, ledger_tasks
 from scripts.swarm_ledger import ledger_artifacts as artifacts
-from scripts.swarm_ledger.repository import repository as storage
+from scripts.swarm_ledger.storage import default as default_repository
+from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_artifacts import MARKDOWN
 from tests.swarm_ledger.test_bin import DAY_MS, make_ledger
 from tests.swarm_ledger.test_media import png
+
+storage = default_repository()
 
 AGENT = "life-engineer"
 RULE = "proofs go on the task proof and the pull request"
@@ -114,7 +117,7 @@ class TestCommands:
         file = {"id": "a" * 64 + ".md", "type": "text/markdown", "size": 1}
         with (
             patch.object(ledger, "upload_artifact", return_value=file),
-            patch.object(ledger, "call", return_value=state or {}) as call,
+            patch.object(ledger, "call", side_effect=lambda slug, ops: state or {"applied": [ops[0]["id"]]}) as call,
             patch.object(
                 ledger,
                 "resource",
@@ -382,7 +385,7 @@ class TestDetails:
     def test_a_ledger_without_a_trash_gets_an_empty_one(self, slug):
         state = storage.export_document(slug)
         del state["artifact_trash"]
-        core.paths(slug)[1].write_text(json.dumps(state))
+        legacy_page.paths(slug, core)[1].write_text(json.dumps(state))
         assert storage.apply_ops(slug)[0]["artifact_trash"] == []
 
     def test_operation_shapes_name_what_they_take(self):

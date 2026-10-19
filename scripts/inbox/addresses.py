@@ -30,6 +30,24 @@ def check_address(inbox: InboxStore, sender: str, address: str) -> None:
     raise InboxError(f"unknown inbox address {address}; valid addresses: {', '.join(sorted(valid))}")
 
 
+def dispatcher_status(inbox: InboxStore, address: str) -> dict:
+    from scripts.swarm.store import DISPATCH, FULL, RedisStore
+
+    seat = address if is_seat(address) else inbox.seats.known_seat(address)
+    if not seat.startswith("dispatcher@"):
+        return {}
+    slug = seat.removeprefix("dispatcher@")
+    store = RedisStore(inbox.redis)
+    owner = next((a.name for a in store.agents(slug) if a.lane == DISPATCH and a.state != "finished"), "")
+    activation = "recorded consumer" if owner else "pending lifecycle checks"
+    if raw := inbox.redis.hgetall(store.key(slug, "config")):
+        if raw["state"] in ("stopping", "stopped") or (raw["state"] == "paused" and not owner):
+            activation = raw["state"]
+        elif raw.get("autonomy") != FULL:
+            activation = "autonomy"
+    return {"dispatch": {"owner": seat, "consumer": owner, "activation": activation}}
+
+
 def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
     address = inbox.names.resolve(address)
     if address == "operator" or address in live:

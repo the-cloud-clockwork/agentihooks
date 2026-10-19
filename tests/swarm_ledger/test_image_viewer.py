@@ -7,7 +7,7 @@ from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 from tests.swarm_ledger.test_media import png
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/template.html"
+PALETTE = Path(__file__).resolve().parents[2] / "scripts/swarm_ledger/palette.css"
 browser = chromium_browser
 
 
@@ -22,7 +22,7 @@ def image_page(browser, request):
     doc = {"title": "Image proof", "phases": [{"id": "p1", "title": "Slides", "comments": [entry]}], "chat": [entry]}
     tab.route("**/media/**", lambda route: route.fulfill(body=png(1280, 720), content_type="image/png"))
     html = shell_html()
-    html = html.replace("__LEDGER_PALETTE__", (TEMPLATE.parent / "palette.css").read_text())
+    html = html.replace("__LEDGER_PALETTE__", PALETTE.read_text())
     show(tab, html, ledger=ledger_state(doc))
     tab.locator("#item-phases-p1 details[data-key]").evaluate("el => el.open = true")
     for image in tab.locator(".attach-row img").all():
@@ -52,7 +52,8 @@ def test_comment_images_are_small_thumbnails_that_keep_ratio_and_never_grow(imag
         """() => {
           const images = [...document.querySelectorAll("#item-phases-p1 .attach-row img")];
           return images.length === 2 && images.every(image =>
-            image.complete && image.naturalWidth > 0 && image.naturalHeight > 0);
+            image.complete && image.naturalWidth > 0 && image.naturalHeight > 0 &&
+            image.getBoundingClientRect().width > 0);
         }"""
     )
     large = tab.locator("#item-phases-p1 .attach-row img").nth(0).bounding_box()

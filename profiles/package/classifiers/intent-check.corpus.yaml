@@ -99,6 +99,10 @@ notes:
       final proof and body contradict a stale published draft. Changed inputs are observed; fixed input flapping and historical
       classification error are unproven.
   chunk_before: 'plan chunk cases: before is the dev rule with four questions on the state without its chunk'
+  aligned: adds aligned, phase fit judged apart from delivery; every case re-sampled three times on 2026-10-13 through the
+    configured classifier with the aligned question; the pass and fail rule is unchanged
+  drift: g18-gates-off became a miss and lifted-t205 a hit in that re-sample; the same day the old four questions scored
+    g18-gates-off weakens 0.19 to 0.22 too, so the model moved since its unrecorded samples, not the aligned question
 cases:
 - name: pn1
   state:
@@ -208,51 +212,60 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 291
     answers:
       usable:
         type: noul
-        noul: 0.9966
+        noul: 0.9975273772292806
+      aligned:
+        type: noul
+        noul: 0.9996849613387693
       delivers:
         type: noul
-        noul: 0.9604
+        noul: 0.9867771784421249
       reachable:
         type: noul
-        noul: 0.9919
+        noul: 0.989671846604901
       weakens:
         type: noul
-        noul: 0.1128
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.11920291263495983
+  - source: liquid-d1
+    latency_ms: 336
     answers:
       usable:
         type: noul
-        noul: 0.9855
+        noul: 0.9975273772292806
+      aligned:
+        type: noul
+        noul: 0.9996849613387693
       delivers:
         type: noul
-        noul: 0.9186
+        noul: 0.9867771784421249
       reachable:
         type: noul
-        noul: 0.9972
+        noul: 0.989671846604901
       weakens:
         type: noul
-        noul: 0.0635
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.11920291263495983
+  - source: liquid-d1
+    latency_ms: 296
     answers:
       usable:
         type: noul
-        noul: 0.9975
+        noul: 0.9975273772292806
+      aligned:
+        type: noul
+        noul: 0.9996849613387693
       delivers:
         type: noul
-        noul: 0.9868
+        noul: 0.9867771784421249
       reachable:
         type: noul
-        noul: 0.9897
+        noul: 0.989671846604901
       weakens:
         type: noul
-        noul: 0.1192
+        noul: 0.11920291263495983
   baseline:
   - verdict: pass
   - verdict: pass
@@ -297,7 +310,7 @@ cases:
       what he operates. Build a read docs skill shipped in the agentihooks package, loaded by the master and every role, and
       available in any project. When the operator asks in the ledger chat, a pane or any session what something means or how
       the swarm behaves, such as a gate, a ledger section, a setting or a swarm control, the agent finds the matching page
-      of the agentihooks docs site, published on the GitHub Pages site the-cloud-clockwork.github.io agentihooks from the
+      of the agentihooks docs site, published on the GitHub Pages site the agentihooks project site from the
       repo docs folder, reads only the section that answers, and replies in plain words naming the page. If the docs lack
       the answer, it says so and proposes a follow up to add it, never invents. Deterministic first: a script maps a question
       to candidate pages through the docs index and headings, and the agent judges only the answer. Seams: the script returns
@@ -354,7 +367,7 @@ cases:
       docs skill shipped in the agentihooks package, loaded by the master and every role, and available in any project. When
       the operator asks in the ledger chat, a pane or any session what something means or how the swarm behaves, such as a
       gate, a ledger section, a setting or a swarm control, the agent finds the matching page of the agentihooks docs site,
-      published on the GitHub Pages site the-cloud-clockwork.github.io agentihooks from the repo docs folder, reads only the
+      published on the GitHub Pages site the agentihooks project site from the repo docs folder, reads only the
       section that answers, and replies in plain words naming the page. If the docs lack the answer, it says so and proposes
       a follow up to add it, never invents. Deterministic first: a script maps a question to candidate pages through the docs
       index and headings, and the agent judges only the answer. Seams: the script returns the right page for a gate name,
@@ -449,51 +462,60 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 296
     answers:
       usable:
         type: noul
-        noul: 0.9973
+        noul: 0.9783846697584035
+      aligned:
+        type: noul
+        noul: 0.9770226287518852
       delivers:
         type: noul
-        noul: 0.9908
+        noul: 0.9959298620122906
       reachable:
         type: noul
-        noul: 0.9953
+        noul: 0.817574471748733
       weakens:
         type: noul
-        noul: 0.0019
-  - source: unrecorded
-    latency_ms: 0
+        noul: 9.610242838657447e-05
+  - source: liquid-d1
+    latency_ms: 341
     answers:
       usable:
         type: noul
-        noul: 0.9784
+        noul: 0.9770226314280634
+      aligned:
+        type: noul
+        noul: 0.9770226287518852
       delivers:
         type: noul
-        noul: 0.9959
+        noul: 0.9947798751576203
       reachable:
         type: noul
-        noul: 0.8176
+        noul: 0.8175744673038221
       weakens:
         type: noul
-        noul: 0.0001
-  - source: unrecorded
-    latency_ms: 0
+        noul: 2.2827999233823465e-05
+  - source: liquid-d1
+    latency_ms: 341
     answers:
       usable:
         type: noul
-        noul: 0.9784
+        noul: 0.9755769071055401
+      aligned:
+        type: noul
+        noul: 0.9770226287518852
       delivers:
         type: noul
-        noul: 0.9948
+        noul: 0.9959298620122906
       reachable:
         type: noul
-        noul: 0.8176
+        noul: 0.817574471748733
       weakens:
         type: noul
-        noul: 0.0
+        noul: 9.610242838657447e-05
   baseline:
   - verdict: pass
   - verdict: pass
@@ -513,7 +535,7 @@ cases:
         selection, a Branch guard answer naming the published page, and unknown hyperdrive returning missing with a proposed
         documentation follow-up. These are task-specific delivery observations independent of merge or review status. Documentation
         expansion is explicitly assigned to a separate final docs task.
-    input_digest: 7f8e9fef38d9b73e
+    input_digest: 6159cd3baa624e4a
     baseline_answers:
     - usable: 0.9973
       delivers: 0.9908
@@ -670,57 +692,66 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 313
     answers:
       usable:
         type: noul
-        noul: 0.9904
+        noul: 0.9867771809697151
+      aligned:
+        type: noul
+        noul: 0.9997694932668463
       delivers:
         type: noul
-        noul: 0.9557
+        noul: 0.9902915249511566
       reachable:
         type: noul
-        noul: 0.9937
+        noul: 0.9740426424254486
       weakens:
         type: noul
-        noul: 0.0056
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0006263340834913398
+  - source: liquid-d1
+    latency_ms: 344
     answers:
       usable:
         type: noul
-        noul: 0.982
+        noul: 0.9867771809697151
+      aligned:
+        type: noul
+        noul: 0.9997694932668463
       delivers:
         type: noul
-        noul: 0.989
+        noul: 0.9902915249511566
       reachable:
         type: noul
-        noul: 0.9868
+        noul: 0.9740426424254486
       weakens:
         type: noul
-        noul: 0.0007
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0006263340834913398
+  - source: liquid-d1
+    latency_ms: 349
     answers:
       usable:
         type: noul
-        noul: 0.9904
+        noul: 0.9908743650361692
+      aligned:
+        type: noul
+        noul: 0.9989677690880904
       delivers:
         type: noul
-        noul: 0.9557
+        noul: 0.990291523661789
       reachable:
         type: noul
-        noul: 0.9937
+        noul: 0.975576911366069
       weakens:
         type: noul
-        noul: 0.0056
+        noul: 0.00027803100529584187
   baseline:
   - verdict: pass
   - verdict: pass
   - verdict: pass
   notes:
-    source: https://github.com/the-cloud-clockwork/agentihooks-bundle/pull/162
+    source: agentihooks-bundle pull request 162
     provenance: reconstruction from retained ledger, PR and proof; not digest verified historical input
     labels:
       standards: The task requires installed build and intent shims and a headless deny. Later dated proof notes record 373
@@ -829,57 +860,66 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 306
     answers:
       usable:
         type: noul
-        noul: 0.0016
+        noul: 0.00037998450909180554
+      aligned:
+        type: noul
+        noul: 0.9997546306099284
       delivers:
         type: noul
-        noul: 0.0053
+        noul: 0.0008559005348012546
       reachable:
         type: noul
-        noul: 0.3961
+        noul: 0.8872045966995028
       weakens:
         type: noul
-        noul: 0.017
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0008559007132032138
+  - source: liquid-d1
+    latency_ms: 268
     answers:
       usable:
         type: noul
-        noul: 0.0016
+        noul: 0.00037998445107620665
+      aligned:
+        type: noul
+        noul: 0.9995121428971994
       delivers:
         type: noul
-        noul: 0.0053
+        noul: 0.0009110514114143117
       reachable:
         type: noul
-        noul: 0.3961
+        noul: 0.8991213799730774
       weakens:
         type: noul
-        noul: 0.017
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.000666702170251392
+  - source: liquid-d1
+    latency_ms: 325
     answers:
       usable:
         type: noul
-        noul: 0.0016
+        noul: 0.00037998445107620665
+      aligned:
+        type: noul
+        noul: 0.9995121428971994
       delivers:
         type: noul
-        noul: 0.0053
+        noul: 0.0009110514114143117
       reachable:
         type: noul
-        noul: 0.3961
+        noul: 0.8991213799730774
       weakens:
         type: noul
-        noul: 0.017
+        noul: 0.000666702170251392
   baseline:
   - verdict: fail
   - verdict: fail
   - verdict: fail
   notes:
-    source: https://github.com/the-cloud-clockwork/agentihooks-bundle/pull/162
+    source: agentihooks-bundle pull request 162
     provenance: deliberately incomplete control built from original draft description
     labels:
       standards: This deliberately incomplete control explicitly says shim files are absent, thirteen tests fail, operator
@@ -924,51 +964,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 235
     answers:
       usable:
         type: noul
-        noul: 0.0001
+        noul: 6.540437884785105e-06
+      aligned:
+        type: noul
+        noul: 5.771921341782636e-06
       delivers:
         type: noul
-        noul: 0.0009
+        noul: 6.681516892461932e-07
       reachable:
         type: noul
-        noul: 0.0015
+        noul: 0.004331501377915682
       weakens:
         type: noul
-        noul: 0.2259
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.025957358704815272
+  - source: liquid-d1
+    latency_ms: 259
     answers:
       usable:
         type: noul
-        noul: 0.0
+        noul: 4.495180942174053e-06
+      aligned:
+        type: noul
+        noul: 5.47597930587746e-05
       delivers:
         type: noul
-        noul: 0.0
+        noul: 5.422220151671273e-06
       reachable:
         type: noul
-        noul: 0.003
+        noul: 0.0018102106761722582
       weakens:
         type: noul
-        noul: 0.0169
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.020332355717182622
+  - source: liquid-d1
+    latency_ms: 264
     answers:
       usable:
         type: noul
-        noul: 0.0001
+        noul: 2.9023116176057283e-06
+      aligned:
+        type: noul
+        noul: 5.771921341782636e-06
       delivers:
         type: noul
-        noul: 0.0009
+        noul: 6.681516892461932e-07
       reachable:
         type: noul
-        noul: 0.0015
+        noul: 0.004331501377915682
       weakens:
         type: noul
-        noul: 0.2259
+        noul: 0.025957358704815272
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1003,7 +1052,7 @@ cases:
       what he operates. Build a read docs skill shipped in the agentihooks package, loaded by the master and every role, and
       available in any project. When the operator asks in the ledger chat, a pane or any session what something means or how
       the swarm behaves, such as a gate, a ledger section, a setting or a swarm control, the agent finds the matching page
-      of the agentihooks docs site, published on the GitHub Pages site the-cloud-clockwork.github.io agentihooks from the
+      of the agentihooks docs site, published on the GitHub Pages site the agentihooks project site from the
       repo docs folder, reads only the section that answers, and replies in plain words naming the page. If the docs lack
       the answer, it says so and proposes a follow up to add it, never invents. Deterministic first: a script maps a question
       to candidate pages through the docs index and headings, and the agent judges only the answer. Seams: the script returns
@@ -1021,51 +1070,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 270
     answers:
       usable:
         type: noul
-        noul: 0.0001
+        noul: 8.1396880765781e-06
+      aligned:
+        type: noul
+        noul: 3.3214203608914855e-05
       delivers:
         type: noul
-        noul: 0.0012
+        noul: 4.1399361092493885e-08
       reachable:
         type: noul
-        noul: 0.0122
+        noul: 0.002323162522631283
       weakens:
         type: noul
-        noul: 0.1217
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.037326887344129464
+  - source: liquid-d1
+    latency_ms: 275
     answers:
       usable:
         type: noul
-        noul: 0.0001
+        noul: 9.81832621556679e-06
+      aligned:
+        type: noul
+        noul: 3.3214203608914855e-05
       delivers:
         type: noul
-        noul: 0.0012
+        noul: 4.1399361092493885e-08
       reachable:
         type: noul
-        noul: 0.0122
+        noul: 0.002323162522631283
       weakens:
         type: noul
-        noul: 0.1217
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.037326887344129464
+  - source: liquid-d1
+    latency_ms: 263
     answers:
       usable:
         type: noul
-        noul: 0.0
+        noul: 1.4593757535300366e-06
+      aligned:
+        type: noul
+        noul: 4.936988894283305e-06
       delivers:
         type: noul
-        noul: 0.0
+        noul: 2.7577923521998413e-08
       reachable:
         type: noul
-        noul: 0.0071
+        noul: 0.0028009275498032983
       weakens:
         type: noul
-        noul: 0.023
+        noul: 0.024423095734812623
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1079,7 +1137,7 @@ cases:
       spec: The explicit operator task authorizes a shipped shared documentation lookup skill and live answer. Cryptocurrency
         wallet balances and market trades implement no lookup, installed skill or answer seam. General project context and
         copied authorization do not authorize this work.
-    input_digest: 90b6928285ac1478
+    input_digest: aa0d08209701fc0c
     baseline_answers:
     - usable: 0.0
       delivers: 0.0
@@ -1112,51 +1170,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 256
     answers:
       usable:
         type: noul
-        noul: 0.0
+        noul: 8.059444162679762e-07
+      aligned:
+        type: noul
+        noul: 8.664652825130241e-06
       delivers:
         type: noul
-        noul: 0.0
+        noul: 7.889261249020096e-06
       reachable:
         type: noul
-        noul: 0.0041
+        noul: 0.0023231619700330055
       weakens:
         type: noul
-        noul: 0.0159
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.03514484741138068
+  - source: liquid-d1
+    latency_ms: 259
     answers:
       usable:
         type: noul
-        noul: 0.0001
+        noul: 4.7379034701988425e-07
+      aligned:
+        type: noul
+        noul: 2.4300248528280456e-05
       delivers:
         type: noul
-        noul: 0.0029
+        noul: 1.1726418189163885e-06
       reachable:
         type: noul
-        noul: 0.0185
+        noul: 0.016914911284419312
       weakens:
         type: noul
-        noul: 0.3751
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.05033063259747688
+  - source: liquid-d1
+    latency_ms: 280
     answers:
       usable:
         type: noul
-        noul: 0.0001
+        noul: 1.994729413143384e-06
+      aligned:
+        type: noul
+        noul: 2.3552623105428692e-05
       delivers:
         type: noul
-        noul: 0.0029
+        noul: 1.9750541243245093e-07
       reachable:
         type: noul
-        noul: 0.0185
+        noul: 0.009708478773683474
       weakens:
         type: noul
-        noul: 0.3751
+        noul: 0.03963883456295853
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1301,57 +1368,66 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 344
     answers:
       usable:
         type: noul
-        noul: 0.9497
+        noul: 0.9465966664338019
+      aligned:
+        type: noul
+        noul: 0.9986749777553211
       delivers:
         type: noul
-        noul: 0.9241
+        noul: 0.9241418252018903
       reachable:
         type: noul
-        noul: 0.985
+        noul: 0.979667648438234
       weakens:
         type: noul
-        noul: 0.0005
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0019267343767748358
+  - source: liquid-d1
+    latency_ms: 288
     answers:
       usable:
         type: noul
-        noul: 0.9741
+        noul: 0.8872045907347107
+      aligned:
+        type: noul
+        noul: 0.9984021548239292
       delivers:
         type: noul
-        noul: 0.8508
+        noul: 0.7057850030829009
       reachable:
         type: noul
-        noul: 0.9975
+        noul: 0.9724147171736395
       weakens:
         type: noul
-        noul: 0.0036
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0005193049573056592
+  - source: liquid-d1
+    latency_ms: 282
     answers:
       usable:
         type: noul
-        noul: 0.9741
+        noul: 0.8807970904940926
+      aligned:
+        type: noul
+        noul: 0.9984021548239292
       delivers:
         type: noul
-        noul: 0.8508
+        noul: 0.7057850030829009
       reachable:
         type: noul
-        noul: 0.9975
+        noul: 0.9724147171736395
       weakens:
         type: noul
-        noul: 0.0036
+        noul: 0.0005193049573056592
   baseline:
   - verdict: pass
   - verdict: pass
   - verdict: pass
   notes:
-    source: https://github.com/the-cloud-clockwork/agentihooks-bundle/pull/162
+    source: agentihooks-bundle pull request 162
     provenance: fixed retained final PR body paired with delivered proof; not historical digest verified
     labels:
       standards: The retained final description explicitly records the operator condition request, delivered engineer shims
@@ -1385,7 +1461,7 @@ cases:
       what he operates. Build a read docs skill shipped in the agentihooks package, loaded by the master and every role, and
       available in any project. When the operator asks in the ledger chat, a pane or any session what something means or how
       the swarm behaves, such as a gate, a ledger section, a setting or a swarm control, the agent finds the matching page
-      of the agentihooks docs site, published on the GitHub Pages site the-cloud-clockwork.github.io agentihooks from the
+      of the agentihooks docs site, published on the GitHub Pages site the agentihooks project site from the
       repo docs folder, reads only the section that answers, and replies in plain words naming the page. If the docs lack
       the answer, it says so and proposes a follow up to add it, never invents. Deterministic first: a script maps a question
       to candidate pages through the docs index and headings, and the agent judges only the answer. Seams: the script returns
@@ -1403,51 +1479,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 263
     answers:
       usable:
         type: noul
-        noul: 0.0009
+        noul: 0.002631674405114382
+      aligned:
+        type: noul
+        noul: 0.8991213853793453
       delivers:
         type: noul
-        noul: 0.0001
+        noul: 2.3320754641094803e-06
       reachable:
         type: noul
-        noul: 0.0117
+        noul: 0.00045831292794009656
       weakens:
         type: noul
-        noul: 0.0331
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.002472623524173327
+  - source: liquid-d1
+    latency_ms: 250
     answers:
       usable:
         type: noul
-        noul: 0.0013
+        noul: 0.00031503872693208507
+      aligned:
+        type: noul
+        noul: 0.966914019704466
       delivers:
         type: noul
-        noul: 0.0011
+        noul: 2.7535697269121263e-05
       reachable:
         type: noul
-        noul: 0.0249
+        noul: 0.010328152519305191
       weakens:
         type: noul
-        noul: 0.0082
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.00628990195061786
+  - source: liquid-d1
+    latency_ms: 259
     answers:
       usable:
         type: noul
-        noul: 0.0009
+        noul: 0.0003353502578499818
+      aligned:
+        type: noul
+        noul: 0.9669140254249554
       delivers:
         type: noul
-        noul: 0.0001
+        noul: 2.5867418168957183e-05
       reachable:
         type: noul
-        noul: 0.0117
+        noul: 0.004905405269296008
       weakens:
         type: noul
-        noul: 0.0124
+        noul: 0.004331501506445335
   baseline:
   - verdict: fail
   - verdict: fail
@@ -1462,7 +1547,7 @@ cases:
       spec: The task explicitly requires a skill shipped in the package, available to every role and any project, with tests
         and one live answer. This fixed proposal-only control ships no skill, lookup command, role install or executable and
         has no live lookup proof. Approval and merge of prose do not satisfy its delivery boundary.
-    input_digest: 187a8c50c7519eb7
+    input_digest: e82ea8fff0893f27
     baseline_answers:
     - usable: 0.0001
       delivers: 0.0
@@ -1597,51 +1682,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 289
     answers:
       usable:
         type: noul
-        noul: 0.9556
+        noul: 0.9496693638413347
+      aligned:
+        type: noul
+        noul: 0.9979492566964249
       delivers:
         type: noul
-        noul: 0.886
+        noul: 0.8933093975331751
       reachable:
         type: noul
-        noul: 0.9965
+        noul: 0.9648551515780319
       weakens:
         type: noul
-        noul: 0.9743
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.09534945461636171
+  - source: liquid-d1
+    latency_ms: 307
     answers:
       usable:
         type: noul
-        noul: 0.9627
+        noul: 0.9496693638413347
+      aligned:
+        type: noul
+        noul: 0.9979492566964249
       delivers:
         type: noul
-        noul: 0.9526
+        noul: 0.8933093975331751
       reachable:
         type: noul
-        noul: 0.9724
+        noul: 0.9648551515780319
       weakens:
         type: noul
-        noul: 0.5622
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.09534945461636171
+  - source: liquid-d1
+    latency_ms: 311
     answers:
       usable:
         type: noul
-        noul: 0.9556
+        noul: 0.975576911366069
+      aligned:
+        type: noul
+        noul: 0.9994115913041225
       delivers:
         type: noul
-        noul: 0.886
+        noul: 0.8991213759183765
       reachable:
         type: noul
-        noul: 0.9965
+        noul: 0.989671849232282
       weakens:
         type: noul
-        noul: 0.9743
+        noul: 0.2689414213699951
   baseline:
   - verdict: pass
   - verdict: pass
@@ -1797,51 +1891,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 323
     answers:
       usable:
         type: noul
-        noul: 0.9316
+        noul: 0.9046505453836383
+      aligned:
+        type: noul
+        noul: 0.9981897893877756
       delivers:
         type: noul
-        noul: 0.8028
+        noul: 0.9149009607937928
       reachable:
         type: noul
-        noul: 0.9978
+        noul: 0.9820137878007522
       weakens:
         type: noul
-        noul: 0.9685
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.03308597648187432
+  - source: liquid-d1
+    latency_ms: 336
     answers:
       usable:
         type: noul
-        noul: 0.8808
+        noul: 0.9196425333801889
+      aligned:
+        type: noul
+        noul: 0.9981897893877756
       delivers:
         type: noul
-        noul: 0.9149
+        noul: 0.9149009607937928
       reachable:
         type: noul
-        noul: 0.9868
+        noul: 0.9859363732666802
       weakens:
         type: noul
-        noul: 0.0567
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.027585281427362537
+  - source: liquid-d1
+    latency_ms: 307
     answers:
       usable:
         type: noul
-        noul: 0.8808
+        noul: 0.9046505453836383
+      aligned:
+        type: noul
+        noul: 0.9981897893877756
       delivers:
         type: noul
-        noul: 0.9149
+        noul: 0.9149009607937928
       reachable:
         type: noul
-        noul: 0.9876
+        noul: 0.9820137878007522
       weakens:
         type: noul
-        noul: 0.0567
+        noul: 0.03308597648187432
   baseline:
   - verdict: pass
   - verdict: pass
@@ -1983,51 +2086,60 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 326
     answers:
       usable:
         type: noul
-        noul: 0.2121
+        noul: 0.18242551491653522
+      aligned:
+        type: noul
+        noul: 0.9970189673255055
       delivers:
         type: noul
-        noul: 0.9466
+        noul: 0.880797081106935
       reachable:
         type: noul
-        noul: 0.9919
+        noul: 0.9919380089483865
       weakens:
         type: noul
-        noul: 0.977
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.9688561699148477
+  - source: liquid-d1
+    latency_ms: 285
     answers:
       usable:
         type: noul
-        noul: 0.2121
+        noul: 0.21206880435710532
+      aligned:
+        type: noul
+        noul: 0.9783846691281407
       delivers:
         type: noul
-        noul: 0.9466
+        noul: 0.9465966709534505
       reachable:
         type: noul
-        noul: 0.9919
+        noul: 0.9850429167000149
       weakens:
         type: noul
-        noul: 0.977
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.9808759667431178
+  - source: liquid-d1
+    latency_ms: 289
     answers:
       usable:
         type: noul
-        noul: 0.0888
+        noul: 0.21206880435710532
+      aligned:
+        type: noul
+        noul: 0.9603611589136498
       delivers:
         type: noul
-        noul: 0.8645
+        noul: 0.9465966709534505
       reachable:
         type: noul
-        noul: 0.9956
+        noul: 0.9919380071907097
       weakens:
         type: noul
-        noul: 0.9898
+        noul: 0.9808759667431178
   baseline:
   - verdict: fail
   - verdict: fail
@@ -2203,51 +2315,60 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 334
     answers:
       usable:
         type: noul
-        noul: 0.9325
+        noul: 0.9324533013520764
+      aligned:
+        type: noul
+        noul: 0.9982992773102688
       delivers:
         type: noul
-        noul: 0.9196
+        noul: 0.9196425355825848
       reachable:
         type: noul
-        noul: 0.9526
+        noul: 0.9525741248028792
       weakens:
         type: noul
-        noul: 0.0001
-  - source: unrecorded
-    latency_ms: 0
+        noul: 8.481099749493856e-05
+  - source: liquid-d1
+    latency_ms: 314
     answers:
       usable:
         type: noul
-        noul: 0.9325
+        noul: 0.939913356558485
+      aligned:
+        type: noul
+        noul: 0.9982992773102688
       delivers:
         type: noul
-        noul: 0.9196
+        noul: 0.9196425355825848
       reachable:
         type: noul
-        noul: 0.9526
+        noul: 0.9525741248028792
       weakens:
         type: noul
-        noul: 0.0001
-  - source: unrecorded
-    latency_ms: 0
+        noul: 8.481099749493856e-05
+  - source: liquid-d1
+    latency_ms: 321
     answers:
       usable:
         type: noul
-        noul: 0.9325
+        noul: 0.9324533013520764
+      aligned:
+        type: noul
+        noul: 0.9988304899090112
       delivers:
         type: noul
-        noul: 0.9196
+        noul: 0.9241418220680101
       reachable:
         type: noul
-        noul: 0.9526
+        noul: 0.9525741248028792
       weakens:
         type: noul
-        noul: 0.0001
+        noul: 8.481099749493856e-05
   baseline:
   - verdict: pass
   - verdict: pass
@@ -2349,7 +2470,7 @@ cases:
       were synthesized or replayed to inflate real history. Exact retained disputed cases cannot yet be independently labelled
       or measured before and after.
 
-      2026-10-07T16:45:41Z root cause evidence: `gh api --paginate --slurp repos/the-cloud-clockwork/agentihooks/pulls/1320/comments`
+      2026-10-07T16:45:41Z root cause evidence: `gh api --paginate --slurp repos/OWNER/agentihooks/pulls/1320/comments`
       -> "unknown flag: --slurp", exit 1 (gh version 2.4.0+dfsg1). `intent.pr_view(".../pull/1320")` -> None. journalctl agentihooks-swarm:
       last "rig-grade-swarm: task ... intent check" line is t54 pass at 04:13:59; none after. gates/intent/history.jsonl absent.
 
@@ -2365,51 +2486,60 @@ cases:
     verdict: fail
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 321
     answers:
       usable:
         type: noul
-        noul: 0.2814
+        noul: 0.22270013882530884
+      aligned:
+        type: noul
+        noul: 0.9987551567257014
       delivers:
         type: noul
-        noul: 0.0103
+        noul: 0.010328153890112811
       reachable:
         type: noul
-        noul: 0.8176
+        noul: 0.8175744850834649
       weakens:
         type: noul
-        noul: 0.0002
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.00019110421907531281
+  - source: liquid-d1
+    latency_ms: 277
     answers:
       usable:
         type: noul
-        noul: 0.2814
+        noul: 0.28140560742914383
+      aligned:
+        type: noul
+        noul: 0.9984021541850645
       delivers:
         type: noul
-        noul: 0.011
+        noul: 0.010986940201801838
       reachable:
         type: noul
-        noul: 0.9241
+        noul: 0.9241418189341297
       weakens:
         type: noul
-        noul: 0.0001
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.00020342687198138013
+  - source: liquid-d1
+    latency_ms: 307
     answers:
       usable:
         type: noul
-        noul: 0.2814
+        noul: 0.22270013882530884
+      aligned:
+        type: noul
+        noul: 0.9987551567257014
       delivers:
         type: noul
-        noul: 0.011
+        noul: 0.010328153890112811
       reachable:
         type: noul
-        noul: 0.9241
+        noul: 0.8175744850834649
       weakens:
         type: noul
-        noul: 0.0001
+        noul: 0.00019110421907531281
   baseline:
   - verdict: pass
   - verdict: pass
@@ -2428,7 +2558,7 @@ cases:
         false, retained_verdicts: 0" and state "Exact retained disputed cases cannot yet be independently labelled or measured
         before and after" -- the PR only fixes the prerequisite gh-flag bug so verdicts can start accumulating; the corpus
         rebuild and before/after measurement the task text calls for were not done.'
-    input_digest: 8825a94095dd7b68
+    input_digest: 82470f4fa597421b
     baseline_answers:
     - usable: 0.6654
       delivers: 0.0276
@@ -2575,51 +2705,60 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 323
     answers:
       usable:
         type: noul
-        noul: 0.9954
+        noul: 0.9919380084717284
+      aligned:
+        type: noul
+        noul: 0.9998204721108941
       delivers:
         type: noul
-        noul: 0.9941
+        noul: 0.9944450745554737
       reachable:
         type: noul
-        noul: 0.9991
+        noul: 0.9990302481837997
       weakens:
         type: noul
-        noul: 0.0004
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0004305570684985389
+  - source: liquid-d1
+    latency_ms: 355
     answers:
       usable:
         type: noul
-        noul: 0.9954
+        noul: 0.9919380084717284
+      aligned:
+        type: noul
+        noul: 0.9998204721108941
       delivers:
         type: noul
-        noul: 0.9941
+        noul: 0.9944450745554737
       reachable:
         type: noul
-        noul: 0.9991
+        noul: 0.9990302481837997
       weakens:
         type: noul
-        noul: 0.0004
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0006263340368550441
+  - source: liquid-d1
+    latency_ms: 362
     answers:
       usable:
         type: noul
-        noul: 0.9954
+        noul: 0.9924227587321393
+      aligned:
+        type: noul
+        noul: 0.9998088957040521
       delivers:
         type: noul
-        noul: 0.9941
+        noul: 0.9950945949489169
       reachable:
         type: noul
-        noul: 0.9991
+        noul: 0.9990889489819228
       weakens:
         type: noul
-        noul: 0.0016
+        noul: 0.0004305570684985389
   baseline:
   - verdict: pass
   - verdict: pass
@@ -2739,51 +2878,60 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 276
     answers:
       usable:
         type: noul
-        noul: 0.9831
+        noul: 0.9850429131873055
+      aligned:
+        type: noul
+        noul: 0.9688561645193348
       delivers:
         type: noul
-        noul: 0.9937
+        noul: 0.995094595385343
       reachable:
         type: noul
-        noul: 0.9196
+        noul: 0.8991213759183765
       weakens:
         type: noul
-        noul: 0.0001
-  - source: unrecorded
-    latency_ms: 0
+        noul: 4.264744276679888e-05
+  - source: liquid-d1
+    latency_ms: 282
     answers:
       usable:
         type: noul
-        noul: 0.9859
+        noul: 0.9850429131873055
+      aligned:
+        type: noul
+        noul: 0.9688561645193348
       delivers:
         type: noul
-        noul: 0.9937
+        noul: 0.995094595385343
       reachable:
         type: noul
-        noul: 0.9196
+        noul: 0.8991213759183765
       weakens:
         type: noul
-        noul: 0.0001
-  - source: unrecorded
-    latency_ms: 0
+        noul: 8.481103540520188e-05
+  - source: liquid-d1
+    latency_ms: 306
     answers:
       usable:
         type: noul
-        noul: 0.9831
+        noul: 0.9859363739898402
+      aligned:
+        type: noul
+        noul: 0.9688561685659695
       delivers:
         type: noul
-        noul: 0.9937
+        noul: 0.9937100985150688
       reachable:
         type: noul
-        noul: 0.9196
+        noul: 0.9196425454933657
       weakens:
         type: noul
-        noul: 0.0001
+        noul: 0.00010229981204736467
   baseline:
   - verdict: pass
   - verdict: pass
@@ -2880,132 +3028,141 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 350
     answers:
       usable:
         type: noul
-        noul: 0.9783846688130092
+        noul: 0.9840936064221572
+      aligned:
+        type: noul
+        noul: 0.9993332976311884
       delivers:
         type: noul
-        noul: 0.9433475786738345
+        noul: 0.9579122720843811
       reachable:
         type: noul
-        noul: 0.9968273173754757
+        noul: 0.9933071486299283
       weakens:
         type: noul
-        noul: 0.06008665017400762
+        noul: 0.0159063898457867
       underdelivers:
         type: noul
-        noul: 0.07585819255676587
+        noul: 0.08035746661981112
       overdelivers:
         type: noul
-        noul: 0.029312230751356316
+        noul: 0.00522012503582944
       misses_line_50:
         type: noul
-        noul: 0.0006667022198914592
+        noul: 0.0005193047890862194
       misses_line_51:
         type: noul
-        noul: 2.0145685674691665e-05
+        noul: 4.832561955536168e-05
       misses_line_52:
         type: noul
-        noul: 0.00033535023599496553
+        noul: 0.00013135184550194755
       misses_line_53:
         type: noul
-        noul: 2.2827996810212582e-05
+        noul: 9.028036694628344e-05
       misses_line_54:
         type: noul
-        noul: 0.001032230829319728
+        noul: 0.00020342695153674473
       misses_line_55:
         type: noul
-        noul: 0.0002959572270396847
+        noul: 5.475978041170883e-05
       misses_line_56:
         type: noul
-        noul: 0.01798620838292263
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.025957355125646668
+  - source: liquid-d1
+    latency_ms: 317
     answers:
       usable:
         type: noul
-        noul: 0.9875683502444729
+        noul: 0.9770226314280634
+      aligned:
+        type: noul
+        noul: 0.9993332976311884
       delivers:
         type: noul
-        noul: 0.9724147149752137
+        noul: 0.949669369539236
       reachable:
         type: noul
-        noul: 0.9961755162276275
+        noul: 0.9940889307935117
       weakens:
         type: noul
-        noul: 0.06371499069622688
+        noul: 0.015906388446265834
       underdelivers:
         type: noul
-        noul: 0.11279540628289324
+        noul: 0.08035746441741523
       overdelivers:
         type: noul
-        noul: 0.031143828511461368
+        noul: 0.00669285137007181
       misses_line_50:
         type: noul
-        noul: 0.0006263342059116326
+        noul: 0.00045831278544184074
       misses_line_51:
         type: noul
-        noul: 1.3846005002180616e-05
+        noul: 0.00027803085204806504
       misses_line_52:
         type: noul
-        noul: 0.0002959570093552082
+        noul: 3.5356248239299225e-05
       misses_line_53:
         type: noul
-        noul: 4.264746484936336e-05
+        noul: 9.028036694628344e-05
       misses_line_54:
         type: noul
-        noul: 0.00026119029915422994
+        noul: 0.00020342695153674473
       misses_line_55:
         type: noul
-        noul: 0.00045831284943805787
+        noul: 7.967301223528304e-05
       misses_line_56:
         type: noul
-        noul: 0.01495708308044074
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0124316506702427
+  - source: liquid-d1
+    latency_ms: 355
     answers:
       usable:
         type: noul
-        noul: 0.9875683502444729
+        noul: 0.9883127425206605
+      aligned:
+        type: noul
+        noul: 0.9996849613018124
       delivers:
         type: noul
-        noul: 0.9724147149752137
+        noul: 0.9046505351008906
       reachable:
         type: noul
-        noul: 0.9961755162276275
+        noul: 0.9947798746159612
       weakens:
         type: noul
-        noul: 0.06371499069622688
+        noul: 0.02297736857193652
       underdelivers:
         type: noul
-        noul: 0.11279540628289324
+        noul: 0.1127953943533099
       overdelivers:
         type: noul
-        noul: 0.031143828511461368
+        noul: 0.009708475335369565
       misses_line_50:
         type: noul
-        noul: 0.0006263342059116326
+        noul: 0.0055549255679988845
       misses_line_51:
         type: noul
-        noul: 1.3846005002180616e-05
+        noul: 1.1478769335085803e-05
       misses_line_52:
         type: noul
-        noul: 0.00033535023599496553
+        noul: 7.031185916970883e-05
       misses_line_53:
         type: noul
-        noul: 2.2827996810212582e-05
+        noul: 1.568955647838028e-05
       misses_line_54:
         type: noul
-        noul: 0.001032230829319728
+        noul: 0.00013135175205341968
       misses_line_55:
         type: noul
-        noul: 0.0002959572270396847
+        noul: 6.60521624470223e-05
       misses_line_56:
         type: noul
-        noul: 0.01798620838292263
+        noul: 0.005911069906977476
   baseline:
   - verdict: pass
   - verdict: pass
@@ -3105,132 +3262,141 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 340
     answers:
       usable:
         type: noul
-        noul: 0.6513548646660542
+        noul: 0.37754066879814546
+      aligned:
+        type: noul
+        noul: 0.9991959142574222
       delivers:
         type: noul
-        noul: 0.2689414213699951
+        noul: 0.25683199138751883
       reachable:
         type: noul
-        noul: 0.9924227595725452
+        noul: 0.9950945940396961
       weakens:
         type: noul
-        noul: 0.025957351169724027
+        noul: 0.017986206803753842
       underdelivers:
         type: noul
-        noul: 0.9433475810629194
+        noul: 0.9241418116217418
       overdelivers:
         type: noul
-        noul: 0.5312093733737563
+        noul: 0.10669059962643358
       misses_line_50:
         type: noul
-        noul: 0.03308597552845946
+        noul: 0.022977371080853633
       misses_line_51:
         type: noul
-        noul: 0.00026119023641150475
+        noul: 6.605216404632929e-05
       misses_line_52:
         type: noul
-        noul: 0.98677717951149
+        noul: 0.9859363709938916
       misses_line_53:
         type: noul
-        noul: 1.7778559347083362e-05
+        noul: 2.586744288560378e-05
       misses_line_54:
         type: noul
-        noul: 0.00024536957466901127
+        noul: 0.00040448140445759723
       misses_line_55:
         type: noul
-        noul: 7.031186859860158e-05
+        noul: 0.0006263342583774798
       misses_line_56:
         type: noul
-        noul: 0.9553191322715435
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.9284087926320944
+  - source: liquid-d1
+    latency_ms: 313
     answers:
       usable:
-        type: noul
-        noul: 0.5621765008857981
-      delivers:
-        type: noul
-        noul: 0.21206882427645699
-      reachable:
-        type: noul
-        noul: 0.9924227596845995
-      weakens:
-        type: noul
-        noul: 0.019124032278560285
-      underdelivers:
-        type: noul
-        noul: 0.9433475762847495
-      overdelivers:
         type: noul
         noul: 0.5
+      aligned:
+        type: noul
+        noul: 0.9997219690640798
+      delivers:
+        type: noul
+        noul: 0.1645164628965632
+      reachable:
+        type: noul
+        noul: 0.9914225137626198
+      weakens:
+        type: noul
+        noul: 0.05665243167886765
+      underdelivers:
+        type: noul
+        noul: 0.9688561669922782
+      overdelivers:
+        type: noul
+        noul: 0.10669058826486906
       misses_line_50:
         type: noul
-        noul: 0.08035746992340508
+        noul: 0.11279540628289324
       misses_line_51:
         type: noul
-        noul: 4.006368819964903e-05
+        noul: 0.0008040859116848763
       misses_line_52:
         type: noul
-        noul: 0.9890130591505206
+        noul: 0.9919380066246781
       misses_line_53:
         type: noul
-        noul: 2.5867422023403438e-05
+        noul: 3.763645089631208e-05
       misses_line_54:
         type: noul
-        noul: 0.0002611901945830296
+        noul: 0.002631674160665622
       misses_line_55:
         type: noul
-        noul: 7.031186859860158e-05
+        noul: 2.9311547267567948e-05
       misses_line_56:
         type: noul
-        noul: 0.9553191322715435
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.9553191303633982
+  - source: liquid-d1
+    latency_ms: 310
     answers:
       usable:
         type: noul
-        noul: 0.5621765008857981
+        noul: 0.48438008427698437
+      aligned:
+        type: noul
+        noul: 0.9995694428465287
       delivers:
         type: noul
-        noul: 0.21206882427645699
+        noul: 0.20181322226037882
       reachable:
         type: noul
-        noul: 0.9924227596845995
+        noul: 0.9933071492490766
       weakens:
         type: noul
-        noul: 0.019124032278560285
+        noul: 0.0715912053870672
       underdelivers:
         type: noul
-        noul: 0.9433475762847495
+        noul: 0.9046505299595163
       overdelivers:
         type: noul
-        noul: 0.5
+        noul: 0.06754668926255561
       misses_line_50:
         type: noul
-        noul: 0.08035746992340508
+        noul: 0.035144850443143076
       misses_line_51:
         type: noul
-        noul: 4.006368819964903e-05
+        noul: 0.00033535002993345295
       misses_line_52:
         type: noul
-        noul: 0.9890130591505206
+        noul: 0.9820137895115189
       misses_line_53:
         type: noul
-        noul: 2.5867422023403438e-05
+        noul: 9.028039838942373e-05
       misses_line_54:
         type: noul
-        noul: 0.000755405490724577
+        noul: 8.481106952445339e-05
       misses_line_55:
         type: noul
-        noul: 0.00011591929137236496
+        noul: 3.5356234245366124e-05
       misses_line_56:
         type: noul
-        noul: 0.9553191322715435
+        noul: 0.9525741335542797
   baseline:
   - verdict: pass
   - verdict: pass
@@ -3340,132 +3506,141 @@ cases:
     verdict: fail
   control: true
   samples:
-  - source: unrecorded
-    latency_ms: 0
+  - source: liquid-d1
+    latency_ms: 586
     answers:
       usable:
         type: noul
-        noul: 0.9859363752295428
+        noul: 0.9840936078216783
+      aligned:
+        type: noul
+        noul: 0.9995955185488501
       delivers:
         type: noul
-        noul: 0.9525741281688026
+        noul: 0.968856165868213
       reachable:
         type: noul
-        noul: 0.9944450747406826
+        noul: 0.997368326465123
       weakens:
         type: noul
-        noul: 0.050330628324051115
+        noul: 0.07159120934874394
       underdelivers:
         type: noul
-        noul: 0.04742586644572034
+        noul: 0.031143830534778462
       overdelivers:
         type: noul
-        noul: 0.9626731083722525
+        noul: 0.9820137912222852
       misses_line_50:
         type: noul
-        noul: 0.002800926738210093
+        noul: 0.0019267347672028178
       misses_line_51:
         type: noul
-        noul: 3.321419395809788e-05
+        noul: 3.535625344175106e-05
       misses_line_52:
         type: noul
-        noul: 9.610240386528745e-05
+        noul: 9.610243876785116e-05
       misses_line_53:
         type: noul
-        noul: 1.568954718527259e-05
+        noul: 6.205049648529098e-05
       misses_line_54:
         type: noul
-        noul: 6.205050665552965e-05
+        noul: 0.00010889691753068057
       misses_line_55:
         type: noul
-        noul: 2.144494278888506e-05
+        noul: 2.4300243549500552e-05
       misses_line_56:
         type: noul
-        noul: 0.001325022328481215
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0007554054808826507
+  - source: liquid-d1
+    latency_ms: 295
     answers:
       usable:
         type: noul
-        noul: 0.9859363752295428
+        noul: 0.9890130583409233
+      aligned:
+        type: noul
+        noul: 0.9996430293503396
       delivers:
         type: noul
-        noul: 0.9706877692486436
+        noul: 0.9603611631680359
       reachable:
         type: noul
-        noul: 0.9944450747406826
+        noul: 0.9981897888391702
       weakens:
         type: noul
-        noul: 0.05033063402195221
+        noul: 0.0850990519679964
       underdelivers:
         type: noul
-        noul: 0.007121429272544365
+        noul: 0.042087729117139754
       overdelivers:
         type: noul
-        noul: 0.9808759617816281
+        noul: 0.9883127425206605
       misses_line_50:
         type: noul
-        noul: 0.0012448436309341361
+        noul: 0.003172683678983596
       misses_line_51:
         type: noul
-        noul: 3.321419395809788e-05
+        noul: 4.006367596173396e-05
       misses_line_52:
         type: noul
-        noul: 9.610240386528745e-05
+        noul: 0.0002780309524874768
       misses_line_53:
         type: noul
-        noul: 1.568954718527259e-05
+        noul: 9.610242802859942e-05
       misses_line_54:
         type: noul
-        noul: 6.205050665552965e-05
+        noul: 0.00010889691753068057
       misses_line_55:
         type: noul
-        noul: 1.6187583426132763e-05
+        noul: 2.5867440910198405e-05
       misses_line_56:
         type: noul
-        noul: 2.9311544483202124e-05
-  - source: unrecorded
-    latency_ms: 0
+        noul: 0.0008559004679005297
+  - source: liquid-d1
+    latency_ms: 399
     answers:
       usable:
         type: noul
-        noul: 0.9859363752295428
+        noul: 0.9890130583409233
+      aligned:
+        type: noul
+        noul: 0.9996430293503396
       delivers:
         type: noul
-        noul: 0.9706877692486436
+        noul: 0.9603611631680359
       reachable:
         type: noul
-        noul: 0.9944450747406826
+        noul: 0.9981897888391702
       weakens:
         type: noul
-        noul: 0.05033063402195221
+        noul: 0.0850990519679964
       underdelivers:
         type: noul
-        noul: 0.007121429272544365
+        noul: 0.042087729117139754
       overdelivers:
         type: noul
-        noul: 0.9808759617816281
+        noul: 0.9820137912222852
       misses_line_50:
         type: noul
-        noul: 0.0012448436309341361
+        noul: 0.0019267347672028178
       misses_line_51:
         type: noul
-        noul: 2.9311543636973343e-05
+        noul: 3.535625344175106e-05
       misses_line_52:
         type: noul
-        noul: 8.481100949985344e-05
+        noul: 9.610243876785116e-05
       misses_line_53:
         type: noul
-        noul: 1.6701421754770273e-05
+        noul: 6.205049648529098e-05
       misses_line_54:
         type: noul
-        noul: 0.00027803082046660803
+        noul: 0.00010889691753068057
       misses_line_55:
         type: noul
-        noul: 2.144494278888506e-05
+        noul: 2.2828003570811997e-05
       misses_line_56:
         type: noul
-        noul: 0.00023050678852740446
+        noul: 0.0014103588114131468
   baseline:
   - verdict: pass
   - verdict: pass
@@ -3538,10 +3713,10 @@ cases:
 
       2026-10-09T21:18:45+02:00 RED: CI Validate run 37978983060 on test-only head 45ffd86a (diffcheck/ci-323133-0263-red):
       Python tests failure, 454 passed 91 skipped 8 errors, all 8 in tests/unit/notifications/test_push_route.py (api.py has
-      no push route, no httpx attribute); Gate Required failure. https://github.com/the-cloud-clockwork/antoncore/actions/runs/37978983060
+      no push route, no httpx attribute); Gate Required failure.
 
       2026-10-09T21:20:02+02:00 GREEN: CI Validate run 37978995978 on PR head 67f8f434: Python tests success, 465 passed 91
-      skipped, tests/unit/notifications/test_push_route.py 11 passed; Gate Required pass. https://github.com/the-cloud-clockwork/antoncore/actions/runs/37978995978
+      skipped, tests/unit/notifications/test_push_route.py 11 passed; Gate Required pass.
 
       '
     reviewer_findings:
@@ -3566,44 +3741,14 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 328
+    latency_ms: 362
     answers:
       usable:
         type: noul
-        noul: 0.8175744673038221
-      delivers:
+        noul: 0.8991213718636752
+      aligned:
         type: noul
-        noul: 0.8438950947024555
-      reachable:
-        type: noul
-        noul: 0.817574471748733
-      weakens:
-        type: noul
-        noul: 0.00026119040275271617
-      underdelivers:
-        type: noul
-        noul: 0.32082130082460697
-      overdelivers:
-        type: noul
-        noul: 0.05033063544642759
-      misses_line_245:
-        type: noul
-        noul: 0.014957085824744773
-      misses_line_246:
-        type: noul
-        noul: 0.0004305570909441722
-      misses_line_248:
-        type: noul
-        noul: 0.0033766128831950342
-      misses_line_249:
-        type: noul
-        noul: 0.5312093733737563
-  - source: liquid-d1
-    latency_ms: 378
-    answers:
-      usable:
-        type: noul
-        noul: 0.9149009665946055
+        noul: 0.9999546021377238
       delivers:
         type: noul
         noul: 0.8438950947024555
@@ -3632,11 +3777,14 @@ cases:
         type: noul
         noul: 0.5312093733737563
   - source: liquid-d1
-    latency_ms: 379
+    latency_ms: 304
     answers:
       usable:
         type: noul
-        noul: 0.9149009665946055
+        noul: 0.8175744673038221
+      aligned:
+        type: noul
+        noul: 0.9999546021377238
       delivers:
         type: noul
         noul: 0.8438950947024555
@@ -3661,6 +3809,42 @@ cases:
       misses_line_248:
         type: noul
         noul: 0.0012448433391414138
+      misses_line_249:
+        type: noul
+        noul: 0.5312093733737563
+  - source: liquid-d1
+    latency_ms: 301
+    answers:
+      usable:
+        type: noul
+        noul: 0.8175744673038221
+      aligned:
+        type: noul
+        noul: 0.9999546021377238
+      delivers:
+        type: noul
+        noul: 0.8438950947024555
+      reachable:
+        type: noul
+        noul: 0.817574471748733
+      weakens:
+        type: noul
+        noul: 0.00026119040275271617
+      underdelivers:
+        type: noul
+        noul: 0.32082130082460697
+      overdelivers:
+        type: noul
+        noul: 0.04468087281684414
+      misses_line_245:
+        type: noul
+        noul: 0.007121427138967083
+      misses_line_246:
+        type: noul
+        noul: 1.0129989867639126e-05
+      misses_line_248:
+        type: noul
+        noul: 0.0015011821506420483
       misses_line_249:
         type: noul
         noul: 0.5312093733737563
@@ -3690,7 +3874,7 @@ cases:
         PR says the deployed proof follows, so it is due after merge. The ready head proof is CI: a red run on the test only
         head and a green run where "test_push_route.py 11 passed". The changed files add nothing beyond the ask, and the `ruff
         format` reflow of unrelated lines is justified in the body as needed to pass the CI format check.'
-    input_digest: 22641f19c6c2976c
+    input_digest: 0a7dbb63eca968b4
     baseline_answers:
     - usable: 0.8991213718636752
       delivers: 0.8438950947024555
@@ -3819,11 +4003,86 @@ cases:
   control: false
   samples:
   - source: liquid-d1
-    latency_ms: 302
+    latency_ms: 303
     answers:
       usable:
         type: noul
-        noul: 0.9706877675527112
+        noul: 0.9046505402422645
+      aligned:
+        type: noul
+        noul: 0.9999339478349696
+      delivers:
+        type: noul
+        noul: 0.8175744850834649
+      reachable:
+        type: noul
+        noul: 0.8670357598021706
+      weakens:
+        type: noul
+        noul: 0.0008559006877172175
+      underdelivers:
+        type: noul
+        noul: 0.06008665017400762
+      overdelivers:
+        type: noul
+        noul: 0.02595735757455145
+      misses_line_239:
+        type: noul
+        noul: 0.00011591932807392184
+      misses_line_240:
+        type: noul
+        noul: 0.00012339454725974165
+      misses_line_242:
+        type: noul
+        noul: 0.07159119746371433
+      misses_line_243:
+        type: noul
+        noul: 0.562176530227267
+  - source: liquid-d1
+    latency_ms: 327
+    answers:
+      usable:
+        type: noul
+        noul: 0.9046505402422645
+      aligned:
+        type: noul
+        noul: 0.9999339478349696
+      delivers:
+        type: noul
+        noul: 0.8175744850834649
+      reachable:
+        type: noul
+        noul: 0.8670357598021706
+      weakens:
+        type: noul
+        noul: 0.0008559006877172175
+      underdelivers:
+        type: noul
+        noul: 0.06008665017400762
+      overdelivers:
+        type: noul
+        noul: 0.02931222820745785
+      misses_line_239:
+        type: noul
+        noul: 0.0004044815242006084
+      misses_line_240:
+        type: noul
+        noul: 0.0002780309970121762
+      misses_line_242:
+        type: noul
+        noul: 0.01798621022528639
+      misses_line_243:
+        type: noul
+        noul: 0.6654105322061351
+  - source: liquid-d1
+    latency_ms: 381
+    answers:
+      usable:
+        type: noul
+        noul: 0.9399133481428692
+      aligned:
+        type: noul
+        noul: 0.9999296881712778
       delivers:
         type: noul
         noul: 0.8519528132451416
@@ -3838,7 +4097,7 @@ cases:
         noul: 0.10669059962643358
       overdelivers:
         type: noul
-        noul: 0.014957087251783064
+        noul: 0.007577242164294059
       misses_line_239:
         type: noul
         noul: 0.0008559007195747131
@@ -3850,73 +4109,7 @@ cases:
         noul: 0.05033063580254644
       misses_line_243:
         type: noul
-        noul: 0.32082130082460697
-  - source: liquid-d1
-    latency_ms: 487
-    answers:
-      usable:
-        type: noul
-        noul: 0.939913354875362
-      delivers:
-        type: noul
-        noul: 0.8519528019683106
-      reachable:
-        type: noul
-        noul: 0.9740426409184302
-      weakens:
-        type: noul
-        noul: 0.0002611903813520866
-      underdelivers:
-        type: noul
-        noul: 0.11279540031810142
-      overdelivers:
-        type: noul
-        noul: 0.006289902881991031
-      misses_line_239:
-        type: noul
-        noul: 0.003376611842674885
-      misses_line_240:
-        type: noul
-        noul: 0.0005884086914961277
-      misses_line_242:
-        type: noul
-        noul: 0.042087733923223715
-      misses_line_243:
-        type: noul
-        noul: 0.32082130082460697
-  - source: liquid-d1
-    latency_ms: 384
-    answers:
-      usable:
-        type: noul
-        noul: 0.9706877675527112
-      delivers:
-        type: noul
-        noul: 0.8519528019683106
-      reachable:
-        type: noul
-        noul: 0.9740426409184302
-      weakens:
-        type: noul
-        noul: 0.0002611903813520866
-      underdelivers:
-        type: noul
-        noul: 0.11279540031810142
-      overdelivers:
-        type: noul
-        noul: 0.010986945868982466
-      misses_line_239:
-        type: noul
-        noul: 0.006692850329902297
-      misses_line_240:
-        type: noul
-        noul: 0.00023050667649229873
-      misses_line_242:
-        type: noul
-        noul: 0.039638843638982
-      misses_line_243:
-        type: noul
-        noul: 0.7310585551920353
+        noul: 0.45326184801538616
   baseline:
   - verdict: pass
   - verdict: pass
@@ -4063,131 +4256,140 @@ cases:
   control: true
   samples:
   - source: liquid-d1
-    latency_ms: 356
+    latency_ms: 340
     answers:
       usable:
         type: noul
-        noul: 0.9850429142850274
+        noul: 0.9496693688269985
+      aligned:
+        type: noul
+        noul: 0.9992445942772872
       delivers:
         type: noul
-        noul: 0.9783846659768267
+        noul: 0.9525741248028792
       reachable:
         type: noul
-        noul: 0.9978172829948229
+        noul: 0.9979492567516987
       weakens:
         type: noul
-        noul: 0.02931222905542399
+        noul: 0.04208772491181671
       underdelivers:
         type: noul
-        noul: 0.02931223159932252
+        noul: 0.05665242530797383
       overdelivers:
         type: noul
-        noul: 0.9525741288419872
+        noul: 0.9241418199787566
       misses_line_50:
         type: noul
-        noul: 0.007121428798416025
+        noul: 8.481104630440573e-05
       misses_line_51:
         type: noul
-        noul: 1.3845999096309213e-05
+        noul: 4.0063679170455226e-05
       misses_line_52:
         type: noul
-        noul: 3.763644662016875e-05
+        noul: 0.0006263339808914936
       misses_line_53:
         type: noul
-        noul: 7.183260700902734e-06
+        noul: 0.0008040859745388206
       misses_line_54:
         type: noul
-        noul: 3.535626200274942e-05
+        noul: 2.2827985967746006e-05
       misses_line_55:
         type: noul
-        noul: 3.1201913137454825e-05
+        noul: 1.2219071377548875e-05
       misses_line_56:
         type: noul
-        noul: 0.00015843624890396233
+        noul: 0.0001088968779819135
   - source: liquid-d1
-    latency_ms: 332
+    latency_ms: 350
     answers:
       usable:
         type: noul
-        noul: 0.9850429142850274
+        noul: 0.974042642048694
+      aligned:
+        type: noul
+        noul: 0.9998686481589014
       delivers:
         type: noul
-        noul: 0.9783846659768267
+        noul: 0.9284088064979618
       reachable:
         type: noul
-        noul: 0.9978172829948229
+        noul: 0.996623387442751
       weakens:
         type: noul
-        noul: 0.02931222905542399
+        noul: 0.06371498536261953
       underdelivers:
         type: noul
-        noul: 0.02931223159932252
+        noul: 0.03114383458141302
       overdelivers:
         type: noul
-        noul: 0.9525741288419872
+        noul: 0.9808759657647961
       misses_line_50:
         type: noul
-        noul: 0.003824482807260733
+        noul: 0.003172683466913557
       misses_line_51:
         type: noul
-        noul: 7.411281059159697e-06
+        noul: 2.586741946983273e-05
       misses_line_52:
         type: noul
-        noul: 3.763645573326168e-05
+        noul: 0.0010987311281206768
       misses_line_53:
         type: noul
-        noul: 1.0129989546876578e-05
+        noul: 8.481102355824277e-05
       misses_line_54:
         type: noul
-        noul: 2.931153211734531e-05
+        noul: 2.586744346377123e-05
       misses_line_55:
         type: noul
-        noul: 1.2219080185484713e-05
+        noul: 5.4759777249942856e-05
       misses_line_56:
         type: noul
-        noul: 0.00015843624890396233
+        noul: 0.0002959571311482753
   - source: liquid-d1
-    latency_ms: 372
+    latency_ms: 301
     answers:
       usable:
         type: noul
-        noul: 0.9850429142850274
+        noul: 0.9808759654852757
+      aligned:
+        type: noul
+        noul: 0.9998204720032375
       delivers:
         type: noul
-        noul: 0.9808759591960624
+        noul: 0.9241418283357702
       reachable:
         type: noul
-        noul: 0.9975273772660345
+        noul: 0.9989677690035798
       weakens:
         type: noul
-        noul: 0.031143830534778462
+        noul: 0.0850990519679964
       underdelivers:
         type: noul
-        noul: 0.03732688680867724
+        noul: 0.035144844379618526
       overdelivers:
         type: noul
-        noul: 0.867035763237924
+        noul: 0.9808759657647961
       misses_line_50:
         type: noul
-        noul: 0.007121428798416025
+        noul: 0.004331502534682705
       misses_line_51:
         type: noul
-        noul: 7.411281059159697e-06
+        noul: 6.605213390555012e-05
       misses_line_52:
         type: noul
-        noul: 2.7535688498905325e-05
+        noul: 9.610243500911293e-05
       misses_line_53:
         type: noul
-        noul: 7.183260700902734e-06
+        noul: 4.539787935652706e-05
       misses_line_54:
         type: noul
-        noul: 3.535626200274942e-05
+        noul: 0.00013135183449360964
       misses_line_55:
         type: noul
-        noul: 1.2219080185484713e-05
+        noul: 2.753569024269073e-05
       misses_line_56:
         type: noul
-        noul: 0.000709670377965772
+        noul: 0.0004878570900848571
   baseline:
   - verdict: fail
   - verdict: fail
@@ -4357,27 +4559,15 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: haiku
-    latency_ms: 14259
-    answers:
-      usable:
-        type: noul
-        noul: 0.7
-      delivers:
-        type: noul
-        noul: 0.85
-      reachable:
-        type: noul
-        noul: 0.95
-      weakens:
-        type: noul
-        noul: 0.6
   - source: liquid-d1
-    latency_ms: 495
+    latency_ms: 281
     answers:
       usable:
         type: noul
         noul: 0.10087860651125365
+      aligned:
+        type: noul
+        noul: 0.9991440992740539
       delivers:
         type: noul
         noul: 0.5312093882168609
@@ -4388,11 +4578,32 @@ cases:
         type: noul
         noul: 0.015906394977364253
   - source: liquid-d1
-    latency_ms: 453
+    latency_ms: 314
     answers:
       usable:
         type: noul
-        noul: 0.12592276483513232
+        noul: 0.10087860651125365
+      aligned:
+        type: noul
+        noul: 0.9966233870039775
+      delivers:
+        type: noul
+        noul: 0.5312093882168609
+      reachable:
+        type: noul
+        noul: 0.9808759654852757
+      weakens:
+        type: noul
+        noul: 0.017986210488481234
+  - source: liquid-d1
+    latency_ms: 289
+    answers:
+      usable:
+        type: noul
+        noul: 0.10087860651125365
+      aligned:
+        type: noul
+        noul: 0.9991440992740539
       delivers:
         type: noul
         noul: 0.5312093882168609
@@ -4552,51 +4763,60 @@ cases:
     verdict: pass
   control: false
   samples:
-  - source: haiku
-    latency_ms: 15193
+  - source: liquid-d1
+    latency_ms: 650
     answers:
       usable:
         type: noul
-        noul: 0.8
+        noul: 0.9688561699148477
+      aligned:
+        type: noul
+        noul: 0.9970189672922892
       delivers:
         type: noul
-        noul: 0.75
+        noul: 0.9626731089077046
       reachable:
         type: noul
-        noul: 0.95
+        noul: 0.21206880435710532
       weakens:
         type: noul
-        noul: 0.6
-  - source: haiku
-    latency_ms: 14012
+        noul: 0.0018102113493076836
+  - source: liquid-d1
+    latency_ms: 388
     answers:
       usable:
         type: noul
-        noul: 0.6
+        noul: 0.9688561699148477
+      aligned:
+        type: noul
+        noul: 0.9970189672922892
       delivers:
         type: noul
-        noul: 0.55
+        noul: 0.9626731089077046
       reachable:
         type: noul
-        noul: 0.95
+        noul: 0.21206880435710532
       weakens:
         type: noul
-        noul: 0.6
-  - source: haiku
-    latency_ms: 14110
+        noul: 0.0018102113493076836
+  - source: liquid-d1
+    latency_ms: 311
     answers:
       usable:
         type: noul
-        noul: 0.8
+        noul: 0.9706877696726267
+      aligned:
+        type: noul
+        noul: 0.9990889490005725
       delivers:
         type: noul
-        noul: 0.7
+        noul: 0.968856165868213
       reachable:
         type: noul
-        noul: 0.92
+        noul: 0.21206881431678096
       weakens:
         type: noul
-        noul: 0.5
+        noul: 0.00043055708132461493
   baseline:
   - &id002
     verdict: fail

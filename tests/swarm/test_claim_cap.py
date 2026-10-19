@@ -1,13 +1,9 @@
 import json
 
-import pytest
-
 from scripts.gates.claims import refusal
 from scripts.swarm import dispatcher
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, store  # noqa: F401
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class CommentingLedger(FakeLedger):
@@ -18,9 +14,9 @@ class CommentingLedger(FakeLedger):
     def state(self, slug):
         return {**super().state(slug), "tasks": [dict(row) for row in self.rows.values()]}
 
-    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         assert (slug, by) == ("sw", "swarm")
-        return super().update_task(slug, task_id, fields, by, if_state)
+        return super().update_task(slug, task_id, fields, by, if_state, if_match)
 
     def comment(self, slug, task_id, text, by):
         self.comments.append((slug, task_id, text, by))

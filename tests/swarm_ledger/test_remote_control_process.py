@@ -17,7 +17,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 ROOT = Path(__file__).resolve().parents[2]
 BOOT = """
 import json, shutil, sys, threading, time
@@ -69,6 +68,7 @@ def remote_server(tmp_path, monkeypatch):
     import redis
 
     backend = fakeredis.TcpFakeServer(("127.0.0.1", 0), server_type="redis")
+    monkeypatch.setattr(backend.RequestHandlerClass, "disable_nagle_algorithm", True)
     thread = threading.Thread(target=backend.serve_forever, daemon=True)
     thread.start()
     url = f"redis://127.0.0.1:{backend.server_address[1]}/0"

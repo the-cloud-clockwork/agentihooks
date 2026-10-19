@@ -100,6 +100,7 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
     (tmp_path / "tests/test_store.py").write_text(test)
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
     store = tmp_path / "scripts/swarm/store.py"
+    store.write_text(subprocess.check_output(["git", "show", "HEAD:scripts/swarm/store.py"], cwd=root, text=True))
 
     def git(*args):
         return subprocess.check_output(["git", *args], cwd=tmp_path, text=True).strip()
@@ -132,12 +133,31 @@ def test_gate_imports_store_from_scratch_directory(tmp_path, monkeypatch, child,
         assert report["failed"] is False
 
 
+def _assert_units_run_their_own_tests(monkeypatch, selection, runner, test_calls):
+    unit = "scripts.s.x_f__mutmut_1"
+    units = []
+
+    def shard_tests(tests, name, index):
+        units.append((tests, name, index))
+        return [test for test in tests if test in {"h", "b"}]
+
+    with monkeypatch.context() as planned:
+        planned.setattr(selection, "shard_tests", shard_tests)
+        assert runner.PytestRunner().run_tests(mutant_name=unit, tests=["a"]) == 0
+        runner.PytestRunner().run_tests(mutant_name=unit, tests=("h", "a", "b"))
+        assert runner.PytestRunner().run_tests(mutant_name="unsplit", tests=[]) == 9
+    assert units == [(["a"], unit, 1), (["h", "a", "b"], unit, 1), ([], "unsplit", 1)]
+    assert test_calls[-2:] == [(unit, ["h", "b"]), ("unsplit", [])]
+    assert len(test_calls) == 6
+
+
 @pytest.mark.parametrize(
     "header", ["", '"""sample contract"""\n', '"""sample contract"""\nfrom __future__ import annotations\n']
 )
 def test_selection_passes_exact_lines_before_generation_and_reloads_source_packages(tmp_path, monkeypatch, header):
     from mutmut import configuration as engine_config
 
+    from scripts.ci_mutation import selection as selection_module
     from scripts.ci_mutation.selection import run_selected
 
     monkeypatch.setenv("CI", "true")
@@ -296,6 +316,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
             (None, ["tests/test_x.py::t"]),
             ("m", ["tests/test_y.py::t"]),
         ]
+        _assert_units_run_their_own_tests(monkeypatch, selection_module, runner, test_calls)
         data.exit_code_by_key = {}
         with pytest.raises(SystemExit) as empty:
             runner.collect_or_load_stats(test_runner)
@@ -527,6 +548,55 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     ]
 
 
+def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_bound_kept_tests(tmp_path):
+    from scripts.ci_mutation.selection import file_seconds, keep_selected_tests, stats_shards
+
+    (tmp_path / "tests").mkdir()
+    for name in "abc":
+        (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
+    (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    (tmp_path / "tests/test_d.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    durations = {"tests/test_c.py::t1": 2, "tests/test_c.py::t1[p]@port": 1, "tests/test_c.py::t1x": 4}
+    durations |= {"tests/test_c.py::t2": 8, "tests/test_a.py::TestK::test_x": 5, "tests/test_b.py::t": 6}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    entries = [
+        "tests/test_a.py",
+        "tests/test_b.py::t",
+        "tests/test_c.py::t1",
+        "tests/test_c.py::t1x",
+        "tests/test_d.py",
+    ]
+    seconds = file_seconds(tmp_path, entries)
+    assert seconds == pytest.approx(
+        {
+            "tests/test_a.py": 5.01,
+            "tests/test_b.py::t": 6.01,
+            "tests/test_c.py::t1": 3.01,
+            "tests/test_c.py::t1x": 4.01,
+            "tests/test_d.py": 0.01,
+        }
+    )
+    assert stats_shards(tmp_path, entries, 3) == [
+        ["tests/test_c.py::t1", "tests/test_c.py::t1x"],
+        ["tests/test_b.py::t", "tests/test_d.py"],
+        ["tests/test_a.py"],
+    ]
+    reached = {
+        "tests/test_c.py::t1[p]",
+        "tests/test_c.py::t1x",
+        "tests/test_c.py::t2",
+        "tests/test_a.py::TestK::test_x",
+        "tests/test_e.py::t",
+    }
+    stats = {"scripts.sample.x_f": set(reached), "scripts.other.x_g": set(reached)}
+    allowed = {"scripts.sample.": {"tests/test_c.py::t1", "tests/test_a.py"}}
+    assert keep_selected_tests(stats, allowed) == {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"}
+    assert stats == {
+        "scripts.sample.x_f": {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"},
+        "scripts.other.x_g": set(),
+    }
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 6])
 def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
     from scripts.ci_mutation.selection import part_files
@@ -574,7 +644,14 @@ def test_shard_stats_run_in_stats_mode_with_their_own_basetemp_and_record_everyt
 
     output = tmp_path / "out.json"
     collect_shard_stats(SimpleNamespace(mutmut=engine), Runner(), ["tests/test_a.py"], output, "/scratch/base")
-    assert calls == [(["tests/test_a.py"], ["-q", "-m", "not wall_clock", "--basetemp=/scratch/base"], "stats", "1")]
+    assert calls == [
+        (
+            ["tests/test_a.py"],
+            ["-q", "-p", "pytest_rerunfailures", "--reruns", "1", "-m", "not wall_clock", "--basetemp=/scratch/base"],
+            "stats",
+            "1",
+        )
+    ]
     result = json.loads(output.read_text())
     assert 0 <= result.pop("cpu") <= process_time()
     assert result == {"status": 4, "tests": {"m.x_f": ["a::t", "b::t"]}, "durations": {"a::t": 2.5}}
@@ -708,6 +785,29 @@ def _gate_tree(tmp_path, monkeypatch):
     (tmp_path / "pyproject.toml").write_text("[tool.pytest.ini_options]\n")
 
 
+@pytest.mark.parametrize("failures", [1, 2])
+def test_statistics_retry_a_flake_once_and_reject_a_persistent_failure(tmp_path, monkeypatch, failures):
+    _gate_tree(tmp_path, monkeypatch)
+    attempts = tmp_path / "attempts"
+    (tmp_path / "scripts/sample.py").write_text("def covered(value):\n    return value + 1\n")
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os\nfrom pathlib import Path\nfrom scripts.sample import covered\n\n"
+        "def test_value():\n"
+        "    assert covered(1) == 2\n"
+        "    if os.environ.get('MUTANT_UNDER_TEST') == 'stats':\n"
+        f"        attempts = Path({str(attempts)!r})\n"
+        "        count = int(attempts.read_text()) + 1 if attempts.exists() else 1\n"
+        "        attempts.write_text(str(count))\n"
+        f"        assert count > {failures}\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    assert attempts.read_text() == "2"
+    assert report["failed"] is (failures == 2)
+    if failures == 1:
+        assert report["not_mutated"] == []
+        assert report["files"][0]["counts"] == {"killed": 2}
+
+
 @pytest.mark.parametrize("source", ["hooks/__init__.py", "scripts/sample/__init__.py"])
 def test_gate_kills_initializer_mutants_through_ordinary_package_imports(tmp_path, monkeypatch, source):
     _gate_tree(tmp_path, monkeypatch)
@@ -757,6 +857,81 @@ def test_gate_mutates_a_function_its_module_calls_at_import(tmp_path, monkeypatc
     assert report["not_mutated"] == []
     assert report["failed"] is False
     assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_a_subprocess_importing_a_mutated_module_skips_the_mutation_engine_and_still_kills(tmp_path, monkeypatch):
+    _gate_tree(tmp_path, monkeypatch)
+    (tmp_path / "scripts/sample.py").write_text("def value(number):\n    return number + 1\n")
+    child = (
+        "import sys\n"
+        "from scripts.sample import value\n"
+        "print(value(1), 'libcst' in sys.modules)\n"
+        "print(callable(__import__('mutmut.__main__').__main__.walk_all_files))\n"
+    )
+    (tmp_path / "tests/test_sample.py").write_text(
+        "import os, subprocess, sys\n\n"
+        "from scripts.sample import value\n\n"
+        "def test_value():\n"
+        "    assert sys.modules['mutmut.__main__'].__file__.endswith('mutmut/__main__.py')\n"
+        "    value(1)\n"
+        "    env = {**os.environ, 'PYTHONPATH': os.getcwd()}\n"
+        f"    out = subprocess.run([sys.executable, '-c', {child!r}], env=env, capture_output=True, text=True, check=True)\n"
+        "    assert out.stdout.split() == ['2', 'False', 'True']\n"
+    )
+    report = run_gate(tmp_path, {"scripts/sample.py": {2}}, tmp_path / "evidence", 60)
+    logs = [Path(item["reason"].rpartition(" ")[2]) for item in report["not_mutated"]]
+    assert report["not_mutated"] == [], [log.read_text()[-4000:] for log in logs if log.is_file()]
+    assert report["failed"] is False
+    assert report["files"][0]["counts"] == {"killed": 2}
+
+
+def test_light_main_answers_the_trampoline_and_hands_every_other_name_to_the_real_module(monkeypatch):
+    from types import ModuleType
+
+    import mutmut.__main__ as real
+
+    from scripts.ci_mutation.selection import LIGHT_MAIN
+
+    light_main = ModuleType("mutmut.__main__")
+    exec(LIGHT_MAIN, light_main.__dict__)
+    assert issubclass(light_main.MutmutProgrammaticFailException, Exception)
+    assert light_main.mangled_name_from_mutant_name("scripts.a.x_f__mutmut_3") == "scripts.a.x_f"
+    with pytest.raises(AssertionError, match="^scripts.a.x_f$"):
+        light_main.mangled_name_from_mutant_name("scripts.a.x_f")
+    assert light_main.record_trampoline_hit("scripts.a.x_f") is None
+    with pytest.raises(AttributeError, match="^__path__$"):
+        light_main.__path__
+    monkeypatch.setattr(sys.modules["mutmut"], "__main__", real)
+    monkeypatch.setitem(sys.modules, "mutmut.__main__", light_main)
+    assert light_main.walk_all_files.__module__ == "mutmut.__main__"
+    loaded = sys.modules["mutmut.__main__"]
+    assert loaded is not light_main
+    assert loaded.__file__ == real.__file__
+    assert light_main.walk_all_files is loaded.walk_all_files
+    assert sys.modules["mutmut.__main__"] is loaded
+
+
+def test_the_mutation_runner_itself_never_takes_the_light_main(tmp_path):
+    from scripts.ci_mutation.selection import LIGHT_BOOTSTRAP
+
+    package = tmp_path / "scripts/ci_mutation"
+    package.mkdir(parents=True)
+    (tmp_path / "scripts/__init__.py").touch()
+    (package / "__init__.py").touch()
+    report = (
+        "import sys\n"
+        "main = sys.modules.get('mutmut.__main__')\n"
+        "print('absent' if main is None else getattr(main, '__file__', 'light'))\n"
+    )
+    for path in ("scripts/ci_mutation/selection.py", "scripts/other.py"):
+        (tmp_path / path).write_text(LIGHT_BOOTSTRAP + report)
+    env = {**os.environ, "PYTHONPATH": str(tmp_path)}
+
+    def loaded(*command):
+        return subprocess.run(command, cwd=tmp_path, env=env, capture_output=True, text=True, check=True).stdout
+
+    assert loaded(sys.executable, "-m", "scripts.ci_mutation.selection") == "absent\n"
+    assert loaded(sys.executable, "-c", "import scripts.other") == "light\n"
 
 
 def test_shared_run_grades_each_file_only_by_the_tests_selected_for_it(tmp_path, monkeypatch):

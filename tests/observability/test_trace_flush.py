@@ -1,4 +1,6 @@
+import contextlib
 import fcntl
+import gc
 import http.client
 import http.server
 import json
@@ -7,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import warnings
 
 import pytest
 from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import ExportTraceServiceRequest
@@ -138,7 +141,13 @@ def test_exporter_flushes_during_an_active_turn_and_once_after_the_owner_exits(h
         return True
 
     result = trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda owner: state["alive"]
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        send,
+        clock,
+        clock.sleep,
+        lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert result == "owner exited"
     assert [(at, trigger) for at, trigger, _ in calls] == [
@@ -163,6 +172,7 @@ def test_owner_exit_drains_new_records_with_a_final_trigger(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start"), (3, "final")]
 
@@ -180,6 +190,7 @@ def test_failed_export_retries_three_times_per_wake_and_keeps_pending_work(home,
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start")] * 3 + [(15, "interval")] * 3 + [(30, "interval")] * 3 + [(40, "final")] * 3
 
@@ -199,6 +210,7 @@ def test_a_request_wakes_the_exporter_before_its_interval(home, tmp_path):
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start"), (4, "request:stop")]
 
@@ -217,6 +229,7 @@ def test_requests_do_not_wake_a_failing_exporter_before_its_interval(home, tmp_p
         clock,
         clock.sleep,
         lambda owner: state["alive"],
+        timer_wait=clock.sleep,
     )
     assert calls == [(0, "request:start")] * 3 + [(15, "request:stop")] * 3 + [(20, "final")] * 3
 
@@ -239,9 +252,9 @@ def test_a_resumed_owner_takes_over_the_running_exporter(home, tmp_path):
         owners.append(owner.pid)
         return owner.pid == os.getpid() and clock() < 20
 
-    assert trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, is_alive) == (
-        "owner exited"
-    )
+    assert trace_flush.supervise(
+        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, is_alive, timer_wait=clock.sleep
+    ) == ("owner exited")
     assert calls == [(0, "final"), (0, "request:start")]
     assert owners[0] == 1 and os.getpid() in owners
     me = {"supervisor_pid": os.getpid(), "supervisor_start": trace_flush.start_time(os.getpid())}
@@ -272,7 +285,13 @@ def test_supervisor_waits_for_a_draining_owner_lock(home, tmp_path):
     clock = Clock()
     clock.hooks.append((10, held.close))
     result = trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), lambda *a: True, clock, clock.sleep, lambda owner: False
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        lambda *a: True,
+        clock,
+        clock.sleep,
+        lambda owner: False,
+        timer_wait=clock.sleep,
     )
     assert result == "owner exited"
     assert clock() == 10
@@ -313,12 +332,13 @@ class Receiver(http.server.BaseHTTPRequestHandler):
     spans: list = []
     posts = 0
     delay = 0.0
+    release = threading.Event()
 
     def do_POST(self):
         spans = type(self).spans
         body = self.rfile.read(int(self.headers["Content-Length"]))
         type(self).posts += 1
-        time.sleep(type(self).delay)
+        type(self).release.wait(type(self).delay)
         request = ExportTraceServiceRequest.FromString(body)
         for resource in request.resource_spans:
             for scope in resource.scope_spans:
@@ -332,13 +352,44 @@ class Receiver(http.server.BaseHTTPRequestHandler):
         pass
 
 
-@pytest.fixture
-def receiver():
+@contextlib.contextmanager
+def _serving():
     Receiver.spans, Receiver.posts, Receiver.delay = [], 0, 0.0
+    Receiver.release = threading.Event()
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     threading.Thread(target=server.serve_forever, daemon=True).start()
-    yield server
-    server.shutdown()
+    try:
+        yield server
+    finally:
+        Receiver.release.set()
+        server.shutdown()
+        server.server_close()
+
+
+@pytest.fixture
+def receiver():
+    with _serving() as server:
+        yield server
+
+
+def test_a_slow_request_in_flight_at_teardown_leaves_no_unclosed_socket():
+    before = set(threading.enumerate())
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        with _serving() as server:
+            Receiver.delay = 30.0
+            port = server.server_port
+            connection = http.client.HTTPConnection("127.0.0.1", port, timeout=15)
+            connection.request("POST", "/", ExportTraceServiceRequest().SerializeToString())
+            assert _wait(lambda: Receiver.posts == 1, 5), "the request never reached the receiver"
+        del server
+        for thread in set(threading.enumerate()) - before:
+            thread.join(15)
+            assert not thread.is_alive()
+        connection.getresponse().read()
+        gc.collect()
+    leaked = [str(w.message) for w in caught if issubclass(w.category, ResourceWarning)]
+    assert [m for m in leaked if f"laddr=('127.0.0.1', {port})" in m] == []
 
 
 def _records(stamp="2026-10-07T10:00:00Z"):
@@ -381,7 +432,12 @@ def _supervise_in_background(session):
     result = {}
     thread = threading.Thread(
         target=lambda: result.update(
-            outcome=trace_flush.supervise(session, trace_flush.Budget(1, 5, 3), sleep=lambda s: time.sleep(0.1))
+            outcome=trace_flush.supervise(
+                session,
+                trace_flush.Budget(1, 5, 3),
+                sleep=lambda s: time.sleep(0.1),
+                timer_wait=lambda s: time.sleep(0.1),
+            )
         ),
         daemon=True,
     )
@@ -586,8 +642,13 @@ def test_flush_once_reports_pending_work(monkeypatch, home):
 def test_stopped_codex_cursor_replays_all_pages_once(home, monkeypatch):
     from tests.observability.test_trace_paging import Receiver, _codex, _line
 
+    monkeypatch.setattr(trace_flush.time, "monotonic", Clock())
     transcript = home / "rollout.jsonl"
     transcript.write_text("".join(_line(record) for record in _codex(6, 2)))
+    monkeypatch.setattr("hooks.config.LANGFUSE_FIELD_MAX_CHARS", 500)
+    monkeypatch.setattr(
+        agent_trace, "identity_from_env", lambda session: agent_trace.Identity(session_id=session, account="test")
+    )
     receiver = Receiver()
     monkeypatch.setattr(agent_trace, "PENDING_MAX_BYTES", 6000)
     monkeypatch.setattr(otel, "langfuse_exporter", lambda: receiver)
@@ -779,7 +840,9 @@ def _run(session, limits, outcome, clock, state):
         calls.append((clock(), trigger, timeout, path))
         return outcome
 
-    result = trace_flush.supervise(session, limits, send, clock, clock.sleep, lambda owner: state["alive"])
+    result = trace_flush.supervise(
+        session, limits, send, clock, clock.sleep, lambda owner: state["alive"], timer_wait=clock.sleep
+    )
     return result, calls
 
 
@@ -858,7 +921,15 @@ def test_the_owner_record_names_the_running_exporter_until_it_exits(home, tmp_pa
         seen.append(json.loads(trace_flush.owner_path("session").read_text()))
         return True
 
-    trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: state["alive"])
+    trace_flush.supervise(
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        send,
+        clock,
+        clock.sleep,
+        lambda o: state["alive"],
+        timer_wait=clock.sleep,
+    )
     assert seen == [me, me]
     assert not trace_flush.owner_path("session").exists()
 
@@ -867,9 +938,9 @@ def test_exporters_create_their_state_folder_and_run_one_after_another(tmp_path,
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "a" / "b")
     for _ in range(2):
         clock = Clock()
-        assert trace_flush.supervise("s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False) == (
-            "owner exited"
-        )
+        assert trace_flush.supervise(
+            "s", trace_flush.Budget(15, 5, 3), None, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
+        ) == ("owner exited")
 
 
 def test_root_reports_the_trigger_and_unwritten_events(monkeypatch, home):
@@ -908,7 +979,13 @@ def test_the_exporter_checks_the_owner_named_in_the_request(home, tmp_path):
     owners = []
     clock = Clock()
     trace_flush.supervise(
-        "session", trace_flush.Budget(15, 5, 3), lambda *a: True, clock, clock.sleep, lambda o: owners.append(o)
+        "session",
+        trace_flush.Budget(15, 5, 3),
+        lambda *a: True,
+        clock,
+        clock.sleep,
+        lambda o: owners.append(o),
+        timer_wait=clock.sleep,
     )
     assert owners[0] == trace_flush.Owner(os.getpid(), trace_flush.start_time(os.getpid()))
 
@@ -936,5 +1013,34 @@ def test_a_missing_owner_record_does_not_stop_the_final_drain(home, tmp_path):
         trace_flush.owner_path("session").unlink()
         return True
 
-    result = trace_flush.supervise("session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False)
+    result = trace_flush.supervise(
+        "session", trace_flush.Budget(15, 5, 3), send, clock, clock.sleep, lambda o: False, timer_wait=clock.sleep
+    )
     assert result == "owner exited"
+
+
+def test_default_supervisor_wait_uses_scheduler_signals(home, tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    from scripts.scheduler import process_timer
+
+    transcript = tmp_path / "transcript.jsonl"
+    _grow(transcript)
+    _request("session", transcript)
+    clock, state = Clock(), {"alive": True}
+    clock.hooks.append((1, lambda: state.update(alive=False)))
+    timer = MagicMock()
+    timer.return_value.__enter__.return_value.wait.side_effect = lambda: clock.sleep(trace_flush.POLL_SEC)
+    monkeypatch.setattr(process_timer, "Timer", timer)
+    assert (
+        trace_flush.supervise(
+            "session",
+            trace_flush.Budget(15, 5, 3),
+            lambda *args: True,
+            clock,
+            clock.sleep,
+            lambda owner: state["alive"],
+        )
+        == "owner exited"
+    )
+    timer.assert_called_once_with(trace_flush.POLL_SEC)

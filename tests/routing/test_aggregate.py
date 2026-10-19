@@ -5,8 +5,6 @@ import pytest
 from scripts.hive import registry
 from scripts.routing import aggregate
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis():
@@ -208,6 +206,7 @@ def test_global_capacity_preserves_api_policy_and_future_reset_fields(redis, mon
             300,
             five_resets_at=200,
             reserved="reserved for 1 live master: workers stop at 70% of the week",
+            unreserved_cap=6,
         ),
         capacity.Account("codex", "one", "OPEN", 1, None, None, 4, kind="api", weight=3),
     ]

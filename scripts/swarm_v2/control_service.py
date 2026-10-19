@@ -2,15 +2,15 @@ import json
 import os
 import threading
 from collections.abc import Callable, Iterable, Mapping
+from functools import partial
 from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 from scripts.hive import auth as hive_auth
-from scripts.swarm import lease, ledger_host
+from scripts.swarm import lease, ledger_host, metrics_fleet
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_link
-from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from scripts.swarm_ledger import ledger_link, storage
 from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
@@ -53,9 +53,7 @@ class ControlError(SwarmError):
 
 
 def page_credential(slug: str) -> str | None:
-    from scripts.swarm_ledger.repository import repository
-
-    return repository.token(slug)
+    return storage.default().token(slug)
 
 
 def launch_key(environ: Mapping[str, str]) -> LaunchKey:
@@ -114,7 +112,8 @@ class ControlService:
         self.tasks = TaskAuthority(store, self.controller, lambda token: self.grants.bound(slug, token))
         self.executions = ExecutionsAPI(self.grants, self.tasks)
         backend = remote.controller_backend(os.environ)
-        self.artifacts = None if backend is None else artifacts.ArtifactsAPI(backend, self.tasks)
+        checkpointed = partial(metrics_fleet.record_checkpoint, store, slug)
+        self.artifacts = None if backend is None else artifacts.ArtifactsAPI(backend, self.tasks, checkpointed)
         self.health = health.Health(store, slug, health.brain_probe(os.environ), self.controller)
         self.health_api = health.HealthAPI(self.health, self.grants, operator, health.deep_enabled())
         self.server: ThreadingHTTPServer | None = None
@@ -205,7 +204,7 @@ class ControlService:
             self.writer.acquire(ledger_writer.owner())
         except ledger_writer.WriterConflict as conflict:
             print(f"controller: serves the tasks API read only for {self.controller.slug}: {conflict}", flush=True)
-        ledger = SQLiteLedgerRepository(folder / DATABASE)
+        ledger = storage.build(None if storage.shared() else folder / storage.DATABASE)
         self.tasks_api = TasksAPI(self.grants, self.tasks, ledger, self.writer.held)
 
     def stop(self) -> None:

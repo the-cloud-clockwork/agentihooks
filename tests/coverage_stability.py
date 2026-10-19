@@ -7,7 +7,7 @@ from coverage.exceptions import CoverageException
 
 from tests.coverage_grade import Unmeasured, executed
 
-SHARDS = 8
+SHARDS = 12
 
 
 def _repo() -> str:

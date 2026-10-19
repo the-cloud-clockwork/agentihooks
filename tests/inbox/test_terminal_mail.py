@@ -7,7 +7,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.control_notifications import notify
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -68,7 +68,7 @@ def test_terminal_notice_has_no_retired_master_recipient(setup, action):
 @pytest.mark.parametrize("state", ["pending", "delivered", "read"])
 def test_closing_a_swarm_settles_its_seat_mail(setup, close, state):
     _, inbox, master = setup
-    item = inbox.send("operator", master.seat, "Outstanding proof", fyi=True)
+    item = inbox.send("operator", master.seat, "Outstanding proof")
     if state != "pending":
         getattr(inbox, "deliver" if state == "delivered" else "read")(item.id, master.name)
     close()

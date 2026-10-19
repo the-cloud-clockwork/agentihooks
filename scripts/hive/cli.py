@@ -1,16 +1,21 @@
 """agentihooks hive invite|join|revoke|controller|serve|set|show|list."""
 
 import argparse
+import contextlib
+import fcntl
 import json
 import os
 import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Iterator, Mapping, MutableMapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, registry, server
+
+LOCK_FILE = "hive.lock"
 
 if TYPE_CHECKING:
     from redis import Redis
@@ -27,10 +32,51 @@ def now_ms() -> int:
 
 
 def _join(url: str, code: str) -> dict:
+    return _post(url, server.JOIN_PATH, {"code": code}, "join")
+
+
+def refresh_env(environ: MutableMapping[str, str]) -> str:
+    saved = _saved_env(environ)
+    url, credential = (
+        environ.get(name) or saved.get(name) for name in ("AGENTIHOOKS_HIVE_URL", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+    )
+    if not (url and credential):
+        raise auth.HiveError(
+            "this host has not joined a hive: "
+            "AGENTIHOOKS_HIVE_URL and AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL must both be set"
+        )
+    grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh")
+    auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
+    environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
+    return grant["id"]
+
+
+def saved_redis_url(environ: Mapping[str, str]) -> str | None:
+    return _saved_env(environ).get("AGENTIHOOKS_HIVE_REDIS_URL") or None
+
+
+def _saved_env(environ: Mapping[str, str]) -> dict[str, str]:
+    try:
+        lines = (registry.home(environ) / auth.ENV_FILE).read_text().splitlines()
+    except OSError:
+        return {}
+    return dict(line.partition("=")[::2] for line in lines)
+
+
+@contextlib.contextmanager
+def refresh_lock(environ: Mapping[str, str]) -> Iterator[None]:
+    path = registry.home(environ) / LOCK_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        yield
+
+
+def _post(url: str, path: str, body: dict, action: str) -> dict:
     parts = urlsplit(url)
     if parts.scheme != "https" and not server.is_loopback(parts.hostname):
-        raise auth.HiveError("a join off loopback carries credentials, so the hive URL must be https")
-    request = urllib.request.Request(url.rstrip("/") + server.JOIN_PATH, data=json.dumps({"code": code}).encode())
+        raise auth.HiveError(f"a {action} off loopback carries credentials, so the hive URL must be https")
+    request = urllib.request.Request(url.rstrip("/") + path, data=json.dumps(body).encode())
     try:
         with urllib.request.urlopen(request, timeout=server.REQUEST_TIMEOUT_S) as response:
             return json.load(response)
@@ -66,6 +112,7 @@ def _parser() -> argparse.ArgumentParser:
     join = sub.add_parser("join", help="Exchange a join code for credentials in hive.env")
     join.add_argument("url")
     join.add_argument("code")
+    sub.add_parser("refresh", help="Mint a new Redis credential for this hive through its join service")
     sub.add_parser("revoke", help="Delete a member's ledger credential and Redis user").add_argument("id")
     sub.add_parser(
         "controller", help="Write a new controller service credential to a private file, retiring the previous one"
@@ -123,6 +170,12 @@ def main(argv: list[str]) -> int:
             grant = _join(args.url, args.code)
             path = auth.write_env(registry.home(), args.url, grant)
             print(f"joined the hive as {grant['id']}; credentials are in {path}")
+        elif args.command == "refresh":
+            with refresh_lock(os.environ):
+                member_id = refresh_env(os.environ)
+            print(
+                f"refreshed the Redis credential of hive member {member_id}; it is in {registry.home() / auth.ENV_FILE}"
+            )
         elif args.command == "revoke":
             auth.revoke(redis_client(), args.id)
             print(f"revoked {args.id}")

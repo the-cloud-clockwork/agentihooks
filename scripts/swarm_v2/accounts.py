@@ -52,7 +52,7 @@ def seat_holder(name: str) -> str:
 
 def stored_accounts(store: RedisStore) -> list[str]:
     prefix = account_key("")
-    return sorted(key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*")))
+    return sorted(key.removeprefix(prefix) for key in store.redis.scan_iter(match=account_key("*"), count=1000))
 
 
 def encode(slot: Slot) -> str:

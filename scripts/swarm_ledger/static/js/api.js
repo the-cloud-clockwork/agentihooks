@@ -1,4 +1,4 @@
-import { API, API_V1, EVENTS_API, LAYOUT_API, MEDIA_API, ROUTING_API, SLUG, TOKEN } from "./config.js";
+import { API, API_V1, EVENTS_API, HIVES_API, LAYOUT_API, MEDIA_API, ROUTING_API, SLUG, TOKEN } from "./config.js";
 
 export function openEvents(cursor) {
   const headers = { Accept: "text/event-stream", "X-Ledger-Token": TOKEN };
@@ -31,6 +31,14 @@ export function readWorkspace(taskId) {
   return fetch(`${API_V1}/tasks/${encodeURIComponent(taskId)}/workspace`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
 
+export function readArchitecture() {
+  return fetch(`${API_V1}/architecture`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+}
+
+export function writeArchitecture(body) {
+  return fetch(`${API_V1}/architecture/actions`, { method: "POST", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
+}
+
 export function readArtifact(id) {
   return fetch(artifactUrl(id));
 }
@@ -41,6 +49,14 @@ export function readRouting() {
 
 export function writeRouting(changes) {
   return fetch(ROUTING_API, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN, "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
+}
+
+export function readHives() {
+  return fetch(HIVES_API, { cache: "no-store" });
+}
+
+export function writeHive(id, changes) {
+  return fetch(`${HIVES_API}/${encodeURIComponent(id)}`, { method: "PATCH", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN, "X-Ledger-Slug": SLUG }, body: JSON.stringify(changes) });
 }
 
 export function readLayout() {

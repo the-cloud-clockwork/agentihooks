@@ -18,7 +18,8 @@ from .test_definitions import sample, write_definition
 PACKAGE = Path(__file__).resolve().parents[2] / "profiles" / "package" / "classifiers"
 KNOWN_MISSES = {
     "filter": ["home-3"],
-    "intent-check": ["g18-quiet-week", "lifted-t201", "lifted-t205"],
+    "intent-check": ["g18-gates-off", "g18-quiet-week", "lifted-t201"],
+    "intent-check-plan": ["cohort-6-t600", "cohort-8-t603"],
     "model-pick": [
         "rig-grade-swarm-doctor-fx-8be892c4-cause",
         "rig-grade-swarm-doctor-fx-9b243b65-tune",

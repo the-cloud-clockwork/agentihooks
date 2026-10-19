@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/metrics_outbox.py:scripts.swarm.metrics_outbox.x\u01c1Outbox\u01c1flush__mutmut_3:10b803451292ea3ffb4cb5c397511d533b4b8eca6f0a314b6a0627e5ec04ebcf": {
+    "reader": "Standards",
+    "reason": "Acceptable against the under thirty second contract, although not identical timing: the dispatch admission budget changes from five to six seconds, and one admitted request has the unchanged three second timeout. Dispatch remains below nine seconds; the deadline checks, durable pending rows and rotation cursor remain intact."
+  }
+}

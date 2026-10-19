@@ -8,8 +8,10 @@ import ledger_core as core  # noqa: E402
 import ledger_gate as gate  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+storage = default_repository()
 
 SLUG = "sync-2026-01-01"
 
@@ -23,7 +25,7 @@ def make_ledger():
         "questions": [{"text": "which?"}],
         "followups": [{"text": "check disk"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -151,7 +153,9 @@ class StatsSync(unittest.TestCase):
         state["time_left_minutes"] = 400
         state["_meta"]["time_left"] = {"inputs": {"slots": 1, "ci_minutes": 35}}
         now = core.now_ms()
-        state["_meta"]["events"].append({"kind": "task done", "target": "tasks/closed", "at": now})
+        state["_meta"]["events"].append(
+            {"kind": "task done", "target": "tasks/closed", "at": now, "rev": state["_meta"]["rev"]}
+        )
         storage.import_document(SLUG, state, replace=True)
         reply, rejected = storage.apply_ops(SLUG, ops=[{"op": "stats_sync", "id": "persist"}])
         self.assertEqual(rejected, [])

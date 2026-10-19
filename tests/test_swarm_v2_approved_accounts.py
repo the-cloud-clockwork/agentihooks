@@ -9,7 +9,7 @@ from scripts.swarm_v2 import quota
 from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "accounts-fixture"
 NOW_MS = 1_800_000_000_000
@@ -252,7 +252,7 @@ def test_a_runtime_with_a_fleet_source_sizes_its_lanes_without_reading_local_acc
     herdr = HerdrRuntime()
     herdr.quota_accounts = approved.FleetAccounts(route, 2)
     decision = _sizing(herdr)
-    assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}
     assert [(row["name"], row["sessions"]) for row in decision["accounts"]] == [("akey", 1), ("bkey", 0)]
 
@@ -311,5 +311,5 @@ def test_a_workstation_runtime_still_sizes_its_lanes_from_its_local_accounts(mon
     assert herdr.quota_accounts is None
     decision = _sizing(herdr)
     assert asked == [(NOW_MS / 1000, True)]
-    assert decision["effective"] == {"eng": 2, "ci": 1, "plan": 0}
+    assert decision["effective"] == {"eng": 1, "ci": 1, "plan": 0}
     assert decision["placeable"] == {"claude": 3, "codex": 0}

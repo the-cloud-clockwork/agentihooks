@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/runtime.py:scripts.doctor.runtime.x__allocated__mutmut_7:1e389987c84baf3c025125009f02724fd093207d1f146e4f13b24d6f0e313ca2": {
+    "reader": "Standards",
+    "reason": "Standards final ruling: omitting followlinks uses os.walk default False, so traversal and public output are identical."
+  }
+}

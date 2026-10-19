@@ -260,8 +260,9 @@ Langfuse event, the agent's start or the outage start), so the Doctor master get
 it once while it lasts, it clears on recovery and a new fault raises a new one.
 An agent Langfuse could not be read for is judged only on its local exporter.
 
-The read budget is 15 seconds for active bindings, one retry per binding, and
-10 seconds per request. Watermarks and the outage start live in
+The read budget is 15 seconds for active bindings, read all at once, one retry
+per binding, and 7 seconds per request. Each read failure names the file and
+line that raised it. Watermarks and the outage start live in
 `<swarm home>/<slug>/doctor-telemetry.json`.
 
 ### Historical findings

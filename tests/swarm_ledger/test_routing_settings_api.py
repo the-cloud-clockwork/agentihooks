@@ -14,6 +14,7 @@ from scripts.routing.settings import FileSettings
 from scripts.swarm_ledger import ledger_server
 from scripts.swarm_ledger.api import resources, routes, routing
 from scripts.swarm_ledger.api.errors import APIError
+from tests.swarm_ledger.api_fakes import as_services
 
 SLUG = "routing-2026-01-01"
 PRINCIPALS = {"admin-token": "", "agent-token": "engineer@1"}
@@ -25,6 +26,10 @@ class Headers(dict):
 
 
 def fake_server(calls=None):
+    return as_services(server_parts(calls))
+
+
+def server_parts(calls=None):
     calls = [] if calls is None else calls
 
     def principal(admin, slug, token, agent):
@@ -40,7 +45,11 @@ def fake_server(calls=None):
         ALLOWED_ORIGINS=set(),
         MAX_BODY=10_000,
         core=SimpleNamespace(SLUG_RE=re.compile(r"[a-z0-9-]+"), loads=json.loads),
-        authority=SimpleNamespace(principal=principal),
+        authority=SimpleNamespace(
+            caller=lambda headers, admin, slug: principal(
+                admin, slug, headers.get("X-Ledger-Token"), headers.get("X-Ledger-Agent")
+            )
+        ),
         repository=SimpleNamespace(token=token),
     )
 

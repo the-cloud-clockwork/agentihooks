@@ -7,7 +7,7 @@ from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import quota
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "scratch"
 NOW = 1_800_000_000_000
 
@@ -22,8 +22,11 @@ def store():
 
 
 def seeded(store):
-    attached = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", pane_id="w1:p1", seat=f"eng-1@{SLUG}")
-    detached = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t2", seat=f"eng-2@{SLUG}")
+    started = NOW - 1_000
+    attached = AgentRecord(
+        store.next_name(SLUG, "eng"), "eng", "t1", pane_id="w1:p1", seat=f"eng-1@{SLUG}", started_at=started
+    )
+    detached = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t2", seat=f"eng-2@{SLUG}", started_at=started)
     ex1 = store.execution_registry.start(SLUG, attached, "").execution_id
     ex2 = store.execution_registry.start(SLUG, detached, "").execution_id
     beat = {"state": "working", "accepted_at_ms": NOW - 1_000, "archive_watermark": 3}
@@ -76,7 +79,11 @@ def test_the_sample_reads_the_registry_admissions_quota_archive_and_feed(store):
         attempts["t2"]["execution_id"],
     }
     assert found["brain"] == {"feed_at_ms": NOW - 30_000, "denials": []}
-    assert found["pools"] == [] and found["checkpoints"] == []
+    assert found["pools"] == []
+    assert found["checkpoints"] == [
+        {"execution_id": attempts[task]["execution_id"], "seat": attempts[task]["seat"], "taken_at_ms": NOW - 1_000}
+        for task in ("t1", "t2")
+    ]
     assert (found["seq"], found["at_ms"]) == (NOW, NOW)
 
 
@@ -108,7 +115,7 @@ def test_record_exports_the_dashboard_panels_and_one_coverage_row_per_source(tmp
             "archive": (1, 2),
             "brain_feed": (1, 1),
             "pools": (0, 0),
-            "checkpoints": (0, 0),
+            "checkpoints": (1, 2),
             "brain_denials": (0, 0),
         }
         rows = box.recent("fleet_panels", NOW) + box.recent("fleet_sources", NOW)
@@ -128,7 +135,7 @@ def test_a_missing_brain_feed_is_an_unavailable_source_not_a_fresh_one(tmp_path,
         assert sources["brain_feed"] == (0, 0)
         assert sources["executions"] == (1, 0)
         assert panels[("attempts", "active")] == 0.0
-        assert panels[("knowledge", "cross_scope_denials")] == 0.0
+        assert ("knowledge", "cross_scope_denials") not in panels
     finally:
         box.close()
 
@@ -149,7 +156,7 @@ def test_panel_rows_carry_no_plan_path():
     assert [(row["plan"], row["phase"], row["slice"], row["task"], row["value"]) for row in rows] == [
         ("", "", "", "", 1.0)
     ]
-    found = {"attempts": [], "quota": [], "archive": [], "brain": {"feed_at_ms": 0}}
+    found = {"attempts": [], "quota": [], "archive": [], "checkpoints": [], "brain": {"feed_at_ms": 0}}
     assert {
         (row["plan"], row["phase"], row["slice"], row["task"]) for row in metrics_fleet.source_rows(SLUG, NOW, found)
     } == {("", "", "", "")}
@@ -161,3 +168,92 @@ def test_the_feed_time_is_the_cached_feed_file_time(tmp_path, monkeypatch):
     assert metrics_fleet.feed_at_ms() == 0
     feed.write_text("{}")
     assert metrics_fleet.feed_at_ms() == int(feed.stat().st_mtime * 1000)
+
+
+def _recorded(tmp_path, store, pools=None):
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "u", ""))
+    try:
+        metrics_fleet.record(box, store, SLUG, NOW, lambda: NOW, pools)
+        return box.recent("fleet_panels", NOW), box.recent("fleet_sources", NOW)
+    finally:
+        box.close()
+
+
+def test_the_newest_checkpoint_of_each_active_execution_reaches_the_sink(tmp_path, store):
+    seeded(store)
+    executions = sorted(store.execution_occupants(SLUG).values(), key=lambda agent: agent.task)
+    first, second = (agent.execution_id for agent in executions)
+    metrics_fleet.record_checkpoint(store, SLUG, first, f"eng-1@{SLUG}", NOW - 3_000_000)
+    metrics_fleet.record_checkpoint(store, SLUG, first, f"eng-1@{SLUG}", NOW - 2_000_000)
+    metrics_fleet.record_checkpoint(store, SLUG, second, f"eng-2@{SLUG}", NOW - 1_800_000)
+    metrics_fleet.record_checkpoint(store, SLUG, "ended", "eng-9@scratch", NOW - 9_000_000)
+    assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
+    store.redis.pexpire(store.key(SLUG, "fleet-checkpoint", first), 1_000)
+    store.redis.pexpire(store.key(SLUG, "fleet-checkpoint", "ended"), 1_000)
+    found = metrics_fleet.sample(store, SLUG, NOW, NOW)
+    assert 604_000_000 < store.redis.pttl(store.key(SLUG, "fleet-checkpoint", first)) <= 604_800_000
+    assert store.redis.pttl(store.key(SLUG, "fleet-checkpoint", "ended")) <= 1_000
+    assert found["checkpoints"] == [
+        {"execution_id": first, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 2_000_000},
+        {"execution_id": second, "seat": f"eng-2@{SLUG}", "taken_at_ms": NOW - 1_800_000},
+    ]
+    panels, sources = _recorded(tmp_path, store)
+    values = {(row["panel"], row["series"]): row["value"] for row in panels}
+    assert values[("checkpoint_age", "stale")] == 1.0
+    assert values[("checkpoint_age", "oldest_age_ms")] == 2_000_000.0
+    assert values[("knowledge", "feed_age_ms")] == 0.0
+    assert ("knowledge", "cross_scope_denials") not in values
+    assert {row["source"]: (row["available"], row["readings"]) for row in sources}["checkpoints"] == (1, 2)
+
+
+def test_an_execution_without_a_checkpoint_ages_from_its_start(tmp_path, store):
+    late = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t1", seat=f"eng-1@{SLUG}", started_at=NOW - 1_900_000)
+    fresh = AgentRecord(store.next_name(SLUG, "eng"), "eng", "t2", seat=f"eng-2@{SLUG}", started_at=NOW - 5_000)
+    late_id = store.execution_registry.start(SLUG, late, "").execution_id
+    fresh_id = store.execution_registry.start(SLUG, fresh, "").execution_id
+    metrics_fleet.record_checkpoint(store, SLUG, fresh_id, f"eng-2@{SLUG}", NOW - 1_000)
+    assert metrics_fleet.sample(store, SLUG, NOW, NOW)["checkpoints"] == [
+        {"execution_id": late_id, "seat": f"eng-1@{SLUG}", "taken_at_ms": NOW - 1_900_000},
+        {"execution_id": fresh_id, "seat": f"eng-2@{SLUG}", "taken_at_ms": NOW - 1_000},
+    ]
+    panels, _ = _recorded(tmp_path, store)
+    values = {(row["panel"], row["series"]): row["value"] for row in panels}
+    assert (values[("checkpoint_age", "stale")], values[("checkpoint_age", "oldest_age_ms")]) == (1.0, 1_900_000.0)
+
+
+def test_a_worker_pool_reading_reaches_the_sink_per_pool(tmp_path, store):
+    seeded(store)
+    target = {"pod_namespace": "swarm-workers", "pod_name": "worker-t4"}
+    pod = AgentRecord(
+        store.next_name(SLUG, "eng"),
+        "eng",
+        "t4",
+        seat=f"eng-3@{SLUG}",
+        runtime_backend="kubernetes",
+        runtime_target=target,
+    )
+    store.execution_registry.start(SLUG, pod, "")
+    reading = [{"pool": "swarm-workers", "configured_maximum": 8, "nodes": 2}]
+    found = metrics_fleet.sample(store, SLUG, NOW, NOW, reading)
+    assert {row["task"]: row.get("pool") for row in found["attempts"]} == {
+        "t1": None,
+        "t2": None,
+        "t3": "swarm-workers",
+        "t4": "swarm-workers",
+    }
+    panels, sources = _recorded(tmp_path, store, lambda: reading)
+    capacity = {(row["series"], row["subject"]): row["value"] for row in panels if row["panel"] == "capacity"}
+    assert capacity == {
+        ("configured_maximum", "swarm-workers"): 8.0,
+        ("observed_nodes", "swarm-workers"): 2.0,
+        ("active_tasks", "swarm-workers"): 1.0,
+        ("pending_requests", "swarm-workers"): 1.0,
+    }
+    found = {row["source"]: (row["available"], row["readings"]) for row in sources}
+    assert (found["pools"], found["brain_denials"]) == ((1, 1), (0, 0))
+
+
+def test_an_unreadable_worker_pool_stays_an_unavailable_source(tmp_path, store):
+    panels, sources = _recorded(tmp_path, store, lambda: None)
+    assert not [row for row in panels if row["panel"] == "capacity"]
+    assert {row["source"]: (row["available"], row["readings"]) for row in sources}["pools"] == (0, 0)
