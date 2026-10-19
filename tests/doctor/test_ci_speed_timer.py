@@ -125,7 +125,10 @@ def test_a_complete_pass_records_full_counts_and_the_next_active_set(store, monk
 def test_the_timer_excludes_jobs_that_started_before_the_saved_window(store, monkeypatch):
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot([record([job(301, created=-601)])]))
     actions = cli.timer(store, DOCTOR, NOW, False)
-    assert "doctor CI speed: complete; 1 runs read of 1 discovered, 1 jobs, 0 crossings, 7 API calls" in actions
+    assert (
+        "doctor CI speed: complete; 1 runs read of 1 discovered, 1 jobs, 0 crossings, 7 API calls, 0 retracted, 0 queued jobs not reread"
+        in actions
+    )
     assert InboxStore(store.redis).inbox(f"master@{WATCHED}") == []
 
 
@@ -201,7 +204,10 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
     assert len(saved()["known"]) == 54
     down.clear()
     third = cli.timer(store, DOCTOR, NOW + 120000, False)
-    assert "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls" in third
+    assert (
+        "doctor CI speed: complete; 100 runs read of 100 discovered, 100 jobs, 0 crossings, 52 API calls, 0 retracted, 0 queued jobs not reread"
+        in third
+    )
     assert sorted(jobs) == list(range(100))
     assert saved()["known"] == {}
 
