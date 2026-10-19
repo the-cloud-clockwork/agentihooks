@@ -180,13 +180,20 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch, e
     monkeypatch.setattr(merge_queue, "graphql", graphql)
     monkeypatch.setattr(merge_queue, "rest", rest)
     monkeypatch.setattr(merge_queue, "prioritize", reorder)
-    alerts = []
+    alerts, writes = [], []
     monkeypatch.setattr(ledger, "raise_alert", lambda *args: alerts.append(args), raising=False)
+    monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: writes.append((args, kwargs)))
     if error:
         monkeypatch.setattr(merge_queue, "prioritize", lambda *args, **kwargs: {"displaced": [], "errors": [error]})
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
     if error:
         assert alerts == [("sw", f"merge-priority:{URL}", f"Deferred merge priority failed for {URL}: {error}")]
+        assert writes == [
+            (
+                ("priority-failed", URL, "", None, None),
+                {"repo": "o/r", "group_head": "old-group", "run_id": 42, "sender": "master", "errors": [error]},
+            ),
+        ]
         assert store.redis.hgetall(store.key("sw", queue_priority.PENDING))
     else:
         assert applied == [URL]
