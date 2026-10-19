@@ -16,12 +16,14 @@ const indexes = new WeakMap();
 
 function byId(list, id) {
   let index = indexes.get(list);
-  if (!index || index.length !== list.length || !index.items.has(id)) {
-    index = { length: list.length, items: new Map() };
-    for (const item of list) if (!index.items.has(item.id)) index.items.set(item.id, item);
+  let at = index && index.get(id);
+  if (at === undefined || list[at].id !== id) {
+    index = new Map();
+    list.forEach((item, i) => { if (!index.has(item.id)) index.set(item.id, i); });
     indexes.set(list, index);
+    at = index.get(id);
   }
-  return index.items.get(id);
+  return at === undefined ? undefined : list[at];
 }
 
 export function ancestors(d, key, seen = new Set()) {
