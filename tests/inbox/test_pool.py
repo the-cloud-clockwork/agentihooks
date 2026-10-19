@@ -440,6 +440,29 @@ def test_a_closed_pool_item_is_not_reopened_when_its_holder_leaves(swarm, inbox)
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "done")
 
 
+def test_a_contended_return_stays_discoverable_for_the_next_pool_pass(swarm, inbox, monkeypatch):
+    from redis.exceptions import WatchError
+
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    original = inbox._stage_pool_return
+    attempts = []
+
+    def contend_once(*args):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise WatchError
+        return original(*args)
+
+    monkeypatch.setattr(inbox, "_stage_pool_return", contend_once)
+    inbox.pool.distribute_all()
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (SECOND, "pending")
+
+
 def test_a_redirected_item_stays_where_it_was_sent(swarm, inbox):
     _masters(swarm, 2)
     item = inbox.send("swarm", FRONT, "first")
