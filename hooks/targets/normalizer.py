@@ -374,9 +374,7 @@ def _codex_answers(resp: Any) -> Any:
         return resp
 
 
-# Codex 0.162.1 hands a shell hook only the command and the session cwd; the
-# workdir the model passed to exec_command lives in the rollout's latest code
-# mode `exec` program, written before the hook fires (captured live).
+# Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
 _EXEC_FIELD = re.compile(r"\s*,?\s*(\w+)\s*:\s*")
 _EXEC_SCALAR = re.compile(r"[^,}]*")
@@ -401,7 +399,8 @@ def _exec_calls(program: str) -> list[dict[str, Any]]:
 def _last_exec_program(transcript: str) -> str:
     try:
         with open(transcript, "rb") as handle:
-            handle.seek(max(handle.seek(0, os.SEEK_END) - _ROLLOUT_TAIL_BYTES, 0))
+            size = handle.seek(0, os.SEEK_END)
+            handle.seek(max(size - _ROLLOUT_TAIL_BYTES, 0))
             lines = handle.read().splitlines()
     except OSError:
         return ""
@@ -410,7 +409,7 @@ def _last_exec_program(transcript: str) -> str:
             item = json.loads(line)["payload"]
         except (ValueError, KeyError, TypeError):
             continue
-        if item.get("type") == "custom_tool_call" and item.get("name") == "exec":
+        if isinstance(item, dict) and item.get("type") == "custom_tool_call" and item.get("name") == "exec":
             return str(item.get("input"))
     return ""
 
@@ -434,7 +433,8 @@ def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
         name, args = _codex_tool_call(str(payload["tool_name"]), payload.get("tool_input"))
         payload["tool_name"] = name
         if name == "Bash" and not args.get("workdir"):
-            workdir = _codex_workdir(str(payload.get("transcript_path")), str(args.get("command")))
+            transcript = payload.get("transcript_path") or codex_rollout_path(str(payload.get("session_id")))
+            workdir = _codex_workdir(transcript, str(args.get("command")))
             if workdir:
                 args["workdir"] = workdir
         if args:

@@ -168,7 +168,13 @@ def codex_rollout(tmp_path, *programs, filler=0):
         lines.append(json.dumps({"type": "response_item", "payload": item}))
     if filler:
         lines.append(json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "text": "x" * filler}}))
-    lines += ["not json", "{}", "[]", json.dumps({"type": "turn_context", "payload": {"cwd": "/elsewhere"}})]
+    lines += [
+        "not json",
+        "{}",
+        "[]",
+        '{"payload": "x"}',
+        json.dumps({"type": "turn_context", "payload": {"cwd": "/elsewhere"}}),
+    ]
     rollout.write_text("\n".join(lines) + "\n")
     return rollout
 
@@ -184,9 +190,11 @@ def codex_call(monkeypatch, rollout, command, cwd, **tool_input):
     monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
     payload = {
         "session_id": "01a15435-ba42-7c60-a0ac-3d9c038cf8c9",
+        "turn_id": "01a15435-ba79-7630-9eff-1ef0d95d96a4",
         "transcript_path": str(rollout),
         "cwd": str(cwd),
         "hook_event_name": "PreToolUse",
+        "model": "gpt-6.1-sol",
         "permission_mode": "bypassPermissions",
         "tool_name": "Bash",
         "tool_input": {"command": command, **tool_input},
@@ -429,3 +437,21 @@ def test_the_harness_comes_from_the_environment_and_defaults_to_claude(tree, tmp
     found = OnePush(ledger=lambda: Ledger(), github=lambda url: None)
     assert found.target() == environ.get("AGENTIHOOKS_TARGET", "claude")
     assert found.decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed is allowed
+
+
+def test_a_codex_payload_without_a_transcript_path_finds_its_rollout(monkeypatch, tree, tmp_path):
+    work = tmp_path / "command"
+    day = tmp_path / "codex" / "sessions" / "2026" / "10" / "19"
+    day.mkdir(parents=True)
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", work))
+    rollout.rename(day / "rollout-2026-10-19T14-49-29-01a15435-ba42-7c60-a0ac-3d9c038cf8c9.jsonl")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    payload = {
+        "session_id": "01a15435-ba42-7c60-a0ac-3d9c038cf8c9",
+        "cwd": str(tree),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "gh pr ready 1"},
+    }
+    assert normalize_payload(payload)["tool_input"]["workdir"] == str(work)
