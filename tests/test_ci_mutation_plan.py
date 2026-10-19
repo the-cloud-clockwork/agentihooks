@@ -569,8 +569,6 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
 
 
 def _budget_project(tmp_path, monkeypatch, seconds, timed):
-    from scripts.ci_mutation.selection import changed_mutations
-
     _project(tmp_path, {})
     tests = _timed_tests(tmp_path, timed)
     source = "".join(f"def f{index}():\n    return {index}\n\n" for index in range(40))
@@ -579,9 +577,7 @@ def _budget_project(tmp_path, monkeypatch, seconds, timed):
         with (tmp_path / path).open("a") as stream:
             stream.write("from scripts.budget import f0\n")
     lines = set(range(1, len(source.splitlines()) + 1))
-    _, mutations = changed_mutations("scripts/budget.py", source, lines)
-    assert len(mutations) >= 10
-    monkeypatch.setattr(plan, "MUTANT_SECONDS", seconds / len(mutations))
+    monkeypatch.setattr(plan, "MUTANT_SECONDS", seconds / 40)
     return {"scripts/budget.py": lines} if seconds else {}, tests
 
 
@@ -613,7 +609,7 @@ def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
         "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"
     )
     text = capsys.readouterr().out
-    assert "Mutation bases: earlier merged\n" in text
+    assert "Mutation bases: earlier merged\nChanged line mutants: 40\n" in text
     assert "Estimated mutation seconds: 1601, slowest stats bucket: 121\n" in text
     assert "Mutation shards: 4\nStats parts: 3\n" in text
 
