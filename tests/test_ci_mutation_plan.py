@@ -159,8 +159,8 @@ def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp
     memory.pytest_runtest_logreport(SimpleNamespace(failed=True, nodeid="fast"))
     killed = measured.refine_plan(tmp_path, selected, stats)["costs"]
     assert traced and set(killed) == set(traced)
-    assert set(traced.values()) == {pytest.approx(5.6 + 1.25 * 202.0)}
-    assert set(killed.values()) == {pytest.approx(8.1)}
+    assert list(traced.values()) == pytest.approx([5.6 + 1.25 * 202.0] * len(traced))
+    assert list(killed.values()) == pytest.approx([8.1] * len(killed))
 
 
 def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
