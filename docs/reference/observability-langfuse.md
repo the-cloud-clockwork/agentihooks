@@ -413,7 +413,8 @@ credential and the `agent-swarm` project stayed as they were.
 
 The Grafana alert read in the same tick reuses this endpoint, client and key
 with `x-mcp-servers: grafana`, so it uses the encrypted route too. Unsetting
-`LANGFUSE_MCP_URL` or `MCP_KEY_GATEWAY` turns off both reads.
+`LANGFUSE_MCP_URL` turns off both reads; unsetting `MCP_KEY_GATEWAY` makes both
+fail silently.
 
 ### Configuration
 
