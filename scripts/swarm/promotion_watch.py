@@ -225,8 +225,10 @@ def _green(slug, ledger, doc, last):
 
 def _recover(slug, redis, ledger, doc, last, repo):
     actions = _green(slug, ledger, doc, last)
+    redis.delete(key(slug, "jobs"))
     for previous in promotion_owner.history(repo, redis) - {slug}:
         actions.extend(_green(previous, ledger, ledger.state(previous), last))
+        redis.delete(key(previous, "jobs"))
     return actions
 
 

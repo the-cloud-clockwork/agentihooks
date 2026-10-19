@@ -33,7 +33,7 @@ class SchemaLedger(LedgerClient):
     def __init__(self, slugs):
         super().__init__()
         self.docs = {slug: new_ledger.build_doc({"title": "Promotion owner proof"}, "swarm") for slug in slugs}
-        self.meta = {slug: {"rev": 0, "stamps": {}, "members": {}} for slug in slugs}
+        self.meta = {}
         self.lock = threading.RLock()
         self.operations = []
         self.refuse = False
@@ -49,7 +49,9 @@ class SchemaLedger(LedgerClient):
                 )
                 if self.refuse:
                     raise LedgerRefused("persistence refused")
-                ctx = ledger_core.Context(self.meta[slug], NOW, slug)
+                ctx = ledger_core.Context(
+                    self.meta.setdefault(slug, {"rev": 0, "stamps": {}, "members": {}}), NOW, slug
+                )
                 for op in checked:
                     assert ledger_core.apply_op(doc, op, ctx)
                 assert not ctx.refused
