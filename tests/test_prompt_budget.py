@@ -105,6 +105,20 @@ def test_the_budget_logs_the_cut_and_skipped_steps(monkeypatch):
     assert fields["skipped"] == ["after"]
 
 
+def test_the_guard_installs_its_alarm_handler_and_restores_the_previous_one():
+    import signal
+
+    previous = signal.getsignal(signal.SIGALRM)
+    budget = PromptBudget(soft=5, hard=5)
+
+    with budget.guarded():
+        installed = signal.getsignal(signal.SIGALRM)
+
+    assert installed == budget._on_alarm
+    assert budget._installed is True
+    assert signal.getsignal(signal.SIGALRM) == previous
+
+
 def test_a_fresh_budget_has_spent_nothing_and_holds_no_alarm():
     budget = PromptBudget(soft=5, hard=5)
 
