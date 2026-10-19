@@ -1281,6 +1281,34 @@ def _retire_master(slug, store, runtime, master, now_ms):
     return f"retired {master.name}"
 
 
+def respawn_master(slug, store, runtime, now_ms):
+    from scripts.swarm import controller, lease
+    from scripts.swarm.commands import hive_id
+
+    held = lease.acquire(store, slug, hive_id())
+    if held is None:
+        return []
+    token = controller.take_tick_lock(store, slug, held, lease.ttl_ms())
+    if token is None:
+        return []
+    try:
+        config = store.ensure_code(slug)
+        if config.state in ("stopping", "stopped"):
+            return []
+        runtime = controller.FencedRuntime(store, slug, held, runtime, controller.LOCAL)
+        live, actions = runtime.live_names(), []
+        for agent in store.agents(slug):
+            gone = agent.state not in ("finished", "starting") and agent.name not in live
+            if agent.lane == MASTER and gone and master_seats.is_lead(slug, agent):
+                store.drop_agent(slug, agent.name)
+                actions.append(f"dropped the gone master {agent.name}")
+        return actions + (
+            _recover_master(slug, config, store, runtime, now_ms) or _master(slug, config, store, runtime, now_ms)
+        )
+    finally:
+        controller.release_tick_lock(store, slug, token)
+
+
 def _settle(slug, config, store, ledger, rows, doc):
     agents = store.agents(slug)
     if config.state == "stopping":

@@ -122,6 +122,7 @@ from scripts.swarm import (
     stall_watch,
     take_master,
     templates,
+    tick_heartbeat,
     tick_master,
     tick_stop,
     timer,
@@ -271,6 +272,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
+                store.redis.set(store.key(slug, "ledger-binned"), 1)
                 _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
                 return [
                     f"the ledger is in the bin, still retiring {', '.join(left)}"
@@ -285,6 +287,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
+            store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
             if actions:
@@ -385,6 +388,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             started = timing.call(snapshot_job.start, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
+            tick_heartbeat.write(store, slug, now_ms(), doc)
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
@@ -580,6 +584,22 @@ def cmd_prober(store, args):
     from scripts.swarm import command_runner, quota_refresh
 
     quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+
+
+def cmd_tick_watch(store, args):
+    from scripts.swarm import controller, scheduled_tick, tick_watch
+    from scripts.swarm.tick import respawn_master
+
+    repair = None
+    if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
+        runtime = routed(herdr=HerdrRuntime())
+
+        def respawn(slug):
+            return respawn_master(slug, store, runtime, now_ms())
+
+        repair = tick_watch.Repair(scheduled_tick.restart, respawn)
+
+    tick_watch.run(store, now_ms, repair)
 
 
 def cmd_create(store, args):
@@ -2165,8 +2185,8 @@ def typed(argv):
 
 
 def dispatch(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "prober", "waits"):
-        handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch"):
+        handler, args = globals()[f"cmd_{argv[0].replace('-', '_')}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (
             *SETTABLE,

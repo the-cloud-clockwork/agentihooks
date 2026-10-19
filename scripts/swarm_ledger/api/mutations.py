@@ -1,4 +1,4 @@
-from scripts.swarm_ledger import ledger_task_duplicates
+from scripts.swarm_ledger import ledger_task_duplicates, ports
 
 from . import resources, schemas
 from .errors import APIError
@@ -43,7 +43,7 @@ class GuardedOperations:
         self.checked = True
 
     def check_controller(self, op: dict) -> None:
-        from scripts.swarm.store import SwarmError
+        SwarmError = ports.swarm().store.SwarmError
 
         if "controller_epoch" in op:
             try:
