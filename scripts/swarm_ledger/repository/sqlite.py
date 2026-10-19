@@ -26,6 +26,11 @@ CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
 """
+ROWS_SCHEMA = "".join(
+    f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
+    "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path));\n"
+    for table in TABLES
+)
 DATABASE = "ledgers.sqlite3"
 BEGIN = "BEGIN"
 REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
@@ -121,6 +126,10 @@ def key_parts(key: str) -> list:
 @contextmanager
 def read_only(directory):
     """A read only connection to the folder's database, or None when it holds none."""
+    if hasattr(directory, "read_only"):
+        with directory.read_only() as connection:
+            yield connection
+        return
     path = Path(directory) / DATABASE
     if not path.exists():
         yield None
@@ -334,6 +343,8 @@ class Snapshot:
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
+    adopts = True
+
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
         self._domain = domain
@@ -389,11 +400,7 @@ class SQLiteLedgerRepository:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
-            for table in TABLES:
-                connection.execute(
-                    f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
-                    "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path))"
-                )
+            connection.executescript(ROWS_SCHEMA)
             self._ready.add(path)
 
     def _key(self, slug):
