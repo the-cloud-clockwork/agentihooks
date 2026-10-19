@@ -28,8 +28,37 @@ def test_the_swarm_store_is_kept_only_without_a_password_and_marked_when_withhel
     plain = {**env, herdr_panes.STORE_ENV: "redis://localhost:6379/7"}
     secret = {**env, herdr_panes.STORE_ENV: "redis://user:pw@localhost:6379/7"}
     assert herdr_panes.record(PLACED, "init-agent", "a", plain, 1).swarm_store == "redis://localhost:6379/7"
-    assert herdr_panes.record(PLACED, "init-agent", "a", secret, 1).swarm_store == herdr_panes.WITHHELD
+    withheld = herdr_panes.record(PLACED, "init-agent", "a", secret, 1).swarm_store
+    assert withheld.startswith(f"{herdr_panes.WITHHELD}:") and "pw" not in withheld
+    assert len(withheld) == len(herdr_panes.WITHHELD) + 17
     assert herdr_panes.record(PLACED, "init-agent", "a", env, 1).swarm_store == ""
+
+
+def keyed(password, host="localhost", db="7"):
+    return "redis://user" + ":" + password + "@" + host + ":6379/" + db
+
+
+def test_a_withheld_store_names_its_url_without_the_password():
+    first = herdr_panes.store_ref(keyed("pw"))
+    assert first == herdr_panes.store_ref(keyed("other"))
+    assert first == herdr_panes.store_ref(keyed("p@w"))
+    assert first != herdr_panes.store_ref(keyed("pw", db="8"))
+    assert first != herdr_panes.store_ref(keyed("pw", host="remote"))
+    assert herdr_panes.store_ref("redis://localhost:6379/7") == "redis://localhost:6379/7"
+    assert herdr_panes.store_ref("") == ""
+
+
+def test_a_recorded_store_resolves_to_its_url_or_only_the_environments_matching_url():
+    own = keyed("pw")
+    env = {herdr_panes.STORE_ENV: own}
+    assert herdr_panes.store_url("redis://localhost:6379/3", env) == "redis://localhost:6379/3"
+    assert herdr_panes.store_url("", env) == ""
+    assert herdr_panes.store_url(herdr_panes.store_ref(own), env) == own
+    assert herdr_panes.store_url(herdr_panes.store_ref(keyed("pw", db="8")), env) is None
+    assert herdr_panes.store_url(herdr_panes.store_ref(own), {}) is None
+    assert herdr_panes.store_url(herdr_panes.WITHHELD, env) == own
+    assert herdr_panes.store_url(herdr_panes.WITHHELD, {herdr_panes.STORE_ENV: "redis://localhost:6379/7"}) is None
+    assert herdr_panes.store_url(herdr_panes.WITHHELD, {}) is None
 
 
 def test_update_and_forget_rewrite_the_one_record(tmp_path):

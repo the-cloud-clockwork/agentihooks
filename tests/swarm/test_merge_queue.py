@@ -988,9 +988,7 @@ def test_state_reports_queue_state_and_pull_request_lifecycle(state):
     ],
 )
 def test_api_failures_remain_cli_failures(monkeypatch, capsys, code, stderr, stdout, message):
-    from types import SimpleNamespace
-
-    monkeypatch.setattr(cli, "connect", lambda: SimpleNamespace(names=SimpleNamespace(swarm_slug=lambda s: s)))
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
 
     def run(command, **kwargs):
         return subprocess.CompletedProcess(command, code, stdout, stderr)

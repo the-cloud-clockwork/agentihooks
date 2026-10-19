@@ -26,13 +26,18 @@ def test_the_host_tick_excludes_retired_ledgers_before_any_tick_pass(monkeypatch
         return slug == "retired"
 
     ledger = SimpleNamespace(binned=binned, closed=closed)
-    store = SimpleNamespace(slugs=lambda: ["retired", "active"])
+    store = SimpleNamespace(
+        slugs=lambda: ["retired", "active"],
+        config=lambda slug: SimpleNamespace(api_url="", pending_api_url=""),
+        redis=SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
     monkeypatch.setattr(cli, "_reconcile_services", lambda: None)
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: [])
 
     def run_tick(received, slug, scheduled):
         assert received is store

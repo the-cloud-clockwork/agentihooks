@@ -130,6 +130,17 @@ def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
     assert any(entry.get("text") == "Remote hello" for entry in state["chat"])
 
 
+def test_remote_swarm_state_uses_the_callers_agent_credential(live, hive):
+    from scripts.swarm.ledger_client import LedgerClient
+
+    with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}):
+        os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
+        with patch.object(ledger.repository, "token", server_only(ledger.repository.token)):
+            ledger.request(SLUG, [{"op": "join", "id": uuid.uuid4().hex, "by": WORKER}])
+            state = LedgerClient().state(SLUG)
+    assert WORKER in state["_meta"]["members"]
+
+
 def test_a_remote_client_without_a_credential_is_refused(live, hive):
     with patch.dict(os.environ, REMOTE):
         os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)

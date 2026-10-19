@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 def setup():
     import fakeredis
 
-    from scripts.hive.orders import Consumer, LaunchOrder, Orders
+    from scripts.hive.orders import Consumer, LaunchOrder, Orders, carried
     from scripts.swarm import lease
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
     from scripts.swarm.tick import Placed
@@ -37,7 +37,7 @@ def setup():
             runtime_target={"host_id": "host"},
         ),
     )
-    redis.set("prompt", json.dumps({"id": "task", "description": "launch this task"}))
+    redis.set("prompt", json.dumps(carried("fixture", {"id": "task", "description": "launch this task"}, "opening")))
     order = LaunchOrder(
         "fixture",
         agent.execution_id,

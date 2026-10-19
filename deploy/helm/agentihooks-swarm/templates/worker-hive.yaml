@@ -6,7 +6,10 @@
 {{- fail "workers need a credentialSecret or joinCodeSecret, exactly one" }}
 {{- end }}
 {{- if and $code.name (ne (int $workers.replicas) 1) }}
-{{- fail "one time join codes require workers.replicas=1; use a member credential to scale" }}
+{{- fail "one time join codes require workers.replicas=1" }}
+{{- end }}
+{{- if gt (int $workers.replicas) 1 }}
+{{- fail "workers.replicas above 1 is refused: one hive credential is one hive, so every replica would report the same hive id and agent limit; install one release per hive credential to scale" }}
 {{- end }}
 {{- if lt (int $workers.maxAgents) 1 }}
 {{- fail "workers.maxAgents must be positive" }}
