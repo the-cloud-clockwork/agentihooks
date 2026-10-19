@@ -813,7 +813,7 @@ def test_guard_says_when_a_drained_supervisor_holds_on_and_recycles_it_on_a_late
     assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
     assert order == ["drain 4242", "supervise", "drain 4242", "supervise"]
     assert capsys.readouterr().err.splitlines()[1] == (
-        "the scheduler supervisor 4242 did not exit; the next wait pass recycles it again"
+        "the scheduler supervisor 4242 still holds its lock; the next wait pass tries again"
     )
 
 

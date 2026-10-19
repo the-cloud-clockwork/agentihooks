@@ -117,6 +117,7 @@ def test_agentihooks_starts_one_detached_supervisor_when_redis_is_configured(
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
     spawn = Mock()
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
     assert service.ensure_running({}) is False
@@ -287,7 +288,12 @@ def test_a_supervisor_records_the_root_and_revision_it_loaded_before_its_runner(
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
-    monkeypatch.setattr(service, "revision", lambda root: f"revision of {root}")
+
+    def revision(root):
+        assert service.holder({}) is None, "the supervisor read git while holding its lock"
+        return f"revision of {root}"
+
+    monkeypatch.setattr(service, "revision", revision)
     monkeypatch.setattr(service.time, "time", lambda: 1_000.0)
     seen = []
     child = Mock()

@@ -210,7 +210,7 @@ def recycle():
     print(f"recycling the scheduler supervisor: {why}", file=sys.stderr)
     if not service.drain(held["pid"], env):
         print(
-            f"the scheduler supervisor {held['pid']} did not exit; the next wait pass recycles it again",
+            f"the scheduler supervisor {held['pid']} still holds its lock; the next wait pass tries again",
             file=sys.stderr,
         )
 

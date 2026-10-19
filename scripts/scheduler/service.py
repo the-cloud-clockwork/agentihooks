@@ -86,8 +86,9 @@ def _command(mode: str) -> list[str]:
 
 def supervise(stop: Event | None = None) -> None:
     stopped = stop if stop is not None else Event()
+    loaded = revision(ROOT)
     with machine_lock("supervisor"):
-        _identify()
+        _identify(loaded)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
@@ -99,8 +100,8 @@ def supervise(stop: Event | None = None) -> None:
                 return
 
 
-def _identify() -> None:
-    record = {"pid": os.getpid(), "root": str(ROOT), "revision": revision(ROOT), "started": time.time()}
+def _identify(loaded: str) -> None:
+    record = {"pid": os.getpid(), "root": str(ROOT), "revision": loaded, "started": time.time()}
     (runtime_dir() / RECORD).write_text(json.dumps(record))
 
 
