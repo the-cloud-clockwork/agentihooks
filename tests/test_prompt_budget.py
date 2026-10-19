@@ -111,6 +111,9 @@ def test_a_bad_budget_setting_falls_back_to_the_default(monkeypatch):
 
     assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 10.0
     assert PromptBudget().soft == 10.0
+    for value in ("nan", "inf", "-3"):
+        monkeypatch.setenv("AGENTIHOOKS_PROMPT_BUDGET_S", value)
+        assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 10.0
 
 
 def test_a_cut_that_lands_outside_a_step_never_escapes_the_budget():

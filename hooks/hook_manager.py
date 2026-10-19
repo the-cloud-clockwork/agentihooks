@@ -749,10 +749,11 @@ def on_user_prompt_submit(payload: dict) -> None:
         _prompt_steps(budget, payload, session_id)
 
 
-def _prompt_overrun() -> None:
+def _prompt_overrun(budget: PromptBudget) -> None:
     from hooks.targets import emitter
 
-    log("prompt hook overran its hard budget in a blocking call; flushing what it gathered")
+    budget.cut = budget.running
+    budget.report()
     emitter.flush("UserPromptSubmit")
     sys.stdout.flush()
     os._exit(0)

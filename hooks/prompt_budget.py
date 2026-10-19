@@ -1,5 +1,6 @@
 """Deadline for the prompt hook's steps, so a slow step costs its own output and never the blocks already injected."""
 
+import math
 import os
 import signal
 import threading
@@ -23,9 +24,10 @@ class Spent(BaseException):
 
 def seconds(name: str, default: float) -> float:
     try:
-        return float(os.environ.get(name) or default)
+        value = float(os.environ.get(name) or default)
     except ValueError:
         return default
+    return value if math.isfinite(value) and value > 0 else default
 
 
 def process_start(clock: Callable[[], float] = time.monotonic) -> float:
@@ -53,6 +55,7 @@ class PromptBudget:
         self.cut = ""
         self.skipped: list[str] = []
         self.times: dict[str, float] = {}
+        self.running = ""
         self._armed = False
         self._installed = False
 
@@ -65,6 +68,7 @@ class PromptBudget:
             self.skipped.append(name)
             return None
         began = self._clock()
+        self.running = name
         try:
             self._arm(self.left(self.hard))
             result = step(*args)
@@ -76,17 +80,18 @@ class PromptBudget:
             return None
         finally:
             self._disarm()
+            self.running = ""
             self.times[name] = self._clock() - began
 
     @contextmanager
-    def guarded(self, on_overrun: Callable[[], None] | None = None) -> Iterator["PromptBudget"]:
+    def guarded(self, on_overrun: Callable[["PromptBudget"], None] | None = None) -> Iterator["PromptBudget"]:
         previous, timer = self._install(), self._saved_timer()
         watchdog = None
-        if on_overrun is not None:
-            watchdog = threading.Timer(max(0.0, self.left(self.hard)) + GRACE_S, on_overrun)
-            watchdog.daemon = True
-            watchdog.start()
         try:
+            if on_overrun is not None:
+                watchdog = threading.Timer(max(0.0, self.left(self.hard)) + GRACE_S, on_overrun, (self,))
+                watchdog.daemon = True
+                watchdog.start()
             yield self
         except Spent:
             self.spent = True
