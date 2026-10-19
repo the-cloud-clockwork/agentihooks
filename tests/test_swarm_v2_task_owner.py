@@ -5,14 +5,14 @@ import pytest
 import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
 from scripts.inbox import cli as inbox_cli
 from scripts.inbox.store import InboxError, InboxStore
-from scripts.swarm import delivery
-from scripts.swarm.store import AgentRecord
+from scripts.swarm import delivery, master_retire
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_v2 import master_fence, masters
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 LOOSE = "t3"
 CLAIMANT = f"eng-1@{SLUG}"
@@ -106,6 +106,96 @@ def test_an_engineer_comment_is_not_fenced(world):
 
 def inbox(world):
     return InboxStore(world.redis, session_id="s1")
+
+
+@pytest.fixture
+def doctor_world(world):
+    doctor = "watch-doctor"
+    sender = "master@fedcba-0001"
+    world.store.names.adopt(doctor, "fedcba", doctor, "repo")
+    world.store.create(SwarmConfig(doctor, "/repo", 1, 0))
+    world.store.names.next(doctor, "master")
+    world.store.set_peer(SLUG, doctor)
+    world.store.set_peer(doctor, SLUG)
+    world.store.put_agent(doctor, AgentRecord(sender, "master", "master", seat=f"master@{doctor}"))
+    world.store.seats.occupy(f"master@{doctor}", sender, 1)
+    world.down(SECOND_NAME)
+    masters.MasterSeats(world.redis).set_count(SLUG, 3)
+    for seat, task in ((SECOND, "master-2"), (f"master-3@{SLUG}", "master-3")):
+        name = world.store.names.next(SLUG, "master")
+        world.store.put_agent(SLUG, AgentRecord(name, "master", task, seat=seat))
+        world.store.seats.occupy(seat, name, 1)
+    return world, doctor, sender
+
+
+@pytest.mark.parametrize("front_door", [True, False])
+@pytest.mark.parametrize("seat", [SECOND, f"master-3@{SLUG}"])
+@pytest.mark.parametrize("by_name", [True, False])
+def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, front_door, seat, by_name):
+    world, _, sender = doctor_world
+    address = world.store.seats.occupant(seat).occupant if by_name else seat
+    if not front_door:
+        world.down(LEAD_NAME)
+        world.store.seats.occupy(LEAD, "", 2)
+    record = {
+        "op": "send",
+        "by": sender,
+        "item": "i-doctor",
+        "args": {"address": address, "text": "Apply the merged fix", "fyi": False},
+    }
+
+    result = inbox_cli.apply(inbox(world), record)
+
+    assert result["to"] == address
+    assert inbox(world).get(result["id"]).text == "Apply the merged fix"
+    assert world.refusals() == 0
+
+
+@pytest.mark.parametrize("link", ["none", "other", "watched-only", "doctor-only", "retired", "retire-requested"])
+def test_only_a_live_linked_doctor_master_can_bypass_the_claimant_fence(doctor_world, link):
+    world, doctor, sender = doctor_world
+    if link == "none":
+        world.store.clear_peer(SLUG)
+        world.store.clear_peer(doctor)
+    elif link == "other":
+        world.store.set_peer(SLUG, "another-doctor")
+        world.store.set_peer(doctor, "another-swarm")
+    elif link == "watched-only":
+        world.store.clear_peer(doctor)
+    elif link == "doctor-only":
+        world.store.clear_peer(SLUG)
+    elif link == "retired":
+        world.store.seats.record_exit(sender, f"master@{doctor}", "retired")
+    else:
+        agent = next(a for a in world.store.agents(doctor) if a.name == sender)
+        master_retire.hold(world.store, doctor, agent, "retired", True, 1)
+        assert master_retire.reason(world.store, doctor, sender) == "retired"
+    record = {
+        "op": "send",
+        "by": sender,
+        "item": "i-unlinked",
+        "args": {"address": SECOND, "text": "Coordinate", "fyi": False},
+    }
+
+    with pytest.raises(InboxError, match="cannot message its claimant"):
+        inbox_cli.apply(inbox(world), record)
+
+    assert inbox(world).mailbox(SECOND) == []
+
+
+def test_a_linked_doctor_master_cannot_message_another_masters_task_claimant(doctor_world):
+    world, _, sender = doctor_world
+    record = {
+        "op": "send",
+        "by": sender,
+        "item": "i-claimant",
+        "args": {"address": CLAIMANT, "text": "Cut over now", "fyi": False},
+    }
+
+    with pytest.raises(InboxError, match="cannot message its claimant"):
+        inbox_cli.apply(inbox(world), record)
+
+    assert inbox(world).mailbox(CLAIMANT) == []
 
 
 def test_a_backend_master_message_to_the_claimant_of_a_task_with_no_phase_is_refused(world):

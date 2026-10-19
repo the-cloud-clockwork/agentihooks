@@ -6,8 +6,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 class FakeHerdr:
     def __init__(self, status):

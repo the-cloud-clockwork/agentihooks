@@ -6,8 +6,6 @@ from scripts.swarm import cli, status
 from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def saved(monkeypatch):

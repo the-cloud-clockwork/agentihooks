@@ -3,8 +3,6 @@ import pytest
 from scripts.swarm import retire_watch
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NAME = "engineer@a1b2c3-0001"
 REFUSED = {"process": 77, "refusal": "survived SIGKILL: 77"}
 

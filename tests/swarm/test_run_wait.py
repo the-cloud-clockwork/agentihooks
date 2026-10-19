@@ -7,8 +7,6 @@ from scripts.swarm import cli, idle, mutation_wait, waits
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_waits import ME, held, started, tick  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RUN = "https://github.com/org/repo/actions/runs/123"
 ENDPOINT = "repos/org/repo/actions/runs/123"
 JOBS = f"{ENDPOINT}/jobs?per_page=100"

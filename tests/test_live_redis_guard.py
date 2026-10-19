@@ -2,8 +2,6 @@ import os
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("host", ["127.0.0.1", "10.0.0.1"])
 def test_no_test_reaches_a_redis_on_its_default_port(host):

@@ -7,8 +7,6 @@ from scripts.swarm import ready
 from scripts.swarm.ledger_events import GATE, pull_request, view, views
 from tests.swarm.test_ready import HEAD, URL, merging  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SUITE = {
     "status": "COMPLETED",
     "conclusion": "SUCCESS",

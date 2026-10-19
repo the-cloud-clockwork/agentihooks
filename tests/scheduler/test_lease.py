@@ -3,7 +3,7 @@ from unittest.mock import Mock
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("lose_ownership", [False, True])

@@ -31,7 +31,7 @@ from tests.test_swarm_v2_control_service import (
 
 repository = default_repository()
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"

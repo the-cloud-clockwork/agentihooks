@@ -26,6 +26,11 @@ CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
 CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
 """
+ROWS_SCHEMA = "".join(
+    f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
+    "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path));\n"
+    for table in TABLES
+)
 DATABASE = "ledgers.sqlite3"
 BEGIN = "BEGIN"
 REGISTRY = "SELECT path,value FROM registry WHERE slug=?"
@@ -121,6 +126,10 @@ def key_parts(key: str) -> list:
 @contextmanager
 def read_only(directory):
     """A read only connection to the folder's database, or None when it holds none."""
+    if hasattr(directory, "read_only"):
+        with directory.read_only() as connection:
+            yield connection
+        return
     path = Path(directory) / DATABASE
     if not path.exists():
         yield None
@@ -163,13 +172,15 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
         if connection is None:
             return ()
         try:
-            rows = [
-                row
-                for table in TABLES
-                for row in connection.execute(
-                    f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
-                )
-            ]
+            with connection:
+                connection.execute(BEGIN)
+                rows = [
+                    row
+                    for table in TABLES
+                    for row in connection.execute(
+                        f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+                    )
+                ]
         except sqlite3.OperationalError:
             return ()
     found = (json.loads(path)[1] for _, path in sorted(rows))
@@ -334,6 +345,8 @@ class Snapshot:
 class SQLiteLedgerRepository:
     """The durable ledger record: one row per JSON value, written only where a mutation changed it."""
 
+    adopts = True
+
     def __init__(self, path: Path | None = None, domain=None):
         self._path = None if path is None else Path(path)
         self._domain = domain
@@ -389,11 +402,7 @@ class SQLiteLedgerRepository:
             connection.execute("PRAGMA journal_mode=WAL")
             connection.executescript(SCHEMA)
             connection.executescript(hierarchy.SCHEMA)
-            for table in TABLES:
-                connection.execute(
-                    f"CREATE TABLE IF NOT EXISTS {table} (slug TEXT, path TEXT, parent TEXT, key TEXT, "
-                    "position INTEGER, kind TEXT, value TEXT, PRIMARY KEY(slug,path))"
-                )
+            connection.executescript(ROWS_SCHEMA)
             self._ready.add(path)
 
     def _key(self, slug):
@@ -599,6 +608,7 @@ class SQLiteLedgerRepository:
     def events_since(self, slug: str, revision: int) -> list:
         self._adopt(slug)
         with self.connect() as connection:
+            connection.execute(BEGIN)
             if connection.execute(STORED, (slug,)).fetchone() is None:
                 raise Missing(slug)
             return read_events(connection, slug, revision)
@@ -671,12 +681,15 @@ class SQLiteLedgerRepository:
 
     def hold_revision(self, kind: str, slug: str, revision: int) -> None:
         with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             connection.execute(HOLD, (kind, slug, revision))
 
     def release_revisions(self, kind: str, slug: str, since: int, revision: int) -> None:
         with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             connection.execute(RELEASE, (kind, slug, since, revision))
 
     def drop_revisions(self, kind: str, slug: str) -> None:
         with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             connection.execute(DROP, (kind, slug))

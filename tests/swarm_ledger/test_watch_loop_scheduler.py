@@ -6,7 +6,7 @@ import pytest
 from scripts.scheduler import process_timer, service
 from scripts.swarm_ledger import ledger_server
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 class Stop(Exception):

@@ -7,8 +7,6 @@ from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 STALE = Finding("stale claim", "watch-eng-1", "no change for 40 minutes", ("task t1",), "30 minutes", 40)
 
 

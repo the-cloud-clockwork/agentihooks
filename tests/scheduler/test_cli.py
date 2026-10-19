@@ -5,7 +5,7 @@ import pytest
 from scripts import cli_delegates
 from scripts.scheduler import cli, commands
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 OWNER = "engineer@323133-1958"
 NOW = 1000.0

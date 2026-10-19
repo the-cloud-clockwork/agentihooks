@@ -12,8 +12,18 @@ export function isSelector(target) {
   return /^(lane|kind):/.test(target);
 }
 
+const indexes = new WeakMap();
+
 function byId(list, id) {
-  return list.find((i) => i.id === id);
+  let index = indexes.get(list);
+  let at = index && index.get(id);
+  if (at === undefined || list[at]?.id !== id) {
+    index = new Map();
+    for (const [i, item] of list.entries()) if (!index.has(item.id)) index.set(item.id, i);
+    indexes.set(list, index);
+    at = index.get(id);
+  }
+  return at === undefined ? undefined : list[at];
 }
 
 export function ancestors(d, key, seen = new Set()) {
@@ -48,25 +58,27 @@ function matches(d, key, selector) {
   return task[field] === value;
 }
 
-function covers(d, key, target) {
-  return isSelector(target) ? matches(d, key, target) : ancestors(d, key).includes(target);
+function covers(d, key, target, up) {
+  return isSelector(target) ? matches(d, key, target) : up.includes(target);
 }
 
 export function ownFreeze(d, key) {
   return d.freezes.find((r) => r.verb === "freeze" && r.target === key);
 }
 
-export function frozen(d, key) {
-  return d.freezes.some((r) => r.verb === "freeze" && covers(d, key, r.target));
+export function frozen(d, key, up = ancestors(d, key)) {
+  return d.freezes.some((r) => r.verb === "freeze" && covers(d, key, r.target, up));
 }
 
 export function held(d, key) {
   const focus = d.freezes.filter((r) => r.verb === "focus");
-  if (!focus.length || frozen(d, key)) return false;
+  if (!focus.length) return false;
+  const up = ancestors(d, key);
+  if (frozen(d, key, up)) return false;
   const [list, id] = key.split("/");
   if (list === "tasks" && (byId(d.tasks, id) || {}).rank === "urgent") return false;
   return !focus.some((r) => (isSelector(r.target) ? list !== "tasks" || matches(d, key, r.target)
-    : covers(d, key, r.target) || ancestors(d, r.target).includes(key)));
+    : covers(d, key, r.target, up) || ancestors(d, r.target).includes(key)));
 }
 
 export function setFreeze(d, op, at) {

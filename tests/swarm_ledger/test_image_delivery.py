@@ -17,8 +17,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "image-delivery"
 GIF = b"GIF89a\x01\x00\x01\x00"
 

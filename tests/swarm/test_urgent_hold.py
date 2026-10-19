@@ -3,7 +3,7 @@ import pytest
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 MINUTE = 60_000

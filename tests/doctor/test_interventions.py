@@ -12,7 +12,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import server_code
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 ENGINEER = f"{WATCHED}-eng-1"
 

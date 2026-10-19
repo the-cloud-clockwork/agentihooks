@@ -3,7 +3,7 @@ import pytest
 from scripts.swarm import grafana_alerts
 from scripts.swarm.health import standing
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 NOW = 1_791_700_000_000
 AT = 1_791_696_000_000

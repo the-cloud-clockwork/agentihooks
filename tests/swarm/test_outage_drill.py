@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MINUTE = 60_000
 SENDERS = ("direct message", "swarm message", "operator chat", "operator comment", "operator answer", "tick notice")

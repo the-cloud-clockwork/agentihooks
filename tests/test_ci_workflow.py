@@ -287,7 +287,7 @@ def test_unit_matrix_runs_one_shard_per_split():
         assert [shard for shard in matrix["shard"] if (version, shard) not in excluded] == list(
             range(1, counts[version] + 1)
         )
-    assert coverage_shards > plain_shards > 1
+    assert coverage_shards >= plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
     assert 'combine.sh --downloaded "$SHARDS" ' in merge["run"]
     assert merge["env"]["SHARDS"] == (

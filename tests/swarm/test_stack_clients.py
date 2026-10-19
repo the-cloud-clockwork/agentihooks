@@ -6,8 +6,6 @@ import pytest
 
 from scripts.swarm import stack_env, stack_init
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis_source(monkeypatch):
