@@ -140,7 +140,7 @@ jobs:
         run: |
           set -o pipefail
           order="base head"
-          (( PAIR % 2 )) || order="head base"
+          [[ "$PAIR" == [135] ]] || order="head base"
           database=1
           failed=""
           for side in $order; do
