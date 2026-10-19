@@ -1,18 +1,21 @@
 import json
+import subprocess
 
 import pytest
 
 from scripts.gates import catalog
 from scripts.gates import log as gate_log
-from scripts.swarm import capacity, tick
+from scripts.swarm import capacity, operator_email, status, tick
 from scripts.swarm.health import merge_stall, night_watch
 from scripts.swarm.store import MANUAL_SCALING, AgentRecord, RedisStore, SwarmConfig
+from tests.swarm.test_cli import env as env
 
 pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 NOW = 1_800_000_000_000
 MINUTE = 60_000
+STEP = 2 * MINUTE
 QUIET = {"repo": "o/r", "queue": 0, "merged": 0, "failed": "none observed", "streak": 0, "head": 0}
 
 
@@ -53,8 +56,8 @@ def enforce(store):
 
 
 class Rig:
-    def __init__(self):
-        self.ledger, self.runtime, self.respawned, self.mailed = Ledger(), Runtime(), [], []
+    def __init__(self, refused=""):
+        self.ledger, self.runtime, self.respawned, self.mailed, self.refused = Ledger(), Runtime(), [], [], refused
 
 
 def run(store, rig, at, doc=None, sleeping=False):
@@ -64,12 +67,20 @@ def run(store, rig, at, doc=None, sleeping=False):
 
     def mail(subject, text, environ, repo):
         rig.mailed.append((subject, text, repo))
-        return ""
+        return rig.refused
 
     found = night_watch.Watch(
         store, SLUG, rig.ledger, rig.runtime, doc or {"tasks": []}, at, sleeping, respawn, environ={}, mail=mail
     )
     return night_watch.run(found)
+
+
+def until(store, rig, start, stop, **extra):
+    actions, at = [], start
+    while at < stop:
+        actions += run(store, rig, at, **extra)
+        at += STEP
+    return actions + run(store, rig, stop, **extra)
 
 
 def kinds(store):
@@ -82,12 +93,11 @@ def test_the_night_watch_gate_defaults_to_log_only():
 
 def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode(store, tmp_path):
     rig = Rig()
-    assert run(store, rig, NOW) == []
-    assert run(store, rig, NOW + 10 * MINUTE - 1) == []
+    assert until(store, rig, NOW, NOW + 10 * MINUTE - 1) == []
     assert kinds(store) == []
     actions = run(store, rig, NOW + 10 * MINUTE)
     assert rig.respawned == [] and rig.ledger.alerts == []
-    assert any(line.startswith("night watch, log only: would respawn the front door master") for line in actions)
+    assert any(line.startswith("night watch gate not at deny: would respawn the front door master") for line in actions)
     assert kinds(store) == ["empty master seat"]
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.summary == "The front door master seat has been empty for 10 minutes"
@@ -96,29 +106,41 @@ def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode
         ("night-watch", "observe", "respawn"),
         ("night-watch", "observe", "alert seat"),
     ]
+    assert run(store, rig, NOW + 11 * MINUTE) == []
 
 
 def test_an_enforced_empty_seat_respawns_once_per_ten_minutes_and_alerts_once(store):
     enforce(store)
     rig = Rig()
-    run(store, rig, NOW)
-    run(store, rig, NOW + 10 * MINUTE)
-    run(store, rig, NOW + 15 * MINUTE)
-    run(store, rig, NOW + 20 * MINUTE)
+    until(store, rig, NOW, NOW + 20 * MINUTE)
     assert rig.respawned == [NOW + 10 * MINUTE, NOW + 20 * MINUTE]
     ((source, text),) = rig.ledger.alerts
     assert source == "seat"
     assert text.startswith("The front door master seat of swarm sw has been empty for 10 minutes: ")
 
 
+def test_the_watch_respawns_an_empty_seat_at_most_three_times(store):
+    enforce(store)
+    rig = Rig()
+    until(store, rig, NOW, NOW + 90 * MINUTE)
+    assert rig.respawned == [NOW + 10 * MINUTE, NOW + 20 * MINUTE, NOW + 30 * MINUTE]
+    assert len(rig.ledger.alerts) == 1
+
+
+def test_an_episode_logged_before_the_gate_moves_to_deny_raises_its_alert_then(store):
+    rig = Rig()
+    until(store, rig, NOW, NOW + 10 * MINUTE)
+    assert rig.ledger.alerts == []
+    enforce(store)
+    run(store, rig, NOW + 11 * MINUTE)
+    assert [source for source, _ in rig.ledger.alerts] == ["seat"]
+
+
 def test_a_live_front_door_master_closes_the_seat_alert(store):
     enforce(store)
     rig = Rig()
-    run(store, rig, NOW)
-    run(store, rig, NOW + 10 * MINUTE)
-    boss = AgentRecord("boss", "master", "master", state="working", seat="master@sw")
-    store.put_agent(SLUG, boss)
-    rig.runtime.live.add("boss")
+    until(store, rig, NOW, NOW + 10 * MINUTE)
+    held_master(store, rig.runtime)
     doc = {"tasks": [], "alerts": [{"id": "a1", "source": "seat", "state": "open"}]}
     assert run(store, rig, NOW + 11 * MINUTE, doc) == [
         "closed the seat alert: the front door master seat is held again"
@@ -127,12 +149,21 @@ def test_a_live_front_door_master_closes_the_seat_alert(store):
     assert kinds(store) == []
 
 
+def test_a_gap_in_the_watch_starts_every_episode_over(store):
+    enforce(store)
+    rig = Rig()
+    until(store, rig, NOW, NOW + 10 * MINUTE)
+    doc = {"tasks": [], "alerts": [{"id": "a1", "source": "seat", "state": "open"}]}
+    actions = run(store, rig, NOW + 60 * MINUTE, doc)
+    assert actions == ["closed the seat alert: the night watch did not run for a while and starts over"]
+    assert kinds(store) == [] and rig.respawned == [NOW + 10 * MINUTE]
+
+
 @pytest.mark.parametrize("state, sleeping", [("paused", False), ("stopped", False), ("running", True)])
 def test_a_seat_left_empty_on_purpose_is_never_judged(store, state, sleeping):
     store.update(SLUG, state=state)
     rig = Rig()
-    run(store, rig, NOW, sleeping=sleeping)
-    run(store, rig, NOW + 60 * MINUTE, sleeping=sleeping)
+    until(store, rig, NOW, NOW + 60 * MINUTE, sleeping=sleeping)
     assert rig.respawned == [] and kinds(store) == []
 
 
@@ -157,8 +188,7 @@ def test_ready_work_held_by_host_room_raises_a_finding_naming_it_at_thirty_minut
     held_master(store, rig.runtime)
     ready(monkeypatch, 2)
     decide(store, host={"room": 0, "granted_at": NOW, "limit": 4, "reason": "load is high"})
-    run(store, rig, NOW)
-    assert run(store, rig, NOW + 30 * MINUTE - 1) == []
+    assert until(store, rig, NOW, NOW + 30 * MINUTE - 1) == []
     actions = run(store, rig, NOW + 30 * MINUTE)
     ((source, text),) = rig.ledger.alerts
     assert source == "spawn"
@@ -175,8 +205,7 @@ def test_ready_work_held_at_the_lane_cap_names_the_cap(store, monkeypatch):
     store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="working", started_at=NOW - MINUTE))
     ready(monkeypatch)
     decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={}, reason="accounts have quota")
-    run(store, rig, NOW)
-    run(store, rig, NOW + 30 * MINUTE)
+    until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Hold: cap", "Evidence: eng 1 of 1 seats busy")
     assert rig.ledger.alerts == []
@@ -187,20 +216,36 @@ def test_ready_work_with_free_seats_and_no_placement_names_quota(store, monkeypa
     held_master(store, rig.runtime)
     ready(monkeypatch)
     decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={"eng": []}, reason="accounts are drain")
-    run(store, rig, NOW)
-    run(store, rig, NOW + 30 * MINUTE)
+    until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Hold: quota", "Evidence: accounts are drain")
+
+
+def test_ready_work_with_no_quota_decision_names_no_hold(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch)
+    store.update(SLUG, max_eng=2)
+    until(store, rig, NOW, NOW + 30 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: no named hold", "Evidence: no quota decision")
+
+
+def test_ready_work_while_the_swarm_sleeps_names_the_sleep(store, monkeypatch):
+    rig = Rig()
+    ready(monkeypatch)
+    until(store, rig, NOW, NOW + 30 * MINUTE, sleeping=True)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence[0] == "Hold: sleep"
 
 
 def test_a_launch_restarts_the_held_spawn_clock(store, monkeypatch):
     rig = Rig()
     held_master(store, rig.runtime)
     ready(monkeypatch)
-    run(store, rig, NOW)
+    until(store, rig, NOW, NOW + 16 * MINUTE)
     store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="working", started_at=NOW + 20 * MINUTE))
-    run(store, rig, NOW + 20 * MINUTE)
-    run(store, rig, NOW + 30 * MINUTE)
+    until(store, rig, NOW + 20 * MINUTE, NOW + 30 * MINUTE)
     assert kinds(store) == []
 
 
@@ -214,13 +259,20 @@ def test_an_enforced_merge_stall_alerts_and_emails_the_operator_once(store, monk
     rig = Rig()
     held_master(store, rig.runtime)
     stalled(monkeypatch)
-    run(store, rig, NOW)
-    run(store, rig, NOW + 6 * MINUTE)
+    actions = until(store, rig, NOW, NOW + 12 * MINUTE)
     ((source, text),) = rig.ledger.alerts
     assert source == "merge"
     assert text.startswith("Swarm sw dev merges are stuck: Dev has had no merge for 61 minutes with 3 queued entries")
-    ((subject, body, repo),) = rig.mailed
-    assert (subject, body, repo) == ("Swarm sw: dev merges are stuck", text, "/repo")
+    assert rig.mailed == [("Swarm sw: dev merges are stuck", text, "/repo")]
+    assert actions[-1] == "emailed the operator: Dev has had no merge for 61 minutes with 3 queued entries"
+
+
+def test_a_refused_email_says_so(store, monkeypatch):
+    enforce(store)
+    rig = Rig(refused="email failed: relay down")
+    held_master(store, rig.runtime)
+    stalled(monkeypatch)
+    assert run(store, rig, NOW)[-1] == "email to the operator refused: email failed: relay down"
 
 
 def test_three_failing_merge_groups_in_a_row_alert_without_an_hour_stall(store, monkeypatch):
@@ -235,14 +287,35 @@ def test_three_failing_merge_groups_in_a_row_alert_without_an_hour_stall(store, 
     assert len(rig.mailed) == 1
 
 
+def test_a_second_merge_trigger_in_the_same_episode_replaces_the_alert(store, monkeypatch):
+    enforce(store)
+    rig = Rig()
+    held_master(store, rig.runtime)
+    stalled(monkeypatch)
+    run(store, rig, NOW)
+    stalled(monkeypatch, streak=3, head=99)
+    doc = {"tasks": [], "alerts": [{"id": "a1", "source": "merge", "state": "open"}]}
+    actions = run(store, rig, NOW + 5 * MINUTE, doc)
+    assert actions[0] == "closed the merge alert: a new merge finding replaces it"
+    assert len(rig.ledger.alerts) == 2 and len(rig.mailed) == 2
+    assert "merge group runs failed in a row" in rig.ledger.alerts[1][1]
+
+
 def test_a_logged_merge_stall_sends_no_email(store, monkeypatch, tmp_path):
     rig = Rig()
     held_master(store, rig.runtime)
     stalled(monkeypatch)
     actions = run(store, rig, NOW)
     assert rig.ledger.alerts == [] and rig.mailed == []
-    assert actions[0].startswith("night watch, log only: would raise the merge alert: ")
+    assert actions[0].startswith("night watch gate not at deny: would raise the merge alert: ")
     assert [row.tool for row in gate_log.recent(SLUG, None, tmp_path)] == ["alert merge"]
+
+
+def test_a_merge_observation_error_raises_no_finding(store, monkeypatch):
+    stalled(monkeypatch)
+    assert merge_stall.findings(store, SLUG, "/repo", NOW)
+    monkeypatch.setattr(merge_stall, "observe", lambda repo, at: (_ for _ in ()).throw(OSError("GitHub down")))
+    assert merge_stall.findings(store, SLUG, "/repo", NOW + 6 * MINUTE) == []
 
 
 def test_the_failing_streak_counts_newest_failures_past_cancelled_runs(monkeypatch):
@@ -255,6 +328,51 @@ def test_the_failing_streak_counts_newest_failures_past_cancelled_runs(monkeypat
     ]
     monkeypatch.setattr(merge_stall, "request", lambda repo, args: {"workflow_runs": runs})
     assert merge_stall.failing("/repo", "o/r") == (2, 4)
+
+
+def sent(monkeypatch):
+    from hooks.integrations import mailer
+
+    mails = []
+
+    def send_email(to, subject, body):
+        mails.append((to, subject, body))
+        return mailer.EmailResult(success=True, recipients_count=1)
+
+    monkeypatch.setattr(mailer, "send_email", send_email)
+    return mails
+
+
+def test_the_operator_email_goes_to_the_configured_address(monkeypatch):
+    mails = sent(monkeypatch)
+    env = {operator_email.MAIL_TO: "boss@example.com"}
+    assert operator_email.send("Subject", "Body", env, "/repo") == ""
+    assert mails == [("boss@example.com", "Subject", "Body")]
+
+
+def test_the_operator_email_falls_back_to_the_repository_git_user(monkeypatch, tmp_path):
+    mails = sent(monkeypatch)
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True)
+    subprocess.run(["git", "-C", str(tmp_path), "config", "user.email", "owner@example.com"], check=True)
+    assert operator_email.send("Subject", "Body", {}, str(tmp_path)) == ""
+    assert mails == [("owner@example.com", "Subject", "Body")]
+
+
+def test_no_operator_address_sends_nothing(monkeypatch, tmp_path):
+    mails = sent(monkeypatch)
+    assert operator_email.send("Subject", "Body", {}, str(tmp_path / "missing")) == (
+        "no operator email: set AGENTIHOOKS_OPERATOR_EMAIL"
+    )
+    assert mails == []
+
+
+def test_night_watch_findings_reach_the_swarm_health_findings_the_doctor_reads(env):
+    store, ledger, _ = env
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0, max_plan=0, scaling="manual"))
+    episode = {"since": NOW, "minutes": 12, "why": "no master launched"}
+    store.redis.set(store.key(SLUG, night_watch.KEY), json.dumps({"seat": episode}))
+    found = status.findings(store, SLUG, store.config(SLUG), ledger.tasks(SLUG), [])
+    assert "empty-master-seat/sw" in {row["id"] for row in found}
 
 
 def test_the_tick_respawns_the_front_door_past_the_host_hold_and_spent_retries(store, monkeypatch):
