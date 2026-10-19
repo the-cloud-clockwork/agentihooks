@@ -287,7 +287,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     elif mode == "module":
         new += "\nSETTING = 1\n"
     elif mode == "trailing":
-        new += "\n"
+        new = source + "\n"
     if mode == "header":
         new = new.replace("def f(value)", "def f(value=1)")
     if mode == "inserted":
