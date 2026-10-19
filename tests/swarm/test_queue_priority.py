@@ -501,14 +501,16 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 
 
-def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monkeypatch, legacy):
     p = priority
-    p.store.redis.set(p.store.key("sw", "merge-priority-order"), 11)
-    p.store.redis.hset(
-        p.store.key("sw", queue_priority.PENDING),
-        URL + "0",
-        json.dumps({"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "master", "order": 11}),
-    )
+    record = {"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "master"}
+    if not legacy:
+        p.store.redis.set(p.store.key("sw", "merge-priority-order"), 11)
+        record["order"] = 11
+    p.store.redis.hset(p.store.key("sw", queue_priority.PENDING), URL + "0", json.dumps(record))
+    read = p.store.redis.hgetall
+    monkeypatch.setattr(p.store.redis, "hgetall", lambda key: dict(reversed(read(key).items())))
     assert cli.main(["sw", "merge", "priority", URL]) == 0
     p.run["status"] = "completed"
     applied = []
