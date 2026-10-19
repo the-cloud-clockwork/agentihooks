@@ -120,6 +120,11 @@ def test_a_malformed_task_is_refused_by_the_api_schema(world, task):
         ),
         (["followup", "add", "Retry the notes build", "--hive", "h1"], None, {"hive": "h1"}),
         (["followup", "add", "Retry the notes build", "--hive", "h1"], "t2", {"hive": "h1", "task": "t2"}),
+        (
+            ["followup", "add", "Retry the notes build", "--needs-operator", "--hive", "h1"],
+            "t2",
+            {"needs_operator": True, "hive": "h1", "task": "t2"},
+        ),
         (["question", "add", "Which port"], None, {}),
         (["question", "add", "Which port", "--hive", "h1"], None, {"hive": "h1"}),
     ],
