@@ -498,7 +498,7 @@ def test_a_runner_pod_missing_from_a_visible_scale_set_is_lost():
     assert "anton-oss-light-cpwxt-runner-gone1" not in cluster()
 
 
-@pytest.mark.parametrize("name", ["anton-batch-5d778-runner-x1y2z", "workstation", "GitHub Actions 1000223407"])
+@pytest.mark.parametrize("name", ["anton-gpu-5d778-runner-x1y2z", "workstation", "GitHub Actions 1000223407"])
 def test_a_runner_the_cluster_cannot_see_is_never_counted_lost(name):
     assert name in cluster()
 
