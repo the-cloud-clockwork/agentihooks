@@ -389,6 +389,40 @@ def test_stats_reuse_tracks_only_applicable_import_and_fixture_inputs(tmp_path, 
     assert calls == ([files, files] if changed == "initializer" else [files])
 
 
+@pytest.mark.parametrize(
+    "loader",
+    [
+        "from importlib import import_module as load\nload('scripts.a')\n",
+        "import importlib\nimportlib.import_module('.a', package='scripts')\n",
+        "import importlib\nload = importlib.import_module\nload('scripts.a')\n",
+    ],
+)
+def test_dynamic_import_dependencies_invalidate_stats_alongside_static_imports(tmp_path, loader):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import scripts.other\n" + loader,
+            "scripts/a.py": "value = 1\n",
+            "scripts/other.py": "value = 1\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    (root / "scripts/a.py").write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
 def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
     import json
 

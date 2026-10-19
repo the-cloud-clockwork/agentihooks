@@ -25,7 +25,7 @@ def test_inputs(
     path: str,
     modules: dict[str, str],
     records: dict[str, tuple[str, set[str]]],
-    resources: set[str],
+    resources: dict[str, set[str]],
 ) -> dict[str, str]:
     pending = {path} | {
         str(parent / "conftest.py") for parent in Path(path).parents if str(parent / "conftest.py") in modules.values()
@@ -34,9 +34,10 @@ def test_inputs(
     while pending:
         current = pending.pop()
         if current not in records:
-            text = (root / current).read_text()
+            content = (root / current).read_bytes()
             dependencies = set()
             if Path(current).suffix == ".py":
+                text = content.decode()
                 tree = ast.parse(text)
                 names = set(imported_names(text, Path(current).parent.parts))
                 dynamic = [
@@ -65,12 +66,8 @@ def test_inputs(
                     for node in ast.walk(tree)
                     if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
                 }
-                dependencies.update(
-                    resource
-                    for resource in resources
-                    if any(resource == value or resource.endswith("/" + value) for value in literals)
-                )
-            records[current] = (hashlib.sha256(text.encode()).hexdigest(), dependencies)
+                dependencies.update(resource for value in literals for resource in resources.get(value, ()))
+            records[current] = (hashlib.sha256(content).hexdigest(), dependencies)
         digest, dependencies = records[current]
         inputs[current] = digest
         pending.update(dependencies - inputs.keys())
@@ -96,7 +93,12 @@ def collect_cached_stats(
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     records = {}
     folder.mkdir(parents=True, exist_ok=True)
-    resources = {path for path in tracked if path and (root / path).is_file()}
+    resources = {}
+    for path in tracked:
+        if path and (root / path).is_file():
+            parts = Path(path).parts
+            for index in range(len(parts)):
+                resources.setdefault("/".join(parts[index:]), set()).add(path)
     inputs = {path: test_inputs(root, path, modules, records, resources) for path in files}
     for dependencies in inputs.values():
         if not any(not name.startswith("tests/") for name in dependencies):
