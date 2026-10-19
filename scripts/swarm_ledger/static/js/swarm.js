@@ -9,6 +9,7 @@ import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { quotaCount, renderHives } from "./hives.js";
+import { agentCellTips } from "./agent_cells.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -145,25 +146,11 @@ function agentRows(sw, now) {
   });
 }
 
-function agentCellTip(node) {
-  if (node.nodeType === Node.TEXT_NODE) return node.textContent.trim();
-  if (node.matches(".sw-transport, .sw-promoted")) return node.dataset.tip;
-  return [...node.childNodes].map(agentCellTip).filter(Boolean).join(" ").trim();
-}
-
 function agentRow(a, remote) {
   const row = withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
     a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state),
     ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
-  for (const cell of row.cells) {
-    if (cell.querySelector(".sw-acts")) continue;
-    const tip = agentCellTip(cell);
-    cell.dataset.tip = tip;
-    for (const el of cell.querySelectorAll("[data-tip], [title]")) {
-      el.dataset.tip = tip;
-    }
-  }
-  return row;
+  return agentCellTips(row);
 }
 
 const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
