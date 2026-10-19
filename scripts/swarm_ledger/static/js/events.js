@@ -5,6 +5,7 @@ import { disconnected, receiveLedger, resume } from "./sync.js";
 import { receiveSwarm, swarmLost } from "./swarm.js";
 
 let eventCursor = null;
+let snapshot = null;
 const latest = { ledger: null, swarm: null };
 
 function onStreamEvent(name, data) {
@@ -38,7 +39,13 @@ function takeFrame(block) {
   }
   if (!data.length) return;
   try {
-    onStreamEvent(name, JSON.parse(data.join("\n")));
+    const raw = data.join("\n");
+    if (name === "snapshot" && raw === snapshot) resume();
+    else {
+      onStreamEvent(name, JSON.parse(raw));
+      if (name === "snapshot") snapshot = raw;
+      else if (name === "ledger" || name === "swarm") snapshot = null;
+    }
   } catch (error) {
     eventCursor = null;
     throw error;
