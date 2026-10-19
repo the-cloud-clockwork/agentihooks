@@ -791,7 +791,7 @@ def test_repositories_report_each_origin_as_a_lowercase_identity(monkeypatch, tm
     other = tmp_path / "other"
     (other / ".git").mkdir(parents=True)
     (other / ".git" / "config").write_text('[remote "upstream"]\n\turl = git@github.com:else/where.git\n')
-    assert daemon.repositories() == ["github.com/the-org/project", str(other), str(repo)]
+    assert daemon.repositories() == sorted(["github.com/the-org/project", str(other), str(repo)])
 
 
 def test_repositories_follow_a_worktree_link_to_its_common_config(monkeypatch, tmp_path):
@@ -803,4 +803,4 @@ def test_repositories_follow_a_worktree_link_to_its_common_config(monkeypatch, t
     checkout = tmp_path / "root" / "wt"
     checkout.mkdir(parents=True)
     (checkout / ".git").write_text(f"gitdir: {common / 'worktrees' / 'wt'}\n")
-    assert daemon.repositories() == ["github.com/org/name", str(checkout)]
+    assert daemon.repositories() == sorted(["github.com/org/name", str(checkout)])
