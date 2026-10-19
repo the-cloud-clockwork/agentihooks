@@ -4,8 +4,10 @@ from types import SimpleNamespace
 
 import pytest
 
+from scripts.inbox.store import InboxStore
 from scripts.swarm import promotion_watch
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
+from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
@@ -27,8 +29,11 @@ JOBS = [
     {"name": "coverage-ratchet", "conclusion": "cancelled"},
     {"name": "Gate — Required", "conclusion": "failure"},
 ]
-NOT_DUPLICATE = "The promotion watch files one task per failed dev job and run, and holds a job while its task is open."
+NOT_DUPLICATE = (
+    "The promotion watch files one task per failed dev job and run, and holds a job's cause while its task is open."
+)
 NOW = 10_000_000
+MAX_ALERT = 2000
 SLUG = "sw"
 
 
@@ -55,11 +60,15 @@ class Ledger:
         self.comments.append((slug, task_id, text, by))
 
     def raise_alert(self, slug, source, text):
+        assert len(text) <= MAX_ALERT
+        if any(a["source"] == source and a["state"] != "done" for a in self.alerts):
+            return
         self.raised.append((slug, source, text))
         self.alerts.append({"id": f"al-{len(self.alerts)}", "source": source, "text": text, "state": "open"})
 
     def close_alert(self, slug, alert_id, outcome):
         self.closed.append((slug, alert_id, outcome))
+        next(a for a in self.alerts if a["id"] == alert_id)["state"] = "done"
 
 
 def gh(runs, jobs=(), calls=None):
@@ -158,8 +167,11 @@ def test_a_real_sonar_failure_still_files_a_fixer(store, message):
     actions = refresh(store, ledger, sonar_run(message))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: sonar"]
     assert len(ledger.raised) == 1
-    assert actions[-1] == "raised the promotion alert for dev push run 900"
-    assert filed(store) == {"promo-900-0": "sonar"}
+    assert actions[-2:] == [
+        "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
+    ]
+    assert filed(store)["promo-900-0"].startswith("sonar: Check dev still points at this commit")
 
 
 def test_a_superseded_run_with_another_failed_job_still_files_real_fixers(store):
@@ -282,8 +294,13 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "filed promo-900-0 for the failed dev job helm-kind",
         "filed promo-900-1 for the failed dev job unit (3.11, 1)",
         "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
     ]
-    assert filed(store) == {"promo-900-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
+    assert filed(store) == {"promo-900-0": "helm-kind: ", "promo-900-1": "unit (3.11, 1): "}
+    assert master_items(store) == [
+        "Dev push run 900 of Tests failed on new causes, so the swarm filed promo-900-0, promo-900-1 in the ci lane "
+        "and raised a promotion alert: https://github.com/o/r/actions/runs/900"
+    ]
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
 
 
@@ -300,9 +317,13 @@ def test_a_job_with_an_open_promotion_task_is_not_filed_again_and_done_ones_are_
     ledger = Ledger(tasks, [alert])
     actions = refresh(store, ledger, gh([RED], JOBS))
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-1"]
-    assert ledger.raised == []
-    assert actions == ["filed promo-900-1 for the failed dev job unit (3.11, 1)"]
-    assert filed(store) == {"promo-800-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
+    assert len(ledger.raised) == 1
+    assert actions == [
+        "filed promo-900-1 for the failed dev job unit (3.11, 1)",
+        "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
+    ]
+    assert filed(store) == {"promo-800-0": "helm-kind", "promo-900-1": "unit (3.11, 1): "}
 
 
 def test_jobs_that_share_a_title_each_get_a_task(store):
@@ -336,6 +357,7 @@ def test_a_run_retried_after_a_partial_write_files_only_the_jobs_it_missed(store
     assert actions == [
         "filed promo-900-1 for the failed dev job unit (3.11, 1)",
         "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
     ]
 
 
@@ -455,7 +477,7 @@ def test_the_tick_hands_the_watch_its_ledger_state_and_clock(store, monkeypatch)
 def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
     config = SimpleNamespace(repo="/repo")
     red = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW, gh([RED], JOBS))
-    assert red[-1] == "raised the promotion alert for dev push run 900"
+    assert red[-2] == "raised the promotion alert for dev push run 900"
     green = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW * 2, gh([GREEN]))
     assert green == []
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
@@ -492,3 +514,160 @@ def test_the_ledger_client_raises_and_closes_alerts_as_the_swarm(monkeypatch):
         (SLUG, [{"op": "alert_close", "by": "swarm", "target": "al-1", "outcome": "Dev passed"}]),
     ]
     assert [ops[0]["id"].split("-")[0] for _, ops in sent] == ["alert_raise", "alert_close"]
+
+
+SMOKE_URL = "https://api.github.com/repos/o/r/check-runs/77"
+
+
+def smoke_run(step, messages, run_id=900):
+    smoke = {
+        "name": "swarm-image / smoke",
+        "conclusion": "failure",
+        "check_run_url": SMOKE_URL,
+        "steps": [{"name": "Set up job", "conclusion": "success"}, {"name": step, "conclusion": "failure"}],
+    }
+    found = [smoke, {"name": "Gate — Required", "conclusion": "failure"}]
+    red = {**RED, "id": run_id, "html_url": f"https://github.com/o/r/actions/runs/{run_id}"}
+
+    def run(argv, **kwargs):
+        if "/annotations" in argv[2]:
+            body = [
+                {"annotation_level": "warning", "message": "Node.js 20 is deprecated."},
+                {"annotation_level": "failure", "message": "Process completed with exit code 1."},
+                *({"annotation_level": "failure", "message": m} for m in messages),
+            ]
+        elif "/jobs" in argv[2]:
+            body = found
+        else:
+            body = [red]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+def master_items(store):
+    inbox = InboxStore(store.redis)
+    return [item.text for item in inbox.inbox(Mail(inbox, store, SLUG).master)]
+
+
+def test_cause_names_the_failed_steps_and_failure_messages():
+    job = {
+        "name": "coverage-ratchet",
+        "check_run_url": SMOKE_URL,
+        "steps": [
+            {"name": "Hold every line the base ran", "conclusion": "failure"},
+            {"name": "Upload", "conclusion": "skipped"},
+        ],
+    }
+    messages = ["", "12 lines the base ran at deadbeef1234 are no longer run by any head test"]
+    found = promotion_watch.cause("/repo", job, smoke_run("x", messages))
+    assert found == (
+        "coverage-ratchet: Hold every line the base ran; "
+        "12 lines the base ran at deadbeef1234 are no longer run by any head test"
+    )
+
+
+@pytest.mark.parametrize(
+    ("detail", "kept"),
+    [
+        ("12 lines at deadbeef1234 ran", "# lines at # ran"),
+        ("took 12.34s at 05:06:51Z", "took # at #"),
+        ("Build e2e tests", "Build e# tests"),
+        ("Build b2b tests", "Build b# tests"),
+        ("in the decade", "in the decade"),
+    ],
+)
+def test_normal_folds_numbers_and_hashes_in_the_cause_but_keeps_the_job_name(detail, kept):
+    job = "unit (3.11, 1)"
+    assert promotion_watch.normal(job, f"{job}: {detail}") == f"{job}: {kept}"
+    assert promotion_watch.normal(job, f"{job}: ") == f"{job}: "
+
+
+def test_cause_of_a_job_without_steps_or_check_run_is_its_name_and_an_empty_detail():
+    assert promotion_watch.cause("/repo", {"name": "lint", "conclusion": "failure"}, gh([])) == "lint: "
+
+
+def test_a_fixer_without_cause_detail_does_not_hold_a_later_cause_with_detail(store):
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], [{"name": "swarm-image / smoke", "conclusion": "failure"}]))
+    refresh(store, ledger, smoke_run("Build the image", [], 901), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
+
+
+def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_alert_and_a_master_item(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", []))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+    ledger.tasks[0]["state"] = "blocked"
+    step = "Bring up the local stack twice with swarm init from the installed package"
+    actions = refresh(store, ledger, smoke_run(step, ["swarm init refused a one task swarm."], 901), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
+    assert ledger.added[1][1]["lane"] == "ci"
+    assert ledger.added[1][1]["description"] == (
+        f"The dev push run 901 of Tests failed in the job swarm-image / smoke at commit {SHA}: "
+        f"https://github.com/o/r/actions/runs/901. Its cause: {step}; swarm init refused a one task swarm. "
+        "Fix it on dev; the swarm closes this task when a later dev push run passes."
+    )
+    replaced = "Dev push run 901 of Tests failed on a new cause, so the swarm raised a new promotion alert."
+    assert ledger.closed == [(SLUG, "al-0", replaced)]
+    assert len(ledger.raised) == 2
+    assert ledger.raised[1][2] == (
+        f"Dev promotion is red: push run 901 at commit {SHA} failed in swarm-image / smoke: {step}; "
+        "swarm init refused a one task swarm. https://github.com/o/r/actions/runs/901"
+    )
+    assert actions == [
+        "filed promo-901-0 for the failed dev job swarm-image / smoke",
+        "raised the promotion alert for dev push run 901",
+        "told the master about the new promotion causes of dev push run 901",
+    ]
+    items = InboxStore(store.redis).inbox(Mail(InboxStore(store.redis), store, SLUG).master)
+    assert [(item.text, item.ref) for item in items][-1] == (
+        "Dev push run 901 of Tests failed on new causes, so the swarm filed promo-901-0 in the ci lane and raised a "
+        "promotion alert: https://github.com/o/r/actions/runs/901",
+        "promo-901-0",
+    )
+    assert len(items) == 2
+    assert filed(store) == {
+        "promo-900-0": "swarm-image / smoke: Build the image",
+        "promo-901-0": f"swarm-image / smoke: {step}; swarm init refused a one task swarm.",
+    }
+
+
+def test_the_same_cause_on_a_held_job_files_nothing_and_stays_quiet_while_its_alert_is_live(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", ["layer 3 failed"]))
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer 4 failed"], 901), NOW * 2) == []
+    assert len(ledger.added) == 1 and len(ledger.raised) == 1
+    assert len(master_items(store)) == 1
+
+
+def test_a_fixer_filed_before_causes_were_kept_still_holds_its_job(store):
+    store.redis.hset(promotion_watch.key(SLUG, "jobs"), "promo-800-0", "swarm-image / smoke")
+    ledger = Ledger([{"id": "promo-800-0", "title": "Promotion red: swarm-image smoke", "state": "claimed"}])
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer failed"])) == [
+        "raised the promotion alert for dev push run 900"
+    ]
+    assert ledger.added == [] and master_items(store) == []
+
+
+def test_a_long_cause_is_cut_so_the_alert_fits_the_ledger_and_keeps_the_run_link(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", ["x" * 5000]))
+    [(_, _, text)] = ledger.raised
+    assert len(text) == MAX_ALERT
+    assert text.endswith(". https://github.com/o/r/actions/runs/900")
+
+
+def test_a_fixer_goes_to_the_eng_lane_when_quota_capacity_gives_the_ci_lane_no_seats(store):
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 3, "ci": 0, "plan": 0}}))
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    assert {fields["lane"] for _, fields, _ in ledger.added} == {"eng"}
+    assert {fields["kind"] for _, fields, _ in ledger.added} == {"ci"}
+
+
+def test_a_fixer_stays_in_the_ci_lane_while_quota_capacity_gives_it_seats(store):
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 3, "ci": 1, "plan": 0}}))
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    assert {fields["lane"] for _, fields, _ in ledger.added} == {"ci"}
