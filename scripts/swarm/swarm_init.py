@@ -101,7 +101,7 @@ def rule(title: str, used=(), out: TextIO | None = None) -> None:
 def in_stack(run: stack_init.Run, environ: Mapping[str, str], script: str, order: dict) -> subprocess.CompletedProcess:
     """Run SCRIPT with the stack's own code, ledger folder and Redis, so the swarm and its ledger live in the stack."""
     home = stack_init.stack_home(environ)
-    argv = stack_init.compose(home, "exec", "-T", "swarm", "python", "-c", script)
+    argv = stack_init.compose(home, "exec", "-T", "-e", "LEDGER_HOST=127.0.0.1", "swarm", "python", "-c", script)
     return run(argv, input=json.dumps(order), capture_output=True, text=True)
 
 

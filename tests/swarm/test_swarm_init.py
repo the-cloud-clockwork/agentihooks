@@ -124,7 +124,7 @@ def test_init_brings_up_the_stack_then_creates_the_paused_swarm_and_its_ledger_i
     docker = Stack()
     code, out = init("demo-swarm", "--plan", str(plan), "--repo", str(tmp_path), docker=docker)
     assert code == 0
-    started, made = up(home, "300"), compose(home, "exec", "-T", "swarm", "python")
+    started, made = up(home, "300"), compose(home, "exec", "-T", "-e", "LEDGER_HOST=127.0.0.1", "swarm", "python")
     assert started in docker.calls and docker.calls.index(started) < docker.calls.index(made)
     doc = new_ledger.storage.default().get_document("demo-swarm")
     assert (doc["size"], doc["title"], [p["title"] for p in doc["phases"]]) == ("swarm", TITLE, [TITLE])
