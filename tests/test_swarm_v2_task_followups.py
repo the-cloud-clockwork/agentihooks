@@ -109,10 +109,12 @@ def test_the_owning_master_decides_flags_and_comments_on_it(world):
     assert world.refusals() == 0
 
 
-def test_another_master_is_refused_on_it(world):
+@pytest.mark.parametrize("path", ["done", "needs_operator"])
+def test_another_master_is_refused_on_it(world, path):
     add(world, task="t2")
 
-    assert decide(world, LEAD_NAME)["warnings"] == [f"{ON_TASK} belongs to {SECOND}, so {LEAD} cannot decide it"]
+    assert decide(world, LEAD_NAME, path)["warnings"] == [f"{ON_TASK} belongs to {SECOND}, so {LEAD} cannot decide it"]
+    assert world.refusals() == 1
 
 
 def test_its_notice_goes_to_the_tasks_owning_master(world):
@@ -126,3 +128,18 @@ def test_its_notice_goes_to_the_tasks_owning_master(world):
     ref = f"{SLUG}:event:{ON_TASK}"
     assert [item.address for item in inbox.mailbox(SECOND_NAME) if item.ref == ref] == [SECOND]
     assert [item for item in inbox.mailbox(LEAD_NAME) if item.ref == ref] == []
+
+
+def test_its_raised_notice_goes_to_the_tasks_owning_master(world):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    inbox = InboxStore(world.redis)
+    ledger_events.event_pass(inbox, world.store, SLUG, world.doc(), None, 0)
+    add(world, task="t2")
+    doc = world.doc()
+    added = next(e for e in doc["_meta"]["events"] if e["target"] == ON_TASK)
+    ledger_events.event_pass(inbox, world.store, SLUG, doc, None, added["at"] + ledger_events.FOLLOWUP_RAISE_MS)
+    raised = [item for item in inbox.mailbox(SECOND_NAME) if "still open fifteen minutes" in item.text]
+    assert [item.address for item in raised] == [SECOND]
+    assert [item for item in inbox.mailbox(LEAD_NAME) if "still open fifteen minutes" in item.text] == []
