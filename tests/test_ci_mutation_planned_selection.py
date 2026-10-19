@@ -240,7 +240,7 @@ def test_tests_whose_recorded_code_changed_since_the_record_stay_selected(tmp_pa
 
 
 @pytest.mark.parametrize(
-    "cause", ["helper", "dependency", "root module", "new function", "unrecorded test", "no commit"]
+    "cause", ["helper", "dependency", "root module", "workflow", "new function", "unrecorded test", "no commit"]
 )
 def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_path, monkeypatch, cause):
     manifest = _recorded_project(tmp_path, monkeypatch)
@@ -248,12 +248,14 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
         "helper": ("tests/conftest.py", "X = 1\n"),
         "dependency": ("pyproject.toml", '[tool.mutmut]\nsource_paths = ["scripts/", "hooks/"]\n'),
         "root module": ("setup.py", "X = 1\n"),
+        "workflow": (".github/workflows/test.yml", "env:\n  FLAG: 1\n"),
         "new function": ("scripts/core.py", "\n\ndef h(value):\n    return value * 2\n"),
         "unrecorded test": ("tests/test_core.py", "\n\ndef test_skipped_when_recorded():\n    pass\n"),
     }
     if cause in edits:
         path, text = edits[cause]
         target = tmp_path / path
+        target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text((target.read_text() if cause in ("new function", "unrecorded test") else "") + text)
         head = _commit(tmp_path, cause)
         if cause == "unrecorded test":

@@ -76,7 +76,9 @@ def record_drift(root: Path, manifest: dict) -> tuple[set[str], set[int], set[st
             if not (path.endswith(".py") and Path(path).name.startswith("test_")):
                 return None
             tests.add(path)
-        elif path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith(MEASURED)):
+        elif path in {*GLOBAL_FILES, ".github/workflows/test.yml"} or (
+            path.endswith(".py") and not path.startswith(MEASURED)
+        ):
             return None
         elif path.endswith(".py"):
             units.update(index[unit] for name in changed_units(old, new) if (unit := f"{path}::{name}") in index)
