@@ -211,7 +211,7 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
 
 
 @pytest.mark.parametrize("shift", [0, 2])
-@pytest.mark.parametrize("mode", ["line", "legacy", "missing", "inserted"])
+@pytest.mark.parametrize("mode", ["line", "legacy", "missing", "inserted", "header", "parameter"])
 def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
     from coverage import CoverageData
 
@@ -225,11 +225,11 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     commit = _commit(tmp_path, "shared function")
     data = CoverageData(basename=str(tmp_path / ".coverage"))
     for test, lines in (
-        ("tests/test_core.py::test_f", [1, 2, 3]),
-        ("tests/test_core.py::test_g[1]", [1, 2, 4]),
-        ("tests/test_core.py::test_other", [1, 2, 3]),
-        ("tests/test_core.py::TestSpawn::test_child", [1, 2, 3]),
-        ("tests/test_helper.py::test_helper", [1, 2, 4]),
+        ("tests/test_core.py::test_f", [2, 3]),
+        ("tests/test_core.py::test_g[1]", [2, 4]),
+        ("tests/test_core.py::test_other", [2, 3]),
+        ("tests/test_core.py::TestSpawn::test_child", [2, 3]),
+        ("tests/test_helper.py::test_helper", [2, 4]),
     ):
         data.set_context(f"{test}|run")
         data.add_lines({str(tmp_path / "scripts/core.py"): lines})
@@ -239,7 +239,11 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         del manifest["lines"]
     elif mode == "missing":
         del manifest["lines"]["tests/test_core.py::test_other"]
+    elif mode == "parameter":
+        manifest["tests"]["tests/test_core.py::test_g[2]"] = {"units": [], "files": [], "escapes": False}
     new = source.replace("value - 1", "value - 2")
+    if mode == "header":
+        new = new.replace("def f(value)", "def f(value=1)")
     if mode == "inserted":
         new = new.replace("    return value - 2", "    value += 1\n    return value - 2")
     (tmp_path / "scripts/core.py").write_text("\n" * shift + new)
@@ -247,11 +251,11 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     selection = {}
     plan.estimate(tmp_path, {"scripts/core.py": {4 + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
-    if mode in {"legacy", "inserted"}:
+    if mode in {"legacy", "inserted", "header"}:
         expected = [
             f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
         ]
-    elif mode == "missing":
+    elif mode in {"missing", "parameter"}:
         expected = ["tests/test_core.py"]
     assert selection["scripts/core.py"] == [
         *expected,
