@@ -156,7 +156,8 @@ def held(watch, ready) -> tuple[str, str]:
         return CAP, ", ".join(f"{lane} {busy[lane]} of {configured.get(lane, 0)} seats busy" for lane in waiting)
     if decision and not any((decision.get("placements") or {}).get(lane) for lane in waiting):
         return QUOTA, decision.get("reason") or "no lane has a quota placement"
-    return UNNAMED, "; ".join(spawn_holds(watch.store, watch.slug)) or decision.get("reason", "no quota decision")
+    held_by = spawn_holds(watch.store, watch.slug)
+    return UNNAMED, held_by[0] if held_by else decision.get("reason", "no quota decision")
 
 
 def _spawn(watch, state):

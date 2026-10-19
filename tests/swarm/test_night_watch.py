@@ -22,13 +22,14 @@ QUIET = {"repo": "o/r", "queue": 0, "merged": 0, "failed": "none observed", "str
 
 class Ledger:
     def __init__(self):
-        self.alerts, self.closed, self.slugs = [], [], []
+        self.alerts, self.closed, self.slugs, self.closed_slugs = [], [], [], []
 
     def raise_alert(self, slug, source, text):
         self.slugs.append(slug)
         self.alerts.append((source, text))
 
     def close_alert(self, slug, alert_id, outcome):
+        self.closed_slugs.append(slug)
         self.closed.append((alert_id, outcome))
 
 
@@ -110,6 +111,7 @@ def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode
         ("nightwatch", "observe", "respawn", "swarm", NOW + 10 * MINUTE),
         ("nightwatch", "observe", "alert seat", "swarm", NOW + 10 * MINUTE),
     ]
+    assert f"night watch gate not at deny: would raise the seat alert: {rows[1]['reason']}" in actions
     assert run(store, rig, NOW + 11 * MINUTE) == []
 
 
@@ -280,6 +282,18 @@ def test_a_lane_without_configured_seats_counts_as_zero_seats_at_the_cap(store, 
     assert finding.evidence == ("Hold: cap", "Evidence: eng 0 of 0 seats busy")
 
 
+def test_every_lane_at_its_cap_is_named_in_the_hold(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="working", started_at=NOW - MINUTE))
+    rows = {"eng": [{"id": "t1", "lane": "eng"}], "ci": [{"id": "t2", "lane": "ci"}], "plan": []}
+    monkeypatch.setattr(capacity, "ready_work", lambda slug, store, doc: ({}, rows))
+    decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={}, reason="accounts have quota")
+    until(store, rig, NOW, NOW + 30 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: cap", "Evidence: eng 1 of 1 seats busy, ci 0 of 0 seats busy")
+
+
 def test_ready_work_with_a_quota_placement_names_no_quota_hold(store, monkeypatch):
     rig = Rig()
     held_master(store, rig.runtime)
@@ -289,6 +303,17 @@ def test_ready_work_with_a_quota_placement_names_no_quota_hold(store, monkeypatc
     until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
+
+
+def test_ready_work_held_by_the_tick_spawn_hold_names_that_hold(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch)
+    store.redis.set(store.key(SLUG, tick.SPAWN_HOLD), "holding spawns: panes are full")
+    decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
+    until(store, rig, NOW, NOW + 30 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: no named hold", "Evidence: holding spawns: panes are full")
 
 
 def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
@@ -542,7 +567,7 @@ def test_an_alert_already_done_is_never_closed_again(store):
     doc["alerts"].insert(0, {"id": "a0", "source": "spawn", "state": "done"})
     outcome = night_watch.CLEARED.format(what="the swarm is not running")
     assert run(store, rig, NOW, doc) == [f"closed the spawn alert: {outcome}"]
-    assert rig.ledger.closed == [("a1", outcome)]
+    assert (rig.ledger.closed_slugs, rig.ledger.closed) == ([SLUG], [("a1", outcome)])
 
 
 def test_ready_work_gone_closes_the_spawn_alert(store):
