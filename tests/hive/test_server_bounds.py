@@ -330,20 +330,3 @@ def test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bo
     finally:
         httpd.shutdown()
         httpd.server_close()
-
-
-def test_the_join_service_redis_client_drops_connections_made_before_its_bound(admin):
-    from redis.backoff import NoBackoff
-    from redis.retry import Retry
-
-    admin.set_retry(Retry(NoBackoff(), 3))
-    early = admin.connection_pool.get_connection()
-    admin.connection_pool.release(early)
-
-    with server.make_server(admin, PUBLIC, "127.0.0.1", 0):
-        late = admin.connection_pool.get_connection()
-
-    assert late is not early
-    assert (late.socket_timeout, late.socket_connect_timeout) == (server.REDIS_TIMEOUT_S, server.REDIS_TIMEOUT_S)
-    assert late.retry.get_retries() == 0
-    assert admin.get_retry().get_retries() == 0

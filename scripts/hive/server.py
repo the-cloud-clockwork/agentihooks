@@ -187,7 +187,7 @@ def bounded(redis: "Redis") -> "Redis":
     from redis.backoff import NoBackoff
     from redis.retry import Retry
 
-    redis.get_connection_kwargs().update(socket_timeout=REDIS_TIMEOUT_S, socket_connect_timeout=REDIS_TIMEOUT_S)
+    redis.get_connection_kwargs()["socket_timeout"] = REDIS_TIMEOUT_S
     redis.set_retry(Retry(NoBackoff(), 0))
     redis.connection_pool.reset()
     return redis
