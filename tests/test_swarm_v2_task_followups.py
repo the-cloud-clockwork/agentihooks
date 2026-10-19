@@ -43,6 +43,55 @@ def test_cli_records_the_agents_task_on_a_new_follow_up(monkeypatch):
     assert captured == [("add_item", {"list": "followups", "text": "Retry the notes build", "task": "t2"})]
 
 
+@pytest.mark.parametrize("flags", [[], ["--hive", "h1"], ["--hive", "h1", "--needs-operator"]])
+@pytest.mark.parametrize("task", ["t2", None])
+def test_the_op_followup_add_builds_passes_the_api_schema(monkeypatch, flags, task):
+    from scripts.swarm_ledger import ledger
+    from scripts.swarm_ledger.api import schemas
+
+    sent = []
+    if task:
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    else:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setattr(ledger, "call", lambda slug, ops: sent.extend(ops) or {})
+    argv = ["--slug", SLUG, "--as", ENGINEER, "followup", "add", "Retry the notes build", *flags]
+    ledger.cmd_followup(ledger.build_parser().parse_args(argv))
+    assert [op.get("task") for op in sent] == [task]
+    assert [schemas.validate(schemas.operation_schema(op["op"]), op) for op in sent] == [None]
+
+
+@pytest.mark.parametrize("extra", [{"task": "t2"}, {"hive": "h1"}, {"task": "t2", "hive": "h1"}])
+def test_the_add_item_schema_takes_the_task_and_hive_an_agent_sends(extra):
+    from scripts.swarm_ledger.api import schemas
+
+    op = {
+        "op": "add_item",
+        "id": ON_TASK.partition("/")[2],
+        "by": ENGINEER,
+        "list": "followups",
+        "text": "Retry the notes build",
+    }
+    assert schemas.validate(schemas.operation_schema("add_item"), op | extra) is None
+
+
+def test_the_add_item_schema_refuses_a_task_that_is_not_text():
+    from scripts.swarm_ledger.api import schemas
+    from scripts.swarm_ledger.api.errors import APIError
+
+    op = {
+        "op": "add_item",
+        "id": ON_TASK.partition("/")[2],
+        "by": ENGINEER,
+        "list": "followups",
+        "text": "Retry",
+        "task": 2,
+    }
+    with pytest.raises(APIError) as error:
+        schemas.validate(schemas.operation_schema("add_item"), op)
+    assert (error.value.status, error.value.code) == (400, "schema_invalid")
+
+
 def test_cli_adds_no_task_outside_a_task(monkeypatch):
     from scripts.swarm_ledger import ledger
 
