@@ -15,6 +15,7 @@ from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
 from scripts.swarm_ledger.storage_migration import hosted
+from tests.swarm_ledger.api_fakes import as_services
 from tests.swarm_ledger.test_sqlite import document
 
 
@@ -130,7 +131,7 @@ def test_expiring_import_authority_is_bound_to_the_ledger_and_scope(stores, monk
     server = SimpleNamespace(
         ALLOWED_HOSTS={"hosted.example"}, ALLOWED_ORIGINS=set(), repository=target, core=ledger_core
     )
-    assert routes.dispatch(request(snapshot, credential), server)["data"] == hosted.manifest(snapshot)
+    assert routes.dispatch(request(snapshot, credential), as_services(server))["data"] == hosted.manifest(snapshot)
     for invalid in (
         hosted.token(secret, "other-ledger", 1100),
         hosted.token(secret, "migration-proof", 999),
@@ -139,12 +140,12 @@ def test_expiring_import_authority_is_bound_to_the_ledger_and_scope(stores, monk
         "1100.é",
     ):
         with pytest.raises(APIError) as failure:
-            routes.dispatch(request(snapshot, invalid), server)
+            routes.dispatch(request(snapshot, invalid), as_services(server))
         assert failure.value.status == 403
     wrong = copy.deepcopy(snapshot)
     wrong["slug"] = "other-ledger"
     with pytest.raises(APIError) as failure:
-        routes.dispatch(request(wrong, credential), server)
+        routes.dispatch(request(wrong, credential), as_services(server))
     assert failure.value.status == 400
 
 
@@ -475,7 +476,7 @@ def test_migration_api_rejects_invalid_inputs_without_creating_a_ledger(stores, 
         ALLOWED_HOSTS={"hosted.example"}, ALLOWED_ORIGINS=set(), repository=target, core=ledger_core
     )
     with pytest.raises(APIError) as failure:
-        routes.dispatch(incoming, server)
+        routes.dispatch(incoming, as_services(server))
     assert failure.value.status == status
     codes = {400: "migration_invalid", 404: "resource_missing", 405: "method_not_allowed", 415: "content_type"}
     messages = {
@@ -500,7 +501,7 @@ def test_migration_readback_reports_the_actual_hosted_document(stores, monkeypat
     server = SimpleNamespace(
         ALLOWED_HOSTS={"hosted.example"}, ALLOWED_ORIGINS=set(), repository=target, core=ledger_core
     )
-    assert routes.dispatch(incoming, server) == {"data": hosted.manifest(snapshot)}
+    assert routes.dispatch(incoming, as_services(server)) == {"data": hosted.manifest(snapshot)}
 
 
 def test_source_inventory_refuses_symbolic_links_and_missing_databases(stores, tmp_path):
@@ -618,7 +619,7 @@ def test_migration_limits_accept_exact_boundaries_and_leave_the_next_request_unr
     server = SimpleNamespace(
         ALLOWED_HOSTS={"hosted.example"}, ALLOWED_ORIGINS=set(), repository=target, core=ledger_core
     )
-    assert routes.dispatch(incoming, server) == {"data": hosted.manifest(snapshot)}
+    assert routes.dispatch(incoming, as_services(server)) == {"data": hosted.manifest(snapshot)}
     assert incoming.rfile.read() == b"GET /next HTTP/1.1\r\n\r\n"
 
 
@@ -633,7 +634,7 @@ def test_one_byte_import_body_is_consumed_before_the_next_request(stores, monkey
     handler.rfile = io.BytesIO(b"\x1fNEXT")
     server = SimpleNamespace(repository=target, core=ledger_core)
     with pytest.raises(APIError) as failure:
-        hosted.route(handler, server, ["migrations", "migration-proof"])
+        hosted.route(handler, as_services(server), ["migrations", "migration-proof"])
     assert failure.value.status == 400
     assert handler.rfile.read() == b"NEXT"
 
@@ -647,7 +648,7 @@ def test_missing_server_secret_never_accepts_a_predictable_default_key(stores, m
         ALLOWED_HOSTS={"hosted.example"}, ALLOWED_ORIGINS=set(), repository=target, core=ledger_core
     )
     with pytest.raises(APIError) as failure:
-        routes.dispatch(incoming, server)
+        routes.dispatch(incoming, as_services(server))
     assert failure.value.status == 403
     assert failure.value.envelope() == {
         "error": {"code": "forbidden", "message": "Missing or expired migration credential"}
@@ -726,6 +727,6 @@ def test_migration_decompression_never_reads_beyond_its_budget(stores, monkeypat
         ALLOWED_HOSTS={"hosted.example"}, ALLOWED_ORIGINS=set(), repository=target, core=ledger_core
     )
     with pytest.raises(APIError) as failure:
-        routes.dispatch(incoming, server)
+        routes.dispatch(incoming, as_services(server))
     assert failure.value.status == 400
     assert not target.exists("migration-proof")

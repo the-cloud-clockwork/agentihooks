@@ -22,6 +22,7 @@ from scripts.swarm_ledger import ledger_authority as authority  # noqa: E402
 from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.mutation_trace import traced  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+from tests.swarm_ledger.api_fakes import as_services  # noqa: E402
 
 server = ledger_server
 from tests.swarm_ledger.test_media import png  # noqa: E402
@@ -32,9 +33,6 @@ SLUG = "authority-proof"
 WORKER = "engineer@323133-0256"
 OTHER = "engineer@323133-0257"
 MASTER = "master@323133-0001"
-
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def operation(kind, **fields):
@@ -534,7 +532,7 @@ def test_mutation_receiver_checks_epoch_before_and_after_domain_apply():
     from scripts.swarm_ledger.api import mutations
 
     server, payload, seen = _epoch_mutation_server(False)
-    reply = mutations.apply(server, "sw", "", payload)
+    reply = mutations.apply(as_services(server), "sw", "", payload)
     assert seen == [("sw", 1), ("sw", 1)]
     assert reply == {"applied": ["one"], "rejected": [], "_meta": {"rev": 1, "warnings": []}}
 
@@ -545,7 +543,7 @@ def test_mutation_receiver_returns_exact_stale_epoch_error():
 
     server, payload, seen = _epoch_mutation_server(True)
     with pytest.raises(APIError) as error:
-        mutations.apply(server, "sw", "", payload)
+        mutations.apply(as_services(server), "sw", "", payload)
     assert seen == [("sw", 1)]
     assert error.value.status == 409
     assert error.value.code == "stale_controller"

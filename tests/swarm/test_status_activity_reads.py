@@ -1,12 +1,8 @@
 from unittest.mock import patch
 
-import pytest
-
 from scripts.swarm import status
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_v2 import accounts
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def test_status_batches_account_discovery_without_losing_findings(monkeypatch):

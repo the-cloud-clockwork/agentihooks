@@ -7,8 +7,6 @@ from hooks import hook_manager
 from hooks.targets.emitter import flush
 from scripts.swarm import idle
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NAME = "engineer@abc123-0001"
 WORKER = {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SWARM_TASK": "t7", "AGENTIHOOKS_AGENT_NAME": NAME}
 TOLD = 'agentihooks swarm rig wait <minutes> --reason "<what you wait on>"'

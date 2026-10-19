@@ -1,3 +1,4 @@
+import os
 import subprocess
 from argparse import Namespace
 
@@ -211,7 +212,7 @@ def _systemctl(calls, failing=()):
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0)
+        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0, "", "")
 
     return run
 
@@ -231,22 +232,271 @@ def test_a_tick_timer_that_cannot_be_disabled_keeps_its_files_for_a_later_pass(t
     )
 
 
-def test_an_upgrade_disables_and_deletes_the_tick_timer_without_stopping_a_running_tick(tmp_path, monkeypatch):
-    scheduled = []
-    monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
+def _draining(calls, groups, clock, shown=0):
+    import subprocess
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        clock.append(clock[-1] + 1)
+        if argv[2] == "show":
+            group, tasks = groups.pop(0) if len(groups) > 1 else groups[0]
+            return subprocess.CompletedProcess(argv, shown, f"ControlGroup={group}\nTasksCurrent={tasks}\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return run
+
+
+SHOW = ["systemctl", "--user", "show", "-p", "ControlGroup", "-p", "TasksCurrent", "agentihooks-swarm.service"]
+KILL = ["systemctl", "--user", "kill", "--kill-who=all"]
+STOP = ["systemctl", "--user", "stop", "agentihooks-swarm.service"]
+
+
+def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_before_scheduling(tmp_path, monkeypatch):
+    calls, clock = [], [0.0]
+    monkeypatch.setattr(timer, "schedule", lambda: calls.append((["schedule"], {})) or True)
+    monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
+    monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\nOnUnitActiveSec=60s\n")
-    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
-    calls = []
-    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\nKillMode=process\n")
+    group = "/user.slice/agentihooks-swarm.service"
+    groups = [(group, "3"), (group, "1"), ("", "[not set]")]
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_draining(calls, groups, clock))
     assert not (tmp_path / "agentihooks-swarm.timer").exists()
     assert not (tmp_path / "agentihooks-swarm.service").exists()
     argvs = [argv for argv, _ in calls]
-    assert argvs[0] == ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"]
+    assert argvs[:7] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        STOP,
+        SHOW,
+        [*KILL, "--signal=SIGTERM", "agentihooks-swarm.service"],
+        SHOW,
+        SHOW,
+        ["systemctl", "--user", "daemon-reload"],
+    ]
     assert calls[0][1] == {"capture_output": True, "text": True, "timeout": 30, "check": False}
-    assert argvs[1] == ["systemctl", "--user", "daemon-reload"]
-    assert not [argv for argv in argvs if "agentihooks-swarm.service" in argv]
-    assert not [argv for argv in argvs if "stop" in argv]
+    assert calls[1][1] == {"capture_output": True, "text": True, "timeout": 120, "check": False}
+    assert argvs[-1] == ["schedule"]
+
+
+@pytest.mark.parametrize(("shown", "left"), [(0, "2"), (1, "unknown")])
+def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
+    tmp_path, monkeypatch, capsys, shown, left
+):
+    calls, clock, scheduled, slept = [], [0.0], [], []
+    monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
+    monkeypatch.setattr(timer.time, "sleep", slept.append)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
+    groups = [("/user.slice/agentihooks-swarm.service", "2")]
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_draining(calls, groups, clock, shown))
+    argvs = [argv for argv, _ in calls]
+    kills = [argv for argv in argvs if argv[:4] == KILL]
+    assert kills == [
+        [*KILL, "--signal=SIGTERM", "agentihooks-swarm.service"],
+        [*KILL, "--signal=SIGKILL", "agentihooks-swarm.service"],
+    ]
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert (tmp_path / "agentihooks-swarm.service").exists()
+    assert ["systemctl", "--user", "daemon-reload"] not in argvs
+    assert capsys.readouterr().err == (
+        f"the agentihooks-swarm service group did not empty ({left} processes left); "
+        "its unit files stay until a later pass\n"
+    )
+    assert clock[-1] >= timer.DRAIN_S + timer.KILL_WAIT_S
     assert scheduled == [True]
+    assert slept and set(slept) == {1}
+    plain = {"capture_output": True, "text": True, "timeout": 30, "check": False}
+    assert {argv[2]: kwargs for argv, kwargs in calls if argv[2] in ("show", "kill")} == {"show": plain, "kill": plain}
+
+
+@pytest.mark.parametrize(
+    ("stdout", "left"),
+    [
+        ("ControlGroup=/x\n", "unknown"),
+        ("ControlGroup=/a=b\nTasksCurrent=3\n", "3"),
+        ("ControlGroup=\nTasksCurrent=[not set]\n", "0"),
+        ("", "0"),
+    ],
+)
+def test_the_group_count_reads_the_shown_properties(stdout, left):
+    import subprocess
+
+    shown = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, stdout, "")  # noqa: E731
+    assert timer._left(shown) == left
+
+
+def test_a_group_that_empties_at_the_last_look_is_drained(monkeypatch):
+    import itertools
+
+    seen = iter(["2", "2", "0"])
+    monkeypatch.setattr(timer, "_left", lambda run: next(seen))
+    monkeypatch.setattr(timer.time, "monotonic", itertools.cycle([0.0, 1e9]).__next__)
+    assert timer._drain(_systemctl([])) == ""
+
+
+def _no_sleep(seconds):
+    raise AssertionError(f"slept {seconds} after the deadline")
+
+
+def test_a_drain_with_no_time_left_looks_once_more_and_never_sleeps(monkeypatch):
+    seen = []
+    monkeypatch.setattr(timer, "_left", lambda run: seen.append(True) or "2")
+    monkeypatch.setattr(timer, "DRAIN_S", 0)
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
+    monkeypatch.setattr(timer.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(timer.time, "sleep", _no_sleep)
+    assert timer._drain(_systemctl([])) == "2"
+    assert len(seen) == 3
+
+
+def test_an_inside_drain_with_no_time_left_never_sleeps(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "_others", lambda procs: {4242})
+    monkeypatch.setattr(timer, "DRAIN_S", 0)
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
+    monkeypatch.setattr(timer.os, "kill", lambda pid, number: None)
+    monkeypatch.setattr(timer.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(timer.time, "sleep", _no_sleep)
+    assert timer._drain_inside(tmp_path / "cgroup.procs") == "1"
+
+
+def test_an_inside_drain_polls_each_second_until_each_deadline(tmp_path, monkeypatch):
+    import signal
+
+    clock, slept, sent = [0.0], [], []
+
+    def sleep(seconds):
+        if len(slept) > 20:
+            raise AssertionError("the drain kept polling past its deadlines")
+        slept.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(timer, "_others", lambda procs: {4242})
+    monkeypatch.setattr(timer, "DRAIN_S", 3)
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 2)
+    monkeypatch.setattr(timer.os, "kill", lambda pid, number: sent.append((pid, number)))
+    monkeypatch.setattr(timer.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(timer.time, "sleep", sleep)
+    assert timer._drain_inside(tmp_path / "cgroup.procs") == "1"
+    assert slept == [1] * 5
+    assert sent == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+
+
+def test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_not_itself(tmp_path, monkeypatch):
+    import signal
+    import subprocess
+    import sys
+
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", timer.Path("/proc"))
+    left = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"]) for _ in range(2)]
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("".join(f"{pid}\n" for pid in [os.getpid(), *[p.pid for p in left]]))
+    monkeypatch.setattr(timer, "_own_group", lambda: procs)
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
+    calls = []
+    try:
+        assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+        assert [p.wait(15) for p in left] == [-signal.SIGTERM] * 2
+    finally:
+        for p in left:
+            p.kill()
+            p.wait()
+    argvs = [argv for argv, _ in calls]
+    assert argvs[:2] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+    assert not [argv for argv in argvs if argv[2] in ("stop", "kill", "show")]
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.service").exists()
+
+
+@pytest.mark.wall_clock
+def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_keeps_the_units(
+    tmp_path, monkeypatch, capsys
+):
+    import signal
+    import subprocess
+    import sys
+
+    deaf = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(600)"
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", timer.Path("/proc"))
+    left = subprocess.Popen([sys.executable, "-c", deaf], stdout=subprocess.PIPE, text=True)
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text(f"{os.getpid()}\n{left.pid}\n")
+    monkeypatch.setattr(timer, "DRAIN_S", 1)
+    slept, real_sleep = [], timer.time.sleep
+    monkeypatch.setattr(timer.time, "sleep", lambda seconds: slept.append(seconds) or real_sleep(0.05))
+    try:
+        assert left.stdout.readline().strip() == "ready"
+        started = timer.time.monotonic()
+        assert timer._drain_inside(procs) == ""
+        assert timer.time.monotonic() - started >= 1
+        assert slept and set(slept) == {1}
+        assert left.wait(15) == -signal.SIGKILL
+    finally:
+        left.kill()
+        left.wait()
+    monkeypatch.setattr(timer, "_others", lambda procs: {4242})
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
+    monkeypatch.setattr(timer.os, "kill", lambda pid, number: None)
+    assert timer._drain_inside(procs) == "1"
+
+
+def test_a_member_gone_before_its_signal_is_skipped(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    members = iter([{gone.pid}, set()])
+    monkeypatch.setattr(timer, "_others", lambda procs: next(members))
+    assert timer._drain_inside(tmp_path / "cgroup.procs") == ""
+
+
+def test_an_unreadable_own_group_keeps_the_units(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(timer, "_own_group", lambda: tmp_path / "gone" / "cgroup.procs")
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert (tmp_path / "agentihooks-swarm.service").exists()
+    assert "the agentihooks-swarm service group did not empty (unknown processes left)" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    ("lines", "procs"),
+    [
+        ("0::/user.slice/user@1000.service/app.slice/agentihooks-swarm.service\n", "user.slice"),
+        (
+            "12:cpu,cpuacct:/user.slice\n1:name=systemd:/user.slice/user@1000.service/agentihooks-swarm.service\n",
+            "systemd/user.slice",
+        ),
+        ("0::/user.slice/a:b/agentihooks-swarm.service\n", "user.slice/a:b"),
+        ("0::/Xa.slice/agentihooks-swarm.service\n", "Xa.slice"),
+        ("0::/user.slice/user@1000.service/app.slice/agentihooks-swarm-waits.service\n", None),
+        (None, None),
+    ],
+)
+def test_the_own_group_is_the_tick_service_cgroup_on_either_hierarchy(tmp_path, monkeypatch, lines, procs):
+    cgroup = tmp_path / "cgroup"
+    if lines is not None:
+        cgroup.write_text(lines)
+    monkeypatch.setattr(timer, "CGROUP_FILE", cgroup)
+    monkeypatch.setattr(timer, "CGROUP_ROOT", tmp_path / "fs")
+    found = timer._own_group()
+    if procs is None:
+        assert found is None
+    else:
+        assert found.name == "cgroup.procs"
+        assert found.parent.name == "agentihooks-swarm.service"
+        assert str(found).startswith(str(tmp_path / "fs" / procs))
 
 
 def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
@@ -256,8 +506,10 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     assert not (tmp_path / "agentihooks-swarm.service").exists()
-    assert [argv for argv, _ in calls][:2] == [
+    assert [argv for argv, _ in calls][:4] == [
         ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        STOP,
+        SHOW,
         ["systemctl", "--user", "daemon-reload"],
     ]
     calls.clear()

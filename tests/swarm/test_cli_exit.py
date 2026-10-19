@@ -6,8 +6,6 @@ from scripts.swarm import cli
 from scripts.swarm.store import AgentRecord
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("case", ["obsolete_wait", "blocked_dependency"])
 def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, monkeypatch, capsys, case):  # noqa: F811

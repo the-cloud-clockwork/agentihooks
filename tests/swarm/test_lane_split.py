@@ -7,8 +7,6 @@ from scripts.swarm import autoscale, capacity, lane_split
 from scripts.swarm.autoscale import calculate
 from scripts.swarm.store import MANUAL_SCALING, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 READY = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=4)

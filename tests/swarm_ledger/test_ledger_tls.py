@@ -15,8 +15,6 @@ from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, new_ledger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CREDENTIALS = [
     {"X-Controller-Credential": "controller"},
     {"X-Hive-Credential": "hive", "X-Ledger-Agent": "engineer@323133-0256"},

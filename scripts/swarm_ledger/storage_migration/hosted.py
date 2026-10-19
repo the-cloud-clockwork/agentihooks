@@ -16,6 +16,7 @@ from pathlib import Path
 
 from scripts.swarm_ledger import storage
 from scripts.swarm_ledger.api.errors import APIError
+from scripts.swarm_ledger.api.services import Services
 from scripts.swarm_ledger.repository import LedgerRepository
 
 LIFETIME = 900
@@ -153,8 +154,8 @@ def restore(repo: LedgerRepository, snapshot: dict) -> dict:
     return manifest(capture(repo, slug))
 
 
-def route(handler: object, server: object, parts: list) -> dict:
-    if len(parts) != 2 or not server.core.SLUG_RE.fullmatch(parts[1]):
+def route(handler: object, services: Services, parts: list) -> dict:
+    if len(parts) != 2 or not services.ledger.core.SLUG_RE.fullmatch(parts[1]):
         raise APIError(404, "resource_missing", "No such migration")
     slug = parts[1]
     if not authorize(
@@ -162,7 +163,7 @@ def route(handler: object, server: object, parts: list) -> dict:
     ):
         raise APIError(403, "forbidden", "Missing or expired migration credential")
     if handler.command == "GET":
-        return {"data": manifest(capture(server.repository, slug))}
+        return {"data": manifest(capture(services.repository, slug))}
     if handler.command != "POST":
         raise APIError(405, "method_not_allowed", "Use GET or POST for migration")
     if handler.headers.get("Content-Type") != "application/gzip":
@@ -178,7 +179,7 @@ def route(handler: object, server: object, parts: list) -> dict:
         snapshot = json.loads(data)
         if snapshot["slug"] != slug:
             raise ValueError("migration slug differs from route")
-        result = restore(server.repository, snapshot)
+        result = restore(services.repository, snapshot)
     except (ValueError, KeyError, TypeError, EOFError, OSError) as error:
         raise APIError(400, "migration_invalid", "Migration refused: invalid data or existing conflict") from error
     return {"data": result}

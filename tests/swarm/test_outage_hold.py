@@ -12,7 +12,6 @@ from tests.swarm.test_lifetime import HOUR, idle_master
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, tasks, workers
 from tests.swarm.test_tick import store as store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 NAME = "engineer@a1b2c3-0001"
 MINUTE = 60_000
 

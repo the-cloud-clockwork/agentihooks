@@ -28,7 +28,7 @@ from scripts.swarm_v2.kubernetes.terminal import Exposure, HostKeys, Launched, T
 from scripts.swarm_v2.runtime.commands import Principal, Role
 from tests import sv2_hdr01_cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 EXE_A = "exe-" + "a" * 32

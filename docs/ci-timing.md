@@ -1,5 +1,138 @@
 # Tests workflow timing
 
+## Helm kind registration to readiness
+
+The promotion Helm chart proof checks recovery as well as initial readiness.
+Its measured interval starts at `ledger and swarm kind-proof registered, no
+lease bound` and ends at `controller readiness probe passed`. This includes a
+deliberate controller freeze, liveness restart and release upgrade enabling the
+control API. Image preparation, cluster creation and subsequent worker and
+terminal proofs are outside the interval.
+
+### Preserved checks and reduced waiting
+
+After the initial release installation and chart tests, a background job
+prepares the signing Secret, controller service account and RBAC, worker pod
+policy ConfigMap and terminal CA Secrets. Setup overlaps the controller lease
+and recovery checks. The proof waits for setup to succeed before the upgrade;
+an error still fails the proof.
+
+One Python process in the ledger Pod watches the lease every 0.2 seconds.
+Acquisition requires the deployment's `SWARM_HIVE_ID` as owner; renewal requires
+the same owner with a later `expires_at`. Each wait has a 180 second deadline.
+Previously each read started a cold `kubectl exec` process, with a one second
+sleep between reads. The separate post restart lease retake loop is unchanged.
+
+The proof retains this sequence:
+
+1. Restart the controller after registration and wait for rollout.
+2. Require lease acquisition, renewal and zero controller restarts.
+3. Freeze the controller in the isolated kind node, require exactly one
+   liveness restart and verify lease retake.
+4. Require successful background setup, upgrade with control API and worker
+   settings, wait for rollout and require the Kubernetes runtime build log.
+5. Verify startup and liveness are wired to `agentihooks controller live` and
+   readiness to `agentihooks controller ready`. Execute all three commands in
+   parallel, wait for every process and fail if any command fails.
+6. Require the Pod's Kubernetes Ready condition and zero restarts on the
+   upgraded controller before continuing with the remaining chart proofs.
+
+Probe results print in startup, liveness, readiness order after all commands
+finish. Printed order is not execution order. A passed readiness command alone
+does not establish the subsequent Ready assertion or completion of the proof.
+
+### Kind configuration
+
+The checked in `deploy/helm/agentihooks-swarm/ci/kind-values.yaml` supplies this
+controller timing excerpt to both release operations:
+
+```yaml
+controller:
+  startupProbe:
+    periodSeconds: 1
+  readinessProbe:
+    periodSeconds: 1
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 1
+    timeoutSeconds: 5
+    failureThreshold: 2
+  terminationGracePeriodSeconds: 1
+  env:
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+```
+
+Liveness initial delay fell from ten to five seconds and its period from two
+to one second. The startup probe already gates liveness with the same live
+command. These are kind overrides: chart default liveness settings remain a
+sixty second initial delay, ten second period, eight second timeout and failure
+threshold three. This excerpt is not a complete cluster configuration.
+
+There is no new flag or environment setting for the 0.2 second lease watch or
+parallel execution. Change those through reviewed proof code; change fixture
+probe cadence through kind values. This optimization requires no production
+configuration change.
+
+### Run and inspect in CI
+
+Push the branch and dispatch the chart proof on that revision:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=helm-kind
+gh run list \
+  --workflow proofs.yml \
+  --branch <branch> \
+  --limit 5
+gh run view <run-id> \
+  --log
+```
+
+The standalone workflow also accepts a dispatch:
+
+```bash
+gh workflow run helm-kind.yml \
+  --ref <branch>
+```
+
+Both routes use the declared Helm input key. Inspect `Key the declared inputs`
+first: a cache hit skips chart execution and supplies no new timing sample.
+See [Helm kind proof input keys](reference/ci-result-cache.md#helm-kind-proof-input-keys)
+for cache scope and due decisions. Run proofs in CI, not on the shared host.
+
+For a fresh execution, subtract the registration marker timestamp from the
+`controller readiness probe passed` timestamp in the raw Actions job log. Keep
+the run link and revision. Separately require the later `controller with the
+control API on is Ready under the health probes, restarts: 0` and final `Helm
+chart kind proof passed` markers. Queue time and whole job duration measure
+different intervals.
+
+| Failure | Inspection |
+|---|---|
+| Lease acquisition or renewal times out | Read the last lease diagnostic, compare owner with `SWARM_HIVE_ID` and check whether expiry advanced. |
+| Frozen controller does not restart exactly once | Inspect liveness settings, restart count and previous controller logs from failure cleanup. |
+| Setup objects were not created | Inspect the earlier background setup command error; upgrade is refused on setup failure. |
+| Runtime build log is absent | Inspect controller startup and worker settings after upgrade; rollout alone does not establish runtime construction. |
+| Probe fails or uses an unexpected command | Inspect the named diagnostic and deployed probe wiring; all three commands remain mandatory. |
+| Ready times out or restarts are nonzero | Inspect Pod state and controller logs; retain these assertions even when the explicit readiness command passed. |
+
+### Delivery measurements
+
+[Pull request #4391](https://github.com/the-cloud-clockwork/agentihooks/pull/4391)
+and its [source issue](https://github.com/the-cloud-clockwork/agentihooks/issues/4389)
+record intervals of 25.86 and 26.79 seconds before the change. The delivered
+revision is `57c433590b7c82d7a45174eabbd8c6ec3aa5c05f`. After the change:
+
+| Branch proof | Registration to readiness | Recorded result |
+|---|---|---|
+| [39099421881](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099421881) | 20.41 seconds | Every check passed |
+| [39099734177](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099734177) | 21.05 seconds | Every check passed |
+
+These branch samples demonstrate the delivered reduction. They are not a fixed
+runtime guarantee or a post merge promotion measurement; runner load and later
+proof changes can affect the interval.
+
 ## Delivery tiers
 
 Pull request checks run once on the current head: lint, format, size, static analysis, changed-line coverage and mutation, and touched tests. The `dev` merge queue runs the full unit suite and test count checks on the merge group; it does not repeat the pull request checks. Shard time budgets do not hold the queue.

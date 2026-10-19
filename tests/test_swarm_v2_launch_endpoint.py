@@ -7,7 +7,7 @@ from scripts.swarm_v2 import broadcast_bridge, broadcasts, worker_home
 from tests.test_swarm_v2_launch import API, FIRST, World
 from tests.test_worker_home import fixture, inprocess, request  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_a_home_bootstrapped_from_a_distributed_launch_claims_broadcasts_from_its_swarm_api(fixture, monkeypatch):  # noqa: F811

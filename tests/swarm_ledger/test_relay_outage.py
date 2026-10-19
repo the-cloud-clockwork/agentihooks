@@ -15,8 +15,6 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig  # 
 from scripts.swarm_ledger import ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "relay-outage-2026-01-01"
 ENG = AgentRecord("ro-eng-1", "eng", "t1", pane_id="p1", seat=f"eng-1@{SLUG}")
 BOSS = AgentRecord("ro-master-1", MASTER, MASTER, pane_id="pm", seat=f"master@{SLUG}")

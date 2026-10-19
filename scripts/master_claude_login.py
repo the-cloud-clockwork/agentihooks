@@ -318,7 +318,7 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
                 raise LoginRefused(NO_LOGIN)
         target = home() if shared else _rebuild(folder, rendered)
     if environ.get(binding.REPORT):
-        binding.rehome(Path(environ[binding.REPORT]), target)
+        binding.rehome(Path(environ[binding.REPORT]), target, shared=shared)
     restore(copy, target)
     found = account(target, environ)
     keep(bao, target, epoch)

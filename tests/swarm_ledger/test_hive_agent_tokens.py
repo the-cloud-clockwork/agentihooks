@@ -9,11 +9,11 @@ from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
+from tests.swarm_ledger.api_fakes import as_services
 from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 live = _authority_live
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture
@@ -53,7 +53,7 @@ def test_the_token_route_reports_an_unplaced_agent(hive):
     _, grant = hive
     handler = SimpleNamespace(headers={"X-Hive-Credential": grant["ledger_credential"], "X-Ledger-Agent": MASTER})
     with pytest.raises(APIError) as refused:
-        routes.agent_token(handler, SimpleNamespace(authority=authority), SLUG)
+        routes.agent_token(handler, as_services(SimpleNamespace(authority=authority)), SLUG)
     assert refused.value.status == 403
     assert refused.value.envelope() == {
         "error": {"code": "forbidden", "message": "Agent is not placed on this member's hive"}

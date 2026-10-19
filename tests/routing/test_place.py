@@ -5,8 +5,6 @@ import pytest
 from scripts.routing import place, settings
 from scripts.routing.slots import API, API_UNBOUNDED, Slot
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 1_900_000_000.0
 
 

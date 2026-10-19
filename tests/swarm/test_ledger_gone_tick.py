@@ -1,12 +1,8 @@
-import pytest
-
 from scripts.swarm import cli
 from scripts.swarm.ledger_client import LedgerGone
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class GoneLedger(FakeLedger):

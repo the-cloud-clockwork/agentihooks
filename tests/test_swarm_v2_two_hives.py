@@ -2,8 +2,6 @@ import pytest
 
 from tests import sv2_mst04_cases as cases
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def world(tmp_path, monkeypatch):
