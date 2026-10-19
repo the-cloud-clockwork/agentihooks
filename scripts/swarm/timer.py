@@ -82,7 +82,7 @@ def _left(run):
     )
     if shown.returncode:
         return "unknown"
-    props = dict(line.partition("=")[::2] for line in (shown.stdout or "").splitlines())
+    props = dict(line.partition("=")[::2] for line in shown.stdout.splitlines())
     return "0" if not props.get("ControlGroup") else props.get("TasksCurrent", "unknown")
 
 

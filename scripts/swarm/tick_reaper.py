@@ -52,7 +52,7 @@ def _age_s(pid: int) -> float:
 
 def alive(pid: int) -> bool:
     try:
-        return _stat(pid)[0] not in ("Z", "X")
+        return _stat(pid)[0] != "Z"
     except OSError:
         return False
 

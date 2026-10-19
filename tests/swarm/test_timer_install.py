@@ -167,7 +167,7 @@ def _systemctl(calls, failing=()):
 
     def run(argv, **kwargs):
         calls.append((argv, kwargs))
-        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0)
+        return subprocess.CompletedProcess(argv, 1 if argv[2] in failing else 0, "", "")
 
     return run
 
@@ -237,9 +237,9 @@ def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_befo
 def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     tmp_path, monkeypatch, capsys, shown, left
 ):
-    calls, clock, scheduled = [], [0.0], []
+    calls, clock, scheduled, slept = [], [0.0], [], []
     monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
-    monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
+    monkeypatch.setattr(timer.time, "sleep", slept.append)
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
     monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
@@ -261,6 +261,50 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     )
     assert clock[-1] >= timer.DRAIN_S + timer.KILL_WAIT_S
     assert scheduled == [True]
+    assert slept and set(slept) == {1}
+    plain = {"capture_output": True, "text": True, "timeout": 30, "check": False}
+    assert {argv[2]: kwargs for argv, kwargs in calls if argv[2] in ("show", "kill")} == {"show": plain, "kill": plain}
+
+
+def test_a_group_without_a_task_count_is_unknown():
+    import subprocess
+
+    shown = lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, "ControlGroup=/x\n", "")  # noqa: E731
+    assert timer._left(shown) == "unknown"
+
+
+def test_a_group_that_empties_at_the_last_look_is_drained(monkeypatch):
+    import itertools
+
+    seen = iter(["2", "2", "0"])
+    monkeypatch.setattr(timer, "_left", lambda run: next(seen))
+    monkeypatch.setattr(timer.time, "monotonic", itertools.cycle([0.0, 1e9]).__next__)
+    assert timer._drain(_systemctl([])) == ""
+
+
+def _no_sleep(seconds):
+    raise AssertionError(f"slept {seconds} after the deadline")
+
+
+def test_a_drain_with_no_time_left_looks_once_more_and_never_sleeps(monkeypatch):
+    seen = []
+    monkeypatch.setattr(timer, "_left", lambda run: seen.append(True) or "2")
+    monkeypatch.setattr(timer, "DRAIN_S", 0)
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
+    monkeypatch.setattr(timer.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(timer.time, "sleep", _no_sleep)
+    assert timer._drain(_systemctl([])) == "2"
+    assert len(seen) == 3
+
+
+def test_an_inside_drain_with_no_time_left_never_sleeps(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "_others", lambda procs: {4242})
+    monkeypatch.setattr(timer, "DRAIN_S", 0)
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
+    monkeypatch.setattr(timer.os, "kill", lambda pid, number: None)
+    monkeypatch.setattr(timer.time, "monotonic", lambda: 5.0)
+    monkeypatch.setattr(timer.time, "sleep", _no_sleep)
+    assert timer._drain_inside(tmp_path / "cgroup.procs") == "1"
 
 
 def test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_not_itself(tmp_path, monkeypatch):
@@ -304,9 +348,14 @@ def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_
     procs = tmp_path / "cgroup.procs"
     procs.write_text(f"{os.getpid()}\n{left.pid}\n")
     monkeypatch.setattr(timer, "DRAIN_S", 1)
+    slept, real_sleep = [], timer.time.sleep
+    monkeypatch.setattr(timer.time, "sleep", lambda seconds: slept.append(seconds) or real_sleep(0.05))
     try:
         assert left.stdout.readline().strip() == "ready"
+        started = timer.time.monotonic()
         assert timer._drain_inside(procs) == ""
+        assert timer.time.monotonic() - started >= 1
+        assert slept and set(slept) == {1}
         assert left.wait(15) == -signal.SIGKILL
     finally:
         left.kill()
@@ -315,6 +364,17 @@ def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_
     monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
     monkeypatch.setattr(timer.os, "kill", lambda pid, number: None)
     assert timer._drain_inside(procs) == "1"
+
+
+def test_a_member_gone_before_its_signal_is_skipped(tmp_path, monkeypatch):
+    import subprocess
+    import sys
+
+    gone = subprocess.Popen([sys.executable, "-c", "pass"])
+    gone.wait()
+    members = iter([{gone.pid}, set()])
+    monkeypatch.setattr(timer, "_others", lambda procs: next(members))
+    assert timer._drain_inside(tmp_path / "cgroup.procs") == ""
 
 
 def test_an_unreadable_own_group_keeps_the_units(tmp_path, monkeypatch, capsys):
@@ -335,6 +395,8 @@ def test_an_unreadable_own_group_keeps_the_units(tmp_path, monkeypatch, capsys):
             "12:cpu,cpuacct:/user.slice\n1:name=systemd:/user.slice/user@1000.service/agentihooks-swarm.service\n",
             "systemd/user.slice",
         ),
+        ("0::/user.slice/a:b/agentihooks-swarm.service\n", "user.slice/a:b"),
+        ("0::/Xa.slice/agentihooks-swarm.service\n", "Xa.slice"),
         ("0::/user.slice/user@1000.service/app.slice/agentihooks-swarm-waits.service\n", None),
         (None, None),
     ],
