@@ -22,7 +22,9 @@ SLICE_SECONDS = 120.0
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
     tests, durations = {}, {}
     timed = [result for result in results if result.get("cpu")]
-    walls, cpu = sum(sum(result["durations"].values()) for result in timed), sum(result["cpu"] for result in timed)
+    # A cached entry per selected path can repeat a test another overlapping path also holds.
+    walls = sum({node: seconds for result in timed for node, seconds in result["durations"].items()}.values())
+    cpu = sum(result["cpu"] for result in timed)
     # Stats fork a bucket per visible CPU onto a runner whose quota is smaller, so recorded walls wait on each other.
     contention = max(1.0, walls / cpu) if cpu else 1.0
     for result in results:
