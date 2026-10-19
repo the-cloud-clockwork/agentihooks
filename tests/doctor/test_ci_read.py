@@ -249,3 +249,43 @@ def test_a_log_read_that_fails_for_another_reason_still_fails_the_detector():
 
     with pytest.raises(subprocess.CalledProcessError):
         ci_read._attempts("o/r", [workflow], gh)
+
+
+def test_dev_pushes_reads_the_last_green_and_failing_jobs_of_each_red_workflow_only():
+    hive = ".github/workflows/hive-worker.yml"
+    runs = [
+        {"id": n, "name": "Worker hive pod", "path": hive, "conclusion": "failure", "created_at": "t", "html_url": "u"}
+        for n in range(10, 15)
+    ] + [{"id": 40, "name": "Pages", "path": ".github/workflows/pages.yml", "conclusion": "success"}]
+    green = {"id": 9, "name": "Worker hive pod", "path": hive, "conclusion": "success"}
+    jobs = [
+        {"name": "pod", "conclusion": "failure"},
+        {"name": "contracts", "conclusion": "timed_out"},
+        {"name": "lint", "conclusion": "success"},
+        {"name": "image", "conclusion": "skipped"},
+    ]
+    calls = []
+
+    def gh(argv, **kwargs):
+        calls.append(argv[2])
+        assert argv[:2] == ["gh", "api"] and kwargs["cwd"] == "/repo" and kwargs["check"] is True
+        replies = {
+            ci_read.DEV_PUSHES: runs,
+            ci_read.LAST_GREEN.format(workflow="hive-worker.yml"): [green],
+            "repos/{owner}/{repo}/actions/runs/14/jobs?per_page=100": jobs,
+        }
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(r) for r in replies[argv[2]]), "")
+
+    assert ci_read.dev_pushes("/repo", gh) == {"runs": runs, "green": {hive: green}, "jobs": {14: ["contracts", "pod"]}}
+    assert len(calls) == 3
+
+
+def test_dev_pushes_without_a_red_workflow_reads_only_the_run_list():
+    calls = []
+
+    def gh(argv, **kwargs):
+        calls.append(argv[2])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    assert ci_read.dev_pushes("/repo", gh) == {"runs": [], "green": {}, "jobs": {}}
+    assert calls == [ci_read.DEV_PUSHES]
