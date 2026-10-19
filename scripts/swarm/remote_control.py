@@ -44,9 +44,9 @@ def decision(lane: str, harness: str, route_kind: str, slug: str, login: bool) -
     reason = off_reason(route_kind, login)
     if reason:
         return {"state": "off", "detail": reason}
-    from scripts.swarm_v2 import masters
+    from scripts.swarm_v2 import front_door, masters
 
-    return {"state": "on", "detail": masters.title(slug, "")}
+    return {"state": "on", "detail": masters.title(slug, front_door.seat(slug))}
 
 
 def arguments(decided: Mapping) -> list[str]:

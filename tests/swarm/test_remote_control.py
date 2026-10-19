@@ -67,10 +67,10 @@ def test_a_master_with_the_login_on_spawns_on_its_own_route_with_remote_control(
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api"])
-def test_a_master_order_on_an_explicit_route_keeps_it_with_the_login_on(tmp_path, kind):
+def test_a_front_door_order_on_an_explicit_route_takes_the_login_and_remote_control(tmp_path, kind):
     passed, placed = _spawn(tmp_path, "master", "claude", kind)
-    assert "master-login" not in passed and "--settings" not in passed and _rc(passed) == []
-    assert placed.route_kind == kind
+    assert passed[:6] == ["--route", "master-login", *RC]
+    assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 
 @pytest.mark.parametrize(("kind", "route"), [("interactive", ["--route", "interactive"]), ("subscription", [])])

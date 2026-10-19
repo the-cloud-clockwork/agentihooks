@@ -19,7 +19,7 @@ def hive(monkeypatch):
     monkeypatch.setattr(master_claude_login.hooks_config, "MASTER_CLAUDE_LOGIN", True)
 
 
-def _spawned(tmp_path, slug, lane, seat):
+def _spawned(tmp_path, slug, lane, seat, kind=None):
     seen = []
 
     def run(argv, **kwargs):
@@ -35,7 +35,8 @@ def _spawned(tmp_path, slug, lane, seat):
         autonomy="delegate",
     )
     runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
-    placed = runtime.spawn(config, lane, "agent", {"id": lane, "title": slug, "seat": seat})
+    task = {"id": lane, "title": slug, "seat": seat} | ({"route_kind": kind} if kind else {})
+    placed = runtime.spawn(config, lane, "agent", task)
     return seen[0], placed
 
 
@@ -80,13 +81,17 @@ def test_a_resumed_backend_master_keeps_its_seat_title(tmp_path):
     assert _title(seen["runs"][0]) == "master 2 · sw"
 
 
-def test_a_doctor_front_door_launch_registers_remote_control_under_its_seat(tmp_path):
-    argv, placed = _spawned(tmp_path, "rig-doctor", "master", "master@rig-doctor")
+@pytest.mark.parametrize("kind", [None, "interactive", "subscription", "api"])
+def test_a_doctor_front_door_launch_registers_remote_control_under_its_seat(tmp_path, kind):
+    argv, placed = _spawned(tmp_path, "rig-doctor", "master", "master@rig-doctor", kind)
     passed = _passed(argv)
     at = passed.index("--remote-control")
     assert passed[:2] == ["--route", master_claude_login.ROUTE]
     assert passed[at : at + 2] == ["--remote-control", "master 1 · rig-doctor"]
-    assert placed.remote_control == {"state": "on", "detail": "master 1 · rig-doctor"}
+    assert (placed.route_kind, placed.remote_control) == (
+        "interactive",
+        {"state": "on", "detail": "master 1 · rig-doctor"},
+    )
     assert _title(argv) == "master 1 · rig-doctor"
 
 

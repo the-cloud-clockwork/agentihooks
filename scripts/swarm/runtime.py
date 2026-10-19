@@ -635,9 +635,7 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = task.get("route_kind", "interactive") == "interactive" and master_claude_login.enabled(
-            config.slug, task.get("seat", ""), lane, agent
-        )
+        login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
         route_kind = "interactive" if login else route_kind
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
