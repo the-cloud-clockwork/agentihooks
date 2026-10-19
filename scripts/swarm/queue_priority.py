@@ -8,6 +8,9 @@ from scripts.swarm.store import RedisStore, SwarmError
 PENDING = "queue-priority"
 
 
+from scripts.swarm.ledger_client import LedgerClient
+
+
 def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -> dict | None:
     groups = journal.groups()
     if groups is None:
@@ -69,7 +72,15 @@ def drop_reason(url: str) -> str:
     return ""
 
 
-def replay(store, slug, url, record, tasks, journal, ledger) -> None:
+def replay(
+    store: RedisStore,
+    slug: str,
+    url: str,
+    record: dict,
+    tasks: list[dict],
+    journal: queue_record.Journal,
+    ledger: LedgerClient | None,
+) -> None:
     try:
         apply(store, slug, url, record["sender"], tasks, journal, record.get("ahead", ()))
     except SwarmError as exc:
@@ -104,7 +115,7 @@ def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
                     continue
             replay(store, slug, url, record, tasks, journal, ledger)
             for later_url, later in records:
-                later["ahead"] = [*later.get("ahead", []), url]
+                later["ahead"] = list(dict.fromkeys([*record.get("ahead", []), *later.get("ahead", []), url]))
                 store.redis.hset(store.key(slug, PENDING), later_url, json.dumps(later))
             journal.write("priority-applied", url, "", None, None, **record)
             actions.append(f"applied deferred merge queue priority for {url}")

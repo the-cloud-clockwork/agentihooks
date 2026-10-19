@@ -37,7 +37,7 @@ def priority(monkeypatch, tmp_path):
     def graphql(query, variables, run):
         if run is subprocess.run:
             assert query == merge_queue.STATE
-            assert variables["url"] in (URL, URL + "0")
+            assert variables["url"] in (URL, URL + "0", URL + "00")
             return original_graphql(query, variables, queue.run)
         return original_graphql(query, variables, run)
 
@@ -45,7 +45,7 @@ def priority(monkeypatch, tmp_path):
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
 
     def read_groups(journal):
-        assert journal.url in (URL, URL + "0")
+        assert journal.url in (URL, URL + "0", URL + "00")
         return groups
 
     monkeypatch.setattr(queue_record.Journal, "groups", read_groups)
@@ -440,7 +440,7 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
 
     def run(command, **kwargs):
         if command[2] == "graphql" and "entries(" in command[4]:
-            command = [item.replace("url=" + URL + "0", "url=" + URL) for item in command]
+            command = ["url=" + URL if item.startswith("url=") else item for item in command]
         return original_run(command, **kwargs)
 
     monkeypatch.setattr(p.queue, "run", run)
@@ -467,15 +467,22 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
             f"applied deferred merge queue priority for {URL}",
             f"merge queue priority for {URL}0 waits: admission refused",
         ]
+        p.run["status"] = "in_progress"
+        assert cli.main(["sw", "merge", "priority", URL + "00"]) == 0
+        p.run["status"] = "completed"
         monkeypatch.setattr(merge_queue, "prioritize", reorder)
         actions = queue_priority.refresh(p.store, "sw", p.tasks)
-        assert actions == [f"applied deferred merge queue priority for {URL}0"]
+        assert actions == [
+            f"applied deferred merge queue priority for {URL}0",
+            f"applied deferred merge queue priority for {URL}00",
+        ]
     else:
         assert actions == [
             f"applied deferred merge queue priority for {URL}",
             f"applied deferred merge queue priority for {URL}0",
         ]
-    assert [entry["pullRequest"]["id"] for entry in p.queue.entries] == ["P1", "P9", "P90", "P2", "P3"]
+    expected = ["P1", "P9", "P90", "P900", "P2", "P3"] if retry else ["P1", "P9", "P90", "P2", "P3"]
+    assert [entry["pullRequest"]["id"] for entry in p.queue.entries] == expected
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 
 
