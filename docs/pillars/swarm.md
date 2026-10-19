@@ -1385,9 +1385,9 @@ card. The swarm writes these values:
 | Value | Written by | Cleared when |
 |---|---|---|
 | `merge` | `swarm ready`, which releases the seat of a task whose reviewed pull request waits only on checks and the merge queue; the task stays `pr` | The merge pass closes the task after the merge, or reopens a task of a kind other than code or ci to `open` with the field empty, awaiting its proof; a reopen for a fix writes `fix` instead; withdrawing the ready record or a stalled claim release writes it empty |
-| `fix` | The merge pass, when a released task's checks go red, its pull request closes unmerged or conflicts with dev, the queue ejects it, GitHub refuses the queue or the pull request has another merge problem; the task reopens `open` with no claimant, and the tick offers it ahead of fresh work of the same rank | The next engineer's `swarm pr` writes it empty, or `approval` at `assist` autonomy; `swarm ready` writes `merge` |
+| `fix` | The merge pass, when a released task's checks go red, its pull request closes unmerged or conflicts with dev, the queue ejects it, GitHub refuses the queue or the pull request has another merge problem; once no live agent owns the task it reopens `open` with no claimant, and the tick offers it ahead of fresh work of the same rank | The next engineer's `swarm pr` writes it empty, or `approval` at `assist` autonomy; `swarm ready` writes `merge` |
 | `approval` | `swarm pr` at `assist` autonomy, so the merge waits on the operator; the task sits in Priorities while it is `pr` | A later `swarm pr` at another autonomy writes it empty; the label hides once the task is `done` |
-| `verify` | The merge pass, when a task with post merge proof merges before its evidence is recorded; the task reopens `open` | The evidence is recorded and the task closes, or the master runs `task set ID awaiting=` (see [Post merge proof](../reference/post-merge-proof.md)) |
+| `verify` | The merge pass, when a task with post merge proof merges before its evidence is recorded; the task reopens `open` once no live agent owns it, and until then stays `pr` while its owner waits on the proof | The evidence is recorded and the task closes, or the master runs `task set ID awaiting=` (see [Post merge proof](../reference/post-merge-proof.md)) |
 | `recovery_pending` | The Kubernetes controller, while a fenced attempt's replacement has not launched or not yet reported its recovery outcome | The replacement reports; the controller writes back the value the task held before, so a `merge` or `approval` wait returns |
 
 The master can also set or clear the field by hand:
@@ -1415,10 +1415,11 @@ writers above or `task set`.
   replacement has not reported. The controller writes the prior value back on its next pass once the replacement
   reports. A controller log line `the ledger refused the recovery mark on task ID` means the ledger rejected the
   write, and the label stays until a later pass succeeds.
-- **A task shows `FIX`.** Its released pull request went red, closed, conflicts with dev, left the queue or GitHub refused the queue. The next engineer
-  continues it from the stored handoff and the existing pull request.
-- **A task shows `MERGE` but its pull request merged.** The merge pass closes it on the next tick. A task of a kind
-  other than code or ci goes back to `open` instead, with a comment that it awaits its proof.
+- **A task shows `FIX`.** Its released pull request went red, closed, conflicts with dev, left the queue or
+  GitHub refused the queue. The next engineer continues it from the stored handoff and the existing pull request.
+- **A task shows `MERGE` but its pull request merged.** The merge pass closes it on the next tick while its ready
+  record is held and its engineer still claims it; otherwise the merge pass clears the label and the task stays
+  `pr`. A task of a kind other than code or ci goes back to `open` instead, with a comment that it awaits its proof.
 - **A task shows `VERIFY` with no engineer.** The post merge measurement window has not matured or has no maturity
   time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
