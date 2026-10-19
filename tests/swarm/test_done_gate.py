@@ -4,8 +4,6 @@ from scripts.swarm import done_gate
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 URL = "https://github.com/o/r/pull/9"
 DAY_MS = 24 * 60 * 60_000
 NOW = 10 * DAY_MS

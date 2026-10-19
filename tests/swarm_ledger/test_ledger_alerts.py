@@ -18,8 +18,6 @@ from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "alerts-2026-01-01"
 LONG = " ".join(["word"] * 120)
 SIZE_TEXT = "phase {} description has 120 words, limit 100"

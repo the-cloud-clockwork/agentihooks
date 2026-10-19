@@ -6,8 +6,6 @@ from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seen import SeenMarks, write_ref
 from scripts.inbox.store import InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 EVENT = {"rev": 3, "by": "operator", "kind": "note added", "id": "n-1", "text": "note 1"}
 
 

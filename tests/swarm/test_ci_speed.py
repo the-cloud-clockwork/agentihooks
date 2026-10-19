@@ -10,8 +10,6 @@ import pytest
 from scripts.swarm import ci_speed
 from scripts.swarm.store import PREFIX
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RUNS = json.loads((Path(__file__).resolve().parent.parent / "fixtures" / "ci_speed_runs.json").read_text())
 NOW_MS = 1_791_454_000_000
 HOUR_MS = 3_600_000

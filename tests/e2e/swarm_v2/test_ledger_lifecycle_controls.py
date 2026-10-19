@@ -7,8 +7,6 @@ from scripts.swarm import command_runner, commands, lifecycle
 from scripts.swarm_ledger import ledger_server
 from tests import sv2_ux02_cases
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 EVIDENCE = Path(__file__).parents[3] / "evidence" / "SV2-UX-02"
 MODULES = (command_runner, commands, lifecycle, ledger_server)
 

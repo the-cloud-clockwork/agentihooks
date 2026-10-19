@@ -18,8 +18,6 @@ from tests.swarm_ledger.test_controller_hosted_ledger import (
     store as store,
 )
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def _operation(deployed):
     claim = deployed.service.tasks.current("t1")

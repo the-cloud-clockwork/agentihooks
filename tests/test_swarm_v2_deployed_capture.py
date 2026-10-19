@@ -4,7 +4,7 @@ from dataclasses import replace
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("capture_at,status", [(39, "complete"), (40, "incomplete")])

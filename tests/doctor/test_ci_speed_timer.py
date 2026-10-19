@@ -12,7 +12,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.doctor.test_ci_speed import NOW, job, record, stamp
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 DOCTOR = "speed-doctor"
 WATCHED = "speed-watched"
 

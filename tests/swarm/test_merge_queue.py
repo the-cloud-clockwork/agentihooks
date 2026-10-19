@@ -23,7 +23,6 @@ AUTHORED = {"sha": "abc", "commit": {"message": "Change the code"}, "committer":
 REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}, "committer": {"login": "web-flow"}}
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 READ_PULL = ledger_events.view
 
 

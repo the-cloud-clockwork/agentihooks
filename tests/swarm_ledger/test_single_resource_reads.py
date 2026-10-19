@@ -10,7 +10,6 @@ from tests.swarm_ledger.test_ledger_authority import SLUG, core, server
 
 repository = default_repository()
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 authority_live = _authority_live
 live = _live
 

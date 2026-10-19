@@ -21,8 +21,6 @@ from scripts.swarm_ledger.api.errors import APIError
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 live = _authority_live
 ROOT = Path(__file__).resolve().parents[2]
 CREDENTIAL = "hive-ledger-credential"

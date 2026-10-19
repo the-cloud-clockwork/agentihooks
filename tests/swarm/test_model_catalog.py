@@ -6,8 +6,6 @@ import pytest
 
 from scripts.swarm import model_catalog
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 HELP = """Usage: claude [options] [command] [prompt]
 
 Options:

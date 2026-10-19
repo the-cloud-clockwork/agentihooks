@@ -13,7 +13,7 @@ from scripts.swarm_v2.kubernetes.completion import Completion
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from tests import sv2_kub04_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-04"
 
