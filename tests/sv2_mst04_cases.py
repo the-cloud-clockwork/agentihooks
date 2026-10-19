@@ -46,7 +46,7 @@ class World:
             "sources": [],
             "phases": [{"title": title, "description": title} for title in INPUTS["phases"]],
         }
-        html_path, _ = core.paths(SLUG)
+        html_path, _ = legacy_page.paths(SLUG, core)
         html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         core.sync(SLUG)
         ops = [{"op": "join", "id": f"join-{n}", "by": n, "role": "orchestrator"} for n in (LEAD_NAME, SECOND_NAME)]

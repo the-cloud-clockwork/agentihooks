@@ -15,7 +15,7 @@ from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger.ledger_page import ORDER, page_source  # noqa: E402
 
-MODULES = core.TEMPLATE.parent / "static" / "js"
+MODULES = core.MODULES
 CONTENT = {
     "title": "Modules",
     "overview": "o",
@@ -115,9 +115,15 @@ def test_the_asset_list_serves_the_palette_and_the_home_script_by_their_paths():
 def test_the_page_version_hashes_the_pages_then_each_name_a_nul_and_its_bytes():
     import hashlib
 
-    pages = core.TEMPLATE.read_bytes() + core.SHELL.read_bytes() + core.HOME.read_bytes()
+    pages = core.SHELL.read_bytes() + core.HOME.read_bytes()
     expected = hashlib.sha256(pages + b"a\0b").hexdigest()[:12]
     assert core.page_version({"a": b"b"}) == expected
+
+
+def test_the_old_per_ledger_template_and_page_path_helper_are_gone():
+    assert not (core.SHELL.parent / "template.html").exists()
+    assert not hasattr(core, "TEMPLATE")
+    assert not hasattr(core, "paths")
 
 
 def test_a_version_url_serves_the_bytes_its_version_was_computed_from(base, tmp_path):

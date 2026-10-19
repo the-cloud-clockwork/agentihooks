@@ -23,7 +23,7 @@ def make_ledger(tasks=()):
         "phases": [{"title": "one", "description": "d"}],
         "tasks": list(tasks),
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)

@@ -13,7 +13,17 @@ from hashlib import sha256
 from pathlib import Path
 
 from scripts.inbox.store import DuplicateItem, InboxStore
-from scripts.swarm import claim_order, done_gate, idle, linked_issues, merge_queue, stack, staged_compatibility, waits
+from scripts.swarm import (
+    claim_order,
+    done_gate,
+    idle,
+    linked_issues,
+    merge_queue,
+    queue_exit,
+    stack,
+    staged_compatibility,
+    waits,
+)
 from scripts.swarm.store import ASSIST, MANUAL, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_kinds
 
@@ -28,6 +38,10 @@ HOLDS = ("timed out", "error connecting to api.github.com", "HTTP 5", "the curre
 REOPENED = (
     "Reopened by the swarm: its pull request {url} {what}. The next engineer continues it from the handoff its "
     "engineer left."
+)
+REQUEUED = (
+    "The swarm queued {url} again: it left the merge queue while green and no merge group run of its own failed, "
+    "so the task keeps its claim."
 )
 PROOF = (
     "The swarm merged {url}. This {kind} task stays open for its proof; the next engineer continues it from the "
@@ -159,6 +173,7 @@ class Pass:
     reread: Callable
     now_ms: int
     queue: Callable = merge_queue.operate
+    exits: Callable = queue_exit.own_failures
 
 
 def merge_pass(run, rows):
@@ -210,7 +225,26 @@ def _advance(run, rows, row, found):
         return []
     if outcome == f"pull request {url}, now merged":
         return _finish(run, rows, row, found)
+    if outcome.startswith(f"pull request {url}, now green"):
+        return _requeue(run, row, found)
     return _reopen(run, row, found, "left the merge queue without merging")
+
+
+def _requeue(run, row, found):
+    task_id, url = row["id"], found["url"]
+    try:
+        failures = run.exits(url, found["queued_at"])
+    except SwarmError as exc:
+        save(run.store, run.slug, task_id, found)
+        return [f"could not read the merge group runs of {url} for task {task_id}: {exc}"]
+    if failures is None or failures or found.get("requeues", 0) >= QUEUE_TRIES:
+        return _reopen(run, row, found, "left the merge queue without merging")
+    actions = _queue(run, row, found)
+    if actions == [f"queued {url} for task {task_id}"]:
+        found["requeues"] = found.get("requeues", 0) + 1
+        save(run.store, run.slug, task_id, found)
+        run.ledger.comment(run.slug, task_id, REQUEUED.format(url=url), by="swarm")
+    return actions
 
 
 def _checks(run, row, found, pull):

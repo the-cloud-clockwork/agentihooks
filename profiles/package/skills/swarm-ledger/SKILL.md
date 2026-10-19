@@ -250,7 +250,7 @@ The session that started the swarm stays out of the work and speaks for the oper
 
 ## Page design (operator rules)
 
-Every change to `template.html` keeps these:
+Every change to the ledger page (`shell.html` and `static/`) keeps these:
 
 - Minimal. Messages (comments, answers, notes) are plain rows: author and time
   on one line, the text under it, faint Edit and Delete on the right. No cards,
@@ -363,4 +363,4 @@ In agentihooks `scripts/swarm_ledger/`; `agentihooks ledger` dispatches to them 
 | `chat_ledger.py` | Post a chat message as an agent through the running server | No (each call adds a message) |
 | `ledger_core.py` | Validation, flatten, checkbox merge, the `sync` facade over the repository | — (library) |
 | `repository/` | `SQLiteLedgerRepository`: row diff writes, events, summaries, token, bin registry, legacy import | — (library) |
-| `template.html` | The page: HTML + CSS + vanilla JS, no external requests | — |
+| `shell.html`, `static/` | The page: a static shell plus its CSS and ES modules, no external requests | — |

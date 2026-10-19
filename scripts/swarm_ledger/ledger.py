@@ -611,6 +611,7 @@ def cmd_followup(args):
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
             **hive_fields(args),
+            **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
     elif args.action in ("flag", "unflag"):
         send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")

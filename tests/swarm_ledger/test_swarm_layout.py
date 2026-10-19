@@ -17,7 +17,6 @@ from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/layout"
 NOW_MS = 1_791_300_000_000
 NOW_S = NOW_MS // 1000
