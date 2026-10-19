@@ -185,6 +185,38 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch):
     assert not store.redis.hgetall(store.key("sw", queue_priority.PENDING))
 
 
+def test_wait_pass_applies_priority_without_an_agent_wait(env, monkeypatch):
+    store, ledger, runtime = env
+    assert cli.main(["sw", "create", "--repo", "/repo"]) == 0
+    store.redis.hset(
+        store.key("sw", queue_priority.PENDING),
+        URL,
+        json.dumps({"repo": "o/r", "group_head": "old-group", "run_id": 42, "sender": "master"}),
+    )
+    applied = []
+
+    def rest(path, run):
+        assert path == "repos/o/r/actions/runs/42"
+        return {"status": "completed"}
+
+    def reorder(url, journal):
+        applied.append(url)
+        return {"url": url, "displaced": [], "errors": []}
+
+    def graphql(query, variables, run):
+        assert query == merge_queue.STATE
+        assert variables == {"url": URL}
+        return {"resource": {"state": "OPEN", "baseRefName": "dev"}}
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    monkeypatch.setattr(merge_queue, "rest", rest)
+    monkeypatch.setattr(merge_queue, "prioritize", reorder)
+    actions = cli.run_waits(store, "sw", ledger)
+    assert applied == [URL]
+    assert f"applied deferred merge queue priority for {URL}" in actions
+    assert not store.redis.hgetall(store.key("sw", queue_priority.PENDING))
+
+
 def test_missing_run_resolves_original_group_after_queue_advances(priority, monkeypatch, capsys):
     p = priority
     responses = [[], [{"id": 42, "status": "completed"}]]
