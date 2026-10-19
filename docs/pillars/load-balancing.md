@@ -385,8 +385,8 @@ token value, so those sessions still count against the one account:
 - The configured tokens are the non empty `AH_CC_TOKEN_<slug>` names in the
   environment plus the managed token block, `api` excluded. Each token counts
   once, under the name chosen by the dedupe rule shared by every account list
-  (see [Codex accounts](#codex-accounts)); that name is the slug the balancer routes
-  the token under.
+  (see [Codex accounts](#codex-accounts)); that name is the slug the balancer
+  routes the token under.
 - A session holding exactly one `AH_CC_TOKEN_<slug>` name is matched to a
   configured token by a SHA-256 of its value, computed in process. A match
   counts the session under the routed slug, whatever name it carries; no match
