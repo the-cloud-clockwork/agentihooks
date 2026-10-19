@@ -172,11 +172,10 @@ def test_a_failing_slot_is_logged_unacknowledged_and_other_entries_still_run(cap
     assert broken.state == "pending"
     assert broken.record["pending"]["delivered"] == [sibling]
     assert scheduler.redis.smembers(scheduler.key("pending")) == {broken.id}
-    failures = [record.getMessage() for record in caplog.records]
-    assert len(failures) == 1
-    assert broken.id in failures[0]
-    assert reference in failures[0]
-    assert "No module named 'scripts.scheduler.absent_slot_module'" in failures[0]
+    assert [record.getMessage() for record in caplog.records] == [
+        f"scheduler slot delivery failed: entry {broken.id} slot {{'kind': 'callable', 'reference': '{reference}'}}"
+        " error ModuleNotFoundError(\"No module named 'scripts.scheduler.absent_slot_module'\")"
+    ]
     caplog.clear()
     with caplog.at_level(logging.WARNING, logger="scripts.scheduler.core"):
         assert scheduler.run_due(now=110) == 0

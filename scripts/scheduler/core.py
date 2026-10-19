@@ -246,7 +246,7 @@ class Scheduler:
             "scheduled_at": pending["scheduled_at"],
             "fired_at": pending["fired_at"],
         }
-        failed = False
+        failed = []
         for connection in pending["slots"]:
             if self.get(entry_id).state != "pending":
                 return
@@ -259,7 +259,7 @@ class Scheduler:
             try:
                 restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.redis)
             except Exception as exc:
-                failed = True
+                failed.append(connection_id)
                 _log.warning("scheduler slot delivery failed: entry %s slot %s error %r", entry_id, slot, exc)
                 continue
 
