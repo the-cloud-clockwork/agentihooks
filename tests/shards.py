@@ -1,6 +1,7 @@
 import ast
 import importlib
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -109,7 +110,13 @@ def _assign_work(
 
 
 def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float) -> list[str]:
-    seconds = {nodeid: durations.get(nodeid.split("@", 1)[0], 0.0) for nodeid in nodeids}
+    seconds = {nodeid: durations.get(re.sub(r"@[^\[\]]*$", "", nodeid), 0.0) for nodeid in nodeids}
+    # A group's later tests reuse what its first test built, so the group keeps collection order at its slowest place.
+    groups = {nodeid: match[1] for nodeid in nodeids if (match := re.search(r"@([^\[\]]*)$", nodeid))}
+    slowest = {}
+    for nodeid, group in groups.items():
+        slowest[group] = max(slowest.get(group, 0.0), seconds[nodeid])
+    seconds.update({nodeid: slowest[group] for nodeid, group in groups.items()})
     slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
     return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
 

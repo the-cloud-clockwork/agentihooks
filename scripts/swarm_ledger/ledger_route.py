@@ -8,9 +8,12 @@ from scripts.gates import Who
 from scripts.swarm_ledger import ports
 
 CURRENT: ContextVar[tuple[str, str] | None] = ContextVar("ledger_route", default=None)
+DEPLOYMENT, LOCAL = "AGENTIHOOKS_DEPLOYMENT", "local"
 
 
 def configured(store: object, slug: str) -> str:
+    if os.environ.get(DEPLOYMENT, LOCAL) != LOCAL:
+        return ""
     return store.redis.hget(store.key(slug, "config"), "api_url") or ""
 
 
@@ -38,13 +41,21 @@ def session(slug: str) -> Iterator[None]:
         store = ports.swarm().store.connect()
         with scoped(slug, store.config(slug).api_url):
             yield
+            _acknowledge(store, slug, Who.from_env())
     else:
         yield
+
+
+def _acknowledge(store: object, slug: str, who: Who) -> None:
+    if os.environ.get("AGENTIHOOKS_LEDGER_AGENT_TOKEN"):
+        ports.swarm().ledger_cutover.acknowledge(store, slug, who, os.environ)
 
 
 @contextmanager
 def command(store: object, slug: str, who: Who) -> Iterator[None]:
     with scoped(slug, configured(store, slug) if slug else ""):
+        if slug:
+            _acknowledge(store, slug, who)
         yield
 
 

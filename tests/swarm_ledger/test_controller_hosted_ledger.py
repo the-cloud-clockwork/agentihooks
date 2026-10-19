@@ -631,8 +631,7 @@ def test_the_hosted_read_returns_every_phase_past_the_first_page(controller_read
 
 def test_a_local_host_reads_intent_from_its_ledger_folder(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
-    with patch.dict(os.environ):
-        os.environ.pop("AGENTIHOOKS_DEPLOYMENT")
+    with patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "local"}):
         read = ledger_read.parts(SLUG, "overview", "phases")
         absent = ledger_read.parts("absent-ledger", "overview")
 

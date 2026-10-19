@@ -93,7 +93,10 @@ def transport(environ=os.environ) -> dict:
             raise SystemExit(f"{CA_FILE_ENV} names no file: {found}")
         return {}
     context = ssl.create_default_context()
-    context.load_verify_locations(cafile=str(found))
+    try:
+        context.load_verify_locations(cafile=str(found))
+    except ssl.SSLError as error:
+        raise SystemExit(f"the ledger CA file {found} holds no valid certificate: {error.reason}") from error
     return {"context": context}
 
 
@@ -111,13 +114,11 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
 
 
 def remote(environ=os.environ, slug="") -> bool:
-    return (
-        bool(
-            ledger_route.url(slug)
-            or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
-        )
-        or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
-    )
+    mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
+    return bool(
+        ledger_route.url(slug)
+        or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
+    ) or (bool(environ.get("LEDGER_URL")) if mode is None else mode != "local")
 
 
 def access_headers(environ=os.environ) -> dict:

@@ -33,6 +33,7 @@ class Swarm(Protocol):
     operator_auth: Any
     task_specs: Any
     authority: Any
+    ledger_cutover: Any
 
 
 @runtime_checkable

@@ -257,6 +257,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
+    actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
@@ -1209,7 +1210,19 @@ def _recover_master(slug, config, store, runtime, now_ms):
     return [f"adopted live master {name}"]
 
 
-def _master(slug, config, store, runtime, now_ms):
+def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
+    from scripts.swarm.health import night_watch
+
+    def respawn():
+        if master_start.read(store, slug).get("alerted"):
+            store.redis.delete(store.key(slug, "master-start"))
+        with PLACING:
+            return _master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
+
+    return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
+
+
+def _master(slug, config, store, runtime, now_ms, past_host=False):
     store.redis.hdel(MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == MASTER]
@@ -1219,7 +1232,7 @@ def _master(slug, config, store, runtime, now_ms):
         return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
     masters = [m for m in masters if master_seats.is_lead(slug, m)]
     pending = master_start.read(store, slug)
-    if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
+    if any(m.state != "finished" for m in masters) or master_start.blocked(pending, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
@@ -1228,7 +1241,7 @@ def _master(slug, config, store, runtime, now_ms):
     if refused := seat_spawn.no_slot(config, runtime, MASTER):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return [refused]
-    if held := seat_spawn.host_hold(slug, store, now_ms, MASTER):
+    if not past_host and (held := seat_spawn.host_hold(slug, store, now_ms, MASTER)):
         return [held]
 
     def prepare(record):
@@ -1255,11 +1268,7 @@ def _master(slug, config, store, runtime, now_ms):
         transfers.failed(store, slug, record)
         store.drop_agent(slug, record.name)
         affinity.failed(store, slug, str(exc))
-        master_alarm.failed(store, slug, f"master spawn failed: {exc}", now_ms)
-        failed = master_start.read(store, slug)
-        if failed.get("attempt") == 1:
-            master_start.save(store, slug, {**failed, "name": "", "retry": True})
-        return [f"master spawn failed: {exc}"]
+        return master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)
     affinity.placed(store, slug, placed.harness)
     master_move.placed(store, slug)
     record = placed_record(record, placed)

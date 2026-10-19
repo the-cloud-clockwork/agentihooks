@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
-from urllib.request import urlopen
+from urllib.request import Request
 
 MAX_SAMPLES = 50000
 RETENTION_SECONDS = 7 * 86400
@@ -447,13 +447,18 @@ def endpoint(method: Callable) -> Callable:
     return request
 
 
+def urlopen(url: str, timeout: float):
+    from scripts.swarm_ledger import ledger_link
+
+    return ledger_link.urlopen(Request(url), timeout)
+
+
 def main(argv: list[str] | None = None) -> None:
     from scripts.swarm_ledger import ledger_link
 
-    host, port = ledger_link.address()
     parser = argparse.ArgumentParser(description="Ledger write timing and request route CPU")
     parser.add_argument("--hours", type=float, default=24.0)
-    parser.add_argument("--url", default=f"http://{host}:{port}")
+    parser.add_argument("--url")
     parser.add_argument("--end", type=float)
     parser.add_argument("--writes", action="store_true")
     parser.add_argument("--limit", type=int, default=DEFAULT_RECORDS)
@@ -467,7 +472,8 @@ def main(argv: list[str] | None = None) -> None:
     query = f"hours={args.hours}"
     query += f"&end={args.end}" if args.end is not None else ""
     query += f"&view=writes&limit={args.limit}" if args.writes else ""
-    with urlopen(f"{args.url.rstrip('/')}/api/v1/metrics?{query}", timeout=10) as response:
+    url = args.url or ledger_link.base()
+    with urlopen(f"{url.rstrip('/')}/api/v1/metrics?{query}", timeout=10) as response:
         print(json.dumps(json.load(response), sort_keys=True))
 
 

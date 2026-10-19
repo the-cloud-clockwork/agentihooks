@@ -175,6 +175,7 @@ class HiveLaunch:
             prompt_ref,
             self.held.epoch,
             lease.now_ms(self.store) + TTL_MS,
+            selected.hive,
         )
         with self.store.redis.pipeline() as pipe:
             pipe.set(prompt_ref, json.dumps(task), px=TTL_MS)
@@ -232,11 +233,13 @@ class HiveLaunch:
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
         current = self.store.execution_occupants(self.slug).get(agent.seat)
+        if current is None or current.execution_id != order.execution_id or agent.generation != order.generation:
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        if agent.state == "launching":
+            agent = self.record(agent, order, ack)
         if (
-            current is None
-            or current.execution_id != order.execution_id
-            or agent.generation != order.generation
-            or agent.runtime_target != ack.target
+            agent.runtime_target != ack.target
+            or agent.pane_id != ack.execution.get("pane_id", agent.pane_id)
             or agent.state != "working"
         ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
@@ -255,6 +258,29 @@ class HiveLaunch:
             desired_route_kind=agent.desired_route_kind if agent.lane == "master" else None,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
+
+    def record(self, agent: AgentRecord, order: LaunchOrder, ack: Ack) -> AgentRecord:
+        """A joined hive cannot write the swarm keyspace, so the controller records what it acknowledged."""
+        decision = ack.execution.get("profile_decision", {})
+        if ack.target.get("host_id") != order.hive or not isinstance(decision, dict):
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        kept = (
+            {"master_placement": agent.profile_decision["master_placement"]}
+            if "master_placement" in agent.profile_decision
+            else {}
+        )
+        live = replace(
+            agent,
+            runtime_target=ack.target,
+            state="working",
+            pane_id=ack.execution.get("pane_id", agent.pane_id),
+            model=ack.execution.get("model", agent.model),
+            effort=ack.execution.get("effort", agent.effort),
+            profile_decision={**decision, **kept},
+        )
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
+        self.store.execution_registry.update(self.slug, live)
+        return live
 
     def end(self, agent: AgentRecord, reason: str) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)

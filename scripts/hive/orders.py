@@ -1,6 +1,6 @@
 import hashlib
 import json
-from dataclasses import asdict, dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
@@ -32,6 +32,7 @@ class LaunchOrder:
     prompt_ref: str
     epoch: int
     expires_at: int
+    hive: str = ""
 
 
 @dataclass(frozen=True)
@@ -39,6 +40,13 @@ class Ack:
     status: str
     target: dict
     failure: str = ""
+    execution: dict = field(default_factory=dict)
+
+    def encode(self) -> str:
+        fields = asdict(self)
+        if not self.execution:
+            del fields["execution"]
+        return json.dumps(fields)
 
 
 @dataclass(frozen=True)
@@ -88,7 +96,7 @@ class Orders:
         return f"{registry.key(hive)}:orders"
 
     def receipt(self, order: LaunchOrder) -> str:
-        return f"{self.store.key(order.slug, 'launch-orders')}:{order.execution_id}:{order.generation}"
+        return f"{registry.key(order.hive)}:launch-orders:{order.slug}:{order.execution_id}:{order.generation}"
 
     def send(self, hive: str, order: LaunchOrder) -> str:
         return self.redis.xadd(self.stream(hive), {"order": json.dumps(asdict(order))})
@@ -98,7 +106,7 @@ class Orders:
         return Ack(**json.loads(raw)) if raw else None
 
     def finish(self, hive: str, item: str, order: LaunchOrder, ack: Ack) -> None:
-        self.redis.hsetnx(self.receipt(order), "ack", json.dumps(asdict(ack)))
+        self.redis.hsetnx(self.receipt(order), "ack", ack.encode())
         canonical = self.redis.hget(self.receipt(order), "ack")
         with self.redis.pipeline() as pipe:
             pipe.hset(f"{self.stream(hive)}:acks", item, canonical)
@@ -156,6 +164,9 @@ class Consumer:
         for item, fields in entries:
             try:
                 order = LaunchOrder(**json.loads(fields["order"]))
+                if order.hive != self.hive:
+                    self._drop(item, "identity")
+                    continue
                 ack = self.orders.ack(order)
                 if ack is None:
                     ack = self.apply(order)
@@ -169,7 +180,7 @@ class Consumer:
 
     def _drop(self, item: str, failure: str) -> None:
         with self.store.redis.pipeline() as pipe:
-            pipe.hset(f"{self.orders.stream(self.hive)}:acks", item, json.dumps(asdict(Ack("failed", {}, failure))))
+            pipe.hset(f"{self.orders.stream(self.hive)}:acks", item, Ack("failed", {}, failure).encode())
             pipe.xdel(self.orders.stream(self.hive), item)
             pipe.execute()
 
@@ -189,7 +200,7 @@ class Consumer:
                         ack = self.command(order)
                     except Exception as exc:
                         ack = Ack(FAILED, {}, f"error: {type(exc).__name__}")
-                    pipe.hset(receipt, "ack", json.dumps(asdict(ack)))
+                    pipe.hset(receipt, "ack", ack.encode())
                     pipe.expire(receipt, RECEIPT_SECONDS)
                 pipe.xdel(stream, item)
                 pipe.execute()
@@ -240,10 +251,12 @@ class Consumer:
             lease.require_epoch(self.store, order.slug, order.epoch)
         except SwarmError:
             return Ack("failed", {}, "stale_epoch")
+        from redis.exceptions import NoPermissionError
+
         try:
             agent = self.store.execution_registry.get(order.slug, order.execution_id)
             self.identity(order, agent)
-        except SwarmError:
+        except (SwarmError, NoPermissionError):
             return Ack("failed", {}, "identity")
         raw = self.store.redis.get(order.prompt_ref)
         if raw is None:
@@ -294,7 +307,6 @@ class Consumer:
         lease.require_epoch(self.store, order.slug, order.epoch)
         if task.get("workspace"):
             task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
-        self.store.execution_registry.update(order.slug, agent)
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
             return Ack("failed", {}, outcome.status.value)
@@ -304,32 +316,22 @@ class Consumer:
             target = {"host_id": self.hive, **launch_target(pid, self.runtime.namespace(), self.runtime.table())}
         except SwarmError:
             return Ack("failed", {"host_id": self.hive}, "ambiguous")
-        live = replace(
-            agent,
-            runtime_target=target,
-            state="working",
-            pane_id=placed.pane_id,
-            model=placed.model,
-            effort=placed.effort,
-            profile_decision={
-                **(
-                    {"master_placement": agent.profile_decision["master_placement"]}
-                    if "master_placement" in agent.profile_decision
-                    else {}
-                ),
-                **placed.profile_decision,
-            },
-        )
+        live = replace(agent, runtime_target=target, pane_id=placed.pane_id)
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")
         if (placed.harness, placed.profile, placed.account) != (order.harness, order.profile, order.slot):
             return self._stop(live, "identity")
         try:
             lease.require_epoch(self.store, order.slug, order.epoch)
-            self.store.execution_registry.update(order.slug, live)
         except SwarmError:
             return self._stop(live, "refused")
-        return Ack("live", target)
+        execution = {
+            "pane_id": placed.pane_id,
+            "model": placed.model,
+            "effort": placed.effort,
+            "profile_decision": placed.profile_decision,
+        }
+        return Ack("live", target, "", execution)
 
     def _stop(self, agent: AgentRecord, failure: str) -> Ack:
         outcome = self.runtime.terminate(agent)

@@ -355,6 +355,12 @@ def test_slow_tests_run_first_and_the_rest_keep_their_order():
     assert slowest_first(nodeids, durations, 0.1) == ["t::d[x]@probe", "t::b", "t::e", "t::a", "t::c", "t::new"]
 
 
+def test_an_xdist_group_keeps_collection_order_at_its_slowest_tests_place():
+    durations = {"t::builds": 1.0, "t::reuses": 2.0, "t::other": 1.5, "t::fast": 0.01}
+    nodeids = ["t::fast", "t::builds@g", "t::reuses@g", "t::other"]
+    assert slowest_first(nodeids, durations, 0.1) == ["t::builds@g", "t::reuses@g", "t::other", "t::fast"]
+
+
 def _modified_order(tmp_path, nodeids, **config):
     (tmp_path / ".test_durations").write_text(json.dumps({"t::fast": 0.001, "t::slow": 2.0}))
     items = [SimpleNamespace(nodeid=nodeid) for nodeid in nodeids]
