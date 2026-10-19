@@ -139,11 +139,24 @@ function planRow({ key, id, title, phases, plan }) {
   return h("li", { class: "plan" + (plan && plan.out_of_scope ? " out" : "") + (plan ? holdClass(key) : ""), id }, fold);
 }
 
-function phaseList() {
+function phaseList(cooperative = false, current = () => true) {
   sliceTaskCounts.clear();
   for (const task of doc.tasks) if (!task.deleted && task.slice) sliceTaskCounts.set(task.slice, (sliceTaskCounts.get(task.slice) || 0) + 1);
   if (!doc.plans.length) return listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
-  if (sectionOpen("phases")) $("phases").replaceChildren(...planGroups().map(planRow));
+  if (!sectionOpen("phases")) return;
+  const groups = planGroups();
+  const target = $("phases");
+  if (!cooperative) return target.replaceChildren(...groups.map(planRow));
+  const paint = async () => {
+    const rows = document.createDocumentFragment();
+    for (const group of groups) {
+      await scheduler.yield();
+      if (!current()) return;
+      rows.append(planRow(group));
+    }
+    if (current()) target.replaceChildren(rows);
+  };
+  return paint();
 }
 
 function questionRow(item, n) {
@@ -280,7 +293,7 @@ export function render(focusKey, cooperative = false) {
     },
     () => {
       $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
-      phaseList();
+      return phaseList(cooperative, () => version === renderVersion);
     },
     () => {
       $("tasks-count").textContent = taskCounts(doc.tasks);
@@ -305,11 +318,12 @@ export function render(focusKey, cooperative = false) {
   const paint = async () => {
     for (const section of sections) {
       if (cooperative) {
-        await new Promise((done) => setTimeout(done, 0));
+        await scheduler.yield();
         if (version !== renderVersion) return rendered;
       }
       try {
-        section();
+        const drawing = section();
+        if (cooperative) await drawing;
       } catch (error) {
         console.error(error);
       }
