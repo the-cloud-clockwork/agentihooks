@@ -1141,6 +1141,49 @@ every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
+### Controller lease during long steps
+
+A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and a pass is
+stopped only at its 450 second deadline, with 30 seconds of grace. The pass keeps the lease in two ways.
+
+- **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
+  first renews the lease, extends the tick lock and records the swarm's last tick activity. Renewal happens only at
+  step boundaries, so a single step longer than the lease still loses it.
+- **During a step that can outlast the lease.** Such a step runs inside a lease heartbeat: a background thread renews
+  the lease once per tick interval until the step returns. The thread stops for good when the lease is no longer
+  this controller's (a higher epoch took over) and tries again at the next beat after a Redis error. Today the
+  Doctor timer of a `doctor` swarm runs this way.
+
+The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
+and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
+most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
+either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
+
+A lease that expires mid pass ends the pass at its next step, fenced ledger call or spawn with this journal line:
+
+```text
+rig-grade-swarm: SwarmError: the controller lease is stale
+```
+
+Find these lines and the step that ran long before them:
+
+```bash
+journalctl --user -t agentihooks-swarm --since "-12h" | grep "controller lease is stale"
+journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
+```
+
+The finished step records carry each step's name, outcome and `wall_s` duration. The step that
+ran longer than the lease before the error is the one to move inside a heartbeat. Any tick step that can run longer than the lease
+belongs inside the heartbeat, the way the Doctor timer does:
+
+```python
+with lease.kept(store, slug, held):
+    actions += skip_refused(doctor.timer, store, slug, now_ms(), scheduled)
+```
+
+The next pass acquires a new lease with a higher epoch when no other controller holds it, so one stale pass loses
+only the rest of that pass's work.
+
 ### Staged and prerequisite pull requests
 
 A task that lands in stages, or registers a prerequisite pull request before its own, declares the scope each such pull request delivers when it records it:
@@ -1377,6 +1420,55 @@ marks the swarm drained and posts a ledger notice. It names how many open tasks 
 example `The swarm has no task it may start: 3 open tasks are held by the focus on phase Documentation agents`, and
 says only `The swarm has no task left to start` when none is held. The ledger page's time left leaves held tasks out
 and says so: `with 3 frozen tasks holding 90m of work left out`.
+
+## Task awaiting states
+
+A task's `awaiting` field names what the task waits on beyond its `state`. It lives on the task record in the
+ledger, separate from an agent's own state such as `awaiting-decision`, which the swarm panel shows on the agent's
+card. The swarm writes these values:
+
+| Value | Written by | Cleared when |
+|---|---|---|
+| `merge` | `swarm ready`, which releases the seat of a task whose reviewed pull request waits only on checks and the merge queue; the task stays `pr` | The merge pass closes the task after the merge, or reopens a task of a kind other than code or ci to `open` with the field empty, awaiting its proof; a reopen for a fix writes `fix` instead; withdrawing the ready record or a stalled claim release writes it empty |
+| `fix` | The merge pass, when a released task's checks go red, its pull request closes unmerged or conflicts with dev, the queue ejects it, GitHub refuses the queue or the pull request has another merge problem; once no live agent owns the task it reopens `open` with no claimant, and the tick offers it ahead of fresh work of the same rank | The next engineer's `swarm pr` writes it empty, or `approval` at `assist` autonomy; `swarm ready` writes `merge` |
+| `approval` | `swarm pr` at `assist` autonomy, so the merge waits on the operator; the task sits in Priorities while it is `pr` | A later `swarm pr` at another autonomy writes it empty; the label hides once the task is `done` |
+| `verify` | The merge pass, when a task with post merge proof merges before its evidence is recorded; the task reopens `open` once no live agent owns it, and until then stays `pr` while its owner waits on the proof | The evidence is recorded and the task closes, or the master runs `task set ID awaiting=` (see [Post merge proof](../reference/post-merge-proof.md)) |
+| `recovery_pending` | The Kubernetes controller, while a fenced attempt's replacement has not launched or not yet reported its recovery outcome | The replacement reports; the controller writes back the value the task held before, so a `merge` or `approval` wait returns |
+
+The master can also set or clear the field by hand:
+
+```bash
+agentihooks ledger --slug example --as master task set t12 awaiting=verify
+agentihooks ledger --slug example --as master task set t12 awaiting=
+```
+
+### On the ledger page
+
+Each task row on the ledger page shows a non empty `awaiting` value as a label in the row meta, right after the
+task state: a task in `pr` with `awaiting` set to `merge` reads `pr` then `MERGE`. Underscores and dashes
+become spaces, so `recovery_pending` shows as `RECOVERY PENDING`. The label has the kind label's bold
+weight, uppercase and letter spacing, in the palette's `--accent-2` colour from `palette.css`; it adds no colour of
+its own.
+
+A row shows no label when the field is empty or absent, and a `done` task never shows one, even when a stale value
+remains on its record. The label is display only: it carries no control, and the value changes only through the
+writers above or `task set`.
+
+### Troubleshooting
+
+- **A task shows `RECOVERY PENDING` for a long time.** Its fenced attempt has no launched replacement, or the
+  replacement has not reported. The controller writes the prior value back on its next pass once the replacement
+  reports. A controller log line `the ledger refused the recovery mark on task ID` means the ledger rejected the
+  write, and the label stays until a later pass succeeds.
+- **A task shows `FIX`.** Its released pull request went red, closed, conflicts with dev, left the queue or
+  GitHub refused the queue. The next engineer continues it from the stored handoff and the existing pull request.
+- **A task shows `MERGE` but its pull request merged.** The merge pass closes it on the next tick while its ready
+  record is held and its engineer still claims it; otherwise the merge pass clears the label and the task stays
+  `pr`. A task of a kind other than code or ci goes back to `open` instead, with a comment that it awaits its proof.
+- **A task shows `VERIFY` with no engineer.** The post merge measurement window has not matured or has no maturity
+  time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
+- **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
+  `task set`, never by editing the ledger file.
 
 ## Redis
 

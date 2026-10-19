@@ -1158,12 +1158,25 @@ def test_a_reopen_leaves_a_task_the_ledger_already_moved_on(merging):
     assert merging.ledger.rows["t1"]["state"] == "done" and merging.ledger.rows["t1"]["claimed_by"] == AGENT
 
 
-def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging):
+@pytest.mark.parametrize("pull", [GREEN, RED], ids=["green-with-merge-group-failure", "red-checks"])
+def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging, pull):
     queued_at_now(merging)
     merging.pulls[URL] = QUEUED
     merging.run(NOW + 60_000)
-    merging.pulls[URL] = GREEN
+    merging.pulls[URL] = pull
     assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.rows["t1"]["state"] == "open"
+    assert merging.rows["t1"]["awaiting"] == "fix"
+    assert merging.queued == [("queue", URL)]
+
+
+def test_a_pull_request_that_leaves_the_queue_red_reopens_without_a_requeue(merging):
+    queued_at_now(merging)
+    merging.pulls[URL] = QUEUED
+    merging.run(NOW + 60_000)
+    merging.pulls[URL] = RED
+    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.exits.calls == [] and merging.queued == [("queue", URL)]
     assert merging.rows["t1"]["state"] == "open"
 
 
