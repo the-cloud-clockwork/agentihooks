@@ -766,10 +766,17 @@ def test_supervise_starts_the_scheduler_with_the_swarm_redis(monkeypatch):
 
 def _supervisor(monkeypatch, record, order, drained=True):
     from scripts.scheduler import service
+    from scripts.swarm.store import redis_url
 
-    monkeypatch.setattr(service, "holder", lambda environ: record)
+    def swarm(environ):
+        assert environ["AGENTIHOOKS_SWARM_REDIS_URL"] == redis_url(os.environ)
+        return environ
+
+    monkeypatch.setattr(service, "holder", lambda environ: swarm(environ) and record)
     monkeypatch.setattr(service, "revision", lambda root: f"revision at {root}")
-    monkeypatch.setattr(service, "drain", lambda pid, environ: order.append(f"drain {pid}") or drained)
+    monkeypatch.setattr(
+        service, "drain", lambda pid, environ: swarm(environ) and order.append(f"drain {pid}") or drained
+    )
     monkeypatch.setattr(timer, "supervise", lambda: order.append("supervise") or True)
 
 
@@ -842,11 +849,12 @@ def test_guard_retires_a_kept_timer_only_after_the_running_supervisor_delivered(
     here = _delivering(monkeypatch)
     _supervisor(monkeypatch, CURRENT, [])
     ensured = []
-    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append((binary, unit_dir)) or True)
+    monkeypatch.setattr(timer, "ensure", lambda binary, unit_dir, run: ensured.append((binary, unit_dir, run)) or True)
     _kept_units(tmp_path)
     scheduled_tick.record(here, "/installed", delivered)
-    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
-    assert ensured == ([("/installed/bin/agentihooks", tmp_path)] if retired else [])
+    runner = _systemctl([])
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=runner) is True
+    assert ensured == ([("/installed/bin/agentihooks", tmp_path, runner)] if retired else [])
 
 
 def test_guard_retires_nothing_once_the_timer_units_are_gone(tmp_path, monkeypatch):

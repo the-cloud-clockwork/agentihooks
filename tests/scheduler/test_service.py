@@ -361,6 +361,22 @@ def test_holder_reads_the_record_of_the_supervisor_holding_its_lock(monkeypatch,
     assert service.holder({}) is None
 
 
+def test_holder_reads_the_lock_and_record_of_the_given_domain(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    domain = {"AGENTIHOOKS_SWARM_REDIS_URL": "redis://domain.invalid/2"}
+    monkeypatch.setattr(
+        service, "runtime_dir", lambda environ=None: tmp_path / ("domain" if environ == domain else "default")
+    )
+    (tmp_path / "domain").mkdir()
+    with service.machine_lock("supervisor", environ=domain):
+        record = {"pid": os.getpid(), "root": "/installed", "revision": "r1", "started": 5.0}
+        (tmp_path / "domain" / "supervisor.json").write_text(json.dumps(record))
+        assert service.holder(domain) == record
+    with service.machine_lock("supervisor"):
+        assert service.holder(domain) is None
+
+
 def test_holder_of_a_lock_with_no_pid_names_pid_zero(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
@@ -384,10 +400,13 @@ def _clock(monkeypatch, service, slept):
 def test_drain_terminates_the_supervisor_and_waits_for_its_lock_to_free(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(
+        service, "runtime_dir", lambda environ=None: tmp_path / ("given" if environ == {} else "default")
+    )
+    (tmp_path / "given").mkdir()
     slept, sent = [], []
     _clock(monkeypatch, service, slept)
-    held = service.machine_lock("supervisor")
+    held = service.machine_lock("supervisor", environ={})
     held.__enter__()
     monkeypatch.setattr(service.os, "kill", lambda pid, number: sent.append((pid, number)))
     exits = iter([False, True])

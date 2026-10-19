@@ -129,7 +129,7 @@ def holder(environ: Mapping[str, str]) -> dict | None:
     try:
         record = json.loads((directory / RECORD).read_text())
     except (OSError, ValueError):
-        record = {}
+        return {"pid": pid}
     return record if isinstance(record, dict) and record.get("pid") == pid else {"pid": pid}
 
 
