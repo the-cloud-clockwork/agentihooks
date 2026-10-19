@@ -49,6 +49,11 @@ def loaded_hives(store: RedisStore) -> list[dict]:
     return hives
 
 
+def _key(account: str) -> str:
+    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
+    return account.replace("_", "-")
+
+
 class HiveLaunch:
     backend = HIVE
     capabilities = frozenset((Capability.SPAWN,))
@@ -103,9 +108,9 @@ class HiveLaunch:
         return self._record_wait(lane, task, reason)
 
     def _master_selection(self, config, decision, hives, now, rows):
-        accounts = {row.name: row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
+        accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
-            {**hive, "slots": [slot for slot in hive["slots"] if slot["account"] in accounts]} for hive in hives
+            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives
         ]
         selected = placement.place_master("claude", "", config.repo, available, now)
         if isinstance(selected, placement.Wait):
@@ -113,7 +118,7 @@ class HiveLaunch:
         account = (
             capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
             if selected.route_kind == "interactive"
-            else accounts[selected.account]
+            else replace(accounts[_key(selected.account)], name=selected.account)
         )
         return Selection(decision, selected.hive, account, selected.route_kind, selected)
 
