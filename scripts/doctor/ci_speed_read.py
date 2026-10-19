@@ -71,11 +71,10 @@ def read(
     known: dict[str, dict] | None = None,
     *,
     run: Callable = subprocess.run,
-    max_calls: int = 60,
-    max_seconds: int = 25,
+    budget: tuple[int, int] = (60, 25),
     active: bool = True,
 ) -> dict:
-    api = _Api(run, max_calls, max_seconds)
+    api = _Api(run, *budget)
     root = f"repos/{REPO}/actions/runs"
     discovered, records = {}, []
     try:
