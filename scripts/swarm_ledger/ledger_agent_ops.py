@@ -16,6 +16,7 @@ STATE_PATH_RE = re.compile(
 FLAG_EVENTS = ("needs the operator", "no longer needs the operator")
 TEXT_ITEM_RE = re.compile(r"^(questions|followups)/[^/]+$")
 GATE_RE = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
+ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}")
 MAX_TEXT = 20000
 
 
@@ -25,6 +26,7 @@ def check(op, task_ids=()):
         raise ValueError("agent ops need `by`, an agent name other than operator")
     kind = op["op"]
     check_hive(op)
+    check_task(op)
     if kind == "join" and op.get("role", "member") not in ROLES:
         raise ValueError(f"role must be one of {ROLES}")
     if kind == "ack" and not isinstance(op.get("rev"), int):
@@ -67,8 +69,16 @@ def check_hive(op):
     if op["op"] != "add_item" or "hive" not in op:
         return
     hive = op["hive"]
-    if not isinstance(hive, str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", hive):
+    if not isinstance(hive, str) or not ID_RE.fullmatch(hive):
         raise ValueError("hive needs an identifier of up to 128 letters, digits, dots, underscores or hyphens")
+
+
+def check_task(op):
+    if op["op"] != "add_item" or "task" not in op:
+        return
+    task = op["task"]
+    if op.get("list") != "followups" or not isinstance(task, str) or not ID_RE.fullmatch(task):
+        raise ValueError("task needs a task id of up to 128 letters, digits, dots, underscores or hyphens")
 
 
 def _screened(text):
@@ -184,8 +194,9 @@ def _add_item(doc, op, ctx):
         return True
     item = {"id": op["id"], "text": op["text"], "comments": []}
     item.update({"done": False} if op["list"] == "followups" else {"answers": []})
-    if "hive" in op:
-        item["hive"] = op["hive"]
+    for field in ("hive", "task"):
+        if field in op:
+            item[field] = op[field]
     if op.get("needs_operator"):
         item["needs_operator"] = True
     items.append(item)

@@ -6,6 +6,7 @@ import subprocess
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from scripts.doctor import ci
 from scripts.swarm.keyspace import ROOT
 
 if TYPE_CHECKING:
@@ -14,6 +15,11 @@ if TYPE_CHECKING:
 TEST = re.compile(
     r"(?:(PASSED|FAILED|SKIPPED) (tests/\S+::.+?)|(tests/\S+::.+?) (PASSED|FAILED|SKIPPED))(?:\s+\[\s*\d+%\])?\s*$"
 )
+
+RUNS = "repos/{owner}/{repo}/actions"
+DEV_PUSHES = f"{RUNS}/runs?branch=dev&event=push&status=completed&per_page=100"
+RUNS_JQ = ".workflow_runs[] | {id, name, path, conclusion, created_at, html_url} | @json"
+JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
 
 
 def test_results(log: str, job: str = "") -> list[dict]:
@@ -95,3 +101,29 @@ def pull_request(repo: str, number: int, run: Callable = subprocess.run, cache: 
         "runs": runs,
         "attempts": _attempts(repo, runs, run, cache),
     }
+
+
+def _repo_rows(repo_dir, endpoint, jq, run):
+    output = run(
+        ["gh", "api", endpoint, "--jq", jq], cwd=repo_dir, capture_output=True, text=True, check=True, timeout=60
+    ).stdout
+    return [json.loads(line) for line in output.splitlines()]
+
+
+def dev_pushes(repo_dir: str, run: Callable = subprocess.run) -> dict:
+    runs = _repo_rows(repo_dir, DEV_PUSHES, RUNS_JQ, run)
+    green, jobs = {}, {}
+    for path, streak in ci.red_streaks(runs).items():
+        last = _repo_rows(
+            repo_dir,
+            f"{RUNS}/workflows/{path.split('/')[-1]}/runs?branch=dev&event=push&status=success&per_page=1",
+            RUNS_JQ,
+            run,
+        )
+        if last:
+            green[path] = last[0]
+        found = _repo_rows(
+            repo_dir, f"repos/{{owner}}/{{repo}}/actions/runs/{streak[0]['id']}/jobs?per_page=100", JOBS_JQ, run
+        )
+        jobs[streak[0]["id"]] = sorted(j["name"] for j in found if j["conclusion"] in ci.DEV_FAILED)
+    return {"runs": runs, "green": green, "jobs": jobs}

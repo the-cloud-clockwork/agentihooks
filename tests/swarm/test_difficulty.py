@@ -97,7 +97,6 @@ def test_ops_kind_is_large_without_infrastructure_territory():
         [
             "scripts/swarm_ledger/home.html",
             "scripts/swarm_ledger/shell.html",
-            "scripts/swarm_ledger/template.html",
             "scripts/swarm_ledger/palette.css",
             "scripts/swarm_ledger/tooltips.js",
         ],

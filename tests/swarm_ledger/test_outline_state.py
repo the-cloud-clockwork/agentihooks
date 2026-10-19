@@ -2,11 +2,9 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 STUB_H = "function h(tag, attrs, ...kids) { return { tag, attrs: attrs || {}, kids: kids.filter(Boolean) }; }\n"
 STUB_FOLD = "function collapsible() {}\n"
 STUB_PAGES = (

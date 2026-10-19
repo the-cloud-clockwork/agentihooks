@@ -1,10 +1,7 @@
-from pathlib import Path
-
 import pytest
 
 from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 DOC = {"title": "Caps columns", "overview": "o", "phases": []}
 STATUS = {"config": {"state": "running", "max_eng": 3, "max_ci": 1}, "agents": [], "tasks": {}, "findings": []}
 

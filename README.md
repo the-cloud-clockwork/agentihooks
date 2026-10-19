@@ -154,9 +154,9 @@ concerns as an inbox message.
 The page has a Ledger tab for the plan and its tasks and a Swarm tab for the
 agents, quota, capacity and health findings.
 
-<!-- IMAGE SLOT: Ledger tab screenshot, filled by a later task. -->
+![Ledger tab of a working ledger: priorities, outline and stats](docs/images/ledger-tab.png)
 
-<!-- IMAGE SLOT: Swarm tab screenshot, filled by a later task. -->
+![Swarm tab of the same ledger: controls, capacity, gates, overlays and agents](docs/images/swarm-tab.png)
 
 ### The swarm and its roles
 

@@ -201,7 +201,7 @@ def server_tree(tmp_path):
         "scripts/swarm_ledger/ledger_server.py": (
             "import os\nimport ledger_core\n\n\ndef relay():\n    from scripts.swarm import operator_mail\n"
         ),
-        "scripts/swarm_ledger/template.html": "<html></html>",
+        "scripts/swarm_ledger/shell.html": "<html></html>",
         "scripts/swarm_ledger/__pycache__/ledger_core.cpython-312.pyc": "",
     }
     for name, text in files.items():
@@ -341,7 +341,7 @@ def test_legacy_restart_preserves_nanosecond_process_start_boundary(store, tmp_p
         "scripts/swarm/relay.py",
         "scripts/swarm/naming.py",
         "scripts/swarm/__init__.py",
-        "scripts/swarm_ledger/template.html",
+        "scripts/swarm_ledger/shell.html",
     ],
 )
 def test_a_change_to_any_module_the_server_imports_allows_the_restart_and_names_it(store, tmp_path, changed):

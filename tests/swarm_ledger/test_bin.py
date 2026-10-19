@@ -27,7 +27,7 @@ DAY_MS = 24 * 60 * 60 * 1000
 
 def make_ledger(slug, title="T", overview="O"):
     content = {"title": title, "overview": overview, "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(slug)
+    html_path, json_path = legacy_page.paths(slug, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
     core.sync(slug)
     return html_path, json_path
