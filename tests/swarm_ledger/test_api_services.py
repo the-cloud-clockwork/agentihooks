@@ -144,6 +144,15 @@ def test_the_api_refuses_hosts_outside_the_policy():
     assert handler.sent[0][0] == 403
 
 
+def test_an_empty_body_is_refused_before_it_is_decoded():
+    services = fake_services([])
+    services.ledger.core.loads = lambda raw: {}
+    handler = request("POST", "/api/v1/layout", extra={"Content-Type": "application/json", "Content-Length": "0"})
+    with pytest.raises(routes.APIError) as refused:
+        routes.body(handler, services)
+    assert (refused.value.status, refused.value.code) == (400, "schema_invalid")
+
+
 def test_the_api_writes_the_layout_through_the_ledger_service_for_an_allowed_origin():
     calls = []
     services = fake_services(calls)
