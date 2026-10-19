@@ -182,8 +182,8 @@ def test_combined_queue_plan_refuses_more_jobs_than_the_runner_pool(capsys):
     main(["combine", "--plans", json.dumps(plan[:15])[1:-1], json.dumps(plan[20:35])[1:-1]])
     assert "30 queue jobs fit one wave of 30 runners" in capsys.readouterr().out
 
-    with pytest.raises(SystemExit, match="40 queue jobs exceed the pool of 30"):
-        main(["combine", "--plans", json.dumps(plan[:20])[1:-1], json.dumps(plan[20:])[1:-1]])
+    with pytest.raises(SystemExit, match="31 queue jobs exceed the pool of 30"):
+        main(["combine", "--plans", json.dumps(plan[:16])[1:-1], json.dumps(plan[20:35])[1:-1]])
 
 
 def _overflowing_plan(tmp_path, seconds, totals=(16, 30)):
@@ -228,7 +228,7 @@ def test_an_overflowing_queue_plan_is_capped_at_the_runner_pool(tmp_path, capsys
 
 
 def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_path, capsys):
-    from tests.queue_shards import MAX_SHARDS, main
+    from tests.queue_shards import main
 
     root, output = _overflowing_plan(tmp_path, 1.0, (20, 20))
 
@@ -236,7 +236,6 @@ def test_a_forty_job_queue_plan_is_capped_to_the_thirty_runner_queue_pool(tmp_pa
 
     outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
     totals = {key: {leg["total"] for leg in json.loads("[" + value + "]")} for key, value in outputs.items()}
-    assert MAX_SHARDS == 30
     assert totals == {"queue_311": {15}, "queue_312": {15}}
     assert "40 queue jobs exceed the pool of 30; capped Python 3.11 at 15 and Python 3.12 at 15 shards" in (
         capsys.readouterr().out
