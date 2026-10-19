@@ -1,0 +1,68 @@
+from tests.swarm_ledger.ledger_page import ledger_state, shell_html, show
+from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
+
+browser = chromium_browser
+
+
+def test_first_snapshot_does_not_serialize_a_full_view_to_compare_it_with_null(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    page.add_init_script(
+        """(() => {
+          const stringify = JSON.stringify;
+          window.snapshotComparisons = 0;
+          JSON.stringify = function(value, ...args) {
+            if (value?.snapshotMarker) window.snapshotComparisons++;
+            return stringify.call(this, value, ...args);
+          };
+        })();"""
+    )
+    show(page, shell_html(), ledger=ledger_state({"title": "Snapshot", "snapshotMarker": True}))
+    assert page.locator("#title").text_content() == "Snapshot"
+    assert page.evaluate("window.snapshotComparisons") == 0
+    page.close()
+
+
+def test_outline_marking_does_not_read_geometry_after_writing_link_classes(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    show(page, shell_html(), ledger=ledger_state({"title": "Outline"}))
+    result = page.evaluate(
+        """async () => {
+          const main = document.querySelector('script[type=module]').src;
+          const {markOutline} = await import(new URL('outline.js', main));
+          const nav = document.getElementById('outline');
+          const link = nav.querySelector('a');
+          link.classList.remove('on');
+          const reads = [];
+          let wrote = false;
+          for (const a of nav.querySelectorAll('a')) {
+            const toggle = a.classList.toggle.bind(a.classList);
+            a.classList.toggle = (...args) => { wrote = true; return toggle(...args); };
+            Object.defineProperty(a, 'offsetTop', {get() { reads.push(wrote); return 0; }});
+          }
+          markOutline();
+          return {reads, active: nav.querySelectorAll('a.on').length};
+        }"""
+    )
+    assert result["active"] == 1
+    assert result["reads"]
+    assert not any(result["reads"])
+    page.close()
+
+
+def test_full_ledger_keeps_task_pagination_and_deep_navigation(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    tasks = [{"id": f"t{i}", "title": f"Task {i}", "state": "open", "lane": "eng"} for i in range(2400)]
+    show(page, shell_html(), ledger=ledger_state({"title": "Full ledger", "tasks": tasks}))
+    page.locator("#tasks-box > summary").click()
+    assert page.locator("#tasks > li[id]").count() == 50
+    page.locator("#tasks > .page-more button").click()
+    assert page.locator("#tasks > li[id]").count() == 100
+    found = page.evaluate(
+        """async () => {
+          const main = document.querySelector('script[type=module]').src;
+          const {revealTarget} = await import(new URL('outline.js', main));
+          return revealTarget('item-tasks-t2399')?.textContent;
+        }"""
+    )
+    assert "Task 2399" in found
+    page.close()
