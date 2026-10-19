@@ -57,7 +57,7 @@ def live():
     host = f"127.0.0.1:{port}"
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, port)
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
         patch("hooks._redis.get_redis", return_value=None),

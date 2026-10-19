@@ -10,6 +10,7 @@ from urllib.parse import urlencode
 REPO = "the-cloud-clockwork/agentihooks"
 ACTIVE = ("queued", "in_progress", "waiting", "pending", "requested")
 FAILURES = (subprocess.SubprocessError, ValueError, KeyError, RuntimeError)
+SETTLE_READS = 4
 
 
 class _Api:
@@ -31,9 +32,9 @@ class _Api:
         )
         return json.loads(response.stdout)
 
-    def pages(self, endpoint: str, field: str) -> list[dict]:
+    def pages(self, endpoint: str, field: str, settles: int) -> list[dict]:
         separator = "&" if "?" in endpoint else "?"
-        for _ in range(2):
+        for attempt in range(2 + settles):
             rows, totals = {}, set()
             page = 1
             while True:
@@ -48,6 +49,10 @@ class _Api:
                         return list(rows.values())
                     break
                 page += 1
+            if 1 <= attempt <= settles:
+                if page > 1 or self.deadline - time.monotonic() <= 2:
+                    break
+                time.sleep(1)
         raise RuntimeError(
             "Actions API pagination ended before the full count: "
             f"endpoint={endpoint}; page={page}; rows={len(rows)}; total={total}"
@@ -66,19 +71,21 @@ def read(
     known: dict[str, dict] | None = None,
     *,
     run: Callable = subprocess.run,
-    max_calls: int = 60,
-    max_seconds: int = 25,
+    budget: tuple[int, int] = (60, 25),
+    active: bool = True,
 ) -> dict:
-    api = _Api(run, max_calls, max_seconds)
+    api = _Api(run, *budget)
     root = f"repos/{REPO}/actions/runs"
     discovered, records = {}, []
     try:
         since = datetime.fromtimestamp(since_ms / 1000, timezone.utc).isoformat()
         until = datetime.fromtimestamp(now_ms / 1000, timezone.utc).isoformat()
         queries = [{"created": f"{since}..{until}"}]
-        queries.extend({"status": status} for status in ACTIVE)
+        queries.extend({"status": status} for status in ACTIVE if active)
         for query in queries:
-            for workflow in api.pages(f"{root}?{urlencode(query)}", "workflow_runs"):
+            for workflow in api.pages(
+                f"{root}?{urlencode(query)}", "workflow_runs", SETTLE_READS if "status" in query else 0
+            ):
                 discovered[workflow["id"]] = workflow
         with ThreadPoolExecutor(max_workers=6) as pool:
             previous = [
@@ -93,7 +100,7 @@ def read(
                 if kept and _final(kept, workflow):
                     records.append({**workflow, "jobs": kept["jobs"]})
                 else:
-                    jobs[pool.submit(api.pages, f"{root}/{identity}/jobs?filter=latest", "jobs")] = workflow
+                    jobs[pool.submit(api.pages, f"{root}/{identity}/jobs?filter=latest", "jobs", 0)] = workflow
             for future in as_completed(jobs):
                 try:
                     records.append({**jobs[future], "jobs": future.result()})

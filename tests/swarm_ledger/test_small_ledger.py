@@ -105,7 +105,7 @@ class SizeOnCreate(unittest.TestCase):
         with at(T0):
             create("home-small", "--as", "w")
             create("proof-a1b2c3-home-1", "--size", "swarm")
-        html_path = core.paths("home-legacy")[0]
+        html_path = legacy_page.paths("home-legacy", core)[0]
         html_path.write_text(legacy_page.render(new_ledger.build_doc(CONTENT, size=None), "home-legacy", 8765))
         core.sync("home-legacy")
         sizes = {s["slug"]: s["size"] for s in server.ledger_summaries()}
@@ -144,7 +144,7 @@ class Lifecycle(unittest.TestCase):
         with at(T0):
             create("proof-a1b2c3-life-1", "--size", "swarm")
             finish("proof-a1b2c3-life-1")
-            html_path = core.paths("life-legacy")[0]
+            html_path = legacy_page.paths("life-legacy", core)[0]
             html_path.write_text(legacy_page.render(new_ledger.build_doc(CONTENT, size=None), "life-legacy", 8765))
             core.sync("life-legacy")
         binned = bin_storage.auto_bin(now=T0 + 400 * DAY_MS)

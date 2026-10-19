@@ -50,7 +50,7 @@ def one_row(browser, now, **fields):
 def make(slug, title="T", overview="O", size="swarm", phases=()):
     content = {"title": title, "overview": overview, "sources": [], "phases": list(phases), "questions": []}
     content["followups"] = []
-    core.paths(slug)[0].write_text(
+    legacy_page.paths(slug, core)[0].write_text(
         legacy_page.render(new_ledger.build_doc(content, size), slug, 8765), encoding="utf-8"
     )
 

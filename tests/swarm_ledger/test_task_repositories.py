@@ -13,7 +13,7 @@ def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_add", ledger_tasks)
     monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": []}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
 
 

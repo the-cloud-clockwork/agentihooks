@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 import socket
 import time
@@ -14,6 +15,8 @@ from scripts.scheduler.slots import CallableSlot, Slot, restore
 if TYPE_CHECKING:
     from redis import Redis
     from redis.lock import Lock
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -243,6 +246,7 @@ class Scheduler:
             "scheduled_at": pending["scheduled_at"],
             "fired_at": pending["fired_at"],
         }
+        failed = []
         for connection in pending["slots"]:
             if self.get(entry_id).state != "pending":
                 return
@@ -252,14 +256,20 @@ class Scheduler:
             slot = dict(connection)
             connection_id = slot.pop("id")
             slot.pop("signal")
-            restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.redis)
+            try:
+                restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.redis)
+            except Exception as exc:
+                failed.append(connection_id)
+                _log.warning("scheduler slot delivery failed: entry %s slot %s error %r", entry_id, slot, exc)
+                continue
 
             def acknowledge(current):
                 if current["state"] == "pending":
                     current["pending"]["delivered"].append(connection_id)
 
             self.update(entry_id, acknowledge, lease=lease)
-        self.update(entry_id, lambda current: self._finish(current, now), lease=lease)
+        if not failed:
+            self.update(entry_id, lambda current: self._finish(current, now), lease=lease)
 
     @staticmethod
     def _finish(entry: dict, now: float) -> None:
