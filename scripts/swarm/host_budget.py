@@ -164,12 +164,10 @@ def agent_memory(proc: Path, roots: Collection[int]) -> tuple[int, int]:
         own = _rss_kb(root, proc)
         if own is None:
             continue
-        stack, total = list(children.get(root, [])), own
-        while stack:
-            pid = stack.pop()
-            total += _rss_kb(pid, proc) or 0
-            stack.extend(children.get(pid, []))
-        trees.append(total)
+        tree = list(children.get(root, []))
+        for pid in tree:
+            tree.extend(children.get(pid, []))
+        trees.append(own + sum(_rss_kb(pid, proc) or 0 for pid in tree))
     return (sum(trees) // len(trees) // 1024, len(trees)) if trees else (0, 0)
 
 
