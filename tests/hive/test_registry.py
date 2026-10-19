@@ -9,8 +9,6 @@ from scripts.swarm import commands, lease
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.keyspace import installation
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DEFAULT = {
     "id": "box",
     "name": "box",

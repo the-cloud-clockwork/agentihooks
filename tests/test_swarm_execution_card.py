@@ -10,8 +10,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_v2.herdr import visibility
 from scripts.swarm_v2.herdr.visibility import View
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "swarm_v2" / "ledger-execution-cards.json").read_text())
 NOW = FIXTURE["now_ms"]
 

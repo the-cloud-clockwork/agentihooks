@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 AT = 1_800_000_000_000
 HOUR = 3_600_000
 REPO = "owner/repo"

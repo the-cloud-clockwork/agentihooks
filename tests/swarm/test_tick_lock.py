@@ -6,7 +6,7 @@ import pytest
 from scripts.swarm import controller, lease
 from scripts.swarm.store import RedisStore, SwarmError
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

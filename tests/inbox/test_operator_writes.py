@@ -8,8 +8,6 @@ from scripts.swarm import operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 MASTER_SEAT = f"master@{SLUG}"
 ENG = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", seat=f"eng-1@{SLUG}")

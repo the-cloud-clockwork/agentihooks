@@ -10,8 +10,6 @@ from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
 JOBS_JQ = ".jobs[] | {name, conclusion, check_run_url, steps} | @json"
 SHA = "c0ffee" + "0" * 34

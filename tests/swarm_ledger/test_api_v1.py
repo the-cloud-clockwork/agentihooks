@@ -8,9 +8,6 @@ RELAY = server.relay_to_inbox
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 authority_live = _authority_live

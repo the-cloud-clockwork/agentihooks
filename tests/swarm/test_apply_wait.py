@@ -6,7 +6,6 @@ from scripts.swarm.store import SwarmConfig
 DOCTOR = SwarmConfig("sw-doctor", "/repo", 1, 0, template="doctor")
 PLAIN = SwarmConfig("sw", "/repo", 1, 0)
 AT = "2026-10-18T12:00:00Z"
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def rows(**deps):

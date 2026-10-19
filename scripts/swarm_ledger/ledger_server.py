@@ -237,6 +237,15 @@ def swarm_status(slug, state=None):
         return None
 
 
+STREAM_UNREAD = ("history", "transfers", "launch_checks")
+
+
+def stream_swarm(slug, ledger):
+    """Swarm status for the page stream, without the records the page never reads."""
+    status = swarm_status(slug, ledger)
+    return status and {key: item for key, item in status.items() if key not in STREAM_UNREAD}
+
+
 def swarm_models():
     from scripts.swarm import model_catalog
     from scripts.swarm.store import SwarmError
@@ -694,7 +703,7 @@ def doctor_phrase(slug, state):
 
 def stream_resources(slug):
     ledger = ledger_view(repository.get_document(slug))
-    return {"ledger": ledger, "swarm": swarm_status(slug, ledger)}
+    return {"ledger": ledger, "swarm": stream_swarm(slug, ledger)}
 
 
 def workspace_tails(slug, task_id):
@@ -764,7 +773,7 @@ def sample_streams():
         if ledger is None:
             continue
         try:
-            HUB.publish(slug, "swarm", swarm_status(slug, ledger))
+            HUB.publish(slug, "swarm", stream_swarm(slug, ledger))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 

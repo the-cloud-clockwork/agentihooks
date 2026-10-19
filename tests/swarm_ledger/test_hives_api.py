@@ -5,8 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "hives-2026-10-18"
 PRINCIPALS = {"admin-token": "", "agent-token": "engineer@1"}
 NOW_MS = 1_800_000_000_000

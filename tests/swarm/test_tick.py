@@ -7,8 +7,6 @@ from scripts.swarm import stack
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def check_update_guards(if_state, if_match):
     import sys

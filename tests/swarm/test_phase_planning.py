@@ -13,7 +13,6 @@ from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
 from tests.swarm_ledger.plan_slices import anchored
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "planned"
 MASTER_SEAT = f"master@{SLUG}"
 DONE_WHEN = (

@@ -106,6 +106,7 @@ function applyServer(server) {
   applyChecks(doc);
   banner([meta.seed_error]);
   render();
+  if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
   lsWrite();
   firstState();
 }

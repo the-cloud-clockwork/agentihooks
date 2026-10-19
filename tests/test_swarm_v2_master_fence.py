@@ -12,7 +12,7 @@ from scripts.swarm_v2.masters_channel import MastersChannel, Post
 from tests import sv2_mst04_cases as cases
 from tests.sv2_mst04_cases import FOLLOWUP, LEAD, LEAD_NAME, QUESTION, SECOND, SECOND_NAME, SLUG
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-04"
 
