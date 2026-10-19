@@ -724,7 +724,7 @@ def test_a_run_whose_failed_jobs_all_lost_their_runner_files_one_outage_task(sto
     ("steps", "messages"),
     [
         ([{"name": "Set up job", "conclusion": "failure"}], ["Failed to download archive after 3 attempts."]),
-        ([*RAN[:1], {"name": "Run tests", "conclusion": "skipped"}], ["Unable to download artifact(s)"]),
+        ([*RAN[:1], {"name": "Run tests", "conclusion": None}], []),
         (RAN, ["The self-hosted runner: anton-x lost communication with the server."]),
         (RAN, ["The operation was canceled."]),
     ],
@@ -733,6 +733,17 @@ def test_each_runner_infrastructure_signature_is_an_outage(store, steps, message
     ledger = Ledger()
     refresh(store, ledger, outage_run([("unit (3.12, 1)", steps, messages), ("unit (3.12, 2)", RAN, DOWNLOAD)]))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+
+
+def test_a_failed_step_that_skipped_the_tests_files_its_own_fixer_and_no_outage(store):
+    ledger = Ledger()
+    steps = [
+        *RAN[:1],
+        {"name": "Install dependencies", "conclusion": "failure"},
+        {"name": "Run tests", "conclusion": "skipped"},
+    ]
+    refresh(store, ledger, outage_run([("unit (3.12, 1)", steps, ["No matching distribution found for fakepkg"])]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.12, 1)"]
 
 
 def test_a_real_failure_beside_an_outage_files_the_outage_task_and_its_own_fixer(store):

@@ -100,23 +100,27 @@ def cause(repo_dir: str, job: dict, run: Callable = subprocess.run) -> str:
     return f"{job['name']}: {'; '.join(detail)}"
 
 
-def lost(job: dict, why: str) -> bool:
+def runner_lost(job: dict, why: str) -> bool:
     steps = {s["name"]: s.get("conclusion") for s in job.get("steps") or []}
     return (
         any(sign in why for sign in OUTAGE_SIGNS)
         or steps.get(SETUP_STEP) in FAILED
-        or (TEST_STEP in steps and steps[TEST_STEP] not in ("success", *FAILED))
+        or (
+            TEST_STEP in steps
+            and steps[TEST_STEP] not in ("success", *FAILED)
+            and not any(conclusion in FAILED for conclusion in steps.values())
+        )
     )
 
 
 def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple[str, str]]:
-    gone = [(job, why) for job, why in causes if lost(named.get(job, {}), why)]
+    gone = [(job, why) for job, why in causes if runner_lost(named.get(job, {}), why)]
     if not gone:
         return causes
     signs = [sign for sign in OUTAGE_SIGNS if any(sign in why for _, why in gone)]
     because = "; ".join(signs) or f"{SETUP_STEP} failed or {TEST_STEP} never ran"
-    jobs = ", ".join(job for job, _ in gone)
-    why = f"{OUTAGE}: the jobs {jobs} lost their runner infrastructure ({because})"
+    names = ", ".join(job for job, _ in gone)
+    why = f"{OUTAGE}: the jobs {names} lost their runner infrastructure ({because})"
     return [(OUTAGE, why), *[cause for cause in causes if cause not in gone]]
 
 
