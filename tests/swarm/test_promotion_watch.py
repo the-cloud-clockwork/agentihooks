@@ -766,5 +766,6 @@ def test_an_open_outage_task_holds_a_later_outage_and_a_green_run_closes_it(stor
     refresh(store, ledger, outage_run([("unit (3.11, 1)", RAN, DOWNLOAD)]))
     refresh(store, ledger, outage_run([("unit (3.12, 4)", RAN, ["The operation was canceled."])], 902), NOW * 2)
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+    assert len(ledger.raised) == 1
     refresh(store, ledger, gh([{**GREEN, "id": 903}]), NOW * 3)
     assert ledger.tasks[0]["state"] == "done"
