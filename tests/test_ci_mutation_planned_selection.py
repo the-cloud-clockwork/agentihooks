@@ -170,7 +170,9 @@ def _recorded_project(tmp_path, monkeypatch):
         "def f(value):\n    return value + 1\n\n\ndef g(value):\n    return value - 1\n"
     )
     (tmp_path / "tests/test_core.py").write_text(
-        "from scripts.core import f, g\n\n\nclass TestSpawn:\n    def test_child(self):\n        pass\n"
+        "from scripts.core import f, g\n\n\n"
+        + "".join(f"def {name}():\n    pass\n\n\n" for name in ("test_f", "test_g", "test_other"))
+        + "class TestSpawn:\n    def test_child(self):\n        pass\n"
     )
     (tmp_path / "tests/test_edited.py").write_text("from scripts.core import g\n")
     (tmp_path / "tests/conftest.py").write_text("")
@@ -199,10 +201,11 @@ NARROWED = ["tests/test_core.py::test_g", "tests/test_edited.py", "tests/test_fr
 WHOLE = ["tests/test_core.py", "tests/test_edited.py", "tests/test_fresh.py"]
 
 
-def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_it(tmp_path, monkeypatch):
+@pytest.mark.parametrize("line", [5, 6])
+def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_it(tmp_path, monkeypatch, line):
     manifest = _recorded_project(tmp_path, monkeypatch)
     selection = {}
-    _, _, tests = plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    _, _, tests = plan.estimate(tmp_path, {"scripts/core.py": {line}}, selection, manifest)
     assert selection == {"scripts/core.py": NARROWED}
     assert tests == NARROWED
 
@@ -240,7 +243,8 @@ def test_tests_whose_recorded_code_changed_since_the_record_stay_selected(tmp_pa
 
 
 @pytest.mark.parametrize(
-    "cause", ["helper", "dependency", "root module", "workflow", "new function", "unrecorded test", "no commit"]
+    "cause",
+    ["helper", "dependency", "root module", "workflow", "new function", "unrecorded test", "edited test", "no commit"],
 )
 def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_path, monkeypatch, cause):
     manifest = _recorded_project(tmp_path, monkeypatch)
@@ -249,6 +253,7 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
         "dependency": ("uv.lock", "version = 1\n"),
         "root module": ("setup.py", "X = 1\n"),
         "workflow": (".github/workflows/test.yml", "env:\n  FLAG: 1\n"),
+        "edited test": ("tests/test_core.py", "\n# edited\n"),
         "new function": ("scripts/core.py", "\n\ndef h(value):\n    return value * 2\n"),
         "unrecorded test": ("tests/test_core.py", "\n\ndef test_skipped_when_recorded():\n    pass\n"),
     }
@@ -256,7 +261,8 @@ def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_pa
         path, text = edits[cause]
         target = tmp_path / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text((target.read_text() if cause in ("new function", "unrecorded test") else "") + text)
+        appended = cause in ("new function", "unrecorded test", "edited test")
+        target.write_text((target.read_text() if appended else "") + text)
         head = _commit(tmp_path, cause)
         if cause == "unrecorded test":
             manifest["commit"] = head
@@ -271,6 +277,8 @@ def test_a_path_whose_covering_tests_are_gone_keeps_its_selected_files(tmp_path,
     manifest = _recorded_project(tmp_path, monkeypatch)
     manifest["commit"] = subprocess.check_output([*GIT, "-C", str(tmp_path), "rev-parse", "HEAD"], text=True).strip()
     manifest["tests"] = {
+        **{f"tests/test_core.py::{name}": {"units": [0], "escapes": False} for name in ("test_f", "test_g")},
+        "tests/test_core.py::test_other": {"units": [2], "escapes": False},
         "tests/test_core.py::TestSpawn::test_child": {"units": [0], "escapes": False},
         "tests/test_edited.py::test_new": {"units": [0], "escapes": False},
         "tests/test_fresh.py::test_fresh": {"units": [2], "escapes": False},
