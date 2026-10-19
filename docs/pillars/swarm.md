@@ -105,7 +105,7 @@ agentihooks claude login --master
 `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` defaults to off and holds for every swarm on
 the machine. When on, the front door master of each swarm uses the one private
 Claude config home, forces `claudeai` login and receives
-`--remote-control "master · <id>"`. Pool masters and workers do not receive this login or the
+`--remote-control "master 1 · <id>"`. Pool masters and workers do not receive this login or the
 Remote Control flags. A failed private login, conflicting declared master
 account, live login holder or missing worker quota tokens refuses this route;
 it does not silently replace the selected private login. See
@@ -148,7 +148,7 @@ recorded launch decision:
 
 | Status or finding | Meaning |
 |---|---|
-| `Remote Control: on (master · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
+| `Remote Control: on (master 1 · <id>)` | The launch requested Remote Control with this session name; verify the session in the Claude app before relying on phone access. |
 | `Remote Control: off (flag)` | The master login option is off. |
 | `Remote Control: off (fallback auth)` | The master uses subscription token authentication. |
 | `Remote Control: off (gateway)` | The master uses the API route. |
@@ -197,7 +197,9 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   divided by `masters-step` (default 12), masters not counted: 0 to 11 agents one master, 12 two, 24 three. Every
   master has the same authority; the operator and Priorities stay with the front door.
 - **Seats.** Seat names come from code. The front door keeps `master@<id>`; backend masters are `master-2@<id>`,
-  `master-3@<id>` and on, launched by the same seat launcher as the first master on either harness.
+  `master-3@<id>` and on, launched by the same seat launcher as the first master on either harness. Every master's
+  Claude session name, herdr tab and Remote Control session read `master <n> · <id>`, with 1 for the front door, so
+  masters of one swarm and of different swarms stay apart in Claude.ai and herdr.
 - **Cool off.** A rise launches the next backend seat at once. A fall waits until the wanted count stayed lower for
   ten minutes running, and the cool off restarts whenever the count rises. Then every extra backend master is asked
   to hand off at once and the count falls from the top as they leave; an asked seat below a live higher seat retires
@@ -218,7 +220,7 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   `agentihooks swarm <id> masters-channel read`; only master seats send and read, and engineer, CI and planner
   sessions are refused. It carries sync only: an item that arrived without context, or a fact another master holds.
   The front door answers the operator about the backend masters from it.
-- **Intent grouping.** `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (off by default) turns on the classifier. Each
+- **Intent grouping.** `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (on by default; `false` turns it off) runs the classifier. Each
   master keeps its last 15 delivered items; every waiting pool item is compared for intent against each master's
   items in parallel, using only first lines, the first configured API classifier model falling through to the next on a backend failure, one short verdict per master and a cache
   by item id. A match sends the item to that master, so related items reach the same master together. Any

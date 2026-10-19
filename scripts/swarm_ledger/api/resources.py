@@ -1,6 +1,8 @@
 import hashlib
 import json
 
+from scripts.swarm_ledger import models
+
 from .errors import APIError
 
 
@@ -89,30 +91,8 @@ def read(doc: dict, path: str, query: dict | None = None, cache: dict | None = N
     return bounded({"data": project(raw), "revision": resource_revision(doc, path)})
 
 
-COLLECTIONS = (
-    "tasks",
-    "phases",
-    "questions",
-    "followups",
-    "notes",
-    "chat",
-    "priorities",
-    "notifications",
-    "artifacts",
-    "artifact_trash",
-    "sources",
-    "alerts",
-    "freezes",
-    "plans",
-    "slices",
-)
-THREADS = {
-    "tasks": ("comments",),
-    "phases": ("comments",),
-    "questions": ("comments", "answers"),
-    "followups": ("comments",),
-    "notes": ("comments",),
-}
+COLLECTIONS = models.COLLECTIONS
+THREADS = models.THREADS
 MAX_REPLY = 262144
 
 

@@ -18,7 +18,8 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, BindingStore, TransportRecord, decode
 from scripts.profiles import binding
 from scripts.routing import envs
-from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore
+from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
+from scripts.swarm_v2 import masters
 
 NO_DAEMON = "--no-daemon"
 REQUIRED_HOOKS = ("sessionStart", "userPromptSubmit", "preToolUse", "postToolUse", "stop")
@@ -219,6 +220,11 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
     return thread
 
 
+def shown_name(launch: Launch, agent: AgentRecord) -> str:
+    title = masters.title(launch.slug, agent.seat)
+    return title if agent.lane == MASTER else agent.name
+
+
 def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:
     """A refused name leaves the default one; the launch still opens its turn."""
     with contextlib.suppress(protocol.Refused):
@@ -271,7 +277,7 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
         bindings.put(launch.slug, record)
         agent = replace(agent, conversation_id=thread["id"])
         store.put_agent(launch.slug, agent)
-        name_thread(connection, thread["id"], agent.name)
+        name_thread(connection, thread["id"], shown_name(launch, agent))
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
             record = replace(record, active_turn_id=protocol.start_turn(connection, thread["id"], launch.opening))
             bindings.put(launch.slug, record)
