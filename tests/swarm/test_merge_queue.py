@@ -199,7 +199,7 @@ def test_queue_waits_until_every_configured_check_exists(missing):
 @pytest.mark.parametrize(
     "source, expected",
     [
-        ("status", False),
+        ("status", True),
         ("other app", False),
         ("required app", True),
         ("both apps", True),
