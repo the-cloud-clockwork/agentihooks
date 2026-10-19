@@ -116,7 +116,8 @@ def _retire(unit_dir, run):
         return False
     if not _inside() and (left := _drain(run)):
         print(
-            f"the {UNIT} service still runs {left} processes; its unit files stay until a later pass", file=sys.stderr
+            f"the {UNIT} service group did not empty ({left} processes left); its unit files stay until a later pass",
+            file=sys.stderr,
         )
         return False
     for path in present:

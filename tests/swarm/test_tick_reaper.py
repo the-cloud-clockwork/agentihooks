@@ -43,7 +43,7 @@ def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_gro
     left = _plant(SHELL, "swarm", "tick", stdout=subprocess.PIPE)
     try:
         sibling = int(left.stdout.readline())
-        reaped = tick_reaper.reap(min_age_s=0)
+        reaped = tick_reaper.reap()
         mine = [record for record in reaped if record.pid == left.pid]
         assert len(mine) == 1
         assert mine[0].command.endswith("swarm tick")
@@ -61,14 +61,14 @@ def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_gro
 
 def test_a_host_without_proc_reaps_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "proc")
-    assert tick_reaper.reap(min_age_s=0) == []
+    assert tick_reaper.reap() == []
 
 
 def test_a_leftover_that_ignores_terminate_is_killed():
     left = _plant(DEAF, "swarm", "tick", stdout=subprocess.PIPE)
     try:
         assert left.stdout.readline().strip() == "ready"
-        reaped = [record for record in tick_reaper.reap(min_age_s=0, grace_s=0.5) if record.pid == left.pid]
+        reaped = [record for record in tick_reaper.reap(grace_s=0.5) if record.pid == left.pid]
         assert [record.signal for record in reaped] == ["SIGKILL"]
         assert left.wait(15) == -signal.SIGKILL
     finally:
@@ -76,18 +76,18 @@ def test_a_leftover_that_ignores_terminate_is_killed():
         left.wait()
 
 
-def test_a_tick_younger_than_one_pass_is_left_running():
+def test_a_tick_that_started_a_moment_ago_is_reaped_too():
     young = _plant(SLEEP, "swarm", "tick")
     try:
-        assert young.pid not in [record.pid for record in tick_reaper.reap()]
-        assert young.poll() is None
+        assert young.pid in [record.pid for record in tick_reaper.reap()]
+        assert young.wait(15) == -signal.SIGTERM
     finally:
         young.kill()
         young.wait()
 
 
 def test_the_reaping_tick_spares_itself_and_its_ancestors():
-    inner = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap(min_age_s=0)])"
+    inner = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap()])"
     outer = (
         "import subprocess, sys; "
         f"sys.exit(subprocess.run([sys.executable, '-c', {inner!r}, 'swarm', 'tick']).returncode)"
@@ -107,8 +107,9 @@ def test_the_reaping_tick_spares_itself_and_its_ancestors():
 def test_a_process_of_another_user_is_never_a_leftover(monkeypatch):
     left = _plant(SLEEP, "swarm", "tick")
     try:
-        monkeypatch.setattr(tick_reaper.os, "getuid", lambda: os.getuid() + 1)
-        assert left.pid not in [record.pid for record in tick_reaper.reap(min_age_s=0)]
+        uid = os.getuid()
+        monkeypatch.setattr(tick_reaper.os, "getuid", lambda: uid + 1)
+        assert left.pid not in [record.pid for record in tick_reaper.reap()]
         assert left.poll() is None
     finally:
         left.kill()
@@ -119,7 +120,7 @@ def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
     other = {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0"}
     left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=other)
     try:
-        assert left.pid not in [record.pid for record in tick_reaper.reap(min_age_s=0)]
+        assert left.pid not in [record.pid for record in tick_reaper.reap()]
         assert left.poll() is None
     finally:
         left.kill()
@@ -127,9 +128,9 @@ def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
 
 
 def test_a_tick_started_for_a_scratch_redis_spares_the_ticks_of_the_installed_swarm():
-    installed = {key: value for key, value in os.environ.items() if key != "AGENTIHOOKS_SWARM_REDIS_URL"}
+    installed = {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6379/0"}
     left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=installed)
-    reaper = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap(min_age_s=0)])"
+    reaper = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap()])"
     scratch = {**installed, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0", "PYTHONPATH": str(ROOT)}
     try:
         done = subprocess.run(

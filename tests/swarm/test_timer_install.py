@@ -255,7 +255,8 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     assert (tmp_path / "agentihooks-swarm.service").exists()
     assert ["systemctl", "--user", "daemon-reload"] not in argvs
     assert capsys.readouterr().err == (
-        f"the agentihooks-swarm service still runs {left} processes; its unit files stay until a later pass\n"
+        f"the agentihooks-swarm service group did not empty ({left} processes left); "
+        "its unit files stay until a later pass\n"
     )
     assert clock[-1] >= timer.DRAIN_S + timer.KILL_WAIT_S
     assert scheduled == [True]

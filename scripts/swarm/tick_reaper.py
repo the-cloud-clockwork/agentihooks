@@ -10,7 +10,6 @@ import hooks.config  # noqa: F401  loads the env files a tick reads its swarm Re
 from scripts.scheduler.service import runtime_dir
 
 PROC = Path("/proc")
-MIN_AGE_S = 60
 GRACE_S = 10
 HOLDER = ["-m", "scripts.swarm.scheduled_tick"]
 
@@ -70,7 +69,7 @@ def _environ(pid: int) -> dict[str, str]:
     return dict(item.partition("=")[::2] for item in raw.split("\0") if "=" in item)
 
 
-def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str], str]]:
+def _leftovers() -> list[tuple[int, float, list[str], str]]:
     spared, uid, found = _ancestors(), os.getuid(), []
     started = _environ(os.getpid())
     loaded = {key: value for key, value in os.environ.items() if key not in started}
@@ -87,8 +86,7 @@ def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str], str]]:
             age, start = _age_s(pid), _stat(pid)[19]
         except (OSError, IndexError, ValueError):
             continue
-        if age >= min_age_s:
-            found.append((pid, age, argv, start))
+        found.append((pid, age, argv, start))
     return found
 
 
@@ -106,10 +104,10 @@ def _same(pid: int, start: str) -> bool:
         return False
 
 
-def reap(min_age_s: float = MIN_AGE_S, grace_s: float = GRACE_S) -> list[Reaped]:
+def reap(grace_s: float = GRACE_S) -> list[Reaped]:
     if not PROC.is_dir():
         return []
-    found = _leftovers(min_age_s)
+    found = _leftovers()
     for pid, _, _, _ in found:
         _signal(pid, signal.SIGTERM)
     alive = set(_wait([pid for pid, _, _, _ in found], grace_s))
