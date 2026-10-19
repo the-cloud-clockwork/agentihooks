@@ -272,7 +272,7 @@ def test_health_requests_use_short_timeouts(isolated_server):
         server.ensure()
         health.assert_called_once()
         assert health.call_args.args[0].full_url == f"{server.BASE}/healthz"
-        assert health.call_args.kwargs["timeout"] == 1
+        assert health.call_args.kwargs == {"timeout": 1}
     with (
         patch.object(server.time, "monotonic", return_value=100),
         patch.object(server, "SERVER_WAIT", 5),

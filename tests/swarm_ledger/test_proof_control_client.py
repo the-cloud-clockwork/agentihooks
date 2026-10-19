@@ -33,7 +33,7 @@ def test_remote_creator_uses_its_own_parent_identity_and_bounded_transport(owned
     sent = []
 
     def open_request(request, **options):
-        assert options["timeout"] == 10
+        assert options == {"timeout": 10}
         sent.append(request.full_url)
         return original(request, **options)
 
@@ -86,7 +86,7 @@ def test_controller_client_adopts_external_owner_and_uses_scoped_controls(owned,
     sent = []
 
     def open_request(request, **options):
-        assert options["timeout"] == 10
+        assert options == {"timeout": 10}
         sent.append(request.full_url)
         return original(request, **options)
 
