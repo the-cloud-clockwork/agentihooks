@@ -24,11 +24,11 @@ def pair_ratios(pairs: list[tuple[dict, dict]], key: str) -> list[float]:
 def same_code_bound(runs: list[list[tuple[dict, dict]]]) -> float:
     """The widest single pair ratio, in either direction, of any recorded same code run."""
     ratios = [ratio for pairs in runs for key, _ in GRADED for ratio in pair_ratios(pairs, key)]
-    return max((max(ratio, 1 / ratio) for ratio in ratios), default=1.0)
+    return max((max(ratio, 1 / ratio) for ratio in ratios if ratio), default=1.0)
 
 
 def recorded_runs(path: Path) -> list[list[tuple[dict, dict]]]:
-    return [[(base, head) for base, head in pairs] for pairs in json.loads(path.read_text())["runs"].values()]
+    return list(json.loads(path.read_text())["runs"].values())
 
 
 def regressions(pairs: list[tuple[dict | None, dict | None]], margin: float) -> list[str]:

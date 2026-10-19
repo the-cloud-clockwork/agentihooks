@@ -28,15 +28,18 @@ def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
         ({"errors": 1}, "head had 2 failed requests, base 0"),
         ({"write_p50_s": 2.0}, "head write p50 median pair ratio 2.00 exceeds the 1.5x margin"),
         ({"busiest_cores": 0.8}, "head busiest CPU window median pair ratio 1.60 exceeds the 1.5x margin"),
-        ({"write_p50_s": None}, "write p50 was not measured on the head run of pair 1"),
     ],
 )
-def test_a_head_regression_in_most_pairs_or_a_missing_measure_is_named(change, problem):
+def test_a_head_regression_in_most_pairs_is_named(change, problem):
     head = {**BASE, **change}
-    pairs = [(BASE, head), (BASE, head), (BASE, BASE)]
-    assert problem in paired.regressions(pairs, 1.5)
-    if change.get("write_p50_s", 1) is not None:
-        assert paired.regressions(pairs, 1.5) == [problem]
+    assert paired.regressions([(BASE, head), (BASE, head), (BASE, BASE)], 1.5) == [problem]
+
+
+def test_a_measure_missing_from_any_run_is_named():
+    head = {**BASE, "write_p50_s": None}
+    assert paired.regressions([(BASE, head), (BASE, BASE)], 1.5) == [
+        "write p50 was not measured on the head run of pair 1"
+    ]
 
 
 def test_a_pair_missing_its_run_is_named():
@@ -78,7 +81,10 @@ def test_the_command_pairs_runs_in_order_and_refuses_a_margin_below_the_same_cod
     slow.write_text(log({**BASE, "busiest_cores": 1.0}))
     same_code.write_text(json.dumps({"runs": {"1": [[BASE, {**BASE, "write_p50_s": 1.3}]]}}))
     graded = ["--margin", "1.5", "--same-code", str(same_code)]
-    assert paired.main(["--base", str(base), str(base), "--head", str(head), str(slow), *graded]) == 0
+    assert (
+        paired.main(["--base", str(base), str(base), str(base), "--head", str(head), str(head), str(slow), *graded])
+        == 0
+    )
     assert (
         paired.main(["--base", str(base), str(base), str(base), "--head", str(head), str(slow), str(slow), *graded])
         == 1
