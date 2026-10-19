@@ -169,6 +169,8 @@ def test_memory_room_is_zero_above_the_swap_use_share_while_available_memory_is_
 def test_stale_swap_above_the_share_leaves_room_while_available_memory_is_ample():
     assert host_budget.memory_room(_swapped(9591, 3716, 4096), LIMITS) == 8
     assert host_budget.memory_room(_swapped(16000, 3700, 4096), LIMITS) == 17
+    assert host_budget.memory_room(_swapped(4796, 3700, 4096), LIMITS) == 1
+    assert host_budget.memory_room(_swapped(4795, 3700, 4096), LIMITS) == 0
 
 
 def test_the_swap_use_share_and_floor_are_configured():

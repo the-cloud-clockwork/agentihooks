@@ -109,8 +109,8 @@ def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
             f"and the configured {thresholds.memory_per_agent_mb} MB"
         )
     return (
-        f"{stale}{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB swap "
-        f"in use fits {memory} "
+        f"{stale}{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB "
+        f"swap in use fits {memory} "
         f"at {per_agent_mb(sample, thresholds)} MB each, {figure}"
     )
 
