@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import commands, controller, lease
-from scripts.swarm.rename import rename_swarm
+from scripts.swarm.rename import LOCK_MS, rename_swarm
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
 pytestmark = pytest.mark.unit
@@ -61,6 +61,19 @@ def test_a_rename_releases_the_tick_lock_it_took(store):
     assert store.redis.get(store.key("sw", "tick-lock")) is None
     held = lease.acquire(store, "sw", commands.hive_id())
     assert controller.take_tick_lock(store, "sw", held, 600_000) is not None
+
+
+def test_a_rename_holds_the_tick_lock_for_the_rename_lock_time(store):
+    seen = []
+
+    def herdr(args):
+        seen.append(store.redis.pttl(store.key("sw", "tick-lock")))
+        raise SwarmError("pane gone")
+
+    with pytest.raises(SwarmError, match="pane gone"):
+        rename_swarm(store, "sw", LEDGER, SimpleNamespace(herdr=herdr), 10)
+    assert len(seen) == 1
+    assert LOCK_MS - 10_000 < seen[0] <= LOCK_MS
 
 
 def test_a_rename_leaves_a_tick_lock_it_lost_to_another_holder(store):
