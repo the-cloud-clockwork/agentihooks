@@ -40,7 +40,13 @@ def test_cli_records_the_agents_task_on_a_new_follow_up(monkeypatch):
 def test_the_add_item_schema_takes_the_task_and_hive_an_agent_sends(extra):
     from scripts.swarm_ledger.api import schemas
 
-    op = {"op": "add_item", "id": ON_TASK.partition("/")[2], "by": ENGINEER, "list": "followups", "text": "Retry the notes build"}
+    op = {
+        "op": "add_item",
+        "id": ON_TASK.partition("/")[2],
+        "by": ENGINEER,
+        "list": "followups",
+        "text": "Retry the notes build",
+    }
     assert schemas.validate(schemas.operation_schema("add_item"), op | extra) is None
 
 
@@ -48,7 +54,14 @@ def test_the_add_item_schema_refuses_a_task_that_is_not_text():
     from scripts.swarm_ledger.api import schemas
     from scripts.swarm_ledger.api.errors import APIError
 
-    op = {"op": "add_item", "id": ON_TASK.partition("/")[2], "by": ENGINEER, "list": "followups", "text": "Retry", "task": 2}
+    op = {
+        "op": "add_item",
+        "id": ON_TASK.partition("/")[2],
+        "by": ENGINEER,
+        "list": "followups",
+        "text": "Retry",
+        "task": 2,
+    }
     with pytest.raises(APIError) as error:
         schemas.validate(schemas.operation_schema("add_item"), op)
     assert (error.value.status, error.value.code) == (400, "schema_invalid")
