@@ -6,7 +6,7 @@ import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on 
 from scripts.inbox import cli as inbox_cli
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import delivery
-from scripts.swarm.store import AgentRecord
+from scripts.swarm.store import AgentRecord, SwarmConfig
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_v2 import master_fence, masters
 from tests import sv2_mst04_cases as cases
@@ -106,6 +106,47 @@ def test_an_engineer_comment_is_not_fenced(world):
 
 def inbox(world):
     return InboxStore(world.redis, session_id="s1")
+
+
+@pytest.fixture
+def doctor_world(world):
+    doctor = "watch-doctor"
+    sender = "master@fedcba-0001"
+    world.store.names.adopt(doctor, "fedcba", doctor, "repo")
+    world.store.create(SwarmConfig(doctor, "/repo", 1, 0))
+    world.store.set_peer(SLUG, doctor)
+    world.store.set_peer(doctor, SLUG)
+    world.store.put_agent(doctor, AgentRecord(sender, "master", "master", seat=f"master@{doctor}"))
+    world.store.seats.occupy(f"master@{doctor}", sender, 1)
+    masters.MasterSeats(world.redis).set_count(SLUG, 3)
+    for name, seat, task in (
+        (SECOND_NAME, SECOND, "master-2"),
+        ("master@abcdef-0007", f"master-3@{SLUG}", "master-3"),
+    ):
+        world.store.put_agent(SLUG, AgentRecord(name, "master", task, seat=seat))
+        world.store.seats.occupy(seat, name, 1)
+    return world, doctor, sender
+
+
+@pytest.mark.parametrize("front_door", [True, False])
+@pytest.mark.parametrize("address", [SECOND, SECOND_NAME, f"master-3@{SLUG}", "master@abcdef-0007"])
+def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, front_door, address):
+    world, _, sender = doctor_world
+    if not front_door:
+        world.down(LEAD_NAME)
+        world.store.seats.occupy(LEAD, "", 2)
+    record = {
+        "op": "send",
+        "by": sender,
+        "item": "i-doctor",
+        "args": {"address": address, "text": "Apply the merged fix", "fyi": False},
+    }
+
+    result = inbox_cli.apply(inbox(world), record)
+
+    assert result["to"] == address
+    assert inbox(world).get(result["id"]).text == "Apply the merged fix"
+    assert world.refusals() == 0
 
 
 def test_a_backend_master_message_to_the_claimant_of_a_task_with_no_phase_is_refused(world):
