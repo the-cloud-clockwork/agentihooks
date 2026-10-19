@@ -395,6 +395,13 @@ jobs:
           path: .mutation-stats
           merge-multiple: true
 
+      - name: Restore the tests that killed this branch's earlier mutants
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
       - name: Download the measured mutation plan
         uses: actions/download-artifact@v4
         with:
@@ -460,6 +467,14 @@ jobs:
         with:
           pattern: mutation-preflight-shard-*
           path: .mutation-shards
+
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: needs.plan.outputs.changed != '0'
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
 
       - name: Download the tests that killed mutants
         if: needs.plan.outputs.changed != '0'

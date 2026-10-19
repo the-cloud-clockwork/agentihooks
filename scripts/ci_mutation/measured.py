@@ -38,7 +38,7 @@ def measured_costs(names: list[str], results: list[dict], memory: KillMemory | N
     for name in names:
         function = name.rpartition("__mutmut_")[0]
         # The recorded killer runs first and mutmut stops at the first failing test.
-        killer = memory.killer(name) if memory else None
+        killer = memory.killer(name) if memory is not None else None
         seconds = (
             durations.get(killer, missing) if killer in tests.get(function, ()) else functions.get(function, fallback)
         )

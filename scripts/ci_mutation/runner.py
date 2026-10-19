@@ -247,6 +247,9 @@ def mutate_files(
                 if plan["head"] != stats.head or key not in plan["keys"]:
                     return {}, "measured mutation plan stale for this commit or selection"
                 shutil.copy(plan_path, work / "shard-plan.json")
+            # The measured plan prices each function from its recorded killer, so the shard runs that test first.
+            if (killers := stats.folder.parent / "killers").is_dir():
+                shutil.copytree(killers, work / "killers")
             (work / "shared-stats.json").write_text(json.dumps(results))
             stats_args = ["reuse", str(work / "shared-stats.json")]
     status = run_process(
