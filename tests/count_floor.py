@@ -36,7 +36,8 @@ class Collected:
 
 code = pytest.main(["--collect-only", "-qq", "--assert=plain", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
 with open(sys.argv[2], "w") as out:
-    json.dump(Collected.nodeids if code in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED) else None, out)
+    ok = code in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED)
+    json.dump(Collected.nodeids if ok else None, out)
 """
 
 
@@ -148,7 +149,11 @@ def collect_all(
             for run, output in parts:
                 run.wait()
                 results.append(json.loads(output.read_text()) if output.is_file() and not run.returncode else None)
-            collected[side] = None if any(result is None for result in results) else sum(results, [])
+            nodeids = None if any(result is None for result in results) else sum(results, [])
+            # Groups are disjoint, so a node id from two groups means the split leaked and would inflate the count.
+            if nodeids and len(set(nodeids)) != sum(len(set(result)) for result in results):
+                nodeids = None
+            collected[side] = nodeids
             if collected[side] and cached[side]:
                 cached[side].parent.mkdir(parents=True, exist_ok=True)
                 cached[side].write_text(json.dumps(collected[side]))

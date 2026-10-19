@@ -214,7 +214,7 @@ def test_collection_splits_across_processes_and_matches_one_process(tmp_path, mo
     assert len(set((root / "pids").read_text().split())) == 3
 
 
-def test_collection_groups_are_contiguous_runs_weighted_by_test_files(tmp_path):
+def test_collection_groups_are_contiguous_runs_weighted_by_test_files(tmp_path, monkeypatch):
     from tests.count_floor import collection_groups
 
     root = (
@@ -248,6 +248,9 @@ def test_collection_groups_are_contiguous_runs_weighted_by_test_files(tmp_path):
         [*shared, "alpha", "beta", "notes.txt", "test_a.py", "test_b.py", "test_data.json"]
     ]
     assert collection_groups(tmp_path / "missing", 4) == [shared]
+    listed = Path.iterdir
+    monkeypatch.setattr(Path, "iterdir", lambda path: reversed(list(listed(path))))
+    assert collection_groups(root, 2)[0] == [*shared, "alpha", "beta", "notes.txt"]
 
 
 def test_each_collected_side_shares_the_processes(tmp_path, monkeypatch):
@@ -272,6 +275,15 @@ def test_one_failed_group_fails_the_whole_side(tmp_path, monkeypatch):
 
     root = _tree(tmp_path, {"alpha/test_x.py": "raise RuntimeError('collection fails')\n", "test_a.py": SUITE})
     monkeypatch.setattr(count_floor, "collection_processes", lambda: 2)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
+
+
+def test_groups_that_overlap_fail_the_side_instead_of_inflating_the_count(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(tmp_path, {"test_a.py": SUITE, "test_b.py": OTHER})
+    every = ["__init__.py", "conftest.py", "test_a.py", "test_b.py"]
+    monkeypatch.setattr(count_floor, "collection_groups", lambda root, count: [every, every])
     assert count_floor.collect_all({"head": root}, "tests/") == {"head": None}
 
 
