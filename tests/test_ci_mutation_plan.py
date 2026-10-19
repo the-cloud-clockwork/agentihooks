@@ -128,6 +128,8 @@ def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
     assert measured_costs([name], cached) == pytest.approx({name: contended})
     uncontended = [{"tests": tests, "durations": {"a": 3.0, "b": 4.0}, "cpu": 10.0}]
     assert measured_costs([name], uncontended) == pytest.approx({name: 5.6 + 1.25 * 7.0})
+    quick = [{"tests": tests, "durations": {"a": 0.3, "b": 0.3}, "cpu": 0.2}]
+    assert measured_costs([name], quick) == pytest.approx({name: 5.6 + 1.25 * 0.2})
     untimed = [{"tests": tests, "durations": {"a": 30.0, "b": 40.0}}]
     assert measured_costs([name], untimed) == pytest.approx({name: 5.6 + 1.25 * 70.0})
     long = [{"tests": tests, "durations": {"a": 300.0, "b": 300.0}, "cpu": 200.0}]
