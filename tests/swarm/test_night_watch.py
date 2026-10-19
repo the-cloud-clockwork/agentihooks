@@ -340,13 +340,6 @@ def test_a_logged_merge_stall_sends_no_email(store, monkeypatch, tmp_path):
     assert [row["tool"] for row in gate_log.recent(SLUG, None, tmp_path)] == ["alert merge"]
 
 
-def test_a_merge_observation_error_raises_no_finding(store, monkeypatch):
-    stalled(monkeypatch)
-    assert merge_stall.findings(store, SLUG, "/repo", NOW)
-    monkeypatch.setattr(merge_stall, "observe", lambda repo, at: (_ for _ in ()).throw(OSError("GitHub down")))
-    assert merge_stall.findings(store, SLUG, "/repo", NOW + 6 * MINUTE) == []
-
-
 def test_the_failing_streak_counts_newest_failures_past_cancelled_runs(monkeypatch):
     runs = [
         {"id": 5, "conclusion": "cancelled"},

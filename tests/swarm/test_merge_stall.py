@@ -464,7 +464,7 @@ def test_positive_remaining_merge_budget_can_finish_a_refresh(rig, monkeypatch):
     store.redis.set(store.key("proof", "merge-stall"), json.dumps(cached))
     state["at"] += merge_stall.CACHE_MS
     clock, original = [100.0], subprocess.run
-    durations = iter((8, 1, 0.4, 0.2, 0.2))
+    durations = iter((8, 1, 0.4, 0.2, 0.2, 0.1))
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
 
     def run(command, **kwargs):
@@ -490,5 +490,5 @@ def test_merge_observation_records_github_read_wall_time(rig, capsys):
         timing.SWARM.reset(token)
     events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
     finished = [row for row in events if row.get("phase") == "finished"]
-    assert len(finished) == 5
+    assert len(finished) == 6
     assert all(row["step"] == "scripts.swarm.health.merge_stall.github_read" and row["wall_s"] >= 0 for row in finished)

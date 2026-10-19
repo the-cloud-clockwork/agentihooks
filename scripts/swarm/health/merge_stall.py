@@ -134,7 +134,7 @@ def findings(store, slug: str, repo: str, at: int) -> list[Finding]:
             state = observed
         state["tried"] = at
         store.redis.set(key, json.dumps(state))
-    return [] if state.get("error") else _stalled(state) + _failing(state)
+    return _stalled(state) + _failing(state)
 
 
 def _failing(state: dict) -> list[Finding]:
