@@ -426,7 +426,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
 | `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the newest `pull_request` run of the Tests workflow on the current head and refuses unless that run passed (`the current pull request head must pass Tests before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
-| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named AgentiHooks touched Python fallback: lint, format, size and complexity on changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
+| `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
 | `agentihooks swarm <id> review` | Start a review round on the task. The third round answers that review is closed: any finding still open gets one ruling from the other reader, then the merge proceeds. A fourth is refused with that text. |
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
@@ -732,6 +732,80 @@ The regression reproduced a push rejected against the predecessor before the
 fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38723619720));
 the corrected publication and continuation cases passed afterward
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
+
+### Fallback gate for repositories without their own
+
+`publish` runs the repository's own gate when the worktree holds
+`scripts/ci_prepush.py` or `scripts/ci_prepush/__main__.py`. Otherwise it runs
+the AgentiHooks touched Python fallback, and the publish result names it in
+its `gate` field:
+
+```json
+{"gate": "AgentiHooks touched Python fallback"}
+```
+
+The fallback has no settings of its own. It grades against the merge base of
+the worktree's local `origin/dev` ref and `HEAD`; `publish` does not fetch that
+ref first. It looks only at Python files that
+the branch adds, copies, modifies, renames or changes type and that still
+exist. Each file is graded in three stages, and the first stage with a finding
+stops the gate:
+
+| Stage | What fails |
+|---|---|
+| Lint | A `ruff check` finding whose lines meet a line the branch added or changed, under the repository's own ruff configuration. Every line of a new file counts as changed; a renamed file counts only its edited lines. A syntax error fails wherever it sits in the file. |
+| Format | A line that `ruff format` would rewrite, when that line is a changed line. A blank line `ruff format` wants to insert before a changed line counts. |
+| Size and complexity | A touched function over 300 lines or over the complexity limits (`C901` above 12, `PLR0912` above 12 branches, `PLR0913` above 7 arguments), or a changed file over 3000 lines, unless the same unit was already that large at the merge base or the base allowlist permits it, and it did not grow. |
+
+Changed lines come from `git diff -U0` between the merge base and `HEAD`.
+Findings on lines the branch never touched pass, so an old offender in a file
+does not block every push that edits that file. For example, with
+`label = f"plain"` already on dev, a branch that changes only the line above
+it publishes:
+
+```text
+AgentiHooks touched Python fallback: /home/me/dev/worktrees/litellm-state/eng-1
+Graded 1 changed Python files
+```
+
+The same `F541` on a line the branch adds, here line 3, fails the publication:
+
+```text
+mod.py:3:9: F541 f-string without any placeholders
+```
+
+#### Suppressions
+
+The fallback runs ruff with `--ignore-noqa`, matching its complexity rules, so
+a `# noqa` comment does not clear a finding on a changed line. Fix the line
+instead. For an intentional re-export, write `import name as name` or list the
+name in `__all__`; ruff accepts both without a suppression. Old suppressed
+lines outside the diff still pass, because they are not changed lines.
+
+#### Reports and failures
+
+Each finding prints one line and the publication stops with a `Next:` command
+to repeat after the fix:
+
+| Report | Meaning |
+|---|---|
+| `path:row:column: CODE message` | A lint finding on a changed line, or a syntax error anywhere in the file. |
+| `path:row: would reformat a changed line` | `ruff format` would rewrite that changed line; `row` is the first such line. Run `ruff format path` and review the diff. |
+| `path: name RULE message` | A touched function or changed file over a size or complexity limit. |
+| `path: unit grew from N to M` | A unit already over its limit at the merge base grew. |
+| `ruff check exited N` or `ruff format exited N` | Ruff could not run, usually an invalid ruff configuration in the repository. Its error reaches the terminal. |
+
+A pass prints `Graded N changed Python files` and records the passing head,
+which `publish` requires before it pushes. Tests never run in the fallback;
+they run in CI.
+
+The changed line grading was delivered in [pull request 4116](https://github.com/the-cloud-clockwork/agentihooks/pull/4116).
+Before it, a one line change to the litellm-state drift script failed on five
+old findings it never touched; with it, the same change graded and passed.
+The test that an old offender outside the diff passes failed before the fix
+([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39044563913))
+and passed after it
+([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39045831977)).
 
 ## Plan tracing for promotion fixer tasks
 
