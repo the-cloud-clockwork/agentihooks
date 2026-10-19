@@ -212,6 +212,16 @@ def test_a_halted_ledger_is_alerted_but_neither_restarted_nor_respawned(store, l
     assert asked == []
 
 
+def test_a_host_tick_that_skips_a_closed_ledger_marks_the_swarm_halted(env, monkeypatch):  # noqa: F811
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    monkeypatch.setattr(cli, "_tickable", lambda slug: False)
+
+    cli._tick_one(store, "sw")
+
+    assert tick_heartbeat.halted(store, "sw")
+
+
 def test_a_binned_ledger_marks_the_swarm_halted_and_a_later_read_clears_it(env):  # noqa: F811
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")

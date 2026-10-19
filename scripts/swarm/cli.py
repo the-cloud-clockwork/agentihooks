@@ -409,6 +409,7 @@ def cmd_list(store, args):
 def _tick_one(store, slug):
     try:
         if not _tickable(slug):
+            store.redis.set(store.key(slug, "ledger-closed"), 1)
             return
         for action in run_tick(store, slug, scheduled=True):
             timing.emit(sys.stdout, f"{slug}: {action}")

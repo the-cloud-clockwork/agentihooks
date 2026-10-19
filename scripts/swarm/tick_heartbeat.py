@@ -11,7 +11,7 @@ KEY = "tick-heartbeat"
 LIMIT_MS = 600_000
 HOST, QUOTA, LEDGER = "host room", "quota", "ledger revision"
 JUDGED = ("running", "paused", "stopping", "drained")
-HALTS = ("ledger-gone", "ledger-binned")
+HALTS = ("ledger-gone", "ledger-binned", "ledger-closed")
 
 
 @dataclass(frozen=True)
