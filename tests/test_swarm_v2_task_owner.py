@@ -115,26 +115,25 @@ def doctor_world(world):
     world.store.names.adopt(doctor, "fedcba", doctor, "repo")
     world.store.create(SwarmConfig(doctor, "/repo", 1, 0))
     world.store.names.next(doctor, "master")
-    for _ in range(3):
-        world.store.names.next(SLUG, "master")
     world.store.set_peer(SLUG, doctor)
     world.store.set_peer(doctor, SLUG)
     world.store.put_agent(doctor, AgentRecord(sender, "master", "master", seat=f"master@{doctor}"))
     world.store.seats.occupy(f"master@{doctor}", sender, 1)
+    world.down(SECOND_NAME)
     masters.MasterSeats(world.redis).set_count(SLUG, 3)
-    for name, seat, task in (
-        (SECOND_NAME, SECOND, "master-2"),
-        ("master@abcdef-0003", f"master-3@{SLUG}", "master-3"),
-    ):
+    for seat, task in ((SECOND, "master-2"), (f"master-3@{SLUG}", "master-3")):
+        name = world.store.names.next(SLUG, "master")
         world.store.put_agent(SLUG, AgentRecord(name, "master", task, seat=seat))
         world.store.seats.occupy(seat, name, 1)
     return world, doctor, sender
 
 
 @pytest.mark.parametrize("front_door", [True, False])
-@pytest.mark.parametrize("address", [SECOND, SECOND_NAME, f"master-3@{SLUG}", "master@abcdef-0003"])
-def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, front_door, address):
+@pytest.mark.parametrize("seat", [SECOND, f"master-3@{SLUG}"])
+@pytest.mark.parametrize("by_name", [True, False])
+def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, front_door, seat, by_name):
     world, _, sender = doctor_world
+    address = world.store.seats.occupant(seat).occupant if by_name else seat
     if not front_door:
         world.down(LEAD_NAME)
         world.store.seats.occupy(LEAD, "", 2)
