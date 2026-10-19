@@ -9,7 +9,7 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 from scripts.swarm_v2 import masters
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-01"
 SLUG = "sw"
@@ -174,18 +174,25 @@ def test_an_item_with_no_phase_has_no_owner(swarm, target):
     assert masters.owner_of(target, DOC, owners) == ""
 
 
-def test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_that_master(swarm):
+def test_an_operator_comment_on_a_phase_of_the_second_master_reaches_only_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
     relay(swarm, write(5, "phases/p2"))
-    assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
-def test_an_operator_comment_on_a_task_whose_claimant_is_gone_reaches_its_phase_owner(swarm):
+def test_an_operator_comment_on_a_task_whose_claimant_is_gone_reaches_only_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
     relay(swarm, write(5, "tasks/t4/comments/c1"))
-    assert len(texts(inbox, SECOND)) == 1 and texts(inbox, LEAD) == []
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
+
+
+def test_operator_chat_naming_a_backend_master_reaches_only_the_front_door(swarm):
+    store, inbox = swarm
+    seated(store, FIRST, OTHER)
+    relay(swarm, write(5, "chat", text=f"@{OTHER.name} where are we"))
+    assert len(texts(inbox, LEAD)) == 1 and texts(inbox, SECOND) == []
 
 
 def test_unaddressed_chat_stays_with_the_lead_which_answers_the_operator(swarm):
@@ -546,13 +553,13 @@ def test_an_added_seat_that_took_a_new_phase_takes_only_what_its_share_still_lac
     assert owners == {"p1": LEAD, "p2": LEAD, "p3": SECOND, "p4": third}
 
 
-def test_a_master_seat_owns_a_hive_and_receives_its_items(swarm):
+def test_a_master_seat_owns_a_hive_while_operator_writes_on_it_reach_the_front_door(swarm):
     store, inbox = swarm
     seated(store, FIRST, OTHER)
     masters.MasterSeats(store.redis).own_hive(SLUG, "anton-1", SECOND)
     assert masters.MasterSeats(store.redis).hive_owners(SLUG) == {"hives/anton-1": SECOND}
     relay(swarm, write(5, "hives/anton-1"))
-    assert texts(inbox, SECOND) and not texts(inbox, LEAD)
+    assert texts(inbox, LEAD) and not texts(inbox, SECOND)
 
 
 def test_a_hive_item_goes_to_the_lead_while_its_owner_is_not_live(swarm):

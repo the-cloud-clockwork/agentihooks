@@ -23,7 +23,6 @@ AUTHORED = {"sha": "abc", "commit": {"message": "Change the code"}, "committer":
 REFRESHED = {"sha": "abc", "commit": {"message": "Merge branch 'dev' into ci-1"}, "committer": {"login": "web-flow"}}
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 READ_PULL = ledger_events.view
 
 
@@ -197,20 +196,23 @@ def test_queue_waits_until_every_configured_check_exists(missing):
 
 
 @pytest.mark.parametrize(
-    "source, expected",
+    "source, state, expected",
     [
-        ("status", False),
-        ("other app", False),
-        ("required app", True),
-        ("both apps", True),
+        ("status", "SUCCESS", True),
+        ("status", "PENDING", False),
+        ("status", "FAILURE", False),
+        ("status", "ERROR", False),
+        ("other app", "SUCCESS", False),
+        ("required app", "SUCCESS", True),
+        ("both apps", "SUCCESS", True),
     ],
 )
 @pytest.mark.parametrize("policy", ["rules", "classic"])
-def test_queue_checks_the_app_required_by_repository_policy(source, expected, policy):
+def test_queue_checks_the_app_required_by_repository_policy(source, state, expected, policy):
     response = checked_resource()
     commit = response["data"]["resource"]["commits"]["nodes"][0]["commit"]
     if source == "status":
-        check = {"context": "CI Validate", "state": "SUCCESS", "isRequired": True}
+        check = {"context": "CI Validate", "state": state, "isRequired": True}
     else:
         check = {
             "name": "CI Validate",
@@ -231,7 +233,13 @@ def test_queue_checks_the_app_required_by_repository_policy(source, expected, po
         )
     reader, _ = runner(response)
     assert READ_PULL(URL, reader, required_checks={"CI Validate": 15368}) == ledger_events.PullRequest(
-        "OPEN", None, None, False, resolved=expected, head="abc"
+        "OPEN",
+        None,
+        None,
+        state in {"FAILURE", "ERROR"},
+        resolved=expected,
+        failed=("CI Validate",) if state in {"FAILURE", "ERROR"} else (),
+        head="abc",
     )
     original, calls = runner(
         {"data": {"resource": OPEN}},
@@ -754,12 +762,12 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     seen = []
 
     def operate(verb, url, **kwargs):
-        seen.append((verb, url))
+        seen.append((verb, url, kwargs["journal"].url))
         return {"queued": True}
 
     monkeypatch.setattr(merge_queue, "operate", operate)
     assert cli.main(["sw", "merge", action, URL]) == 0
-    assert seen == [(action, URL)]
+    assert seen == [(action, URL, URL)]
     assert capsys.readouterr().out == '{"queued": true}\n'
 
 
@@ -885,7 +893,8 @@ def test_cli_queue_applies_the_judged_intent_mode(monkeypatch, tmp_path, capsys,
     queued, events = [], []
     monkeypatch.setattr(intent.log, "append", lambda slug, row, home=None: events.append((slug, row, home)))
 
-    def operate(action, url, admit):
+    def operate(action, url, admit, journal):
+        assert journal.url == URL
         admit("abc")
         queued.append(url)
         return {"queued": True}

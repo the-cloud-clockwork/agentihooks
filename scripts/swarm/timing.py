@@ -9,6 +9,8 @@ from contextvars import ContextVar
 from functools import wraps
 from typing import Any
 
+from scripts.swarm import tick_stop
+
 SWARM = ContextVar("tick_swarm", default=None)
 BEFORE_STEP = ContextVar("tick_before_step", default=None)
 ON_FAILURE = ContextVar("tick_failure", default=None)
@@ -49,6 +51,9 @@ def step(name: str) -> Iterator[None]:
     outcome = "success"
     try:
         yield
+    except tick_stop.Stopped:
+        outcome = "stopped"
+        raise
     except BaseException as exc:
         outcome = "error"
         if record_failure := ON_FAILURE.get():

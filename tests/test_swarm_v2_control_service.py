@@ -15,7 +15,7 @@ from scripts.swarm_v2.kubernetes.spec import pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "control-fixture"
 SECRET = b"k" * 32
@@ -604,7 +604,9 @@ def test_the_hosted_api_honours_the_deep_diagnostics_switch(tmp_path, monkeypatc
 
 
 def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     monkeypatch.setattr(repository, "token", lambda slug: f"token-for-{slug}")
     assert _cs().page_credential(SLUG) == f"token-for-{SLUG}"

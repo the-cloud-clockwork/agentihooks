@@ -11,7 +11,6 @@ SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 sys.path.insert(0, str(SCRIPTS))
 import new_ledger  # noqa: E402
 
-TEMPLATE = SCRIPTS / "template.html"
 CONTENT = {
     "title": "Demo",
     "overview": "o",

@@ -255,8 +255,8 @@ records its actor and time in the store's history.
 |---|---|---|---|
 | `claude-api-weight`, `codex-api-weight` | integer 0 to 100 | `0` | Live share of the api side |
 | `claude-api-max-sessions`, `codex-api-max-sessions` | integer 0 or more | unset (unbounded) | Session cap of the api slot; `0` closes the api side to placement (a forced `--route api` still launches) |
-| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters; stored and validated, read by no launch path yet |
-| `master-tier-claude`, `master-tier-codex` | tier name | unset | Tier declared for swarm masters; stored and validated, read by no launch path yet |
+| `master-account-claude`, `master-account-codex` | account name | unset | Account declared for swarm masters, used for interactive routing and worker reservation |
+| `master-tier-claude`, `master-tier-codex` | tier name | unset | Display label for the declared master account |
 
 ```bash
 agentihooks balance settings                     # every key with its value and the store in use
@@ -270,6 +270,56 @@ one `key: before -> after` line per key, and exits 2 on an unknown key or an
 invalid value. The actor is `AGENTIHOOKS_AGENT_NAME`, else `operator`.
 `agentihooks balance` and `agentihooks quota` show each row's `KIND`, `WEIGHT`
 and `CAP`; an api row shows `n/a` for its quota windows.
+
+## Master accounts and reserved headroom
+
+Declare the account the operator uses for masters separately from worker
+placement. The declaration stores account names and optional tier labels, never
+credentials:
+
+```bash
+agentihooks balance master-account claude=<slug> tier=Max
+agentihooks balance master-account codex=default tier=Pro
+agentihooks balance settings
+agentihooks balance master-account --clear claude
+```
+
+Each `tier=` follows the account it labels. Codex accepts `default` for its
+native login or a slug with a matching `AH_CX_TOKEN_<slug>` variable. A Claude
+declaration may name an interactive login with no worker token. Declarations
+appear as `MASTER <tier>` in account reports. Clearing one harness leaves the
+other declaration in place; `--clear` without a harness clears both. These
+commands declare an identity; sign in separately using the
+[master login procedure](../reference/account-login.md#master-claude-ai-login).
+
+The declared account keeps weekly headroom according to how many masters are
+live on it, across swarms. The 70/60/50 rule is a ceiling on **weekly quota
+used**, not the percentage left and not a session cap:
+
+| Live masters on the declared account | Worker ceiling: week used | Headroom left at the ceiling |
+|---|---|---|
+| 0 | No master reservation | Normal quota rules apply |
+| 1 | 70% | 30% |
+| 2 | 60% | 40% |
+| 3 or more | 50% | 50% |
+
+At or above the ceiling, new workers and worker quota handoffs cannot select
+that account. A running worker's quota policy uses the same ceiling. Masters
+are exempt from the worker reservation; their normal account eligibility and
+quota limits still apply. Other accounts keep their normal routing rules, and
+workers can use their tokens or the configured API capacity.
+
+For example, with one master and 65% of its account's week used, workers may
+still use that account. A second master lowers the ceiling to 60%, so the same
+65% reading now closes it to workers. With three masters, workers stop selecting
+it at 50% used. When the count drops, the next reservation reading uses the
+corresponding ceiling; with no live master the reservation disappears.
+
+The account report includes the reason, for example
+`reserved for 2 live masters: workers stop at 60% of the week`. Use
+`agentihooks balance` and `agentihooks quota` to inspect the declaration and
+reservation. See [Interactive masters and Remote Control](swarm.md#interactive-masters-and-remote-control)
+for launch authentication, fallback and phone access.
 
 ## Skill evaluations
 
@@ -544,7 +594,9 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   idle account keeps its seats; a 7-day window that has reset in the meantime
   reads 100% left. `agentihooks quota` shows `STALE` only past that age, and
   judges a reading older than fifteen minutes on its week alone, without its old
-  five-hour window.
+  five-hour window. A `STALE` row whose 7-day window has reset since its reading
+  shows `-` for `7D LEFT` and `ROUTING LEFT`: the old reading says nothing about
+  the new week, so it is unknown rather than a full 100%.
   `--route` forces one. `init-agent --agent
   codex` and the swarm tick launch through it, and the route report names the
   account for the swarm panel.
@@ -552,7 +604,9 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   `AH_CC_TOKEN_*`, and runs `codex --no-daemon` with the token in
   `CODEX_ACCESS_TOKEN`. Codex keeps one app-server daemon per Codex home and that
   daemon answers with its own login, so a token session must not attach to it.
-  The Codex home, config and hooks stay the shared ones.
+  The Codex home, config and hooks stay the shared ones; each account's quota
+  readings come from its own sessions folder (see
+  [Account identity and own sessions folders](#account-identity-and-own-sessions-folders)).
 - The default account runs plain `codex` with no token variables. With no
   `AH_CX_TOKEN_*` set, every launch takes this path without checking the login.
 - Live sessions are counted per account from `/proc`: a Codex process with
@@ -566,6 +620,7 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   is a Codex process belongs to that session. A run started through a shell,
   even inside a Codex session, holds its own slot.
   Quota per account is the newest of the usage read and the rate-limit event in
+  that account's own sessions folder, or, while the folder holds no reading, in
   the session logs the session registry attributes to it; a token with neither
   shows no quota and still routes.
 - `agentihooks balance` and `agentihooks quota` print one table for every Claude
@@ -575,7 +630,10 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   whole table (api and interactive rows unnumbered), `-` for any missing value.
   Codex routing left is its week left whenever the week is known. A signed-out
   default login shows `SIGNED_OUT` and a cancelled token `EXPIRED` with `-`
-  values. `balance --current` marks this session's account `(current)`. Sessions on
+  values. Each Codex row carries its account fingerprint, `#<8 hex>`, after the
+  name, and lines under the table name every refused duplicate and whether the
+  default login is a distinct ChatGPT account. `balance --current` marks this
+  session's account `(current)`. Sessions on
   names that are not listed accounts are counted in one last line,
   `+N sessions on unlisted account names`, only when there are any. `quota
   --json` gives the same fields per row with `harness`. `balance --fable` prints
@@ -589,6 +647,68 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   list (`balance`, `quota`, the tick, routing) counts a token value once: when
   several names hold the same token, the block's name is kept, else the first
   name in sort order.
+
+### Account identity and own sessions folders
+
+Two credentials can sign in the same ChatGPT account: a token exported under two
+slugs from one workspace, or a token account that is also the default `codex
+login`. Routing both would count one quota twice. The router compares accounts
+by identity, never by token value.
+
+- **Identity.** An account's identity is the `chatgpt_account_id` claim inside
+  its credential: the `AH_CX_TOKEN_<slug>` value for a token account, the access
+  token in the default login's `auth.json` for `default`. An api slot has none.
+  The claim is never printed. Output shows only its fingerprint, the first 8 hex
+  characters of its SHA-256, so two rows with the same fingerprint are the same
+  ChatGPT account.
+- **Duplicates.** When a token account repeats the identity of a token account
+  earlier in name order, the later one leaves the routing pool: no automatic
+  placement and no swarm seat. It gets a balance row only while live sessions
+  still run on it, with `-` for `CAP` and `ROUTING LEFT`. Every
+  `agentihooks codex` launch prints one line
+  per duplicate on stderr:
+
+  ```text
+  agentihooks codex: warning: AH_CX_TOKEN_ncgma_b is the same ChatGPT account as ncgma; it is not routed
+  ```
+
+  The fix is to remove one of the two exports from the managed token block, or
+  to log the second slug in with another workspace.
+- **Default login.** Once any token account exists, `default` leaves the pool
+  (see above), so it is never routed beside a token of the same account. The
+  balance table still names whether it is the same account as one of them.
+- **Own sessions folder.** Codex writes every rollout under
+  `CODEX_HOME/sessions`, and every account shares one `CODEX_HOME`. At each Stop
+  of a Codex session the hook hard links that session's rollout into
+  `CODEX_HOME/accounts/<account>/sessions` at the same relative path, with the
+  account taken from the token variable of the Codex process itself. The
+  router's `codex exec` quota probe links its thread the same way. A rollout
+  outside `CODEX_HOME/sessions` is not linked, and a failed link is logged and
+  never blocks the Stop.
+- **Reading quota.** An account whose folder exists reads its rate-limit events
+  from that folder alone, so one account's reading can never land on another.
+  An account with no reading there yet falls back to the session registry's
+  attribution, and the default login's fallback skips every session already
+  linked into a token account's folder. Sessions that predate the folders keep
+  their readings this way until their next Stop links them.
+
+`agentihooks balance` shows the fingerprints and the verdicts:
+
+```text
+$ agentihooks balance
+#  HARNESS  ACCOUNT           KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET
+1  codex    team_a #5f0e9a71  subscription  NORMAL  0/6       -       6    88%           -        -         88%      4d02h
+2  codex    ncgma #ab12cd34   subscription  NORMAL  2/6       -       6    71%           90%      3h10m     71%      2d15h
+AH_CX_TOKEN_ncgma_b is the same ChatGPT account as ncgma; it is not routed
+codex default login #ab12cd34: same ChatGPT account as ncgma
+```
+
+A default login that matches no token account reads
+`codex default login #<fingerprint>: distinct from ncgma, team_a`, listing every
+token account. A default login whose credential carries no claim, such as one
+signed out or signed in with an API key, reads `codex default login: identity
+unknown`. With no token account set, no verdict line is printed. `balance
+--fable` prints neither the warning nor the verdict.
 
 ### Logging in an account
 

@@ -3,8 +3,10 @@ import pytest
 from scripts.swarm_ledger import ledger, ledger_groups, ledger_tasks, new_ledger
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.api import schemas
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger import legacy_page
+
+repository = default_repository()
 
 SLUG = "taskgroup-2026-01-01"
 MASTER = "master@abcdef-0001"
@@ -32,7 +34,7 @@ def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
     monkeypatch.setitem(core.EXTENSION_OPS, "task_group", ledger_groups)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     ops = [
         {"op": "task_add", "id": f"seed-{n}", "by": "swarm", "task": f"t{n}", "title": f"task {n}", "lane": "eng"}

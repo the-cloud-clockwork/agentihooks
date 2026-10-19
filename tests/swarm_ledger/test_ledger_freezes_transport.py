@@ -7,8 +7,6 @@ from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, ledger, new_ledger, operation, pinned
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 authority_live = _authority_live
 DISPATCHER, ENGINEER = "dispatcher@323133-0002", "engineer@323133-0256"
 
@@ -18,7 +16,7 @@ def swarm(authority_live, monkeypatch):
     import fakeredis
 
     content = {"title": "Freeze transport", "phases": [{"title": "Proof"}]}
-    html, document = core.paths(SLUG)
+    html, document = legacy_page.paths(SLUG, core)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"]))
     document.unlink(missing_ok=True)
     core.sync(SLUG)

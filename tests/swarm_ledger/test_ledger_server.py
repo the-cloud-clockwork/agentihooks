@@ -12,9 +12,11 @@ import ledger_server as server  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm.store import SwarmError  # noqa: E402
-from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import chromium, rendered_home  # noqa: E402
+
+storage = default_repository()
 
 MINUTE = 60 * 1000
 SWARM_STATE = server.swarm_state
@@ -48,7 +50,7 @@ def one_row(browser, now, **fields):
 def make(slug, title="T", overview="O", size="swarm", phases=()):
     content = {"title": title, "overview": overview, "sources": [], "phases": list(phases), "questions": []}
     content["followups"] = []
-    core.paths(slug)[0].write_text(
+    legacy_page.paths(slug, core)[0].write_text(
         legacy_page.render(new_ledger.build_doc(content, size), slug, 8765), encoding="utf-8"
     )
 
@@ -339,7 +341,7 @@ def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_with
     with (
         patch.object(server, "swarm_store", return_value=Swarms()),
         patch.object(server, "sample_streams"),
-        patch.object(server.time, "sleep", finish),
+        patch.object(server, "scheduled_wait", finish),
         pytest.raises(RuntimeError, match="watch ended"),
     ):
         server.watch_ledgers()

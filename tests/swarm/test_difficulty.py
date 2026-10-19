@@ -7,8 +7,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DOC = {"phases": [{"id": "p1", "title": "Sizing", "description": "Every task carries a size"}]}
 TASK = {
     "id": "t1",
@@ -97,7 +95,6 @@ def test_ops_kind_is_large_without_infrastructure_territory():
         [
             "scripts/swarm_ledger/home.html",
             "scripts/swarm_ledger/shell.html",
-            "scripts/swarm_ledger/template.html",
             "scripts/swarm_ledger/palette.css",
             "scripts/swarm_ledger/tooltips.js",
         ],

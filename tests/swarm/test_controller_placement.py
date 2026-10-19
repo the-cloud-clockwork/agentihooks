@@ -1,7 +1,5 @@
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store(monkeypatch):

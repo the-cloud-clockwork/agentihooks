@@ -5,7 +5,6 @@ import pytest
 from scripts.swarm import status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 MIDNIGHT = 1_791_244_800_000
 HOUR = 3_600_000
 
@@ -255,6 +254,7 @@ def test_status_reports_each_closed_failed_launch_pane_with_its_lines(store, mon
             "error": "account not found",
             "pane_id": "w1:p9",
             "after": "",
+            "head": "",
             "pane_lines": ["account not found", "$"],
         }
     ]

@@ -4,9 +4,6 @@ import re
 import time
 from dataclasses import dataclass
 
-from scripts.swarm.keyspace import ROOT
-
-PREFIX = f"{ROOT}:swarm"
 OUTCOME_COMMANDS = (
     ("pushed", re.compile(r"(?:^|[;&|(\n]\s*)git(?:\s+-C\s+\S+)?\s+push\b")),
     ("pull request opened", re.compile(r"(?:^|[;&|(\n]\s*)gh\s+pr\s+create\b")),
@@ -29,7 +26,9 @@ class Progress:
         self.redis, self.slug = redis, slug
 
     def key(self, agent):
-        return f"{PREFIX}:{self.slug}:progress:{agent}"
+        from scripts.hive import scope
+
+        return f"{scope.readings(self.redis, self.slug, agent)}:{self.slug}:progress:{agent}"
 
     def read(self, agent):
         raw = self.redis.hgetall(self.key(agent))

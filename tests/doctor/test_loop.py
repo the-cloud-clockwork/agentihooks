@@ -8,7 +8,6 @@ from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 T0 = 1_000 * MINUTE_MS
 TASK_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -214,3 +213,82 @@ def test_a_judged_finding_whose_only_growth_is_age_stays_judged_until_its_eviden
     step(store, T0 + 100 * MINUTE_MS, [aged(110, "from a to b", "1 wake")], closed=[])
     [_, again] = master_items(store)
     assert f"{aged(0).id}: pending for 110 minutes. It came back after a false-positive verdict." in again.text
+
+
+@pytest.mark.parametrize("value", ["false-positive", "established"])
+@pytest.mark.parametrize("minutes", [10, 100])
+def test_detector_wording_changes_do_not_return_judged_findings(store, value, minutes):
+    before = [
+        Finding("inbox past window", f"item-{i}", "pending", ("0 wakes",), "window", 10, evidence_identity=(0, 0))
+        for i in range(19)
+    ]
+    assert len(loop.record(store, DOCTOR, before, T0, MINUTE_MS)) == 19
+    for finding in before:
+        loop.verdicts(store, DOCTOR).judge(finding.id, value, "known", "master", T0)
+    after = [
+        Finding(
+            "inbox past window",
+            f"item-{i}",
+            "unread delivery",
+            ("recipient has no live occupant", "no wakes"),
+            "window",
+            minutes,
+            evidence_identity=(0, 0),
+        )
+        for i in range(19)
+    ]
+    assert loop.record(store, DOCTOR, after, T0 + 90 * MINUTE_MS, MINUTE_MS) == []
+
+
+def test_new_evidence_identity_returns_a_judged_finding_even_with_unchanged_display(store):
+    from scripts.swarm.health.verdicts import VerdictStore
+
+    judgments = VerdictStore(store.redis, loop.verdicts(store, DOCTOR).key)
+    first = Finding("inbox past window", "item", "pending", ("same display",), "window", 10, evidence_identity=(0,))
+    loop.record(store, DOCTOR, [first], T0, MINUTE_MS)
+    judgments.judge(first.id, "established", "known", "master", T0)
+    changed = Finding("inbox past window", "item", "pending", ("same display",), "window", 11, evidence_identity=(1,))
+    assert loop.record(store, DOCTOR, [changed], T0, MINUTE_MS) == []
+    [returned] = loop.record(store, DOCTOR, [changed], T0 + MINUTE_MS, MINUTE_MS)
+    assert returned["id"] == first.id
+    assert returned["verdict"]["value"] == "established"
+    assert loop.record(store, DOCTOR, [changed], T0 + 2 * MINUTE_MS, MINUTE_MS) == []
+
+
+def test_a_legacy_verdict_adopts_evidence_identity_without_returning_on_new_wording(store):
+    first = Finding("inbox past window", "item", "pending", ("old wording",), "window", 10)
+    loop.record(store, DOCTOR, [first], T0, MINUTE_MS)
+    loop.verdicts(store, DOCTOR).judge(first.id, "false-positive", "known", "master", T0)
+    changed = Finding("inbox past window", "item", "pending", ("new wording",), "window", 100, evidence_identity=(0,))
+    assert loop.record(store, DOCTOR, [changed], T0 + MINUTE_MS, MINUTE_MS) == []
+    _, verdict = loop.judged(store, DOCTOR, first.id)
+    assert verdict["evidence_identity"] == [0]
+    assert verdict["measure"] == 10
+    assert verdict["at"] == T0
+    changed = Finding("inbox past window", "item", "pending", ("new wording",), "window", 101, evidence_identity=(1,))
+    assert len(loop.record(store, DOCTOR, [changed], T0 + 2 * MINUTE_MS, MINUTE_MS)) == 1
+
+
+def test_inbox_wording_does_not_return_a_finding_but_a_new_wake_does(store, monkeypatch):
+    from scripts.doctor import inbox
+
+    item = {
+        "id": "item",
+        "sender": "master",
+        "address": "operator",
+        "text": "work",
+        "state": "pending",
+        "created_at": T0 - 10 * MINUTE_MS,
+        "history": [],
+    }
+    monkeypatch.setattr(inbox, "_recipient", lambda *args: "old recipient wording")
+    first = inbox.past_window([item], T0, MINUTE_MS)
+    assert len(loop.record(store, DOCTOR, first, T0, MINUTE_MS)) == 1
+    loop.verdicts(store, DOCTOR).judge(first[0].id, "false-positive", "known", "master", T0)
+    monkeypatch.setattr(inbox, "_recipient", lambda *args: "recipient has no live occupant")
+    after = inbox.past_window([item], T0 + 90 * MINUTE_MS, MINUTE_MS)
+    assert after[0].evidence != first[0].evidence
+    assert loop.record(store, DOCTOR, after, T0 + 90 * MINUTE_MS, MINUTE_MS) == []
+    item["history"].append({"event": "woken", "at": T0 + 90 * MINUTE_MS})
+    wake = inbox.past_window([item], T0 + 91 * MINUTE_MS, MINUTE_MS)
+    assert len(loop.record(store, DOCTOR, wake, T0 + 91 * MINUTE_MS, MINUTE_MS)) == 1

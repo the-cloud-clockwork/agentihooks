@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 PR = "https://github.com/o/r/pull/9"
 
@@ -42,7 +41,9 @@ class FileLedger(LedgerClient):
 
     def _resource(self, slug, path, collection=False):
         from scripts.swarm_ledger.api.resources import hierarchy_read, value
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         if path.startswith("hierarchy"):
             rows, query = [], {"limit": 100}
@@ -72,6 +73,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setattr(swarm_cli.delivery, "HerdrMessenger", lambda: FakeHerdr({}))
     monkeypatch.setattr(doctor, "linked_bundle", lambda: tmp_path / "bundle")
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
+    monkeypatch.setattr(doctor.loop, "speed", lambda *args: [])
     assert swarm_cli.main([WATCHED, "create", "--repo", "/repo"]) == 0
     return store, rt, tmp_path
 
@@ -579,8 +581,10 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "startup",
         "context overrun",
         "ci",
+        "dev workflow",
         "trace",
         "runtime storage",
+        "scheduled tick",
     }
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]

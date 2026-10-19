@@ -260,12 +260,18 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
     workflow = yaml.safe_load((root / ".github/workflows/test.yml").read_text())
     policy = json.loads((root / ".github/workflows/trusted-actors.json").read_text())
     steps = workflow["jobs"]["gate-required"]["steps"]
+    steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     forms = (
         ({"selected": True}, {}, {"queue_tier": True}, {"queue_tier": True, "promotion": True})
         if "durations" in workflow["jobs"]
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
-    assert steps in [ci_reuse.gate_steps(**form, summary=summary) for form in forms for summary in (False, True)]
+    assert steps in [
+        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        for form in forms
+        for summary in (False, True)
+        for watcher_loss in (False, True)
+    ]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
@@ -946,6 +952,54 @@ def _gate(steps, needs, event="merge_group"):
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled", "skipped", "pending", None])
+@pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
+def test_queue_watcher_loss_does_not_drop_passed_graded_jobs(watcher, failed):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    if watcher is not None:
+        needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
+    assert (result.returncode == 0) == (watcher in {"success", "failure", "cancelled"} and not failed), (
+        result.stdout + result.stderr
+    )
+
+
+@pytest.mark.parametrize("job", ["select", "split", "unit", "shard-check", "test-count"])
+@pytest.mark.parametrize("status", ["failure", "cancelled", "skipped", "pending", None])
+def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    needs["queue-fail-fast"] = {"result": "failure"}
+    if status is None:
+        del needs[job]
+    else:
+        needs[job]["result"] = status
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
+    assert result.returncode != 0, result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled"])
+@pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
+@pytest.mark.parametrize("graded", ["success", "failure", "cancelled", "skipped"])
+def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(watcher, failed, graded):
+    jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    required = {"select", "split", "unit", "shard-check", "test-count"}
+    needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
+    needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
+    needs["unit"]["result"] = graded
+    step = next(step for step in jobs["gate-required"]["steps"] if step.get("name") == "Require every gate to succeed")
+    result = _gate([step], needs)
+    assert (result.returncode == 0) == (not failed and graded == "success"), result.stdout + result.stderr
+
+
+def test_the_workflow_watcher_exports_reported_failures_to_the_gate():
+    jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    assert jobs["queue-fail-fast"]["outputs"]["failed"] == "${{ steps.watch.outputs.failed }}"
+
+
 def test_queue_gate_keeps_legacy_duration_admission_by_default():
     from scripts import ci_reuse
 
@@ -973,6 +1027,23 @@ def test_consolidated_gate_requires_the_shared_admission(event, promotion, admis
         needs["select"]["result"] = admission
     result = _gate(ci_reuse.gate_steps(queue_tier=True, promotion=promotion, consolidated=True), needs, event)
     assert (result.returncode == 0) == (admission == "success"), result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("status", ["success", "failure", "skipped", "cancelled", None])
+def test_documentation_gate_requires_a_successful_build_on_pull_requests(status):
+    from scripts import ci_reuse
+
+    required = {"select", "test-count", "lint", "semgrep", "sonar"}
+    needs = {name: {"result": "success"} for name in required}
+    needs["select"]["outputs"] = {"scope": "none"}
+    if status is not None:
+        needs["docs"] = {"result": status}
+    result = _gate(
+        ci_reuse.gate_steps(queue_tier=True, consolidated=True, docs=True),
+        needs,
+        event="pull_request",
+    )
+    assert (result.returncode == 0) == (status == "success"), result.stdout + result.stderr
 
 
 def test_the_canonical_gate_still_needs_the_standalone_ratchet_in_the_queue():

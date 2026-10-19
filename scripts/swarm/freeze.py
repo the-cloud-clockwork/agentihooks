@@ -55,12 +55,15 @@ def exempt(task: dict, fix_phase: str) -> bool:
 
 def ancestry(task: dict, graph: dict) -> list:
     chain = [f"tasks/{task['id']}"]
-    up = hierarchy.parent("tasks", task)
-    for _ in range(hierarchy.CHAIN - 1):
-        if not up or up in chain:
-            return chain
-        chain.append(up)
-        up = (graph.get(up) or (None, None))[1]
+    roots = [hierarchy.parent("tasks", task)]
+    if task.get("merged_into"):
+        roots.append(f"tasks/{task['merged_into']}")
+    for up in roots:
+        for _ in range(hierarchy.CHAIN - 1):
+            if not up or up in chain:
+                break
+            chain.append(up)
+            up = (graph.get(up) or (None, None))[1]
     return chain
 
 
@@ -69,6 +72,39 @@ def covers(target: str, task: dict, chain: list) -> bool:
     if selector in SELECTORS and value:
         return SELECTORS[selector](task) == value
     return target in chain
+
+
+def marks(doc: dict, graph: dict, fix: str, watched: bool) -> dict:
+    records = doc.get("freezes") or []
+    focus = [r["target"] for r in records if r["verb"] == "focus"]
+    tasks = {f"tasks/{t.get('id')}": t for t in doc.get("tasks") or [] if isinstance(t, dict)}
+    chains = {node: _chain(node, graph, tasks) for node in graph}
+    found = {"frozen": [], "held": []}
+    for node, chain in chains.items():
+        task = tasks.get(node)
+        if task is not None:
+            cold = frozen(task, records, chain)
+            hold = task.get("state") == "open" and (
+                unfocused(task, records, chain, fix) or watched and not exempt(task, fix)
+            )
+        else:
+            cold = any(r["verb"] == "freeze" and r["target"] in chain for r in records)
+            hold = bool(focus) and not any(_reaches(target, node, chains) for target in focus)
+        if cold or hold:
+            found["frozen" if cold else "held"].append(node)
+    return found
+
+
+def _chain(node: str, graph: dict, tasks: dict, below: tuple = ()) -> list:
+    if node in tasks:
+        return ancestry(tasks[node], graph)
+    chain = [*below, node]
+    up = (graph.get(node) or (None, None))[1]
+    return _chain(up, graph, tasks, tuple(chain)) if up not in (None, *chain) else chain
+
+
+def _reaches(target: str, node: str, chains: dict) -> bool:
+    return target.partition(":")[0] in SELECTORS or target in chains[node] or node in chains.get(target, ())
 
 
 def fix_phase(config: SwarmConfig) -> str:

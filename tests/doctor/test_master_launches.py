@@ -9,8 +9,6 @@ from scripts.doctor import master_launches, spawn_read
 from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ERROR = "unsupported transfer: saved effort is outside the current swarm range"
 COOLDOWN_MS = 60 * 60_000
 INTERVAL_MS = 10 * 60_000
@@ -275,8 +273,14 @@ def test_master_reader_is_read_only_and_reads_master_rows_and_journal():
     assert read["journal"] == record["journal"]
     assert read["journal_error"] == ""
     argv = seen[0]
-    assert argv[:4] == ["journalctl", "--user", "-u", "agentihooks-swarm.service"]
-    assert ["--since", "@1", "--until", "@2"] == argv[4:8]
+    assert argv[:5] == [
+        "journalctl",
+        "--user",
+        "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+        "+",
+        "SYSLOG_IDENTIFIER=agentihooks-swarm",
+    ]
+    assert ["--since", "@1", "--until", "@2"] == argv[5:9]
     assert "master spawn failed" in argv
     assert master_launches.findings(read) == []
 
@@ -296,7 +300,7 @@ def test_master_reader_reads_the_journal_from_the_last_live_binding():
     seen = []
     spawn_read.master_records(store, "rig-grade-swarm", run=_journal(record, seen))
     live = max(r["binding"]["at"] for r in record["transfers"] if r["binding"]["state"] == "live")
-    assert seen[0][4:6] == ["--since", f"@{live / 1000:.3f}"]
+    assert seen[0][5:7] == ["--since", f"@{live / 1000:.3f}"]
     assert "--until" not in seen[0]
 
 
@@ -318,7 +322,7 @@ def test_master_reader_with_no_binding_reads_from_the_first_master_transfer():
     store.redis.hset(store.key("sw", "transfers"), "f1", json.dumps(row))
     seen = []
     spawn_read.master_records(store, "sw", run=_journal({"journal": []}, seen))
-    assert seen[0][4:6] == ["--since", "@7.000"]
+    assert seen[0][5:7] == ["--since", "@7.000"]
 
 
 @pytest.mark.parametrize(
@@ -595,8 +599,9 @@ def journal_command(pattern, since, until):
     return [
         "journalctl",
         "--user",
-        "-u",
-        "agentihooks-swarm.service",
+        "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+        "+",
+        "SYSLOG_IDENTIFIER=agentihooks-swarm",
         *(["--since", since] if since else []),
         *(["--until", until] if until else []),
         "-o",
@@ -653,10 +658,10 @@ def test_master_reader_takes_only_master_outcomes_and_working_masters_as_binding
     calls, run = recording()
     read = spawn_read.master_records(store, "sw", run=run)
     assert read["restored"] == [outcomes[0]]
-    assert calls[0][0][4:6] == ["--since", "@7.000"]
+    assert calls[0][0][5:7] == ["--since", "@7.000"]
     store.put_agent("sw", AgentRecord("master@sw-2", "master", "master", state="working", started_at=9000))
     spawn_read.master_records(store, "sw", run=run)
-    assert calls[1][0][4:6] == ["--since", "@9.000"]
+    assert calls[1][0][5:7] == ["--since", "@9.000"]
 
 
 def test_master_reader_with_no_master_rows_reads_the_whole_journal():

@@ -10,8 +10,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 1_800_000_000_000
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer"}
 
@@ -76,6 +74,36 @@ def test_record_pass_collects_ledger_rows_before_flushing(spool, monkeypatch, re
     )
     assert received["INSERT INTO swarm.ticks FORMAT JSONEachRow"][0]["actions"] == 3
     assert acks == [("sw", 1)]
+
+
+def test_record_pass_uses_its_tick_document_and_client_without_reading_a_new_revision(
+    spool, sent, monkeypatch, real_ledger_record
+):
+    import fakeredis
+
+    from tests.swarm.test_metrics_ledger import Ledger
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", 0, 0))
+    ledger = Ledger()
+    ledger.move("claimed", 1, NOW - 1)
+    doc = ledger.state("sw")
+    ledger.move("done", 2, NOW)
+    ledger.calls.clear()
+    monkeypatch.setattr(metrics, "LedgerClient", lambda: ledger)
+    monkeypatch.setattr(metrics.metrics_ledger, "record", real_ledger_record)
+    swarm = metrics.metrics_swarm.TickInput(store, doc, [], lambda url: None, ledger)
+
+    assert metrics.record_pass("sw", NOW, 0, ON, swarm) == []
+
+    events = [
+        json.loads(line)
+        for _, query, body in sent
+        if query == "INSERT INTO swarm.ledger_events FORMAT JSONEachRow"
+        for line in body.splitlines()
+    ]
+    assert [(row["ledger"], row["state"], row["revision"]) for row in events] == [("sw", "claimed", 1)]
+    assert ledger.calls == [("ack", "sw", 1)]
 
 
 @pytest.mark.parametrize("error", [OSError, LedgerGone, SwarmError])

@@ -1,20 +1,19 @@
 """Agents still working on a draining account past their quota handoff warning, a health finding for the master."""
 
-from scripts import quota_freshness
+from scripts import quota_freshness, quota_state
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import capacity, quota_view
 from scripts.swarm.health.findings import MINUTE_MS, Finding, Limits
 from scripts.swarm.store import RedisStore
-
-CLOSED = "CLOSED"
 
 
 def draining(account: dict, limits: Limits, now: float) -> bool:
     resets = (account.get("five_resets_at"), account.get("week_resets_at"))
     if quota_freshness.stale(account.get("observed_at"), resets, now):
         return False
-    left = quota_view.routing_left(account)
-    return account["state"] == CLOSED or (left is not None and left <= limits.drain_left)
+    return account["state"] == quota_state.CLOSED or quota_state.draining(
+        quota_view.routing_left(account), limits.drain_left
+    )
 
 
 def _finding(agent, account: dict, minutes: int, limits: Limits) -> Finding:

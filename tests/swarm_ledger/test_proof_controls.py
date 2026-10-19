@@ -15,7 +15,6 @@ from tests.swarm_ledger.test_proof_ledgers import credential as _credential
 from tests.swarm_ledger.test_proof_ledgers import hive as _hive
 from tests.swarm_ledger.test_proof_ledgers import live as _live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 credential, hive, live = _credential, _hive, _live
 
 
@@ -45,7 +44,7 @@ def owned(live, credential, hive, monkeypatch):
             exists=server.repository.exists,
             send=lambda status, text, kind: (status, json.loads(text)),
         )
-        return routes.handle(handler, server)
+        return routes.handle(handler, server.api_services())
 
     controller = {"X-Controller-Credential": credential}
     status, created = invoke("", {"agent": owner, "task": "contract", "content": CONTENT}, controller)
@@ -520,7 +519,7 @@ def test_controller_controls_require_controller_and_enqueue_only_scoped_pause(ow
 @pytest.mark.parametrize("owner", [{}, {"parent": "", "agent": "engineer@a1b2c3-0001", "task": "contract"}])
 def test_migration_refuses_incomplete_requester_identity(owned, owner):
     with pytest.raises(proofs.APIError) as refused:
-        proofs.migrate(server, owned.slug, owner)
+        proofs.migrate(server.api_services(), owned.slug, owner)
     assert refused.value.status == 400
     assert owned.store.redis.hgetall(owned.store.key(owned.slug, "proof-creator")) == {
         "parent": SLUG,
@@ -544,7 +543,7 @@ def test_migration_schema_refuses_malformed_payload_before_authority(owned, chan
     else:
         payload = []
     with pytest.raises(proofs.APIError) as refused:
-        proofs.migrate(server, owned.slug, payload)
+        proofs.migrate(server.api_services(), owned.slug, payload)
     assert refused.value.status == 400
     assert refused.value.code == "schema_invalid"
 
@@ -561,6 +560,6 @@ def test_controller_control_schema_refuses_malformed_payload(owned, change):
     else:
         payload = []
     with pytest.raises(proofs.APIError) as refused:
-        proofs.controller_control(server, owned.slug, payload)
+        proofs.controller_control(server.api_services(), owned.slug, payload)
     assert refused.value.status == 400
     assert refused.value.code == "schema_invalid"

@@ -4,7 +4,7 @@ G10 qualification requires a scratch ledger, two hives and two masters. Each mas
 
 ## Hive ownership and ledger writes
 
-The ledger writes that carry hive targets are `agentihooks ledger question add TEXT --hive ID` and `agentihooks ledger followup add TEXT --hive ID`. The stored item retains `hive`; its added event, priority notice, later operator comments and follow up escalation route to the live master owning that hive. Configure ownership with `agentihooks swarm SLUG set hive.ID=SEAT`. Direct inbox writes use `agentihooks msg send SEAT TEXT`, addressed to the owning master seat. There is no direct hive inbox address.
+The ledger writes that carry hive targets are `agentihooks ledger question add TEXT --hive ID` and `agentihooks ledger followup add TEXT --hive ID`. The stored item retains `hive`; its added event, priority notice and follow up escalation route to the live master owning that hive; later operator comments reach the front door lead, which hands them on over the masters channel. Configure ownership with `agentihooks swarm SLUG set hive.ID=SEAT`. Direct inbox writes use `agentihooks msg send SEAT TEXT`, addressed to the owning master seat. There is no direct hive inbox address.
 
 Use an existing scratch swarm with two admitted masters. In these examples,
 `$PROOF_SWARM` is its code generated name, `$LOCAL_HIVE` and `$ANTON_HIVE` are

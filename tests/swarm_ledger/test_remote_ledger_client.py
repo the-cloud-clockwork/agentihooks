@@ -18,10 +18,9 @@ from scripts.swarm_ledger import ledger, ledger_hook, ledger_link
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger.api import routes
 from scripts.swarm_ledger.api.errors import APIError
+from tests.swarm_ledger.api_fakes import as_services
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 live = _authority_live
 ROOT = Path(__file__).resolve().parents[2]
@@ -152,7 +151,7 @@ def test_a_remote_client_without_ledger_url_imports_and_is_refused_at_request_ti
     assert (imported.returncode, imported.stdout.strip()) == (0, "''")
     with patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "compose"}), patch.object(ledger, "BASE", ""):
         os.environ.pop("LEDGER_URL", None)
-        with pytest.raises(SystemExit, match="LEDGER_URL"):
+        with pytest.raises(SystemExit, match="SWARM_URL"):
             ledger.base()
 
 
@@ -191,7 +190,7 @@ def exits(message):
 
 
 def test_remote_refusals_name_what_is_missing():
-    with exits("a remote ledger client needs LEDGER_URL, the address of the hive ledger server"):
+    with exits("a remote ledger client needs SWARM_URL, the address of the hosted ledger server"):
         ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose"})
     assert ledger_link.base({"AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://hub.example/X/"}) == (
         "https://hub.example/X"
@@ -245,7 +244,9 @@ def test_the_agent_token_route_answers_or_names_what_is_missing():
         ({"X-Ledger-Agent": WORKER}, "Missing or wrong hive credential"),
     ):
         with pytest.raises(APIError) as refused:
-            routes.agent_token(SimpleNamespace(headers=headers), server, SLUG)
+            routes.agent_token(SimpleNamespace(headers=headers), as_services(server), SLUG)
         assert (refused.value.status, refused.value.code, str(refused.value)) == (403, "forbidden", message)
     granted = SimpleNamespace(headers={"X-Hive-Credential": CREDENTIAL, "X-Ledger-Agent": WORKER})
-    assert routes.agent_token(granted, server, SLUG) == {"data": {"agent": WORKER, "token": "issued-token"}}
+    assert routes.agent_token(granted, as_services(server), SLUG) == {
+        "data": {"agent": WORKER, "token": "issued-token"}
+    }

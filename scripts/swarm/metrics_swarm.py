@@ -1,7 +1,7 @@
 import hashlib
 import json
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +28,9 @@ HOST = metrics_outbox.Table(
         ("available_mb", "Int64"),
         ("load_per_cpu", "Float64"),
         ("live_agents", "Int64"),
+        ("swap_used_mb", "Int64"),
+        ("swap_total_mb", "Int64"),
+        ("agent_mb", "Int64"),
         ("held_spawns", "Int64"),
         ("held_by", "String"),
         ("held_harness", "String"),
@@ -304,6 +307,9 @@ def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict
         "available_mb": sample.available_mb,
         "load_per_cpu": sample.load1 / sample.cpus,
         "live_agents": sample.agents,
+        "swap_used_mb": sample.swap_used_mb,
+        "swap_total_mb": sample.swap_total_mb,
+        "agent_mb": sample.agent_mb,
         "held_spawns": quota.get("held_spawns", 0),
         "held_by": quota.get("held_by", ""),
         "held_harness": quota.get("held_harness", ""),
@@ -347,22 +353,26 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
     ]
 
 
-def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
-    completed = {
-        event["target"].removeprefix("tasks/")
-        for event in swarm.doc.get("_meta", {}).get("events", [])
-        if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
-    }
-    recent = box.recent("delivery_events", now_ms)
+def pull_targets(doc: dict, now_ms: int, recent: Sequence[dict] = ()) -> list[tuple[str, bool]]:
     recorded = {row["pull_request"] for row in recent if row["kind"] == "merge"}
     merged = {row["pull_request"] for row in recent if row["kind"] == "pull_request_merged"}
-    return {
-        url: swarm.view(url)
-        for task in swarm.doc["tasks"]
-        if task["state"] in ("pr", "claimed") or task["id"] in completed
+    completed = {
+        event["target"].removeprefix("tasks/")
+        for event in doc.get("_meta", {}).get("events", [])
+        if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
+    }
+    return [
+        (url, url == task.get("pr_url"))
+        for task in doc.get("tasks", [])
+        if task.get("state") in ("pr", "claimed") or task.get("id") in completed
         for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
         if url and url not in (recorded if url == task.get("pr_url") else merged)
-    }
+    ]
+
+
+def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
+    recent = box.recent("delivery_events", now_ms)
+    return {url: swarm.view(url) for url, _ in pull_targets(swarm.doc, now_ms, recent)}
 
 
 def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:

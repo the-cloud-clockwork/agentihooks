@@ -400,7 +400,7 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 
 Every attempt sets `overwrite: true`, so a caller does not pass it. A retry deletes any copy an earlier attempt finalized under the same name and uploads the files again: the artifact keeps the caller's name, files and retention, whichever attempt succeeds. `if-no-files-found` reaches every attempt, so a caller that asks for `error` stays red when its files are missing: all three attempts report no files and the step fails, 30 s later than a plain upload would.
 
-Two steps in `test.yml` use it; every other upload in the workflow calls `actions/upload-artifact@v4` directly.
+Four steps in `test.yml` use it; every other upload in the workflow calls `actions/upload-artifact@v4` directly.
 
 ```yaml
       - name: Upload the chosen durations        # split
@@ -426,7 +426,7 @@ Two steps in `test.yml` use it; every other upload in the workflow calls `action
           retention-days: 14
 ```
 
-To route another upload through it, replace `uses: actions/upload-artifact@v4` with `uses: ./.github/actions/retry-upload` and drop `overwrite`. Do it only for an upload whose name is unique to the job, since each attempt replaces the artifact of that name. `tests/test_ci_step_retry.py` pins the three attempts, the waits and warnings, the inputs passed to each attempt and the `with` block of both duration steps. Its guard against retrying in a job that holds a deployment environment or an OIDC token covers only `retry-download`; nothing stops `retry-upload` there, so keep it out of such jobs by review.
+To route another upload through it, replace `uses: actions/upload-artifact@v4` with `uses: ./.github/actions/retry-upload` and drop `overwrite`. Do it only for an upload whose name is unique to the job, since each attempt replaces the artifact of that name. `tests/test_ci_step_retry.py` pins the three attempts, the waits and warnings, the inputs passed to each attempt and the `with` block of both duration steps and of the unit flake report step. Its guard against retrying in a job that holds a deployment environment or an OIDC token covers only `retry-download`; nothing stops `retry-upload` there, so keep it out of such jobs by review.
 
 Why the action's own retry is not enough, read from its source for [#3996](https://github.com/the-cloud-clockwork/agentihooks/issues/3996): `actions/upload-artifact@v4` resolves to v4.6.2, `actions/upload-artifact` commit [`ea165f8`](https://github.com/actions/upload-artifact/commit/ea165f8d65b6e75b540449e92b4886f43607fa02). Its artifact service client retries timeouts and retryable HTTP statuses up to five times, but throws a socket error code (`ECONNRESET`, `ECONNREFUSED`, `ETIMEDOUT`, `ENOTFOUND`, `EHOSTUNREACH`) at once. The toolkit's `main` branch does the same, so a version bump does not help.
 

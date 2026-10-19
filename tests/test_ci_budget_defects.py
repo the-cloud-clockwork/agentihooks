@@ -11,8 +11,6 @@ from scripts.swarm.health import standing
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CI_SPEED_READ = True
 NOW_MS = 1_791_540_000_000
 URL = "https://github.com/o/r/actions/runs/{}/job/9"
@@ -195,7 +193,7 @@ def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_
         8,
         [
             _job("mutation (1)", "01:00", "09:00", 8),
-            _job("docs", "00:00", "16:40", 8),
+            _job("unbudgeted", "00:00", "16:40", 8),
             _job("lint", "00:00", "05:00", 8),
             _job("Gate — Required", "17:00", "17:00", 8),
         ],

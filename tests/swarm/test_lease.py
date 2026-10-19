@@ -5,7 +5,7 @@ import pytest
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -175,7 +175,7 @@ def test_controller_entrypoint_runs_once_and_reports_actions(store, monkeypatch,
     monkeypatch.setattr(controller, "run_once", lambda saved: calls.append(saved) or {"sw": ["worked"]})
     monkeypatch.setattr(operator_env, "fill", lambda env: None)
     monkeypatch.setattr(operator_env, "classifier", lambda env: [])
-    monkeypatch.setattr(controller.time, "sleep", lambda delay: pytest.fail("once must not sleep"))
+    monkeypatch.setattr(controller, "scheduled_wait", lambda delay: pytest.fail("once must not sleep"))
     monkeypatch.setattr(install.sys, "argv", ["agentihooks", "controller", "run", "--once"])
     with pytest.raises(SystemExit) as result:
         install.main()
@@ -268,7 +268,7 @@ def test_controller_loop_waits_one_tick_between_runs(store, monkeypatch, capsys)
         sleeps.append(delay)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(controller.time, "sleep", stop_after_wait)
+    monkeypatch.setattr(controller, "scheduled_wait", stop_after_wait)
     with pytest.raises(KeyboardInterrupt):
         controller.main(["run"])
     assert calls == [store]

@@ -27,6 +27,10 @@ SCALING = ("auto", "manual")
 AUTO_SCALING, MANUAL_SCALING = SCALING
 DEFAULT_LOAD_HIGH, DEFAULT_LOAD_LOW = 1.5, 1.0
 DEFAULT_MEMORY_PER_AGENT_MB = 700
+DEFAULT_SWAP_FULL_SHARE = 0.9
+DEFAULT_SWAP_FLOOR_MB = 4096
+DEFAULT_MASTERS_STEP = 12
+DEFAULT_MASTER_MOVE_GRACE = 300
 MAX_LOAD = 10.0
 CODEX_TRANSPORTS = ("legacy", "app_server")
 LEGACY_TRANSPORT, APP_SERVER_TRANSPORT = CODEX_TRANSPORTS
@@ -69,7 +73,11 @@ class SwarmConfig:
     codex_model: str = default_models.DEFAULTS["codex"]
     scratch: bool = False
     codex_inbox_transport: str = LEGACY_TRANSPORT
-    master_claude_login: bool = False
+    masters_step: int = 0
+    caps_pinned: bool = False
+    master_move_grace: int = DEFAULT_MASTER_MOVE_GRACE
+    swap_full_share: float = DEFAULT_SWAP_FULL_SHARE
+    swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
 
 
 def scaling_refusal(config):
@@ -83,6 +91,10 @@ def scaling_refusal(config):
         return f"load low must be above 0 and at most load high, and load high at most {MAX_LOAD:g}"
     if type(config.memory_per_agent_mb) is not int or config.memory_per_agent_mb <= 0:
         return "memory per agent must be a whole number of MB above 0"
+    if type(config.swap_full_share) not in (int, float) or not 0 < config.swap_full_share <= 1:
+        return "swap full share must be above 0 and at most 1"
+    if type(config.swap_floor_mb) is not int or config.swap_floor_mb <= 0:
+        return "swap floor must be a whole number of MB above 0"
     return ""
 
 
@@ -120,6 +132,7 @@ class AgentRecord:
     route_kind: str = "subscription"
     transport: str = ""
     remote_control: dict = field(default_factory=dict)
+    desired_route_kind: str = ""
 
 
 class RedisStore:
@@ -198,7 +211,11 @@ class RedisStore:
             raw.get("codex_model") or default_models.DEFAULTS["codex"],
             raw.get("scratch") == "True",
             raw.get("codex_inbox_transport") or LEGACY_TRANSPORT,
-            raw.get("master_claude_login") == "True",
+            int(raw.get("masters_step") or 0),
+            raw.get("caps_pinned", "True") == "True",
+            int(raw.get("master_move_grace") or DEFAULT_MASTER_MOVE_GRACE),
+            float(raw.get("swap_full_share") or DEFAULT_SWAP_FULL_SHARE),
+            int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
         )
 
     def update(self, slug, **changes):
@@ -398,6 +415,7 @@ class RedisStore:
                 reason = "handed off"
             self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
         self.redis.hdel(self.key(slug, "agents"), name)
+        self.redis.hdel(self.key(slug, "desired-routes"), name)
         self.redis.hdel(self.key(slug, "state-since"), name)
         self.redis.hdel(self.key(slug, "retire-failures"), name)
         self.names.retire(name, ended)
@@ -432,7 +450,9 @@ class RedisStore:
     def launch_failure(self, slug, task):
         return self.redis.hget(self.key(slug, "launch-failures"), task) or ""
 
-    def record_launch(self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "") -> None:
+    def record_launch(
+        self, slug: str, agent: AgentRecord, state: str, error: str = "", after: str = "", head: str | None = ""
+    ) -> None:
         row = {
             "agent": agent.name,
             "task": agent.task,
@@ -441,6 +461,7 @@ class RedisStore:
             "error": error,
             "pane_id": agent.pane_id,
             "after": after,
+            "head": head,
         }
         self.redis.hset(self.key(slug, "launches"), agent.name, json.dumps(row))
 

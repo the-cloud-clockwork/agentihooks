@@ -7,6 +7,8 @@ the entry carries those words, of any length and in any wording.
 
 import re
 
+from scripts.swarm_ledger import ports
+
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks|notes)/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("relay",)
@@ -30,10 +32,11 @@ def check(op):
 def watched_masters(by: str) -> list[str]:
     from redis.exceptions import RedisError
 
-    from hooks._redis import get_redis
-    from hooks.context import operator_words
     from scripts.doctor.priming import TEMPLATE
-    from scripts.swarm.store import RedisStore, SwarmError
+
+    get_redis = ports.hooks().redis
+    operator_words = ports.hooks().operator_words
+    RedisStore, SwarmError = ports.swarm().store.RedisStore, ports.swarm().store.SwarmError
 
     redis = get_redis()
     if redis is None:
@@ -52,8 +55,8 @@ def watched_masters(by: str) -> list[str]:
 
 def speakers(by):
     """Every address of the relaying agent, then every master and planner of its swarm with recorded words."""
-    from hooks.context import operator_words
-    from scripts.swarm.naming import addresses, parse
+    operator_words = ports.hooks().operator_words
+    addresses, parse = ports.swarm().naming.addresses, ports.swarm().naming.parse
 
     names = addresses(by)
     codes = sorted({agent.code for agent in map(parse, names) if agent})
@@ -63,7 +66,7 @@ def speakers(by):
 
 def verified(by, quote):
     """The quoted span, as the operator wrote it, of recorded words from any master or planner of the relaying agent's swarm."""
-    from hooks.context import operator_words
+    operator_words = ports.hooks().operator_words
 
     if len(quote.split()) < 3:
         return ""

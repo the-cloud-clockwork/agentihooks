@@ -1,11 +1,12 @@
 x-swarm-env: &swarm-env
   AGENTIHOOKS_DEPLOYMENT: ${AGENTIHOOKS_DEPLOYMENT:-compose}
-  AGENTIHOOKS_SWARM_REDIS_URL: ${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0
+  AGENTIHOOKS_SWARM_DATABASE_URL: ${AGENTIHOOKS_SWARM_DATABASE_URL:-}
+  AGENTIHOOKS_SWARM_REDIS_URL: ${AGENTIHOOKS_SWARM_REDIS_URL:-${SWARM_REDIS_SCHEME:-redis}://swarm:${SWARM_REDIS_PASSWORD:?set SWARM_REDIS_PASSWORD, see deploy/compose/.env.example}@redis:6379/0}
   SSL_CERT_FILE: ${SWARM_CA_FILE:-/etc/ssl/certs/ca-certificates.crt}
 
 services:
   swarm:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     build: .
     ports:
       - "${SWARM_BIND:-127.0.0.1}:${SWARM_PORT:-8765}:8765"
@@ -26,7 +27,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   controller:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     command:
       - sh
       - -c
@@ -62,7 +63,7 @@ services:
         condition: service_healthy
     restart: unless-stopped
   hive:
-    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev
+    image: ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}
     profiles: [join]
     command:
       - agentihooks

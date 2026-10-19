@@ -44,7 +44,16 @@ def test_head_collection_is_uploaded_once_per_interpreter_and_downloaded_as_data
     assert upload["if"] == "github.event.pull_request.base.ref != 'main'"
     assert collect["run"].endswith(" --collected collected.json")
     assert "--shard" not in collect["run"]
-    assert jobs["split"]["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
+    versions = jobs["split"]["strategy"]["matrix"]["python-version"]
+    joint = "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
+    assert jobs["test-count"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
+    assert jobs["unit"]["strategy"]["matrix"]["python-version"] == ["3.11", "3.12"]
+    assert versions in (["3.11", "3.12"], joint)
+    if versions == joint:
+        artifacts = {step.get("with", {}).get("name"): step for step in split if step.get("uses")}
+        assert artifacts["early-collected-3.12"]["with"]["path"] == "queue-input/3.12"
+        assert artifacts["collected-3.12"]["with"]["path"] == "queue-input/3.12/collected.json"
+        assert artifacts["collected-3.12"]["with"]["if-no-files-found"] == "error"
     assert upload["with"]["name"] == "collected-${{ matrix.python-version }}"
     assert upload["with"]["path"] == "collected.json"
     assert upload["with"]["if-no-files-found"] == "error"

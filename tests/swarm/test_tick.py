@@ -7,8 +7,6 @@ from scripts.swarm import stack
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def check_update_guards(if_state, if_match):
     import sys
@@ -97,6 +95,9 @@ class FakeLedger:
 
     def binned(self, slug):
         return slug in getattr(self, "bin", set())
+
+    def closed(self, slug):
+        return bool(self.state(slug).get("closed_at"))
 
     def rank_task(self, slug, task_id, rank, by, if_owned=False):
         self.ranks.append((task_id, rank, by))
@@ -516,6 +517,27 @@ def test_a_failed_launch_keeps_the_restart_mark_for_the_next_start(store):
     runtime.crash = None
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert sorted((row["state"], row["after"]) for row in store.launches("sw")) == [("failed", ""), ("started", "park")]
+
+
+@pytest.mark.parametrize(
+    ("pr_url", "read", "head"),
+    [
+        ("", "abc123", ""),
+        ("https://github.com/o/r/pull/7", "abc123", "abc123"),
+        ("https://github.com/o/r/pull/7", "", None),
+    ],
+)
+def test_a_started_launch_records_the_pull_request_head_it_started_on(store, monkeypatch, pr_url, read, head):
+    from scripts.swarm import ledger_events
+
+    seen = []
+    monkeypatch.setattr(ledger_events, "head", lambda url: seen.append(url) or read)
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    if pr_url:
+        ledger.rows["t1"]["pr_url"] = pr_url
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert [(row["state"], row["head"]) for row in store.launches("sw")] == [("started", head)]
+    assert seen == ([pr_url] if pr_url else [])
 
 
 class FailingFor(FakeRuntime):
@@ -1450,6 +1472,19 @@ def test_the_tick_hands_the_ci_budget_pass_its_store_and_clock(store, monkeypatc
     assert [(args[0], args[2], args[3]) for args in seen] == [("sw", store, 1)]
 
 
+def test_tick_captures_panes_before_any_retirement(store, monkeypatch):
+    from scripts.swarm import pane_evidence
+    from scripts.swarm import tick as module
+
+    seen = []
+    rt = FakeRuntime()
+    monkeypatch.setattr(pane_evidence, "sweep", lambda *args: seen.append(("capture", args)) or ["captured"])
+    monkeypatch.setattr(module, "_recover_master", lambda *args: seen.append(("recover", args)) or ["recovered"])
+    assert tick("sw", store, tasks(("t1", "eng")), rt, 123)[:2] == ["captured", "recovered"]
+    assert seen[0] == ("capture", ("sw", store, rt, 123))
+    assert seen[1][0] == "recover"
+
+
 def test_the_tick_hands_the_flake_budget_pass_its_ledger(store, monkeypatch):
     from scripts.ci_budget import flakes
 
@@ -2000,6 +2035,52 @@ def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(
     assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": runtime.spawned[0][1], "areas": ["hooks"]}]
 
 
+@pytest.mark.parametrize("claimant", ["engineer@a1b2c3-0099", "eng-1@sw", ""])
+def test_an_overlap_released_for_checks_has_no_coordination_recipient(store, claimant):
+    from scripts.swarm import prompt, ready
+
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "state": "pr", "awaiting": "merge", "claimed_by": claimant, "territory": ["hooks"]},
+            {"id": "t2", "title": "Build it", "territory": ["hooks/x.py"]},
+        ]
+    )
+    ready.save(store, "sw", "t1", {"agent": claimant})
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"]
+    overlap = runtime.tasks[0]["overlaps"]
+    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "checks": True}]
+    text = prompt.build("sw", "/repo", "eng", runtime.spawned[0][1], runtime.tasks[0])
+    assert "Task t1, waiting on checks with no agent; no coordination note needed, shares hooks/x.py." in text
+    assert f"claimed by {claimant}" not in text
+
+
+def test_a_reused_seat_does_not_make_its_new_agent_the_owner_of_an_overlap(store):
+    from scripts.swarm import prompt, ready
+
+    ledger = FakeLedger([{"id": "other", "territory": ["docs"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = store.agents("sw")[0]
+    ledger.rows.update(
+        FakeLedger(
+            [
+                {"id": "t1", "state": "pr", "awaiting": "merge", "claimed_by": agent.seat, "territory": ["hooks"]},
+                {"id": "t2", "title": "Build it", "territory": ["hooks/x.py"]},
+            ]
+        ).rows
+    )
+    ready.save(store, "sw", "t1", {"agent": "departed"})
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["other", "t2"]
+    overlap = runtime.tasks[1]["overlaps"]
+    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "checks": True}]
+    text = prompt.build("sw", "/repo", "eng", runtime.spawned[1][1], runtime.tasks[1])
+    assert "waiting on checks with no agent; no coordination note needed" in text
+    assert agent.name not in text and agent.seat not in text
+
+
 def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):
     ledger = FakeLedger(
         [{"id": "t1", "territory": ["scripts/swarm"]}, {"id": "t2", "territory": ["scripts/swarm_ledger"]}]
@@ -2232,7 +2313,7 @@ def test_a_spawned_agent_gets_the_conversation_id_herdr_reports_for_its_pane(sto
     assert _conversations(store) == {"engineer@a1b2c3-0001": "5c90d80c", "master@a1b2c3-0001": "15e33356"}
 
 
-def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(store):
+def test_each_tick_refreshes_the_conversation_id_and_preserves_known_ids(store):
     rt = FakeRuntime()
     ledger = FakeLedger([{"id": "t1"}, {"id": "t2"}])
     tick("sw", store, ledger, rt, 1000)
@@ -2248,12 +2329,12 @@ def test_each_tick_refreshes_the_conversation_id_and_stores_unknown_as_empty(sto
     tick("sw", store, ledger, rt, 3000)
     assert _conversations(store) == {
         "engineer@a1b2c3-0001": "resumed",
-        "engineer@a1b2c3-0002": "",
+        "engineer@a1b2c3-0002": "other",
         "master@a1b2c3-0001": "",
     }
     del rt.conversation_ids["w1:p1"]
     tick("sw", store, ledger, rt, 4000)
-    assert _conversations(store)["engineer@a1b2c3-0001"] == ""
+    assert _conversations(store)["engineer@a1b2c3-0001"] == "resumed"
 
 
 def test_a_tick_without_an_answer_from_herdr_keeps_the_known_conversation_ids(store):

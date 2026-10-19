@@ -27,8 +27,6 @@ from tests.swarm_ledger.test_ledger_authority import (
 )
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 authority_live = _authority_live
 REPEAT = "Publish the package to PyPI from the main branch"
 OPEN_REFUSAL = (
@@ -65,7 +63,7 @@ def live(authority_live, monkeypatch):
         ],
     }
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     state, _ = core.sync(SLUG)
     first, second = (phase["id"] for phase in state["phases"])
     seed = [

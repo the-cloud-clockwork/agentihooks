@@ -29,16 +29,26 @@ export function closedText(closedAt) {
   return `Closed ${new Date(closedAt).toISOString().slice(0, 16).replace("T", " ")} UTC`;
 }
 
+export function excerpt(text, limit) {
+  const words = [...text.matchAll(/\S+/g)];
+  if (words.length <= limit) return text;
+  const last = words[limit - 1];
+  return text.slice(0, last.index + last[0].length) + "…";
+}
+
 export function grow(el) {
   el.style.height = "auto";
   el.style.height = el.scrollHeight + 2 + "px";
 }
 
+const timeFormat = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" });
+const dayFormat = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
+
 export function when(at) {
   if (!at) return "";
   const d = new Date(at);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  const time = timeFormat.format(d);
+  return d.toDateString() === new Date().toDateString() ? time : `${dayFormat.format(d)} ${time}`;
 }
 
 export function newId(noun) {

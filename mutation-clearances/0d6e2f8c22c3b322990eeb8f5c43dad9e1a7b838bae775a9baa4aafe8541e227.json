@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_route__mutmut_114:0638df2297fdc8eb124d6bce72169114da3d97ac2a01e06bcfb7959a11b5321c": {
+    "reader": "Standards",
+    "reason": "Zero length reads no bytes and reaches empty gzip or JSON rejection, with the same invalid envelope and stream cursor."
+  }
+}

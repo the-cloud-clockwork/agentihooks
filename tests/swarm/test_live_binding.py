@@ -1,12 +1,11 @@
 import json
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
 from scripts.swarm import live_binding
 from scripts.swarm.store import AgentRecord
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 EVENTS = (
     "SessionStart",
@@ -171,6 +170,69 @@ def test_codex_home_hooks_and_native_effort(mounted):
     assert live_binding.compare(agent, live_binding.read(agent, 42, proc)) == {}
     (home / "config.toml").write_text("[features]\nhooks = false\n")
     assert live_binding.read(agent, 42, proc)["hooks"] is False
+
+
+@pytest.fixture
+def captured_codex(mounted, monkeypatch):
+    from functools import partial
+
+    from scripts import terminate_agent
+
+    agent, proc, home = mounted
+    capture = json.loads((Path(__file__).parents[1] / "fixtures" / "live_binding_codex.json").read_text())
+    for row in capture["processes"]:
+        root = proc / str(row["pid"])
+        root.mkdir()
+        for field in ("comm", "stat", "status"):
+            (root / field).write_text(row[field])
+        (root / "cmdline").write_bytes("\0".join(row["argv"]).encode())
+        (root / "environ").write_bytes(b"")
+    pid = capture["processes"][0]["pid"]
+    root = proc / str(pid)
+    (root / "environ").write_bytes(
+        f"CODEX_HOME={home}\0AGENTIHOOKS_PROFILE=engineer\0AGENTIHOOKS_AGENT_NAME=engineer\0".encode()
+    )
+    (home / "config.toml").write_text("[features]\nhooks = true\n")
+    (home / "hooks.json").write_text((home / "settings.json").read_text())
+    agent = replace(
+        agent,
+        harness="codex",
+        model="gpt-6.1-sol",
+        account="default",
+        conversation_id="conversation",
+        profile_decision={"validation": {"pid": pid, "home": str(home), "model": "gpt-6.1-sol", "effort": "high"}},
+    )
+    registry = {"conversation": {"pid": pid, "name": agent.name, "status": "alive"}}
+    monkeypatch.setattr(terminate_agent, "sessions", partial(terminate_agent.sessions, proc, registry, "local"))
+    monkeypatch.setattr(live_binding, "read", partial(live_binding.read, proc=proc))
+    return agent, root
+
+
+@pytest.mark.parametrize(
+    "condition, expected",
+    [
+        ("live", {}),
+        ("missing", {"process": {"expected": True, "actual": False}}),
+        ("zombie", {"process": {"expected": True, "actual": False}}),
+        ("model", {"model": {"expected": "gpt-6.1-sol", "actual": "gpt-7"}}),
+        ("effort", {"effort": {"expected": "high", "actual": "low"}}),
+    ],
+)
+def test_captured_codex_process_matches_only_its_live_assigned_launch(captured_codex, condition, expected):
+    from scripts.swarm.runtime import HerdrRuntime
+
+    agent, root = captured_codex
+    if condition == "missing":
+        (root / "stat").unlink()
+    elif condition == "zombie":
+        (root / "stat").write_text((root / "stat").read_text().replace(") S ", ") Z "))
+    elif condition == "model":
+        (root / "cmdline").write_bytes((root / "cmdline").read_bytes().replace(b"gpt-6.1-sol", b"gpt-7"))
+    elif condition == "effort":
+        (root / "cmdline").write_bytes((root / "cmdline").read_bytes().replace(b"high", b"low"))
+    facts = HerdrRuntime().bindings([agent])
+    assert agent.name in facts
+    assert live_binding.compare(agent, facts[agent.name]) == expected
 
 
 def test_flagless_claude_session_reads_model_and_effort_from_its_home(mounted):

@@ -1,7 +1,8 @@
 """Swarm snapshot and restore: documents in the swarm's state folder carrying its Redis state, ledger and worktrees.
 
-Stop and the snapshot command write snapshot.json; while the swarm runs, the tick writes one automatic snapshot per
-interval into the snapshots folder and keeps the newest ten. Restore takes the newest of them all unless pointed at one.
+Stop and the snapshot command write snapshot.json; while the swarm runs, a job the tick starts writes one automatic
+snapshot per interval into the snapshots folder and keeps the newest ten. Restore takes the newest of them all unless
+pointed at one.
 
 A restore reopens each agent in its own conversation where it can and leaves the swarm paused. Every other agent is
 marked finished, so the next tick retires it, reopens its task and primes the successor with seat memory and handoffs.
@@ -61,11 +62,16 @@ def interval_minutes(config, environ):
     return minutes
 
 
-def auto(store, slug, now_ms, environ, run=subprocess.run):
-    """Take an automatic snapshot when the running swarm's interval has passed; returns its file or None."""
+def due(store, slug, now_ms, environ):
+    """Whether the swarm runs and its interval has passed since the last automatic snapshot."""
     config, last = store.config(slug), last_auto(slug)
     minutes = interval_minutes(config, environ)
-    if config.state != "running" or minutes <= 0 or (last is not None and now_ms - last < minutes * 60_000):
+    return config.state == "running" and minutes > 0 and (last is None or now_ms - last >= minutes * 60_000)
+
+
+def auto(store, slug, now_ms, environ, run=subprocess.run):
+    """Take an automatic snapshot when the running swarm's interval has passed; returns its file or None."""
+    if not due(store, slug, now_ms, environ):
         return None
     taken = take(store, slug, now_ms, run, auto_dir(slug) / f"auto-{now_ms}.json", environ)
     for old in automatic(slug)[:-KEEP]:
@@ -100,7 +106,9 @@ def ledger_source(slug):
 
 
 def stored_ledger(slug):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.export_document(slug) if repository.exists(slug) else None
 
@@ -258,7 +266,9 @@ def restore(store, slug, live, source=None, runtime=None, has_quota=resume.accou
     store.restore(slug, doc["state"])
     store.update(slug, state="paused")
     if doc["ledger"] is not None:
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger import storage
+
+        repository = storage.default()
 
         if not repository.exists(slug):
             repository.import_document(slug, doc["ledger"])

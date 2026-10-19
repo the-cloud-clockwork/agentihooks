@@ -1,17 +1,13 @@
 """The stored quota capacity decision as swarm status lines and as the ledger page reads it."""
 
-from scripts import quota_freshness
+from scripts import quota_freshness, quota_state
 from scripts.routing.slots import API
 from scripts.swarm import capacity
 from scripts.swarm.health.findings import MINUTE_MS
 
 
 def routing_left(account: dict) -> float | None:
-    if account["harness"] == "codex":
-        return account["week_left"]
-    if account["five_left"] is None or account["week_left"] is None:
-        return None
-    return min(account["five_left"], account["week_left"])
+    return quota_state.routing_left(account["harness"], account["five_left"], account["week_left"])
 
 
 def left_text(value: float | None) -> str:

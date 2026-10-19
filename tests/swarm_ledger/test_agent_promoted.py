@@ -31,6 +31,6 @@ def test_the_state_cell_shows_the_promoted_label():
     page = page_source()
     assert (
         'a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, '
-        'label(a.state), label("promoted")) : label(a.state)' in page
+        'label(a.state), " ", label("promoted")) : label(a.state)' in page
     )
     assert ".lbl.promoted {" in page

@@ -6,12 +6,14 @@ import subprocess
 import sys
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.observability.trace_flush import start_time
+from scripts import tool_deps
 from scripts.inbox.seats import of_swarm, seat_address
 from scripts.inbox.store import InboxStore
-from scripts.swarm import control_notifications
+from scripts.swarm import apply_wait, control_notifications, stack
 from scripts.swarm.ledger_client import LEDGER_DIR
 from scripts.swarm.store import MASTER, SwarmError
 from scripts.swarm_ledger import server_code
@@ -39,6 +41,8 @@ class Context:
     run: Callable = subprocess.run
     code: Path = LEDGER_DIR
     pidfile: Path = field(default_factory=_pidfile)
+    source: Path = tool_deps.SOURCE
+    python: str = sys.executable
 
 
 def _call(ctx, argv):
@@ -53,8 +57,34 @@ def pull_dev(ctx, args):
     branch = _call(ctx, ["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
     if branch != "dev":
         raise SwarmError(f"the main checkout {repo} is on {branch}, not dev; the Doctor pulls only into dev")
-    _call(ctx, ["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
-    return "The Doctor pulled dev into the main checkout of the watched swarm."
+    merged = merged_fixes(ctx, repo)
+    installed = tool_deps.pull(repo, lambda argv: _call(ctx, argv), ctx.python, ctx.source)
+    stamped = record_applied(ctx, merged)
+    line = "The Doctor pulled dev into the main checkout of the watched swarm"
+    if stamped:
+        line += f" and recorded {len(stamped)} merged fixes applied"
+    if installed:
+        line += f". It installed {', '.join(installed)} into the agentihooks tool environment"
+    return line + "."
+
+
+def merged_fixes(ctx, repo):
+    rows = {t["id"]: t for t in ctx.ledger.tasks(ctx.doctor)}
+    home = stack.repo_key(_call(ctx, ["git", "-C", repo, "remote", "get-url", "origin"]))
+    found = (d for t in rows.values() if t.get("state") != "done" for d in apply_wait.unapplied(t, rows))
+    return [d for d in dict.fromkeys(found) if _pulled_here(rows.get(d, {}), home)]
+
+
+def _pulled_here(row, home):
+    elsewhere = row.get("branch_repo") and stack.repo_key(row["branch_repo"]) != home
+    return row.get("state") == "done" and not elsewhere
+
+
+def record_applied(ctx, merged):
+    at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for task_id in merged:
+        ctx.ledger.update_task(ctx.doctor, task_id, {apply_wait.FIELD: at}, by=seat_address(ctx.doctor, MASTER))
+    return merged
 
 
 def _module_files(root, dotted):

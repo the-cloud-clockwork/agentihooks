@@ -6,7 +6,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -561,6 +561,41 @@ def test_the_sweep_reads_the_swarms_seats_once(redis, monkeypatch):
     monkeypatch.setattr(store.seats, "agent_seats", lambda slug: reads.append(slug) or seated(slug))
     exits.sweep(inbox, "sw", store, dict)
     assert reads == ["sw"]
+
+
+@pytest.mark.parametrize("admission", ["agents", "tasks"])
+def test_the_sweep_keeps_a_member_admitted_while_it_reads_live_state(redis, monkeypatch, admission):
+    from scripts.inbox.recipient import empty_seat
+    from scripts.swarm.store import AgentRecord
+
+    store, inbox = RedisStore(redis), InboxStore(redis)
+    store.create(SwarmConfig("sw", "/repo", 1, 0))
+    name = store.next_name("sw", "eng")
+    seat = "eng-1@sw"
+    agents = store.agents
+
+    def place_member():
+        store.start_execution("sw", AgentRecord(name, "eng", "task", seat=seat, hive="member"))
+        store.seats.occupy(seat, name, 1)
+
+    def read_agents(slug):
+        snapshot = agents(slug)
+        place_member()
+        monkeypatch.setattr(store, "agents", agents)
+        return snapshot
+
+    def read_tasks():
+        if admission == "tasks":
+            place_member()
+        return {}
+
+    if admission == "agents":
+        monkeypatch.setattr(store, "agents", read_agents)
+    exits.sweep(inbox, "sw", store, read_tasks)
+    assert store.seats.exit_of(name) == {}
+    assert empty_seat(inbox, "host", seat) == {}
+    message = inbox.send("host", seat, "hello from the host")
+    assert [item.id for item in inbox.mailbox(name)] == [message.id]
 
 
 def test_mail_passed_to_a_gone_successor_master_reaches_the_live_one_in_the_same_sweep(redis):

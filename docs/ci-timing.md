@@ -1,5 +1,138 @@
 # Tests workflow timing
 
+## Helm kind registration to readiness
+
+The promotion Helm chart proof checks recovery as well as initial readiness.
+Its measured interval starts at `ledger and swarm kind-proof registered, no
+lease bound` and ends at `controller readiness probe passed`. This includes a
+deliberate controller freeze, liveness restart and release upgrade enabling the
+control API. Image preparation, cluster creation and subsequent worker and
+terminal proofs are outside the interval.
+
+### Preserved checks and reduced waiting
+
+After the initial release installation and chart tests, a background job
+prepares the signing Secret, controller service account and RBAC, worker pod
+policy ConfigMap and terminal CA Secrets. Setup overlaps the controller lease
+and recovery checks. The proof waits for setup to succeed before the upgrade;
+an error still fails the proof.
+
+One Python process in the ledger Pod watches the lease every 0.2 seconds.
+Acquisition requires the deployment's `SWARM_HIVE_ID` as owner; renewal requires
+the same owner with a later `expires_at`. Each wait has a 180 second deadline.
+Previously each read started a cold `kubectl exec` process, with a one second
+sleep between reads. The separate post restart lease retake loop is unchanged.
+
+The proof retains this sequence:
+
+1. Restart the controller after registration and wait for rollout.
+2. Require lease acquisition, renewal and zero controller restarts.
+3. Freeze the controller in the isolated kind node, require exactly one
+   liveness restart and verify lease retake.
+4. Require successful background setup, upgrade with control API and worker
+   settings, wait for rollout and require the Kubernetes runtime build log.
+5. Verify startup and liveness are wired to `agentihooks controller live` and
+   readiness to `agentihooks controller ready`. Execute all three commands in
+   parallel, wait for every process and fail if any command fails.
+6. Require the Pod's Kubernetes Ready condition and zero restarts on the
+   upgraded controller before continuing with the remaining chart proofs.
+
+Probe results print in startup, liveness, readiness order after all commands
+finish. Printed order is not execution order. A passed readiness command alone
+does not establish the subsequent Ready assertion or completion of the proof.
+
+### Kind configuration
+
+The checked in `deploy/helm/agentihooks-swarm/ci/kind-values.yaml` supplies this
+controller timing excerpt to both release operations:
+
+```yaml
+controller:
+  startupProbe:
+    periodSeconds: 1
+  readinessProbe:
+    periodSeconds: 1
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 1
+    timeoutSeconds: 5
+    failureThreshold: 2
+  terminationGracePeriodSeconds: 1
+  env:
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+```
+
+Liveness initial delay fell from ten to five seconds and its period from two
+to one second. The startup probe already gates liveness with the same live
+command. These are kind overrides: chart default liveness settings remain a
+sixty second initial delay, ten second period, eight second timeout and failure
+threshold three. This excerpt is not a complete cluster configuration.
+
+There is no new flag or environment setting for the 0.2 second lease watch or
+parallel execution. Change those through reviewed proof code; change fixture
+probe cadence through kind values. This optimization requires no production
+configuration change.
+
+### Run and inspect in CI
+
+Push the branch and dispatch the chart proof on that revision:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=helm-kind
+gh run list \
+  --workflow proofs.yml \
+  --branch <branch> \
+  --limit 5
+gh run view <run-id> \
+  --log
+```
+
+The standalone workflow also accepts a dispatch:
+
+```bash
+gh workflow run helm-kind.yml \
+  --ref <branch>
+```
+
+Both routes use the declared Helm input key. Inspect `Key the declared inputs`
+first: a cache hit skips chart execution and supplies no new timing sample.
+See [Helm kind proof input keys](reference/ci-result-cache.md#helm-kind-proof-input-keys)
+for cache scope and due decisions. Run proofs in CI, not on the shared host.
+
+For a fresh execution, subtract the registration marker timestamp from the
+`controller readiness probe passed` timestamp in the raw Actions job log. Keep
+the run link and revision. Separately require the later `controller with the
+control API on is Ready under the health probes, restarts: 0` and final `Helm
+chart kind proof passed` markers. Queue time and whole job duration measure
+different intervals.
+
+| Failure | Inspection |
+|---|---|
+| Lease acquisition or renewal times out | Read the last lease diagnostic, compare owner with `SWARM_HIVE_ID` and check whether expiry advanced. |
+| Frozen controller does not restart exactly once | Inspect liveness settings, restart count and previous controller logs from failure cleanup. |
+| Setup objects were not created | Inspect the earlier background setup command error; upgrade is refused on setup failure. |
+| Runtime build log is absent | Inspect controller startup and worker settings after upgrade; rollout alone does not establish runtime construction. |
+| Probe fails or uses an unexpected command | Inspect the named diagnostic and deployed probe wiring; all three commands remain mandatory. |
+| Ready times out or restarts are nonzero | Inspect Pod state and controller logs; retain these assertions even when the explicit readiness command passed. |
+
+### Delivery measurements
+
+[Pull request #4391](https://github.com/the-cloud-clockwork/agentihooks/pull/4391)
+and its [source issue](https://github.com/the-cloud-clockwork/agentihooks/issues/4389)
+record intervals of 25.86 and 26.79 seconds before the change. The delivered
+revision is `57c433590b7c82d7a45174eabbd8c6ec3aa5c05f`. After the change:
+
+| Branch proof | Registration to readiness | Recorded result |
+|---|---|---|
+| [39099421881](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099421881) | 20.41 seconds | Every check passed |
+| [39099734177](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099734177) | 21.05 seconds | Every check passed |
+
+These branch samples demonstrate the delivered reduction. They are not a fixed
+runtime guarantee or a post merge promotion measurement; runner load and later
+proof changes can affect the interval.
+
 ## Delivery tiers
 
 Pull request checks run once on the current head: lint, format, size, static analysis, changed-line coverage and mutation, and touched tests. The `dev` merge queue runs the full unit suite and test count checks on the merge group; it does not repeat the pull request checks. Shard time budgets do not hold the queue.
@@ -56,6 +189,114 @@ Inspect each named test's result and any `RERUN` or flaky test report. A green r
 If the sampling audit fails, use its warning category, message and source location to distinguish a new sampling leak from inherited garbage; retain the post sampling collection that exposes new leaks. If the overrun check fails, inspect the stop diagnostic and recorded condition interval before changing any budget. Timing the enclosing hook process against the condition timeout reintroduces the startup and exit overhead mismatch.
 
 [Pull request #2808](https://github.com/the-cloud-clockwork/agentihooks/pull/2808) introduced the resource audit isolation. Its [green Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38243723120) records both ownership controls passing on Python 3.11 and 3.12 with reruns disabled. [Pull request #4083](https://github.com/the-cloud-clockwork/agentihooks/pull/4083) changed only the overrun test timing; its [Python 3.12 selected tests job](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39051257730/job/117450548906) passed all 62 tests, including the overrun check, without a test rerun. That pull request also reports no failed or rerun line for either target test across about 165 recent dev push runs. This is historical delivery evidence, not a guarantee that future runs cannot fail.
+
+## Standing CI budget report
+
+The swarm's CI budget pass updates one standing health finding,
+`bottleneck-stage/ci_overrun`, for pull request Tests runs that take more than
+fifteen minutes from push to `Gate Required`. It does not create a follow up for
+each slow run or restore hourly follow ups. Multiple slow stages appear as
+evidence on that same finding, rather than as separate findings or tasks.
+
+### Read the report
+
+Open the watched swarm's ledger, select the Swarm tab and inspect Swarm health.
+The finding includes the run overrun, its slowest stage, and a summary for every
+known stage that exceeded its budget in the retained slow runs. For example:
+
+```text
+mutation: 2 runs over budget; worst 15 minutes.
+lint: 1 run over budget; worst 5 minutes.
+```
+
+These counts are per stage: a run can count toward both lines. They are distinct
+from the finding's `Fired N times` counter. Only stages strictly above a declared
+budget are grouped; a stage exactly at its budget, an unknown stage, and
+`gate-required` itself are excluded. The current mutation budget is eight
+minutes and lint budget four minutes. A run can exceed the overall fifteen
+minute budget without any individual stage exceeding its own budget.
+
+Each retained slow run has a `Slow run <run id>` link beneath the evidence. Open
+it to inspect the Actions run and its jobs. The report prefers the run URL and
+falls back to the completed gate job URL when the run has no URL. Links open in
+a new tab. The page renders only HTTP or HTTPS links, with `rel="noopener"`.
+
+The finding carries links separately from its prose, using this shape:
+
+```json
+{
+  "links": [
+    {
+      "label": "Slow run 39024469354",
+      "url": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39024469354"
+    }
+  ]
+}
+```
+
+The URL above illustrates the field format using a delivered proof run; it is
+not a claim that that proof exceeded the budget. A URL pasted into evidence
+text does not create the report's run anchor. Findings without structured links
+retain their existing display.
+
+Inspect the watched swarm from the command line:
+
+```bash
+agentihooks swarm <swarm> status --json
+```
+
+Use the run id from a link to inspect its result and job timings:
+
+```bash
+gh run view <run-id> \
+  --repo the-cloud-clockwork/agentihooks \
+  --json url,status,conclusion
+gh api repos/the-cloud-clockwork/agentihooks/actions/runs/<run-id>/jobs \
+  --paginate \
+  --jq '.jobs[] | {name, started_at, completed_at, conclusion}'
+```
+
+### Configuration and retention
+
+The pass refreshes every five minutes and retains slow-run samples for six
+hours, dated by the gate's completion time. It stores each run by its id in the
+watched swarm's `ci-budget:stages` cache. Reprocessing the same run does not add
+another sample. On a new sample update, runs at least six hours old are removed
+from the cache and the evidence and links are rebuilt from retained samples.
+The cache itself also has a six hour expiry.
+
+The overall run budget, stage budgets, refresh interval and sample window are
+code constants (`RUN_BUDGET_S`, `BUDGETS`, `REFRESH_MS` and `WINDOW_S`), rather
+than new CLI flags or environment settings. Change them through the normal
+reviewed code workflow. For example, a proposed mutation budget of ten minutes
+would change the `mutation` entry in `BUDGETS` from `480` to `600` seconds; the
+overall run threshold would remain `900` seconds unless separately changed.
+
+The cache and standing finding belong to the watched swarm. Linking a Doctor
+ledger does not redirect or duplicate the report into that ledger. Inspect the
+watched swarm's health panel even when a Doctor is observing it. Existing
+[standing finding verdict and expiry rules](pillars/swarm.md#commands)
+still apply; sample retention does not bypass a verdict cooldown or keep a
+stale finding visible indefinitely.
+
+### Troubleshooting and delivery evidence
+
+| Symptom | Check |
+|---|---|
+| Several stages are slow but only one finding appears | Expected: read the per-stage evidence on `ci_overrun`. |
+| A stage has no summary line | Confirm that the run exceeded fifteen minutes, the stage has a declared budget, and its duration was strictly above it. |
+| Evidence shows a URL but no clickable run link | Check that the finding has a `links` entry with `label` and an HTTP or HTTPS `url`; plain evidence text is not the link field. |
+| An older run disappears from the report | Check the six hour sample window and the standing finding's expiry and verdict rules. |
+| The Doctor ledger has no report | Inspect the watched swarm; the report deliberately writes only there. |
+
+[Delivered pull request #4012](https://github.com/the-cloud-clockwork/agentihooks/pull/4012)
+records red CI proofs for missing grouped evidence and the missing run anchor,
+followed by a [successful focused proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39024469354)
+and [successful mutation preflight](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39026092462).
+The delivered regression cases cover per-stage counts and worst times, run URL
+selection, repeated-run stability, sample expiry and isolation from the Doctor
+ledger. These are reporting checks, not evidence that every CI run meets the
+fifteen minute target.
 
 ## Proof dispatch lanes
 

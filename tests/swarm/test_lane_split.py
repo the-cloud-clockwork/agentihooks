@@ -7,8 +7,6 @@ from scripts.swarm import autoscale, capacity, lane_split
 from scripts.swarm.autoscale import calculate
 from scripts.swarm.store import MANUAL_SCALING, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 READY = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=4)
@@ -19,7 +17,9 @@ def store():
     import fakeredis
 
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    saved.create(SwarmConfig(SLUG, "/repo", max_eng=4, max_ci=1, scaling=MANUAL_SCALING))
+    saved.create(
+        SwarmConfig(SLUG, "/repo", max_eng=4, max_ci=1, scaling=MANUAL_SCALING, gates={"lane-split": "enforce"})
+    )
     return saved
 
 
@@ -168,6 +168,71 @@ def test_the_receiving_lane_never_passes_host_room(store, home):
     assert caps(store) == (3, 2)
     (row,) = gate_log.recent(SLUG, None, home)
     assert row["reason"].endswith(" Host room unknown.")
+
+
+def test_a_lane_with_no_ready_task_receives_no_seat(store, home):
+    empty = lane_split.Lanes(ready={"eng": 3, "ci": 0}, live={"eng": 1, "ci": 0}, room=4)
+    actions = ticks(store, "ci", 3, empty)
+    assert caps(store) == (4, 1)
+    assert actions == [lane_split.HELD.format(named="ci", ticks=3, reason="the ci lane has no ready task")]
+    assert gate_log.recent(SLUG, None, home) == []
+    store.update(SLUG, max_eng=1, max_ci=4)
+    idle = lane_split.Lanes(ready={"eng": 0, "ci": 2}, live={"eng": 0, "ci": 1}, room=4)
+    assert ticks(store, "engineering", 3, idle, start=3) == [
+        lane_split.HELD.format(named="engineering", ticks=3, reason="the eng lane has no ready task")
+    ]
+    assert caps(store) == (1, 4)
+
+
+def test_caps_the_operator_or_master_set_stay_where_they_set_them(store, home):
+    store.update(SLUG, caps_pinned=True)
+    actions = ticks(store, "ci", 3)
+    assert caps(store) == (4, 1)
+    assert actions == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the operator or the master set the lane caps")
+    ]
+    assert gate_log.recent(SLUG, None, home) == []
+
+
+def test_caps_stored_before_the_pin_existed_stay_where_the_operator_set_them(store, home):
+    store.redis.hdel(store.key(SLUG, "config"), "caps_pinned")
+    assert store.config(SLUG).caps_pinned is True
+    assert ticks(store, "ci", 3) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the operator or the master set the lane caps")
+    ]
+    assert caps(store) == (4, 1)
+
+
+@pytest.mark.parametrize("gates", [{}, {"lane-split": "observe"}])
+def test_log_only_records_the_would_be_move_and_moves_nothing(store, home, gates):
+    store.update(SLUG, gates=gates)
+    actions = ticks(store, "ci", 3)
+    assert caps(store) == (4, 1)
+    assert actions == [lane_split.HELD.format(named="ci", ticks=3, reason="the lane split switch is log only")]
+    (row,) = gate_log.recent(SLUG, None, home)
+    assert (row["gate"], row["kind"], row["agent"], row["tool"], row["at"]) == (
+        "lane-split",
+        "observe",
+        "dispatcher",
+        "lane-split",
+        NOW + 120_000,
+    )
+    assert row["reason"] == lane_split.MOVED.format(giver="eng", taker="ci", named="ci", ticks=3, eng=3, ci=2, total=5)
+
+
+def test_skip_moves_nothing_and_logs_nothing(store, home):
+    store.update(SLUG, gates={"lane-split": "off"})
+    assert ticks(store, "ci", 3) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the lane split switch is skip")
+    ]
+    assert caps(store) == (4, 1)
+    assert gate_log.recent(SLUG, None, home) == []
+
+
+def test_the_lane_split_switch_defaults_to_log_only():
+    from scripts.gates import catalog
+
+    assert catalog.defaults()["lane-split"] == "observe"
 
 
 def test_seats_already_live_do_not_need_host_room(store, home):

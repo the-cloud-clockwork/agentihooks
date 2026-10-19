@@ -9,7 +9,7 @@ from collections.abc import Callable, Mapping, MutableMapping
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
-from scripts import codex_router, quota_freshness, session_bands
+from scripts import codex_router, quota_freshness, quota_state, session_bands
 from scripts.claude_quota_balancer import (
     MASTERS_ONLY,
     OPEN,
@@ -25,13 +25,16 @@ from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
 if TYPE_CHECKING:
     from scripts.codex_quota import CodexQuota
     from scripts.routing.master_account import MasterAccount
+    from scripts.routing.reservation import Reservation
     from scripts.routing.slots import SlotSource
 
 PAGE_TTL_S = 60
 RETIRED_AFTER_S = session_bands.FRESH_SECONDS
 STALE = "STALE"
+CLOSED = "CLOSED"
 EXPIRED_SOURCE = "token expired: run {login}"
 NEXT_MARK = "(next)"
+RESERVED_MARK = "(reserved)"
 CURRENT_MARK = "(current)"
 NO_CURRENT = ""
 CACHED = "cached"
@@ -82,6 +85,7 @@ class QuotaRow:
     fable_left: float | None = None
     fable_resets_at: int | None = None
     identity: str = ""
+    reserved: str = ""
 
 
 def claude_rows(
@@ -100,10 +104,14 @@ def claude_rows(
 def _claude_row(
     result, sessions: dict[str, int], source: str, seen: float | None, now: float, include_fable: bool
 ) -> QuotaRow:
+    cap = account_cap(result, now, include_fable) if session_bands.fresh(seen, now) else None
+    five = session_bands.left(result.five_hour.used, result.five_hour.resets_at, now)
+    week = session_bands.left(result.seven_day.used, result.seven_day.resets_at, now)
+    routing = quota_state.claude_left(five, week)
     row = QuotaRow(
         agent="claude",
         account=result.account,
-        state=result.state,
+        state=quota_state.shown(result.state, cap, routing),
         sessions=sessions.get(result.account, 0),
         five_hour_left=result.five_hour.remaining,
         seven_day_left=result.seven_day.remaining,
@@ -111,8 +119,8 @@ def _claude_row(
         source=source,
         five_hour_resets_at=result.five_hour.resets_at,
         observed_at=seen,
-        cap=account_cap(result, now, include_fable) if session_bands.fresh(seen, now) else None,
-        routing_left=result.margin,
+        cap=cap,
+        routing_left=routing,
         fable_left=result.fable.remaining,
         fable_resets_at=result.fable.resets_at,
     )
@@ -167,7 +175,7 @@ def codex_rows(
             QuotaRow(
                 agent="codex",
                 account=account.name,
-                state=_codex_state(account, quota, now, environ),
+                state=quota_state.shown(_codex_state(account, quota, now, environ), cap, week),
                 sessions=sessions.get(account.name, 0),
                 five_hour_left=session_bands.left(quota.five_hour.used, quota.five_hour.resets_at, now)
                 if fresh
@@ -251,6 +259,7 @@ def _cells(rank: str, row: QuotaRow, now: int, current: str) -> list[str]:
                 row.identity and f"#{row.identity}",
                 mark,
                 row.master,
+                RESERVED_MARK if row.reserved else "",
                 NEXT_MARK if row.selected else "",
             )
             if part
@@ -382,10 +391,15 @@ def _render_live(
     rows: list[QuotaRow], sessions: dict[str, int], now: float, fable: bool = False, current: str = NO_CURRENT
 ) -> str:
     from hooks.context.account_sessions import codex_sessions_by_account
+    from scripts.routing import reservation
 
     live = {"claude": sessions, **({} if fable else {"codex": codex_sessions_by_account()})}
     table = render(rows, int(now), unlisted_sessions(rows, live), fable, current)
     notes = [] if fable else [*codex_router.identity_warnings(os.environ), codex_router.default_distinction(os.environ)]
+    for harness in sorted({row.agent for row in rows if row.master}):
+        held = reservation.current(harness, os.environ)
+        if held and held.reason:
+            notes.append(f"{harness} {held.slug}: {held.reason}")
     return "\n".join([table, *(note for note in notes if note)])
 
 
@@ -418,6 +432,21 @@ def _observed(results: list, now: float, fable: bool) -> dict[str, float]:
     return {result.account: cached.get(result.account, now) for result in results}
 
 
+def _week_left(row: QuotaRow, now: float) -> float | None:
+    if row.seven_day_left is None:
+        return None
+    return session_bands.left(100 - row.seven_day_left, row.seven_day_resets_at, now)
+
+
+def with_reservations(rows: list[QuotaRow], holds: Mapping[str, "Reservation | None"], now: float) -> list[QuotaRow]:
+    return [
+        replace(row, state=CLOSED, cap=0, reserved=held.reason)
+        if (held := holds.get(row.agent)) and held.closes_row(row.agent, row.kind, row.account, _week_left(row, now))
+        else row
+        for row in rows
+    ]
+
+
 def balance_table(
     results: list,
     sessions: dict[str, int],
@@ -426,12 +455,16 @@ def balance_table(
     current: str = NO_CURRENT,
     observed: dict[str, float] | None = None,
 ) -> str:
+    from scripts.routing import reservation
     from scripts.routing.claude_api import ClaudeApiSource
 
     observed = _observed(results, now, fable) if observed is None else observed
     claude = claude_rows(results, sessions, observed=observed, now=now, include_fable=fable)
     claude = with_masters(claude + api_rows(ClaudeApiSource(sessions), "claude", now), _masters("claude"), sessions)
-    return _render_live(claude + ([] if fable else _codex(now)), sessions, now, fable, current)
+    holds = {harness: reservation.current(harness, os.environ) for harness in (("claude",) if fable else HARNESSES)}
+    rows = with_reservations(claude + ([] if fable else _codex(now)), holds, now)
+    table = _render_live(rows, sessions, now, fable, current)
+    return "\n".join([table, *(f"{row.agent} {row.account}: {row.reserved}" for row in rows if row.reserved)])
 
 
 def current_observations(cached: list) -> list:

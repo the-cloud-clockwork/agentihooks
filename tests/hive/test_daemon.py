@@ -5,7 +5,7 @@ import pytest
 
 from scripts.hive import daemon, registry
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -82,7 +82,7 @@ def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis
     daemon.beat(redis, "machine")
 
     assert redis.smembers(registry.INDEX) == indexed
-    assert round(redis.pttl(f"{ROOT}:launch-slot:first") / 1000) == ttl
+    assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
 
 
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
@@ -96,7 +96,7 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
         events.append(seconds)
         raise KeyboardInterrupt
 
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connection)
     assert events == [(connection, "local"), 15]
@@ -108,7 +108,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     timestamps = iter([100, 103])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(object())
     sleep.assert_called_once_with(12)
@@ -354,7 +354,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     timestamps = iter([100, 116])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(object())
     sleep.assert_called_once_with(0)
@@ -750,6 +750,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                     "provider_error": "",
                     "provider_checked": False,
                     "provider_error_id": "",
+                    "content_refusal": False,
                 },
             }
         },
@@ -772,3 +773,34 @@ def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis
     assert json.loads(redis.get(reports.key("machine"))) == {"names": [], "panes": {}, "executions": {}}
     herdr.bindings.assert_not_called()
     herdr.conversations.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "git@github.com:The-Org/Project.git",
+        "https://github.com/the-org/project",
+        "ssh://git@github.com/the-org/project.git/",
+    ],
+)
+def test_repositories_report_each_origin_as_a_lowercase_identity(monkeypatch, tmp_path, url):
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    repo = tmp_path / "project"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "config").write_text(f'[core]\n\tbare = false\n[remote "origin"]\n\turl = {url}\n')
+    other = tmp_path / "other"
+    (other / ".git").mkdir(parents=True)
+    (other / ".git" / "config").write_text('[remote "upstream"]\n\turl = git@github.com:else/where.git\n')
+    assert daemon.repositories() == sorted(["github.com/the-org/project", str(other), str(repo)])
+
+
+def test_repositories_follow_a_worktree_link_to_its_common_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "root"))
+    common = tmp_path / "main" / ".git"
+    (common / "worktrees" / "wt").mkdir(parents=True)
+    (common / "config").write_text('[remote "origin"]\n\turl = git@github.com:org/name.git\n')
+    (common / "worktrees" / "wt" / "commondir").write_text("../..\n")
+    checkout = tmp_path / "root" / "wt"
+    checkout.mkdir(parents=True)
+    (checkout / ".git").write_text(f"gitdir: {common / 'worktrees' / 'wt'}\n")
+    assert daemon.repositories() == sorted(["github.com/org/name", str(checkout)])

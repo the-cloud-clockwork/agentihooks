@@ -35,21 +35,26 @@ if ! docker compose up --pull never "${build[@]}" --wait --wait-timeout 180; the
 fi
 
 slug="compose-proof"
-docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
+host_agent="$(docker compose exec -T -e SLUG="$slug" swarm python - <<'PY'
 import os
+import time
 
 from scripts.inbox.seats import SeatRegistry
-from scripts.swarm.store import SwarmConfig, connect
+from scripts.swarm.store import AgentRecord, SwarmConfig, connect
 from scripts.swarm_ledger.new_ledger import create
 
 store, slug = connect(), os.environ["SLUG"]
 create(slug, {"title": "Compose proof", "phases": [{"title": "Prove the compose stack"}]}, "swarm")
 store.create(SwarmConfig(slug, "/data", 1, 1))
 seats = SeatRegistry(store.redis)
-seats.occupy(f"master@{slug}", "host-agent", 0)
-seats.occupy(f"eng-1@{slug}", "member-agent", 0)
-print(f"seeded swarm {slug} with host-agent and member-agent seated, in the compose Redis over TLS")
+name = store.next_name(slug, "master")
+started = int(time.time() * 1000)
+store.start_execution(slug, AgentRecord(name, "master", "", seat=f"master@{slug}", started_at=started))
+seats.occupy(f"master@{slug}", name, started)
+print(name)
 PY
+)"
+printf 'seeded swarm %s with %s seated, in the compose Redis over TLS\n' "$slug" "$host_agent"
 docker compose restart controller >/dev/null
 held=""
 for _ in $(seq 60); do
@@ -67,7 +72,8 @@ if [[ $held != *'"owner": "compose-controller"'* ]]; then
 fi
 
 docker run -d --name "$run-member" --network "${run}_default" -v "$tls/ca.pem:/tls/ca.pem:ro" \
-  -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/ca.pem -e AGENTIHOOKS_AGENT_NAME=member-agent \
+  -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/ca.pem -e LEDGER_URL=http://swarm:8765 \
+  -e AGENTIHOOKS_SWARM="$slug" \
   ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev sleep infinity >/dev/null
 code="$(docker compose exec -T hive agentihooks hive invite member)"
 joined="$(docker exec "$run-member" agentihooks hive join https://hive:8770 "$code")"
@@ -78,13 +84,39 @@ client = redis_client()
 assert client.acl_whoami().startswith("hive-"), client.acl_whoami()
 print(f"member Redis user over TLS: {client.acl_whoami()}")
 '
+member_id="${joined#joined the hive as }"
+member_id="${member_id%%;*}"
+member_agent="$(docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="$member_id" swarm python -c '
+import os, time
+from scripts.inbox import exits
+from scripts.inbox.store import InboxStore
+from scripts.swarm.store import AgentRecord, connect
+store, slug, member = connect(), os.environ["SLUG"], os.environ["MEMBER_ID"]
+name = store.next_name(slug, "eng")
+started = int(time.time() * 1000)
+agent = AgentRecord(name, "eng", "task", seat=f"eng-1@{slug}", started_at=started, hive=member, runtime_target={"host_id": member})
+def place_member():
+    store.start_execution(slug, agent)
+    store.seats.occupy(agent.seat, name, started)
+    return {}
+exits.sweep(InboxStore(store.redis), slug, store, place_member)
+assert store.seats.exit_of(name) == {}, "the exit sweep marked the newly placed member as exited"
+print(name)
+')"
+printf 'placed %s on the member in seat eng-1\n' "$member_agent"
 
-docker exec "$run-member" agentihooks msg send "master@$slug" "hello from the member hive"
-inbox="$(docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks msg inbox)"
+docker exec -e AGENTIHOOKS_AGENT_NAME="$member_agent" "$run-member" agentihooks msg send "master@$slug" "hello from the member hive"
+relayed="$(docker compose exec -T swarm python -c '
+from scripts.inbox import relay
+from scripts.swarm.store import connect
+print(relay.relay(connect().redis))
+')"
+printf 'controller relay of member mail: %s\n' "$relayed"
+inbox="$(docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks msg inbox)"
 printf 'host inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the member hive"* ]]
-docker compose exec -T -e AGENTIHOOKS_AGENT_NAME=host-agent swarm agentihooks msg send "eng-1@$slug" "hello from the host"
-inbox="$(docker exec "$run-member" agentihooks msg inbox)"
+docker compose exec -T -e AGENTIHOOKS_AGENT_NAME="$host_agent" swarm agentihooks msg send "eng-1@$slug" "hello from the host"
+inbox="$(docker exec -e AGENTIHOOKS_AGENT_NAME="$member_agent" "$run-member" agentihooks msg inbox)"
 printf 'member inbox: %s\n' "$inbox"
 [[ $inbox == *"hello from the host"* ]]
 for _ in $(seq 30); do
@@ -118,8 +150,7 @@ printf 'after a Redis restart, the refreshed '
 docker exec "$run-member" python -c "$member_auth"
 docker exec "$run-member" agentihooks hive refresh >/dev/null
 printf 'after a Redis restart, a refresh still finds the member record\n'
-member_id="${joined#joined the hive as }"
-docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="${member_id%%;*}" swarm python -c '
+docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="$member_id" -e MEMBER_AGENT="$member_agent" swarm python -c '
 import os
 from scripts.hive import registry
 from scripts.inbox.seats import SeatRegistry
@@ -127,7 +158,7 @@ from scripts.swarm.store import connect
 slug = os.environ["SLUG"]
 redis = connect().redis
 seat = SeatRegistry(redis).occupant(f"eng-1@{slug}")
-assert seat and seat.occupant == "member-agent", f"the seat lost its occupant after the Redis restart: {seat}"
+assert seat and seat.occupant == os.environ["MEMBER_AGENT"], f"the seat lost its occupant after the Redis restart: {seat}"
 print(f"after a Redis restart, the seat is still held by {seat.occupant}")
 assert os.environ["MEMBER_ID"] in redis.smembers(registry.INDEX), "the member left the hive index"
 print("after a Redis restart and a refresh, the member is still in the hive index")

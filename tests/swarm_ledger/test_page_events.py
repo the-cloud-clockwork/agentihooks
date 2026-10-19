@@ -80,10 +80,10 @@ def test_the_page_sends_its_cursor_in_a_header_and_reloads_without_it_after_410(
     assert all(r["url"].endswith("/api/v1/ledgers/__LEDGER_SLUG__/events") for r in events)
     assert all("token" not in r["url"].lower() and r["headers"].get("x-ledger-token") for r in events)
     assert sorted(r["url"] for r in seen if "/api/" in r["url"] and not is_events(r["url"])) == [
-        "http://ledger.test/api/layout",
-        "http://ledger.test/api/swarm/__LEDGER_SLUG__/models",
+        "http://ledger.test/api/v1/layout",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__",
         "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/architecture",
+        "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/swarm/models",
     ]
 
 
@@ -101,7 +101,7 @@ def test_a_failed_stream_marks_the_page_offline_and_the_next_snapshot_recovers_i
 @pytest.fixture
 def live(monkeypatch):
     content = {"title": "Events", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content, "swarm"), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)
@@ -140,12 +140,12 @@ def test_tabs_get_ledger_and_swarm_changes_without_polling_the_document(browser,
         tab.wait_for_function("() => document.body.textContent.includes('streamed note 1')", timeout=5000)
         tab.wait_for_function("() => document.querySelector('#swarm-state').textContent === 'paused'", timeout=5000)
     time.sleep(3)
-    reads = [(method, path) for method, path in requests if path.startswith("/api/") and path != "/api/layout"]
+    reads = [(method, path) for method, path in requests if path.startswith("/api/") and path != "/api/v1/layout"]
     assert sorted(reads) == sorted(
         [
             ("GET", f"/api/v1/ledgers/{SLUG}/events"),
             ("GET", f"/api/v1/ledgers/{SLUG}"),
-            ("GET", f"/api/swarm/{SLUG}/models"),
+            ("GET", f"/api/v1/ledgers/{SLUG}/swarm/models"),
             ("GET", f"/api/v1/ledgers/{SLUG}/architecture"),
         ]
         * 2

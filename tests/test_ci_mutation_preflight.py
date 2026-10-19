@@ -1,4 +1,7 @@
+import json
+import shlex
 from pathlib import Path
+from string import Template
 
 import yaml
 
@@ -34,8 +37,21 @@ def test_preflight_skips_a_branch_with_an_open_pull_request():
     jobs = _workflow()["jobs"]
     assert "pull-request" not in jobs
     plan = jobs["plan"]
-    assert "needs" not in plan
-    assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
+    if "capacity" in jobs:
+        assert plan["needs"] == "capacity"
+        assert plan["if"] == (
+            "${{ !cancelled() && (needs.capacity.result == 'success' || needs.capacity.result == 'skipped')"
+            " && (github.event_name != 'push' || !github.event.deleted) }}"
+        )
+        assert "secrets." not in str(plan)
+        capacity = jobs["capacity"]
+        assert [step.get("id") for step in capacity["steps"]] == ["capacity-token", "capacity"]
+        assert capacity["steps"][0]["uses"] == "actions/create-github-app-token@v3.2.0"
+        assert capacity["steps"][1]["run"].startswith("gh api ")
+        assert "checkout" not in str(capacity)
+    else:
+        assert "needs" not in plan
+        assert plan["if"] == "${{ github.event_name != 'push' || !github.event.deleted }}"
     assert plan["outputs"]["graded"] == "${{ steps.plan.conclusion == 'success' }}"
     step = plan["steps"][0]
     assert step["id"] == "open"
@@ -79,7 +95,43 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     gated = "steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'"
     assert steps[upload_at + 1 :]
     for step in steps[upload_at + 1 :]:
-        assert step["if"] == gated, step
+        if step.get("id") in {"capacity-token", "lanes"}:
+            assert (
+                step["if"]
+                == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
+            )
+        elif (
+            step.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))
+            or step.get("name") == "Install dependencies"
+        ):
+            assert step["if"] == f"{gated} && steps.suite.outputs.changed != 'true'", step
+        else:
+            assert step["if"] == gated, step
+
+
+def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_module_changes():
+    steps, names = _steps(_workflow()["jobs"]["plan"])
+    find_at = names.index("Find a changed test module")
+    find = steps[find_at]
+    assert find_at == 2
+    assert find["id"] == "suite"
+    assert find["if"] == "github.event_name == 'push' && steps.open.outputs.open == 'false'"
+    assert find["run"].startswith('files=$(git -c core.quotePath=false diff --name-only --no-renames "$BASE...HEAD")\n')
+    assert "grep -qE '^tests/(.+/)?test_[^/]*\\.py$' <<< \"$files\"" in find["run"]
+    run_at = names.index("Run the suite speed contracts")
+    assert run_at < names.index("Record the revisions the report grades")
+    assert run_at < names.index("Reuse a green report when this head only adds tests to it")
+    changed = "steps.suite.outputs.changed == 'true'"
+    assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
+    assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
+    reused = steps[find_at + 1 : run_at]
+    later = steps[names.index("Reuse a green report when this head only adds tests to it") + 1 :]
+    for step in reused:
+        if "uses" in step:
+            assert next(other for other in later if other.get("uses") == step["uses"])["with"] == step["with"], step
+        else:
+            assert step["run"] == steps[names.index("Install dependencies")]["run"]
+    assert not any(step.get("continue-on-error") for step in steps)
 
 
 def test_pull_request_reuse_does_not_grade_the_skipped_empty_plan():
@@ -95,14 +147,19 @@ def _steps(job):
     return steps, [step.get("name") for step in steps]
 
 
-def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
+def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monkeypatch):
     jobs = _workflow()["jobs"]
     plan = jobs["plan"]
     assert plan["env"]["BASE"] == "${{ inputs.base || 'origin/dev' }}"
-    assert plan["outputs"] == {
+    outputs = dict(plan["outputs"])
+    if "stats_lane" in outputs:
+        assert outputs.pop("stats_lane") == "${{ steps.lanes.outputs.lane }}"
+        assert outputs.pop("batch_ceiling") == "${{ steps.lanes.outputs.ceiling }}"
+    assert outputs == {
         "shards": "${{ steps.plan.outputs.shards }}",
         "stats_parts": "${{ steps.plan.outputs.stats_parts }}",
         "bases": "${{ steps.plan.outputs.bases }}",
+        "browser": "${{ steps.plan.outputs.browser }}",
         "changed": "${{ steps.plan.outputs.changed }}",
         "graded": "${{ steps.plan.conclusion == 'success' }}",
         "open": "${{ steps.open.outputs.open }}",
@@ -112,7 +169,43 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
     assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert sized["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    from scripts.ci_mutation import plan as planner
+    from tests.test_ci_mutation_plan import _project
+
+    _project(tmp_path, {})
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    command = shlex.split(Template(sized["run"]).substitute(BASE="chosen-base", GITHUB_REPOSITORY="org/repo"))
+    module = command.index("-m") + 1
+    assert command[module] == "scripts.ci_mutation.plan"
+    monkeypatch.setattr("sys.argv", command[module:])
+    calls = []
+
+    def bases(root, base, head, *args):
+        calls.append((root, base, head))
+        return ["resolved-base"]
+
+    def record(repository, *args):
+        calls.append(repository)
+        return None
+
+    monkeypatch.setattr(planner, "own_bases", bases)
+    monkeypatch.setattr(planner, "find_record", record)
+    monkeypatch.setattr(planner, "discover_changes", lambda *args: {"scripts/sample.py": {2}})
+    output = tmp_path / "output"
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output))
+    assert planner.main() == 0
+    assert calls == [(tmp_path, "chosen-base", "HEAD"), "org/repo"]
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
+        "scripts/sample.py": ["tests/test_sample.py"]
+    }
+    assert dict(line.split("=", 1) for line in output.read_text().splitlines()) == {
+        "shards": "[0]",
+        "stats_parts": "[0]",
+        "bases": "resolved-base",
+        "changed": "1",
+        "browser": "false",
+    }
     assert jobs["stats"]["needs"] == "plan"
     assert jobs["stats"]["strategy"] == {
         "fail-fast": False,
@@ -141,6 +234,9 @@ def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     measured = steps[names.index("Refine mutation shards from measured statistics")]
     assert measured["run"] == 'python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats'
     assert names.index("Download the shared mutation stats") < names.index(measured["name"])
+    selection = steps[names.index("Download planned mutation test selection")]
+    assert selection["with"] == {"name": "mutation-selection"}
+    assert names.index(selection["name"]) < names.index(measured["name"])
     assert jobs["mutation-shard"]["strategy"]["matrix"]["shard"] == "${{ fromJSON(needs.refine.outputs.shards) }}"
     assert "refine" in jobs["mutation-shard"]["needs"]
     assert "refine" in jobs["mutation"]["needs"]
@@ -155,11 +251,13 @@ def test_preflight_collects_one_stats_part_per_leg_with_the_pull_request_budget(
     job = _workflow()["jobs"]["stats"]
     assert job["timeout-minutes"] == 26
     steps, names = _steps(job)
-    select = steps[names.index("Select mutation tests before browser setup")]
     collect = steps[names.index("Collect one stats part for every mutation shard")]
-    for step in (select, collect):
-        assert step["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
-    assert select["run"] == "python -m scripts.ci_mutation." + 'browser --bases "$BASES"'
+    assert collect["env"]["BASES"] == "${{ needs.plan.outputs.bases }}"
+    selection = steps[names.index("Download planned mutation test selection")]
+    assert selection["with"]["name"] == "mutation-selection"
+    assert "Select mutation tests before browser setup" not in names
+    browser = steps[names.index("Install the browser that page tests drive")]
+    assert browser["if"] == "needs.plan.outputs.browser == 'true'"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
     assert collect["run"] == (
@@ -191,7 +289,9 @@ def test_preflight_mutates_each_shard_against_the_shared_stats_with_the_pull_req
     assert names.index("Install the browser that page tests drive") < names.index(mutate["name"])
     assert steps[-1]["if"] == "always()"
     assert steps[-1]["with"]["name"] == "mutation-preflight-shard-${{ matrix.shard }}"
-    assert steps[-1]["with"]["path"] == ".mutation-gate/"
+    assert steps[-1]["with"]["path"] == (
+        "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
 
 
 def test_single_shard_collection_preserves_both_supported_workflow_states():
@@ -278,3 +378,13 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
         'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
+
+
+def test_touched_test_selection_supplies_the_automatic_worker_limit():
+    steps, names = _steps(_workflow()["jobs"]["touched-tests"])
+    select = steps[names.index("Select the tests the branch touches")]
+    assert "from scripts.ci_touched_tests import worker_count" in select["run"]
+    assert "workers = worker_count(tests) if tests else 1" in select["run"]
+    assert "workers={workers}" in select["run"]
+    run = steps[names.index("Run the tests the branch touches")]
+    assert run["env"]["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "${{ steps.touched.outputs.workers }}"

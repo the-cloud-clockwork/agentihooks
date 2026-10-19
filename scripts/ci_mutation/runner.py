@@ -50,6 +50,117 @@ def failing_tests(log: Path) -> list[str]:
     return list(named.values())
 
 
+def path_parts(node: ast.AST, bindings: dict[str, ast.AST]) -> list[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, ast.Name):
+        if node.id == "__file__":
+            return [""]
+        if node.id not in bindings:
+            return []
+        return path_parts(bindings[node.id], {key: value for key, value in bindings.items() if key != node.id})
+    if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+        return [part for value in node.elts for part in path_parts(value, bindings)]
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Div):
+        return [
+            str(Path(left) / right)
+            for left in path_parts(node.left, bindings)
+            for right in path_parts(node.right, bindings)
+        ]
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id in {"Path", "str"} and node.args:
+        return path_parts(node.args[0], bindings)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "resolve":
+        return path_parts(node.func.value, bindings)
+    if isinstance(node, ast.Attribute) and node.attr == "parent":
+        return path_parts(node.value, bindings)
+    if isinstance(node, ast.Subscript) and isinstance(node.value, ast.Attribute) and node.value.attr == "parents":
+        return path_parts(node.value.value, bindings)
+    return []
+
+
+def read_paths(call: ast.Call, bindings: dict[str, ast.AST]) -> list[str]:
+    if isinstance(call.func, ast.Name) and call.func.id == "open" and call.args:
+        return path_parts(call.args[0], bindings)
+    if not isinstance(call.func, ast.Attribute):
+        return []
+    operation = call.func.attr
+    if operation in {"run", "Popen", "call", "check_call", "check_output"}:
+        return path_parts(call.args[0], bindings) if call.args else []
+    if operation not in {"read_text", "read_bytes", "open", "glob", "rglob", "iterdir", "is_file", "exists"}:
+        return []
+    paths = path_parts(call.func.value, bindings)
+    if operation in {"glob", "rglob", "iterdir"}:
+        patterns = ["*"] if operation == "iterdir" else path_parts(call.args[0], bindings)
+        prefix = "**/" if operation == "rglob" else ""
+        return [str(Path(path) / (prefix + pattern)) for path in paths for pattern in patterns]
+    return paths
+
+
+def fixture_literals(node: ast.AST) -> list[str]:
+    bindings = {
+        target.id: assignment.value
+        for assignment in ast.walk(node)
+        if isinstance(assignment, ast.Assign)
+        for target in assignment.targets
+        if isinstance(target, ast.Name)
+        and target.id not in {part.id for part in ast.walk(assignment.value) if isinstance(part, ast.Name)}
+    }
+    functions = {function.name: function for function in ast.walk(node) if isinstance(function, ast.FunctionDef)}
+    parameters = {}
+    for call in (part for part in ast.walk(node) if isinstance(part, ast.Call)):
+        if isinstance(call.func, ast.Name) and call.func.id in functions:
+            for parameter, value in zip(functions[call.func.id].args.args, call.args):
+                if parameter.arg not in {part.id for part in ast.walk(value) if isinstance(part, ast.Name)}:
+                    parameters.setdefault(parameter.arg, []).append(value)
+        if isinstance(call.func, ast.Attribute) and call.func.attr == "parametrize" and len(call.args) >= 2:
+            names = path_parts(call.args[0], bindings)
+            if len(names) == 1:
+                bindings[names[0]] = call.args[1]
+    bindings.update({name: ast.List(elts=values) for name, values in parameters.items()})
+    return [path for call in ast.walk(node) if isinstance(call, ast.Call) for path in read_paths(call, bindings)]
+
+
+def fixture_candidates(root: Path, work: Path, literal: str) -> list[Path]:
+    relative = Path(literal)
+    if not relative.parts or relative.is_absolute() or ".." in relative.parts:
+        return []
+    if any(len(part) > 255 for part in relative.parts) or relative == Path("pyproject.toml"):
+        return []
+    if (work / relative).exists():
+        return []
+    target = root / relative
+    if any(part.is_symlink() for part in (target, *target.parents) if part != root):
+        return []
+    return list(root.glob(literal))
+
+
+def fixture_files(root: Path, work: Path, tests: list[str]) -> list[str]:
+    sources = {root / test.split("::")[0] for test in tests}
+    for source in tuple(sources):
+        sources.update(parent / "conftest.py" for parent in source.parents if parent.is_relative_to(root))
+    files = set()
+    for source in sorted(sources):
+        if not source.is_file():
+            continue
+        for literal in fixture_literals(ast.parse(source.read_text())):
+            for candidate in fixture_candidates(root, work, literal):
+                name = candidate.relative_to(root)
+                if any(part in {".git", "__pycache__", work.name} for part in name.parts):
+                    continue
+                if candidate.name.startswith(".env") and candidate.suffix not in {
+                    ".example",
+                    ".sample",
+                    ".template",
+                    ".dist",
+                }:
+                    continue
+                if any(part.is_symlink() for part in (candidate, *candidate.parents) if part != root):
+                    continue
+                if candidate.is_file() and candidate.suffix != ".pyc" and not (work / name).exists():
+                    files.add(name.as_posix())
+    return sorted(files)
+
+
 def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]) -> None:
     for name in (
         "hooks",
@@ -62,6 +173,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
+        "deploy/helm/agentihooks-swarm/ci",
     ):
         source = root / name
         if source.is_dir():
@@ -75,6 +187,10 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         and (path.name == ".test_durations" or not path.name.startswith("."))
     )
     for name in root_files:
+        shutil.copy(root / name, work / name)
+    extra_files = fixture_files(root, work, tests)
+    for name in extra_files:
+        (work / name).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy(root / name, work / name)
     pytest_args = ["-q", "-x", "-o", "addopts=", "-p", "pytest_asyncio.plugin"]
     # pytest would load the plugin from its own mutated copy, whose hooks raise in mutmut's forced fail run.
@@ -92,12 +208,26 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "observability/",
             "docker/swarm-node/",
             ".agentihooks/conditions/",
+            "deploy/helm/agentihooks-swarm/ci/",
             *root_files,
+            *(f"{name}/" for name in sorted({Path(path).parts[0] for path in extra_files})),
         ],
         "pytest_add_cli_args_test_selection": tests,
         "pytest_add_cli_args": pytest_args,
     }
     (work / "pyproject.toml").write_text(tomlkit.dumps(project))
+
+
+def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
+    plan_path = stats.folder.parent / "plan.json"
+    if plan_path.is_file():
+        plan = json.loads(plan_path.read_text())
+        if plan["head"] != stats.head or key not in plan["keys"]:
+            return "measured mutation plan stale for this commit or selection"
+        shutil.copy(plan_path, work / "shard-plan.json")
+    if (killers := stats.folder.parent / "killers").is_dir():
+        shutil.copytree(killers, work / "killers")
+    return ""
 
 
 def mutate_files(
@@ -125,12 +255,8 @@ def mutate_files(
             results, reason = load_parts(stats.folder, key)
             if reason:
                 return {}, reason
-            plan_path = stats.folder.parent / "plan.json"
-            if plan_path.is_file():
-                plan = json.loads(plan_path.read_text())
-                if plan["head"] != stats.head or key not in plan["keys"]:
-                    return {}, "measured mutation plan stale for this commit or selection"
-                shutil.copy(plan_path, work / "shard-plan.json")
+            if reason := seed_measured_shard(stats, key, work):
+                return {}, reason
             (work / "shared-stats.json").write_text(json.dumps(results))
             stats_args = ["reuse", str(work / "shared-stats.json")]
     status = run_process(
@@ -220,6 +346,8 @@ def run_gate(
     started = time.monotonic()
     deadline = started + budget
     cleared = load_clearances(root)
+    selection_path = root / ".mutation-selection.json"
+    selection = json.loads(selection_path.read_text()) if selection_path.is_file() else None
     split = split_plan_names(stats)
     report = {"files": [], "not_mutated": [], "failed": False}
     rows, reasons, selected, failing = {}, {}, {}, []
@@ -232,7 +360,7 @@ def run_gate(
             rows[path] = []
         elif time.monotonic() >= deadline:
             reasons[path] = "over budget"
-        elif tests := select_tests(root, Path(path)):
+        elif tests := (selection[path] if selection is not None else select_tests(root, Path(path))):
             selected[path] = (lines, tests)
         else:
             reasons[path] = "no matching or importing test modules"

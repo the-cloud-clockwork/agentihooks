@@ -8,8 +8,6 @@ from scripts.swarm import operator_mail
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 MASTER_SEAT = f"master@{SLUG}"
 ENG = AgentRecord("sw-eng-1", "eng", "t1", pane_id="p1", seat=f"eng-1@{SLUG}")
@@ -187,6 +185,16 @@ def test_a_swarm_chat_line_reaches_the_master_seat_while_no_master_is_recorded(s
     assert len(pending(inbox, ENG.seat)) == 1
 
 
+def test_a_swarm_chat_line_carries_the_master_rule_while_no_master_seat_is_held(swarm):
+    store, inbox = swarm
+    store.drop_agent(SLUG, BOSS.name)
+    store.redis.delete(store.seats.key(MASTER_SEAT))
+    assert operator_mail.master_address(store.redis, SLUG, store.agents(SLUG)) == MASTER_SEAT
+    relay(swarm, write(5, "chat", kind="message added", text="@swarm the master launch failed"))
+    [(_, text, _)] = pending(inbox, MASTER_SEAT)
+    assert text.endswith(operator_mail.MASTER_RULE)
+
+
 def test_a_write_for_an_agent_that_is_gone_goes_to_the_master(swarm):
     _, inbox = swarm
     relay(swarm, write(5, "tasks/t9"), write(6, "chat", kind="message added", text="@sw-eng-7 hello"))
@@ -196,6 +204,7 @@ def test_a_write_for_an_agent_that_is_gone_goes_to_the_master(swarm):
 def test_a_live_master_without_a_seat_gets_the_item_by_name(swarm):
     store, inbox = swarm
     store.put_agent(SLUG, AgentRecord(BOSS.name, MASTER, MASTER, pane_id="pm"))
+    store.redis.delete(store.seats.key(MASTER_SEAT))
     relay(swarm, write(5, "phases/p1"))
     assert pending(inbox, MASTER_SEAT) == [] and len(pending(inbox, BOSS.name)) == 1
 

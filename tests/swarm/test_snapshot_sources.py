@@ -8,8 +8,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.checkpoints import git_capture
 from tests import sv2_ckp02_cases as cases
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 AGENT = "engineer@a1b2c3-0001"
 
 

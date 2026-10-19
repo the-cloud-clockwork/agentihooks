@@ -165,6 +165,29 @@ def test_launch_succeeds_only_after_the_terminal_starts_the_launcher(monkeypatch
     assert not list((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.started"))
 
 
+def test_a_session_launch_starts_the_supervised_scheduler(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    calls = []
+    monkeypatch.setattr(service, "ensure_running", lambda environ: calls.append(environ))
+
+    def popen(command, **kwargs):
+        Path(command[-1]).with_suffix(".started").touch()
+
+    assert _launch(monkeypatch, tmp_path, popen) == 0
+    assert len(calls) == 1
+    assert calls[0]["HOME"] == str(tmp_path)
+
+
+def test_a_dry_launch_does_not_start_the_scheduler(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "ensure_running", lambda environ: pytest.fail("dry launch started scheduler"))
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    assert init_agent.main(["--dir", str(tmp_path), "--dry-run"], {"HOME": str(tmp_path)}) == 0
+
+
 def test_launch_reports_when_the_launcher_and_the_harness_started(monkeypatch, tmp_path, capsys):
     def popen(command, **kwargs):
         launcher = Path(command[-1])
@@ -589,6 +612,18 @@ def test_a_swarm_launcher_pins_its_own_pid(tmp_path):
     assert "export AGENTIHOOKS_SWARM_LAUNCHER=$$" in lines
     text = "\n".join(lines)
     assert text.index("AGENTIHOOKS_SWARM_LAUNCHER") < text.index(" claude ")
+
+
+def test_a_swarm_launcher_exports_the_agent_s_ledger_token_and_drops_the_server_secret(tmp_path):
+    (tmp_path / ".env").write_text("PLAIN=1\n")
+    env = {"HOME": str(tmp_path), "AGENTIHOOKS_SWARM": "sw", "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "derived-one"}
+    text = _launcher_text(tmp_path, env)
+    lines = text.splitlines()
+    assert "export AGENTIHOOKS_LEDGER_AGENT_TOKEN=derived-one" in lines
+    assert "unset SWARM_SECRET" in lines
+    assert text.index("unset SWARM_SECRET") < text.index(" claude ")
+    assert text.index(init_agent.operator_env.SOURCE) < text.index("unset SWARM_SECRET")
+    assert "AGENTIHOOKS_LEDGER_AGENT_TOKEN" not in _launcher_text(tmp_path, {"AGENTIHOOKS_SWARM": "sw"})
 
 
 AGENT_ENV = {
@@ -1072,7 +1107,9 @@ def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, 
     monkeypatch.setattr(
         init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append((pane, environ, changes))
     )
-    assert init_agent._name_in_herdr("w1:p2", "engineer@abc-0001", agent, {"K": "v"}, "", 12.5) == named
+    assert (
+        init_agent._name_in_herdr("w1:p2", init_agent.Names("engineer@abc-0001"), agent, {"K": "v"}, "", 12.5) == named
+    )
     expected = [("agent", "w1:p2", "engineer@abc-0001", {"K": "v"})]
     if agent == "codex" and detected:
         expected.append(("ready", "w1:p2", {"K": "v"}, init_agent.CODEX_READY_S))
@@ -1090,7 +1127,9 @@ def test_an_app_server_viewer_gets_no_typed_rename_because_its_server_names_the_
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited on a served viewer"))
     monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("typed a rename"))
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda *args, **changes: pytest.fail("marked a session name"))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0, served=True) == ["agent_name=eng-a"]
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", 0.0, served=True) == [
+        "agent_name=eng-a"
+    ]
 
 
 def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch):
@@ -1099,7 +1138,7 @@ def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch)
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: False)
     monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("renamed while not ready"))
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == [
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", 0.0) == [
         "agent_name=eng-a",
         "session_name=unset",
         "session_name_error=not-ready",
@@ -1121,7 +1160,7 @@ def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
     calls = []
     _ready_codex(monkeypatch, calls)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or sent)
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {"K": "v"}, "Start.", 0.0)
+    named = init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {"K": "v"}, "Start.", 0.0)
     assert named == ["agent_name=eng-a", "session_name=eng-a", f"opening_prompt={said}"]
     assert calls == [
         "agent",
@@ -1138,7 +1177,7 @@ def test_an_opening_prompt_is_held_from_a_busy_pane(monkeypatch, ready, busy, sa
     calls = []
     _ready_codex(monkeypatch, calls, ready, busy)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: pytest.fail("prompted a busy pane"))
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0)
+    named = init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "Start.", 0.0)
     assert named[-1] == f"opening_prompt={said}"
     assert [call for call in calls if call[0] == "busy"] == ([("busy", "w1:p2", {})] if ready else [])
 
@@ -1169,7 +1208,7 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or True)
     monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: "")
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or True)
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0) == [
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "Start.", 0.0) == [
         "agent_name=unset",
         "opening_prompt=sent",
     ]
@@ -1183,7 +1222,7 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
 def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatch):
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited"))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == ["agent_name=unset"]
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", 0.0) == ["agent_name=unset"]
 
 
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])

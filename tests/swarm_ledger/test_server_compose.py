@@ -1,3 +1,4 @@
+import functools
 import http.server
 import inspect
 import json
@@ -12,6 +13,7 @@ from unittest.mock import patch
 
 import pytest
 
+from scripts.swarm import stack_init
 from scripts.swarm_ledger import ledger_server as server
 from scripts.swarm_ledger import server_compose
 
@@ -55,6 +57,128 @@ def test_only_the_shared_folder_with_docker_and_the_compose_file_uses_compose(tm
     assert not server_compose.used(folder, {}, docker, tmp_path / "gone.yaml")
     assert not server_compose.used(folder, {"LEDGER_SERVER_RUNTIME": "process"}, docker, present)
     assert server_compose.used(folder, {"LEDGER_SERVER_RUNTIME": "compose"}, docker, present)
+
+
+def adopt(tmp_path, folder):
+    stack = tmp_path / ".agentihooks" / "swarm-stack"
+    stack.mkdir(parents=True)
+    (stack / ".env").write_text(f"SWARM_PORT=8765\nSWARM_ADOPT_LEDGER_DIR={folder}\n")
+    return stack
+
+
+def test_an_adopted_folder_uses_the_bundle_even_without_docker_or_the_legacy_file(tmp_path, monkeypatch):
+    folder = shared(tmp_path, monkeypatch)
+    gone = tmp_path / "gone.yaml"
+    assert not server_compose.adopted(folder, {})
+    assert not server_compose.used(folder, {}, {}.get, gone)
+    adopt(tmp_path, folder)
+    assert server_compose.adopted(folder, {})
+    assert not server_compose.adopted(tmp_path / "scratch", {})
+    assert server_compose.used(folder, {}, {}.get, gone)
+    assert not server_compose.used(folder, {"LEDGER_SERVER_RUNTIME": "process"}, {}.get, gone)
+    elsewhere = tmp_path / "elsewhere"
+    assert not server_compose.adopted(folder, {"AGENTIHOOKS_HOME": str(elsewhere)})
+
+
+def test_adoption_sends_start_and_stop_to_the_bundle_swarm_service(tmp_path, monkeypatch):
+    folder = shared(tmp_path, monkeypatch)
+    stack = adopt(tmp_path, folder)
+    calls = []
+
+    def run(argv, **kw):
+        calls.append((argv, kw))
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    environ = {"HOME": str(tmp_path), "KEEP": "1"}
+    assert server_compose.start(folder, environ, run) == ""
+    assert server_compose.stop(folder, environ, run) == ""
+    assert [argv for argv, _ in calls] == [
+        stack_init.compose(stack, "up", "-d", "swarm"),
+        stack_init.compose(stack, "stop", "swarm"),
+    ]
+    assert "--file" in calls[0][0] and str(stack / "deploy" / "compose" / "adopt.yaml") in calls[0][0]
+    for _, kw in calls:
+        assert kw["env"] == environ
+        assert (kw["capture_output"], kw["text"], kw["check"], kw["timeout"]) == (True, True, False, 120)
+
+
+def test_an_adopted_folder_matches_through_a_symlink(tmp_path, monkeypatch):
+    folder = shared(tmp_path, monkeypatch)
+    link = tmp_path / "linked-ledger"
+    link.symlink_to(folder)
+    adopt(tmp_path, link)
+    assert server_compose.adoption({}) == str(link)
+    assert server_compose.adopted(folder, {})
+
+
+def test_adoption_is_read_from_the_agentihooks_home_the_caller_names(tmp_path, monkeypatch):
+    monkeypatch.setattr(Path, "home", classmethod(lambda cls: tmp_path / "default"))
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    folder = tmp_path / "scratch-ledger"
+    stack = tmp_path / "custom" / "swarm-stack"
+    stack.mkdir(parents=True)
+    (stack / ".env").write_text(f"SWARM_ADOPT_LEDGER_DIR={folder}\n")
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path / "custom")}
+    gone = tmp_path / "gone.yaml"
+    assert server_compose.used(folder, environ, {}.get, gone)
+    assert not server_compose.used(folder, {}, {}.get, gone)
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    assert server_compose.start(folder, environ, run) == ""
+    assert calls == [stack_init.compose(stack, "up", "-d", "swarm")]
+
+
+def test_an_adoption_of_another_folder_refuses_rather_than_restoring_the_old_service(tmp_path, monkeypatch):
+    folder = shared(tmp_path, monkeypatch)
+    elsewhere = tmp_path / "elsewhere"
+    adopt(tmp_path, elsewhere)
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    refusal = f"the swarm stack adopts {elsewhere}, not {folder}; the legacy ledger service stays down"
+    assert server_compose.start(folder, {}, run) == refusal
+    assert server_compose.stop(folder, {}, run) == refusal
+    assert calls == []
+    assert server_compose.used(folder, {}, {}.get, tmp_path / "gone.yaml")
+    assert not server_compose.used(tmp_path / "scratch", {}, {}.get, tmp_path / "gone.yaml")
+    assert server_compose.adoption({"AGENTIHOOKS_HOME": str(tmp_path / "none")}) == ""
+
+
+def test_an_adopted_ledger_restart_never_restores_the_old_service(tmp_path, monkeypatch, ledger_port):
+    folder = shared(tmp_path, monkeypatch)
+    stack = adopt(tmp_path, folder)
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    monkeypatch.delenv("LEDGER_SERVER_RUNTIME", raising=False)
+    monkeypatch.setattr(server.core, "LEDGER_DIR", folder)
+    monkeypatch.setattr(server, "PIDFILE", folder / ".server.pid")
+    monkeypatch.setattr(server, "LOGFILE", folder / ".server.log")
+    monkeypatch.setattr(server, "BASE", f"http://127.0.0.1:{ledger_port}")
+    calls = []
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(server.server_compose, "start", functools.partial(server_compose.start, run=run))
+    monkeypatch.setattr(server.server_compose, "stop", functools.partial(server_compose.stop, run=run))
+    answers = iter([None, str(folder)])
+    monkeypatch.setattr(server.ledger_link, "serving", lambda **kw: next(answers))
+    with patch.object(server.subprocess, "Popen") as spawn:
+        server.stop()
+        server.ensure()
+    spawn.assert_not_called()
+    assert calls == [
+        stack_init.compose(stack, "stop", "swarm"),
+        stack_init.compose(stack, "up", "-d", "swarm"),
+    ]
+    assert not any(str(server_compose.COMPOSE_FILE) in argv or "ledger" in argv for argv in calls)
 
 
 def test_compose_runs_with_the_folder_the_code_and_this_user(tmp_path, monkeypatch):

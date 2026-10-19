@@ -159,7 +159,9 @@ def restart(session):
 
 def progress_of(session):
     from scripts.gates.progress import Progress
-    from scripts.swarm.store import redis_client
+    from scripts.swarm_ledger import ports
+
+    redis_client = ports.swarm().store.redis_client
 
     return Progress(redis_client(), session["slug"])
 
@@ -172,7 +174,9 @@ def note_outcome(session, kind):
 
 
 def wait_seen(session: dict) -> bool:
-    from scripts.swarm import idle
+    from scripts.swarm_ledger import ports
+
+    idle = ports.swarm().idle
 
     try:
         held = idle.wait(progress_of(session).redis, session["slug"], session["name"])
@@ -281,13 +285,14 @@ HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_st
 def serve_ledgers():
     import ledger_link
 
-    from scripts.swarm_ledger import server_lifetime
-    from scripts.swarm_ledger.repository.sqlite import DATABASE
+    from scripts.swarm_ledger import server_lifetime, storage
 
     if (
         os.environ.get("LEDGER_AUTOSTART") == "0"
         or ledger_link.remote()
-        or (not (LEDGER_DIR / DATABASE).exists() and not any(LEDGER_DIR.glob("*.json")))
+        or (
+            not storage.shared() and not (LEDGER_DIR / storage.DATABASE).exists() and not any(LEDGER_DIR.glob("*.json"))
+        )
     ):
         return
     try:
@@ -317,7 +322,9 @@ def dispatch(payload):
     sfile = SESSIONS / f"{sid}.json"
     session = read_json(sfile)
     if session is not None:
-        from scripts.swarm.naming import resolve_name
+        from scripts.swarm_ledger import ports
+
+        resolve_name = ports.swarm().naming.resolve_name
 
         session["name"] = resolve_name(session["name"])
     handler = HANDLERS.get(payload.get("hook_event_name"))
@@ -325,7 +332,7 @@ def dispatch(payload):
         return
     import ledger_gate
 
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     state = read_ledger(LEDGER_DIR, session["slug"], *GATE_READS)
     if not isinstance(state, dict) or not isinstance(state.get("_meta"), dict) or ledger_gate.closed(state):
@@ -345,4 +352,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     sys.exit(main())

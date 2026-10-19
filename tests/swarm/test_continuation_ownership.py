@@ -10,8 +10,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm.test_tick import store as store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 REPO = "https://github.com/the-cloud-clockwork/agentihooks"
 HEAD = "a" * 40
 CASES = [

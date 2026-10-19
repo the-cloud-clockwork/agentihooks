@@ -15,8 +15,6 @@ from scripts.swarm_v2.runtime import process
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 HIVE = "hive-ledger-credential"
 HIVE_ID = "member-1"
 CARRIED = "s-261013-101500"
@@ -161,6 +159,12 @@ def test_a_remote_host_without_a_hive_id_is_refused_before_any_change(remote_tak
         "swarm: take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive join\n"
     )
     assert (_masters(store), sent, broadcast.session_name(4242)) == ([], [], CARRIED)
+
+
+def test_a_workstation_on_a_hosted_ledger_needs_no_hive_id():
+    assert take_master.hive_of({"SWARM_URL": "https://swarm.example"}) == ""
+    assert take_master.hive_of({"SWARM_URL": "https://swarm.example", "AGENTIHOOKS_DEPLOYMENT": "local"}) == ""
+    assert take_master.hive_of({"AGENTIHOOKS_DEPLOYMENT": "compose", "AGENTIHOOKS_HIVE_ID": "member-9"}) == "member-9"
 
 
 def test_a_local_ledger_keeps_the_session_unpinned(taker, monkeypatch):  # noqa: F811

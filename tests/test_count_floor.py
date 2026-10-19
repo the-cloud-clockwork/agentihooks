@@ -73,6 +73,38 @@ def _collection_tree(tmp_path):
     return root
 
 
+@pytest.mark.parametrize("lost", [False, True])
+def test_the_floor_exports_the_same_head_collection_without_collecting_it_again(tmp_path, monkeypatch, lost):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    expected = ["tests/test_a.py::test_a", "tests/test_a.py::test_b[1]", "tests/test_a.py::test_b[2]"]
+    if lost:
+        (head / "tests" / "test_a.py").write_text("def test_a():\n    pass\n")
+        expected = ["tests/test_a.py::test_a"]
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == int(lost)
+    assert json.loads(output.read_text()) == expected
+    assert (head / ".collection-runs").read_text() == "x"
+    from tests.duration_coverage import collected_tests
+
+    assert json.loads(output.read_text()) == collected_tests(head)
+
+
+def test_a_failed_head_collection_exports_no_list_for_splitting(tmp_path, monkeypatch):
+    from tests.count_floor import main
+
+    base = _collection_tree(tmp_path / "base")
+    head = _collection_tree(tmp_path / "head")
+    (head / "tests" / "test_a.py").write_text("this is invalid python\n")
+    output = tmp_path / "collected.json"
+    monkeypatch.setenv("TEST_COUNT_HEAD_COLLECTION", str(output))
+    assert main(["--base", str(base), "--head", str(head)]) == 1
+    assert not output.exists()
+
+
 def test_collection_reuses_only_an_exact_clean_tree_and_environment(tmp_path):
     from tests.count_floor import collect_all
 
@@ -290,12 +322,21 @@ def test_a_renamed_test_keeps_the_floor(tmp_path):
 
 @pytest.mark.parametrize("side", ["base", "head"])
 def test_a_collection_error_on_either_side_is_red(tmp_path, side):
-    broken = {"test_a.py": SUITE, "test_x.py": "import not_a_module_anywhere\n"}
+    broken = {
+        "test_a.py": SUITE,
+        "test_x.py": "import not_a_module_anywhere\n",
+        "test_y.py": "raise RuntimeError('another collection exception')\n",
+    }
     sides = {"base": {"test_a.py": SUITE}, "head": {"test_a.py": SUITE}}
     sides[side] = broken
     result = _floor(tmp_path, sides["base"], sides["head"])
     assert result.returncode == 1
     assert f"::error::Collecting the {side} tests failed" in result.stdout
+    output = result.stdout + result.stderr
+    assert "tests/test_x.py" in output
+    assert "ModuleNotFoundError: No module named 'not_a_module_anywhere'" in output
+    assert "tests/test_y.py" in output
+    assert "RuntimeError: another collection exception" in output
 
 
 SUBJECT = "def subject():\n    return 1\n"

@@ -10,8 +10,7 @@ from scripts.hive import auth as hive_auth
 from scripts.swarm import lease, ledger_host, metrics_fleet
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
-from scripts.swarm_ledger import ledger_link
-from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from scripts.swarm_ledger import ledger_link, storage
 from scripts.swarm_v2 import deployed, ledger_writer, operator_auth, telemetry
 from scripts.swarm_v2.api import artifacts, health
 from scripts.swarm_v2.api.executions import ExecutionsAPI
@@ -54,9 +53,7 @@ class ControlError(SwarmError):
 
 
 def page_credential(slug: str) -> str | None:
-    from scripts.swarm_ledger.repository import repository
-
-    return repository.token(slug)
+    return storage.default().token(slug)
 
 
 def launch_key(environ: Mapping[str, str]) -> LaunchKey:
@@ -207,7 +204,7 @@ class ControlService:
             self.writer.acquire(ledger_writer.owner())
         except ledger_writer.WriterConflict as conflict:
             print(f"controller: serves the tasks API read only for {self.controller.slug}: {conflict}", flush=True)
-        ledger = SQLiteLedgerRepository(folder / DATABASE)
+        ledger = storage.build(None if storage.shared() else folder / storage.DATABASE)
         self.tasks_api = TasksAPI(self.grants, self.tasks, ledger, self.writer.held)
 
     def stop(self) -> None:

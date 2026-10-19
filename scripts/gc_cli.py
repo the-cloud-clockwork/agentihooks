@@ -28,8 +28,12 @@ def _parser() -> argparse.ArgumentParser:
     gc.add_argument("--json", action="store_true", help="Print the full report as JSON")
     gc.add_argument("--path", default="", help="Only report findings under this path")
     gc.add_argument("--enforce", action="store_true", help="Act on findings that are due: remove, snapshot, archive")
-    gc.add_argument("--install-timer", action="store_true", help="Install and enable the hourly systemd user timer")
-    gc.add_argument("--remove-timer", action="store_true", help="Disable and remove the systemd user timer")
+    gc.add_argument(
+        "--install-timer", action="store_true", help="Schedule the hourly sweep on the agentihooks scheduler"
+    )
+    gc.add_argument(
+        "--remove-timer", action="store_true", help="Remove the hourly sweep from the agentihooks scheduler"
+    )
     lease = sub.add_parser("lease", help="Record the calling agent session as owner of a worktree or scratch dir")
     lease.add_argument("path")
     lease.add_argument("--kind", choices=("worktree", "ephemeral", "scratch"), default="worktree")
@@ -53,6 +57,9 @@ def _print_report(report: dict) -> None:
         if item["action"] in ACTIONABLE or item["action"] == "skip":
             state = item.get("outcome") or ("due" if item["due"] else "pending")
             print(f"{item['action']:9} {state:8} {item['size'] / GB:7.2f} GB  {item['path']}  ({item['reason']})")
+    for item in report.get("git_maintenance", []):
+        state = item["outcome"] or ("maintenance registered" if item["registered"] else "maintenance not registered")
+        print(f"git       {item['loose']!s:>5} loose {item['packs']!s:>5} packs  {item['path']}  ({state})")
 
 
 def _lease(path: Path, kind: str) -> int:

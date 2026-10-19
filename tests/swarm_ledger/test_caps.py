@@ -26,7 +26,7 @@ def make_ledger():
         "questions": [],
         "followups": [],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -66,7 +66,9 @@ class EventsCap(unittest.TestCase):
         make_ledger()
 
     def test_events_are_capped_and_the_start_time_does_not_move(self):
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         state = repository.get_document(SLUG)
         state["_meta"]["events"] = [

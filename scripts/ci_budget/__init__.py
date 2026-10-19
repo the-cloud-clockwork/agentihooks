@@ -22,6 +22,7 @@ BUDGETS = {
     "shard-check": 90,
     "test-count": 120,
     "lint": 240,
+    "docs": 120,
     "sonar": 240,
     "coverage-ratchet": 90,
     "queue-fail-fast": 60,

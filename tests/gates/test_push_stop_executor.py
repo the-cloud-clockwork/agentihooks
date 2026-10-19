@@ -46,8 +46,6 @@ TEMPLATE = (
 )
 IDENTITY = ("-c", "user.name=t", "-c", "user.email=t@example.com")
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def git(path, *args):
     done = subprocess.run(["git", "-C", str(path), *IDENTITY, *args], capture_output=True, text=True, check=True)
@@ -58,6 +56,8 @@ def git(path, *args):
 def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
+
+    from tests.scheduler.process_service import start_scheduler, stop_scheduler
 
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
@@ -75,7 +75,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     }
     doc = new_ledger.build_doc(content)
     doc["tasks"][0].update(state="claimed", claimed_by=ME)
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     task = doc["tasks"][0]["id"]
@@ -134,7 +134,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
         )
 
     def ledger_task():
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         return next(t for t in repository.get_document(SLUG)["tasks"] if t["id"] == task)
 
@@ -163,6 +165,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         path = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    scheduler = start_scheduler(env)
     rig = type("Rig", (), {})()
     rig.stop, rig.redis, rig.task, rig.ledger_task, rig.cli, rig.rows = stop, client, task, ledger_task, cli, rows
     rig.commit, rig.remote_head, rig.tree, rig.env = commit, remote_head, tree, env
@@ -171,6 +174,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         yield rig
     finally:
         subprocess.run([sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, timeout=30)
+        stop_scheduler(scheduler, client)
         server.shutdown()
         server.server_close()
 

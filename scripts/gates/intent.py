@@ -21,7 +21,7 @@ from scripts.gates.base import Decision, Who
 from scripts.gates.identity import program_index, simple_commands
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import timing
-from scripts.swarm_ledger import plan_read
+from scripts.swarm_ledger import ledger_splits, plan_read
 
 NAME = "intent"
 PURPOSE = "intent-check"
@@ -71,7 +71,13 @@ def mode_of(config):
 
 
 def _tests_first(body: str) -> bool:
-    return "Task part: tests-first" in body.splitlines()
+    return "Task part: tests-first" in body.splitlines() or bool(
+        re.search(
+            r"(?:^|[.!?]\s+)(?:This tests[- ]first prerequisite\b|Tests[- ]first prerequisite for #\d+\.(?=\s|$))",
+            body,
+            re.MULTILINE,
+        )
+    )
 
 
 def _pr_diff(url: str, run) -> str | None:
@@ -92,11 +98,17 @@ def _same_phase(record, task):
 
 def section(doc, task):
     phase = _phase(doc, task)
+    declared = _declared(task)
+    delivers = f"declared {declared['kind']}: {declared['scope']}" if declared else task["description"]
     return (
         f"{START}\n## Parent intent\n\n**Project:** {doc['overview']}\n\n"
         f"**Phase {phase.get('title', '')}:** {phase.get('description', '')}\n\n"
-        f"**Task {task['id']}, {task['title']}:** {task['description']}\n{END}"
+        f"**Task {task['id']}, {task['title']}:** {delivers}\n{END}"
     )
+
+
+def _declared(task):
+    return (task.get("pull_scopes") or {}).get(task.get("pr_url"))
 
 
 def with_intent(body, text):
@@ -118,7 +130,7 @@ def stamp_body(url, doc, task, run=subprocess.run):
         read = _gh(["gh", "pr", "view", url, "--json", "body"], run)
         if read.returncode:
             return False
-        body = with_intent(json.loads(read.stdout).get("body") or "", section(doc, task))
+        body = with_intent(json.loads(read.stdout).get("body") or "", section(doc, {**task, "pr_url": url}))
         path = f"repos/{owner}/{repo}/pulls/{number}"
         sent = _gh(["gh", "api", "--method", "PATCH", path, "--input", "-"], run, json.dumps({"body": body}))
     except (OSError, subprocess.SubprocessError, ValueError):
@@ -313,25 +325,29 @@ def _split_note(task):
         return ""
     index, lines = half
     ranges = task["split"]
-    others = "; ".join(f"half {n} carries plan lines {other}" for n, other in enumerate(ranges, 1) if n != index + 1)
+    kind = "plan lines " if ledger_splits.ranged(ranges) else ""
+    others = "; ".join(f"half {n} carries {kind}{other}" for n, other in enumerate(ranges, 1) if n != index + 1)
     return (
-        f"\n\nThis pull request is half {index + 1} of {len(ranges)} of a split task: it carries only plan lines "
+        f"\n\nThis pull request is half {index + 1} of {len(ranges)} of a split task: it carries only {kind}"
         f"{lines}; {others} in its own pull request."
     )
 
 
 def _plan_chunk(doc, task):
-    half = _split_half(task)
+    half = _split_half(task) if task.get("split") and ledger_splits.ranged(task["split"]) else None
     task = {**task, "plan_lines": half[1]} if half else task
-    if not task.get("plan_lines") or task.get("follow_up"):
+    if not task.get("plan_lines") or task.get("follow_up") or _declared(task):
         return {}
     try:
         text = plan_read.exact(doc, task)
     except (ValueError, OSError):
         text = None
-    if isinstance(text, str) and _foreign_slice(doc, task, text):
+    part = {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    if task.get("plan_slice") != task.get("id"):
+        part = plan_read.scoped(doc, task, part)
+    if "shared_slice" not in part and isinstance(text, str) and _foreign_slice(doc, task, text):
         return {}
-    return {"plan_lines": task["plan_lines"], "plan_chunk": text}
+    return part
 
 
 def _foreign_slice(doc, task, text):
@@ -358,12 +374,24 @@ def _parent(doc, task):
         "phase": phase.get("title", ""),
         "phase_intent": phase.get("description", ""),
         "task": task["title"],
-        "task_text": task["description"] + _split_note(task),
+        "task_text": _task_text(task),
     }
+
+
+def _task_text(task):
+    declared = _declared(task)
+    if declared is None:
+        return task["description"] + _split_note(task)
+    return (
+        f"This pull request is a declared {declared['kind']} of this task and delivers only: {declared['scope']}. "
+        "The whole task is judged at its final pull request."
+    )
 
 
 def _task_contract(doc, task):
     phase = _phase(doc, task)
+    if task.get("split") and not ledger_splits.ranged(task["split"]):
+        return {**task, "plan_lines": ""}
     if task.get("split") and (
         task.get("follow_up") or not (task.get("plan_url") or phase.get("plan_url") or phase.get("plan_ref"))
     ):
@@ -593,7 +621,8 @@ def _plan_verdict(state, answers, thresholds):
 def _verdicts(definition, state, params, answers):
     thresholds = definition.thresholds if definition.name == PURPOSE else definitions.load(PURPOSE).thresholds
     verdict, reason, criterion = _verdict(state, answers, thresholds)
-    return {"verdict": verdict, "reason": reason + _judged_on(state), "criterion": criterion}
+    shared = f"; {state['shared_slice']}" if state.get("shared_slice") else ""
+    return {"verdict": verdict, "reason": reason + _judged_on(state) + shared, "criterion": criterion}
 
 
 RULE = code_rules.CodeRule(_questions, _verdicts, {"verdict": (PASS, FAIL, UNCHECKED)}, {"verdict": FAIL})
@@ -687,7 +716,9 @@ def plan_check(slug, doc, task_id, traced, mode, now_ms, home=None):
 def _fingerprint(doc, task):
     phase = _phase(doc, task)
     parent = [task.get("title"), task.get("description"), phase.get("title"), phase.get("description")]
-    return hashlib.sha256(json.dumps([*parent, _plan_chunk(doc, task)]).encode()).hexdigest()
+    declared = _declared(task)
+    inputs = [*parent, _plan_chunk(doc, task), *([declared] if declared else [])]
+    return hashlib.sha256(json.dumps(inputs).encode()).hexdigest()
 
 
 def _drafted(record):

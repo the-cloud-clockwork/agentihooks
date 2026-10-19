@@ -24,7 +24,7 @@ connector-specific companion environment files.
 
 ## Install & Automation
 
-These variables control how `agentihooks init` installs and configures Claude Code. They are read at install time, not at hook runtime.
+These variables control how `agentihooks init` installs and configures Claude Code and Codex. Harness-specific variables apply only to their named client. They are read at install time, not at hook runtime.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -75,7 +75,7 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `CLAUDE_HOOK_LOG_FILE` | `~/.agentihooks/logs/hooks.log` | Hook event log file path. |
 | `AGENT_LOG_FILE` | `~/.agentihooks/logs/agent.log` | Agent transcript log file path. |
 | `AGENTIHOOKS_LOG_MAX_MB` | `20` | Size at which `hooks.log`, `agent.log` and `async-hooks.log` rotate. |
-| `LIFECYCLE_GC_ENABLED` | `true` | Workspace lifecycle: per-call claims, disk warning, session-triggered sweeps and the hourly `agentihooks-gc.timer`. `false` removes the timer on the next install. |
+| `LIFECYCLE_GC_ENABLED` | `true` | Workspace lifecycle: per-call claims, disk warning, session-triggered sweeps and the hourly `agentihooks-gc` scheduler cron. `false` removes the cron on the next install. |
 | `AGENTIHOOKS_GC_INTERVAL_MIN` | `60` | Minimum minutes between session-triggered sweeps. |
 | `AGENTIHOOKS_DISK_WARN_GB` | `100` | Free space (smaller of `$HOME` and, on WSL, `/mnt/c`) below which every tool call is warned and a sweep starts. |
 | `AGENTIHOOKS_LOG_BACKUPS` | `3` | Rotated copies kept per log (`.1` newest). `0` truncates instead. |
@@ -242,13 +242,26 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ---
 
+## Hook Injection Budget
+
+Claude hook context uses a shared event budget, independently of compression.
+See [Hook Injection Budget](../hooks/injection-budget.md) for priority order,
+examples, inbox exceptions and size diagnostics. Codex and Copilot retain their
+own limits and arrival order.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOOK_INJECTION_MAX_CHARS` | `9000` | Claude event budget in UTF-16 code units. Keep positive and below 10,000; zero or negative disables fitting and priority sorting. |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTICORE_TOOL_MEMORY_PATH` | `~/.agenticore_tool_memory.ndjson` | Path to the tool error memory file. |
 | `AGENTICORE_TOOL_MEMORY_MAX` | `100` | Maximum number of error entries to store. |
-| `AGENTICORE_TOOL_MEMORY_SHOW` | `15` | Number of entries to inject per `PreToolUse` event. |
+| `AGENTICORE_TOOL_MEMORY_SHOW` | `5` | Maximum selected entries per `PreToolUse` event, each limited to 160 characters before event budget fitting. |
 
 ---
 

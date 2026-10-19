@@ -10,7 +10,7 @@ from scripts.swarm.store import PREFIX
 from tests.swarm.test_cli import env as env
 from tests.swarm.test_spawn_stall import stalled as stalled
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 NOW = 1_791_700_000_000
 HOUR_MS = 3_600_000

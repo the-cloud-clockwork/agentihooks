@@ -5,12 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm import cli, runtime, status, store, templates, tick
-from tests.swarm.test_tick import FakeLedger
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm.profile_fixture import validated
+from tests.swarm.test_tick import FakeLedger
 
 
 def test_template_role_defaults_and_master_settings_round_trip(tmp_path):
@@ -77,6 +73,10 @@ def test_runtime_forwards_and_records_profile(tmp_path, lane, profile, harness):
     calls = []
 
     def launch(argv, **kwargs):
+        from scripts.routing import native_login
+
+        if argv[1:] == list(native_login.COMMAND):
+            return SimpleNamespace(returncode=1, stdout="", stderr="")
         calls.append(argv)
         return SimpleNamespace(
             returncode=0,

@@ -14,7 +14,7 @@ from scripts.swarm import ledger_read, profile_choice, prompt
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
@@ -29,7 +29,9 @@ from tests.test_swarm_v2_control_service import (
     _store,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+repository = default_repository()
+
+pytestmark = pytest.mark.unit
 
 PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"
@@ -198,13 +200,15 @@ def test_a_claim_lost_before_hosted_apply_cannot_change_the_task(deployed, store
 
 
 def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
+    from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS
+
     _, read = _read(deployed)
     original = _hl().ResourceClient.request
     stamp = store.redis.time()
 
     def expire_claim(client, slug, path, *args, **kwargs):
         if path == "operations":
-            store.redis.time = lambda: (stamp[0] + 61, stamp[1])
+            store.redis.time = lambda: (stamp[0] + DEFAULT_LEASE_MS // 1000 + 1, stamp[1])
         return original(client, slug, path, *args, **kwargs)
 
     with patch.object(_hl().ResourceClient, "request", expire_claim):

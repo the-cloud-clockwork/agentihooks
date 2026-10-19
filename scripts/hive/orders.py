@@ -277,7 +277,14 @@ class Consumer:
             pane_id=placed.pane_id,
             model=placed.model,
             effort=placed.effort,
-            profile_decision=placed.profile_decision,
+            profile_decision={
+                **(
+                    {"master_placement": agent.profile_decision["master_placement"]}
+                    if "master_placement" in agent.profile_decision
+                    else {}
+                ),
+                **placed.profile_decision,
+            },
         )
         if order.expires_at <= lease.now_ms(self.store):
             return self._stop(live, "expired")

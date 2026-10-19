@@ -18,7 +18,7 @@ QUIET_EVERY = 2
 QUIET_WORDS = 20
 REMINDER = "Operator not present: replies stay within {words} words."
 SWITCH = re.compile(r"operator (on|off)\b")
-ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off."
+ON_NOTICE = "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
@@ -78,14 +78,23 @@ def _turn(state, now):
 
 
 def observe(session_id, prompt, typed, now=None):
+    from hooks.context import operator_expiry
+
     if not session_id:
         return ""
     now = time.time() if now is None else now
     word = switch(prompt) if typed else ""
-    state = _load(session_id)
-    if word or (typed and _on(state, now)):
-        state.update(on=word != "off", at=now)
-    _save(session_id, {**state, "turn_at": now if typed and word != "off" else None})
+    with operator_expiry.state_lock(session_id):
+        state = _load(session_id)
+        if word or (typed and _on(state, now)):
+            state.update(on=word != "off", at=now)
+        state["turn_at"] = now if typed and word != "off" else None
+        if word == "off":
+            operator_expiry.cancel(session_id, state)
+        elif typed and state.get("on"):
+            operator_expiry.start(session_id, state, now)
+        else:
+            _save(session_id, state)
     return word
 
 
@@ -149,9 +158,14 @@ def _reminder_text(environ):
 
 def reminder(session_id, environ=None, now=None):
     """The quiet reminder on every second tool call while the operator is away."""
-    if not _away(session_id, environ, now):
+    from hooks.context import operator_expiry
+
+    if not session_id:
         return ""
-    state = _load(session_id)
-    calls = state.get("calls", 0) + 1
-    _save(session_id, {**state, "calls": calls})
+    with operator_expiry.state_lock(session_id):
+        if not _away(session_id, environ, now):
+            return ""
+        state = _load(session_id)
+        calls = state.get("calls", 0) + 1
+        _save(session_id, {**state, "calls": calls})
     return _reminder_text(environ) if calls % QUIET_EVERY == 0 else ""

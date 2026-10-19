@@ -4,11 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger
+from scripts.swarm_ledger import ledger, ledger_tasks, new_ledger
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
-from scripts.swarm_ledger.repository import hierarchy
+from scripts.swarm_ledger.repository import hierarchy, legacy
 from scripts.swarm_ledger.repository import sqlite as store
+from tests.swarm_ledger.api_fakes import as_services
 
 SLUG = "hierarchy-reads"
 STATE = {
@@ -139,7 +140,7 @@ def test_cycles_in_parents_and_dependencies_end(tmp_path):
 
 
 def server(repo):
-    return SimpleNamespace(repository=repo)
+    return as_services(SimpleNamespace(repository=repo))
 
 
 def test_the_hierarchy_resource_reads_the_ledger_tree_with_states(repo):
@@ -187,13 +188,41 @@ def test_the_hierarchy_revision_follows_the_rows(repo):
     assert whole != resources.hierarchy_read(repo, SLUG, "hierarchy/subtree/slices/s1", {})["revision"]
 
 
+def test_a_warm_hierarchy_read_sees_a_task_state_written_by_another_repository(repo, tmp_path, monkeypatch):
+    state = new_ledger.build_doc({"title": "Freshness", "phases": []})
+    state.update({key: value for key, value in STATE.items() if key != "_meta"})
+    state, meta, _ = legacy.fresh(state)
+    repo.import_document(SLUG, {**state, "_meta": meta}, replace=True)
+    before = resources.hierarchy_read(repo, SLUG, "hierarchy", {})
+    writer = store.SQLiteLedgerRepository(tmp_path / store.DATABASE)
+    for name in ledger_tasks.OPS:
+        monkeypatch.setitem(writer.domain.EXTENSION_OPS, name, ledger_tasks)
+    _, rejected = writer.apply_ops(
+        SLUG,
+        ops=[
+            {
+                "op": "task_update",
+                "id": "external-state-change",
+                "by": "planner",
+                "item": "tasks/t2",
+                "fields": {"state": "blocked"},
+            }
+        ],
+    )
+    assert rejected == []
+    after = resources.hierarchy_read(repo, SLUG, "hierarchy", {})
+    states = {row["node"]: row["state"] for row in after["data"]}
+    assert states["tasks/t2"] == "blocked"
+    assert after["revision"] != before["revision"]
+
+
 def test_a_node_whose_item_left_the_document_reads_as_open():
     class Drifted:
         def nodes(self, slug, read, node=None):
             return [{"node": "tasks/gone", "kind": "task", "parent": None, "depth": 0}]
 
-        def read(self, slug, *keys):
-            return {"tasks": []}
+        def current(self, slug):
+            return SimpleNamespace(state={"tasks": []})
 
     assert [row["state"] for row in resources.hierarchy_read(Drifted(), SLUG, "hierarchy", {})["data"]] == ["open"]
 

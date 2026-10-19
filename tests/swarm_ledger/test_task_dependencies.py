@@ -5,7 +5,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"))
 
-from scripts.swarm_ledger import ledger_tasks  # noqa: E402
+from scripts.swarm_ledger import ledger_kinds, ledger_tasks, task_dependencies  # noqa: E402
 from scripts.swarm_ledger.ledger_core import Context  # noqa: E402
 
 
@@ -60,6 +60,32 @@ def test_claim_without_dependencies_still_applies():
     assert (live["state"], live["claimed_by"], ctx.dirty) == ("claimed", "engineer-next", True)
 
 
+@pytest.mark.parametrize("kind", ["code", "ci", None])
+@pytest.mark.parametrize(("state", "eligible"), [("claimed", False), ("pr", False), ("done", True)])
+def test_a_tune_task_waits_for_its_code_dependency_to_be_done(kind, state, eligible):
+    work = {"id": "work", "title": "measure", "lane": "ci", "kind": "tune", "state": "open", "claimed_by": ""}
+    dep = {"id": "dep", "state": state, "branch": "feature", **({"kind": kind} if kind else {})}
+    work["depends_on"] = ["dep"]
+
+    live, ctx = claim({"tasks": [work, dep]})
+
+    assert (live["state"], live["claimed_by"]) == (("claimed", "engineer-next") if eligible else ("open", ""))
+    assert ctx.dirty == eligible
+
+
+@pytest.mark.parametrize(
+    ("work_kind", "dep_kind"), [("tune", "tune"), ("tune", "research"), ("tune", "ops"), ("code", "code")]
+)
+def test_other_kind_pairs_still_stack_on_a_claimed_dependency_branch(work_kind, dep_kind):
+    work = {"id": "work", "title": "x", "lane": "eng", "kind": work_kind, "state": "open", "claimed_by": ""}
+    dep = {"id": "dep", "state": "claimed", "branch": "feature", "kind": dep_kind}
+    work["depends_on"] = ["dep"]
+
+    live, ctx = claim({"tasks": [work, dep]})
+
+    assert (live["state"], live["claimed_by"], ctx.dirty) == ("claimed", "engineer-next", True)
+
+
 @pytest.mark.parametrize("state", ["claimed", "pr"])
 def test_retained_pull_claim_waits_for_all_dependencies_to_finish(state):
     work = {
@@ -102,6 +128,16 @@ def test_claim_treats_an_unspecified_state_as_open():
     live, ctx = claim({"tasks": [work, {"id": "dep", "state": "open"}]})
     assert "state" not in live
     assert (live["claimed_by"], ctx.dirty) == ("", False)
+
+
+def test_a_tune_task_is_not_ready_while_its_dependency_is_missing_from_the_rows():
+    task = {"id": "m", "kind": "tune", "depends_on": ["gone"]}
+    assert task_dependencies.ready(task, {"m": task}) is False
+
+
+@pytest.mark.parametrize(("task", "read_only"), [({}, False), ({"kind": "ci"}, False), ({"kind": "tune"}, True)])
+def test_read_only_names_every_kind_that_keeps_no_branch(task, read_only):
+    assert ledger_kinds.read_only(task) is read_only
 
 
 @pytest.mark.parametrize(

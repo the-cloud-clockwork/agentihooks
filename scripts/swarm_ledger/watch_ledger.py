@@ -53,7 +53,7 @@ def stream(slug, cursor=None, headers=None):
     """Yield (event, data, cursor) from the ledger server's event stream; Expired when the cursor is gone."""
     url, headers = request(slug, cursor, credentials(slug) if headers is None else headers)
     try:
-        response = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=STREAM_TIMEOUT_S)
+        response = ledger_link.urlopen(urllib.request.Request(url, headers=headers), STREAM_TIMEOUT_S)
     except urllib.error.HTTPError as exc:
         if exc.code == 410:
             raise Expired from None
@@ -158,7 +158,9 @@ def main():
     parser.add_argument("--as", dest="name")
     parser.add_argument("--since-rev", type=int)
     args = parser.parse_args()
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     if not repository.exists(args.slug):
         sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")

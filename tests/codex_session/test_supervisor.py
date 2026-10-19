@@ -14,7 +14,7 @@ from scripts.codex_session.binding import CONNECTED, ENDPOINTS, EXITED, FAILED, 
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.codex_session.fakes import FIRST_PID, OWN_START, SERVER_START, Clock, Process, Server, hooks
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 SEAT = f"eng-1@{SLUG}"
@@ -772,9 +772,9 @@ def test_the_runtime_root_comes_from_the_launch_environment_when_deps_name_none(
     runtime = Path(tempfile.mkdtemp(prefix="rt-"))
     try:
         spec = launch_spec(store, server, tmp_path)
-        spec = replace(spec, environ={**spec.environ, "XDG_RUNTIME_DIR": str(runtime)})
+        spec = replace(spec, environ={**spec.environ, "HOME": str(runtime), "XDG_RUNTIME_DIR": "/run/user/7"})
         started = supervisor.launch(store, spec, deps(server, clock, None))
-        assert started.record.endpoint_ref.startswith(f"unix://{runtime}/cx/")
+        assert started.record.endpoint_ref.startswith(f"unix://{runtime}/.agentihooks/cx/")
     finally:
         shutil.rmtree(runtime)
 
@@ -815,8 +815,10 @@ def test_a_socket_path_past_the_limit_is_refused_and_one_at_it_is_kept(tmp_path)
         shutil.rmtree(short)
 
 
-def test_the_runtime_root_prefers_the_user_runtime_dir(monkeypatch):
-    assert supervisor.runtime_root({"XDG_RUNTIME_DIR": "/run/user/7", "HOME": "/home/u"}) == Path("/run/user/7/cx")
+def test_the_runtime_root_ignores_the_memory_backed_user_runtime_dir(monkeypatch):
+    assert supervisor.runtime_root({"XDG_RUNTIME_DIR": "/run/user/7", "HOME": "/home/u"}) == Path(
+        "/home/u/.agentihooks/cx"
+    )
     assert supervisor.runtime_root({"HOME": "/home/u"}) == Path("/home/u/.agentihooks/cx")
     monkeypatch.setattr(supervisor.Path, "home", classmethod(lambda cls: Path("/home/fallback")))
     assert supervisor.runtime_root({}) == Path("/home/fallback/.agentihooks/cx")
