@@ -371,6 +371,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 
 For hive ownership configuration, targeted questions and follow ups, worker browser limits and G10 evidence, see [Two masters across two hives](../swarm-v2/two-hive-proof.md).
 
+For the startup log and exit reason a refused worker Pod leaves after removal, see [Refused worker startup diagnostics](../swarm-v2/startup-diagnostics.md).
+
 For grouped CI stage counts, worst times, run links and report retention, see
 [Standing CI budget report](../ci-timing.md#standing-ci-budget-report).
 
