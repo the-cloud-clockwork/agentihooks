@@ -296,6 +296,26 @@ def test_a_short_multi_page_status_list_is_not_settled(monkeypatch):
     )
 
 
+def test_a_short_single_page_job_list_is_not_settled(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, reads = [], []
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+    fallback, _ = api([{"id": 5, "status": "completed", "event": "push"}])
+
+    def run(args, **kwargs):
+        if "/jobs" not in args[2]:
+            return fallback(args, **kwargs)
+        reads.append(args[2])
+        return SimpleNamespace(stdout=json.dumps({"total_count": 2, "jobs": [{"id": 1}]}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert len(reads) == 2 and sleeps == []
+    assert result["error"].endswith(
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs/5/jobs?filter=latest; page=1; rows=1; total=2"
+    )
+
+
 @pytest.mark.parametrize("elapsed,complete", [(24.5, True), (25, False), (25.5, False)])
 def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, elapsed, complete):
     from scripts.doctor import ci_speed_read
