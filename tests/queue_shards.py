@@ -21,6 +21,7 @@ STEP_SECONDS = 420
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.5
 MAX_SHARDS = 30
+SHARD_FLOORS = {"3.11": 6, "3.12": 12}
 
 
 def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, int] | None = None) -> list[dict]:
@@ -111,38 +112,31 @@ def _combine(argv: list[str]) -> None:
 
 def _capped(plan: list[dict], root: Path, inputs: Path) -> list[dict]:
     needed = {leg["python-version"]: leg["total"] for leg in plan}
-    total = sum(needed.values())
-    counts = {version: count * MAX_SHARDS // total for version, count in needed.items()}
-    spare = MAX_SHARDS - sum(counts.values())
-    for version in sorted(needed, key=lambda version: needed[version] * MAX_SHARDS % total, reverse=True)[:spare]:
-        counts[version] += 1
     versions = {version: json.loads((inputs / version / ".test_durations").read_text()) for version in needed}
     files = discover_test_files(root)
     grouped = grouped_files(root, files)
     sizes = source_sizes(root, files)
-    counts = _balanced(
-        counts, functools.cache(lambda version, count: _predicted(versions[version], count, grouped, sizes))
-    )
+
+    @functools.cache
+    def predict(version: str, count: int) -> float:
+        return _predicted(versions[version], count, grouped, sizes)
+
+    counts = _balanced(list(needed), predict)
     print(
-        f"::warning::{total} queue jobs exceed the pool of {MAX_SHARDS}; capped "
+        f"::warning::{sum(needed.values())} queue jobs exceed the pool of {MAX_SHARDS}; capped "
         + " and ".join(f"Python {version} at {counts[version]}" for version in needed)
         + " shards"
     )
     return matrix(root, versions, counts)
 
 
-def _balanced(counts: dict[str, int], predict: Callable[[str, int], float]) -> dict[str, int]:
-    best = counts
-    while True:
-        slow = max(counts, key=lambda version: predict(version, counts[version]))
-        fast = min(counts, key=lambda version: predict(version, counts[version]))
-        if slow == fast or counts[fast] == 1:
-            return best
-        counts = {**counts, slow: counts[slow] + 1, fast: counts[fast] - 1}
-        if max(predict(*leg) for leg in counts.items()) < max(predict(*leg) for leg in best.items()):
-            best = counts
-        if predict(fast, counts[fast]) >= predict(slow, counts[slow]):
-            return best
+def _balanced(versions: list[str], predict: Callable[[str, int], float]) -> dict[str, int]:
+    first, second = versions
+    splits = (
+        {first: count, second: MAX_SHARDS - count}
+        for count in range(SHARD_FLOORS[first], MAX_SHARDS - SHARD_FLOORS[second] + 1)
+    )
+    return min(splits, key=lambda counts: max(predict(*leg) for leg in counts.items()))
 
 
 def main(argv: list[str] | None = None) -> None:

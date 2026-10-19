@@ -269,47 +269,104 @@ def test_a_capped_plan_gives_the_slower_version_the_shards_it_needs_to_fit_the_s
         for key, value in (line.split("=", 1) for line in output.read_text().splitlines())
     }
     assert {key: {leg["total"] for leg in legs} for key, legs in plans.items()} == {
-        "queue_311": {3},
-        "queue_312": {27},
+        "queue_311": {6},
+        "queue_312": {24},
     }
-    assert max(leg["predicted_seconds"] for legs in plans.values() for leg in legs) == 333.75 < STEP_SECONDS
+    assert max(leg["predicted_seconds"] for legs in plans.values() for leg in legs) == 367.5 < STEP_SECONDS
     out = capsys.readouterr().out
-    assert "capped Python 3.11 at 3 and Python 3.12 at 27 shards" in out
+    assert "capped Python 3.11 at 6 and Python 3.12 at 24 shards" in out
     assert "The capped queue plan predicts" not in out
 
 
-def test_balanced_counts_move_shards_to_the_slower_version_until_its_lead_ends():
+def test_a_capped_plan_at_the_step_timeout_warns(tmp_path, capsys, monkeypatch):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 630)
+    root, output = _overflowing_plan(tmp_path, 400.0)
+
+    queue_shards.main(
+        ["combine", "--from-output", str(output), "--root", str(root), "--inputs", str(tmp_path / "queue-input")]
+    )
+
+    assert "::warning::The capped queue plan predicts 630.0s, over 630s of the step timeout\n" in (
+        capsys.readouterr().out
+    )
+
+
+@pytest.mark.parametrize("seconds", [210.0, 500.0])
+def test_an_uncapped_plan_at_half_the_step_timeout_refuses(seconds):
+    from tests.queue_shards import main
+
+    plan = [{"python-version": "3.11", "shard": 1, "total": 1, "predicted_seconds": seconds}]
+
+    with pytest.raises(SystemExit, match=f"Queue plan exceeds 210s of the step timeout: {seconds:.1f}s"):
+        main(["combine", "--plans", json.dumps(plan)[1:-1], ""])
+
+
+def test_balanced_counts_pick_the_split_with_the_lowest_slowest_shard():
     from tests.queue_shards import _balanced
 
     work = {"3.11": 100.0, "3.12": 300.0}
 
-    assert _balanced({"3.11": 15, "3.12": 15}, lambda version, count: work[version] / count) == {
-        "3.11": 8,
-        "3.12": 22,
-    }
-    assert _balanced({"3.11": 15, "3.12": 15}, lambda version, count: 1.0) == {"3.11": 15, "3.12": 15}
+    assert _balanced(["3.11", "3.12"], lambda version, count: work[version] / count) == {"3.11": 8, "3.12": 22}
 
 
-def test_balanced_counts_leave_the_faster_version_at_least_one_shard():
-    from tests.queue_shards import _balanced
-
-    work = {"3.11": 0.0, "3.12": 300.0}
-
-    assert _balanced({"3.11": 15, "3.12": 15}, lambda version, count: work[version] / count) == {
-        "3.11": 1,
-        "3.12": 29,
-    }
-
-
-def test_balanced_counts_keep_the_earlier_split_when_moving_shards_only_ties_the_slowest():
+def test_balanced_counts_search_past_a_split_that_stops_improving():
     from tests.queue_shards import _balanced
 
     def predict(version, count):
         if version == "3.12":
             return 10.0
-        return 1.0 if count > 12 else 20.0
+        return 1.0 if count == 17 else 20.0
 
-    assert _balanced({"3.11": 15, "3.12": 15}, predict) == {"3.11": 15, "3.12": 15}
+    assert _balanced(["3.11", "3.12"], predict) == {"3.11": 17, "3.12": 13}
+
+
+@pytest.mark.parametrize(
+    ("work", "expected"),
+    [({"3.11": 0.0, "3.12": 300.0}, {"3.11": 6, "3.12": 24}), ({"3.11": 300.0, "3.12": 0.0}, {"3.11": 18, "3.12": 12})],
+)
+def test_balanced_counts_keep_every_version_at_its_shard_floor(work, expected):
+    from tests.queue_shards import _balanced
+
+    assert _balanced(["3.11", "3.12"], lambda version, count: work[version] / count) == expected
+
+
+def test_shard_floors_match_the_unit_matrix_legs_of_a_merge_group():
+    from pathlib import Path
+
+    import yaml
+
+    from tests.queue_shards import SHARD_FLOORS
+
+    workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
+    legs = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    merge_group = {"${{ github.event_name == 'merge_group' && '3.11' || '' }}": "3.11"}
+    excluded = {
+        (merge_group.get(leg["python-version"], leg["python-version"]), leg["shard"]) for leg in legs["exclude"]
+    }
+
+    assert {
+        version: len([shard for shard in legs["shard"] if (version, shard) not in excluded])
+        for version in legs["python-version"]
+    } == SHARD_FLOORS
+
+
+def test_queue_prediction_pins_the_first_shard_files_and_ignores_removed_files(tmp_path):
+    from tests.queue_shards import matrix
+
+    (tmp_path / "tests/routing").mkdir(parents=True)
+    (tmp_path / "tests/routing/test_codex_api.py").write_text("")
+    (tmp_path / "tests/test_a.py").write_text("")
+    durations = {
+        "tests/routing/test_codex_api.py::test_pinned": 100.0,
+        "tests/test_gone.py::test_removed": 1000.0,
+        **{f"tests/test_a.py::test_{i}": 1.0 for i in range(8)},
+    }
+
+    plan = matrix(tmp_path, {"3.11": durations}, {"3.11": 2})
+
+    assert {leg["predicted_seconds"] for leg in plan} == {180.0}
 
 
 def test_queue_capacity_admission_precedes_the_unit_matrix():
