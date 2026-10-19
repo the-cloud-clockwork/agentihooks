@@ -22,9 +22,10 @@ QUIET = {"repo": "o/r", "queue": 0, "merged": 0, "failed": "none observed", "str
 
 class Ledger:
     def __init__(self):
-        self.alerts, self.closed = [], []
+        self.alerts, self.closed, self.slugs = [], [], []
 
     def raise_alert(self, slug, source, text):
+        self.slugs.append(slug)
         self.alerts.append((source, text))
 
     def close_alert(self, slug, alert_id, outcome):
@@ -229,7 +230,7 @@ def test_ready_work_held_by_host_room_raises_a_finding_naming_it_at_thirty_minut
     assert until(store, rig, NOW, NOW + 30 * MINUTE - 1) == []
     actions = run(store, rig, NOW + 30 * MINUTE)
     ((source, text),) = rig.ledger.alerts
-    assert source == "spawn"
+    assert (rig.ledger.slugs, source) == ([SLUG], "spawn")
     assert text.startswith("Swarm sw has had 2 ready tasks and no agent launch for 30 minutes, held by host room: ")
     assert "load is high" in text
     assert actions == [f"raised the spawn alert: {text}"]
@@ -267,6 +268,36 @@ def test_ready_work_with_no_quota_decision_names_no_hold(store, monkeypatch):
     until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.evidence == ("Hold: no named hold", "Evidence: no quota decision")
+
+
+def test_a_lane_without_configured_seats_counts_as_zero_seats_at_the_cap(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch)
+    decide(store, configured={"ci": 0, "plan": 0}, placements={}, reason="accounts have quota")
+    until(store, rig, NOW, NOW + 30 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: cap", "Evidence: eng 0 of 0 seats busy")
+
+
+def test_ready_work_with_a_quota_placement_names_no_quota_hold(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch)
+    decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
+    until(store, rig, NOW, NOW + 30 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence[0] == "Hold: no named hold"
+
+
+def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
+    rig = Rig()
+    held_master(store, rig.runtime)
+    ready(monkeypatch)
+    decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={"eng": []})
+    until(store, rig, NOW, NOW + 30 * MINUTE)
+    (finding,) = night_watch.findings(store, SLUG)
+    assert finding.evidence == ("Hold: quota", "Evidence: no lane has a quota placement")
 
 
 def test_ready_work_while_the_swarm_sleeps_names_the_sleep(store, monkeypatch):
@@ -395,6 +426,20 @@ def test_no_operator_address_sends_nothing(monkeypatch, tmp_path):
         "no operator email: set AGENTIHOOKS_OPERATOR_EMAIL"
     )
     assert mails == []
+
+
+def test_the_git_user_lookup_gives_up_after_five_seconds(monkeypatch):
+    calls = []
+
+    def found(argv, **kwargs):
+        calls.append((argv, kwargs))
+        return subprocess.CompletedProcess(argv, 0, stdout="owner@example.com\n")
+
+    monkeypatch.setattr(operator_email.subprocess, "run", found)
+    assert operator_email._git_email("/repo") == "owner@example.com"
+    assert calls == [
+        (["git", "-C", "/repo", "config", "user.email"], {"capture_output": True, "text": True, "timeout": 5})
+    ]
 
 
 def test_night_watch_findings_reach_the_swarm_health_findings_the_doctor_reads(env):
