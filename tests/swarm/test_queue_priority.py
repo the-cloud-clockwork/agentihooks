@@ -27,9 +27,9 @@ def priority(monkeypatch, tmp_path):
     queue = FakeQueue()
     reorder = merge_queue.prioritize
 
-    def prioritize(url, journal):
+    def prioritize(url, journal, **kwargs):
         assert isinstance(journal, queue_record.Journal) and journal.url == url
-        return reorder(url, run=queue.run, journal=journal)
+        return reorder(url, run=queue.run, journal=journal, **kwargs)
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
     original_graphql = merge_queue.graphql
@@ -432,7 +432,9 @@ def test_one_held_request_does_not_block_a_completed_request(priority, monkeypat
     assert list(p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))) == [URL]
 
 
-def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority, monkeypatch):
+@pytest.mark.parametrize("reverse_hash", [False, True])
+@pytest.mark.parametrize("retry", [False, True])
+def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority, monkeypatch, reverse_hash, retry):
     p = priority
     original_run = p.queue.run
 
@@ -447,11 +449,32 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
     assert cli.main(["sw", "merge", "priority", URL + "0"]) == 0
     assert p.queue.mutations == []
     p.run["status"] = "completed"
+    if reverse_hash:
+        original_read = p.store.redis.hgetall
+        monkeypatch.setattr(p.store.redis, "hgetall", lambda key: dict(reversed(original_read(key).items())))
+    reorder = merge_queue.prioritize
+    if retry:
+
+        def refuse_second(url, journal, **kwargs):
+            if url == URL + "0":
+                return {"displaced": [], "errors": ["admission refused"]}
+            return reorder(url, journal, **kwargs)
+
+        monkeypatch.setattr(merge_queue, "prioritize", refuse_second)
     actions = queue_priority.refresh(p.store, "sw", p.tasks)
-    assert actions == [
-        f"applied deferred merge queue priority for {URL}",
-        f"applied deferred merge queue priority for {URL}0",
-    ]
+    if retry:
+        assert actions == [
+            f"applied deferred merge queue priority for {URL}",
+            f"merge queue priority for {URL}0 waits: admission refused",
+        ]
+        monkeypatch.setattr(merge_queue, "prioritize", reorder)
+        actions = queue_priority.refresh(p.store, "sw", p.tasks)
+        assert actions == [f"applied deferred merge queue priority for {URL}0"]
+    else:
+        assert actions == [
+            f"applied deferred merge queue priority for {URL}",
+            f"applied deferred merge queue priority for {URL}0",
+        ]
     assert [entry["pullRequest"]["id"] for entry in p.queue.entries] == ["P1", "P9", "P90", "P2", "P3"]
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 

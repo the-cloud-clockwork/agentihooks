@@ -29,9 +29,9 @@ def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -
 
 
 def apply(
-    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal
+    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
 ) -> dict:
-    result = merge_queue.prioritize(url, journal=journal)
+    result = merge_queue.prioritize(url, journal=journal, **({"ahead": ahead} if ahead else {}))
     for task in tasks:
         if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
             InboxStore(store.redis).send(
@@ -49,7 +49,7 @@ def request(store: RedisStore, slug: str, url: str, sender: str, tasks: list[dic
     journal = queue_record.Journal(url)
     held = None if lift else blocking(url, journal)
     if held is not None:
-        record = {**held, "sender": sender}
+        record = {**held, "sender": sender, "order": store.redis.incr(store.key(slug, "merge-priority-order"))}
         store.redis.hset(store.key(slug, PENDING), url, json.dumps(record))
         journal.write("priority-deferred", url, "", None, None, **record)
         return {"url": url, "deferred": True, "displaced": [], "errors": [], **held}
@@ -69,10 +69,22 @@ def drop_reason(url: str) -> str:
     return ""
 
 
-def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
+def replay(store, slug, url, record, tasks, journal, ledger) -> None:
+    try:
+        apply(store, slug, url, record["sender"], tasks, journal, record.get("ahead", ()))
+    except SwarmError as exc:
+        journal.write("priority-failed", url, "", None, None, errors=[str(exc)], **record)
+        if ledger is not None:
+            ledger.raise_alert(slug, f"merge-priority:{url}", f"Deferred merge priority failed for {url}: {exc}")
+        raise
+
+
+def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
     actions = []
-    for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items():
-        record = json.loads(raw)
+    records = [(url, json.loads(raw)) for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items()]
+    records.sort(key=lambda item: item[1].get("order", 0))
+    while records:
+        url, record = records.pop(0)
         try:
             journal = queue_record.Journal(url)
             reason = drop_reason(url)
@@ -84,13 +96,16 @@ def refresh(store: RedisStore, slug: str, tasks: list[dict]) -> list[str]:
             if record["run_id"] is None:
                 held = blocking(url, journal, record["group_head"])
                 if held is not None:
-                    store.redis.hset(store.key(slug, PENDING), url, json.dumps({**held, "sender": record["sender"]}))
+                    store.redis.hset(store.key(slug, PENDING), url, json.dumps({**record, **held}))
                     continue
             else:
                 run = merge_queue.rest(f"repos/{record['repo']}/actions/runs/{record['run_id']}", subprocess.run)
                 if run["status"] != "completed":
                     continue
-            apply(store, slug, url, record["sender"], tasks, journal)
+            replay(store, slug, url, record, tasks, journal, ledger)
+            for later_url, later in records:
+                later["ahead"] = [*later.get("ahead", []), url]
+                store.redis.hset(store.key(slug, PENDING), later_url, json.dumps(later))
             journal.write("priority-applied", url, "", None, None, **record)
             actions.append(f"applied deferred merge queue priority for {url}")
         except SwarmError as exc:
