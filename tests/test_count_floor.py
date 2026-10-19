@@ -185,6 +185,35 @@ def test_changed_pytest_selection_cannot_reuse_a_full_collection(tmp_path, monke
     assert (root / ".collection-runs").read_text() == "xx"
 
 
+def test_collection_splits_across_processes_and_matches_one_process(tmp_path, monkeypatch):
+    import tests.count_floor as count_floor
+
+    root = _tree(
+        tmp_path / "tree",
+        {
+            "test_a.py": SUITE,
+            "alpha/test_x.py": OTHER,
+            "helpers/__init__.py": "",
+            "test_m.py": OTHER.replace("test_c", "test_m"),
+            "zeta/inner/test_z.py": SUITE,
+            "conftest.py": "import os\nwith open('pids', 'a') as out:\n    out.write(f'{os.getpid()}\\n')\n",
+        },
+    )
+    single = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider", "tests/"],
+        cwd=root,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    expected = [line for line in single.stdout.splitlines() if "::" in line]
+    (root / "pids").unlink()
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 3, raising=False)
+    assert count_floor.collect_all({"head": root}, "tests/") == {"head": expected}
+    assert len(expected) == 8
+    assert len(set((root / "pids").read_text().split())) == 3
+
+
 def _recorded_floor(tmp_path, base_files, head_files, recorded, environ=None):
     base = _collection_tree(tmp_path / "b")
     for name, text in base_files.items():
