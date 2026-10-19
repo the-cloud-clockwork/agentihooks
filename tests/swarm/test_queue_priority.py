@@ -150,7 +150,8 @@ def test_github_outage_retains_deferred_request(priority, monkeypatch, capsys):
     assert p.queue.mutations == []
 
 
-def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch):
+@pytest.mark.parametrize("error", ["", "could not restore https://github.com/o/r/pull/2: refused"])
+def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch, error):
     from tests.swarm.test_delivery import FakeHerdr
 
     store, ledger, runtime = env
@@ -179,10 +180,19 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch):
     monkeypatch.setattr(merge_queue, "graphql", graphql)
     monkeypatch.setattr(merge_queue, "rest", rest)
     monkeypatch.setattr(merge_queue, "prioritize", reorder)
+    alerts = []
+    monkeypatch.setattr(ledger, "raise_alert", lambda *args: alerts.append(args), raising=False)
+    if error:
+        monkeypatch.setattr(merge_queue, "prioritize", lambda *args, **kwargs: {"displaced": [], "errors": [error]})
     actions = cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}))
-    assert applied == [URL]
-    assert f"applied deferred merge queue priority for {URL}" in actions
-    assert not store.redis.hgetall(store.key("sw", queue_priority.PENDING))
+    if error:
+        assert alerts == [("sw", f"merge-priority:{URL}", f"Deferred merge priority failed for {URL}: {error}")]
+        assert store.redis.hgetall(store.key("sw", queue_priority.PENDING))
+    else:
+        assert applied == [URL]
+        assert f"applied deferred merge queue priority for {URL}" in actions
+        assert not store.redis.hgetall(store.key("sw", queue_priority.PENDING))
+        assert alerts == []
 
 
 def test_missing_run_resolves_original_group_after_queue_advances(priority, monkeypatch, capsys):
