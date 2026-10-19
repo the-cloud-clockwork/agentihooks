@@ -254,7 +254,13 @@ def test_missing_tests_run_waits_for_discovery_then_completion(priority, monkeyp
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
     saved = json.loads(p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL))
-    assert saved == {"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "engineer@a1b2c3-0001"}
+    assert saved == {
+        "repo": "o/r",
+        "group_head": "group-head",
+        "run_id": 42,
+        "sender": "engineer@a1b2c3-0001",
+        "order": 1,
+    }
     assert p.queue.mutations == []
     p.run["status"] = "completed"
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
@@ -370,6 +376,7 @@ def test_replay_records_application_and_notifies_the_displaced_owner(priority, m
                 "group_head": "group-head",
                 "run_id": 42,
                 "sender": "engineer@a1b2c3-0001",
+                "order": 1,
             },
         )
     ]
@@ -389,6 +396,7 @@ def test_replay_records_application_and_notifies_the_displaced_owner(priority, m
             "group_head": "group-head",
             "run_id": 42,
             "sender": "engineer@a1b2c3-0001",
+            "order": 1,
         },
     )
 
