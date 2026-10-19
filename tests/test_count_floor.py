@@ -208,7 +208,7 @@ def test_collection_splits_across_processes_and_matches_one_process(tmp_path, mo
     )
     expected = [line for line in single.stdout.splitlines() if "::" in line]
     (root / "pids").unlink()
-    monkeypatch.setattr(count_floor, "collection_processes", lambda: 3, raising=False)
+    monkeypatch.setattr(count_floor, "collection_processes", lambda: 3)
     assert count_floor.collect_all({"head": root}, "tests/") == {"head": expected}
     assert len(expected) == 8
     assert len(set((root / "pids").read_text().split())) == 3

@@ -23,7 +23,9 @@ class Collected:
     group = set(json.loads(sys.argv[3]))
 
     def pytest_ignore_collect(self, collection_path):
-        return True if collection_path.parent == Collected.root and collection_path.name not in Collected.group else None
+        if collection_path.parent == Collected.root and collection_path.name not in Collected.group:
+            return True
+        return None
 
     def pytest_collection_finish(self, session):
         Collected.nodeids = [item.nodeid for item in session.items]
