@@ -11,7 +11,7 @@ from tests.swarm.test_tick import store, tasks  # noqa: F401
 pytestmark = pytest.mark.unit
 
 
-def test_alerted_master_relaunches_with_original_handoff_within_five_minutes(store):
+def test_alerted_master_relaunches_with_original_handoff_within_five_minutes(store):  # noqa: F811
     runtime, ledger = StartupRuntime(), tasks()
     runtime.crash = RuntimeError("no master claude ai login")
     store.put_handoff("sw", MASTER, "Original complete handoff")
