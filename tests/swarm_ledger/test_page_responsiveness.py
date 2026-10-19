@@ -148,6 +148,26 @@ def test_browser_cache_serializes_the_document_off_the_main_thread_and_keeps_pen
     page.close()
 
 
+def test_stream_render_does_not_steal_focus_after_the_user_moves_to_another_control(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    show(page, shell_html(), ledger=ledger_state({"title": "Focus"}))
+    focused = page.evaluate(
+        """async () => {
+          const main = document.querySelector('script[type=module]').src;
+          const {render} = await import(new URL('render.js', main));
+          const field = document.createElement('textarea');
+          field.dataset.focus = 'proof:focus';
+          document.body.append(field);
+          field.focus();
+          setTimeout(() => document.getElementById('overview-edit').focus(), 0);
+          await render(null, true);
+          return document.activeElement.id;
+        }"""
+    )
+    assert focused == "overview-edit"
+    page.close()
+
+
 def test_full_ledger_keeps_task_pagination_and_deep_navigation(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     tasks = [{"id": f"t{i}", "title": f"Task {i}", "state": "open", "lane": "eng"} for i in range(2400)]
