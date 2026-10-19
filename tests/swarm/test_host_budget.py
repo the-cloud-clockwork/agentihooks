@@ -212,7 +212,7 @@ def test_read_host_reads_swap_and_measures_live_agent_process_trees(tmp_path, mo
     (tmp_path / "meminfo").write_text(
         "MemAvailable:    5120900 kB\nDirectMap4k:     unknown\nSwapTotal:       4194904 kB\nSwapFree:          98404 kB\n"
     )
-    for pid, ppid, rss in ((10, 1, 300000), (11, 10, 200000), (12, 11, 100000), (20, 1, 401471), (30, 1, 999999)):
+    for pid, ppid, rss in ((10, 1, 300000), (11, 10, 200000), (12, 11, 100000), (20, 1, 1652799), (30, 1, 999999)):
         _process(tmp_path, pid, ppid, rss)
     _process(tmp_path, 13, 10, None)
     _process(tmp_path, 50, 1, None)
@@ -232,7 +232,7 @@ def test_read_host_reads_swap_and_measures_live_agent_process_trees(tmp_path, mo
         agents=5,
         swap_used_mb=4000,
         swap_total_mb=4096,
-        agent_mb=488,
+        agent_mb=1099,
         measured_agents=2,
     )
 
