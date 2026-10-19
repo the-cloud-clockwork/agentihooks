@@ -163,6 +163,13 @@ def test_an_environment_splits_on_nul_and_keeps_equals_in_values(tmp_path, monke
     assert tick_reaper._environ(9) == {"A": "b=c", "B": "x y"}
 
 
+def test_an_undecodable_command_line_is_read_with_replacements(tmp_path, monkeypatch):
+    (tmp_path / "9").mkdir()
+    (tmp_path / "9" / "cmdline").write_bytes(b"python\0\xff\0swarm\0tick\0")
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path)
+    assert tick_reaper._argv(9) == ["python", "�", "swarm", "tick"]
+
+
 def _fake_proc(root, pid, argv, environ=b""):
     entry = root / str(pid)
     entry.mkdir()
