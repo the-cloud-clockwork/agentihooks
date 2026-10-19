@@ -24,6 +24,7 @@ def prepare(root: Path, folder: Path) -> None:
             *tests,
             "-o",
             "addopts=",
+            "--cov=hooks",
             "--cov=scripts",
             "--cov-context=test",
             "--cov-report=",
