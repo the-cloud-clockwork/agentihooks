@@ -138,13 +138,14 @@ export function markOutline() {
   }
   if (current && !current.getClientRects().length) current = current.closest(".ol-sec").querySelector("a");
   const section = current && current.closest(".ol-sec").querySelector("a");
+  const top = current ? current.offsetTop : 0;
+  const height = nav.clientHeight;
+  const outside = current && (top < nav.scrollTop || top > nav.scrollTop + height - 24);
   for (const a of links) {
     a.classList.toggle("on", a === current);
     a.classList.toggle("in", a === section && a !== current);
   }
-  if (current && (current.offsetTop < nav.scrollTop || current.offsetTop > nav.scrollTop + nav.clientHeight - 24)) {
-    nav.scrollTop = current.offsetTop - nav.clientHeight / 2;
-  }
+  if (outside) nav.scrollTop = top - height / 2;
 }
 
 export function reveal(el) {

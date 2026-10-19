@@ -50,13 +50,32 @@ def test_outline_marking_does_not_read_geometry_after_writing_link_classes(brows
     page.close()
 
 
+def test_stream_rendering_yields_to_input_between_sections(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    show(page, shell_html(), ledger=ledger_state({"title": "Yielding"}))
+    result = page.evaluate(
+        """async () => {
+          const main = document.querySelector('script[type=module]').src;
+          const {render} = await import(new URL('render.js', main));
+          let inputHandled = false;
+          setTimeout(() => { inputHandled = true; }, 0);
+          await render(null, true);
+          return {inputHandled, title: document.getElementById('title').textContent};
+        }"""
+    )
+    assert result == {"inputHandled": True, "title": "Yielding"}
+    page.close()
+
+
 def test_full_ledger_keeps_task_pagination_and_deep_navigation(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     tasks = [{"id": f"t{i}", "title": f"Task {i}", "state": "open", "lane": "eng"} for i in range(2400)]
     show(page, shell_html(), ledger=ledger_state({"title": "Full ledger", "tasks": tasks}))
     page.locator("#tasks-box > summary").click()
+    page.locator("#tasks > li[id]").nth(49).wait_for()
     assert page.locator("#tasks > li[id]").count() == 50
     page.locator("#tasks > .page-more button").click()
+    page.locator("#tasks > li[id]").nth(99).wait_for()
     assert page.locator("#tasks > li[id]").count() == 100
     found = page.evaluate(
         """async () => {
