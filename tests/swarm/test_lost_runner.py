@@ -3,8 +3,9 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import lost_runner
-from scripts.swarm.store import PREFIX
+from scripts.swarm import lost_runner, tick
+from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
 NOW_MS = 1_792_430_000_000
 
@@ -93,3 +94,15 @@ def test_the_home_defaults_to_the_agentihooks_folder_in_the_user_home(monkeypatc
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
     monkeypatch.setattr(lost_runner.Path, "home", lambda: tmp_path)
     assert lost_runner.home() == tmp_path / ".agentihooks"
+
+
+def test_every_tick_runs_the_sweep_with_its_swarm_config(monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo"))
+    calls = []
+    monkeypatch.setattr(lost_runner, "sweep", lambda *args: calls.append(args) or [])
+    tick.tick("sw", store, FakeLedger([]), FakeRuntime(), now_ms=1_000)
+    [(slug, config, swept, now_ms)] = calls
+    assert (slug, config.repo, swept, now_ms) == ("sw", "/repo", store, 1_000)
