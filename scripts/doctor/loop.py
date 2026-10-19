@@ -81,6 +81,26 @@ def news(watched, found):
     return "\n".join(lines)
 
 
+def retract(store, doctor, watched, cleared):
+    details = _details_key(store, doctor)
+    gone = [finding_id for finding_id in cleared if store.redis.hexists(details, finding_id)]
+    if not gone:
+        return []
+    store.redis.hdel(details, *gone)
+    store.redis.hdel(verdicts(store, doctor).key, *gone)
+    text = "\n".join(
+        [
+            f"Retracted Doctor findings on the swarm {watched}: a corrected read shows every job started within 5 minutes."
+        ]
+        + [f"- {finding_id}" for finding_id in gone]
+    )
+    mail = InboxStore(store.redis)
+    for slug in (watched, doctor):
+        store.redis.srem(store.key(doctor, "ci-speed-notified", slug), *gone)
+        mail.send(SENDER, seat_address(slug, MASTER), text)
+    return gone
+
+
 def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str]:
     key = store.key(doctor, "ci-speed")
     state = json.loads(store.redis.get(key) or "{}")
@@ -111,6 +131,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             )
         )
     record(store, doctor, found, now_ms, limits(os.environ).cooldown_minutes * MINUTE_MS)
+    report["retracted"] = len(retract(store, doctor, watched, ci_speed.cleared(snapshot["runs"])))
     mail = InboxStore(store.redis)
     for slug in (watched, doctor):
         notified = store.key(doctor, "ci-speed-notified", slug)

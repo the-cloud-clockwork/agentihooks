@@ -97,7 +97,7 @@ def test_runner_wait_crosses_only_above_five_minutes(wait, count):
 
 def test_a_still_queued_job_uses_now_and_remains_visible_after_its_creation_window():
     [finding] = ci_speed.findings([record([job(0, queued=True, created=-301)])], NOW - 60000, NOW)
-    assert finding.kind == "ci runner wait" and finding.measure == 301
+    assert finding.kind == "ci queue age unconfirmed" and finding.measure == 301
 
 
 @pytest.mark.parametrize("status", ["queued", "pending", "waiting"])
