@@ -172,13 +172,15 @@ def read_ids(directory, slug: str, collection: str) -> tuple:
         if connection is None:
             return ()
         try:
-            rows = [
-                row
-                for table in TABLES
-                for row in connection.execute(
-                    f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
-                )
-            ]
+            with connection:
+                connection.execute(BEGIN)
+                rows = [
+                    row
+                    for table in TABLES
+                    for row in connection.execute(
+                        f"SELECT position, path FROM {table} WHERE slug=? AND parent=?", (slug, parent)
+                    )
+                ]
         except sqlite3.OperationalError:
             return ()
     found = (json.loads(path)[1] for _, path in sorted(rows))

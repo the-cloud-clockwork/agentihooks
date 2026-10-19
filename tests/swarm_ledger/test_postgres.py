@@ -25,6 +25,9 @@ class Cursor:
     def fetchone(self):
         return None
 
+    def __iter__(self):
+        return iter(())
+
     def executemany(self, sql, rows):
         self.raw.log.append((sql, list(rows)))
         if self.raw.fail is not None:
@@ -434,6 +437,19 @@ def test_events_since_reads_one_snapshot_and_relay_holds_take_the_writer_lock(op
         raw.log.clear()
         write(*arguments)
         assert raw.log == [(lock, ()), (statement, arguments)]
+
+
+def test_reading_collection_ids_takes_one_snapshot_across_the_row_tables(opened):
+    assert sqlite.read_ids(postgres.Database(ADDRESS), "s", "tasks") == ()
+    raw = opened.raws[0]
+    assert raw.log == [
+        ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ()),
+        *[
+            (f"SELECT position, path FROM {table} WHERE slug=%s AND parent=%s", ("s", '["tasks"]'))
+            for table in sqlite.TABLES
+        ],
+    ]
+    assert raw.commits == 1
 
 
 def test_storage_builds_the_shared_repository_only_for_the_default_folder(monkeypatch, tmp_path):
