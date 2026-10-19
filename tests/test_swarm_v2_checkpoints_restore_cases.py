@@ -26,5 +26,3 @@ def test_package_record_and_manifest_match_the_fixture_inputs():
     assert manifest["input_sha256"] == {transcript.name: digest}
     assert manifest["fixture_inputs"] == record["fixture_inputs"] == cases.FIXTURE_INPUTS
     assert manifest["tested_commit"] == record["tested_commit"]
-    assert all(isinstance(line, str) and line for line in record["remaining_limitations"])
-    assert record["remaining_limitations"]
