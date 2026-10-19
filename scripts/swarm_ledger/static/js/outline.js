@@ -13,6 +13,7 @@ let outlinePick = null;
 
 let outlineFrame = 0;
 let outlineObserver = null;
+let outlineHeight = 0;
 const outlineTargets = new Map();
 const outlinePositions = new WeakMap();
 let markedCurrent = null;
@@ -134,13 +135,19 @@ function markPending() {
 }
 
 function observeOutline(links) {
+  if (outlineObserver && outlineHeight !== innerHeight) {
+    outlineObserver.disconnect();
+    outlineTargets.clear();
+    outlineObserver = null;
+  }
+  outlineHeight = innerHeight;
   if (!outlineObserver) outlineObserver = new IntersectionObserver((entries) => {
     for (const entry of entries) outlinePositions.set(entry.target, {
       passed: entry.boundingClientRect.top <= 120,
       visible: !!(entry.boundingClientRect.width || entry.boundingClientRect.height),
     });
     markOutline();
-  }, { rootMargin: "-120px 0px 0px 0px" });
+  }, { rootMargin: `-119px 0px -${Math.max(0, innerHeight - 120)}px 0px` });
   const targets = new Map();
   for (const link of links) {
     const id = link.dataset.target;

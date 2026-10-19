@@ -150,7 +150,7 @@ function phaseList(cooperative = false, current = () => true) {
   const paint = async () => {
     const rows = document.createDocumentFragment();
     for (const group of groups) {
-      await scheduler.yield();
+      await scheduler.postTask(() => {}, { priority: "background" });
       if (!current()) return;
       rows.append(planRow(group));
     }
@@ -318,7 +318,7 @@ export function render(focusKey, cooperative = false) {
   const paint = async () => {
     for (const section of sections) {
       if (cooperative) {
-        await scheduler.yield();
+        await scheduler.postTask(() => {}, { priority: "background" });
         if (version !== renderVersion) return rendered;
       }
       try {

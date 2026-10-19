@@ -10,11 +10,9 @@ const latest = { ledger: null, swarm: null };
 
 function onStreamEvent(name, data) {
   if (name === "snapshot") {
-    const same = (key) => data[key] === latest[key] || (latest[key] !== null && JSON.stringify(data[key]) === JSON.stringify(latest[key]));
-    const changed = { ledger: !same("ledger"), swarm: !same("swarm") };
     Object.assign(latest, data);
-    if (changed.swarm || latest.swarm === null) receiveSwarm(latest.swarm);
-    if (changed.ledger && latest.ledger) receiveLedger(latest.ledger);
+    receiveSwarm(latest.swarm);
+    if (latest.ledger) receiveLedger(latest.ledger);
   } else if (name === "ledger") {
     latest.ledger = applyPatch(latest.ledger, data.patch);
     receiveLedger(latest.ledger);
