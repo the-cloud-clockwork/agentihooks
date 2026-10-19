@@ -26,6 +26,13 @@ def decide(world, by, path="done", value=True):
     return world.write(op)
 
 
+def api_checked(world, op):
+    from scripts.swarm_ledger.api import schemas
+
+    payload = {"operation_id": f"request-{op['id']}", "ops": [op], "guards": {}}
+    return schemas.check_operations(payload, cases.core, tuple(t["id"] for t in world.doc()["tasks"]))
+
+
 def test_cli_records_the_agents_task_on_a_new_follow_up(monkeypatch):
     from scripts.swarm_ledger import ledger
 
@@ -79,6 +86,25 @@ def test_a_task_id_on_a_follow_up_passes_the_check(task):
     op = {"op": "add_item", "id": "f", "by": ENGINEER, "list": "followups", "text": "Retry", "task": task}
     ledger_agent_ops.check(op)
     assert op["task"] == task
+
+
+def test_a_follow_up_add_with_a_task_passes_the_api_schema_and_lands_on_its_owning_master(world):
+    op = {"op": "add_item", "id": "on-t2", "by": ENGINEER, "list": "followups", "text": "Retry", "task": "t2"}
+    assert api_checked(world, op) == [op]
+    assert world.write(op)["accepted"] is True
+    doc = world.doc()
+    owners = masters.MasterSeats(world.redis).owners(SLUG, doc)
+    assert masters.owner_of(ON_TASK, doc, owners) == SECOND
+
+
+@pytest.mark.parametrize("task", ["", "a/b", "a\nb", 7, None, "a" * 129])
+def test_a_malformed_task_is_refused_by_the_api_schema(world, task):
+    from scripts.swarm_ledger.api.errors import APIError
+
+    op = {"op": "add_item", "id": "f", "by": ENGINEER, "list": "followups", "text": "Retry", "task": task}
+    with pytest.raises(APIError) as error:
+        api_checked(world, op)
+    assert error.value.code == "schema_invalid"
 
 
 def test_a_follow_up_on_a_task_belongs_to_the_tasks_owning_master(world):

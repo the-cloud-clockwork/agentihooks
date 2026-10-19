@@ -147,5 +147,5 @@ def test_a_pool_master_and_an_engineer_stay_on_their_routes(tmp_path, lane, seat
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api"])
-def test_a_master_order_on_an_explicit_route_keeps_it(tmp_path, kind):
-    assert "master-login" not in _spawn(tmp_path, "master", "master@proof", kind)
+def test_a_front_door_order_on_an_explicit_route_takes_the_master_login(tmp_path, kind):
+    assert _spawn(tmp_path, "master", "master@proof", kind)[:2] == ["--route", "master-login"]

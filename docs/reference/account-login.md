@@ -65,9 +65,10 @@ With it on, the Claude front door master of every swarm, seat
 and resumes on route `master-login` from one private home,
 `$AGENTIHOOKS_HOME/master-login/claude`, copied from its rendered master
 profile without the shared credential link. Pool master seats
-(`master-2@<slug>` and up) keep their routed quota tokens, and so does a
-master launched from an order on an explicit subscription or API route; a
-later resume of the front door takes the login. `CLAUDE_CONFIG_DIR` and
+(`master-2@<slug>` and up) keep their routed quota tokens. A front door
+launched from an order on an explicit subscription or API route takes the
+login too, so every swarm's front door, the Doctor's included, registers
+Remote Control as `master 1 · <slug>`. `CLAUDE_CONFIG_DIR` and
 `CLAUDE_SECURESTORAGE_CONFIG_DIR` both point at that home, the session gets
 `--settings {"forceLoginMethod":"claudeai"}`, and its environment drops routed
 OAuth tokens, API keys, custom endpoints and provider selectors. Settings that
