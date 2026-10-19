@@ -19,7 +19,7 @@ from scripts.swarm_v2 import front_door
 KEY = "night-watch"
 SENDER = "swarm"
 SEAT_MS, SPAWN_MS, GAP_MS = 10 * MINUTE_MS, 30 * MINUTE_MS, 5 * MINUTE_MS
-RESPAWNS = 3
+RESPAWNS, RESPAWN_WINDOW_MS = 3, 60 * MINUTE_MS
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
 SOURCES = (SEAT, SPAWN, MERGE)
 HOST, QUOTA, CAP, SLEEP, UNNAMED = "host room", "quota", "cap", "sleep", "no named hold"
@@ -30,6 +30,7 @@ SPAWN_ALERT = (
 )
 MERGE_ALERT = "Swarm {slug} dev merges are stuck: {summary}. {evidence}"
 CLEARED = "The night watch saw it clear: {what}"
+GAP = "The night watch starts over after a gap in its passes and raises this again if the fault remains"
 LOGGED = "night watch gate not at deny: would {action}"
 
 
@@ -57,7 +58,7 @@ def run(watch: Watch) -> list[str]:
     try:
         if watch.now_ms - state.get("at", watch.now_ms) > GAP_MS:
             for source in SOURCES:
-                actions += _clear(watch, state, source, "the night watch did not run for a while and starts over")
+                actions += _clear(watch, state, source, GAP)
         state["at"] = watch.now_ms
         for step in (_seat, _spawn, _merge):
             actions += step(watch, state)
@@ -75,28 +76,33 @@ def _minutes(watch, since):
 
 
 def _alert(watch, episode, source, text):
-    enforced = modes.configured(NIGHT_WATCH, watch.store.config(watch.slug).gates) == "enforce"
-    if episode.get("raised") or (episode.get("logged") and not enforced):
+    mode = _mode(watch)
+    if mode == "off" or episode.get("raised") or (episode.get("logged") and mode != "enforce"):
         return []
     if not _allows(watch, f"alert {source}", text):
         episode["logged"] = watch.now_ms
         return [LOGGED.format(action=f"raise the {source} alert: {text}")]
-    episode["raised"] = watch.now_ms
     watch.ledger.raise_alert(watch.slug, source, text)
+    episode["raised"] = watch.now_ms
     return [f"raised the {source} alert: {text}"]
 
 
-def _clear(watch, state, source, what):
-    episode = state.pop(source, None)
-    return _close(watch, source, what) if (episode or {}).get("raised") else []
+def _mode(watch):
+    return modes.configured(NIGHT_WATCH, watch.store.config(watch.slug).gates)
 
 
-def _close(watch, source, what):
+def _clear(watch, state, source, outcome):
+    closed = _close(watch, source, outcome) if state.get(source, {}).get("raised") else []
+    state.pop(source, None)
+    return closed
+
+
+def _close(watch, source, outcome):
     closed = []
     for alert in watch.doc.get("alerts") or []:
         if alert.get("source") == source and alert.get("state") != "done":
-            watch.ledger.close_alert(watch.slug, alert["id"], CLEARED.format(what=what))
-            closed.append(f"closed the {source} alert: {what}")
+            watch.ledger.close_alert(watch.slug, alert["id"], outcome)
+            closed.append(f"closed the {source} alert: {outcome}")
     return closed
 
 
@@ -110,7 +116,7 @@ def _seat_held(watch):
 
 def _seat(watch, state):
     if watch.store.config(watch.slug).state != "running" or watch.sleeping or _seat_held(watch):
-        return _clear(watch, state, SEAT, "the front door master seat is held again")
+        return _clear(watch, state, SEAT, CLEARED.format(what="the front door master seat is held again"))
     episode = state.setdefault(SEAT, {"since": watch.now_ms})
     minutes = _minutes(watch, episode["since"])
     if watch.now_ms - episode["since"] < SEAT_MS:
@@ -121,11 +127,12 @@ def _seat(watch, state):
     episode.update(minutes=minutes, why=why)
     actions = []
     due = watch.now_ms - episode.get("respawned", episode["since"]) >= SEAT_MS
-    if due and episode.get("respawns", 0) < RESPAWNS:
+    recent = [at for at in state.get("respawns", []) if watch.now_ms - at < RESPAWN_WINDOW_MS]
+    if due and len(recent) < RESPAWNS and _mode(watch) != "off":
         reason = f"front door master seat empty {minutes} minutes: {why}"
         episode["respawned"] = watch.now_ms
+        state["respawns"] = [*recent, watch.now_ms]
         if _allows(watch, "respawn", reason):
-            episode["respawns"] = episode.get("respawns", 0) + 1
             actions += watch.respawn() or [f"front door respawn refused: {why}"]
         else:
             actions.append(LOGGED.format(action=f"respawn the front door master, {reason}"))
@@ -153,14 +160,14 @@ def held(watch, ready) -> tuple[str, str]:
 
 def _spawn(watch, state):
     if watch.store.config(watch.slug).state != "running":
-        return _clear(watch, state, SPAWN, "the swarm is not running")
+        return _clear(watch, state, SPAWN, CLEARED.format(what="the swarm is not running"))
     _, ready = capacity.ready_work(watch.slug, watch.store, watch.doc)
     waiting = sum(len(tasks) for tasks in ready.values())
     if not waiting:
-        return _clear(watch, state, SPAWN, "no ready work waits")
+        return _clear(watch, state, SPAWN, CLEARED.format(what="no ready work waits"))
     last, episode = spawn_stall.launched(watch.store, watch.slug), state.get(SPAWN)
     if episode is None or last > episode["launch"]:
-        actions = _clear(watch, state, SPAWN, "an agent launched") if episode else []
+        actions = _clear(watch, state, SPAWN, CLEARED.format(what="an agent launched")) if episode else []
         state[SPAWN] = {"since": watch.now_ms, "launch": last}
         return actions
     if watch.now_ms - episode["since"] < SPAWN_MS:
@@ -175,15 +182,21 @@ def _spawn(watch, state):
 def _merge(watch, state):
     config = watch.store.config(watch.slug)
     if config.state != "running" or watch.sleeping:
-        return _clear(watch, state, MERGE, "the swarm is not running")
+        return _clear(watch, state, MERGE, CLEARED.format(what="the swarm is not running"))
     found = timing.call(merge_stall.findings, watch.store, watch.slug, config.repo, watch.now_ms)
-    if not found:
-        return _clear(watch, state, MERGE, "dev merges again")
     observed = json.loads(watch.store.redis.get(watch.store.key(watch.slug, "merge-stall")) or "{}")
+    if observed.get("error"):
+        return []
+    if not found:
+        return _clear(watch, state, MERGE, CLEARED.format(what="no merge finding stands"))
     kinds, episode, actions = sorted(finding.kind for finding in found), state.get(MERGE), []
-    if episode is None or episode["merged"] != observed.get("merged") or not set(kinds) <= set(episode["kinds"]):
+    if (
+        episode is None
+        or episode["merged"] != observed.get("merged")
+        or not set(kinds) <= set(episode.get("kinds", []))
+    ):
         if (episode or {}).get("raised"):
-            actions += _close(watch, MERGE, "a new merge finding replaces it")
+            actions += _close(watch, MERGE, CLEARED.format(what="a new merge finding replaces it"))
         episode = state[MERGE] = {"merged": observed.get("merged"), "kinds": kinds}
     summary = "; ".join(finding.summary for finding in found)
     evidence = "; ".join(line for finding in found for line in finding.evidence)

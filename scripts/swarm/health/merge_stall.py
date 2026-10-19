@@ -94,7 +94,7 @@ def observe(repo: str, at: int) -> dict:
         length, merged = queue(repo, name)
         streak, head = failing(repo, name) if length else (0, 0)
         stalled = length and merged and at - merged >= HOUR_MS
-        failed = failed_checks(repo, name) if stalled or streak >= STREAK else "none observed"
+        failed = failed_checks(repo, name) if stalled else "none observed"
         return {
             "repo": name,
             "queue": length,
@@ -145,12 +145,9 @@ def _failing(state: dict) -> list[Finding]:
         Finding(
             "merge failures",
             state["repo"],
-            f"The last {streak} merge group runs failed in a row with {state['queue']} queued entries",
-            (
-                f"Queue length: {state['queue']}",
-                f"Newest failed merge group run: {state['head']}",
-                f"Most common failed check in the last {RUNS} queue runs: {state['failed']}",
-            ),
+            f"The last {'at least ' if streak >= RUNS else ''}{streak} merge group runs failed in a row "
+            f"with {state['queue']} queued entries",
+            (f"Queue length: {state['queue']}", f"Newest failed merge group run: {state['head']}"),
             f"{STREAK} merge group runs failing in a row while the queue holds entries",
             streak,
         )

@@ -119,12 +119,40 @@ def test_an_enforced_empty_seat_respawns_once_per_ten_minutes_and_alerts_once(st
     assert text.startswith("The front door master seat of swarm sw has been empty for 10 minutes: ")
 
 
-def test_the_watch_respawns_an_empty_seat_at_most_three_times(store):
+def test_the_watch_respawns_an_empty_seat_at_most_three_times_an_hour(store):
     enforce(store)
     rig = Rig()
-    until(store, rig, NOW, NOW + 90 * MINUTE)
+    until(store, rig, NOW, NOW + 60 * MINUTE)
     assert rig.respawned == [NOW + 10 * MINUTE, NOW + 20 * MINUTE, NOW + 30 * MINUTE]
     assert len(rig.ledger.alerts) == 1
+    until(store, rig, NOW + 62 * MINUTE, NOW + 70 * MINUTE)
+    assert rig.respawned[-1] == NOW + 70 * MINUTE
+
+
+def test_the_log_counts_would_be_respawns_against_the_same_cap(store, tmp_path):
+    rig = Rig()
+    until(store, rig, NOW, NOW + 60 * MINUTE)
+    assert [row.tool for row in gate_log.recent(SLUG, None, tmp_path)].count("respawn") == 3
+
+
+def test_a_skipped_gate_logs_and_reports_nothing(store, tmp_path):
+    store.update(SLUG, gates={"night-watch": "off"})
+    rig = Rig()
+    assert until(store, rig, NOW, NOW + 30 * MINUTE) == []
+    assert gate_log.recent(SLUG, None, tmp_path) == []
+    assert kinds(store) == ["empty master seat"]
+
+
+def test_a_merge_observation_outage_keeps_the_open_merge_alert(store, monkeypatch):
+    enforce(store)
+    rig = Rig()
+    held_master(store, rig.runtime)
+    stalled(monkeypatch)
+    run(store, rig, NOW)
+    monkeypatch.setattr(merge_stall, "observe", lambda repo, at: (_ for _ in ()).throw(OSError("GitHub down")))
+    doc = {"tasks": [], "alerts": [{"id": "a1", "source": "merge", "state": "open"}]}
+    assert run(store, rig, NOW + 5 * MINUTE, doc) == []
+    assert rig.ledger.closed == []
 
 
 def test_an_episode_logged_before_the_gate_moves_to_deny_raises_its_alert_then(store):
@@ -143,7 +171,7 @@ def test_a_live_front_door_master_closes_the_seat_alert(store):
     held_master(store, rig.runtime)
     doc = {"tasks": [], "alerts": [{"id": "a1", "source": "seat", "state": "open"}]}
     assert run(store, rig, NOW + 11 * MINUTE, doc) == [
-        "closed the seat alert: the front door master seat is held again"
+        "closed the seat alert: The night watch saw it clear: the front door master seat is held again"
     ]
     assert rig.ledger.closed == [("a1", "The night watch saw it clear: the front door master seat is held again")]
     assert kinds(store) == []
@@ -155,7 +183,8 @@ def test_a_gap_in_the_watch_starts_every_episode_over(store):
     until(store, rig, NOW, NOW + 10 * MINUTE)
     doc = {"tasks": [], "alerts": [{"id": "a1", "source": "seat", "state": "open"}]}
     actions = run(store, rig, NOW + 60 * MINUTE, doc)
-    assert actions == ["closed the seat alert: the night watch did not run for a while and starts over"]
+    assert actions == [f"closed the seat alert: {night_watch.GAP}"]
+    assert rig.ledger.closed == [("a1", night_watch.GAP)]
     assert kinds(store) == [] and rig.respawned == [NOW + 10 * MINUTE]
 
 
@@ -296,7 +325,7 @@ def test_a_second_merge_trigger_in_the_same_episode_replaces_the_alert(store, mo
     stalled(monkeypatch, streak=3, head=99)
     doc = {"tasks": [], "alerts": [{"id": "a1", "source": "merge", "state": "open"}]}
     actions = run(store, rig, NOW + 5 * MINUTE, doc)
-    assert actions[0] == "closed the merge alert: a new merge finding replaces it"
+    assert actions[0] == "closed the merge alert: The night watch saw it clear: a new merge finding replaces it"
     assert len(rig.ledger.alerts) == 2 and len(rig.mailed) == 2
     assert "merge group runs failed in a row" in rig.ledger.alerts[1][1]
 
