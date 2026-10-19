@@ -256,7 +256,7 @@ def test_the_watcher_connects_with_header_credentials_and_no_token_in_the_url(mo
         def __iter__(self):
             return iter([b"event: heartbeat\n", b"data: {}\n", b"\n"])
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         seen.append((request.full_url, dict(request.header_items()), timeout))
         return Answer()
 

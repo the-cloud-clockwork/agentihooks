@@ -478,7 +478,7 @@ class InboxStore:
         return moved
 
     def _stage_pool_return(self, pipe, item, moved, holder):
-        """pipe is in MULTI: an item its holder never confirmed waits in the pool again, passing that holder over."""
+        """pipe is in MULTI: unsettled work waits in the pool again, passing its previous holder over."""
         front = master_of(item.address)
         back = replace(moved, address=front)
         key = self.key("item", item.id)
@@ -489,9 +489,8 @@ class InboxStore:
         self.pool.stage_add(pipe, back)
         return back
 
-    def return_to_pool(self, item_id, holder):
-        """A pool item still pending at the seat of a master that is gone goes back to the pool; None when it moved
-        meanwhile, for the next distribution to retry."""
+    def return_to_pool(self, item_id: str, holder: str, expected_receiver: str = "") -> Item | None:
+        """Return unsettled pool work still held by this seat and, when given, the departing receiver."""
         from redis.exceptions import WatchError
 
         key = self.key("item", item_id)
@@ -499,12 +498,24 @@ class InboxStore:
             try:
                 pipe.watch(key)
                 raw = pipe.hgetall(key)
-                if not raw or (raw["state"], raw["address"], raw.get(POOL_HOLDER)) != ("pending", holder, holder):
+                if not raw or raw["state"] in CLOSED or (raw["address"], raw.get(POOL_HOLDER)) != (holder, holder):
                     return None
+                if raw["state"] != "pending" and not expected_receiver and not self.pool.reclaimable(pipe, holder):
+                    return None
+                if expected_receiver:
+                    history = self.key("history", item_id)
+                    pipe.watch(history)
+                    entries = [json.loads(entry) for entry in pipe.lrange(history, 0, -1)]
+                    receiver = next(
+                        (entry["by"] for entry in reversed(entries) if entry["state"] in ("delivered", "read")), ""
+                    )
+                    if receiver != expected_receiver:
+                        return None
                 item = _item(raw, item_id)
-                moved = replace(item, updated_at=now_ms(), reason=RECLAIMED)
+                moved = replace(item, state="pending", delivery_session="", updated_at=now_ms(), reason=RECLAIMED)
                 pipe.multi()
                 moved = self._stage_pool_return(pipe, item, moved, holder)
+                pipe.zrem(self.key("delivered"), item_id)
                 pipe.rpush(self.key("history", item_id), _entry("pending", REDELIVERER, RECLAIMED, moved.updated_at))
                 pipe.execute()
                 return moved

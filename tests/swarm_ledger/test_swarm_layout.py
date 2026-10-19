@@ -145,7 +145,7 @@ class Page:
         request = route.request
         if is_events(request.url):
             fulfill_events(route, ledger_state(DOC), self.payload)
-        elif "/api/swarm/" in request.url:
+        elif "/swarm/" in request.url:
             if request.method == "PUT":
                 self.puts.append(json.loads(request.post_data))
             route.fulfill(json=self.payload)

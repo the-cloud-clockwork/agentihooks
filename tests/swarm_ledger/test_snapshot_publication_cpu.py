@@ -19,7 +19,7 @@ def test_snapshot_publication_only_builds_views_for_subscribed_ledgers(subscribe
 
     hub.has.assert_called_once_with("cpu-proof")
     if subscribed:
-        render.assert_called_once_with(state)
+        render.assert_called_once_with(state, "cpu-proof")
         assert render.call_args.args[0] is state
         hub.publish_snapshot.assert_called_once_with("cpu-proof", "ledger", view)
         assert hub.publish_snapshot.call_args.args[2] is view

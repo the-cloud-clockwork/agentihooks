@@ -157,10 +157,12 @@ def test_the_api_writes_the_layout_through_the_ledger_service_for_an_allowed_ori
     calls = []
     services = fake_services(calls)
     services.ledger.layout_rows = {"main": ("left",)}
+    services.ledger.layout_lists = ("columns",)
     services.ledger.write_layout = lambda sizes: calls.append(("layout", sizes)) or sizes
-    status, body = served(services, "PUT", "/api/v1/layout", {"main": {"left": 3}}, origin="o")
-    assert (status, body["data"]) == (200, {"main": {"left": 3}})
-    assert calls == [("layout", {"main": {"left": 3}})]
+    sizes = {"main": {"left": 3}, "columns": {"tasks": [120]}}
+    status, body = served(services, "PUT", "/api/v1/layout", sizes, origin="o")
+    assert (status, body["data"]) == (200, sizes)
+    assert calls == [("layout", sizes)]
 
 
 def test_a_controller_credential_reads_a_ledger_without_a_page_credential():
@@ -209,6 +211,7 @@ def test_the_services_bundle_carries_interfaces_and_no_modules():
         ("ledger", "authority", "authority"),
         ("ledger", "hub", "HUB"),
         ("ledger", "layout_rows", "ledger_layout.ROWS"),
+        ("ledger", "layout_lists", "ledger_layout.LISTS"),
         ("ledger", "home_summaries", "home_summaries"),
         ("ledger", "bin_summaries", "bin_summaries"),
         ("ledger", "bin_entries", "ledger_bin.entries"),
@@ -223,11 +226,14 @@ def test_the_services_bundle_carries_interfaces_and_no_modules():
         ("swarm", "doctor", "DOCTOR"),
         ("swarm", "store", "swarm_store"),
         ("swarm", "status", "swarm_status"),
+        ("swarm", "models", "swarm_models"),
         ("swarm", "control", "swarm_control"),
         ("swarm", "lifecycle", "lifecycle_control"),
         ("swarm", "refresh_quota", "refresh_quota"),
         ("swarm", "control_argv", "control_argv"),
         ("swarm", "doctor_phrase", "doctor_phrase"),
+        ("media", "media_store", "ledger_media"),
+        ("media", "artifact_store", "ledger_artifacts"),
         ("media", "resolve_media", "ledger_media.resolve"),
         ("media", "resolve_artifacts", "ledger_artifacts.resolve"),
     ],
