@@ -320,3 +320,27 @@ def test_a_page_test_that_cannot_launch_chromium_fails_while_coverage_is_recorde
     report = SimpleNamespace(outcome=outcome, skipped=outcome == "skipped", longrepr=("f.py", 1, f"Skipped: {reason}"))
     browser_coverage.failed_launch(report)
     assert report.outcome == after
+
+
+def test_the_browser_check_scans_a_module_shared_by_test_files_once(tmp_path, monkeypatch):
+    from scripts.ci_mutation import browser
+    from tests import browser_coverage
+
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests/helper.py").write_text("import json\n")
+    (tmp_path / "tests/test_a.py").write_text("import tests.helper\n")
+    (tmp_path / "tests/test_b.py").write_text("import tests.helper\n")
+    (tmp_path / "tests/test_page.py").write_text("import tests.helper\nimport playwright.sync_api\n")
+    scanned = []
+    original = browser.scan
+    monkeypatch.setattr(browser, "scan", lambda root, path: scanned.append(path) or original(root, path))
+    browser_coverage._scan.cache_clear()
+    try:
+        drives = [browser_coverage.drives_browser(tmp_path, f"tests/{name}") for name in ("test_a.py", "test_b.py")]
+        assert drives + [browser_coverage.drives_browser(tmp_path, "tests/test_page.py")] == [False, False, True]
+    finally:
+        browser_coverage._scan.cache_clear()
+        browser_coverage.drives_browser.cache_clear()
+    assert sorted(scanned) == sorted(
+        tmp_path / "tests" / name for name in ("helper.py", "test_a.py", "test_b.py", "test_page.py")
+    )

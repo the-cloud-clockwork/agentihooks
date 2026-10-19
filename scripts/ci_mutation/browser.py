@@ -30,7 +30,20 @@ def imported_paths(root: Path, path: Path, nodes: list[ast.AST]) -> list[Path]:
     return paths
 
 
-def needs_browser(root: Path, tests: list[str]) -> bool:
+def scan(root: Path, path: Path) -> tuple[bool, list[Path]]:
+    nodes = list(ast.walk(ast.parse(path.read_text())))
+    for node in nodes:
+        if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "playwright" for alias in node.names):
+            return True, []
+        if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "playwright":
+            return True, []
+        if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
+            if isinstance(node.args[0].value, str) and node.args[0].value.split(".")[0] == "playwright":
+                return True, []
+    return False, imported_paths(root, path, nodes)
+
+
+def needs_browser(root: Path, tests: list[str], scanned=scan) -> bool:
     pending = [root / test for test in tests]
     for test in tests:
         parent = (root / test).parent
@@ -43,16 +56,10 @@ def needs_browser(root: Path, tests: list[str]) -> bool:
         if path in seen:
             continue
         seen.add(path)
-        nodes = list(ast.walk(ast.parse(path.read_text())))
-        for node in nodes:
-            if isinstance(node, ast.Import) and any(alias.name.split(".")[0] == "playwright" for alias in node.names):
-                return True
-            if isinstance(node, ast.ImportFrom) and (node.module or "").split(".")[0] == "playwright":
-                return True
-            if isinstance(node, ast.Call) and node.args and isinstance(node.args[0], ast.Constant):
-                if isinstance(node.args[0].value, str) and node.args[0].value.split(".")[0] == "playwright":
-                    return True
-        pending.extend(imported_paths(root, path, nodes))
+        browser, imported = scanned(root, path)
+        if browser:
+            return True
+        pending.extend(imported)
     return False
 
 
