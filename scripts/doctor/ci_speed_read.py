@@ -32,7 +32,7 @@ class _Api:
         )
         return json.loads(response.stdout)
 
-    def pages(self, endpoint: str, field: str, settles: int = 0) -> list[dict]:
+    def pages(self, endpoint: str, field: str, settles: int) -> list[dict]:
         separator = "&" if "?" in endpoint else "?"
         for attempt in range(2 + settles):
             rows, totals = {}, set()
@@ -49,8 +49,8 @@ class _Api:
                         return list(rows.values())
                     break
                 page += 1
-            if 0 < attempt < 1 + settles:
-                if page > 1 or self.deadline - time.monotonic() <= 1:
+            if 1 <= attempt <= settles:
+                if page > 1 or self.deadline - time.monotonic() <= 2:
                     break
                 time.sleep(1)
         raise RuntimeError(
@@ -100,7 +100,7 @@ def read(
                 if kept and _final(kept, workflow):
                     records.append({**workflow, "jobs": kept["jobs"]})
                 else:
-                    jobs[pool.submit(api.pages, f"{root}/{identity}/jobs?filter=latest", "jobs")] = workflow
+                    jobs[pool.submit(api.pages, f"{root}/{identity}/jobs?filter=latest", "jobs", 0)] = workflow
             for future in as_completed(jobs):
                 try:
                     records.append({**jobs[future], "jobs": future.result()})

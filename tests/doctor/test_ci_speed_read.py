@@ -242,7 +242,7 @@ def test_a_status_count_still_holding_a_run_that_left_it_completes_once_the_coun
     result = ci_speed_read.read(NOW - 60000, NOW, run=run)
     assert result["complete"] is complete
     assert reads == [["1"]] * min(stale + 1, 6)
-    assert sleeps == [1] * min(stale - 1, 4)
+    assert sleeps == [1] * min(stale - 1, ci_speed_read.SETTLE_READS)
     if complete:
         assert sorted(r["id"] for r in result["runs"]) == list(range(1, 8))
     else:
@@ -252,7 +252,7 @@ def test_a_status_count_still_holding_a_run_that_left_it_completes_once_the_coun
         )
 
 
-@pytest.mark.parametrize("elapsed,settles", [(23.5, 4), (24, 0)])
+@pytest.mark.parametrize("elapsed,settles", [(22.5, 4), (23, 0)])
 def test_settling_reads_stop_when_the_time_budget_cannot_cover_another(monkeypatch, elapsed, settles):
     from scripts.doctor import ci_speed_read
 
