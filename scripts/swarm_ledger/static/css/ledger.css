@@ -657,7 +657,9 @@ body.resizing-x { cursor: col-resize; user-select: none; }
 #quota-table .lbl.open { color: var(--positive); }
 #quota-table .lbl.closed { color: var(--destructive); }
 #quota-table .lbl.drain { color: var(--warn); }
-.sw-promoted, .sw-transport { display: inline-flex; gap: 8px; }
+.sw-promoted, .sw-transport { display: inline; }
+#agents-table .sw-sub { overflow: hidden; text-overflow: ellipsis; }
+#agents-table .sw-id { display: block; max-width: 100%; }
 .lbl.on::before, .lbl.off::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 6px; border-radius: 50%; background: currentColor; vertical-align: middle; }
 .lbl.master { letter-spacing: .06em; }
 .lbl.master::before { content: ""; display: inline-block; margin-right: 6px; border-top: 4px solid transparent; border-bottom: 4px solid transparent; border-right: 6px solid currentColor; }
