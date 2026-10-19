@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -24,7 +25,7 @@ LIVE = ("active", "pending")
 TIMEOUT_S = 540
 STOP_S = 90
 DELIVERED = "swarm-tick-delivered"
-FRESH_S = 180
+FRESH_S = TIMEOUT_S + STOP_S + 60
 KEEP = ("HOME", "LANG", "LOGNAME", "SHELL", "USER", "XDG_RUNTIME_DIR", "XDG_DATA_DIRS")
 ROOT = Path(__file__).resolve().parents[2]
 LOCK = "swarm-tick"
@@ -63,12 +64,6 @@ def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
             stderr=log,
             start_new_session=True,
         )
-    from redis.exceptions import RedisError
-
-    try:
-        record(Scheduler(redis), ROOT, event["fired_at"])
-    except RedisError as exc:
-        print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def record(scheduler: Scheduler, root: Path | str, at: float) -> None:
@@ -146,9 +141,23 @@ def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
         with machine_lock(LOCK) as held:
             fd = held.fileno()
             env = {**environment(os.environ), HELD_FD: str(fd)}
-            return _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,)))
+            code = _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,)))
     except AlreadyRunning:
         return 0
+    if not code:
+        _delivered(time.time())
+    return code
+
+
+def _delivered(at: float) -> None:
+    from redis.exceptions import RedisError
+
+    from scripts.swarm.store import redis_client
+
+    try:
+        record(Scheduler(redis_client()), ROOT, at)
+    except RedisError as exc:
+        print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 if __name__ == "__main__":

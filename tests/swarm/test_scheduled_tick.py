@@ -1,5 +1,7 @@
+import json
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -210,29 +212,40 @@ def test_a_tick_past_its_timeout_is_terminated_then_killed():
     assert tick.signals == ["terminate", "kill"]
 
 
-def _delivering(monkeypatch, popen):
-    from types import SimpleNamespace
-
+def _holding(monkeypatch):
     from scripts.scheduler.core import Scheduler
+    from scripts.swarm import store, timer
 
-    monkeypatch.setattr(scheduled_tick, "subprocess", SimpleNamespace(Popen=popen, DEVNULL=subprocess.DEVNULL))
-    scheduler = _scheduler()
-    scheduler.update(scheduled_tick.ensure(scheduler), lambda entry: entry.update(due=MINUTE_START))
-    return scheduler, Scheduler(scheduler.redis)
+    here = Scheduler(_scheduler().redis)
+    monkeypatch.setattr(timer, "entry_point", lambda: "/installed/bin/agentihooks")
+    monkeypatch.setattr(store, "redis_client", lambda: here.redis)
+    return here
 
 
-def test_a_delivered_tick_records_the_delivering_root_and_minute(monkeypatch):
-    scheduler, here = _delivering(monkeypatch, lambda argv, **kwargs: None)
+def test_a_clean_tick_records_the_delivering_root_and_its_finish(monkeypatch):
+    here = _holding(monkeypatch)
     assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START) == (
         "no scheduler has delivered a swarm tick yet"
     )
-    assert scheduler.run_due(now=MINUTE_START + 1) == 1
-    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START + 181) == ""
-    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START + 182) == (
-        "the last swarm tick was delivered 181 seconds ago"
+    before = time.time()
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0])) == 0
+    at = json.loads(here.redis.get(here.key(scheduled_tick.DELIVERED)))["at"]
+    assert before <= at <= time.time()
+    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, at + 690) == ""
+    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, at + 691) == (
+        "the last swarm tick was delivered 691 seconds ago"
     )
-    assert scheduled_tick.undelivered(here, "/installed", MINUTE_START + 1) == (
+    assert scheduled_tick.undelivered(here, "/installed", at) == (
         f"the last swarm tick was delivered by a scheduler running {scheduled_tick.ROOT}, not the installed /installed"
+    )
+
+
+@pytest.mark.parametrize("code", [1, -9])
+def test_a_failing_tick_records_no_delivery(monkeypatch, code):
+    here = _holding(monkeypatch)
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([code])) == code
+    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START) == (
+        "no scheduler has delivered a swarm tick yet"
     )
 
 
@@ -240,9 +253,19 @@ def test_a_tick_that_cannot_start_records_no_delivery(monkeypatch):
     def refuse(argv, **kwargs):
         raise OSError("no python")
 
-    scheduler, here = _delivering(monkeypatch, refuse)
-    scheduler.run_due(now=MINUTE_START + 1)
-    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START + 1) == (
+    here = _holding(monkeypatch)
+    with pytest.raises(OSError, match="no python"):
+        scheduled_tick.main(refuse)
+    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START) == (
+        "no scheduler has delivered a swarm tick yet"
+    )
+
+
+def test_a_minute_skipped_for_a_running_tick_records_no_delivery(monkeypatch):
+    here = _holding(monkeypatch)
+    with machine_lock("swarm-tick"):
+        assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0])) == 0
+    assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START) == (
         "no scheduler has delivered a swarm tick yet"
     )
 
@@ -257,18 +280,15 @@ def test_a_delivery_record_resolves_both_roots(tmp_path):
     assert scheduled_tick.undelivered(here, tmp_path / "real", MINUTE_START) == ""
 
 
-def test_a_delivery_that_cannot_be_recorded_still_acknowledges_the_minute(monkeypatch, capsys):
+def test_a_clean_tick_whose_delivery_cannot_be_recorded_still_exits_clean(monkeypatch, capsys):
     from redis.exceptions import ConnectionError
 
-    def down(redis, root, at):
+    def down(scheduler, root, at):
         raise ConnectionError("down")
 
-    started = []
-    scheduler, here = _delivering(monkeypatch, lambda argv, **kwargs: started.append(argv))
+    _holding(monkeypatch)
     monkeypatch.setattr(scheduled_tick, "record", down)
-    assert scheduler.run_due(now=MINUTE_START + 1) == 1
-    assert scheduler.run_due(now=MINUTE_START + 2) == 0
-    assert len(started) == 1
+    assert scheduled_tick.main(lambda argv, **kwargs: _Tick([0])) == 0
     assert capsys.readouterr().err == "the swarm tick delivery could not be recorded: ConnectionError: down\n"
 
 

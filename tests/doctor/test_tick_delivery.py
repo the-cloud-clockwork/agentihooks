@@ -17,7 +17,7 @@ def test_an_unproven_scheduled_tick_raises_one_finding_naming_why():
     assert finding.id == "scheduled-tick/host"
     assert finding.summary == "the scheduler has not proven the swarm tick, so the systemd timer stays"
     assert finding.evidence == (why,)
-    assert finding.threshold == "a swarm tick delivered by the installed code within the last 180 seconds"
+    assert finding.threshold == "a swarm tick delivered by the installed code within the last 690 seconds"
     assert finding.measure == 1
 
 
