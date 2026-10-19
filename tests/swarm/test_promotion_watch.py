@@ -27,7 +27,9 @@ JOBS = [
     {"name": "coverage-ratchet", "conclusion": "cancelled"},
     {"name": "Gate — Required", "conclusion": "failure"},
 ]
-NOT_DUPLICATE = "The promotion watch files one task per failed dev job and run, and holds a job while its task is open."
+NOT_DUPLICATE = (
+    "The promotion watch files one task per failed dev job and run, and holds a job's cause while its task is open."
+)
 NOW = 10_000_000
 SLUG = "sw"
 
@@ -158,8 +160,11 @@ def test_a_real_sonar_failure_still_files_a_fixer(store, message):
     actions = refresh(store, ledger, sonar_run(message))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: sonar"]
     assert len(ledger.raised) == 1
-    assert actions[-1] == "raised the promotion alert for dev push run 900"
-    assert filed(store) == {"promo-900-0": "sonar"}
+    assert actions[-2:] == [
+        "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
+    ]
+    assert filed(store)["promo-900-0"].startswith("sonar: Check dev still points at this commit")
 
 
 def test_a_superseded_run_with_another_failed_job_still_files_real_fixers(store):
@@ -282,6 +287,7 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "filed promo-900-0 for the failed dev job helm-kind",
         "filed promo-900-1 for the failed dev job unit (3.11, 1)",
         "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
     ]
     assert filed(store) == {"promo-900-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
@@ -300,8 +306,12 @@ def test_a_job_with_an_open_promotion_task_is_not_filed_again_and_done_ones_are_
     ledger = Ledger(tasks, [alert])
     actions = refresh(store, ledger, gh([RED], JOBS))
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-1"]
-    assert ledger.raised == []
-    assert actions == ["filed promo-900-1 for the failed dev job unit (3.11, 1)"]
+    assert len(ledger.raised) == 1
+    assert actions == [
+        "filed promo-900-1 for the failed dev job unit (3.11, 1)",
+        "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
+    ]
     assert filed(store) == {"promo-800-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
 
 
@@ -336,6 +346,7 @@ def test_a_run_retried_after_a_partial_write_files_only_the_jobs_it_missed(store
     assert actions == [
         "filed promo-900-1 for the failed dev job unit (3.11, 1)",
         "raised the promotion alert for dev push run 900",
+        "told the master about the new promotion causes of dev push run 900",
     ]
 
 
@@ -455,7 +466,7 @@ def test_the_tick_hands_the_watch_its_ledger_state_and_clock(store, monkeypatch)
 def test_a_ledger_without_task_or_alert_lists_still_files_and_closes(store):
     config = SimpleNamespace(repo="/repo")
     red = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW, gh([RED], JOBS))
-    assert red[-1] == "raised the promotion alert for dev push run 900"
+    assert red[-2] == "raised the promotion alert for dev push run 900"
     green = promotion_watch.refresh(SLUG, config, store, Ledger(), {}, NOW * 2, gh([GREEN]))
     assert green == []
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "901"
