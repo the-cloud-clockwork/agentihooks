@@ -259,6 +259,12 @@ def test_read_host_without_available_memory_reads_nothing(tmp_path, monkeypatch)
     assert host_budget.read_host(tmp_path) is None
 
 
+def test_meminfo_values_are_read_after_the_first_colon(tmp_path):
+    (tmp_path / "meminfo").write_text("MemAvailable:    2048 kB: x\nSwapTotal:  1024 kB\nSwapFree:  0 kB\n")
+
+    assert host_budget._memory_mb(tmp_path) == (2, 1, 1)
+
+
 def test_only_the_band_hold_is_marked_held():
     assert host_budget.room(_sample(load1=24.0, available_mb=16000, agents=10), LIMITS, previous=3).held is True
     assert host_budget.room(_sample(load1=24.0, available_mb=1400, agents=10), LIMITS, previous=5).held is False
