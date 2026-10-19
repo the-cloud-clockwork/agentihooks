@@ -1,6 +1,6 @@
 import math
 import os
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -155,7 +155,7 @@ def _children(proc: Path) -> dict[int, list[int]]:
     return children
 
 
-def agent_memory(proc: Path, roots: Iterable[int]) -> tuple[int, int]:
+def agent_memory(proc: Path, roots: Collection[int]) -> tuple[int, int]:
     if not roots:
         return 0, 0
     children = _children(proc)
