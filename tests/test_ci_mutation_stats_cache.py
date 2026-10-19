@@ -352,6 +352,43 @@ def test_import_scoped_stats_only_recollect_affected_files(tmp_path, changed):
     }
 
 
+@pytest.mark.parametrize("changed", ["documentation", "unrelated_fixture", "comment", "initializer"])
+def test_stats_reuse_tracks_only_applicable_import_and_fixture_inputs(tmp_path, changed):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            "scripts/pkg/__init__.py": "value = 1\n",
+            "scripts/pkg/sample.py": "# importlib is mentioned in a comment\nvalue = 1\n",
+            "scripts/other.py": "value = 1\n",
+            files[0]: "import scripts.pkg.sample\n",
+            "tests/other/conftest.py": "value = 1\n",
+            "docs/other.md": "original\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    scope = {"scripts/pkg/sample.py": [2]}
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    target = {
+        "documentation": "docs/other.md",
+        "unrelated_fixture": "tests/other/conftest.py",
+        "comment": "scripts/other.py",
+        "initializer": "scripts/pkg/__init__.py",
+    }[changed]
+    (root / target).write_text("value = 2\n")
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    assert calls == ([files, files] if changed == "initializer" else [files])
+
+
 def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
     import json
 
