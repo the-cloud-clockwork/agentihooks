@@ -1,4 +1,5 @@
 import json
+import subprocess
 from datetime import datetime
 from types import SimpleNamespace
 from urllib.parse import urlsplit
@@ -72,6 +73,8 @@ def actions(runs, jobs, reread):
             body = {"total_count": len(runs), "workflow_runs": list(runs)}
         elif "/actions/jobs/" in path:
             body = reread[int(path.rsplit("/", 1)[1])]
+            if body is None:
+                raise subprocess.CalledProcessError(1, args)
         else:
             body = runs[0]
         return SimpleNamespace(stdout=json.dumps(body))
@@ -163,4 +166,37 @@ def test_a_finding_superseded_by_a_corrected_read_is_retracted(store, monkeypatc
     assert judged["retracted_at"] == FOUND_AT + 60000
     for slug in (DOCTOR, WATCHED):
         texts = [item.text for item in InboxStore(store.redis).inbox(f"master@{slug}")]
-        assert any("Retracted" in text and raised in text for text in texts)
+        assert any(f"supersedes them.\n- {raised}" in text for text in texts)
+        assert not store.redis.sismember(store.key(DOCTOR, "ci-speed-notified", slug), raised)
+
+
+def test_failed_rereads_count_as_unverified_and_the_rest_are_still_corrected():
+    jobs = [{**STALE, "id": 1}, {**STALE, "id": 2}, {**STALE, "id": 3}, {**REFINE, "id": 4}]
+    run, _ = actions([PREFLIGHT], jobs, {1: None, 2: None, 3: {**REFINE, "id": 3}})
+    result = ci_speed_read.read(FOUND_AT - 60000, FOUND_AT, run=run)
+    assert result["unverified"] == 2
+    [read] = result["runs"]
+    assert [job["id"] for job in read["jobs"]] == [1, 2, 3, 4]
+    assert read["jobs"][2] == {**REFINE, "id": 3}
+
+
+def test_a_job_queued_exactly_five_minutes_is_not_reread():
+    edge = {**STALE, "created_at": "2026-10-19T15:32:32Z", "started_at": "2026-10-19T15:32:32Z"}
+    run, calls = actions([PREFLIGHT], [edge], {})
+    assert ci_speed_read.read(FOUND_AT - 60000, FOUND_AT, run=run)["unverified"] == 0
+    assert not any("/actions/jobs/" in call for call in calls)
+
+
+def test_a_start_exactly_five_minutes_after_creation_clears_the_runner_wait():
+    edge = {**REFINE, "started_at": "2026-10-19T15:36:56Z"}
+    assert WAIT_ID in ci_speed.cleared([{**PREFLIGHT, "jobs": [edge]}])
+
+
+def test_one_unstarted_job_keeps_every_finding_of_its_group():
+    assert ci_speed.cleared([{**PREFLIGHT, "jobs": [STALE, REFINE]}]) == []
+
+
+def test_the_status_line_reports_queued_jobs_not_reread(store, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(unverified=3))
+    actions_taken = cli.timer(store, DOCTOR, FOUND_AT, False)
+    assert any("0 retracted, 3 queued jobs not reread" in action for action in actions_taken)
