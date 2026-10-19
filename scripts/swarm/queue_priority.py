@@ -43,7 +43,7 @@ def stale(holder: str, hive: str) -> bool:
     if len(parts) != 3 or parts[0] != hive or not parts[1].isdigit():
         return False
     try:
-        os.kill(int(parts[1]), 0)
+        os.kill(int(parts[1]), 0)  # NOSONAR: signal 0 probes the pid and delivers nothing
     except ProcessLookupError:
         return True
     except PermissionError:
