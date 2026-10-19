@@ -24,7 +24,7 @@ function onStreamEvent(name, data) {
   }
 }
 
-function takeFrame(block) {
+async function takeFrame(block) {
   let name = "message", id = null;
   const data = [];
   for (const line of block.split("\n")) {
@@ -40,7 +40,9 @@ function takeFrame(block) {
     const raw = data.join("\n");
     if (name === "snapshot" && raw === snapshot) resume();
     else {
-      onStreamEvent(name, JSON.parse(raw));
+      const parsed = JSON.parse(raw);
+      await scheduler.postTask(() => {}, { priority: "background" });
+      onStreamEvent(name, parsed);
       if (name === "snapshot") snapshot = raw;
       else if (name === "ledger" || name === "swarm") snapshot = null;
     }
@@ -60,7 +62,7 @@ async function readStream(body) {
     buffer = (buffer + value).replace(/\r\n?/g, "\n");
     let end;
     while ((end = buffer.indexOf("\n\n")) >= 0) {
-      takeFrame(buffer.slice(0, end));
+      await takeFrame(buffer.slice(0, end));
       buffer = buffer.slice(end + 2);
     }
   }
