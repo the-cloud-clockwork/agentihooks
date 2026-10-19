@@ -70,6 +70,39 @@ def test_stream_rendering_yields_to_input_between_sections(browser):
     page.close()
 
 
+def test_browser_cache_serializes_the_document_off_the_main_thread_and_keeps_pending_edits(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    page.add_init_script(
+        """(() => {
+          const stringify = JSON.stringify;
+          window.cacheSerializations = 0;
+          JSON.stringify = function(value, ...args) {
+            if (value?.doc?.title === 'Cache proof') window.cacheSerializations++;
+            return stringify.call(this, value, ...args);
+          };
+        })();"""
+    )
+    show(page, shell_html(), ledger=ledger_state({"title": "Cache proof"}))
+    result = page.evaluate(
+        """async () => {
+          const main = document.querySelector('script[type=module]').src;
+          const sync = await import(new URL('sync.js', main));
+          const state = await import(new URL('state.js', main));
+          sync.ops.push({op: 'add', thread: 'notes', id: 'pending', text: 'Keep this edit'});
+          state.lsWrite();
+          return {serializations: window.cacheSerializations, saved: state.lsRead().ops};
+        }"""
+    )
+    assert result["serializations"] == 0
+    assert result["saved"] == [{"op": "add", "thread": "notes", "id": "pending", "text": "Keep this edit"}]
+    page.wait_for_function(
+        """() => Object.values(localStorage).some(value => {
+          try { return JSON.parse(value)?.doc?.title === 'Cache proof'; } catch { return false; }
+        })"""
+    )
+    page.close()
+
+
 def test_full_ledger_keeps_task_pagination_and_deep_navigation(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     tasks = [{"id": f"t{i}", "title": f"Task {i}", "state": "open", "lane": "eng"} for i in range(2400)]
