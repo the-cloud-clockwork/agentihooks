@@ -226,3 +226,32 @@ The disabled `queue-baseline` job is gone: pull request [3517](https://github.co
 | `The base carries no tests/coverage_ratchet.py, so nothing trusted can grade.` | The base predates the ratchet. | Dispatch the Tests workflow with a newer `base` input. |
 | `<n> lines the base ran are no longer run by any head test; see the coverage-ratchet report.` | A merged change removed or rerouted the only test reaching those lines, listed by file and line in `report.txt`, so promotion is red while the queue keeps merging. | Add or restore a test that reaches each line through a normal pull request; never lower the ratchet or exclude the line. |
 | A coverage job ran in a merge group and `Gate — Required` failed with `Every gate required for this event must succeed and other gates must be skipped.` | A workflow change gave a coverage job a `merge_group` condition. | Restore the event conditions in the table above. |
+
+## Selector changes prove their head copy
+
+Pull request grading continues to execute the base copy of `scripts.ci_select`.
+Before merging a selector change, create a `diffcheck/selector-<name>` plant
+branch from the candidate. Make the final commit a named planted change that
+exercises the new rule. Its parent contains the selector change; the final
+commit contains only the change being selected. Never open a pull request for
+this plant branch.
+
+A push to that branch runs **Selector plant proof**, comparing the base and
+head selectors against the final commit, with identical base durations. The
+push defaults expect `tests/test_ci_select.py`; for other expected tests or a
+pinned base revision, dispatch explicitly:
+
+```bash
+gh workflow run selector-proof.yml \
+  --ref diffcheck/selector-<name> \
+  -f base=<base-selector-revision> \
+  -f change_base=HEAD^ \
+  -f expected_tests='tests/test_expected.py'
+```
+
+The read-only workflow reports both revisions, the plant commit subject, both
+complete selections and the expected paths in its summary and `selector-proof`
+artifact. It fails unless head selects every expected path and base misses
+every one. A full-suite selection includes every path. Record the red control
+run and green proof run beside both selections in the selector pull request
+body before merging. This proof never supplies the required gate result.

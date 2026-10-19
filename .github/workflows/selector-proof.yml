@@ -1,0 +1,130 @@
+name: Selector plant proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      base:
+        description: Base selector revision to compare
+        required: true
+        default: dev
+      change_base:
+        description: Parent of the named planted change
+        required: true
+        default: HEAD^
+      expected_tests:
+        description: Space separated test paths selected by head and missed by base
+        required: true
+        default: tests/test_ci_select.py
+  push:
+    branches: ['diffcheck/selector-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: selector-proof-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  selection:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    env:
+      EXPECTED_TESTS: ${{ inputs.expected_tests || 'tests/test_ci_select.py' }}
+      CHANGE_REF: ${{ inputs.change_base || 'HEAD^' }}
+    steps:
+      - name: Require a plant branch
+        env:
+          REF: ${{ github.ref }}
+        run: |
+          [[ "$REF" == refs/heads/diffcheck/selector-* ]] || { echo '::error::Use a diffcheck/selector- plant branch.'; exit 1; }
+      - uses: actions/checkout@v4
+        with:
+          path: head
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base || 'dev' }}
+          path: base
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Record the named plant and revisions
+        working-directory: head
+        run: |
+          change_base=$(git rev-parse --verify --end-of-options "$CHANGE_REF^{commit}")
+          plant_head=$(git rev-parse HEAD)
+          [[ -n "$(git diff --name-only "$change_base" "$plant_head")" ]] || { echo '::error::Plant diff is empty.'; exit 1; }
+          echo "CHANGE_BASE=$change_base" >> "$GITHUB_ENV"
+          echo "PLANT_HEAD=$plant_head" >> "$GITHUB_ENV"
+          python - <<'PY'
+          import json
+          import os
+          import subprocess
+          from pathlib import Path
+          def git(*args):
+              return subprocess.check_output(['git', *args], text=True).strip()
+          Path('../metadata.json').write_text(json.dumps({
+              'plant': git('log', '-1', '--format=%s'),
+              'base': git('-C', '../base', 'rev-parse', 'HEAD'),
+              'head': git('rev-parse', 'HEAD'),
+              'change_base': git('rev-parse', '--verify', '--end-of-options', os.environ['CHANGE_REF'] + '^{commit}'),
+          }, indent=2))
+          PY
+      - name: Run base selector
+        working-directory: base
+        env:
+          GITHUB_OUTPUT: ''
+        run: >-
+          python -m scripts.ci_select --root "$GITHUB_WORKSPACE/head"
+          --base "$CHANGE_BASE" --head "$PLANT_HEAD" --event pull_request
+          --legs 3 --durations "$GITHUB_WORKSPACE/base/.test_durations" > ../base.txt
+      - name: Run head selector
+        working-directory: head
+        env:
+          GITHUB_OUTPUT: ''
+        run: >-
+          python -m scripts.ci_select --root "$GITHUB_WORKSPACE/head"
+          --base "$CHANGE_BASE" --head "$PLANT_HEAD" --event pull_request
+          --legs 3 --durations "$GITHUB_WORKSPACE/base/.test_durations" > ../head.txt
+      - name: Compare selections
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          from pathlib import Path
+          report = json.loads(Path('metadata.json').read_text())
+          expected = os.environ['EXPECTED_TESTS'].split()
+          selections = {}
+          for side in ('base', 'head'):
+              raw = Path(f'{side}.txt').read_text()
+              values = dict(line.split('=', 1) for line in raw.splitlines() if '=' in line)
+              files = sorted({path for key, value in values.items() if key.startswith('files_') for path in value.split()})
+              selections[side] = {'scope': values.get('scope'), 'files': files, 'raw': raw}
+          report.update(expected_tests=expected, selections=selections)
+          rendered = json.dumps(report, indent=2)
+          Path('selection-proof.json').write_text(rendered + '\n')
+          print(rendered)
+          with Path(os.environ['GITHUB_STEP_SUMMARY']).open('a') as summary:
+              summary.write('```json\n' + rendered + '\n```\n')
+          assert expected and all(re.fullmatch(r'tests/[A-Za-z0-9_./-]+\.py', path) for path in expected), 'Name expected test paths'
+          assert all(side['scope'] in {'full', 'selected', 'none'} for side in selections.values()), 'Selector output is missing a valid scope'
+          def selects(side, path):
+              return side['scope'] == 'full' or path in side['files']
+          assert all(selects(selections['head'], path) for path in expected), 'Head selector missed the planted rule'
+          assert all(not selects(selections['base'], path) for path in expected), 'Base selector did not miss the control'
+          PY
+      - name: Retain both selections
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: selector-proof
+          path: |
+            metadata.json
+            base.txt
+            head.txt
+            selection-proof.json
+          if-no-files-found: error
