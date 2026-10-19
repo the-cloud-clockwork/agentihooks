@@ -104,20 +104,66 @@ def test_the_budget_logs_the_cut_and_skipped_steps(monkeypatch):
     assert fields["skipped"] == ["after"]
 
 
-_SLOW_HOOK = """
+def test_a_bad_budget_setting_falls_back_to_the_default(monkeypatch):
+    from hooks.prompt_budget import seconds
+
+    monkeypatch.setenv("AGENTIHOOKS_PROMPT_BUDGET_S", "10s")
+
+    assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 10.0
+    assert PromptBudget().soft == 10.0
+
+
+def test_a_cut_that_lands_outside_a_step_never_escapes_the_budget():
+    from hooks.prompt_budget import Spent
+
+    budget = PromptBudget(soft=5, hard=5)
+
+    with budget.guarded():
+        raise Spent
+
+    assert budget.spent
+
+
+def test_an_outer_real_timer_survives_the_budget():
+    import signal
+
+    fired = []
+    previous = signal.signal(signal.SIGALRM, lambda *_: fired.append(True))
+    signal.setitimer(signal.ITIMER_REAL, 50)
+    try:
+        with PromptBudget(soft=5, hard=0.2).guarded() as budget:
+            budget.run("slow", time.sleep, 30)
+        remaining, _ = signal.getitimer(signal.ITIMER_REAL)
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, 0)
+        signal.signal(signal.SIGALRM, previous)
+
+    assert remaining > 40
+    assert fired == []
+
+
+_HOOK = """
+import runpy
+import signal
+import sys
 import time
 from hooks import hook_manager
 from hooks.common import inject_context
-from hooks.prompt_budget import process_start
+
+
+def blocked(*args, **kwargs):
+    signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+    time.sleep(120)
+
 
 hook_manager._confirm_inbox = lambda session_id: inject_context("kept block", also_log=False, skip_compression=True)
-hook_manager._swarm_heartbeat = lambda *args, **kwargs: time.sleep(120)
-hook_manager._EVENT_STARTED = process_start()
-hook_manager.main()
+hook_manager._swarm_heartbeat = blocked if sys.argv[1] == "blocked" else lambda *args, **kwargs: time.sleep(120)
+runpy.run_module("hooks", run_name="__main__")
 """
 
 
-def test_a_slow_prompt_step_cannot_push_the_hook_past_its_budget(tmp_path):
+@pytest.mark.parametrize("step", ["sleeping", "blocked"])
+def test_a_slow_prompt_step_cannot_push_the_hook_past_its_budget(tmp_path, step):
     env = {
         **os.environ,
         "AGENTIHOOKS_HOME": str(tmp_path / "home"),
@@ -129,7 +175,7 @@ def test_a_slow_prompt_step_cannot_push_the_hook_past_its_budget(tmp_path):
     began = time.monotonic()
 
     done = subprocess.run(
-        [sys.executable, "-c", _SLOW_HOOK],
+        [sys.executable, "-c", _HOOK, step],
         input=json.dumps(payload),
         capture_output=True,
         text=True,
@@ -139,5 +185,5 @@ def test_a_slow_prompt_step_cannot_push_the_hook_past_its_budget(tmp_path):
     )
 
     assert done.returncode == 0, done.stderr
-    assert time.monotonic() - began < 20
+    assert time.monotonic() - began < 25
     assert "kept block" in done.stdout

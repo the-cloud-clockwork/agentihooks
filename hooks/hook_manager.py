@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
+from hooks.prompt_budget import PromptBudget
 
 
 class BlockAction(Exception):
@@ -741,19 +742,28 @@ def _prompt_broadcasts(session_id: str) -> None:
 
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
-    from hooks.prompt_budget import PromptBudget
-
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
     budget = PromptBudget(start=_EVENT_STARTED)
-    with budget.guarded():
+    with budget.guarded(_prompt_overrun if _EVENT_STARTED is not None else None):
         _prompt_steps(budget, payload, session_id)
 
 
-def _prompt_steps(budget, payload: dict, session_id: str) -> None:
+def _prompt_overrun() -> None:
+    from hooks.targets import emitter
+
+    log("prompt hook overran its hard budget in a blocking call; flushing what it gathered")
+    emitter.flush("UserPromptSubmit")
+    sys.stdout.flush()
+    os._exit(0)
+
+
+def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
     from hooks.config import BROADCAST_ENABLED
 
     run = budget.run
+    run("secrets", _prompt_secrets, payload)
+    run("amygdala", _prompt_amygdala, session_id)
     run("confirm_inbox", _confirm_inbox, session_id)
     run("swarm_heartbeat", _swarm_heartbeat, "working", payload.get("prompt", ""))
     run("swarm_ledger", _swarm_ledger, payload)
@@ -763,18 +773,17 @@ def _prompt_steps(budget, payload: dict, session_id: str) -> None:
     run("trace_flush", _request_trace_flush, payload, "prompt")
     run("quota_usage", _prompt_quota_usage, session_id)
     run("quota_policy", _prompt_quota_policy, payload, session_id)
-    run("secrets", _prompt_secrets, payload)
     run("claude_md_cap", _prompt_claude_md_cap, payload, session_id)
     run("enforcements", _prompt_enforcements, payload, session_id)
     run("ci_manifesto", _prompt_ci_manifesto, session_id)
     run("rules_refresh", _prompt_rules_refresh, session_id)
-    run("amygdala", _prompt_amygdala, session_id)
     run("prod_bypass", _prompt_prod_bypass, payload, session_id)
     run("signals", _prompt_signals, payload, session_id, typed)
     if typed:
         run("gate_lifts", _arm_gate_lifts, payload)
     run("voice", _prompt_voice, payload, session_id, typed)
     run("controls", _prompt_controls, payload, session_id, typed)
+    # --- Broadcast: inject pending messages ---
     if BROADCAST_ENABLED:
         run("broadcasts", _prompt_broadcasts, session_id)
     run("refocus", _inject_refocus, session_id, "prompt")
@@ -814,6 +823,7 @@ def _prompt_quota_policy(payload: dict, session_id: str) -> None:
 
 
 def _prompt_secrets(payload: dict) -> None:
+    # --- Secrets scanning ---
     from hooks.config import SECRETS_MODE
 
     if SECRETS_MODE != "off":

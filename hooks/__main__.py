@@ -7,9 +7,8 @@ Usage:
 """
 
 from hooks import hook_manager
-from hooks.hook_manager import main
 from hooks.prompt_budget import process_start
 
 if __name__ == "__main__":
     hook_manager._EVENT_STARTED = process_start()
-    main()
+    hook_manager.main()
