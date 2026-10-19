@@ -60,6 +60,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not fenced:
         consumer.poll()
     consumer.poll_commands()
+    consumer.sync_workspaces(TTL_SECONDS)
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
 

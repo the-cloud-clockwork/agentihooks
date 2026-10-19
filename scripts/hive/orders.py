@@ -1,10 +1,12 @@
+import hashlib
 import json
 from dataclasses import asdict, dataclass, replace
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
-from scripts.swarm import lease, reaper
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm import lease, prompt, reaper
+from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
+from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime.base import SpawnRequest
 from scripts.swarm_v2.runtime.process import launch_target
 
@@ -56,6 +58,25 @@ FOREIGN = Ack(FAILED, {}, "identity")
 UNKNOWN_ACTION = Ack(FAILED, {}, "unknown_action")
 COMMAND_BATCH = 32
 SENT = {"sent": "1"}
+OPENING, DIGEST, SEEDS = prompt.CARRIED, "hive_opening_digest", "hive_seeds"
+
+
+def build_opening(request: SpawnRequest) -> str:
+    """Built where the ledger is, naming the work folder below whichever home the hive runs it in."""
+    config, task = request.config, {**request.task, "harness": "claude"}
+    if task.get("workspace"):
+        task["workspace"] = ledger_workspace.portable(config.slug, task["id"])
+    role = config.lanes.get(request.lane, {}).get("role")
+    return prompt.build(config.slug, config.repo, request.lane, request.name, task, role=role, autonomy=config.autonomy)
+
+
+def digest(text: str) -> str:
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+def carried(slug: str, task: dict, text: str) -> dict:
+    sent = ledger_workspace.seeds(slug, task["id"]) if task.get("workspace") else {}
+    return {**task, OPENING: text, DIGEST: digest(text), SEEDS: sent}
 
 
 class Orders:
@@ -174,6 +195,15 @@ class Consumer:
                 pipe.execute()
         return len(entries)
 
+    def sync_workspaces(self, ttl: int) -> None:
+        hosted = [
+            (slug, task)
+            for slug in self.store.slugs()
+            for task, agent in ledger_workspace.latest(self.store.agents(slug)).items()
+            if agent.execution_id and agent.lane != MASTER and agent.runtime_target.get("host_id") == self.hive
+        ]
+        ledger_workspace.sync(self.store.redis, self.hive, hosted, ttl)
+
     def command(self, order: CommandOrder) -> Ack:
         if order.action == "reap":
             return _done(self.runtime.herdr.reap_name(order.name))
@@ -224,6 +254,8 @@ class Consumer:
             return Ack("failed", {}, "prompt")
         if not isinstance(task, dict) or task.get("id") != order.task:
             return Ack("failed", {}, "prompt")
+        if not isinstance(task.get(OPENING), str) or task.get(DIGEST) != digest(task[OPENING]):
+            return Ack("failed", {}, "prompt")
         try:
             return self.launch(order, agent, task)
         except SwarmError:
@@ -260,6 +292,8 @@ class Consumer:
             "effort": agent.effort or config.effort_min,
         }
         lease.require_epoch(self.store, order.slug, order.epoch)
+        if task.get("workspace"):
+            task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
         self.store.execution_registry.update(order.slug, agent)
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:

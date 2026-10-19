@@ -159,7 +159,7 @@ def waiting_ahead(url: str, target: str, run) -> list[dict]:
         variables["after"] = page["pageInfo"]["endCursor"]
 
 
-def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
+def prioritize(url: str, run=subprocess.run, journal=None, ahead=()) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
         raise SwarmError("queue priority requires an open pull request into dev")
@@ -167,7 +167,7 @@ def prioritize(url: str, run=subprocess.run, journal=None) -> dict:
         raise SwarmError("queue priority requires a dev merge queue")
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
     require_green(url, raw["headRefOid"], run)
-    waiting = waiting_ahead(url, raw["id"], run)
+    waiting = [pull for pull in waiting_ahead(url, raw["id"], run) if pull["url"] not in ahead]
     before = journal.groups() if journal is not None else None
     errors = []
     steps = []

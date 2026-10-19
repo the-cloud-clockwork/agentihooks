@@ -10,12 +10,22 @@ import tempfile
 from collections.abc import Iterator
 from pathlib import Path
 
+_SHARED = {"__init__.py", "conftest.py"}
+
 # Runs inside each tree so the base imports its own sources, never the head's.
 _COLLECT = """
-import json, sys, pytest
+import json, os, sys, pytest
+from pathlib import Path
 
 class Collected:
     nodeids = []
+    root = Path(os.path.abspath(sys.argv[1]))
+    group = set(json.loads(sys.argv[3]))
+
+    def pytest_ignore_collect(self, collection_path):
+        if collection_path.parent == Collected.root and collection_path.name not in Collected.group:
+            return True
+        return None
 
     def pytest_collection_finish(self, session):
         Collected.nodeids = [item.nodeid for item in session.items]
@@ -26,7 +36,8 @@ class Collected:
 
 code = pytest.main(["--collect-only", "-qq", "--assert=plain", "-p", "no:cacheprovider", sys.argv[1]], plugins=[Collected()])
 with open(sys.argv[2], "w") as out:
-    json.dump(Collected.nodeids if code == 0 else None, out)
+    ok = code in (pytest.ExitCode.OK, pytest.ExitCode.NO_TESTS_COLLECTED)
+    json.dump(Collected.nodeids if ok else None, out)
 """
 
 
@@ -117,30 +128,61 @@ def collect_all(
 ) -> dict[str, list[str] | None]:
     cached = {side: collection_cache(tree, tests, cache, environment) for side, tree in trees.items()}
     collected = {}
+    for side in trees:
+        if cached[side] and cached[side].is_file():
+            nodeids = json.loads(cached[side].read_text())
+            collected[side] = (
+                nodeids if isinstance(nodeids, list) and all(isinstance(nodeid, str) for nodeid in nodeids) else None
+            )
+    pending = [side for side in trees if side not in collected]
+    processes = collection_processes() // max(1, len(pending))
     with tempfile.TemporaryDirectory() as scratch:
-        outputs = {side: Path(scratch) / f"{side}.json" for side in trees}
         runs = {}
-        for side, tree in trees.items():
-            if cached[side] and cached[side].is_file():
-                nodeids = json.loads(cached[side].read_text())
-                collected[side] = (
-                    nodeids
-                    if isinstance(nodeids, list) and all(isinstance(nodeid, str) for nodeid in nodeids)
-                    else None
-                )
-            else:
-                runs[side] = subprocess.Popen(
-                    [sys.executable, "-c", _COLLECT, tests, str(outputs[side])], cwd=tree, stdout=subprocess.DEVNULL
-                )
-        for side, run in runs.items():
-            run.wait()
-            collected[side] = json.loads(outputs[side].read_text()) if outputs[side].is_file() else None
-            if run.returncode:
-                collected[side] = None
+        for side in pending:
+            runs[side] = []
+            for index, group in enumerate(collection_groups(trees[side] / tests, processes)):
+                output = Path(scratch) / f"{side}-{index}.json"
+                command = [sys.executable, "-c", _COLLECT, tests, str(output), json.dumps(group)]
+                runs[side].append((subprocess.Popen(command, cwd=trees[side], stdout=subprocess.DEVNULL), output))
+        for side, parts in runs.items():
+            results = []
+            for run, output in parts:
+                run.wait()
+                results.append(json.loads(output.read_text()) if output.is_file() and not run.returncode else None)
+            nodeids = None if any(result is None for result in results) else sum(results, [])
+            # Groups are disjoint, so a node id from two groups means the split leaked and would inflate the count.
+            if nodeids and len(set(nodeids)) != sum(len(set(result)) for result in results):
+                nodeids = None
+            collected[side] = nodeids
             if collected[side] and cached[side]:
                 cached[side].parent.mkdir(parents=True, exist_ok=True)
                 cached[side].write_text(json.dumps(collected[side]))
     return collected
+
+
+def collection_processes() -> int:
+    # Imported here: the dev record fetch imports this module from a base tree that may hold only the tests.
+    from scripts.ci_cpu_quota import quota_cpus, worker_count
+
+    return worker_count(len(os.sched_getaffinity(0)), quota_cpus())
+
+
+def collection_groups(root: Path, count: int) -> list[list[str]]:
+    entries = sorted(root.iterdir(), key=lambda path: path.name) if root.is_dir() else []
+    entries = [path for path in entries if path.name not in _SHARED]
+    weights = [
+        sum(1 for _ in path.rglob("test_*.py"))
+        if path.is_dir()
+        else int(path.name.startswith("test_") and path.suffix == ".py")
+        for path in entries
+    ]
+    total, done, groups = sum(weights), 0, [[]]
+    for path, weight in zip(entries, weights):
+        if weight and done * count >= total * len(groups):
+            groups.append([])
+        groups[-1].append(path.name)
+        done += weight
+    return [sorted(_SHARED) + group for group in groups]
 
 
 _DEFINITIONS = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)

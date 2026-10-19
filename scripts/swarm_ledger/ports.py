@@ -40,6 +40,7 @@ class Hive(Protocol):
     auth: Any
     registry: Any
     launch: Any
+    reports: Any
 
 
 @runtime_checkable

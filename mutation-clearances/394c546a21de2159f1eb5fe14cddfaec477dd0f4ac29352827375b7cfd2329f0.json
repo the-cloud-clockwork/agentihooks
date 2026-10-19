@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/ledger_workspace.py:scripts.swarm_ledger.ledger_workspace.x_materialize__mutmut_33:2ae6ead569a7275b526c78307dba49f1ca4eb3a9fe7e5022d2b65987c4e2dda8": {
+    "reader": "Standards reader for hiv8",
+    "reason": "materialize creates progress.md and proof.md with encoding UTF-8 instead of utf-8. Codec lookup normalises UTF-8 and utf-8 to the identical utf_8 codec regardless of locale, so the bytes read and written are the same."
+  }
+}

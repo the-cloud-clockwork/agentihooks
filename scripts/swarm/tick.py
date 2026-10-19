@@ -1219,7 +1219,7 @@ def _master(slug, config, store, runtime, now_ms):
         return [_retire_master(slug, store, runtime, m, now_ms) for m in masters]
     masters = [m for m in masters if master_seats.is_lead(slug, m)]
     pending = master_start.read(store, slug)
-    if any(m.state != "finished" for m in masters) or pending.get("name") or pending.get("alerted"):
+    if any(m.state != "finished" for m in masters) or master_start.blocked(pending, now_ms):
         return []
     if any(m.name in runtime.live_names() for m in masters):
         return ["the old master is still running, waiting for it to end before starting the next"]
@@ -1255,11 +1255,7 @@ def _master(slug, config, store, runtime, now_ms):
         transfers.failed(store, slug, record)
         store.drop_agent(slug, record.name)
         affinity.failed(store, slug, str(exc))
-        master_alarm.failed(store, slug, f"master spawn failed: {exc}", now_ms)
-        failed = master_start.read(store, slug)
-        if failed.get("attempt") == 1:
-            master_start.save(store, slug, {**failed, "name": "", "retry": True})
-        return [f"master spawn failed: {exc}"]
+        return master_start.failed(store, slug, f"master spawn failed: {exc}", now_ms)
     affinity.placed(store, slug, placed.harness)
     master_move.placed(store, slug)
     record = placed_record(record, placed)

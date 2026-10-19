@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -37,6 +38,7 @@ def setup():
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
+    launcher.opening = lambda request: f"opening for {request.name}"
     return SimpleNamespace(store=store, config=config, held=held, hive=hive, herdr=herdr, launcher=launcher)
 
 
@@ -123,6 +125,9 @@ def test_publishes_fenced_order_after_host_admission(setup):
     assert json.loads(store.redis.get(order.prompt_ref)) == {
         **task,
         "profile_decision": setup.herdr._profile_decision.return_value.record(),
+        "hive_opening": f"opening for {name}",
+        "hive_opening_digest": hashlib.sha256(f"opening for {name}".encode()).hexdigest(),
+        "hive_seeds": {},
     }
     assert order.prompt_ref == store.key(slug, f"launch-prompt:{order.execution_id}")
     assert 0 < store.redis.pttl(order.prompt_ref) <= 300000
@@ -208,7 +213,13 @@ def request_for(setup, name=None, lane="eng", route="subscription"):
         setup.config,
         lane,
         name,
-        {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch, "route_kind": route},
+        {
+            "id": "task",
+            "title": "Launch on a hive",
+            "seat": record.seat,
+            "controller_epoch": setup.held.epoch,
+            "route_kind": route,
+        },
     )
 
 
@@ -390,7 +401,7 @@ def write_hive(setup, **changes):
 
 
 def live_order(setup, route="subscription"):
-    from scripts.hive.orders import Consumer
+    from scripts.hive.orders import Consumer, carried
     from scripts.swarm import lease
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -400,7 +411,7 @@ def live_order(setup, route="subscription"):
     request = request_for(setup, route=route)
     selected = setup.launcher.select(setup.config, "eng", request.task)
     order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
-    setup.store.redis.set("prompt", json.dumps(request.task))
+    setup.store.redis.set("prompt", json.dumps(carried("fixture", request.task, "opening")))
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
     runtime = Mock()
