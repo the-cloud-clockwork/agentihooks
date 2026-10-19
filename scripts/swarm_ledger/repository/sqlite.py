@@ -54,9 +54,12 @@ RELEASE = "DELETE FROM relay_journal WHERE kind=? AND slug=? AND revision BETWEE
 DROP = "DELETE FROM relay_journal WHERE kind=? AND slug=?"
 REGISTRIES = "SELECT slug,path,value FROM registry WHERE path=? ORDER BY slug,path"
 ADD_REGISTRY = "INSERT INTO registry VALUES (?,?,?)"
+DROP_REGISTRIES = "DELETE FROM registry WHERE path=?"
 TABLES_SQL = "SELECT name FROM sqlite_master WHERE type='table'"
 FENCES = "CREATE TABLE IF NOT EXISTS hosted_fences (slug TEXT PRIMARY KEY, destination TEXT NOT NULL)"
 FENCED = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*')"
+UNFENCE = "DELETE FROM hosted_fences WHERE destination=?"
+FROZEN = "SELECT 1 FROM hosted_fences WHERE slug='*'"
 FENCE_DESTINATIONS = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*') OR ?='*'"
 TABLE_ID = re.compile(r"[a-z_]+\Z")
 # a fenced ledger's last relay must still be able to hold its revision
@@ -234,6 +237,10 @@ def read_document(directory, slug: str) -> dict | None:
             return None
 
 
+def registry_rows(connection, slug: str) -> list:
+    return [list(row) for row in connection.execute(REGISTRIES, (slug,))]
+
+
 def without_events(state: dict) -> dict:
     """The document as its rows hold it: the event log lives in its own table."""
     return {**state, "_meta": {key: value for key, value in state["_meta"].items() if key != "events"}}
@@ -241,12 +248,20 @@ def without_events(state: dict) -> dict:
 
 def fenced(directory: Path, slug: str) -> bool:
     """Whether the hosted migration fenced this ledger, or every ledger, in the folder's database."""
+    return fence_row(directory, FENCED, (slug,))
+
+
+def frozen(directory: Path) -> bool:
+    return fence_row(directory, FROZEN, ())
+
+
+def fence_row(directory: Path, query: str, parameters: tuple) -> bool:
     with read_only(directory) as connection:
         exists = (
             connection is not None
             and connection.execute("SELECT 1 FROM sqlite_master WHERE name='hosted_fences'").fetchone()
         )
-        return bool(exists and connection.execute(FENCED, (slug,)).fetchone())
+        return bool(exists and connection.execute(query, parameters).fetchone())
 
 
 class Transaction:
@@ -273,6 +288,17 @@ class Transaction:
 
     def add_registries(self, rows: list) -> None:
         self.connection.executemany(ADD_REGISTRY, rows)
+
+    def replace_registries(self, slug: str, rows: list) -> None:
+        self.connection.execute(DROP_REGISTRIES, (slug,))
+        self.add_registries(rows)
+
+    def registries(self, slug: str) -> list:
+        return registry_rows(self.connection, slug)
+
+    def purge(self, slug: str) -> None:
+        self.repository.purge(slug, self.connection)
+        self.connection.execute(DROP_REGISTRIES, (slug,))
 
     def export(self, slug: str) -> dict:
         return self.repository._export(self.connection, slug)
@@ -302,6 +328,10 @@ class Transaction:
     def fence(self, slug: str, destination: str) -> None:
         self.connection.execute("INSERT OR IGNORE INTO hosted_fences VALUES (?,?)", (slug, destination))
         self.connection.commit()
+
+    def unfence(self, destination: str) -> None:
+        self.connection.execute(FENCES)
+        self.connection.execute(UNFENCE, (destination,))
 
 
 class Snapshot:
@@ -339,7 +369,11 @@ class Snapshot:
         return self.repository._export(self.connection, slug)
 
     def registries(self, slug: str) -> list:
-        return [list(row) for row in self.connection.execute(REGISTRIES, (slug,))]
+        return registry_rows(self.connection, slug)
+
+    def token(self, slug: str) -> str | None:
+        row = self.connection.execute(TOKEN, (slug,)).fetchone()
+        return None if row is None else row[0]
 
 
 class SQLiteLedgerRepository:

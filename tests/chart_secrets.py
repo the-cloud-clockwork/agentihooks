@@ -55,20 +55,34 @@ def is_controller(document: dict, container: dict) -> bool:
     )
 
 
-def entry_problems(documents: list, entry: dict, others: set[str]) -> list[str]:
+def is_ledger(document: dict, container: dict) -> bool:
+    return (
+        document["kind"] == "StatefulSet"
+        and document["metadata"]["name"].endswith("-ledger")
+        and container["name"] == "ledger"
+    )
+
+
+OWNERS = {"controller": is_controller, "ledger": is_ledger}
+
+
+def entry_problems(documents: list, entry: dict, others: set[str], role: str) -> list[str]:
     secret, held, problems = entry["secretName"], [], []
     for document, pod, container in containers(documents):
         found = references(pod, container, secret)
-        if found and is_controller(document, container):
+        if found and OWNERS[role](document, container):
             held += [item for item in found if item.get("name") not in others]
         elif found:
             owner = f"{document['kind']} {document['metadata']['name']} container {container['name']}"
-            problems.append(f"{owner} references the controller only Secret {secret}")
+            problems.append(f"{owner} references the {role} only Secret {secret}")
     if held != [expected_reference(entry)]:
-        problems.append(
-            f"the controller container references {secret} as {held}, expected {[expected_reference(entry)]}"
-        )
+        problems.append(f"the {role} container references {secret} as {held}, expected {[expected_reference(entry)]}")
     return problems
+
+
+def role_problems(documents: list, entries: list, role: str) -> list[str]:
+    names = {entry["name"] for entry in entries}
+    return [problem for entry in entries for problem in entry_problems(documents, entry, names - {entry["name"]}, role)]
 
 
 def holds(volume: dict, secret: str) -> bool:
@@ -118,12 +132,12 @@ def main(values_paths: list[str], rendered: str) -> list[str]:
     for path in values_paths:
         values = merged(values, yaml.safe_load(Path(path).read_text()))
     entries = values.get("controller", {}).get("secretEnv") or []
+    ledger = values.get("ledger", {}).get("secretEnv") or []
     ca = values.get("controller", {}).get("terminalCa") or {}
-    if not entries and not ca.get("secretName"):
-        return ["controller.secretEnv and controller.terminalCa name no Secret to check"]
+    if not entries and not ledger and not ca.get("secretName"):
+        return ["controller.secretEnv, ledger.secretEnv and controller.terminalCa name no Secret to check"]
     documents = [d for d in yaml.safe_load_all(rendered) if d]
-    names = {entry["name"] for entry in entries}
-    problems = [problem for entry in entries for problem in entry_problems(documents, entry, names - {entry["name"]})]
+    problems = role_problems(documents, entries, "controller") + role_problems(documents, ledger, "ledger")
     return problems + (terminal_ca_problems(documents, ca) if ca.get("secretName") else [])
 
 
@@ -133,4 +147,4 @@ if __name__ == "__main__":
         print(problem, file=sys.stderr)
     if found:
         sys.exit(1)
-    print("only the controller container references each Secret reserved for it")
+    print("only the owning container references each Secret reserved for it")

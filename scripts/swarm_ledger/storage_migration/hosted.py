@@ -128,6 +128,14 @@ def write_files(folder: Path, files: dict) -> None:
             temporary.replace(path)
 
 
+def unseeded(state: dict) -> tuple[dict, dict | None]:
+    stored = json.loads(encode(state))
+    seeds = stored["_meta"].get("seeds")
+    if seeds is not None:
+        stored["_meta"]["seeds"] = {}
+    return stored, seeds
+
+
 def restore(repo: LedgerRepository, snapshot: dict) -> dict:
     slug, state = snapshot["slug"], snapshot["state"]
     if snapshot["version"] != 1 or not repo.domain.SLUG_RE.fullmatch(slug):
@@ -141,10 +149,7 @@ def restore(repo: LedgerRepository, snapshot: dict) -> dict:
                 raise ValueError("hosted ledger conflict")
             return manifest(snapshot)
         write_files(repo.directory / f"{slug}.media", files)
-        stored = json.loads(encode(state))
-        seeds = stored["_meta"].get("seeds")
-        if seeds is not None:
-            stored["_meta"]["seeds"] = {}
+        stored, seeds = unseeded(state)
         import secrets
 
         transaction.insert(slug, stored, seeds, secrets.token_urlsafe())
