@@ -290,6 +290,14 @@ def test_host_sample_and_quota_unknown_values_are_explicit():
     }
 
 
+def test_host_sample_carries_swap_in_use_and_the_measured_agent_figure():
+    sample = HostSample(4.0, 2, 1024, 3, swap_used_mb=3700, swap_total_mb=4096, agent_mb=430, measured_agents=2)
+    host = metrics_swarm.host_row(SLUG, NOW, sample, {})
+
+    assert [host[key] for key in ("swap_used_mb", "swap_total_mb", "agent_mb")] == [3700, 4096, 430]
+    assert {"swap_used_mb", "swap_total_mb", "agent_mb"} <= {column for column, _ in metrics_swarm.HOST.columns}
+
+
 def test_classifier_calls_are_host_scoped_with_stable_source_ids():
     call = {
         "ts": "2027-01-15T08:00:00+00:00",

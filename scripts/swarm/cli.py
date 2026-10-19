@@ -178,6 +178,7 @@ SCALING_KEYS = {
     "load-high": "load_high",
     "load-low": "load_low",
     "memory-per-agent": "memory_per_agent_mb",
+    "swap-full-share": "swap_full_share",
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
@@ -883,7 +884,8 @@ def scaling_value(key, value):
     try:
         return float(value)
     except ValueError:
-        raise SwarmError(f"{key} takes a number, the one minute load per CPU") from None
+        what = "the share of swap in use" if key == "swap-full-share" else "the one minute load per CPU"
+        raise SwarmError(f"{key} takes a number, {what}") from None
 
 
 def api_address(value):
@@ -969,7 +971,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, api-url=URL, codex-inbox-transport=legacy|app_server "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -1002,6 +1004,7 @@ def cmd_set(store, args):
                 "load_high": config.load_high,
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
+                "swap_full_share": config.swap_full_share,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},

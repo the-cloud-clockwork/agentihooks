@@ -15,6 +15,7 @@ import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import (  # noqa: E402
     PAGE_URL,
@@ -170,7 +171,7 @@ def test_an_asset_edit_changes_the_version_the_shell_links(tmp_path):
     sheet = tmp_path / "ledger.css"
     sheet.write_text("body{}")
     assets = {**core.static_assets(), "css/ledger.css": sheet}
-    with patch.object(core, "static_assets", return_value=assets):
+    with patch.object(page_assets, "static_assets", return_value=assets):
         assert core.page_version() != before
 
 
