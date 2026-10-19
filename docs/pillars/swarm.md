@@ -437,7 +437,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
-| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item, which for a red Actions run names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), records branch and head on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. |
+| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item, which for a red Actions run names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), records branch and head on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, the task's own fork from `origin/dev`), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
@@ -734,6 +734,142 @@ The regression reproduced a push rejected against the predecessor before the
 fix ([red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38723619720));
 the corrected publication and continuation cases passed afterward
 ([green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38725568065)).
+
+## One push per pull request
+
+Every push to an open pull request starts a new check run and cancels the one
+in progress. The `one-push` gate keeps a swarm worker's pull request to one
+push in the normal case: the pull request opens only after review closes and
+the reviewed work is on origin, and no push lands while its checks still run
+unless one is already red. Before the gate, pushes to open pull requests while
+their checks ran had cancelled thirty nine runs.
+
+The gate ships as the condition `pre-bash.git+bash.gh-one_push.py` in the
+`engineer`, `cicd` and `qa` package roles. It runs on every Bash call whose
+command runs `git` or `gh`, and acts only on calls that run `git push`,
+`gh pr create` or `gh pr ready`, including inside a chain such as
+`cd <checkout> && git push`. The directory it checks is the session's working
+folder joined with the call's `workdir` and any `cd` or `git -C` in the command.
+
+### Who it applies to
+
+The gate decides only for a session pinned to a swarm task: it has a swarm and
+an agent name (`AGENTIHOOKS_SWARM`, `AGENTIHOOKS_AGENT_NAME`, or the session
+registry), a task (`AGENTIHOOKS_SWARM_TASK`), and its agent name is in the `eng`
+or `ci` lane. The master, planners, the operator's own sessions and any session
+outside a swarm pass every call.
+
+### Opening a pull request after review
+
+`gh pr create` and `gh pr ready` are refused until both of these hold:
+
+- **Both reviewers ran for the task.** The `standards-reader` and `spec-reader`
+  sub-agents were each launched for the current task. The `subagents` gate
+  counts a launch through the Agent or Task tool when its `name` or
+  `subagent_type` is one of those two. This part applies to Claude sessions
+  only (`AGENTIHOOKS_TARGET` unset or `claude`); Codex and Copilot sessions skip
+  it.
+- **The checkout is saved on origin.** `git status` in the checkout shows no
+  modified tracked files, and `HEAD` has no commits missing from every
+  `origin` remote branch. Untracked files are ignored. A folder that is not a
+  git checkout passes.
+
+A draft stays open for the block path: `gh pr create --draft` (or `-d`) and
+`gh pr ready --undo` pass. The refusal names what is owed and the draft path:
+
+```text
+open the pull request once review closes, so one push carries it: launch the
+spec-reader sub-agent on the committed diff and close its findings; commit and
+push the uncommitted changes. A draft pull request for a block stays allowed:
+gh pr create --draft, then agentihooks swarm <swarm> block "<why>"
+```
+
+The usual order for a worker is therefore:
+
+```bash
+agentihooks swarm <swarm> publish --message "<commit message>" -- <files>
+agentihooks swarm <swarm> review        # start each review round
+# launch the standards-reader and spec-reader sub-agents, fix every finding,
+# publish the fixes, repeat for at most three rounds
+gh pr create --base dev --title "<title>" --body "<body>"
+agentihooks swarm <swarm> pr <pull request url>
+```
+
+### Pushing while checks run
+
+A `git push` from a task session is refused when all of these hold:
+
+1. The task records a pull request URL (`swarm pr`).
+2. The push goes to that pull request's repository. The remote is the first
+   positional argument, as a URL or a remote name, and `origin` when none is
+   given. A push to another GitHub repository passes.
+3. The push writes the task's recorded branch. Each refspec's destination
+   counts; no refspec, or `HEAD`, means the current branch. A task with no
+   recorded branch skips this test.
+4. The pull request is open and no check is red.
+5. The pull request waits in the merge queue, or its checks are running. Checks
+   run while a current workflow suite has not completed, a check result is
+   pending, or a required check has not reported yet.
+
+`git push --dry-run` (`-n`) and `git push --delete` (`-d`) always pass. A red
+check lifts the refusal at once, so the agent can push its fix without waiting
+for the other checks to finish.
+
+While checks run, the refusal points to a checked wait:
+
+```text
+checks still run on <pull request url> and none is red: a push now cancels them.
+Wait with agentihooks swarm <swarm> wait --on checks <pull request url>, then push
+once they resolve, or as soon as a check goes red
+```
+
+```bash
+agentihooks swarm <swarm> wait --on checks <pull request url>
+# the tick ends the wait when the checks resolve; push then
+git push
+```
+
+While the pull request waits in the merge queue, a push would drop it from the
+queue, so the refusal asks for an explicit dequeue first:
+
+```bash
+agentihooks swarm <swarm> merge dequeue <pull request url>
+git push
+```
+
+### Configuration
+
+The gate's swarm mode is set by the operator or the master, on the ledger
+page's Gates controls or from the command line:
+
+```bash
+agentihooks swarm <swarm> set one-push-gate=deny        # default: refuse and log
+agentihooks swarm <swarm> set "one-push-gate=log only"  # let the call through, log the would-be refusal
+agentihooks swarm <swarm> set one-push-gate=skip        # do not run the check
+```
+
+`swarm status` reports the mode in `gate_modes`. Inside a swarm the gate reads
+only the swarm config; `AGENTIHOOKS_GATE_ONE_PUSH` picks the mode only outside a
+swarm or when the config cannot be read. To let one agent past the gate for an
+hour, the operator or the master runs `agentihooks swarm <swarm> lift <agent>
+one-push`, or the operator types `lift the one-push gate` in that agent's pane.
+Every refusal, logged would-be refusal and lift is a row in the swarm gate log.
+A gate that raises lets the call through and records a `fail-open` row.
+
+### Troubleshooting
+
+| Symptom | Cause and action |
+|---|---|
+| `gh pr create` refused although both readers reviewed | The readers were launched under another name. Launch them with `name` or `subagent_type` set to `standards-reader` and `spec-reader`. A launch is counted only while the `subagents` gate runs: with `subagents-gate=skip` no reader is counted and every non draft open is refused, so set `one-push-gate` to `log only` or `skip` too. |
+| Refused for `uncommitted changes` with nothing to commit | A tracked file changed in the checkout the command runs in. Check `git status` in the folder named by `workdir`, `cd` or `git -C`, not the session's starting folder. |
+| Refused for `commits not on origin` | `HEAD` holds a commit no `origin` branch has. Publish it with `swarm publish`, then open the pull request. |
+| A push is refused although the checks look finished | A required check has not reported yet, or a workflow suite of the newest commit is still queued. Wait with `--on checks`. |
+| A push to another branch or repository is refused | The task's recorded branch matches the refspec destination, or the remote resolves to the pull request's repository. Name the destination explicitly. |
+| The gate never refuses | The session is not pinned to an `eng` or `ci` task, the mode is `skip` or `log only`, or a lift holds. Check `swarm status --json` for `gate_modes` and the agent's `gates`. |
+
+The gate was delivered in [pull request 2116](https://github.com/the-cloud-clockwork/agentihooks/pull/2116);
+[pull request 4736](https://github.com/the-cloud-clockwork/agentihooks/pull/4736)
+made it count commits in the folder the command runs in.
 
 ## Plan tracing for promotion fixer tasks
 
