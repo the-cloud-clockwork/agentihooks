@@ -21,6 +21,7 @@ from scripts.doctor import (
     runtime,
     spawn_read,
     spawns,
+    tick_delivery,
     traces,
     traces_read,
 )
@@ -91,6 +92,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
 
     found = {
         "runtime storage": lambda: runtime.findings(now_ms, env),
+        "scheduled tick": lambda: tick_delivery.read(),
         "health": lambda: health.findings(
             read.health_records(store.redis, slug), now_ms, reported=reported(store, ledger, slug)
         ),

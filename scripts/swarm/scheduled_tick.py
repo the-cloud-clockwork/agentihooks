@@ -1,5 +1,6 @@
 """The swarm minute tick as an agentihooks scheduler cron, run by a holder that keeps one tick per machine."""
 
+import json
 import os
 import shutil
 import subprocess
@@ -20,6 +21,8 @@ JOURNAL = "agentihooks-swarm"
 LIVE = ("active", "pending")
 TIMEOUT_S = 540
 STOP_S = 90
+DELIVERED = "swarm-tick-delivered"
+FRESH_S = 180
 KEEP = ("HOME", "LANG", "LOGNAME", "SHELL", "USER", "XDG_RUNTIME_DIR", "XDG_DATA_DIRS")
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -56,6 +59,23 @@ def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
             stderr=log,
             start_new_session=True,
         )
+    record(redis, ROOT, event["fired_at"])
+
+
+def record(redis: "Redis", root: Path | str, at: float) -> None:
+    redis.set(Scheduler(redis).key(DELIVERED), json.dumps({"root": str(root), "at": at}))
+
+
+def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
+    raw = scheduler.redis.get(scheduler.key(DELIVERED))
+    if not raw:
+        return "no scheduler has delivered a swarm tick yet"
+    delivered = json.loads(raw)
+    if Path(delivered["root"]).resolve() != Path(installed).resolve():
+        return f"the last swarm tick was delivered by a scheduler running {delivered['root']}, not the installed {installed}"
+    if now - delivered["at"] > FRESH_S:
+        return f"the last swarm tick was delivered {int(now - delivered['at'])} seconds ago"
+    return ""
 
 
 def command(binary: str) -> list[str]:
