@@ -78,7 +78,7 @@ def _walk(body: list):
 def _absolute(module: str, is_package: bool, node: ast.ImportFrom, modules: dict) -> str:
     package = module if is_package else module.rpartition(".")[0]
     if not node.level:
-        base = node.module or ""
+        base = node.module
         sibling = f"{package}.{base}"
         return sibling if sibling.partition(".")[0] in PACKAGES and sibling in modules else base
     parts = package.split(".")
@@ -142,7 +142,8 @@ class Program:
                 self._attribute(unit, node, bound)
 
     def _attribute(self, unit: Unit, node: ast.Attribute, bound: dict) -> None:
-        unit.dotted.add(_dotted(node))
+        if dotted := _dotted(node):
+            unit.dotted.add(dotted)
         base = _tail(node.value)
         if unit.owner and base in OWN:
             unit.own.add(node.attr)

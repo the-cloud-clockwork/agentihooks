@@ -22,7 +22,7 @@ class _Recorder(redis.Redis):
     def execute_command(self, *args, **options):
         name = str(args[0]).upper()
         self.sent.append(name)
-        return 1 if name in ("SET", "EVALSHA") else None
+        return True if name in ("SET", "EVALSHA") else None
 
 
 class _Subscriber(PubSub):

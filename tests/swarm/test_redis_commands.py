@@ -214,6 +214,7 @@ def test_a_method_no_sample_call_completes_is_refused(monkeypatch):
 
 def test_lua_scripts_name_the_commands_they_call():
     assert lua("return redis.call('incrby', KEYS[1], 1) + redis.call( \"GET\", KEYS[1])") == {"INCRBY", "GET"}
+    assert lua("redis.call('HSET', KEYS[1], 'field', ARGV[1])") == {"HSET"}
 
 
 def test_only_commands_reached_from_the_entry_point_are_issued(program):
@@ -245,6 +246,49 @@ def test_a_method_read_on_an_object_of_no_known_class_reaches_any_reached_class(
 )
 def test_imports_resolve_relative_sibling_aliased_and_dotted(program, entry, commands):
     assert set(program.commands(program.reach((entry,)))) == commands
+
+
+CYCLE = {
+    "scripts/__init__.py": "",
+    "scripts/a.py": "from scripts.b import f\n",
+    "scripts/b.py": "from scripts.a import f\n",
+    "scripts/e.py": "def go(redis):\n    redis.llen('k')\n",
+    "scripts/c.py": """
+from scripts.a import f
+
+
+def main():
+    import scripts.e
+
+    f()
+    scripts.e.go()
+    client().hgetall("k")
+    factory().thing.hkeys("k")
+    bound(None)
+
+
+def bound(self):
+    self.go()
+
+
+def client():
+    return None
+""",
+}
+
+
+def test_cyclic_reexports_nested_dotted_imports_call_receivers_and_unbound_self_resolve(tmp_path):
+    for name, text in CYCLE.items():
+        (tmp_path / name).write_text(text)
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    reached = program.reach(("scripts.c:main",))
+    assert program.commands(reached) == {
+        "LLEN": {"scripts.e:go"},
+        "HGETALL": {"scripts.c:main"},
+        "HKEYS": {"scripts.c:main"},
+    }
+    assert program.units["scripts.c:main"].dotted == {"scripts.e", "scripts.e.go"}
+    assert program.units["scripts.c:bound"].reads == {"go"}
 
 
 def test_an_entry_point_missing_from_the_code_is_refused(program):
