@@ -106,9 +106,9 @@ def test_an_empty_front_door_seat_logs_a_respawn_at_ten_minutes_in_log_only_mode
     (finding,) = night_watch.findings(store, SLUG)
     assert finding.summary == "The front door master seat has been empty for 10 minutes"
     rows = gate_log.recent(SLUG, None, tmp_path)
-    assert [(row["gate"], row["kind"], row["tool"]) for row in rows] == [
-        ("nightwatch", "observe", "respawn"),
-        ("nightwatch", "observe", "alert seat"),
+    assert [(row["gate"], row["kind"], row["tool"], row["agent"], row["at"]) for row in rows] == [
+        ("nightwatch", "observe", "respawn", "swarm", NOW + 10 * MINUTE),
+        ("nightwatch", "observe", "alert seat", "swarm", NOW + 10 * MINUTE),
     ]
     assert run(store, rig, NOW + 11 * MINUTE) == []
 
@@ -283,11 +283,12 @@ def test_a_lane_without_configured_seats_counts_as_zero_seats_at_the_cap(store, 
 def test_ready_work_with_a_quota_placement_names_no_quota_hold(store, monkeypatch):
     rig = Rig()
     held_master(store, rig.runtime)
+    store.put_agent(SLUG, AgentRecord("e1", "eng", "engineer", state="finished", started_at=NOW - MINUTE))
     ready(monkeypatch)
     decide(store, configured={"eng": 1, "ci": 0, "plan": 0}, placements={"eng": ["acct"]}, reason="eng is placed")
     until(store, rig, NOW, NOW + 30 * MINUTE)
     (finding,) = night_watch.findings(store, SLUG)
-    assert finding.evidence[0] == "Hold: no named hold"
+    assert finding.evidence == ("Hold: no named hold", "Evidence: eng is placed")
 
 
 def test_a_quota_hold_without_a_reason_says_no_lane_is_placed(store, monkeypatch):
@@ -380,8 +381,9 @@ def test_a_logged_merge_stall_sends_no_email(store, monkeypatch, tmp_path):
     assert [row["tool"] for row in gate_log.recent(SLUG, None, tmp_path)] == ["alert merge"]
 
 
-def test_the_failing_streak_counts_newest_failures_past_cancelled_runs(monkeypatch):
+def test_the_failing_streak_counts_newest_failures_past_cancelled_and_skipped_runs(monkeypatch):
     runs = [
+        {"id": 6, "conclusion": "skipped"},
         {"id": 5, "conclusion": "cancelled"},
         {"id": 4, "conclusion": "failure"},
         {"id": 3, "conclusion": "timed_out"},
@@ -440,6 +442,14 @@ def test_the_git_user_lookup_gives_up_after_five_seconds(monkeypatch):
     assert calls == [
         (["git", "-C", "/repo", "config", "user.email"], {"capture_output": True, "text": True, "timeout": 5})
     ]
+
+
+def test_a_failed_git_user_lookup_gives_no_address(monkeypatch):
+    def fails(argv, **kwargs):
+        raise OSError("no git")
+
+    monkeypatch.setattr(operator_email.subprocess, "run", fails)
+    assert operator_email._git_email("/repo") == ""
 
 
 def test_night_watch_findings_reach_the_swarm_health_findings_the_doctor_reads(env):
@@ -522,6 +532,17 @@ def test_a_stopped_swarm_closes_its_spawn_alert(store):
     store.update(SLUG, state="paused")
     plant(store, spawn=RAISED)
     assert closes(store, Rig(), "spawn", "the swarm is not running") is None
+
+
+def test_an_alert_already_done_is_never_closed_again(store):
+    rig = Rig()
+    store.update(SLUG, state="paused")
+    plant(store, spawn=RAISED)
+    doc = open_alert("spawn")
+    doc["alerts"].insert(0, {"id": "a0", "source": "spawn", "state": "done"})
+    outcome = night_watch.CLEARED.format(what="the swarm is not running")
+    assert run(store, rig, NOW, doc) == [f"closed the spawn alert: {outcome}"]
+    assert rig.ledger.closed == [("a1", outcome)]
 
 
 def test_ready_work_gone_closes_the_spawn_alert(store):
