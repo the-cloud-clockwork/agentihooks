@@ -91,5 +91,5 @@ def test_a_host_without_the_agentihooks_home_starts_nothing_and_keeps_the_minute
 
 def test_the_home_defaults_to_the_agentihooks_folder_in_the_user_home(monkeypatch, tmp_path):
     monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
-    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setattr(lost_runner.Path, "home", lambda: tmp_path)
     assert lost_runner.home() == tmp_path / ".agentihooks"
