@@ -37,11 +37,11 @@ For heartbeat handling, reconnect examples and the live replay regression, see
 
 Every comment dropdown on the ledger page opens on its newest eight comments:
 the comments under a task, a phase, a follow up, a question and the comments
-on an operator note. A **Show N older comments · M left** control sits under the list. Each
-click adds the next ten older comments above the ones already shown; the last
-click shows what remains and the
-control disappears. Once an item has comments, the summary line reads **Comments · N** and counts
-every comment that is not deleted.
+on an operator note. A **Show N older comments · M left** control sits under
+the list. Each click adds the next ten older comments above the ones already
+shown; the last click shows what remains and the control disappears. The
+summary line reads **Comments**, followed by **· N** once the item has
+comments, where N counts every comment that is not deleted.
 
 | Comments on the item | Shown on open | Control |
 |---|---|---|
