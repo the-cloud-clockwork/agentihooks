@@ -19,6 +19,9 @@ def test_first_snapshot_does_not_serialize_a_full_view_to_compare_it_with_null(b
     show(page, shell_html(), ledger=ledger_state({"title": "Snapshot", "snapshotMarker": True}))
     assert page.locator("#title").text_content() == "Snapshot"
     assert page.evaluate("window.snapshotComparisons") == 0
+    with page.expect_request("**/events"):
+        page.wait_for_timeout(1500)
+    assert page.evaluate("window.snapshotComparisons") == 0
     page.close()
 
 
