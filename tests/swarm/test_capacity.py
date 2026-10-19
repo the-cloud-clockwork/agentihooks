@@ -609,6 +609,50 @@ def test_a_cached_claude_record_without_its_token_or_a_live_session_is_pruned(mo
     assert [(row.name, row.state, row.sessions) for row in rows] == [("busy", "UNKNOWN", 1), ("mail", "OPEN", 0)]
 
 
+def test_claude_caps_come_from_the_shared_cache_whatever_tokens_the_session_holds(monkeypatch, tmp_path):
+    from scripts import operator_env
+    from scripts.swarm import quota_handoff
+
+    block = {"AH_CC_TOKEN_a": "fake-a", "AH_CC_TOKEN_b": "fake-b"}
+    monkeypatch.setattr(operator_env, "block_tokens", lambda: dict(block))
+    results = [
+        balancer.ProbeResult(
+            "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=10)
+        ),
+        balancer.ProbeResult(
+            "b", "allowed", "NORMAL", 50, balancer.QuotaWindow(used=50), balancer.QuotaWindow(used=20)
+        ),
+    ]
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "version": 1,
+            "modes": {
+                "normal": {
+                    "accounts": {
+                        f"AH_CC_TOKEN_{r.account}": {"observed_at": 100, "result": balancer._result_data(r)}
+                        for r in results
+                    }
+                }
+            },
+        },
+    )
+    monkeypatch.setattr(capacity.account_sessions, "sessions_by_account", lambda **_: {"a": 1})
+    monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
+    home = {"AGENTIHOOKS_HOME": str(tmp_path)}
+
+    def seats(env):
+        return [(row.name, row.state, row.cap, capacity.free_seats(row)) for row in capacity.accounts(env, 100)]
+
+    tokenless = seats(home)
+    assert tokenless == [("a", "OPEN", 6, 5), ("b", "OPEN", 4, 4)]
+    assert seats({**home, "AH_CC_TOKEN_a": "fake-a"}) == tokenless
+    assert seats({**home, **block}) == tokenless
+    rows = capacity.accounts({**home, "AGENTIHOOKS_TARGET": "codex"}, 100)
+    found = quota_handoff.successor(rows, ("claude",), quota_handoff.Thresholds.from_env({}))
+    assert found.name == "a"
+
+
 def test_the_reason_leads_with_lanes_held_by_missing_ready_work_ahead_of_unknown_accounts():
     config = SwarmConfig("sw", "/repo", max_eng=12, max_ci=1, max_plan=2)
     stale = capacity.Account("claude", "busy", "UNKNOWN", 1, None, None)
