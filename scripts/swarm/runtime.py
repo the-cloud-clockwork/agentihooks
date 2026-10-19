@@ -151,6 +151,12 @@ def pane_target(agent):
     return agent.pane_id or herdr_target(agent.name)
 
 
+def _titled(slug, lane, seat):
+    from scripts.swarm_v2 import masters
+
+    return ["--title", masters.title(slug, seat)] if lane == MASTER else []
+
+
 def _launch_records(name):
     from scripts import herdr_panes
 
@@ -603,6 +609,7 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
+        argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
@@ -704,6 +711,7 @@ class HerdrRuntime:
             agent.overlays,
         )
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
+        argv += _titled(config.slug, agent.lane, agent.seat)
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
             agent.model or defaults.model,

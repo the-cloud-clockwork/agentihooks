@@ -93,6 +93,7 @@ class AgentSpec:
     transport: str = ""
     seat: str = ""
     previous_execution: str = ""
+    title: str = ""
 
 
 APP_SERVER = "app_server"
@@ -385,7 +386,7 @@ def _agent_command(
         "--agentihooks-report",
         str(report),
         "--name",
-        name,
+        spec.title or name,
         *(["--resume", spec.resume] if spec.resume else []),
         *_model_args("claude", agent_args, environ),
         *agent_args,
@@ -672,6 +673,7 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Open a routed Claude session in a new terminal")
     parser.add_argument("--dir", default="", help="Target directory; relative paths resolve below the configured base")
     parser.add_argument("--name", default="", help="Claude session and terminal name")
+    parser.add_argument("--title", default="", help="Display name and herdr tab label in place of the name")
     prompt = parser.add_mutually_exclusive_group()
     prompt.add_argument("--prompt", default="", help="Opening Claude prompt")
     prompt.add_argument("--prompt-file", default="", help="Read the opening prompt from this file")
@@ -758,7 +760,7 @@ def _select_host(requested: str, environ: dict[str, str]) -> tuple[str, bool]:
 def _start_herdr(launcher: Path, directory: Path, name: str, args, agent: str, environ: dict[str, str]) -> list[str]:
     started = herdr_host.ensure_server(environ)
     env = {"HERDR_AGENT": agent, **({PROMPT_AFTER_START: "1"} if _held_prompt(launcher, agent) else {})}
-    placed = herdr_host.open_pane(directory, name, env, args.placement, args.workspace, environ)
+    placed = herdr_host.open_pane(directory, args.title or name, env, args.placement, args.workspace, environ)
     herdr_panes.record(placed, "init-agent", name, environ, int(time.time() * 1000))
     herdr_host.run(placed.pane_id, launcher, environ)
     return [
@@ -906,6 +908,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 transport=_transport(args, agent),
                 seat=args.seat,
                 previous_execution=args.previous_execution,
+                title=args.title,
             ),
         )
         host, explicit = _select_host(args.host, active_env)
