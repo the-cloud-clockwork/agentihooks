@@ -67,10 +67,14 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
             value = self._field(field)
             if value is None:
                 return self._answer(400, {"error": bad_body})
+            from redis.exceptions import RedisError
+
             try:
                 return self._answer(200, getattr(auth, operation)(redis, value, redis_url))
             except auth.HiveError as exc:
                 return self._answer(403, {"error": str(exc)})
+            except RedisError as exc:
+                return self._answer(503, {"error": f"the hive Redis did not answer ({exc})"})
 
         def _field(self, field):
             try:
@@ -172,4 +176,14 @@ def make_server(
             context.load_cert_chain(*tls)
         except (OSError, ssl.SSLError) as exc:
             raise auth.HiveError(f"the TLS certificate or key cannot be loaded ({exc})") from exc
-    return JoinServer((host, port), _handler(redis, redis_url, context))
+    return JoinServer((host, port), _handler(bounded(redis), redis_url, context))
+
+
+def bounded(redis: "Redis") -> "Redis":
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    redis.get_connection_kwargs().update(socket_timeout=REDIS_TIMEOUT_S, socket_connect_timeout=REDIS_TIMEOUT_S)
+    redis.set_retry(Retry(NoBackoff(), 0))
+    redis.connection_pool.reset()
+    return redis

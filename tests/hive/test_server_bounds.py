@@ -306,17 +306,40 @@ def test_a_join_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound
     import redis
 
     monkeypatch.setattr(server, "MAX_HANDLERS", 1)
-    monkeypatch.setattr(server, "REDIS_TIMEOUT_S", 0.5)
+    monkeypatch.setattr(server, "REDIS_TIMEOUT_S", 1)
     httpd = server.make_server(redis.Redis.from_url(stalled_redis, decode_responses=True), PUBLIC, "127.0.0.1", 0)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
     try:
         started = time.monotonic()
-        assert _join(httpd.server_address[1], "any") == 503
+        with socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5) as conn:
+            conn.sendall(b'POST /hive/join HTTP/1.0\r\nContent-Length: 15\r\n\r\n{"code": "any"}')
+            reply = b""
+            while chunk := conn.recv(65536):
+                reply += chunk
         while httpd._admitted and time.monotonic() - started < 5:
             time.sleep(0.05)
 
-        assert time.monotonic() - started < server.REDIS_TIMEOUT_S + 1
+        assert time.monotonic() - started < server.REDIS_TIMEOUT_S * 2
+        assert int(reply.split()[1]) == 503
+        assert json.loads(reply.partition(b"\r\n\r\n")[2])["error"].startswith("the hive Redis did not answer (")
         assert not httpd._admitted
     finally:
         httpd.shutdown()
         httpd.server_close()
+
+
+def test_the_join_service_redis_client_drops_connections_made_before_its_bound(admin):
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    admin.set_retry(Retry(NoBackoff(), 3))
+    early = admin.connection_pool.get_connection()
+    admin.connection_pool.release(early)
+
+    with server.make_server(admin, PUBLIC, "127.0.0.1", 0):
+        late = admin.connection_pool.get_connection()
+
+    assert late is not early
+    assert (late.socket_timeout, late.socket_connect_timeout) == (server.REDIS_TIMEOUT_S, server.REDIS_TIMEOUT_S)
+    assert late.retry.get_retries() == 0
+    assert admin.get_retry().get_retries() == 0
