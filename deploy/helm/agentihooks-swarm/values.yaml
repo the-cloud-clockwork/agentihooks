@@ -184,6 +184,27 @@ controller:
       memory: 512Mi
       ephemeral-storage: 256Mi
 
+# The stale tick watcher, a process apart from the controller tick: one alert per stale episode to every seat through
+# the Redis inbox and a resolved notice when a fresh pass lands. The controller liveness probe restarts the tick.
+tickWatch:
+  enabled: true
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: anton.io/capacity-type
+                operator: DoesNotExist
+  tolerations: []
+  resources:
+    requests:
+      cpu: 10m
+      memory: 96Mi
+      ephemeral-storage: 16Mi
+    limits:
+      memory: 256Mi
+      ephemeral-storage: 64Mi
+
 workers:
   replicas: 0
   maxAgents: 1

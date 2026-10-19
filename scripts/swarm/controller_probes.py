@@ -2,7 +2,7 @@ import json
 import urllib.request
 from collections.abc import Callable, Mapping
 
-from scripts.swarm import lease
+from scripts.swarm import lease, tick_heartbeat
 from scripts.swarm.store import RedisStore
 
 PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
@@ -15,16 +15,35 @@ def live(
     store: RedisStore,
     fetch: Callable = urllib.request.urlopen,
     owner: str | None = None,
+    age_ms: Callable[[], int] | None = None,
 ) -> int:
     stale = [slug for slug in store.slugs() if not lease.current(store, slug)]
     if stale:
         print(f"controller: no live controller lease for {stale}")
+        return 1
+    if frozen := _frozen(store, owner, age_ms or tick_heartbeat.process_age_ms):
+        print(f"controller: the tick is stale, {frozen}")
         return 1
     error = _unanswered(environ, fetch)
     if error:
         return _standby(environ[SWARM_ENV], store, owner, error)
     print("controller: live")
     return 0
+
+
+def _frozen(store: RedisStore, owner: str | None, age_ms: Callable[[], int]) -> str:
+    """Only the swarms this controller ticks are judged, each from the later of its heartbeat and this process start."""
+    from scripts.swarm import commands
+
+    now, mine = lease.now_ms(store), owner or commands.hive_id()
+    since = now - age_ms()
+    for slug in store.slugs():
+        held = lease.current(store, slug)
+        if held is None or held.owner != mine:
+            continue
+        if evidence := tick_heartbeat.stale(tick_heartbeat.read(store, slug), now, since):
+            return f"{slug}: {'; '.join(evidence)}"
+    return ""
 
 
 def _unanswered(environ: Mapping[str, str], fetch: Callable) -> str:

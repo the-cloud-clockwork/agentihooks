@@ -1,0 +1,79 @@
+"""Every completed tick pass leaves a heartbeat: when it ended and when each input it decided on was last observed.
+The liveness probe and the stale watcher judge it; the tick never judges itself."""
+
+import json
+import os
+import time
+from dataclasses import asdict, dataclass
+
+from scripts.swarm import capacity
+
+KEY = "tick-heartbeat"
+LIMIT_MS = 600_000
+HOST, QUOTA, LEDGER = "host room", "quota", "ledger revision"
+
+
+@dataclass(frozen=True)
+class Heartbeat:
+    at: int
+    observed: dict
+    rev: int | None = None
+
+
+def read(store, slug) -> Heartbeat | None:
+    raw = store.redis.get(store.key(slug, KEY))
+    return Heartbeat(**json.loads(raw)) if raw else None
+
+
+def write(store, slug, at: int, doc: dict) -> Heartbeat:
+    """The ledger revision counts as observed when it last changed: every pass writes the ledger, so a revision that
+    holds still means the tick decides on a ledger that no longer moves."""
+    decision, previous = capacity.read(store, slug), read(store, slug)
+    rev = (doc.get("_meta") or {}).get("rev")
+    seen = [account["observed_at"] for account in decision.get("accounts", []) if account.get("observed_at")]
+    kept = previous is not None and rev is not None and previous.rev == rev and previous.observed.get(LEDGER)
+    beat = Heartbeat(
+        at,
+        {
+            HOST: decision.get("observed_at"),
+            QUOTA: round(max(seen) * 1000) if seen else None,
+            LEDGER: previous.observed[LEDGER] if kept else (at if rev is not None else None),
+        },
+        rev,
+    )
+    store.redis.set(store.key(slug, KEY), json.dumps(asdict(beat)))
+    return beat
+
+
+def stale(beat: Heartbeat | None, now: int, since: int | None = None, limit: int = LIMIT_MS) -> list[str]:
+    """since is when the judge began watching: a heartbeat older than it is judged from since, and a missing one is
+    judged only when since is given."""
+    if beat is None:
+        if since is None or now - since < limit:
+            return []
+        return [f"no tick pass has completed in the {_minutes(now - since)} since the watch began"]
+    evidence = []
+    if now - max(beat.at, since or 0) >= limit:
+        evidence.append(f"no tick pass has completed for {_minutes(now - beat.at)}, the last ended at {clock(beat.at)}")
+    for name, observed in beat.observed.items():
+        if observed is not None and beat.at - observed >= limit:
+            evidence.append(f"the {name} it decides on was {_minutes(beat.at - observed)} old at its last pass")
+    return evidence
+
+
+def process_age_ms(pid: int = 1) -> int:
+    """How long the process has run, read from the kernel so a restarted container counts from its own start."""
+    with open(f"/proc/{pid}/stat") as stat:
+        started = int(stat.read().rsplit(")", 1)[-1].split()[19])
+    with open("/proc/uptime") as uptime:
+        up = float(uptime.read().split()[0])
+    return max(0, round((up - started / os.sysconf("SC_CLK_TCK")) * 1000))
+
+
+def clock(at: int) -> str:
+    return time.strftime("%H:%M UTC", time.gmtime(at / 1000))
+
+
+def _minutes(ms: int) -> str:
+    minutes = ms // 60_000
+    return "1 minute" if minutes == 1 else f"{minutes} minutes"

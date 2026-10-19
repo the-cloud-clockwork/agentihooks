@@ -1,0 +1,43 @@
+{{- if .Values.tickWatch.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "swarm.fullname" . }}-tick-watch
+  labels:
+    {{- include "swarm.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tick-watch
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "swarm.selector" (dict "root" . "component" "tick-watch") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "swarm.labels" . | nindent 8 }}
+        app.kubernetes.io/component: tick-watch
+    spec:
+      automountServiceAccountToken: false
+      {{- include "swarm.podSecurityContext" . | nindent 6 }}
+      {{- with .Values.tickWatch.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tickWatch.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: tick-watch
+          image: {{ include "swarm.image" . }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "swarm.containerSecurity" . | nindent 10 }}
+          command: [agentihooks, swarm, tick-watch]
+          env:
+            {{- include "swarm.env" (dict "root" . "role" "controller") | nindent 12 }}
+          {{- include "swarm.envFrom" . | nindent 10 }}
+          resources:
+            {{- toYaml .Values.tickWatch.resources | nindent 12 }}
+{{- end }}

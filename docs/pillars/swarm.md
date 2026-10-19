@@ -298,6 +298,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm names check NAME [--plan FILE]` | Prints `valid: NAME`, or `invalid:` with the reason, the name rule and two free suggestions from the plan title. A name the stack already uses for a swarm, or for a ledger that is not a swarm's, is taken; a swarm ledger left without its swarm stays free so init can finish it. With the stack down only the rule is checked, and the output says so. Exits 1 when invalid. |
 | `agentihooks swarm init --prepare-clients` | Stage named authentication before moving an existing local swarm into the bundle. First deploy the bundle's named Redis user and persistent ACL configuration through the source service's repository, retaining existing clients, and verify authentication after a source restart. Preparation checks the bundle credential against the current localhost Redis, its named user and configured ACL file, then atomically writes the private `swarm-client.env` companion for existing environment loaders. It changes no Redis users, data, services, deployment mode, ledger address or ports. Existing sessions keep their connections; new processes use named authentication on the same source. Keep that source as the sole writer until the master completes seat turnover and verifies client counts before the final data and port cutover. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
+| `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service or Deployment: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, and on a workstation a respawn of an empty front door master while the tick is stale (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
@@ -1138,6 +1139,36 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Tick heartbeat and stale watcher
+
+Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
+input it decided on was last observed. The host room counts from its last capacity decision, the quota from the
+freshest account observation, and the ledger revision from the pass that last saw it change; every pass writes the
+ledger, so a revision that holds still means the tick decides on a ledger that no longer moves. An input never
+observed is recorded as unknown and never judged.
+
+The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
+its last pass. The tick never judges itself; two watchdogs do:
+
+- **Liveness probe.** `agentihooks controller live`, the controller container's liveness probe, fails while a swarm
+  whose controller lease this controller holds has a stale tick, so Kubernetes restarts the tick container. A
+  restarted container is judged from the later of its own start and the last heartbeat, so it has 10 minutes to
+  complete a pass. Swarms another hive holds are left to that hive's probe.
+- **Stale watcher.** `agentihooks swarm tick-watch` is a process apart from the tick that never runs a tick pass. It
+  checks every running, paused or stopping swarm once a minute. A stale episode sends one information item from
+  `swarm` through the Redis inbox to the front door master seat and every live agent seat, carrying the evidence;
+  a seat that comes live during the episode gets the same alert. When a fresh pass completes, every alerted seat
+  gets one resolved notice. On a workstation install (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the watcher also
+  restarts an empty front door master while the tick is stale: under this hive's controller lease and the tick
+  lock it drops lead master records whose pane is gone and spawns the master as the tick would. A swarm that
+  another hive ticks is left alone.
+
+The workstation runs the watcher as the `agentihooks-tick-watch` user service, installed and enabled with the other
+swarm services and restarted by systemd if it exits. The Helm chart runs it as the `tick-watch` Deployment
+(`tickWatch.enabled`, on by default) with the controller Redis role. The controller lease keeps one tick per swarm:
+while the cluster controller holds a swarm's lease, a workstation tick of that swarm returns `the swarm belongs to
+another hive`, and it ticks again only once that lease has expired.
 
 ### Staged and prerequisite pull requests
 
