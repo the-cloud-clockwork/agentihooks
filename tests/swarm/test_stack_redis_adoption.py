@@ -8,6 +8,7 @@ import yaml
 
 from scripts.hive import auth
 from scripts.swarm import stack_init
+from tests.swarm.test_stack_init import ComposeLoader
 
 REDIS = stack_init.BUNDLED / "deploy" / "compose" / "redis"
 TOKEN = secrets.token_urlsafe()
@@ -69,5 +70,5 @@ def test_a_stack_without_adoption_keeps_the_swarm_user_flush(tmp_path):
 
 
 def test_the_adoption_override_marks_the_stack_redis_adopted():
-    override = yaml.safe_load((stack_init.BUNDLED / stack_init.ADOPTION).read_text())
+    override = yaml.load((stack_init.BUNDLED / stack_init.ADOPTION).read_text(), Loader=ComposeLoader)
     assert override["services"]["redis"] == {"environment": {"SWARM_REDIS_ADOPTED": "1"}}
