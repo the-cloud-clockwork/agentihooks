@@ -108,7 +108,7 @@ def test_the_budget_logs_the_cut_and_skipped_steps(monkeypatch):
 def test_a_fresh_budget_has_spent_nothing_and_holds_no_alarm():
     budget = PromptBudget(soft=5, hard=5)
 
-    assert (budget.spent, budget._armed, budget._installed) == (False, False, False)
+    assert (budget.spent, budget._armed, budget._installed, budget.running) == (False, False, False, "")
 
 
 @pytest.mark.parametrize(("now", "ran"), [(9.5, True), (10.0, False)])
@@ -259,7 +259,7 @@ def test_the_process_start_reads_its_start_tick_from_proc(monkeypatch):
     fields = ["S", *(str(n) for n in range(1, 30))]
     fields[19] = "50000"
     stat = "4242 (py (x)) " + " ".join(fields)
-    monkeypatch.setattr(pb, "Path", lambda path: SimpleNamespace(read_text=lambda: stat))
+    monkeypatch.setattr(pb, "Path", lambda path: SimpleNamespace(read_text=lambda: {"/proc/self/stat": stat}[path]))
     monkeypatch.setattr(pb.time, "clock_gettime", lambda clock: {pb.time.CLOCK_BOOTTIME: 1000.0}[clock])
     monkeypatch.setattr(pb.os, "sysconf", lambda name: {"SC_CLK_TCK": 100}[name])
 
@@ -406,6 +406,8 @@ def test_a_bad_budget_setting_falls_back_to_the_default(monkeypatch):
     for value in ("nan", "inf", "-3", "0"):
         monkeypatch.setenv("AGENTIHOOKS_PROMPT_BUDGET_S", value)
         assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 10.0
+    monkeypatch.setenv("AGENTIHOOKS_PROMPT_BUDGET_S", "0.5")
+    assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 0.5
 
 
 def test_a_cut_that_lands_outside_a_step_never_escapes_the_budget():
