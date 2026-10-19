@@ -51,6 +51,51 @@ def test_outline_marking_does_not_read_geometry_after_writing_link_classes(brows
     page.close()
 
 
+def test_outline_updates_when_a_tall_target_top_crosses_the_activation_line(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    show(page, shell_html(), ledger=ledger_state({"title": "Outline crossing"}))
+    page.evaluate(
+        """async () => {
+          const main = document.querySelector('script[type=module]').src;
+          const {markOutline} = await import(new URL('outline.js', main));
+          const target = document.createElement('section');
+          target.id = 'outline-crossing';
+          target.style.cssText = 'position:fixed;top:300px;left:400px;width:100px;height:400px';
+          document.body.append(target);
+          const row = document.createElement('li');
+          row.className = 'ol-sec';
+          row.innerHTML = '<a href="#outline-crossing" data-target="outline-crossing">Crossing</a>';
+          document.querySelector('#outline > ul').append(row);
+          markOutline();
+          await new Promise(requestAnimationFrame);
+          await new Promise(requestAnimationFrame);
+        }"""
+    )
+    page.evaluate("document.getElementById('outline-crossing').style.top = '88px'")
+    page.wait_for_function("() => document.querySelector('a[data-target=outline-crossing]').classList.contains('on')", timeout=3000)
+    page.close()
+
+
+def test_a_changed_reconnect_snapshot_updates_without_serializing_the_full_view(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    page.add_init_script(
+        """(() => {
+          const stringify = JSON.stringify;
+          window.snapshotComparisons = 0;
+          JSON.stringify = function(value, ...args) {
+            if (value?.snapshotMarker) window.snapshotComparisons++;
+            return stringify.call(this, value, ...args);
+          };
+        })();"""
+    )
+    ledger = ledger_state({"title": "Before reconnect", "snapshotMarker": True})
+    show(page, shell_html(), ledger=ledger)
+    ledger["title"] = "After reconnect"
+    page.wait_for_function("() => document.getElementById('title').textContent === 'After reconnect'", timeout=5000)
+    assert page.evaluate("window.snapshotComparisons") == 0
+    page.close()
+
+
 def test_stream_rendering_yields_to_input_between_sections(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     show(page, shell_html(), ledger=ledger_state({"title": "Yielding"}))
