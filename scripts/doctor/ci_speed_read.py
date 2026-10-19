@@ -73,6 +73,7 @@ def read(
     run: Callable = subprocess.run,
     max_calls: int = 60,
     max_seconds: int = 25,
+    active: bool = True,
 ) -> dict:
     api = _Api(run, max_calls, max_seconds)
     root = f"repos/{REPO}/actions/runs"
@@ -81,7 +82,7 @@ def read(
         since = datetime.fromtimestamp(since_ms / 1000, timezone.utc).isoformat()
         until = datetime.fromtimestamp(now_ms / 1000, timezone.utc).isoformat()
         queries = [{"created": f"{since}..{until}"}]
-        queries.extend({"status": status} for status in ACTIVE)
+        queries.extend({"status": status} for status in ACTIVE if active)
         for query in queries:
             for workflow in api.pages(
                 f"{root}?{urlencode(query)}", "workflow_runs", SETTLE_READS if "status" in query else 0

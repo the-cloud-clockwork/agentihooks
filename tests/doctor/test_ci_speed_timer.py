@@ -52,7 +52,7 @@ def test_later_waiting_jobs_grow_one_finding_without_another_notice(store, monke
 def test_every_timer_tick_reads_speed_and_sends_each_crossing_to_both_masters_once(store, monkeypatch):
     calls = []
 
-    def read(since, now, pending=None, known=None):
+    def read(since, now, pending=None, known=None, active=True):
         calls.append((since, now, pending))
         return snapshot([record([job(0, queued=True, created=-301)])])
 
@@ -78,7 +78,7 @@ def test_an_api_failure_reports_incomplete_counts_and_preserves_the_window_for_r
     calls = []
     outcomes = [snapshot(), snapshot(complete=False, error="API unavailable"), snapshot()]
 
-    def read(since, now, pending=None, known=None):
+    def read(since, now, pending=None, known=None, active=True):
         calls.append((since, pending))
         return outcomes.pop(0)
 
