@@ -723,6 +723,8 @@ def sample_streams():
         if ledger is None:
             continue
         try:
+            repository.current(slug)
+            ledger = HUB.resource(slug, "ledger")
             HUB.publish(slug, "swarm", swarm_status(slug, ledger))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
