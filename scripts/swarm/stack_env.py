@@ -53,7 +53,7 @@ def settings(env_file: Path) -> dict[str, str]:
 def client_env(values: dict[str, str], home: Path) -> str:
     scheme = values.get("SWARM_REDIS_SCHEME", "redis")
     netloc = f"swarm:{values['SWARM_REDIS_PASSWORD']}@{BIND}:{values['SWARM_REDIS_PORT']}"
-    redis_url = urllib.parse.urlunsplit((scheme, netloc, "/0", "", ""))
+    redis_url = values.get("SWARM_ADOPT_REDIS_URL") or urllib.parse.urlunsplit((scheme, netloc, "/0", "", ""))
     text = (
         "AGENTIHOOKS_DEPLOYMENT=compose\n"
         f"LEDGER_URL=http://{BIND}:{values['SWARM_PORT']}\n"

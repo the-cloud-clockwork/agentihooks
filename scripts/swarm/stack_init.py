@@ -6,6 +6,7 @@ It never creates or starts a swarm; swarm init creates it after this step and th
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import urllib.parse
@@ -19,6 +20,7 @@ PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
 SERVICES = ("redis", "swarm", "controller")
 ADOPTION = "deploy/compose/adopt.yaml"
+PREPARED_CLIENT = "swarm-client.env"
 LEDGER_PORT = 8765
 AGAIN = "then run agentihooks swarm init again"
 OUTPUT_LINES = 10
@@ -99,7 +101,12 @@ def materialize(home: Path) -> None:
     (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
-def adopt(env_file: Path, environ: Mapping[str, str]) -> None:
+def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
+    from scripts.swarm_ledger.server_compose import ROOT
+
+    client = read_env(env_file.parent.parent / PREPARED_CLIENT).get("AGENTIHOOKS_SWARM_REDIS_URL", "")
+    if not client:
+        return False
     values = read_env(env_file)
     values.update(
         {
@@ -109,10 +116,13 @@ def adopt(env_file: Path, environ: Mapping[str, str]) -> None:
             "SWARM_ADOPT_HOME": str(Path.home()),
             "SWARM_ADOPT_UID": str(os.getuid()),
             "SWARM_ADOPT_GID": str(os.getgid()),
+            "SWARM_ADOPT_CODE": str(ROOT),
+            "SWARM_ADOPT_REDIS_URL": shlex.split(client)[0],
             "SWARM_PORT": str(LEDGER_PORT),
         }
     )
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
+    return True
 
 
 def project(home: Path) -> str:
@@ -205,8 +215,10 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
         return 1
     home = stack_home(environ)
     materialize(home)
-    if args.adopt:
-        adopt(home / ".env", environ)
+    if args.adopt and not adopt(home / ".env", environ):
+        fix = "run agentihooks swarm init --prepare-clients, then agentihooks swarm init --adopt"
+        failed(out, paint, "no prepared swarm Redis client to adopt", fix)
+        return 1
     values = settings(home / ".env")
     write_private(home / "client.env", client_env(values, home))
     if args.no_start:
