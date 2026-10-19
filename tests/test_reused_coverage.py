@@ -126,7 +126,9 @@ def test_the_unit_job_checks_its_coverage_database_before_uploading_it():
     names = list(steps)
     check = steps["Check the coverage database"]
     assert check["if"] == steps["Upload coverage"]["if"]
-    assert "python -m tests.coverage_check .coverage" in check["run"]
+    assert "databases=(.coverage)" in check["run"]
+    assert "databases+=(reused-coverage/.coverage)" in check["run"]
+    assert 'python -m tests.coverage_check "${databases[@]}"' in check["run"]
     assert names.index("Run tests") < names.index("Check the coverage database") < names.index("Upload coverage")
     kept = steps["Keep the reused tests' dev coverage"]
     assert kept["env"]["ARTIFACT"] == "coverage-${{ matrix.python-version }}-${{ matrix.shard }}"

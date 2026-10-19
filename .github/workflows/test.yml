@@ -1263,7 +1263,10 @@ jobs:
 
       - name: Check the coverage database
         if: matrix.python-version == '3.12'
-        run: python -m tests.coverage_check .coverage
+        run: |
+          databases=(.coverage)
+          if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+          python -m tests.coverage_check "${databases[@]}"
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
