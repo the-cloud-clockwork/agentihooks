@@ -278,6 +278,7 @@ def client():
 
 
 def test_cyclic_reexports_nested_dotted_imports_call_receivers_and_unbound_self_resolve(tmp_path):
+    (tmp_path / "scripts").mkdir()
     for name, text in CYCLE.items():
         (tmp_path / name).write_text(text)
     program = code_reach.Program(code_reach.parse(tmp_path))
