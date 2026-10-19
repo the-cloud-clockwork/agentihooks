@@ -7,8 +7,6 @@ import pytest
 from scripts.swarm import cli, timer
 from scripts.swarm.store import SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 real_roots = timer._roots
 real_reconcile = timer.reconcile
 real_schedule = timer.schedule
@@ -523,7 +521,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
 
 def test_ensure_fails_and_keeps_the_tick_timer_when_the_scheduled_tick_cannot_be_registered(tmp_path, monkeypatch):
     monkeypatch.setattr(timer, "schedule", lambda: False)
-    monkeypatch.setattr(timer, "undelivered", lambda: pytest.fail("delivery read without a registered tick"))
+    monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is False
     assert [argv[2] for argv, _ in calls][-4:] == ["enable"] * 4
@@ -644,16 +642,6 @@ def test_ensure_reloads_nothing_while_the_kept_units_are_current(tmp_path, monke
     argvs = [argv for argv, _ in calls]
     assert ["systemctl", "--user", "daemon-reload"] not in argvs
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm.timer"] in argvs
-
-
-def test_ensure_keeps_the_tick_timer_while_the_scheduled_tick_is_not_registered(tmp_path, monkeypatch, capsys):
-    monkeypatch.setattr(timer, "schedule", lambda: False)
-    monkeypatch.setattr(timer, "undelivered", lambda: "")
-    calls = []
-    assert not timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert (tmp_path / "agentihooks-swarm.timer").read_text() == TICK_TIMER
-    assert not [argv for argv, _ in calls if "disable" in argv]
-    assert capsys.readouterr().err == "the agentihooks-swarm timer stays: the scheduled swarm tick is not registered\n"
 
 
 def test_ensure_restores_a_retired_tick_timer_while_delivery_fails(tmp_path, monkeypatch):

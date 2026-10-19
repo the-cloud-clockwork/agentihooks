@@ -2,7 +2,7 @@ import pytest
 
 from scripts.doctor import tick_delivery
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_a_proven_scheduled_tick_raises_no_finding():

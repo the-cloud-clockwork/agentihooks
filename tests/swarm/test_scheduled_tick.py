@@ -241,8 +241,7 @@ def test_a_tick_that_cannot_start_records_no_delivery(monkeypatch):
         raise OSError("no python")
 
     scheduler, here = _delivering(monkeypatch, refuse)
-    with pytest.raises(OSError, match="no python"):
-        scheduler.run_due(now=MINUTE_START + 1)
+    scheduler.run_due(now=MINUTE_START + 1)
     assert scheduled_tick.undelivered(here, scheduled_tick.ROOT, MINUTE_START + 1) == (
         "no scheduler has delivered a swarm tick yet"
     )

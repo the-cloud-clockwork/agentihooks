@@ -248,8 +248,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         print(refusal, file=sys.stderr)
         return False
     unit_dir.mkdir(parents=True, exist_ok=True)
-    scheduled = schedule()
-    kept = _kept() if scheduled else "the scheduled swarm tick is not registered"
+    kept = _kept()
     expected = units(binary)
     if kept:
         print(f"the {UNIT} timer stays: {kept}", file=sys.stderr)
@@ -278,7 +277,7 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
         run(["systemctl", "--user", "enable", "--now", name], capture_output=True, text=True, timeout=30)
         for name in [*_services(expected), f"{WAITS}.timer", *([f"{UNIT}.timer"] if kept else [])]
     ]
-    return scheduled and all(proc.returncode == 0 for proc in procs)
+    return schedule() and all(proc.returncode == 0 for proc in procs)
 
 
 def guard(binary, unit_dir=None, run=subprocess.run):
