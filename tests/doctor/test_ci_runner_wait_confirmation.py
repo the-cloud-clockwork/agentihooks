@@ -140,8 +140,19 @@ def test_rereads_stop_at_the_pass_cap_and_leave_the_rest_unconfirmed():
     run, calls = actions([PREFLIGHT], stale, {n: STALE for n in range(ci_speed_read.REREADS + 1)})
     result = ci_speed_read.read(FOUND_AT - 60000, FOUND_AT, run=run)
     assert sum("/actions/jobs/" in call for call in calls) == ci_speed_read.REREADS
+    assert result["unverified"] == 1
     [finding] = ci_speed.findings(result["runs"], FOUND_AT - 60000, FOUND_AT)
     assert finding.kind == "ci queue age unconfirmed"
+
+
+def test_a_late_start_supersedes_the_queue_age_but_keeps_the_runner_wait():
+    late = {**REFINE, "started_at": "2026-10-19T15:37:00Z"}
+    gone = ci_speed.cleared([{**PREFLIGHT, "jobs": [late]}])
+    assert AGE_ID in gone
+    assert 'ci-concurrency-hold/39278021878-1-["anton-oss-light"]' in gone
+    assert WAIT_ID not in gone
+    assert set(ci_speed.cleared([{**PREFLIGHT, "jobs": [REFINE]}])) >= {AGE_ID, WAIT_ID}
+    assert ci_speed.cleared([{**PREFLIGHT, "jobs": [STALE]}]) == []
 
 
 def test_a_finding_superseded_by_a_corrected_read_is_retracted(store, monkeypatch):  # noqa: F811
@@ -158,7 +169,8 @@ def test_a_finding_superseded_by_a_corrected_read_is_retracted(store, monkeypatc
     [raised] = [key for key in details if key.endswith('39278021878-1-["anton-oss-light"]')]
     cli.timer(store, DOCTOR, FOUND_AT + 60000, False)
     assert raised not in store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
-    assert raised not in store.redis.hgetall(store.key(DOCTOR, "doctor-findings"))
+    judged = json.loads(store.redis.hget(store.key(DOCTOR, "doctor-findings"), raised))
+    assert judged["retracted_at"] == FOUND_AT + 60000
     for slug in (DOCTOR, WATCHED):
         texts = [item.text for item in InboxStore(store.redis).inbox(f"master@{slug}")]
         assert any("Retracted" in text and raised in text for text in texts)

@@ -81,17 +81,18 @@ def news(watched, found):
     return "\n".join(lines)
 
 
-def retract(store, doctor, watched, cleared):
+def retract(store, doctor, watched, cleared, now_ms):
     details = _details_key(store, doctor)
     gone = [finding_id for finding_id in cleared if store.redis.hexists(details, finding_id)]
     if not gone:
         return []
     store.redis.hdel(details, *gone)
-    store.redis.hdel(verdicts(store, doctor).key, *gone)
+    judgments = verdicts(store, doctor).key
+    for finding_id, raw in zip(gone, store.redis.hmget(judgments, gone)):
+        if raw:
+            store.redis.hset(judgments, finding_id, json.dumps({**json.loads(raw), "retracted_at": now_ms}))
     text = "\n".join(
-        [
-            f"Retracted Doctor findings on the swarm {watched}: a corrected read shows every job started within 5 minutes."
-        ]
+        [f"Retracted Doctor findings on the swarm {watched}: a corrected read of their jobs supersedes them."]
         + [f"- {finding_id}" for finding_id in gone]
     )
     mail = InboxStore(store.redis)
@@ -131,7 +132,8 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             )
         )
     record(store, doctor, found, now_ms, limits(os.environ).cooldown_minutes * MINUTE_MS)
-    report["retracted"] = len(retract(store, doctor, watched, ci_speed.cleared(snapshot["runs"])))
+    report["retracted"] = len(retract(store, doctor, watched, ci_speed.cleared(snapshot["runs"]), now_ms))
+    report["unverified"] = snapshot.get("unverified", 0)
     mail = InboxStore(store.redis)
     for slug in (watched, doctor):
         notified = store.key(doctor, "ci-speed-notified", slug)
@@ -167,7 +169,8 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     )
     return [
         f"doctor CI speed: {status}; {report['runs']} runs read of {report['discovered_runs']} discovered, "
-        f"{report['jobs']} jobs, {report['crossings']} crossings, {report['api_calls']} API calls"
+        f"{report['jobs']} jobs, {report['crossings']} crossings, {report['api_calls']} API calls, "
+        f"{report['retracted']} retracted, {report['unverified']} queued jobs not reread"
     ]
 
 

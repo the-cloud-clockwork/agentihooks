@@ -73,16 +73,24 @@ def _reread(api, pool, records, now_ms):
         (run, n)
         for run in records
         for n, job in enumerate(run["jobs"])
-        if job.get("status") in ACTIVE and not ci_speed.started(job) and now_ms - iso_ms(job["created_at"]) > 300000
-    ][:REREADS]
-    reads = {pool.submit(api.get, f"repos/{REPO}/actions/jobs/{run['jobs'][n]['id']}"): (run, n) for run, n in stale}
+        if job.get("status") in ACTIVE
+        and not ci_speed.started(job)
+        and now_ms - iso_ms(job["created_at"]) > ci_speed.SHORT_WAIT_MS
+    ]
+    reads = {
+        pool.submit(api.get, f"repos/{REPO}/actions/jobs/{run['jobs'][n]['id']}"): (run, n)
+        for run, n in stale[:REREADS]
+    }
+    unverified = len(stale) - len(reads)
     for future in as_completed(reads):
         run, n = reads[future]
         try:
             fresh = future.result()
         except FAILURES:
+            unverified += 1
             continue
         run["jobs"] = [*run["jobs"][:n], fresh, *run["jobs"][n + 1 :]]
+    return unverified
 
 
 def read(
@@ -129,8 +137,14 @@ def read(
                     failure = failure or exc
             if failure:
                 raise failure
-            _reread(api, pool, records, now_ms)
-        return {"complete": True, "runs": records, "api_calls": api.calls, "discovered_runs": len(discovered)}
+            unverified = _reread(api, pool, records, now_ms)
+        return {
+            "complete": True,
+            "runs": records,
+            "api_calls": api.calls,
+            "discovered_runs": len(discovered),
+            "unverified": unverified,
+        }
     except FAILURES as exc:
         return {
             "complete": False,

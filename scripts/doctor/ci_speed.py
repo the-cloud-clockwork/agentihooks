@@ -7,6 +7,7 @@ from scripts.swarm.ledger_events import iso_ms
 GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
 COUNTED = {"success", "failure"}
+SHORT_WAIT_MS = 300000
 JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
     "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
@@ -20,10 +21,14 @@ THRESHOLDS = {
 }
 
 
-def started(job):
+def started(job: dict) -> bool:
     return bool(job.get("started_at")) and (
         job["status"] in {"in_progress", "completed"} or bool(job.get("runner_name"))
     )
+
+
+def _subject(run, labels):
+    return f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(tuple(sorted(set(labels))))}"
 
 
 def _cause(run, job):
@@ -41,7 +46,7 @@ def _wait(run, jobs, since_ms, now_ms):
         created = iso_ms(job["created_at"])
         began = iso_ms(job["started_at"]) if started(job) else now_ms
         elapsed = began - created
-        if elapsed <= 300000:
+        if elapsed <= SHORT_WAIT_MS:
             continue
         key = (_cause(run, job), tuple(sorted(set(job["labels"]))))
         groups.setdefault(key, []).append(elapsed)
@@ -57,7 +62,7 @@ def _wait(run, jobs, since_ms, now_ms):
         found.append(
             Finding(
                 kind,
-                f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(labels)}",
+                _subject(run, labels),
                 SUMMARIES[kind].format(text=text, minutes=f"{longest / 60:.2f}", count=len(waits)),
                 (
                     f"run {run['id']}, labels {text}, {len(waits)} jobs, longest {longest} seconds, median {typical} seconds",
@@ -73,10 +78,17 @@ def cleared(records: list[dict]) -> list[str]:
     groups = {}
     for run in records:
         for job in run["jobs"]:
-            subject = f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(tuple(sorted(set(job['labels']))))}"
-            short = started(job) and iso_ms(job["started_at"]) - iso_ms(job["created_at"]) <= 300000
-            groups[subject] = groups.get(subject, True) and short
-    return [f"{kind.replace(' ', '-')}/{subject}" for subject, short in groups.items() if short for kind in SUMMARIES]
+            subject = _subject(run, job["labels"])
+            began, short = groups.get(subject, (True, True))
+            groups[subject] = (
+                began and started(job),
+                short and started(job) and iso_ms(job["started_at"]) - iso_ms(job["created_at"]) <= SHORT_WAIT_MS,
+            )
+    gone = []
+    for subject, (began, short) in groups.items():
+        kinds = [kind for kind in SUMMARIES if short or (began and kind != "ci runner wait")]
+        gone.extend(f"{kind.replace(' ', '-')}/{subject}" for kind in kinds)
+    return gone
 
 
 def _wall(run, now_ms):
