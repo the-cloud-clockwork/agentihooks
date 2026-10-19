@@ -189,7 +189,12 @@ also bootstraps the fixture profiles in `fixtures/profiles` inside fresh
 containers, runs `claude mcp list`, `codex mcp list` and `claude -p` offline,
 and replays a fixture SessionStart event through the rendered Codex hook.
 Both hooks must register exactly one session in the proof working directory;
-Codex registration does not depend on an authenticated model request. It proves
+Codex registration does not depend on an authenticated model request. The replay
+keeps the first observed matching registry write as its registration timestamp
+and fails if new hook descendants remain alive after a one second grace period,
+killing and naming each survivor. Both positive containers must exit less than
+two seconds after registration. See [Worker profile proof](../../docs/reference/worker-profile-proof.md)
+for CI commands, fixed limits, timing fields and failure diagnosis. It proves
 refusals, crash recovery and a profile rollback, and writes the SV2-IMG-02
 evidence. The output contains the build manifest, software
 inventory, profile hashes and package evidence. Production deployment and new
