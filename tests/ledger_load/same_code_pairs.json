@@ -1,0 +1,8 @@
+{
+  "runs": {
+    "39148204008": [
+      [{"errors": 0, "write_p95_s": 0.1, "busiest_cores": 0.164}, {"errors": 0, "write_p95_s": 0.094, "busiest_cores": 0.163}],
+      [{"errors": 0, "write_p95_s": 0.093, "busiest_cores": 0.159}, {"errors": 0, "write_p95_s": 0.094, "busiest_cores": 0.16}]
+    ]
+  }
+}
