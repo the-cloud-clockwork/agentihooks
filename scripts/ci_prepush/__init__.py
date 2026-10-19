@@ -53,10 +53,11 @@ def tests_for(root: Path, names: list[str]) -> list[str]:
 
 
 def plan(root: Path, base: str, grade: Path) -> list[tuple[str, list[str]]]:
+    merge_base = _git(root, "merge-base", base, "HEAD")
     for name in (ALLOWLIST, GRADER):
         target = grade / name
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(_git(root, "show", f"{base}:{name}") + "\n")
+        target.write_text(_git(root, "show", f"{merge_base}:{name}") + "\n")
     python = sys.executable
     steps = [
         ("ruff check", [python, "-m", "ruff", "check", *LINTED]),

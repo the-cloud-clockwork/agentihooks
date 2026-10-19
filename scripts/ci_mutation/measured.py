@@ -8,6 +8,7 @@ from pathlib import Path
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import function_name
 from scripts.ci_mutation.plan import MUTANT_SECONDS, WORKERS, shard_count
 from scripts.ci_mutation.scope import discover_changes, select_tests
@@ -38,11 +39,20 @@ def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, 
     return tests, durations, max([MUTANT_SECONDS, *durations.values()])
 
 
-def measured_costs(names: list[str], results: list[dict]) -> dict[str, float]:
+def measured_costs(names: list[str], results: list[dict], memory: KillMemory | None = None) -> dict[str, float]:
     tests, durations, missing = function_tests(results)
     functions = {function: sum(durations.get(node, missing) for node in nodes) for function, nodes in tests.items()}
     fallback = max(60.0, max(functions.values(), default=0.0))
-    return {name: MUTANT_SECONDS + 1.25 * functions.get(name.rpartition("__mutmut_")[0], fallback) for name in names}
+    costs = {}
+    for name in names:
+        function = name.rpartition("__mutmut_")[0]
+        # The recorded killer runs first and mutmut stops at the first failing test.
+        killer = memory.killer(name) if memory is not None else None
+        seconds = (
+            durations.get(killer, missing) if killer in tests.get(function, ()) else functions.get(function, fallback)
+        )
+        costs[name] = MUTANT_SECONDS + 1.25 * seconds
+    return costs
 
 
 def split_tests(nodes: set[str], seconds: dict[str, float], limit: int) -> dict | None:
@@ -132,7 +142,7 @@ def refine_plan(root: Path, selected: dict, stats: SharedStats) -> dict:
         for path, (lines, _) in scope.items():
             generated = selected_mutant_names(path, (root / path).read_text(), lines)
             names.extend(get_mutant_name(Path(path), name) for name in generated)
-        costs.update(measured_costs(names, results))
+        costs.update(measured_costs(names, results, KillMemory(stats.folder / "killers")))
         splits.update(measured_splits(names, results))
     return {**plan_shards(costs, splits=splits), "keys": keys, "head": stats.head}
 

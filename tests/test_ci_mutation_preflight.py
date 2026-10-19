@@ -97,6 +97,11 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
                 step["if"]
                 == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
             )
+        elif (
+            step.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))
+            or step.get("name") == "Install dependencies"
+        ):
+            assert step["if"] == f"{gated} && steps.suite.outputs.changed != 'true'", step
         else:
             assert step["if"] == gated, step
 
@@ -116,6 +121,13 @@ def test_preflight_runs_the_suite_speed_contracts_before_reuse_when_a_test_modul
     changed = "steps.suite.outputs.changed == 'true'"
     assert [step["if"] for step in steps[find_at + 1 : run_at + 1]] == [changed] * (run_at - find_at)
     assert steps[run_at]["run"] == "python -m pytest tests/test_suite_speed.py --tb=short -p no:cacheprovider"
+    reused = steps[find_at + 1 : run_at]
+    later = steps[names.index("Reuse a green report when this head only adds tests to it") + 1 :]
+    for step in reused:
+        if "uses" in step:
+            assert next(other for other in later if other.get("uses") == step["uses"])["with"] == step["with"], step
+        else:
+            assert step["run"] == steps[names.index("Install dependencies")]["run"]
     assert not any(step.get("continue-on-error") for step in steps)
 
 

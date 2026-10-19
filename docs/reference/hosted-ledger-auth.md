@@ -46,6 +46,8 @@ A workstation swarm, its agents and the ledger hooks reach a hosted ledger by en
 | `AGENTIHOOKS_LEDGER_AGENT_TOKEN` | The agent's own token, sent with its pinned name. |
 | `SWARM_SECRET` | When the client holds it and no agent token is set, the client derives the token for its own name. The swarm tick derives each spawned agent's token; neither the secret nor the tick's own agent token reaches a spawned agent. |
 | `SWARM_ACCESS_CLIENT_ID`, `SWARM_ACCESS_CLIENT_SECRET` | Cloudflare service token for machines off the tailnet. Both set, every API request, upload, event stream, proof ledger call and health probe carries `CF-Access-Client-Id`, `CF-Access-Client-Secret` and `User-Agent: agentihooks-swarm`, because Cloudflare refuses Python's default user agent with error 1010. |
+| `LEDGER_CA_PEM` | The PEM of the CA that signed the ledger's certificate. Set, it is the only CA an https ledger request trusts. |
+| `LEDGER_CA_FILE` | Without `LEDGER_CA_PEM`, a CA file trusted beside the system roots. Defaults to `ledger-ca.pem` in the agentihooks home, which `agentihooks init` writes from OpenBao `k8s/agentihooks-swarm-ledger-ca`, field `ca.crt`, when `OPENBAO_URL` and `OPENBAO_TOKEN` are set. |
 
 Every reader of `ledger_link.remote` treats `SWARM_URL` as a non-local deployment, so a process with it set never accepts page-derived agent tokens. A herdr pane gets its token from the launcher, which exports it after sourcing the operator's env files and unsets `SWARM_SECRET`.
 

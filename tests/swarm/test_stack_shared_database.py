@@ -8,9 +8,12 @@ def test_adoption_keeps_shared_connections_in_stack_and_client(tmp_path):
         "AGENTIHOOKS_SWARM_DATABASE_URL": database,
         "AGENTIHOOKS_SWARM_REDIS_URL": redis,
     }
-    env_file = tmp_path / "settings"
-    stack_init.adopt(env_file, chosen)
+    (tmp_path / stack_init.PREPARED_CLIENT).write_text("AGENTIHOOKS_SWARM_REDIS_URL=redis://adopted:6379/0\n")
+    (tmp_path / "stack").mkdir()
+    env_file = tmp_path / "stack" / ".env"
+    assert stack_init.adopt(env_file, chosen) is True
     values = stack_env.settings(env_file)
+    assert values["SWARM_ADOPT_REDIS_URL"] == "redis://adopted:6379/0"
     assert {key: values[key] for key in chosen} == chosen
     client = dict(line.split("=", 1) for line in stack_env.client_env(values, tmp_path).splitlines())
     assert {key: client[key] for key in chosen} == chosen

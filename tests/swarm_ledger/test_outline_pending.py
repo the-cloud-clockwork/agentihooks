@@ -8,7 +8,7 @@ from tests.swarm_ledger.ledger_page import fulfill_events, is_events, loaded, pa
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
 URL = "http://ledger.test/swarm-buildout"
-API = "http://ledger.test/api/__LEDGER_SLUG__"
+API = "http://ledger.test/api/v1/ledgers/__LEDGER_SLUG__/saves"
 
 
 def notice(nid, item, text):

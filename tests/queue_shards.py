@@ -18,7 +18,7 @@ WORKERS = 4
 STEP_SECONDS = 420
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.5
-MAX_SHARDS = 40
+MAX_SHARDS = 30
 
 
 def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, int] | None = None) -> list[dict]:

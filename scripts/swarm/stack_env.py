@@ -59,7 +59,7 @@ def settings(env_file: Path, environ: dict[str, str] | None = None) -> dict[str,
 
 def client_env(values: dict[str, str], home: Path) -> str:
     scheme = values.get("SWARM_REDIS_SCHEME", "redis")
-    redis_url = values.get("AGENTIHOOKS_SWARM_REDIS_URL")
+    redis_url = values.get("AGENTIHOOKS_SWARM_REDIS_URL") or values.get("SWARM_ADOPT_REDIS_URL")
     if not redis_url:
         netloc = f"swarm:{values['SWARM_REDIS_PASSWORD']}@{BIND}:{values['SWARM_REDIS_PORT']}"
         redis_url = urllib.parse.urlunsplit((scheme, netloc, "/0", "", ""))
