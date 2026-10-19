@@ -77,7 +77,8 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     launcher_text = launcher.read_text()
     route_report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks select-profile engineer --agent claude -- --agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
+        f"/usr/bin/agentihooks select-profile engineer --home={profile_env['CLAUDE_CONFIG_DIR']} --agent claude -- "
+        f"--agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
     ) in launcher_text
     assert "--resume session-id --fork-session --model fable" in launcher_text
     assert prompt not in launcher_text
@@ -373,7 +374,11 @@ def test_handoff_excludes_this_account_and_never_falls_back_to_bare(monkeypatch,
     assert rc == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
     text = launcher.read_text()
-    assert "select-profile engineer --agent claude -- --agentihooks-exclude alpha --agentihooks-report" in text
+    home = tmp_path / "engineer" / "claude"
+    assert (
+        f"select-profile engineer --home={home} --agent claude -- --agentihooks-exclude alpha --agentihooks-report"
+        in text
+    )
     assert "--agentihooks-fallback-bare" not in text
 
 
@@ -1485,7 +1490,11 @@ def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monke
     assert "agent=codex\n" in report and "agent_reason=handoff\n" in report
     launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
     command = Path(launcher).read_text()
-    assert "select-profile engineer --agent codex -- --agentihooks-exclude alpha --agentihooks-report" in command
+    home = profile_env["CODEX_HOME"]
+    assert (
+        f"select-profile engineer --home={home} --agent codex -- --agentihooks-exclude alpha --agentihooks-report"
+        in command
+    )
     assert " resume thread-1 " in command
     assert "-m gpt-6.1-sol" in command
 

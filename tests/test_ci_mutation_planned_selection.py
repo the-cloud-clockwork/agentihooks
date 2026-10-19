@@ -210,6 +210,126 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
     assert tests == NARROWED
 
 
+def _line_project(tmp_path, monkeypatch, mode):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    if mode == "repeated":
+        source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
+    (tmp_path / "scripts/core.py").write_text(source)
+    (tmp_path / "scripts/helper.py").write_text("from scripts.core import f\n")
+    (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 1\n")
+    (tmp_path / "scripts/settings.json").write_text("{}")
+    (tmp_path / "tests/test_helper.py").write_text("from scripts.helper import f\n\ndef test_helper():\n    pass\n")
+    commit = _commit(tmp_path, "shared function")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("tests/test_core.py::test_f", [2, 3]),
+        ("tests/test_core.py::test_g[1]", [2, 4]),
+        ("tests/test_core.py::test_other", [2, 3]),
+        ("tests/test_core.py::TestSpawn::test_child", [2, 3]),
+        ("tests/test_helper.py::test_helper", [2, 4]),
+    ):
+        if mode == "repeated":
+            lines = [2, *range(4, 304)]
+            if test.endswith(("test_f", "test_helper")):
+                lines.append(3)
+        data.set_context(f"{test}|run")
+        path = (
+            "scripts/aaa.py"
+            if mode in {"separate", "deleted", "dependency"} and test.endswith("test_other")
+            else "scripts/core.py"
+        )
+        data.add_lines({str(tmp_path / path): lines if path.endswith("core.py") else [2]})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    return manifest, source
+
+
+def _line_contexts(tmp_path, manifest, mode):
+    if mode == "legacy":
+        del manifest["lines"]
+    elif mode == "missing":
+        del manifest["lines"]["tests/test_core.py::test_other"]
+    elif mode == "parameter":
+        manifest["tests"]["tests/test_core.py::test_g[2]"] = {"units": [], "files": [], "escapes": False}
+    if mode == "data":
+        manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["scripts/settings.json"]
+        (tmp_path / "scripts/settings.json").write_text('{"changed": true}')
+    if mode == "separate":
+        del manifest["tests"]["tests/test_core.py::test_other"]["files"]
+    if mode == "new":
+        (tmp_path / "scripts/fresh.py").write_text("def fresh():\n    return 1\n")
+    elif mode == "deleted":
+        (tmp_path / "scripts/aaa.py").unlink()
+    elif mode == "dependency":
+        (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 2\n")
+
+
+@pytest.mark.parametrize("shift", [0, 2])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "line",
+        "legacy",
+        "missing",
+        "inserted",
+        "header",
+        "parameter",
+        "drift",
+        "separate",
+        "data",
+        "module",
+        "new",
+        "deleted",
+        "trailing",
+        "dependency",
+        "repeated",
+    ],
+)
+def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
+    manifest, source = _line_project(tmp_path, monkeypatch, mode)
+    _line_contexts(tmp_path, manifest, mode)
+    new = source.replace("value - 1", "value - 2")
+    if mode == "drift":
+        new = source.replace("value + 1", "value + 2")
+    elif mode == "module":
+        new = source + "\nSETTING = 1\n"
+    elif mode == "trailing":
+        new = source + "\n"
+    elif mode == "repeated":
+        new = source.replace("value += 1", "value += 2")
+    if mode == "header":
+        new = new.replace("def f(value)", "def f(value=1)")
+    if mode == "inserted":
+        new = new.replace("    return value - 2", "    value += 1\n    return value - 2")
+    (tmp_path / "scripts/core.py").write_text("\n" * shift + new)
+    _commit(tmp_path, "edited branch")
+    selection = {}
+    line = 3 if mode == "repeated" else 4
+    plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
+    expected = ["tests/test_core.py::test_g"]
+    if mode in {"legacy", "inserted", "header", "drift", "module"}:
+        expected = [
+            f"tests/test_core.py::{name}" for name in ("TestSpawn::test_child", "test_f", "test_g", "test_other")
+        ]
+    elif mode in {"missing", "parameter"}:
+        expected = ["tests/test_core.py"]
+    elif mode in {"data", "deleted", "dependency"}:
+        expected.append("tests/test_core.py::test_other")
+    elif mode == "repeated":
+        expected = ["tests/test_core.py::test_f"]
+    assert selection["scripts/core.py"] == [
+        *expected,
+        "tests/test_edited.py",
+        "tests/test_fresh.py",
+        "tests/test_helper.py::test_helper",
+    ]
+
+
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))

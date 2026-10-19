@@ -4,6 +4,7 @@ import json
 import math
 import os
 from datetime import UTC, datetime
+from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
@@ -30,9 +31,15 @@ def estimate(
     if drift is not None:
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
-        covering = covering_tests(manifest, units | drifted, paths)
+        if "lines" in manifest:
+            covering = line_covering_tests(root, manifest, changes, paths)
+        else:
+            covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
         for test in manifest["tests"]:
+            if not manifest["tests"][test]["units"] or "lines" in manifest and test not in manifest["lines"]:
+                stale.add(test_file(test))
+                continue
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
     for path, lines in changes.items():
@@ -109,6 +116,46 @@ def covering_tests(manifest: dict, units: set[int], paths: set[str]) -> set[str]
         node(test).partition("[")[0]
         for test, found in manifest["tests"].items()
         if units.intersection(found["units"]) or paths.intersection(found.get("files", ()))
+    }
+
+
+def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[dict[str, set[int]], set[int]]:
+    lines = {path: set(found) for path, found in changes.items()}
+    fallback = set()
+    index = {unit: number for number, unit in enumerate(manifest["units"])}
+    for path, old, new in recorded_changes(root, manifest["commit"], "HEAD"):
+        if not path.endswith(".py") or not path.startswith(MEASURED):
+            continue
+        if old is None or new is None:
+            fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
+            continue
+        mapping, affected = {}, set()
+        for kind, a, b, c, d in SequenceMatcher(None, old.splitlines(), new.splitlines(), autojunk=False).get_opcodes():
+            if kind == "equal" or kind == "replace" and b - a == d - c:
+                mapping.update(zip(range(c + 1, d + 1), range(a + 1, b + 1)))
+                if kind == "replace":
+                    affected.update(range(a + 1, b + 1))
+            else:
+                for source, start, end in ((old, a, b), (new, c, d)):
+                    for first, _, last, name in _spans(ast.parse(source)):
+                        if first <= end and start < last and (unit := f"{path}::{name}") in index:
+                            fallback.add(index[unit])
+        by_line = line_units(old)
+        if any(line not in by_line for line in affected) or "<module>" in changed_units(old, new):
+            fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
+        lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
+    return lines, fallback
+
+
+def line_covering_tests(root: Path, manifest: dict, changes: dict[str, set[int]], paths: set[str]) -> set[str]:
+    lines, fallback = recorded_lines(root, manifest, changes)
+    return {
+        node(test).partition("[")[0]
+        for test, found in manifest["tests"].items()
+        if test not in manifest["lines"]
+        or fallback.intersection(found["units"])
+        or paths.intersection(found.get("files", ()))
+        or any(changed.intersection(manifest["lines"][test].get(path, ())) for path, changed in lines.items())
     }
 
 

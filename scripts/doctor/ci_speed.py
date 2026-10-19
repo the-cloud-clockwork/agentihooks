@@ -7,7 +7,26 @@ from scripts.swarm.ledger_events import iso_ms
 GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
 COUNTED = {"success", "failure"}
-JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at")
+SHORT_WAIT_MS = 300000
+JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at", "runner_name")
+SUMMARIES = {
+    "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
+    "ci queue age unconfirmed": "{text} jobs read as queued up to {minutes} minutes with no confirmed start, {count} jobs",
+}
+THRESHOLDS = {
+    "ci runner wait": "runner queue wait over 5 minutes",
+    "ci queue age unconfirmed": "unconfirmed queue age over 5 minutes",
+}
+
+
+def started(job: dict) -> bool:
+    return bool(job.get("started_at")) and (
+        job["status"] in {"in_progress", "completed"} or bool(job.get("runner_name"))
+    )
+
+
+def _subject(run, labels):
+    return f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(tuple(sorted(set(labels))))}"
 
 
 def _wait(run, jobs, since_ms, now_ms):
@@ -15,35 +34,52 @@ def _wait(run, jobs, since_ms, now_ms):
     active = set()
     for job in jobs:
         created = iso_ms(job["created_at"])
-        queued = job["status"] not in {"in_progress", "completed"}
-        started = iso_ms(job["started_at"]) if job.get("started_at") and not queued else now_ms
-        elapsed = started - created
-        if elapsed <= 300000:
+        began = iso_ms(job["started_at"]) if started(job) else now_ms
+        elapsed = began - created
+        if elapsed <= SHORT_WAIT_MS:
             continue
-        labels = tuple(sorted(set(job["labels"])))
-        groups.setdefault(labels, []).append(elapsed)
-        if queued or started >= since_ms:
-            active.add(labels)
+        kind = "ci runner wait" if started(job) else "ci queue age unconfirmed"
+        key = (kind, tuple(sorted(set(job["labels"]))))
+        groups.setdefault(key, []).append(elapsed)
+        if not started(job) or began >= since_ms:
+            active.add(key)
     found = []
-    for labels, waits in groups.items():
-        if labels not in active:
+    for (kind, labels), waits in groups.items():
+        if (kind, labels) not in active:
             continue
         longest = max(waits) // 1000
         typical = median(waits) / 1000
         text = ", ".join(labels) or "unassigned"
         found.append(
             Finding(
-                "ci runner wait",
-                f"{run['id']}-{run.get('run_attempt', 1)}-{json.dumps(labels)}",
-                f"{text} runners waited up to {longest / 60:.2f} minutes for {len(waits)} jobs",
+                kind,
+                _subject(run, labels),
+                SUMMARIES[kind].format(text=text, minutes=f"{longest / 60:.2f}", count=len(waits)),
                 (
                     f"run {run['id']}, labels {text}, {len(waits)} jobs, longest {longest} seconds, median {typical} seconds",
                 ),
-                "runner queue wait over 5 minutes",
+                THRESHOLDS[kind],
                 longest,
             )
         )
     return found
+
+
+def cleared(records: list[dict]) -> list[str]:
+    groups = {}
+    for run in records:
+        for job in run["jobs"]:
+            subject = _subject(run, job["labels"])
+            began, short = groups.get(subject, (True, True))
+            groups[subject] = (
+                began and started(job),
+                short and started(job) and iso_ms(job["started_at"]) - iso_ms(job["created_at"]) <= SHORT_WAIT_MS,
+            )
+    gone = []
+    for subject, (began, short) in groups.items():
+        kinds = [kind for kind in SUMMARIES if short or (began and kind != "ci runner wait")]
+        gone.extend(f"{kind.replace(' ', '-')}/{subject}" for kind in kinds)
+    return gone
 
 
 def _wall(run, now_ms):
