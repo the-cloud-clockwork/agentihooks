@@ -33,6 +33,7 @@ NOT_DUPLICATE = (
     "The promotion watch files one task per failed dev job and run, and holds a job's cause while its task is open."
 )
 NOW = 10_000_000
+MAX_ALERT = 2000
 SLUG = "sw"
 
 
@@ -59,11 +60,15 @@ class Ledger:
         self.comments.append((slug, task_id, text, by))
 
     def raise_alert(self, slug, source, text):
+        assert len(text) <= MAX_ALERT
+        if any(a["source"] == source and a["state"] != "done" for a in self.alerts):
+            return
         self.raised.append((slug, source, text))
         self.alerts.append({"id": f"al-{len(self.alerts)}", "source": source, "text": text, "state": "open"})
 
     def close_alert(self, slug, alert_id, outcome):
         self.closed.append((slug, alert_id, outcome))
+        next(a for a in self.alerts if a["id"] == alert_id)["state"] = "done"
 
 
 def gh(runs, jobs=(), calls=None):
@@ -594,6 +599,8 @@ def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_al
     actions = refresh(store, ledger, smoke_run(step, ["swarm init refused a one task swarm"], 901), NOW * 2)
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
     assert f"Its cause: {step}; swarm init refused a one task swarm." in ledger.added[1][1]["description"]
+    replaced = "Dev push run 901 of Tests failed on a new cause, so the swarm raised a new promotion alert."
+    assert ledger.closed == [(SLUG, "al-0", replaced)]
     assert len(ledger.raised) == 2
     assert ledger.raised[1][2] == (
         f"Dev promotion is red: push run 901 at commit {SHA} failed in swarm-image / smoke: {step}; "
@@ -627,6 +634,14 @@ def test_a_fixer_filed_before_causes_were_kept_still_holds_its_job(store):
         "raised the promotion alert for dev push run 900"
     ]
     assert ledger.added == [] and master_items(store) == []
+
+
+def test_a_long_cause_is_cut_so_the_alert_fits_the_ledger_and_keeps_the_run_link(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", ["x" * 5000]))
+    [(_, _, text)] = ledger.raised
+    assert len(text) == MAX_ALERT
+    assert text.endswith(". https://github.com/o/r/actions/runs/900")
 
 
 def test_a_fixer_goes_to_the_eng_lane_when_quota_capacity_gives_the_ci_lane_no_seats(store):

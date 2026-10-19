@@ -19,7 +19,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import capacity, dev_red, naming, promotion_owner
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX
-from scripts.swarm_ledger import ledger_comments
+from scripts.swarm_ledger import ledger_alerts, ledger_comments
 
 if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
@@ -47,6 +47,7 @@ MASTER_ITEM = (
 )
 CLOSABLE = ("open", "blocked")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
+REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
 
 
 def key(slug: str, part: str) -> str:
@@ -142,14 +143,21 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         new.append((task_id, why))
     if new or not _live_alerts(doc):
         named = [why.removesuffix(": ").rstrip(".") for _, why in new] or [job for job, _ in causes]
-        where = f" in {', '.join(named)}" if named else ""
-        ledger.raise_alert(
-            slug, SOURCE, f"Dev promotion is red: push run {run_id} at commit {sha} failed{where}. {url}"
-        )
-        actions.append(f"raised the promotion alert for dev push run {run_id}")
+        actions += _alert(slug, ledger, doc, last, named)
     if new:
         actions += _tell_master(slug, store, last, [task_id for task_id, _ in new], lane)
     return actions
+
+
+def _alert(slug, ledger, doc, last, named):
+    run_id = last["id"]
+    for alert in _live_alerts(doc):
+        ledger.close_alert(slug, alert["id"], REPLACED.format(run_id=run_id))
+    head = f"Dev promotion is red: push run {run_id} at commit {last['head_sha']} failed"
+    tail = f". {last['html_url']}"
+    where = f" in {', '.join(named)}" if named else ""
+    ledger.raise_alert(slug, SOURCE, head + where[: ledger_alerts.MAX_OUTCOME - len(head) - len(tail)] + tail)
+    return [f"raised the promotion alert for dev push run {run_id}"]
 
 
 def _tell_master(slug, store, last, new, lane):
