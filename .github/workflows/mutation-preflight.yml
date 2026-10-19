@@ -306,6 +306,13 @@ jobs:
       - name: Install dependencies
         run: uv pip install --system --excludes .github/test-excludes.txt -e ".[dev,all]"
 
+      - name: Restore the tests that killed this branch's earlier mutants
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
       - name: Download the shared mutation stats
         uses: actions/download-artifact@v4
         with:
@@ -402,6 +409,20 @@ jobs:
           SHARDS: ${{ strategy.job-total }}
         run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard "$SHARD" --shards "$SHARDS" --stats .mutation-stats
 
+      - name: Collect the tests that killed mutants
+        if: always()
+        run: mkdir -p .mutation-killers && [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+
+      - name: Upload the tests that killed mutants
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-killers-${{ matrix.shard }}
+          path: .mutation-killers/
+          if-no-files-found: ignore
+          retention-days: 1
+          overwrite: true
+
       - name: Upload shard mutation evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -435,6 +456,21 @@ jobs:
         with:
           pattern: mutation-preflight-shard-*
           path: .mutation-shards
+
+      - name: Download the tests that killed mutants
+        if: needs.plan.outputs.changed != '0'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mutation-killers-*
+          path: .mutation-stats/killers
+          merge-multiple: true
+
+      - name: Keep the tests that killed mutants for this branch's next plan
+        if: needs.plan.outputs.changed != '0' && hashFiles('.mutation-stats/killers/*') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
 
       - name: Record the revisions the report grades
         run: |
