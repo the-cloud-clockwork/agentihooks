@@ -20,6 +20,7 @@ def test_adoption_keeps_shared_connections_in_stack_and_client(tmp_path):
 def test_external_clients_keep_database_without_rebuilding_redis_address(tmp_path):
     values = {
         "SWARM_PORT": "8767",
+        "SWARM_REDIS_SCHEME": "rediss",
         "AGENTIHOOKS_SWARM_DATABASE_URL": "postgresql://ledger@shared/ledger",
         "AGENTIHOOKS_SWARM_REDIS_URL": "rediss://shared:6379/0",
     }
@@ -33,6 +34,7 @@ def test_external_clients_keep_database_without_rebuilding_redis_address(tmp_pat
 
 def test_initialization_retains_selected_urls_and_shell_quotes_database_options(tmp_path):
     import shlex
+    from unittest.mock import patch
 
     chosen = {
         "AGENTIHOOKS_SWARM_DATABASE_URL": "postgresql://ledger@shared/ledger?sslmode=verify-full&sslrootcert=/certs/ca.crt",
@@ -45,5 +47,26 @@ def test_initialization_retains_selected_urls_and_shell_quotes_database_options(
     args = shlex.split(stack_env.client_env(values, tmp_path))
     assert f"AGENTIHOOKS_SWARM_DATABASE_URL={chosen['AGENTIHOOKS_SWARM_DATABASE_URL']}" in args
     before = env_file.read_bytes()
-    assert stack_env.settings(env_file, chosen) == values
+    with patch.object(stack_env, "write_private") as writer:
+        assert stack_env.settings(env_file, chosen) == values
+        writer.assert_not_called()
     assert env_file.read_bytes() == before
+
+
+def test_native_initialization_propagates_shared_settings_without_adoption(tmp_path, monkeypatch):
+    import io
+
+    from tests.swarm.test_stack_init import Docker
+
+    monkeypatch.setattr(stack_init.shutil, "which", lambda name: f"/usr/bin/{name}")
+    chosen = {
+        "AGENTIHOOKS_SWARM_DATABASE_URL": "postgresql://ledger@shared/ledger",
+        "AGENTIHOOKS_SWARM_REDIS_URL": "rediss://shared:6379/0",
+    }
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path), **chosen}
+    out = io.StringIO()
+    assert stack_init.init(["--no-start"], environ, Docker(), None, out, "demo-swarm") == 0
+    folder = tmp_path / "swarm-stack"
+    assert {key: stack_env.read_env(folder / ".env")[key] for key in chosen} == chosen
+    assert {key: stack_env.read_env(folder / "client.env")[key] for key in chosen} == chosen
+    assert all(value not in out.getvalue() for value in chosen.values())
