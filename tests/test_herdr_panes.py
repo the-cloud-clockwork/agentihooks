@@ -41,6 +41,7 @@ def keyed(password, host="localhost", db="7"):
 def test_a_withheld_store_names_its_url_without_the_password():
     first = herdr_panes.store_ref(keyed("pw"))
     assert first == herdr_panes.store_ref(keyed("other"))
+    assert first == herdr_panes.store_ref(keyed("p@w"))
     assert first != herdr_panes.store_ref(keyed("pw", db="8"))
     assert first != herdr_panes.store_ref(keyed("pw", host="remote"))
     assert herdr_panes.store_ref("redis://localhost:6379/7") == "redis://localhost:6379/7"

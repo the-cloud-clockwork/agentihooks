@@ -61,9 +61,10 @@ def store_url(recorded: str, environ: dict[str, str]) -> str | None:
     """A withheld store opens only on this environment's own URL; a legacy bare mark only when that URL withholds."""
     if not recorded.startswith(WITHHELD):
         return recorded
-    own = environ.get(STORE_ENV, "")
-    legacy = recorded == WITHHELD and bool(urlparse(own).password)
-    return own if legacy or (own and store_ref(own) == recorded) else None
+    own = environ.get(STORE_ENV)
+    if own and (store_ref(own) == recorded or (recorded == WITHHELD and urlparse(own).password)):
+        return own
+    return None
 
 
 def _store(environ: dict[str, str]) -> str:
