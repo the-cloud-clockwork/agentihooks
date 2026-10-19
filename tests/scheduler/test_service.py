@@ -1,4 +1,8 @@
 import asyncio
+import fcntl
+import json
+import os
+import signal
 import subprocess
 import sys
 from pathlib import Path
@@ -66,6 +70,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
     children = [Mock(), Mock()]
     children[0].poll.return_value = 1
     children[1].poll.return_value = 2
@@ -90,6 +95,7 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     from scripts.scheduler import service
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
     child = Mock()
     child.poll.return_value = None
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=Mock(return_value=child)))
@@ -275,3 +281,156 @@ def test_supervisor_startup_and_log_use_the_explicit_domain(tmp_path, monkeypatc
     assert spawn.call_args.kwargs["env"] == active
     assert spawn.call_args.kwargs["stdout"].name == str(directory / "scheduler.log")
     assert spawn.call_count == 1
+
+
+def test_a_supervisor_records_the_root_and_revision_it_loaded_before_its_runner(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: f"revision of {root}")
+    monkeypatch.setattr(service.time, "time", lambda: 1_000.0)
+    seen = []
+    child = Mock()
+    child.poll.return_value = None
+
+    def spawn(argv, **kwargs):
+        seen.append(json.loads((tmp_path / "supervisor.json").read_text()))
+        return child
+
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = True
+    service.supervise(stop)
+    root = Path(service.__file__).resolve().parents[2]
+    assert seen == [{"pid": os.getpid(), "root": str(root), "revision": f"revision of {root}", "started": 1_000.0}]
+
+
+def test_revision_names_the_checked_out_commit_and_nothing_without_one(tmp_path):
+    from scripts.scheduler import service
+
+    git = ["git", "-c", "user.name=proof", "-c", "user.email=proof@invalid", "-C", str(tmp_path)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    assert service.revision(tmp_path) == ""
+    subprocess.run([*git, "commit", "-q", "--allow-empty", "-m", "proof"], check=True)
+    head = subprocess.run([*git, "rev-parse", "HEAD"], capture_output=True, text=True, check=True).stdout.strip()
+    assert service.revision(tmp_path) == head
+    assert service.revision(tmp_path / "missing") == ""
+
+
+def test_holder_reads_the_record_of_the_supervisor_holding_its_lock(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    assert service.holder({}) is None
+    record = {"pid": os.getpid(), "root": "/installed", "revision": "r1", "started": 5.0}
+    with service.machine_lock("supervisor"):
+        assert service.holder({}) == {"pid": os.getpid()}
+        (tmp_path / "supervisor.json").write_text(json.dumps(record))
+        assert service.holder({}) == record
+        (tmp_path / "supervisor.json").write_text(json.dumps({**record, "pid": os.getpid() + 1}))
+        assert service.holder({}) == {"pid": os.getpid()}
+        (tmp_path / "supervisor.json").write_text("{")
+        assert service.holder({}) == {"pid": os.getpid()}
+    assert service.holder({}) is None
+
+
+def test_holder_of_a_lock_with_no_pid_names_pid_zero(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    with (tmp_path / "supervisor.lock").open("a+") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert service.holder({}) == {"pid": 0}
+
+
+def _clock(monkeypatch, service, slept):
+    now = [0.0]
+    monkeypatch.setattr(service.time, "monotonic", lambda: now[0])
+
+    def sleep(seconds):
+        slept.append(seconds)
+        now[0] += seconds
+
+    monkeypatch.setattr(service.time, "sleep", sleep)
+
+
+def test_drain_terminates_the_supervisor_and_waits_for_its_lock_to_free(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    slept, sent = [], []
+    _clock(monkeypatch, service, slept)
+    held = service.machine_lock("supervisor")
+    held.__enter__()
+    monkeypatch.setattr(service.os, "kill", lambda pid, number: sent.append((pid, number)))
+    exits = iter([False, True])
+
+    def sleep(seconds):
+        slept.append(seconds)
+        if next(exits):
+            held.__exit__(None, None, None)
+
+    monkeypatch.setattr(service.time, "sleep", sleep)
+    assert service.drain(4242, {}) is True
+    assert sent == [(4242, signal.SIGTERM)]
+    assert slept == [1, 1]
+
+
+def test_drain_gives_up_after_its_wait_while_the_supervisor_holds_on(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    slept = []
+    _clock(monkeypatch, service, slept)
+    monkeypatch.setattr(service.os, "kill", lambda pid, number: None)
+    with service.machine_lock("supervisor"):
+        assert service.drain(4242, {}) is False
+    assert slept == [1] * service.DRAIN_S
+
+
+def test_drain_of_a_supervisor_already_gone_needs_no_wait(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+
+    def gone(pid, number):
+        raise ProcessLookupError(pid)
+
+    monkeypatch.setattr(service.os, "kill", gone)
+    monkeypatch.setattr(service.time, "sleep", lambda seconds: pytest.fail("drain waited"))
+    assert service.drain(4242, {}) is True
+
+
+@pytest.mark.parametrize("pid", [0, -1])
+def test_drain_never_signals_without_a_supervisor_pid(monkeypatch, tmp_path, pid):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service.os, "kill", lambda pid, number: pytest.fail("drain signalled a process group"))
+    assert service.drain(pid, {}) is False
+
+
+def test_a_terminated_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    dispatched = []
+
+    def run_due():
+        if dispatched:
+            raise AssertionError("the runner kept dispatching after terminate")
+        os.kill(os.getpid(), signal.SIGTERM)
+        dispatched.append("finished")
+
+    def unhandled(number, frame):
+        raise AssertionError("terminate reached the process handler")
+
+    previous = signal.signal(signal.SIGTERM, unhandled)
+    try:
+        asyncio.run(service.run(SimpleNamespace(run_due=run_due)))
+    finally:
+        signal.signal(signal.SIGTERM, previous)
+    assert dispatched == ["finished"]
+    with service.machine_lock("runner"):
+        pass
