@@ -291,7 +291,7 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "raised the promotion alert for dev push run 900",
         "told the master about the new promotion causes of dev push run 900",
     ]
-    assert filed(store) == {"promo-900-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
+    assert filed(store) == {"promo-900-0": "helm-kind: ", "promo-900-1": "unit (3.11, 1): "}
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
 
 
@@ -314,7 +314,7 @@ def test_a_job_with_an_open_promotion_task_is_not_filed_again_and_done_ones_are_
         "raised the promotion alert for dev push run 900",
         "told the master about the new promotion causes of dev push run 900",
     ]
-    assert filed(store) == {"promo-800-0": "helm-kind", "promo-900-1": "unit (3.11, 1)"}
+    assert filed(store) == {"promo-800-0": "helm-kind", "promo-900-1": "unit (3.11, 1): "}
 
 
 def test_jobs_that_share_a_title_each_get_a_task(store):
@@ -571,11 +571,18 @@ def test_cause_names_the_failed_steps_and_failure_messages():
 def test_normal_folds_numbers_and_hashes_in_the_cause_but_keeps_the_job_name(detail, kept):
     job = "unit (3.11, 1)"
     assert promotion_watch.normal(job, f"{job}: {detail}") == f"{job}: {kept}"
-    assert promotion_watch.normal(job, job) == job
+    assert promotion_watch.normal(job, f"{job}: ") == f"{job}: "
 
 
-def test_cause_of_a_job_without_steps_or_check_run_is_its_name():
-    assert promotion_watch.cause("/repo", {"name": "lint", "conclusion": "failure"}, gh([])) == "lint"
+def test_cause_of_a_job_without_steps_or_check_run_is_its_name_and_an_empty_detail():
+    assert promotion_watch.cause("/repo", {"name": "lint", "conclusion": "failure"}, gh([])) == "lint: "
+
+
+def test_a_fixer_without_cause_detail_does_not_hold_a_later_cause_with_detail(store):
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], [{"name": "swarm-image / smoke", "conclusion": "failure"}]))
+    refresh(store, ledger, smoke_run("Build the image", [], 901), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
 
 
 def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_alert_and_a_master_item(store):

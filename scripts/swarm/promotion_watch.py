@@ -85,7 +85,7 @@ def cause(repo_dir: str, job: dict, run: Callable = subprocess.run) -> str:
         detail += [
             a["message"] for a in found if a["annotation_level"] == "failure" and a["message"] not in ("", STEP_EXIT)
         ]
-    return f"{job['name']}: {'; '.join(detail)}" if detail else job["name"]
+    return f"{job['name']}: {'; '.join(detail)}"
 
 
 def normal(job: str, why: str) -> str:
@@ -141,7 +141,7 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         actions.append(f"filed {task_id} for the failed dev job {job}")
         new.append((task_id, why))
     if new or not _live_alerts(doc):
-        named = [why.rstrip(".") for _, why in new] or [job for job, _ in causes]
+        named = [why.removesuffix(": ").rstrip(".") for _, why in new] or [job for job, _ in causes]
         where = f" in {', '.join(named)}" if named else ""
         ledger.raise_alert(
             slug, SOURCE, f"Dev promotion is red: push run {run_id} at commit {sha} failed{where}. {url}"
