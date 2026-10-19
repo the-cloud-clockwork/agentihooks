@@ -841,8 +841,11 @@ def test_jobs_that_failed_for_want_of_lost_unit_shard_output_join_the_outage_tas
         "Promotion red: unit (3.12, 10)",
     ]
     description = ledger.added[0][1]["description"]
-    assert all(name in description for name, _, _ in CONSUMERS)
-    assert all(name in description for name in LOST_SHARDS)
+    assert f"the jobs {', '.join(LOST_SHARDS)} lost their runner infrastructure" in description
+    assert (
+        "the jobs refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard "
+        "output" in description
+    )
     assert "unit (3.12, 10)" not in description
     assert len(ledger.raised) == 1
 
