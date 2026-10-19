@@ -117,7 +117,9 @@ def convert(source: LedgerRepository, target: LedgerRepository, dry_run: bool = 
 
 
 def main() -> None:
-    from hooks import config  # noqa: F401
+    from scripts.swarm_ledger import ports
+
+    ports.hooks().config  # noqa: B018
 
     parser = argparse.ArgumentParser(prog="python -m scripts.swarm_ledger.storage_migration.shared")
     parser.add_argument("--source", type=Path, required=True)
