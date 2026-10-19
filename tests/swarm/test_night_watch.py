@@ -268,7 +268,7 @@ def test_the_tick_respawns_the_front_door_past_the_host_hold_and_spent_retries(s
         return []
 
     monkeypatch.setattr(night_watch, "run", run_watch)
-    tick._night_watch(SLUG, store.config(SLUG), store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
+    tick._night_watch(SLUG, store, Ledger(), Runtime(), {"tasks": []}, NOW, False)
     assert seen["respawn"] == ["launched"]
     assert called == [{"past_host": True}]
     assert not store.redis.exists(store.key(SLUG, "master-start"))

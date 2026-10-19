@@ -255,7 +255,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
-        actions += skip_refused(_night_watch, slug, config, store, ledger, runtime, doc, now_ms, sleeping)
+        actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
@@ -1208,13 +1208,13 @@ def _recover_master(slug, config, store, runtime, now_ms):
     return [f"adopted live master {name}"]
 
 
-def _night_watch(slug, config, store, ledger, runtime, doc, now_ms, sleeping):
+def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
     from scripts.swarm.health import night_watch
 
     def respawn():
         if master_start.read(store, slug).get("alerted"):
             store.redis.delete(store.key(slug, "master-start"))
-        return _master(slug, config, store, runtime, now_ms, past_host=True)
+        return _master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
 
     return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
 
