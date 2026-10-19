@@ -27,6 +27,28 @@ def test_first_snapshot_does_not_serialize_a_full_view_to_compare_it_with_null(b
     page.close()
 
 
+def test_snapshot_parsing_yields_before_applying_the_view(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    page.add_init_script(
+        """(() => {
+          const parse = JSON.parse;
+          JSON.parse = function(...args) {
+            const value = parse.apply(this, args);
+            if (value?.ledger?.snapshotMarker) {
+              value.ledger.title = 'Parsed snapshot';
+              setTimeout(() => { window.titleAfterParsing = document.getElementById('title').textContent; }, 0);
+            }
+            return value;
+          };
+        })();"""
+    )
+    show(page, shell_html(), ledger=ledger_state({"title": "Before snapshot", "snapshotMarker": True}))
+    page.wait_for_function("window.titleAfterParsing !== undefined")
+    assert page.evaluate("window.titleAfterParsing") != "Parsed snapshot"
+    page.wait_for_function("document.getElementById('title').textContent === 'Parsed snapshot'")
+    page.close()
+
+
 def test_outline_marking_does_not_read_geometry_after_writing_link_classes(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     show(page, shell_html(), ledger=ledger_state({"title": "Outline"}))
