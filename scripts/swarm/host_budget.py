@@ -102,8 +102,7 @@ def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
         )
     stale = ""
     supply = (
-        f"{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB "
-        "swap in use"
+        f"{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB swap in use"
     )
     if swap_above_share(sample, thresholds):
         stale = (
@@ -117,9 +116,7 @@ def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
             f"the larger of {sample.agent_mb} MB measured over {sample.measured_agents} Claude agent trees "
             f"and the configured {thresholds.memory_per_agent_mb} MB"
         )
-    return (
-        f"{stale}{supply} fits {memory} at {per_agent_mb(sample, thresholds)} MB each, {figure}"
-    )
+    return f"{stale}{supply} fits {memory} at {per_agent_mb(sample, thresholds)} MB each, {figure}"
 
 
 def load_room(sample: HostSample, thresholds: Thresholds) -> int | None:
