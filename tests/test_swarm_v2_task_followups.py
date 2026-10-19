@@ -107,6 +107,32 @@ def test_a_malformed_task_is_refused_by_the_api_schema(world, task):
     assert error.value.code == "schema_invalid"
 
 
+@pytest.mark.parametrize("task", [None, "t2"])
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ["followup", "add", "Retry the notes build"],
+        ["followup", "add", "Retry the notes build", "--needs-operator"],
+        ["followup", "add", "Retry the notes build", "--hive", "h1"],
+        ["question", "add", "Which port"],
+        ["question", "add", "Which port", "--hive", "h1"],
+    ],
+)
+def test_every_item_add_the_cli_sends_passes_the_api_schema(world, monkeypatch, argv, task):
+    from scripts.swarm_ledger import ledger
+
+    sent = []
+    if task:
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    else:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setattr(ledger, "call", lambda slug, ops, *rest: sent.extend(ops) or {})
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", ENGINEER, *argv])
+    {"followup": ledger.cmd_followup, "question": ledger.cmd_question}[args.command](args)
+    assert [op["op"] for op in sent] == ["add_item"]
+    assert api_checked(world, sent[0]) == sent
+
+
 def test_a_follow_up_on_a_task_belongs_to_the_tasks_owning_master(world):
     add(world, task="t2")
     doc = world.doc()
