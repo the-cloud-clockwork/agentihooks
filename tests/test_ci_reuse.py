@@ -266,7 +266,12 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         if "durations" in workflow["jobs"]
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
-    assert steps in [ci_reuse.gate_steps(**form, summary=summary) for form in forms for summary in (False, True)]
+    assert steps in [
+        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        for form in forms
+        for summary in (False, True)
+        for watcher_loss in (False, True)
+    ]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
