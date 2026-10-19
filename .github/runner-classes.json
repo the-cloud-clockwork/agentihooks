@@ -19,6 +19,7 @@
   "ledger-row-memory.yml/replay": "batch",
   "lost-runner.yml/watch": "hosted",
   "mutation-deadline-proof.yml/receipts": "batch",
+  "mutation-line-selection-proof.yml/compare": "batch",
   "mutation-preflight.yml/mutation": "light",
   "mutation-preflight.yml/mutation-shard": "batch",
   "mutation-preflight.yml/plan": "light",

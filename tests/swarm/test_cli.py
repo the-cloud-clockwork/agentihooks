@@ -836,11 +836,14 @@ def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys,
     capsys.readouterr()
     first = "https://github.com/o/r/pull/1"
     second = "https://github.com/o/r/pull/2"
-    if not legacy:
+    if legacy:
+        for _ in range(3):
+            cli.review_rounds.Budget("sw", "reviews").spend("t1", "rounds", 3)
+    else:
         ledger.rows["t1"]["pr_url"] = first
-    for n in (1, 2, 3):
-        assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
-        assert json.loads(capsys.readouterr().out)["round"] == n
+        for n in (1, 2, 3):
+            assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 0
+            assert json.loads(capsys.readouterr().out)["round"] == n
     if legacy and register_first:
         ledger.rows["t1"]["pr_url"] = first
         assert run("sw", "--as", "engineer@a1b2c3-0001", "review") == 1
