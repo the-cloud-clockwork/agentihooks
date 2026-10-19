@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts import openbao_kv
+from scripts import init_reporter, openbao_kv
 from scripts.swarm_ledger import ledger_ca, ledger_link
 from tests.swarm_ledger import test_ledger_tls
 from tests.swarm_ledger.test_ledger_authority import core
@@ -164,7 +164,7 @@ def test_init_installs_the_ledger_ca(monkeypatch, capsys):
 
     monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
     monkeypatch.setattr(install, "_load_state", lambda: {})
-    monkeypatch.setattr(install, "cmd_init_unified", lambda args: None)
+    monkeypatch.setattr(init_reporter, "report_target", lambda *args, **kwargs: None)
     monkeypatch.setattr(herdr_setup, "init_step", lambda *args: None)
     monkeypatch.setattr(ledger_ca, "install", lambda: "ledger CA: installed")
     monkeypatch.setattr(sys, "argv", ["agentihooks", "init", "--profile", "default", "--target", "claude", "--verbose"])
