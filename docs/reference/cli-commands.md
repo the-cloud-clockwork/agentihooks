@@ -590,11 +590,11 @@ Every layer is a JSON object with a `roots` list. Each root entry takes:
 | Field | Default | Meaning |
 |---|---|---|
 | `id` | required | Merge key across layers; an entry without a non-empty `id` is ignored |
-| `path` | required | Directory the root covers; `~` is expanded |
-| `kind` | required | One of the kinds above; any other value drops the root |
+| `path` | required in the merged entry | Directory the root covers; `~` is expanded |
+| `kind` | required in the merged entry | One of the kinds above; any other value drops the root |
 | `idle_days` | `7` | Idle age before an entry is acted on |
 | `budget_gb` | `0` | `scratch` only: size above which the oldest dead dirs go |
-| `include` | `[]` | `archive` only: file name globs to gzip |
+| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry |
 | `enabled` | `true` | `false` drops the root after the merge |
 
 Later layers update an earlier entry with the same `id` field by field, so an overlay names only what it changes. A personal `~/.agentihooks/lifecycle.json` that shortens the scratchpad idle time, turns off ledger archiving and adds a root of its own:
@@ -611,7 +611,13 @@ Later layers update an earlier entry with the same `id` field by field, so an ov
 
 Each finding in `agentihooks gc --json` carries the `id` of the root it came from in its `root` field.
 
-A layer that cannot be used contributes no roots and the other layers still load: a missing file, a path that is a directory or cannot be read, text that is not JSON, and JSON whose top level is not an object (`null`, `[]`) all count as empty. Inside `roots`, entries that are not objects or have no `id` are skipped. A broken overlay therefore falls back to the base roots silently; nothing reports it. A file that is not valid UTF-8 is the exception: its decode error is not caught and stops the reader.
+A layer the reader cannot open or parse contributes no roots and the other layers still load: a missing file, a path that is a directory or cannot be read, text that is not JSON, JSON whose top level is not an object (`null`, `[]`) and an object with no `roots` all count as empty. Inside `roots`, entries that are not objects or have no `id` are skipped. Nothing reports a skipped layer or entry, so a broken overlay leaves the other layers' roots in force without a warning.
+
+These shapes raise out of the reader. `agentihooks gc` stops with the error; on PreToolUse the lifecycle guard logs `lifecycle pre-tool failed` and lets the call through without recording a lease or blocking a path gc is removing:
+
+- A file that is not valid UTF-8.
+- `roots` set to `null` or a number; it must be a list.
+- `include` set to `null`. `include` must be a list of strings: a bare string such as `"*.json"` is read as one pattern per character.
 
 ---
 
