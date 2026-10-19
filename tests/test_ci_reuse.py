@@ -956,7 +956,9 @@ def test_queue_watcher_loss_does_not_drop_passed_graded_jobs(watcher, failed):
     if watcher is not None:
         needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
     result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
-    assert (result.returncode == 0) == (watcher in {"success", "failure", "cancelled"} and not failed), result.stdout + result.stderr
+    assert (result.returncode == 0) == (watcher in {"success", "failure", "cancelled"} and not failed), (
+        result.stdout + result.stderr
+    )
 
 
 @pytest.mark.parametrize("job", ["select", "split", "unit", "shard-check", "test-count"])
