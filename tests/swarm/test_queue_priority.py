@@ -168,7 +168,7 @@ def test_tick_applies_priority_after_blocking_tests_complete(env, monkeypatch, e
         assert path == "repos/o/r/actions/runs/42"
         return {"status": "completed"}
 
-    def reorder(url, journal):
+    def reorder(url, journal, **kwargs):
         applied.append(url)
         return {"url": url, "displaced": [], "errors": []}
 
@@ -218,7 +218,7 @@ def test_missing_run_resolves_original_group_after_queue_advances(priority, monk
     assert json.loads(capsys.readouterr().out)["run_id"] is None
     p.groups[0]["head"] = "new-group"
 
-    def reorder(url, journal):
+    def reorder(url, journal, **kwargs):
         return {"url": url, "displaced": [], "errors": []}
 
     monkeypatch.setattr(merge_queue, "prioritize", reorder)
@@ -277,7 +277,7 @@ def test_missing_run_for_a_departed_group_does_not_hold_forever(priority, monkey
     monkeypatch.setattr(
         merge_queue,
         "prioritize",
-        lambda url, journal: applied.append(url) or {"url": url, "displaced": [], "errors": []},
+        lambda url, journal, **kwargs: applied.append(url) or {"url": url, "displaced": [], "errors": []},
     )
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"applied deferred merge queue priority for {URL}"]
     assert applied == [URL]
@@ -288,7 +288,9 @@ def test_refused_reorder_keeps_pending_request_for_retry(priority, monkeypatch, 
     assert cli.main(["sw", "merge", "priority", URL]) == 0
     capsys.readouterr()
     p.run["status"] = "completed"
-    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: {"displaced": [], "errors": ["queue refused"]})
+    monkeypatch.setattr(
+        merge_queue, "prioritize", lambda url, journal, **kwargs: {"displaced": [], "errors": ["queue refused"]}
+    )
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority for {URL} waits: queue refused"]
     assert p.store.redis.hget(p.store.key("sw", queue_priority.PENDING), URL)
 
@@ -437,7 +439,7 @@ def test_one_held_request_does_not_block_a_completed_request(priority, monkeypat
 
     applied = []
 
-    def reorder(url, journal):
+    def reorder(url, journal, **kwargs):
         assert isinstance(journal, queue_record.Journal) and journal.url == url
         applied.append(url)
         return {"url": url, "displaced": [], "errors": []}
@@ -575,7 +577,7 @@ def draft_target(run):
     def read(command, **kwargs):
         done = run(command, **kwargs)
         response = json.loads(done.stdout)
-        raw = response["data"].get("resource")
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
         if raw and raw.get("id") == "P9":
             raw["isDraft"] = True
         return subprocess.CompletedProcess(command, 0, json.dumps(response), "")

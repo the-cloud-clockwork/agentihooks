@@ -153,7 +153,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
 
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=ledger_tasks))
 
-    def prioritize(url, journal):
+    def prioritize(url, journal, **kwargs):
         assert url == URL
         assert isinstance(journal, queue_record.Journal) and journal.url == URL
         return {"url": url, "displaced": [URL[:-1] + str(n) for n in (2, 3, 5, 6)], "errors": errors}
@@ -328,7 +328,11 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))
     queue = FakeQueue()
     prioritize = merge_queue.prioritize
-    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: prioritize(url, run=queue.run, journal=journal))
+    monkeypatch.setattr(
+        merge_queue,
+        "prioritize",
+        lambda url, journal, **kwargs: prioritize(url, run=queue.run, journal=journal, **kwargs),
+    )
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
     records = []
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
@@ -405,7 +409,7 @@ def test_priority_refuses_a_draft_before_any_entry_leaves():
     def run(command, **kwargs):
         done = queue.run(command, **kwargs)
         response = json.loads(done.stdout)
-        raw = response["data"].get("resource")
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
         if raw and raw.get("id") == "P9":
             raw["isDraft"] = True
         return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
