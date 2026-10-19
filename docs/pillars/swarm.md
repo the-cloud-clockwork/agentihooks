@@ -786,8 +786,9 @@ lines outside the diff still pass, because they are not changed lines.
 #### Reports and failures
 
 A failed gate stops the publication. The error names the fallback and the
-worktree, carries the gate's report and ends with the `Next:` command to
-repeat after the fix. Each finding is one report line:
+worktree, carries the gate's report, or ruff's own error text when ruff
+writes one, and ends with the `Next:` command to repeat after the fix. Each
+finding is one report line:
 
 | Report | Meaning |
 |---|---|
@@ -795,14 +796,15 @@ repeat after the fix. Each finding is one report line:
 | `path:row: would reformat a changed line` | `ruff format` would rewrite that changed line; `row` is the first such line. Run `ruff format path` and review the diff. |
 | `path: name RULE message` | A touched function over a complexity limit. |
 | `path: name exceeds 300 lines` or `path: file exceeds 3000 lines` | A touched function or changed file over its size limit. |
-| `path: unit grew from N to M` | A unit already over its limit at the merge base grew. |
+| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base grew. |
 | `ruff check exited N` or `ruff format exited N` | Ruff could not run, usually an invalid ruff configuration in the repository. When ruff writes its own error, the publication error shows that text instead of this line. |
 
 On a pass the gate records the passing head, which `publish` requires before
-it pushes, and the publish result is printed without the gate's report. Run
-`python -I <agentihooks>/scripts/swarm/publish_gate.py` from the worktree,
-with a Python that has ruff installed, to see the full report, ending in `Graded N changed Python files`. Tests never run
-in the fallback; they run in CI.
+it pushes, and the publish result is printed without the gate's report. To see
+the full report, ending in `Graded N changed Python files`, run
+`python -I <agentihooks>/scripts/swarm/publish_gate.py` from the worktree with
+a Python that has ruff installed. A passing manual run records the head too.
+Tests never run in the fallback; they run in CI.
 
 The changed line grading was delivered in [pull request 4116](https://github.com/the-cloud-clockwork/agentihooks/pull/4116).
 Before it, a one line change to the litellm-state drift script failed on five
