@@ -242,13 +242,26 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ---
 
+## Hook Injection Budget
+
+Claude hook context uses a shared event budget, independently of compression.
+See [Hook Injection Budget](../hooks/injection-budget.md) for priority order,
+examples, inbox exceptions and size diagnostics. Codex and Copilot retain their
+own limits and arrival order.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOOK_INJECTION_MAX_CHARS` | `9000` | Claude event budget in UTF-16 code units. Keep positive and below 10,000; zero or negative disables fitting and priority sorting. |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTICORE_TOOL_MEMORY_PATH` | `~/.agenticore_tool_memory.ndjson` | Path to the tool error memory file. |
 | `AGENTICORE_TOOL_MEMORY_MAX` | `100` | Maximum number of error entries to store. |
-| `AGENTICORE_TOOL_MEMORY_SHOW` | `15` | Number of entries to inject per `PreToolUse` event. |
+| `AGENTICORE_TOOL_MEMORY_SHOW` | `5` | Maximum selected entries per `PreToolUse` event, each limited to 160 characters before event budget fitting. |
 
 ---
 
