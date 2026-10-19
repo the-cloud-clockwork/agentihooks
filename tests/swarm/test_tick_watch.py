@@ -4,7 +4,7 @@ import os
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import cli, controller_probes, lease, tick_heartbeat, tick_watch
+from scripts.swarm import cli, lease, scheduled_tick, tick_heartbeat, tick_watch
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
@@ -14,7 +14,6 @@ MINUTE = 60_000
 LIMIT = tick_heartbeat.LIMIT_MS
 START = 1_800_000_000_000
 FRONT_DOOR = "master@sw"
-PROBE_ENV = {"AGENTIHOOKS_CONTROL_API_PORT": "8780", "AGENTIHOOKS_CONTROL_SWARM": "sw"}
 
 
 @pytest.fixture
@@ -200,13 +199,12 @@ def test_a_seat_that_comes_live_during_the_episode_gets_the_current_evidence(sto
 
 
 @pytest.mark.parametrize("mark", tick_heartbeat.HALTS)
-def test_a_halted_ledger_is_alerted_but_neither_restarted_nor_respawned(store, lease_clock, mark):
+def test_a_halted_ledger_is_alerted_but_never_repaired(store, mark):
     beat(store, START - 3 * LIMIT)
     store.redis.set(store.key("sw", mark), 1)
     asked = []
 
-    assert probe(store, age=2 * LIMIT) == 0
-    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug: asked.append(slug) or []) == [
+    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: asked.append(slug) or []) == [
         f"told {FRONT_DOOR} the tick is stale"
     ]
     assert asked == []
@@ -276,20 +274,13 @@ def test_a_swarm_stopped_mid_episode_ends_the_episode_with_a_closing_notice(stor
     assert again == []
 
 
-def test_the_liveness_probe_leaves_a_swarm_whose_ledger_is_gone(store, lease_clock):
-    beat(store, START - 3 * LIMIT)
-    store.redis.set(store.key("sw", "ledger-gone"), 1)
-
-    assert probe(store, age=2 * LIMIT) == 0
-
-
 def test_the_watcher_respawns_the_master_only_while_the_tick_is_stale(store):
     asked = []
     beat(store, START)
 
-    tick_watch.watch_pass(store, "sw", START + MINUTE, START, lambda slug: asked.append(slug) or [])
+    tick_watch.watch_pass(store, "sw", START + MINUTE, START, lambda slug, now: asked.append(slug) or [])
     assert asked == []
-    assert tick_watch.watch_pass(store, "sw", START + LIMIT, START, lambda slug: [f"spawned master for {slug}"])[
+    assert tick_watch.watch_pass(store, "sw", START + LIMIT, START, lambda slug, now: [f"spawned master for {slug}"])[
         -1
     ] == ("spawned master for sw")
 
@@ -336,105 +327,24 @@ def test_respawn_master_leaves_a_swarm_another_hive_ticks(store, monkeypatch):
     assert runtime.masters == []
 
 
-def probe(store, age, owner="home"):
-    return controller_probes.live(PROBE_ENV, store, lambda url, timeout: None, owner, lambda: age)
-
-
-@pytest.fixture
-def lease_clock(store, monkeypatch):
-    now = [START]
-    monkeypatch.setattr(lease, "now_ms", lambda saved: now[0])
-    assert lease.acquire(store, "sw", "home") is not None
-    return now
-
-
-def test_the_liveness_probe_fails_when_the_tick_it_runs_has_not_completed_a_pass_for_ten_minutes(
-    store, lease_clock, capsys
-):
-    beat(store, START - LIMIT)
-
-    assert probe(store, age=2 * LIMIT) == 1
-    assert capsys.readouterr().out == (
-        "controller: the tick is stale, sw: no tick pass has completed for 10 minutes, the last ended at "
-        f"{tick_heartbeat.clock(START - LIMIT)}\n"
-    )
-
-
-def test_the_liveness_probe_fails_on_a_frozen_decision_input(store, lease_clock, capsys):
-    beat(store, START, host=START - LIMIT)
-
-    assert probe(store, age=2 * LIMIT) == 1
-    assert "the host room it decides on was 10 minutes old at its last pass" in capsys.readouterr().out
-
-
-def test_the_liveness_probe_passes_a_fresh_heartbeat(store, lease_clock, capsys):
-    beat(store, START - MINUTE)
-
-    assert probe(store, age=2 * LIMIT) == 0
-    assert capsys.readouterr().out == "controller: live\n"
-
-
-def test_a_restarted_tick_gets_ten_minutes_from_its_own_start(store, lease_clock):
-    beat(store, START - 3 * LIMIT)
-
-    assert probe(store, age=LIMIT - 1) == 0
-    assert probe(store, age=LIMIT) == 1
-
-
-def test_a_restarted_tick_with_no_heartbeat_fails_after_ten_minutes(store, lease_clock):
-    assert probe(store, age=LIMIT - 1) == 0
-    assert probe(store, age=LIMIT) == 1
-
-
-def test_the_liveness_probe_judges_only_the_swarms_this_controller_ticks(store, lease_clock):
-    beat(store, START - 3 * LIMIT)
-
-    assert probe(store, age=2 * LIMIT, owner="anton") == 0
-
-
-def test_the_liveness_probe_skips_a_stopped_swarm(store, lease_clock):
-    beat(store, START - 3 * LIMIT)
-    store.update("sw", state="stopped")
-
-    assert probe(store, age=2 * LIMIT) == 0
-
-
-def test_the_liveness_probe_leaves_a_swarm_in_a_ledger_outage_to_the_watcher(store, lease_clock, tmp_path, monkeypatch):
+def test_a_swarm_in_a_ledger_outage_is_alerted_but_never_repaired(store, tmp_path, monkeypatch):
     from scripts.swarm import outage
 
     monkeypatch.setattr(outage, "HOME", tmp_path)
     beat(store, START - 3 * LIMIT)
     outage.ledger_health("sw", START - 2 * LIMIT, lambda: False)
+    asked = []
 
-    assert probe(store, age=2 * LIMIT) == 0
-    assert tick_watch.watch_pass(store, "sw", START, START) == [f"told {FRONT_DOOR} the tick is stale"]
-
-
-def test_the_liveness_probe_without_a_control_api_judges_the_lease_and_heartbeat_only(store, lease_clock, capsys):
-    beat(store, START - MINUTE)
-
-    assert controller_probes.live({}, store, None, "home", lambda: 2 * LIMIT) == 0
-    assert capsys.readouterr().out == "controller: live\n"
+    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug, now: asked.append(slug) or []) == [
+        f"told {FRONT_DOOR} the tick is stale"
+    ]
+    assert asked == []
 
 
 def test_a_restarted_watcher_alerts_at_once_on_a_heartbeat_already_ten_minutes_old(store):
     beat(store, START)
 
     assert tick_watch.watch_pass(store, "sw", START + LIMIT, START + LIMIT) == [f"told {FRONT_DOOR} the tick is stale"]
-
-
-def test_the_process_age_reads_the_kernel_start_time():
-    assert 0 <= tick_heartbeat.process_age_ms(os.getpid()) < 3_600_000
-
-
-def test_the_process_age_counts_from_process_one_start_whatever_its_name(tmp_path):
-    ticks = os.sysconf("SC_CLK_TCK")
-    (tmp_path / "1").mkdir()
-    fields = ["S", *["0"] * 18, str(100 * ticks)]
-    (tmp_path / "1" / "stat").write_text(f"1 (odd) name) {' '.join(fields)} 0 0\n")
-    (tmp_path / "uptime").write_text("160.5 9.0\n")
-
-    assert tick_heartbeat.process_age_ms(proc=tmp_path) == 60_500
 
 
 def test_times_and_durations_read_in_plain_words():
@@ -494,10 +404,64 @@ def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deploymen
     (args,) = ran
     assert args[:2] == ("store", cli.now_ms)
     if respawns:
-        assert args[2]("sw") == ["spawned"]
+        assert args[2].restart is scheduled_tick.restart
+        assert args[2].respawn("sw") == ["spawned"]
         assert asked == [("sw", "store", runtime, START)]
     else:
         assert args[2] is None
+
+
+def test_the_repair_restarts_the_scheduler_once_per_stale_window_and_respawns_every_pass():
+    restarts, respawns = [], []
+    repair = tick_watch.Repair(lambda: restarts.append(1) or "restarted", lambda slug: respawns.append(slug) or [])
+
+    assert repair("sw", START) == ["restarted"]
+    assert repair("other", START + LIMIT - 1) == []
+    assert repair("sw", START + LIMIT) == ["restarted"]
+    assert (len(restarts), respawns) == (2, ["sw", "other", "sw"])
+
+
+def test_the_scheduler_restart_stops_the_running_supervisor_then_registers_the_tick_again():
+    from contextlib import ExitStack
+
+    from scripts.scheduler.service import machine_lock
+
+    held, kills = ExitStack(), []
+    held.enter_context(machine_lock("supervisor"))
+
+    def kill(pid, sig):
+        kills.append((pid, sig))
+        held.close()
+
+    assert scheduled_tick.restart(kill, lambda: True, lambda seconds: None) == "restarted the scheduler tick"
+    assert kills == [(os.getpid(), scheduled_tick.signal.SIGTERM)]
+
+
+def test_the_scheduler_restart_with_no_supervisor_only_registers_the_tick():
+    kills, waits = [], []
+
+    said = scheduled_tick.restart(lambda *args: kills.append(args), lambda: False, waits.append)
+
+    assert said == "restarted the scheduler, but the tick did not register"
+    assert (kills, waits) == ([], [])
+
+
+def test_the_scheduler_restart_waits_for_the_supervisor_to_let_go():
+    from contextlib import ExitStack
+
+    from scripts.scheduler.service import machine_lock
+
+    held, waits = ExitStack(), []
+    held.enter_context(machine_lock("supervisor"))
+
+    def wait(seconds):
+        waits.append(seconds)
+        if len(waits) == 3:
+            held.close()
+
+    scheduled_tick.restart(lambda pid, sig: None, lambda: True, wait)
+
+    assert waits == [1, 1, 1]
 
 
 def test_respawn_master_leaves_a_stopping_swarm(store, monkeypatch):
@@ -506,10 +470,12 @@ def test_respawn_master_leaves_a_stopping_swarm(store, monkeypatch):
 
     monkeypatch.setenv("SWARM_HIVE_ID", "home")
     store.update("sw", state="stopping")
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
     runtime = FakeRuntime()
 
     assert tick.respawn_master("sw", store, runtime, START) == []
     assert runtime.masters == []
+    assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}
 
 
 @pytest.mark.parametrize("state", ["finished", "starting"])

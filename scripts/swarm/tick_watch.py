@@ -32,7 +32,7 @@ def recipients(store: RedisStore, slug: str) -> list[str]:
 
 
 def watch_pass(
-    store: RedisStore, slug: str, now: int, since: int, respawn: Callable[[str], list[str]] | None = None
+    store: RedisStore, slug: str, now: int, since: int, repair: Callable[[str, int], list[str]] | None = None
 ) -> list[str]:
     episode = _read(store, slug)
     if store.config(slug).state not in tick_heartbeat.JUDGED:
@@ -40,9 +40,23 @@ def watch_pass(
     beat = tick_heartbeat.read(store, slug)
     evidence = tick_heartbeat.stale(beat, now, None if beat else since)
     if evidence:
-        respawned = respawn(slug) if respawn and not tick_heartbeat.halted(store, slug) else []
-        return _alert(store, slug, now, episode, evidence) + respawned
+        repaired = repair(slug, now) if repair and not tick_heartbeat.halted(store, slug) else []
+        return _alert(store, slug, now, episode, evidence) + repaired
     return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
+
+
+class Repair:
+    """The scheduler serves every swarm on the machine, so it restarts at most once per stale window."""
+
+    def __init__(self, restart: Callable[[], str], respawn: Callable[[str], list[str]]):
+        self.restart, self.respawn, self.restarted = restart, respawn, None
+
+    def __call__(self, slug: str, now: int) -> list[str]:
+        actions = []
+        if self.restarted is None or now - self.restarted >= tick_heartbeat.LIMIT_MS:
+            self.restarted = now
+            actions.append(self.restart())
+        return actions + self.respawn(slug)
 
 
 def _alert(store, slug, now, episode, evidence) -> list[str]:
@@ -83,12 +97,12 @@ def _save(store, slug, episode) -> None:
     store.redis.set(store.key(slug, KEY), json.dumps(episode))
 
 
-def run(store: RedisStore, now: Callable[[], int], respawn=None, wait=None, passes: int | None = None) -> None:
+def run(store: RedisStore, now: Callable[[], int], repair=None, wait=None, passes: int | None = None) -> None:
     since, done = now(), 0
     while passes is None or done < passes:
         for slug in store.slugs():
             try:
-                for action in watch_pass(store, slug, now(), since, respawn):
+                for action in watch_pass(store, slug, now(), since, repair):
                     timing.emit(sys.stdout, f"{slug}: {action}")
             except Exception as exc:
                 timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")

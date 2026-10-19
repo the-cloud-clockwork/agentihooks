@@ -566,17 +566,19 @@ def cmd_prober(store, args):
 
 
 def cmd_tick_watch(store, args):
-    from scripts.swarm import controller, tick_watch
+    from scripts.swarm import controller, scheduled_tick, tick_watch
     from scripts.swarm.tick import respawn_master
 
-    respawn = None
+    repair = None
     if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
         runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):
             return respawn_master(slug, store, runtime, now_ms())
 
-    tick_watch.run(store, now_ms, respawn)
+        repair = tick_watch.Repair(scheduled_tick.restart, respawn)
+
+    tick_watch.run(store, now_ms, repair)
 
 
 def cmd_create(store, args):
