@@ -204,6 +204,28 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
     assert tests == selection["scripts/core.py"]
 
 
+def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch, capsys):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    (tmp_path / "tests/test_core.py").write_text(
+        "from scripts.core import f, g\n\n\nclass TestSpawn:\n    def test_child(self):\n        pass\n"
+    )
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {6}})
+    monkeypatch.setattr(plan, "find_record", lambda *args: ({"id": 7}, manifest))
+    assert plan.main() == 0
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {
+        "scripts/core.py": [
+            "tests/test_core.py::TestSpawn::test_child",
+            "tests/test_core.py::test_g",
+            "tests/test_edited.py",
+            "tests/test_fresh.py",
+        ]
+    }
+    assert "browser=false" in (tmp_path / "output").read_text().splitlines()
+
+
 @pytest.mark.parametrize(
     "change,helper",
     [({"scripts/core.py": {6}}, True), ({"scripts/core.py": {10}}, False)],

@@ -3,14 +3,15 @@ import ast
 import json
 import math
 import os
+import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
 from scripts.ci_mutation.browser import needs_browser
-from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests
+from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
 from scripts.ci_test_plan import find_record
-from tests.dep_manifest import line_units
+from tests.dep_manifest import _spans, line_units, node
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
@@ -24,10 +25,17 @@ def estimate(
     manifest: dict | None = None,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
+    stale = stale_test_files(root, manifest.get("commit")) if manifest is not None else None
+    if stale is not None:
+        units, unrecorded = changed_recorded_units(root, manifest, changes)
+        covering = covering_tests(manifest, units)
+        recorded = {test_file(test) for test in manifest["tests"]}
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
         if manifest is not None:
             chosen = sorted({*chosen, *recorded_tests(root, manifest, path, lines)})
+        if stale is not None and path not in unrecorded:
+            chosen = narrow(chosen, covering, recorded, stale)
         if selection is not None:
             selection[path] = chosen
         if not chosen:
@@ -50,6 +58,51 @@ def recorded_tests(root: Path, manifest: dict, path: str, lines: set[int]) -> se
     units = {index for index, unit in enumerate(manifest["units"]) if unit in changed}
     files = {test.partition("::")[0] for test, found in manifest["tests"].items() if units.intersection(found["units"])}
     return {name for name in files if Path(name).name.startswith("test_") and (root / name).is_file()}
+
+
+def stale_test_files(root: Path, commit: str | None) -> set[str] | None:
+    if commit is None:
+        return None
+    changed = subprocess.check_output(
+        ["git", "diff", "--no-renames", "--name-only", commit, "HEAD", "--", "tests"], cwd=root, text=True
+    ).split()
+    # A changed helper, conftest or fixture can move what any test reaches.
+    if any(not (path.endswith(".py") and Path(path).name.startswith("test_")) for path in changed):
+        return None
+    return set(changed)
+
+
+def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
+    index = {unit: number for number, unit in enumerate(manifest["units"])}
+    units, unrecorded = set(), set()
+    for path, lines in changes.items():
+        spans = _spans(ast.parse((root / path).read_text()))
+        for line in lines:
+            if inside := [span for span in spans if span[0] <= line <= span[2]]:
+                unit = f"{path}::{max(inside)[3]}"
+                if unit in index:
+                    units.add(index[unit])
+                else:
+                    unrecorded.add(path)
+    return units, unrecorded
+
+
+def covering_tests(manifest: dict, units: set[int]) -> set[str]:
+    return {
+        node(test).partition("[")[0]
+        for test, found in manifest["tests"].items()
+        if found.get("escapes") or units.intersection(found["units"])
+    }
+
+
+def narrow(chosen: list[str], covering: set[str], recorded: set[str], stale: set[str]) -> list[str]:
+    kept = set()
+    for path in chosen:
+        if path in stale or path not in recorded:
+            kept.add(path)
+        else:
+            kept.update(test for test in covering if test_file(test) == path)
+    return sorted(kept) or chosen
 
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
@@ -77,7 +130,7 @@ def stats_part_count(root: Path, tests: list[str], target: float, limit: int) ->
 def validate_tests(root: Path, tests: list[str]) -> None:
     from tests.test_collection_imports import SDK_GROUP, loads_heavy, loads_sdk_when_run
 
-    for test in tests:
+    for test in sorted({test_file(entry) for entry in tests}):
         path = root / test
         if loads_heavy(test.removesuffix(".py").replace("/", "."), set()):
             raise SystemExit(f"{test}: loads the MCP SDK while collecting")
@@ -110,7 +163,7 @@ def main() -> int:
     selection = {}
     seconds, mutants, tests = estimate(root, changes, selection, manifest)
     validate_tests(root, tests)
-    browser = str(needs_browser(root, tests)).lower()
+    browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")
     count = shard_count(seconds, mutants, args.target, args.limit)
     parts, stats = stats_part_count(root, tests, args.stats_target, args.limit)
