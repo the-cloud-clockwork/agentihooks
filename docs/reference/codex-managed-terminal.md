@@ -126,8 +126,8 @@ concurrent update conflicts, then refuses with
 `execution history kept changing; pane was not committed`. It leaves the
 agent's state-since time untouched, so a reopen never resets how long the agent
 has been in its current state. An execution identity with no stored record is
-refused with `unknown execution identity; display labels cannot identify
-attempts`. The new
+refused with
+`unknown execution identity; display labels cannot identify attempts`. The new
 viewer is also recorded as a viewer of the execution, as every reopened viewer
 is. A viewer that fails to open writes no pane, and the record keeps its
 earlier pane.
@@ -297,7 +297,7 @@ The live qualification also recorded these viewer limits:
   server starts work; the recorded thread remains the attachment identity.
 - Retiring the execution left a reopened viewer showing
   `Reconnecting to server…` during the qualification. A viewer pane that
-  retirement leaves open, as described above, shows the same; close it
+  retirement leaves open, as described above, can show the same; close it
   separately.
 - A Codex update prompt can interrupt attachment. Dismiss or complete it in
   the viewer before checking the conversation history.
