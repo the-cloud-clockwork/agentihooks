@@ -17,6 +17,7 @@ UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
 KILL_WAIT_S = 10
+STOP_TIMEOUT_S = 120
 
 
 def units(binary):
@@ -74,16 +75,20 @@ def _left(run):
         text=True,
         timeout=30,
         check=False,
-    ).stdout
-    props = dict(line.partition("=")[::2] for line in (shown or "").splitlines())
-    return "0" if not props.get("ControlGroup") else props.get("TasksCurrent", "")
+    )
+    if shown.returncode:
+        return "unknown"
+    props = dict(line.partition("=")[::2] for line in (shown.stdout or "").splitlines())
+    return "0" if not props.get("ControlGroup") else props.get("TasksCurrent", "unknown")
 
 
 def _drain(run):
+    stop = ["systemctl", "--user", "stop", f"{UNIT}.service"]
+    run(stop, capture_output=True, text=True, timeout=STOP_TIMEOUT_S, check=False)
     for name, wait_s in (("SIGTERM", DRAIN_S), ("SIGKILL", KILL_WAIT_S)):
         if _left(run) == "0":
             return ""
-        kill = ["systemctl", "--user", "kill", "--kill-whom=all", f"--signal={name}", f"{UNIT}.service"]
+        kill = ["systemctl", "--user", "kill", "--kill-who=all", f"--signal={name}", f"{UNIT}.service"]
         run(kill, capture_output=True, text=True, timeout=30, check=False)
         deadline = time.monotonic() + wait_s
         while time.monotonic() < deadline:

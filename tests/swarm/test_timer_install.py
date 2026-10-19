@@ -186,7 +186,7 @@ def test_a_tick_timer_that_cannot_be_disabled_keeps_its_files_for_a_later_pass(t
     )
 
 
-def _draining(calls, groups, clock):
+def _draining(calls, groups, clock, shown=0):
     import subprocess
 
     def run(argv, **kwargs):
@@ -194,14 +194,15 @@ def _draining(calls, groups, clock):
         clock.append(clock[-1] + 1)
         if argv[2] == "show":
             group, tasks = groups.pop(0) if len(groups) > 1 else groups[0]
-            return subprocess.CompletedProcess(argv, 0, f"ControlGroup={group}\nTasksCurrent={tasks}\n", "")
+            return subprocess.CompletedProcess(argv, shown, f"ControlGroup={group}\nTasksCurrent={tasks}\n", "")
         return subprocess.CompletedProcess(argv, 0, "", "")
 
     return run
 
 
 SHOW = ["systemctl", "--user", "show", "-p", "ControlGroup", "-p", "TasksCurrent", "agentihooks-swarm.service"]
-KILL = ["systemctl", "--user", "kill", "--kill-whom=all"]
+KILL = ["systemctl", "--user", "kill", "--kill-who=all"]
+STOP = ["systemctl", "--user", "stop", "agentihooks-swarm.service"]
 
 
 def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_before_scheduling(tmp_path, monkeypatch):
@@ -217,8 +218,9 @@ def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_befo
     assert not (tmp_path / "agentihooks-swarm.timer").exists()
     assert not (tmp_path / "agentihooks-swarm.service").exists()
     argvs = [argv for argv, _ in calls]
-    assert argvs[:6] == [
+    assert argvs[:7] == [
         ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        STOP,
         SHOW,
         [*KILL, "--signal=SIGTERM", "agentihooks-swarm.service"],
         SHOW,
@@ -226,18 +228,23 @@ def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_befo
         ["systemctl", "--user", "daemon-reload"],
     ]
     assert calls[0][1] == {"capture_output": True, "text": True, "timeout": 30, "check": False}
+    assert calls[1][1] == {"capture_output": True, "text": True, "timeout": 120, "check": False}
     assert argvs[-1] == ["schedule"]
 
 
-def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(tmp_path, monkeypatch, capsys):
-    calls, clock = [], [0.0]
+@pytest.mark.parametrize(("shown", "left"), [(0, "2"), (1, "unknown")])
+def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
+    tmp_path, monkeypatch, capsys, shown, left
+):
+    calls, clock, scheduled = [], [0.0], []
     monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
     monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
+    monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
     groups = [("/user.slice/agentihooks-swarm.service", "2")]
-    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_draining(calls, groups, clock))
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_draining(calls, groups, clock, shown))
     argvs = [argv for argv, _ in calls]
     kills = [argv for argv in argvs if argv[:4] == KILL]
     assert kills == [
@@ -248,9 +255,10 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     assert (tmp_path / "agentihooks-swarm.service").exists()
     assert ["systemctl", "--user", "daemon-reload"] not in argvs
     assert capsys.readouterr().err == (
-        "the agentihooks-swarm service still runs 2 processes; its unit files stay until a later pass\n"
+        f"the agentihooks-swarm service still runs {left} processes; its unit files stay until a later pass\n"
     )
     assert clock[-1] >= timer.DRAIN_S + timer.KILL_WAIT_S
+    assert scheduled == [True]
 
 
 def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
@@ -260,8 +268,9 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     assert not (tmp_path / "agentihooks-swarm.service").exists()
-    assert [argv for argv, _ in calls][:3] == [
+    assert [argv for argv, _ in calls][:4] == [
         ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        STOP,
         SHOW,
         ["systemctl", "--user", "daemon-reload"],
     ]
