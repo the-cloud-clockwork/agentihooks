@@ -125,6 +125,26 @@ def test_a_refused_tick_exits_non_zero_and_logs_why(monkeypatch, capsys):
     assert "this run comes from a worktree" in capsys.readouterr().err
 
 
+def test_the_stale_tick_watcher_is_its_own_restarting_user_service():
+    from configparser import ConfigParser
+
+    parsed = ConfigParser(interpolation=None, strict=False)
+    parsed.optionxform = str
+    parsed.read_string(timer.units("/installed/bin/agentihooks")["agentihooks-tick-watch.service"])
+
+    assert parsed.sections() == ["Unit", "Service", "Install"]
+    assert parsed["Unit"]["Description"] == "agentihooks stale tick watcher, apart from the tick it watches"
+    assert dict(parsed["Service"]) == {
+        "Type": "simple",
+        "Environment": "PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin",
+        "EnvironmentFile": "-%h/.agentihooks/.env",
+        "ExecStart": '"/installed/bin/agentihooks" swarm tick-watch',
+        "Restart": "always",
+        "RestartSec": "5",
+    }
+    assert dict(parsed["Install"]) == {"WantedBy": "default.target"}
+
+
 def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
     import subprocess
     from configparser import ConfigParser

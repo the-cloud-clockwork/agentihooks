@@ -425,3 +425,102 @@ def test_a_restarted_watcher_alerts_at_once_on_a_heartbeat_already_ten_minutes_o
 
 def test_the_process_age_reads_the_kernel_start_time():
     assert 0 <= tick_heartbeat.process_age_ms(os.getpid()) < 3_600_000
+
+
+def test_the_process_age_counts_from_process_one_start_whatever_its_name(tmp_path):
+    ticks = os.sysconf("SC_CLK_TCK")
+    (tmp_path / "1").mkdir()
+    fields = ["S", *["0"] * 18, str(100 * ticks)]
+    (tmp_path / "1" / "stat").write_text(f"1 (odd) name) {' '.join(fields)} 0 0\n")
+    (tmp_path / "uptime").write_text("160.5 9.0\n")
+
+    assert tick_heartbeat.process_age_ms(proc=tmp_path) == 60_500
+
+
+def test_times_and_durations_read_in_plain_words():
+    assert tick_heartbeat.clock(3_900_000) == "01:05 UTC"
+    assert [tick_heartbeat._minutes(ms) for ms in (60_000, 120_000, 659_999)] == ["1 minute", "2 minutes", "10 minutes"]
+
+
+def test_alert_and_resolved_items_carry_stable_ids_per_seat_and_episode(store):
+    beat(store, START)
+    tick_watch.watch_pass(store, "sw", START + LIMIT, START)
+    beat(store, START + LIMIT + MINUTE, rev=2)
+    tick_watch.watch_pass(store, "sw", START + LIMIT + MINUTE, START)
+
+    ids = [item.id for item in InboxStore(store.redis).inbox(FRONT_DOOR)]
+    since = START + LIMIT
+    assert ids == [
+        tick_watch._item_id("sw", since, FRONT_DOOR, "alert"),
+        tick_watch._item_id("sw", since, FRONT_DOOR, "resolved"),
+    ]
+
+
+def test_the_watcher_reports_a_failing_swarm_and_goes_on(store, monkeypatch, capsys):
+    store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
+    real = tick_watch.watch_pass
+
+    def failing(store, slug, *args):
+        if slug == "other":
+            raise RuntimeError("redis went away")
+        return real(store, slug, *args)
+
+    monkeypatch.setattr(tick_watch, "watch_pass", failing)
+    beat(store, START - LIMIT)
+    tick_watch.run(store, lambda: START, None, lambda seconds: None, passes=1)
+
+    out = capsys.readouterr()
+    assert "other: RuntimeError: redis went away" in out.err
+    assert f"sw: told {FRONT_DOOR} the tick is stale" in out.out
+
+
+@pytest.mark.parametrize(("deployment", "respawns"), [(None, True), ("local", True), ("distributed", False)])
+def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deployment, respawns):
+    from scripts.swarm import tick
+
+    if deployment is None:
+        monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    else:
+        monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
+    runtime, ran, asked = object(), [], []
+    monkeypatch.setattr(cli, "routed", lambda herdr: runtime)
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
+    monkeypatch.setattr(cli, "now_ms", lambda: START)
+    monkeypatch.setattr(tick, "respawn_master", lambda *args: asked.append(args) or ["spawned"])
+    monkeypatch.setattr(tick_watch, "run", lambda *args: ran.append(args))
+
+    cli.cmd_tick_watch("store", None)
+
+    (args,) = ran
+    assert args[:2] == ("store", cli.now_ms)
+    if respawns:
+        assert args[2]("sw") == ["spawned"]
+        assert asked == [("sw", "store", runtime, START)]
+    else:
+        assert args[2] is None
+
+
+def test_respawn_master_leaves_a_stopping_swarm(store, monkeypatch):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    store.update("sw", state="stopping")
+    runtime = FakeRuntime()
+
+    assert tick.respawn_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+
+
+@pytest.mark.parametrize("state", ["finished", "starting"])
+def test_respawn_master_keeps_a_finished_or_starting_master_record(store, monkeypatch, state):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER, state=state)
+
+    actions = tick.respawn_master("sw", store, FakeRuntime(), START)
+
+    assert "dropped the gone master master@a1b2c3-0001" not in actions
+    assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}

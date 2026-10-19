@@ -4,10 +4,12 @@ import json
 import os
 import time
 from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from scripts.swarm import capacity
 
 KEY = "tick-heartbeat"
+PROC = Path("/proc")
 LIMIT_MS = 600_000
 HOST, QUOTA, LEDGER = "host room", "quota", "ledger revision"
 JUDGED = ("running", "paused", "stopping", "drained")
@@ -69,11 +71,9 @@ def stale(beat: Heartbeat | None, now: int, since: int | None = None, limit: int
     return evidence
 
 
-def process_age_ms(pid: int = 1) -> int:
-    with open(f"/proc/{pid}/stat") as stat:
-        started = int(stat.read().rsplit(")", 1)[-1].split()[19])
-    with open("/proc/uptime") as uptime:
-        up = float(uptime.read().split()[0])
+def process_age_ms(pid: int = 1, proc: Path = PROC) -> int:
+    started = int((proc / str(pid) / "stat").read_text().rsplit(")", 1)[-1].split()[19])
+    up = float((proc / "uptime").read_text().split()[0])
     return max(0, round((up - started / os.sysconf("SC_CLK_TCK")) * 1000))
 
 

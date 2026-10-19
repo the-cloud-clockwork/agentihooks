@@ -7,7 +7,7 @@ from collections.abc import Callable
 
 from scripts.inbox.store import DuplicateItem, InboxStore
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import tick_heartbeat
+from scripts.swarm import tick_heartbeat, timing
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import front_door
 
@@ -89,8 +89,8 @@ def run(store: RedisStore, now: Callable[[], int], respawn=None, wait=None, pass
         for slug in store.slugs():
             try:
                 for action in watch_pass(store, slug, now(), since, respawn):
-                    print(f"{slug}: {action}", flush=True)
+                    timing.emit(sys.stdout, f"{slug}: {action}")
             except Exception as exc:
-                print(f"{slug}: {type(exc).__name__}: {exc}", file=sys.stderr, flush=True)
+                timing.emit(sys.stderr, f"{slug}: {type(exc).__name__}: {exc}")
         done += 1
         (wait or scheduled_wait)(PASS_S)
