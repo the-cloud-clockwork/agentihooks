@@ -713,7 +713,7 @@ def test_a_run_whose_failed_jobs_all_lost_their_runner_files_one_outage_task(sto
     _, fields, _ = ledger.added[0]
     assert (fields["task"], fields["kind"], fields["rank"]) == ("promo-900-0", "ci", "urgent")
     assert "https://github.com/o/r/actions/runs/900" in fields["description"]
-    assert "unit (3.11, 1), unit (3.11, 2)" in fields["description"]
+    assert all(f"unit (3.11, {n})" in fields["description"] for n in range(1, 18))
     assert "Failed to resolve action download info" in fields["description"]
     assert len(ledger.raised) == 1
     assert "runner outage" in ledger.raised[0][2]
