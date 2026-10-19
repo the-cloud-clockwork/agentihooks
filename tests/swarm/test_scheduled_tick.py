@@ -273,7 +273,17 @@ def test_a_delivery_that_cannot_be_recorded_still_acknowledges_the_minute(monkey
     assert capsys.readouterr().err == "the swarm tick delivery could not be recorded: ConnectionError: down\n"
 
 
-@pytest.mark.parametrize("raw", ["not json", '{"root": "/installed"}', '["/installed"]', '{"root": "/i", "at": "x"}'])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        "not json",
+        '{"root": "/installed"}',
+        '["/installed"]',
+        '{"root": "/i", "at": "x"}',
+        '{"root": 5, "at": 1}',
+        '{"root": null, "at": 1}',
+    ],
+)
 def test_an_unreadable_delivery_record_counts_as_undelivered(raw):
     from scripts.scheduler.core import Scheduler
 

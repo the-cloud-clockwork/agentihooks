@@ -78,9 +78,10 @@ def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
     try:
         delivered = json.loads(raw)
         root, age = delivered["root"], now - delivered["at"]
+        foreign = Path(root).resolve() != Path(installed).resolve()
     except (ValueError, KeyError, TypeError):
         return f"the swarm tick delivery record is unreadable: {raw}"
-    if Path(root).resolve() != Path(installed).resolve():
+    if foreign:
         return f"the last swarm tick was delivered by a scheduler running {root}, not the installed {installed}"
     if age > FRESH_S:
         return f"the last swarm tick was delivered {int(age)} seconds ago"
