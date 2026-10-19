@@ -5,7 +5,7 @@ from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, REPO, hive
 
-ALL_ROLES = ["master", "qa", "frontend", "eng", "ci", "plan"]
+ALL_ROLES = ["master", "qa", "frontend", "eng", "ci", "plan", "dispatch"]
 
 
 def two_hosts(setup, anton_agents=0):
@@ -14,7 +14,7 @@ def two_hosts(setup, anton_agents=0):
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
     write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10)
-    write_hive(setup, id="anton", ui="no", roles=["eng", "ci", "plan"], max_agents=2)
+    write_hive(setup, id="anton", ui="no", roles=["eng", "ci", "plan", "dispatch"], max_agents=2)
     setup.store.redis.set(f"{registry.key('anton')}:sessions", f'{{"eng": {anton_agents}}}')
 
 
@@ -24,6 +24,7 @@ ROLES = {
     "master": ("master", "master", {"id": "master"}, "workstation"),
     "engineer": ("eng", "engineer", {"id": "task"}, "anton"),
     "planner": ("plan", "planner", {"id": "task"}, "anton"),
+    "dispatcher": ("dispatch", "dispatcher", {"id": "dispatcher"}, "anton"),
 }
 
 
@@ -111,6 +112,31 @@ def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
     assert fenced.runtime.router.placed_backend("plan", {"id": "task"}) == "hive"
     assert fenced.placement_refusal("plan", {"id": "task"}) == ""
     assert fenced.runtime.hive_launch.select(setup.config, "plan", {"id": "task"}).hive == "anton"
+
+
+def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_only_when_none_has_room(setup):
+    from scripts.hive import registry
+    from scripts.swarm import controller
+    from scripts.swarm.dispatch_seat import SEAT
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter, SpawnRequest
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision("dispatcher", "lane", "dispatcher")
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    task = {"id": SEAT, "seat": "dispatcher@fixture", "controller_epoch": setup.held.epoch}
+    assert fenced.runtime.router.placed_backend("dispatch", task) == "hive"
+    assert fenced.placement_refusal("dispatch", {"id": SEAT}) == ""
+    selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
+    assert (selected.hive, selected.fallback) == ("anton", "")
+    setup.store.redis.set(f"{registry.key('anton')}:sessions", '{"dispatch": 2}')
+    selected = fenced.runtime.hive_launch.select(setup.config, "dispatch", task)
+    assert (selected.hive, selected.fallback) == ("workstation", "no headless hive for dispatch has room")
+    name = setup.store.next_name(setup.config.slug, "dispatch")
+    admitted = setup.launcher.admit(SpawnRequest(setup.config, "dispatch", name, task), selected)
+    assert admitted.profile_decision["placement_fallback"] == "no headless hive for dispatch has room"
 
 
 def host(hive_id: str, ui: str, **fields) -> dict:
