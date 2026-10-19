@@ -31,9 +31,10 @@ def estimate(
     if drift is not None:
         stale, drifted, paths = drift
         units, unrecorded = changed_recorded_units(root, manifest, changes)
-        covering = covering_tests(manifest, units | drifted, paths)
         if "lines" in manifest:
-            covering &= line_covering_tests(root, manifest, changes, paths)
+            covering = line_covering_tests(root, manifest, changes, paths)
+        else:
+            covering = covering_tests(manifest, units | drifted, paths)
         recorded = {}
         for test in manifest["tests"]:
             if not manifest["tests"][test]["units"] or "lines" in manifest and test not in manifest["lines"]:

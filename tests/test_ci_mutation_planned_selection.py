@@ -217,6 +217,8 @@ def _line_project(tmp_path, monkeypatch, mode):
 
     _recorded_project(tmp_path, monkeypatch)
     source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    if mode == "repeated":
+        source = "def f(value):\n    if value:\n        value += 1\n" + "    pass\n" * 300
     (tmp_path / "scripts/core.py").write_text(source)
     (tmp_path / "scripts/helper.py").write_text("from scripts.core import f\n")
     (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 1\n")
@@ -231,6 +233,10 @@ def _line_project(tmp_path, monkeypatch, mode):
         ("tests/test_core.py::TestSpawn::test_child", [2, 3]),
         ("tests/test_helper.py::test_helper", [2, 4]),
     ):
+        if mode == "repeated":
+            lines = [2, *range(4, 304)]
+            if test.endswith(("test_f", "test_helper")):
+                lines.append(3)
         data.set_context(f"{test}|run")
         path = (
             "scripts/aaa.py"
@@ -281,6 +287,7 @@ def _line_contexts(tmp_path, manifest, mode):
         "deleted",
         "trailing",
         "dependency",
+        "repeated",
     ],
 )
 def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
@@ -293,6 +300,8 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         new = source + "\nSETTING = 1\n"
     elif mode == "trailing":
         new = source + "\n"
+    elif mode == "repeated":
+        new = source.replace("value += 1", "value += 2")
     if mode == "header":
         new = new.replace("def f(value)", "def f(value=1)")
     if mode == "inserted":
@@ -300,7 +309,8 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     (tmp_path / "scripts/core.py").write_text("\n" * shift + new)
     _commit(tmp_path, "edited branch")
     selection = {}
-    plan.estimate(tmp_path, {"scripts/core.py": {4 + shift}}, selection, manifest)
+    line = 3 if mode == "repeated" else 4
+    plan.estimate(tmp_path, {"scripts/core.py": {line + shift}}, selection, manifest)
     expected = ["tests/test_core.py::test_g"]
     if mode in {"legacy", "inserted", "header", "drift", "module"}:
         expected = [
@@ -310,6 +320,8 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         expected = ["tests/test_core.py"]
     elif mode in {"data", "deleted", "dependency"}:
         expected.append("tests/test_core.py::test_other")
+    elif mode == "repeated":
+        expected = ["tests/test_core.py::test_f"]
     assert selection["scripts/core.py"] == [
         *expected,
         "tests/test_edited.py",
