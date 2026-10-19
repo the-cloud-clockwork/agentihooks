@@ -398,8 +398,11 @@ def test_unsettled_pool_mail_of_a_gone_master_returns_with_its_id(swarm, inbox, 
 @pytest.mark.parametrize("exit_text", ["handed off its seat", "retired after the swarm idle limit"])
 def test_master_exit_returns_confirmed_pool_mail_but_keeps_operator_mail(swarm, inbox, exit_text):
     from scripts.inbox import exits
+    from scripts.swarm.naming import NameRegistry
 
     _masters(swarm, 2)
+    names = NameRegistry(swarm.redis)
+    swarm.redis.hset(names.key("name", "sw-master-1"), mapping={"type": "master"})
     item = inbox.send("swarm", FRONT, "work")
     inbox.deliver(item.id, "sw-master-1")
     inbox.confirm(item.id, "sw-master-1")
