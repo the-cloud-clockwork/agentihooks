@@ -41,7 +41,11 @@ class Timer:
         self.entry = scheduler.timer(owner="process", payload=json.dumps({"key": self.key}), delay=delay)
         self.entry.timeout.connect(wake)
         self.entry.start()
-        service.ensure_running()
+        try:
+            service.ensure_running()
+        except BaseException:
+            self.close()
+            raise
 
     def wait(self) -> None:
         self.redis.blpop(self.key)

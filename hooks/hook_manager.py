@@ -38,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # Only import lightweight common module at startup
 from hooks.common import log
+from hooks.prompt_budget import PromptBudget
 
 
 class BlockAction(Exception):
@@ -742,18 +743,59 @@ def _prompt_broadcasts(session_id: str) -> None:
 
 def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
-    from hooks.config import SECRETS_MODE
-
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
-    _confirm_inbox(session_id)
-    _swarm_heartbeat("working", payload.get("prompt", ""))
-    _swarm_ledger(payload)
-    typed = _operator_words(payload)
-    _operator_mode(payload, typed)
-    _master_coding(payload, typed)
-    _request_trace_flush(payload, "prompt")
+    budget = PromptBudget(start=_EVENT_STARTED, keep=(BlockAction,))
+    with budget.guarded(_prompt_overrun if _EVENT_STARTED is not None else None):
+        _prompt_steps(budget, payload, session_id)
 
+
+def _prompt_overrun(budget: PromptBudget) -> None:
+    from hooks.targets import emitter
+
+    try:
+        budget.cut = budget.running
+        budget.report()
+        emitter.flush("UserPromptSubmit")
+        sys.stdout.flush()
+        otel.flush()
+    finally:
+        os._exit(0)
+
+
+def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
+    from hooks.config import BROADCAST_ENABLED
+
+    run = budget.run
+    run("secrets", _prompt_secrets, payload)
+    run("amygdala", _prompt_amygdala, session_id)
+    run("confirm_inbox", _confirm_inbox, session_id)
+    run("swarm_heartbeat", _swarm_heartbeat, "working", payload.get("prompt", ""))
+    run("swarm_ledger", _swarm_ledger, payload)
+    typed = bool(run("operator_words", _operator_words, payload))
+    run("operator_mode", _operator_mode, payload, typed)
+    run("master_coding", _master_coding, payload, typed)
+    run("trace_flush", _request_trace_flush, payload, "prompt")
+    run("quota_usage", _prompt_quota_usage, session_id)
+    run("quota_policy", _prompt_quota_policy, payload, session_id)
+    run("claude_md_cap", _prompt_claude_md_cap, payload, session_id)
+    run("enforcements", _prompt_enforcements, payload, session_id)
+    run("ci_manifesto", _prompt_ci_manifesto, session_id)
+    run("rules_refresh", _prompt_rules_refresh, session_id)
+    run("prod_bypass", _prompt_prod_bypass, payload, session_id)
+    run("signals", _prompt_signals, payload, session_id, typed)
+    if typed:
+        run("gate_lifts", _arm_gate_lifts, payload)
+    run("voice", _prompt_voice, payload, session_id, typed)
+    run("controls", _prompt_controls, payload, session_id, typed)
+    # --- Broadcast: inject pending messages ---
+    if BROADCAST_ENABLED:
+        run("broadcasts", _prompt_broadcasts, session_id)
+    run("refocus", _inject_refocus, session_id, "prompt")
+    run("ledger_decision", _inject_ledger_decision, payload)
+
+
+def _prompt_quota_usage(session_id: str) -> None:
     try:
         from hooks.config import QUOTA_USAGE_INJECTION_ENABLED
 
@@ -767,6 +809,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("quota usage user prompt failed", {"error": str(e)})
 
+
+def _prompt_quota_policy(payload: dict, session_id: str) -> None:
     try:
         from hooks.config import QUOTA_POLICY_ENABLED
 
@@ -782,7 +826,11 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("quota policy user prompt failed", {"error": str(e)})
 
+
+def _prompt_secrets(payload: dict) -> None:
     # --- Secrets scanning ---
+    from hooks.config import SECRETS_MODE
+
     if SECRETS_MODE != "off":
         prompt = payload.get("prompt", "")
         if prompt:
@@ -801,6 +849,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     else:
         log("Secrets scanning skipped (mode=off)")
 
+
+def _prompt_claude_md_cap(payload: dict, session_id: str) -> None:
     try:
         from hooks.context.claude_md_sanity import parse_max_lines_signal, set_session_max_lines
 
@@ -817,6 +867,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("claude_md_sanity signal detection failed", {"error": str(e)})
 
+
+def _prompt_enforcements(payload: dict, session_id: str) -> None:
     try:
         from hooks.common import inject_context as _inject_enforcements
         from hooks.context.enforcement import get_user_prompt_enforcements
@@ -826,6 +878,9 @@ def on_user_prompt_submit(payload: dict) -> None:
             _inject_enforcements(enforcement_context, also_log=False, skip_compression=True, kind="enforcement")
     except Exception as e:
         log("enforcement user prompt failed", {"error": str(e)})
+
+
+def _prompt_ci_manifesto(session_id: str) -> None:
     # --- CI Manifesto: counter-gated re-injection of doctrine ---
     try:
         from hooks.config import CI_MANIFESTO_ENABLED
@@ -837,6 +892,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto refresh failed", {"error": str(e)})
 
+
+def _prompt_rules_refresh(session_id: str) -> None:
     # --- Rules refresh: one-shot re-injection for running sessions ---
     try:
         from hooks.context.rules_refresh import maybe_inject as rules_refresh_inject
@@ -845,6 +902,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("rules_refresh inject failed", {"error": str(e)})
 
+
+def _prompt_amygdala(session_id: str) -> None:
     # --- Amygdala: emergency signal check (every turn, O(1) stat) ---
     try:
         from hooks.config import AMYGDALA_ENABLED
@@ -856,6 +915,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("amygdala_hook failed", {"error": str(e)})
 
+
+def _prompt_prod_bypass(payload: dict, session_id: str) -> None:
     # --- Prod lockdown bypass: detect operator override phrase ---
     try:
         from hooks.context.prod_lockdown import contains_bypass_phrase, set_bypass
@@ -867,6 +928,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("prod_lockdown bypass detection failed", {"error": str(e)})
 
+
+def _prompt_signals(payload: dict, session_id: str, typed: bool) -> None:
     # --- Release-gate / hotfix / branch / PR signals (CI Manifesto §9, §14, §15) ---
     try:
         from hooks.context.branch_guard import set_branch_signal, set_pr_signal
@@ -913,9 +976,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("ci_manifesto signal detection failed", {"error": str(e)})
 
-    if typed:
-        _arm_gate_lifts(payload)
 
+def _prompt_voice(payload: dict, session_id: str, typed: bool) -> None:
     # --- Voice output: detect enable/disable voice signals ---
     try:
         from hooks.config import VOICE_ENABLED
@@ -965,6 +1027,8 @@ def on_user_prompt_submit(payload: dict) -> None:
     except Exception as e:
         log("voice_output signal detection failed", {"error": str(e)})
 
+
+def _prompt_controls(payload: dict, session_id: str, typed: bool) -> None:
     # --- Controls toggle: detect "disable controls" / "enable controls" ---
     try:
         from hooks.config import CONTROLS_BYPASS_ENABLED
@@ -1016,15 +1080,6 @@ def on_user_prompt_submit(payload: dict) -> None:
                     )
     except Exception as e:
         log("controls_toggle signal detection failed", {"error": str(e)})
-
-    # --- Broadcast: inject pending messages ---
-    from hooks.config import BROADCAST_ENABLED
-
-    if BROADCAST_ENABLED:
-        _prompt_broadcasts(session_id)
-
-    _inject_refocus(session_id, "prompt")
-    _inject_ledger_decision(payload)
 
 
 def _inject_ledger_decision(payload: dict) -> None:
@@ -2723,6 +2778,7 @@ def emit_permission_decision(
 
 # Track subagent session IDs to prevent signal self-arming (audit finding 6.2)
 _KNOWN_SUBAGENT_IDS: set[str] = set()
+_EVENT_STARTED: float | None = None
 
 EVENT_HANDLERS = {
     "SessionStart": on_session_start,
