@@ -98,6 +98,11 @@ def test_every_consumer_reaches_redis(published):
     assert all(consumer["commands"] for consumer in published.values())
 
 
+def test_the_tick_reads_the_swarm_index_before_ticking_each_swarm(published):
+    commands = published["tick"]["commands"]
+    assert "scripts.swarm.store:RedisStore.slugs" in commands["SMEMBERS"]
+
+
 def test_the_map_names_each_consumer_with_its_redis_role(published):
     roles = {name: consumer["role"] for name, consumer in published.items()}
     assert roles == {
