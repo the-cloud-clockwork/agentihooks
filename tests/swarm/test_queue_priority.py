@@ -662,7 +662,10 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P2", "P3"]
 
 
-def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch):
+@pytest.mark.parametrize("head", ["head2", "moved"])
+def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head):
+    from scripts.inbox.store import InboxError
+
     p = priority
 
     def graphql(query, variables, run):
@@ -670,10 +673,14 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch):
             raise SwarmError("GitHub unavailable")
         return GRAPHQL(query, variables, p.queue.run)
 
+    def refuse(*args, **flags):
+        raise InboxError("GitHub unavailable")
+
     monkeypatch.setattr(merge_queue, "graphql", graphql)
+    monkeypatch.setattr(queue_priority, "InboxStore", lambda redis: SimpleNamespace(send=refuse))
     p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] != "P2"]
     displaced = queue_priority.Displaced(p.store, "sw")
-    displaced.add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": "head2"})
+    displaced.add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": head})
     alerts = []
     ledger = SimpleNamespace(raise_alert=lambda *args: alerts.append(args))
     assert queue_priority.refresh(p.store, "sw", p.tasks, ledger) == [

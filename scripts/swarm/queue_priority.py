@@ -5,7 +5,7 @@ import uuid
 from collections.abc import Collection
 from contextlib import contextmanager
 
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
@@ -122,7 +122,7 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
                 displaced.discard(url)
                 queue_record.Journal(url).write("priority-requeue", url, head, None, None)
                 actions.append(f"requeued {url} left out of the merge queue by an interrupted priority")
-        except SwarmError as exc:
+        except (SwarmError, InboxError) as exc:
             if ledger is not None:
                 ledger.raise_alert(slug, f"merge-priority-requeue:{url}", f"Could not requeue {url}: {exc}")
             actions.append(f"could not requeue {url} after an interrupted priority: {exc}")
