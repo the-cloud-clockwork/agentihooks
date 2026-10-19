@@ -20,7 +20,8 @@ OFF = "off"
 DECISIONS = "master_decisions"
 REFUSALS = "write_refusals"
 DECIDED = ("questions/", "followups/")
-VERBS = {"answer": "answer", "set": "decide", "task_update": "set"}
+TASKS = "tasks/"
+VERBS = {"answer": "answer", "set": "decide", "task_update": "set", "add": "comment on", "relay": "relay onto"}
 
 
 def decision(op: dict) -> str:
@@ -28,6 +29,12 @@ def decision(op: dict) -> str:
     kind = op.get("op")
     if kind in ("answer", "task_update"):
         return op["item"]
+    if kind == "relay":
+        item = str(op.get("item", ""))
+        return item if item.startswith(TASKS) else ""
+    if kind == "add":
+        item, _, thread = str(op.get("thread", "")).rpartition("/")
+        return item if thread == "comments" and item.startswith(TASKS) else ""
     if kind != "set":
         return ""
     item = op["path"].rpartition("/")[0]
@@ -42,6 +49,13 @@ def refusal(item: str, owner: str, writer: str, action: str, rev: int = 0) -> st
     if rev:
         return f"{item} was decided by {owner} at revision {rev}, so {writer} cannot {action} it"
     return f"{item} belongs to {owner}, so {writer} cannot {action} it"
+
+
+def send_refusal(slug: str, task: str, owner: str, writer: str) -> str:
+    return (
+        f"{TASKS}{task} belongs to {owner}, so {writer} cannot message its claimant; ask {owner} with agentihooks "
+        f'swarm {slug} masters-channel say "<text>"'
+    )
 
 
 def _fields(stamps: dict, item: str) -> dict:
@@ -76,6 +90,40 @@ def _connect():
     from scripts.swarm.store import redis_client
 
     return redis_client()
+
+
+def _ledger_state(slug: str) -> dict:
+    from scripts.swarm.ledger_client import LedgerClient
+
+    return LedgerClient().state(slug)
+
+
+def check_send(inbox, sender: str, address: str) -> None:
+    """A master's message to a task's claimant rules on that task, so only the task's owning master sends one."""
+    from scripts.inbox.seats import master_of
+    from scripts.inbox.store import InboxError
+    from scripts.swarm.naming import lane_of
+    from scripts.swarm.store import RedisStore
+
+    if lane_of(sender) != MASTER or os.environ.get(SWITCH) == OFF:
+        return
+    task = inbox.receiver_task(address)
+    if not task:
+        return
+    slug = master_of(inbox.names.resolve(address), inbox.names).partition("@")[2]
+    try:
+        seats = Seats(slug, RedisStore(inbox.redis), {})
+        if len(seats.live) < 2:
+            return
+        seats.doc = _ledger_state(slug)
+        owner, _ = seats.owner(f"{TASKS}{task}", {})
+    except Exception as exc:  # a crashed check lets the message through, counted in the gate log
+        log.append(slug, log.Row.of(NAME, "fail-open", Who(name=sender), "inbox", f"{type(exc).__name__}: {exc}"))
+        return
+    writer = seats.writer(sender)
+    if writer != owner:
+        inbox.redis.hincrby(seats.table.key(slug), REFUSALS)
+        raise InboxError(send_refusal(slug, task, owner, writer))
 
 
 class Seats:

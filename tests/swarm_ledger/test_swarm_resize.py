@@ -20,7 +20,7 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 
 browser = chromium_browser
 SLUGS = ("resize-one-2026-10-06", "resize-two-2026-10-06")
-HEIGHT_ROWS = ("capacity-box", "quota-box", "overlays-box", "agents-box", "health-box", "handoff-box")
+HEIGHT_ROWS = ("capacity-box", "quota-box", "hives-box", "overlays-box", "agents-box", "health-box", "handoff-box")
 FINDINGS = [
     {
         "id": f"idle-claim/eng-{n}",
@@ -264,14 +264,14 @@ def test_reset_layout_restores_the_defaults_everywhere(visit):
 
 
 def test_phone_width_stacks_the_panels_hides_the_handles_and_ignores_saved_sizes(visit):
-    layout.write({"capacity-box": {"height": 400}, "agents-box": {"height": 90}})
+    layout.write({"capacity-box": {"height": 640}, "agents-box": {"height": 90}})
     page = visit(width=390)
     assert page.tab.locator("[data-grip]").count() == len(HEIGHT_ROWS)
     assert page.tab.eval_on_selector_all("[data-grip]", "gs => gs.filter(g => g.getClientRects().length).length") == 0
     full = page.box("swarm-box")["width"]
     for row in HEIGHT_ROWS:
         assert page.box(row)["width"] == pytest.approx(full, abs=1)
-    assert page.box("capacity-box")["height"] < 400
+    assert page.box("capacity-box")["height"] < 640
     assert page.tab.eval_on_selector("#agents-box", "el => el.scrollHeight <= el.clientHeight + 1")
     assert page.stored() == layout.read()
 

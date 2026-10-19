@@ -67,7 +67,37 @@ class BroadcastSlot:
         create_broadcast(event["payload"], source=event["owner"], channel=self.channel, delivery_id=delivery_id)
 
 
+@dataclass(frozen=True)
+class SwarmSlot:
+    slug: str
+
+    def record(self) -> dict:
+        return {"kind": "swarm", **asdict(self)}
+
+    def deliver(self, event: dict, delivery_id: str, redis: "Redis") -> None:
+        from scripts.inbox.outbox import stable_id
+        from scripts.inbox.store import DuplicateItem, InboxStore
+        from scripts.swarm.delivery import recipients
+        from scripts.swarm.store import RedisStore
+
+        inbox = InboxStore(redis)
+        for agent in recipients(RedisStore(redis), self.slug, "all", event["owner"]):
+            try:
+                inbox.send(
+                    event["owner"],
+                    agent.name,
+                    event["payload"],
+                    task=agent.task,
+                    item_id=stable_id(delivery_id, agent.name),
+                )
+            except DuplicateItem:
+                pass
+
+
+KINDS = {"inbox": InboxSlot, "broadcast": BroadcastSlot, "swarm": SwarmSlot, "callable": CallableSlot}
+
+
 def restore(record: dict) -> Slot:
     fields = dict(record)
     kind = fields.pop("kind")
-    return {"inbox": InboxSlot, "broadcast": BroadcastSlot, "callable": CallableSlot}[kind](**fields)
+    return KINDS[kind](**fields)

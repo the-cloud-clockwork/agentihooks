@@ -30,6 +30,8 @@ def rig(tmp_path, monkeypatch, ledger_port):
     import redis
     from fakeredis import TcpFakeServer
 
+    from tests.scheduler.process_service import start_scheduler, stop_scheduler
+
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"redis://127.0.0.1:{server.server_address[1]}/0"
@@ -91,6 +93,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         path = tmp_path / "home" / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    scheduler = start_scheduler(env)
     rig = type("Rig", (), {})()
     rig.cli, rig.hook, rig.mode, rig.rows, rig.redis = cli, hook, mode, rows, client
     try:
@@ -101,6 +104,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         yield rig
     finally:
         subprocess.run([sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, timeout=30)
+        stop_scheduler(scheduler, client)
         server.shutdown()
         server.server_close()
 

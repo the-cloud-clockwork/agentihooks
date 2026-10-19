@@ -234,7 +234,7 @@ def _load_user_env(*, override_file_owned: bool = False) -> None:
     _pass_keys: set[str] = set()
 
     # 1. Main .env first
-    blocked = set(_BRAIN_KEYS_FROM_KERNEL)
+    blocked = set(_BRAIN_KEYS_FROM_KERNEL) | {"SWARM_SECRET"}
     multiline = _parse_env_file(
         _home / ".env",
         override_file_owned=override_file_owned,
@@ -416,6 +416,9 @@ LOG_USE_COLORS = _env_bool("LOG_USE_COLORS", "true")
 # Enable/disable automatic memory save on session Stop
 # Captures session digest and stores it via MemoryStore
 MEMORY_AUTO_SAVE = _env_bool("MEMORY_AUTO_SAVE", "true")
+
+# The front door master of every swarm launches on the one claude ai master login
+MASTER_CLAUDE_LOGIN = _env_bool("AGENTIHOOKS_MASTER_CLAUDE_LOGIN", "false")
 
 # =============================================================================
 # SECRETS SCANNING MODE

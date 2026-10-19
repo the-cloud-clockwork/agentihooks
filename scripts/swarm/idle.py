@@ -48,6 +48,16 @@ def last_prompt(redis, slug, name):
     return int(raw) if raw else None
 
 
+def begin_turn(redis, slug, name):
+    name, prefix = _resolved(redis, slug, name)
+    redis.incr(key(slug, "turn", name, prefix))
+
+
+def turn(redis, slug, name):
+    name, prefix = _resolved(redis, slug, name)
+    return redis.get(key(slug, "turn", name, prefix))
+
+
 def remember_wait(redis, slug: str, name: str, entry: dict, end: int, prefix: str) -> None:
     ended = {**entry, "until": min(entry["until"], end)}
     redis.hset(key(slug, "wait-history", name, prefix), str(entry["at"]), json.dumps(ended))

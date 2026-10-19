@@ -632,7 +632,9 @@ class SwarmPanel(unittest.TestCase):
             "config": {"max_eng": 3, "max_ci": 1, "max_plan": 1},
             "agents": [{"lane": "eng"}, {"lane": "eng", "state": "finished"}, {"lane": "ci"}, {"lane": "master"}],
         }
-        self.assertEqual(self.run_js(["liveCaps"], f"liveCaps({json.dumps(sw)})"), ["eng 1/3", "ci 1/1", "plan 0/1"])
+        self.assertEqual(
+            self.run_js(["liveAgents", "liveCaps"], f"liveCaps({json.dumps(sw)})"), ["eng 1/3", "ci 1/1", "plan 0/1"]
+        )
 
     def test_seat_names_read_as_lane_and_number_and_the_master_seat_stays_whole(self):
         out = self.run_js(["seatText"], '["master@rig", "eng-2@rig", "ci-1@rig"].map(seatText)')

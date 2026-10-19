@@ -32,6 +32,10 @@ def set_env_fallback_allowed(allowed: bool) -> None:
     _ENV_FALLBACK_ALLOWED = allowed
 
 
+def env_fallback_allowed() -> bool:
+    return _ENV_FALLBACK_ALLOWED
+
+
 def resolve_session_id(explicit: str = "") -> str:
     """Resolve the calling session's id.
 

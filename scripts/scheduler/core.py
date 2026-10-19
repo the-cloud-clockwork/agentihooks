@@ -1,4 +1,5 @@
 import json
+import os
 import socket
 import time
 import uuid
@@ -109,12 +110,25 @@ class Scheduler:
         self.machine = machine or socket.gethostname()
 
     def key(self, suffix: str) -> str:
+        if os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" and (
+            member := os.environ.get("AGENTIHOOKS_HIVE_ID")
+        ):
+            from scripts.swarm.keyspace import ROOT
+
+            return f"{ROOT}:hive:{member}:scheduler:{self.machine}:{suffix}"
         return redis_key("scheduler", f"{self.machine}:{suffix}")
 
     def get(self, entry_id: str) -> Entry:
         entry = Entry(self, entry_id)
         entry.record
         return entry
+
+    def owned(self, owner: str) -> list[Entry]:
+        entries = self.redis.hgetall(self.key("entries"))
+        return [Entry(self, entry_id) for entry_id, raw in entries.items() if json.loads(raw)["owner"] == owner]
+
+    def records(self) -> list[dict]:
+        return [json.loads(raw) for raw in self.redis.hvals(self.key("entries"))]
 
     def update(self, entry_id: str, change: Callable[[dict], None], *, lease: "Lock | None" = None) -> None:
         from redis.exceptions import WatchError
@@ -163,6 +177,12 @@ class Scheduler:
         if limit < 0:
             raise ValueError("limit must not be negative")
         return self._new(Schedule("stopwatch", owner, payload, now + limit, limit))
+
+    def interval(self, *, owner: str, payload: str, every: float, now: float | None = None) -> Entry:
+        now = time.time() if now is None else now
+        if every <= 0:
+            raise ValueError("an interval must be positive")
+        return self._new(Schedule("interval", owner, payload, now + every, every))
 
     def cron(
         self, *, owner: str, payload: str, expression: str, timezone: str = "UTC", now: float | None = None
@@ -249,7 +269,23 @@ class Scheduler:
         if entry["kind"] == "cron":
             entry["state"] = "active"
             entry["due"] = next_due(entry["expression"], entry["timezone"], now)
+        elif entry["kind"] == "interval":
+            entry["state"] = "active"
+            entry["due"] = now + entry["delay"]
         entry.pop("pending")
+
+    def retire(self, entry_id: str, wake_key: str) -> None:
+        self.get(entry_id).cancel()
+        self.redis.hset(self.key("retired"), entry_id, wake_key)
+
+    def _reap(self, lease: "Lock") -> None:
+        for entry_id, wake_key in self.redis.hgetall(self.key("retired")).items():
+            verify_lease(self.redis, lease)
+            with self.redis.pipeline() as pipe:
+                pipe.hdel(self.key("entries"), entry_id)
+                pipe.delete(wake_key)
+                pipe.hdel(self.key("retired"), entry_id)
+                pipe.execute()
 
     def run_due(self, *, now: float | None = None) -> int:
         now = time.time() if now is None else now
@@ -262,4 +298,5 @@ class Scheduler:
                 entry = self.get(entry_id).record
                 if entry["state"] == "pending":
                     self._deliver(entry_id, now, lease)
+            self._reap(lease)
             return fired

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm import cli, ledger_events, merge_queue, queue_record
+from scripts.swarm import cli, ledger_events, merge_queue, queue_priority, queue_record
 
 pytestmark = pytest.mark.unit
 URL = "https://github.com/o/r/pull/9"
@@ -157,13 +157,14 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
         return {"url": url, "displaced": [URL[:-1] + "2", URL[:-1] + "3"], "errors": errors}
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
     sent = []
 
     def inbox(redis):
         assert redis is store.redis
         return SimpleNamespace(send=lambda sender, recipient, text: sent.append((sender, recipient, text)))
 
-    monkeypatch.setattr(cli, "InboxStore", inbox)
+    monkeypatch.setattr(queue_priority, "InboxStore", inbox)
     assert cli.main(["sw", "merge", "priority", URL]) == status
     assert sent == [
         (
@@ -310,3 +311,37 @@ def test_priority_does_not_remove_an_entry_that_started_running():
     assert result == {"url": URL, "displaced": [URL[:-1] + "3"], "errors": []}
     assert queue.mutations == [("dequeue", 3), ("queue", 9), ("queue", 3)]
     assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1", "P2", "P9", "P3"]
+
+
+def test_master_priority_defers_without_cancelling_running_head(monkeypatch, capsys):
+    from tests.swarm.test_merge_queue import swarm_of
+
+    store = swarm_of("master")
+    store.config = lambda slug: None
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))
+    queue = FakeQueue()
+    prioritize = merge_queue.prioritize
+    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: prioritize(url, run=queue.run, journal=journal))
+    groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
+    records = []
+    monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
+    monkeypatch.setattr(queue_record.Journal, "write", lambda self, *args, **kwargs: records.append((args, kwargs)))
+
+    original_rest = merge_queue.rest
+
+    def rest(path, run):
+        if "/actions/" not in path:
+            return original_rest(path, run)
+        assert path == "repos/o/r/actions/workflows/test.yml/runs?event=merge_group&head_sha=group-head&per_page=100"
+        return {"workflow_runs": [{"id": 42, "status": "in_progress", "head_sha": "group-head"}]}
+
+    monkeypatch.setattr(merge_queue, "rest", rest)
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    assert queue.mutations == []
+    assert json.loads(capsys.readouterr().out)["deferred"] is True
+    pending = store.redis.hgetall(store.key("sw", "queue-priority"))
+    assert len(pending) == 1
+    assert json.loads(pending[URL])["run_id"] == 42
+    assert records[0][0][0] == "priority-deferred"

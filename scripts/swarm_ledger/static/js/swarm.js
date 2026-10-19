@@ -8,6 +8,8 @@ import { firstPage, moreButton, wanted } from "./pages.js";
 import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
+import { quotaCount, renderHives } from "./hives.js";
+import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -99,7 +101,7 @@ function openFindings(sw) {
 }
 
 function liveCaps(sw) {
-  const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
   return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
 }
 
@@ -250,7 +252,7 @@ function quotaRow(q) {
     q.master ? label("master", "master") : h("span"));
 }
 
-function renderQuota(sw, now, force) {
+export function renderQuota(sw, now, force) {
   if (!sw || (!force && $("swarm-quota").contains(document.activeElement))) return;
   loadRouting();
   const quota = quotaRows(sw, now);
@@ -276,11 +278,6 @@ export async function saveRouting(input) {
 
 function sessionCell(q) {
   return h("span", { class: "sw-sessions-value", text: String(q.sessions) });
-}
-
-function quotaCount(sw, count, now) {
-  const at = (sw.quota || {}).probed_at, accounts = `${count} ${count === 1 ? "account" : "accounts"}`;
-  return at ? `${accounts} · probed ${age(now - at * 1000)} ago` : accounts;
 }
 
 function renderDoctor(sw, now) {
@@ -316,6 +313,8 @@ export function renderSwarm(sw) {
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
   renderControls();
+  capacityShown(sw, swarmReadError);
+  renderRoles(sw);
   titlePause(sw);
   if ($("swarm").hidden) return renderStats();
   renderFreezes();
@@ -333,6 +332,7 @@ export function renderSwarm(sw) {
   renderAgents(sw, now);
   renderOverlays(sw);
   renderQuota(sw, now);
+  renderHives();
   renderDoctor(sw, now);
   if (wanted.id || !$("health").contains(document.activeElement)) renderHealth(sw.findings, now);
   renderHandoffs(sw.handoffs || []);

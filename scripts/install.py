@@ -6273,7 +6273,7 @@ def main() -> None:
     if _argv and _argv[0] in ("swarm", "controller"):
         from scripts.swarm import cli, controller
 
-        raise SystemExit({"swarm": cli.main, "controller": controller.main}[_argv[0]](_argv[1:]))
+        raise SystemExit({"swarm": cli.typed, "controller": controller.main}[_argv[0]](_argv[1:]))
     if _crew_doctor(_argv):
         from scripts.doctor.cli import main as doctor_main
 

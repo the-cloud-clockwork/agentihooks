@@ -1,5 +1,6 @@
 {
   "access-audit.yml/audit": "light",
+  "actions-storage.yml/prune": "light",
   "brain-smoke.yml/smoke": "standard",
   "branch-lanes.yml/grade": "light",
   "ci-templates.yml/actionlint": "hosted",
@@ -10,6 +11,7 @@
   "gate-protected.yml/grade": "hosted",
   "github-access-audit.yml/read-back": "hosted",
   "helm-kind.yml/kind": "standard",
+  "hierarchy-cpu.yml/hierarchy": "standard",
   "hive-worker.yml/contracts": "light",
   "hive-worker.yml/kind": "standard",
   "hive-worker.yml/publish": "standard",

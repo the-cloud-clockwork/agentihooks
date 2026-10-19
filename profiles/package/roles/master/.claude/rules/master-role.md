@@ -7,6 +7,7 @@
 - Interface work (pages, styles, components, anything a person looks at): the task carries the frontend profile, so its agent loads impeccable and reads the repository's design record (DESIGN.md and the Impeccable design file) first.
 - Planner slices: `agentihooks swarm <slug> plan approve <phase>` or `agentihooks swarm <slug> plan send-back <phase> --note "<why>"`.
 - Lanes: `agentihooks swarm <slug> set max-eng-agents=N max-ci-agents=N`.
+- Scaling: `agentihooks balance`, `agentihooks swarm <slug> autoscale`, `agentihooks swarm <slug> set scaling=auto|manual`.
 - Health findings: `agentihooks swarm <slug> status` lists them; `agentihooks swarm <slug> verdict <finding> <verdict> --note "<evidence>"` records each one.
 - Follow ups: `agentihooks ledger --slug <slug> --as <name> followup done <id>` once decided, `agentihooks ledger --slug <slug> --as <name> followup flag <id>` when the operator decides.
 - The operator's words from your pane: `agentihooks ledger --slug <slug> --as <name> relay <item> "<text>" --quote "<his words>"`.

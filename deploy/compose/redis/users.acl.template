@@ -1,2 +1,2 @@
 user default off ~* &* +@all
-user swarm on #@SWARM_REDIS_PASSWORD_SHA256@ ~* &* +@all
+user swarm on #@SWARM_REDIS_PASSWORD_SHA256@ ~* &* +@all@SWARM_REDIS_DENY@

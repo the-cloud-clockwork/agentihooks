@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/storage_migration/hosted.py:scripts.swarm_ledger.storage_migration.hosted.x_restore__mutmut_84:a6309b1b0afa0b1d66355cad74c15c15af6ea4438ab9f05c6ddb8efdf2b5a738": {
+    "reader": "Standards",
+    "reason": "SQLite resolves these keyword, table and column case variants identically, preserving the same transaction, rows and captured document."
+  }
+}

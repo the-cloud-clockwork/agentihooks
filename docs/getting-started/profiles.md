@@ -17,6 +17,8 @@ parent: Getting Started
 
 ## What is a profile?
 
+Profiles supply instructions and assets for **Claude Code and Codex**. Claude examples below use `CLAUDE.md` and JSON settings; Codex uses `AGENTS.md` and native TOML settings. See the [Codex reference](../reference/CODEX-COMPAT.md) for mapping and limits.
+
 A **profile** is a named configuration bundle that controls:
 
 - Which **agent system prompt** (`CLAUDE.md`) Claude Code loads

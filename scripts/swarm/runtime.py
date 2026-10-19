@@ -34,7 +34,15 @@ from scripts.swarm import (
     remote_control,
     timing,
 )
-from scripts.swarm.pane import PaneObservation, provider_error, provider_error_id, selection_prompt, typed_input
+from scripts.swarm.pane import (
+    PaneObservation,
+    content_refusal,
+    provider_error,
+    provider_error_id,
+    refusal_input,
+    selection_prompt,
+    typed_input,
+)
 from scripts.swarm.store import MASTER, AgentRecord, SwarmConfig, connect
 from scripts.swarm.tick import Placed, SpawnError
 from scripts.swarm_v2 import front_door
@@ -74,7 +82,9 @@ def parse_fields(text):
 
 
 def _ledger_token(slug, name):
-    secret = os.environ.get("SWARM_SECRET")
+    from scripts.swarm_ledger.authority_context import secret as trusted_secret
+
+    secret = trusted_secret()
     if not secret:
         return {}
     from scripts.swarm_ledger.ledger_authority import agent_token
@@ -618,7 +628,9 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = front and master_claude_login.enabled(config, lane, agent)
+        login = task.get("route_kind", "interactive") == "interactive" and master_claude_login.enabled(
+            config.slug, task.get("seat", ""), lane, agent
+        )
         route_kind = "interactive" if login else route_kind
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
@@ -670,7 +682,7 @@ class HerdrRuntime:
             desired_route_kind=None
             if lane != MASTER
             else "interactive"
-            if agent == "claude" and not task.get("route_kind")
+            if front and agent == "claude" and not task.get("route_kind")
             else "",
         )
 
@@ -699,7 +711,7 @@ class HerdrRuntime:
             source=agent.model_source or ("recorded" if agent.model else defaults.source),
         )
         front = front_door.holds(config.slug, agent.seat)
-        login = front and master_claude_login.enabled(config, agent.lane, agent.harness)
+        login = master_claude_login.enabled(config.slug, agent.seat, agent.lane, agent.harness)
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if agent.route_kind == "interactive"
@@ -1127,6 +1139,9 @@ class HerdrRuntime:
         error = provider_error(agent.harness, text)
         error_id = provider_error_id(agent.harness, text)
         title = selection_prompt(text)
+        refusal = content_refusal(agent.harness, text)
+        if state in {"idle", "blocked"} and refusal and not refusal_input(text):
+            return PaneObservation("idle", provider_checked=True, content_refusal=refusal)
         if title or state == "blocked":
             return PaneObservation(
                 "waiting", title, provider_error=error, provider_checked=True, provider_error_id=error_id
