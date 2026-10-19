@@ -303,6 +303,55 @@ def _repository(root: Path, files: dict[str, str]) -> None:
     subprocess.run(["git", "add", *files], cwd=root, check=True)
 
 
+@pytest.mark.parametrize("changed", ["unrelated", "imported", "test", "scope"])
+def test_import_scoped_stats_only_recollect_affected_files(tmp_path, changed):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_a.py", "tests/test_b.py"]
+    _repository(
+        root,
+        {
+            "scripts/a.py": "value = 1\n",
+            "scripts/b.py": "value = 1\n",
+            "scripts/other.py": "value = 1\n",
+            files[0]: "from scripts.a import value\n",
+            files[1]: "from scripts.b import value\n",
+        },
+    )
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [
+            {
+                "status": 0,
+                "tests": {f"scripts.{Path(path).stem[5:]}.x_value": [f"{path}::test_value"] for path in chosen},
+                "durations": {f"{path}::test_value": 1 for path in chosen},
+                "cpu": 1,
+            }
+        ]
+
+    cache = tmp_path / "cache"
+    scope = {"scripts/a.py": [1], "scripts/b.py": [1]}
+    collect_cached_stats(root, cache, scope, files, [], collect)
+    if changed == "unrelated":
+        (root / "scripts/other.py").write_text("value = 2\n")
+        scope["scripts/other.py"] = [1]
+    elif changed == "imported":
+        (root / "scripts/a.py").write_text("value = 2\n")
+    elif changed == "test":
+        (root / files[0]).write_text("from scripts.a import value\nassert value\n")
+    else:
+        scope["scripts/a.py"] = [1, 2]
+    warm = collect_cached_stats(root, cache, scope, files, [], collect)
+    assert calls == [files] if changed == "unrelated" else calls == [files, files[:1]]
+    assert {test for result in warm for test in result["durations"]} == {
+        "tests/test_a.py::test_value",
+        "tests/test_b.py::test_value",
+    }
+
+
 def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
     import json
 
