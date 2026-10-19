@@ -641,14 +641,15 @@ def test_claude_caps_come_from_the_shared_cache_whatever_tokens_the_session_hold
     monkeypatch.setattr(capacity.codex_router, "accounts", lambda env: [])
     home = {"AGENTIHOOKS_HOME": str(tmp_path)}
 
-    def seats(env):
-        return [(row.name, row.state, row.cap, capacity.free_seats(row)) for row in capacity.accounts(env, 100)]
+    sessions = (home, {**home, "AH_CC_TOKEN_a": "fake-a"}, {**home, **block})
 
-    tokenless = seats(home)
-    assert tokenless == [("a", "OPEN", 6, 5), ("b", "OPEN", 4, 4)]
-    assert seats({**home, "AH_CC_TOKEN_a": "fake-a"}) == tokenless
-    assert seats({**home, **block}) == tokenless
-    rows = capacity.accounts({**home, "AGENTIHOOKS_TARGET": "codex"}, 100)
+    def seats(env, now=100):
+        return [(row.name, row.state, row.cap, capacity.free_seats(row)) for row in capacity.accounts(env, now)]
+
+    assert [seats(env) for env in sessions] == [[("a", "OPEN", 6, 5), ("b", "OPEN", 4, 4)]] * 3
+    stale = 100 + session_bands.FRESH_SECONDS + 1
+    assert [seats(env, stale) for env in sessions] == [[("a", "UNKNOWN", None, 0), ("b", "UNKNOWN", None, 0)]] * 3
+    rows = capacity.accounts(home, 100)
     found = quota_handoff.successor(rows, ("claude",), quota_handoff.Thresholds.from_env({}))
     assert found.name == "a"
 
