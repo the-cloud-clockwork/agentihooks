@@ -981,6 +981,25 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
     assert result.returncode != 0, result.stdout + result.stderr
 
 
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled"])
+@pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
+@pytest.mark.parametrize("graded", ["success", "failure", "cancelled", "skipped"])
+def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(watcher, failed, graded):
+    jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    required = {"select", "split", "unit", "shard-check", "test-count"}
+    needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
+    needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
+    needs["unit"]["result"] = graded
+    step = next(step for step in jobs["gate-required"]["steps"] if step.get("name") == "Require every gate to succeed")
+    result = _gate([step], needs)
+    assert (result.returncode == 0) == (not failed and graded == "success"), result.stdout + result.stderr
+
+
+def test_the_workflow_watcher_exports_reported_failures_to_the_gate():
+    jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    assert jobs["queue-fail-fast"]["outputs"]["failed"] == "${{ steps.watch.outputs.failed }}"
+
+
 def test_queue_gate_keeps_legacy_duration_admission_by_default():
     from scripts import ci_reuse
 

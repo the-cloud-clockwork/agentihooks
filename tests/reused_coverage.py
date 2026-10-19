@@ -8,12 +8,14 @@ test that took them; captures taken outside a test, or recorded before captures 
 import argparse
 import difflib
 import json
+import os
 import shutil
 import sqlite3
 import subprocess
 import sys
 from pathlib import Path
 
+from tests import coverage_check
 from tests.dep_manifest import node
 
 
@@ -106,6 +108,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--captures", type=Path, required=True, help="the dev shard's page capture folder")
     parser.add_argument("--captures-out", type=Path, required=True)
     args = parser.parse_args(argv)
+    unusable = coverage_check.problem(args.coverage)
+    if unusable:
+        artifact = os.environ.get("ARTIFACT", str(args.coverage))
+        print(
+            f"::warning::The dev coverage {artifact} from {args.commit} is unusable ({unusable});"
+            " this shard runs its reused tests"
+        )
+        args.reused.unlink()
+        return 0
     tests = set(json.loads(args.reused.read_text())["tests"])
     moved = moved_lines(args.repo, args.commit, args.head)
     count = keep(args.coverage, args.out, tests, moved)
