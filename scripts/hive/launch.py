@@ -49,6 +49,23 @@ def loaded_hives(store: RedisStore) -> list[dict]:
     return hives
 
 
+def _key(account: str) -> str:
+    """A hive names an account by its AH_CC_TOKEN_ slug, a hosted controller by its Secret key; only _ and - differ."""
+    return account.replace("_", "-")
+
+
+def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: int | None) -> int | None:
+    """A master on a hive is held to the session cap that hive reports for the account, not the cloud worker cap."""
+    caps = [
+        slot["cap"]
+        for hive in hives
+        if hive["id"] == selected.hive
+        for slot in hive["slots"]
+        if slot["account"] == selected.account and "cap" in slot
+    ]
+    return caps[0] if caps else fallback
+
+
 class HiveLaunch:
     backend = HIVE
     capabilities = frozenset((Capability.SPAWN,))
@@ -103,18 +120,18 @@ class HiveLaunch:
         return self._record_wait(lane, task, reason)
 
     def _master_selection(self, config, decision, hives, now, rows):
-        accounts = {row.name: row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
+        accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
         available = [
-            {**hive, "slots": [slot for slot in hive["slots"] if slot["account"] in accounts]} for hive in hives
+            {**hive, "slots": [slot for slot in hive["slots"] if _key(slot["account"]) in accounts]} for hive in hives
         ]
         selected = placement.place_master("claude", "", config.repo, available, now)
         if isinstance(selected, placement.Wait):
             return selected if hives else placement.Wait(placement.NO_UI_HIVE)
-        account = (
-            capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
-            if selected.route_kind == "interactive"
-            else accounts[selected.account]
-        )
+        if selected.route_kind == "interactive":
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
+        else:
+            row = accounts[_key(selected.account)]
+            account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
         return Selection(decision, selected.hive, account, selected.route_kind, selected)
 
     def orders_for(self, task: str) -> LaunchOrder | None:

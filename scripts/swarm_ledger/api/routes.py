@@ -4,7 +4,7 @@ import os
 import re
 from urllib.parse import parse_qs, urlsplit
 
-from scripts.hive.auth import HiveError
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
@@ -90,7 +90,7 @@ def agent_token(handler: object, services: Services, slug: str) -> dict:
         raise APIError(403, "forbidden", "Agent is not placed on this member's hive")
     try:
         token = services.ledger.authority.hive_agent_token(member, slug, agent)
-    except HiveError as exc:
+    except ports.hive().auth.HiveError as exc:
         raise APIError(403, "forbidden", str(exc)) from exc
     return {"data": {"agent": agent, "token": token}}
 

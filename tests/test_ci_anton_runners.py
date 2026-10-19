@@ -116,6 +116,7 @@ CLASSED = {
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
     ("queue-retry.yml", "retry"),
+    ("lost-runner.yml", "watch"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED

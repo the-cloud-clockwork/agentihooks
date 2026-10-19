@@ -36,6 +36,7 @@ LANE_USERS = {
     "test-leaks.yml",
     "swarm-node-image.yml",
     "hive-worker.yml",
+    "lost-runner.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}

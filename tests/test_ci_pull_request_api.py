@@ -186,6 +186,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/chart_secrets.py",
         "tests/chart_workers.py",
         "tests/count_floor.py",
+        "tests/coverage_check.py",
         "tests/coverage_baseline.py",
         "tests/coverage_ratchet.py",
         "tests/dep_manifest.py",

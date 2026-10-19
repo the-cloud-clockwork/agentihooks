@@ -6,6 +6,7 @@ It never creates or starts a swarm; swarm init creates it after this step and th
 import argparse
 import json
 import os
+import shlex
 import shutil
 import subprocess
 import urllib.parse
@@ -19,6 +20,7 @@ PROJECT = "agentihooks-swarm"
 BUNDLED = Path(__file__).with_name("stack")
 SERVICES = ("redis", "swarm", "controller")
 ADOPTION = "deploy/compose/adopt.yaml"
+PREPARED_CLIENT = "swarm-client.env"
 LEDGER_PORT = 8765
 AGAIN = "then run agentihooks swarm init again"
 OUTPUT_LINES = 10
@@ -39,6 +41,8 @@ FIXES = {
     "and keep the password in {env} as it was at the first start, {again}",
     "swarm": "read its logs; the ledger server needs Redis healthy, and if port {SWARM_PORT} is in use, "
     "set SWARM_PORT in {env} to a free port, {again}",
+    "adopted": "read its logs; the adopted ledger server serves port {SWARM_PORT} on the host network, "
+    "so stop the legacy ledger container by its id first, {again}",
     "controller": "read its logs; the controller starts once Redis and the ledger server are healthy "
     "and then holds a lease, so fix those first, {again}",
 }
@@ -99,7 +103,12 @@ def materialize(home: Path) -> None:
     (home / "deploy" / "compose" / "tls").mkdir(exist_ok=True)
 
 
-def adopt(env_file: Path, environ: Mapping[str, str]) -> None:
+def adopt(env_file: Path, environ: Mapping[str, str]) -> bool:
+    from scripts.swarm_ledger.server_compose import ROOT
+
+    client = read_env(env_file.parent.parent / PREPARED_CLIENT).get("AGENTIHOOKS_SWARM_REDIS_URL")
+    if not client:
+        return False
     values = read_env(env_file)
     values.update(
         {
@@ -109,10 +118,20 @@ def adopt(env_file: Path, environ: Mapping[str, str]) -> None:
             "SWARM_ADOPT_HOME": str(Path.home()),
             "SWARM_ADOPT_UID": str(os.getuid()),
             "SWARM_ADOPT_GID": str(os.getgid()),
+            "SWARM_ADOPT_CODE": str(ROOT),
+            "SWARM_ADOPT_REDIS_URL": shlex.split(client)[0],
             "SWARM_PORT": str(LEDGER_PORT),
         }
     )
+    values.update(
+        {
+            key: environ[key]
+            for key in ("AGENTIHOOKS_SWARM_DATABASE_URL", "AGENTIHOOKS_SWARM_REDIS_URL")
+            if environ.get(key)
+        }
+    )
     write_private(env_file, "".join(f"{key}={value}\n" for key, value in values.items()))
+    return True
 
 
 def project(home: Path) -> str:
@@ -205,16 +224,19 @@ def init(argv: list[str], environ: Mapping[str, str], run: Run, opener: Callable
         return 1
     home = stack_home(environ)
     materialize(home)
-    if args.adopt:
-        adopt(home / ".env", environ)
-    values = settings(home / ".env")
+    if args.adopt and not adopt(home / ".env", environ):
+        fix = "run agentihooks swarm init --prepare-clients, then agentihooks swarm init --adopt"
+        failed(out, paint, "no prepared swarm Redis client to adopt", fix)
+        return 1
+    values = settings(home / ".env", environ)
     write_private(home / "client.env", client_env(values, home))
     if args.no_start:
         print(f"Swarm stack settings written to {home}; no service was started.", file=out)
         return 0
     if sick := start(run, home, args.timeout, out):
         for service, state in sick:
-            fix = FIXES[service].format(env=home / ".env", again=AGAIN, **values)
+            adopted = service == "swarm" and values.get("SWARM_ADOPT_LEDGER_DIR")
+            fix = FIXES["adopted" if adopted else service].format(env=home / ".env", again=AGAIN, **values)
             failed(out, paint, f"{service} is {state}", fix, f"{logs(home)} {service}")
         return 1
     base = urllib.parse.urlunsplit(("http", f"{BIND}:{values['SWARM_PORT']}", "", "", ""))

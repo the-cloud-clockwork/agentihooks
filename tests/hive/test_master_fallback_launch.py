@@ -208,3 +208,34 @@ def test_a_pinned_secondary_master_uses_hive_selection_before_its_original_route
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.placement_refusal("master", {"id": "master-2", "hive": "remote"}) == ""
+
+
+def test_master_matches_a_dashed_controller_key_to_the_hive_slot_it_names(setup):
+    from scripts.swarm.capacity import Account
+
+    task = master(setup)
+    setup.herdr._quota_accounts = [Account("claude", "user-atmail-com", "OPEN", 0, 80, 80, 6)]
+    write_hive(
+        setup,
+        roles=["master"],
+        ui="yes",
+        slots=[{"harness": "claude", "account": "user_atmail_com", "kind": "subscription", "cap": 6}],
+    )
+    selected = setup.launcher.select(setup.config, "master", task)
+    assert (selected.hive, selected.route_kind) == ("remote", "subscription")
+    assert selected.account == Account("claude", "user_atmail_com", "OPEN", 0, 80, 80, 6)
+
+
+@pytest.mark.parametrize(("slot", "cap"), [({"cap": 6}, 6), ({"cap": 0}, 0), ({}, 1)])
+def test_master_on_a_hive_reserves_against_the_cap_that_hive_reports(setup, slot, cap):
+    from scripts.swarm.capacity import Account
+
+    task = master(setup)
+    setup.herdr._quota_accounts = [Account("claude", "user-atmail-com", "OPEN", 0, None, None, 1)]
+    write_hive(
+        setup,
+        roles=["master"],
+        ui="yes",
+        slots=[{"harness": "claude", "account": "user_atmail_com", "kind": "subscription", **slot}],
+    )
+    assert setup.launcher.select(setup.config, "master", task).account.cap == cap
