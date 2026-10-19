@@ -134,9 +134,9 @@ def _memory_mb(proc: Path) -> tuple[int, int, int]:
     for line in (proc / "meminfo").read_text().splitlines():
         name, _, rest = line.partition(":")
         if name in MEMINFO_KEYS:
-            fields[name] = int(rest.split()[0])
+            fields[name] = int(rest.split()[0]) // 1024
     total = fields.get("SwapTotal", 0)
-    return fields["MemAvailable"] // 1024, (total - fields.get("SwapFree", total)) // 1024, total // 1024
+    return fields["MemAvailable"], total - fields.get("SwapFree", total), total
 
 
 def _rss_kb(pid: int, proc: Path) -> int | None:

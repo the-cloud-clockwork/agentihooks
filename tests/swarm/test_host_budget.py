@@ -210,19 +210,22 @@ def _process(proc, pid: int, ppid: int, rss_kb: int | None) -> None:
 def test_read_host_reads_swap_and_measures_live_agent_process_trees(tmp_path, monkeypatch):
     (tmp_path / "loadavg").write_text("2.00 1.00 1.00 3/900 4242\n")
     (tmp_path / "meminfo").write_text(
-        "MemAvailable:    5120000 kB\nDirectMap4k:     unknown\nSwapTotal:       4194304 kB\nSwapFree:          98304 kB\n"
+        "MemAvailable:    5120900 kB\nDirectMap4k:     unknown\nSwapTotal:       4194904 kB\nSwapFree:          98404 kB\n"
     )
-    for pid, ppid, rss in ((10, 1, 300000), (11, 10, 200000), (12, 11, 100000), (20, 1, 400000), (30, 1, 999999)):
+    for pid, ppid, rss in ((10, 1, 300000), (11, 10, 200000), (12, 11, 100000), (20, 1, 401471), (30, 1, 999999)):
         _process(tmp_path, pid, ppid, rss)
     _process(tmp_path, 13, 10, None)
     _process(tmp_path, 50, 1, None)
     monkeypatch.setattr(host_budget.os, "cpu_count", lambda: 4)
     monkeypatch.setattr(
-        host_budget.account_sessions, "live_sessions", lambda proc: {10: "a", 20: "b", 40: "c", 50: "d"}
+        host_budget.account_sessions, "live_sessions", lambda proc: {40: "c", 10: "a", 20: "b", 50: "d"}
     )
     monkeypatch.setattr(host_budget.account_sessions, "live_codex_sessions", lambda proc: 1)
 
-    assert host_budget.read_host(tmp_path) == HostSample(
+    sample = host_budget.read_host(tmp_path)
+
+    assert {type(value) for value in (sample.available_mb, sample.swap_used_mb, sample.agent_mb)} == {int}
+    assert sample == HostSample(
         load1=2.0,
         cpus=4,
         available_mb=5000,
@@ -243,7 +246,8 @@ def test_read_host_without_swap_lines_reads_no_swap_and_no_measured_agents(tmp_p
 
     sample = host_budget.read_host(tmp_path)
 
-    assert (sample.swap_used_mb, sample.swap_total_mb, sample.agent_mb, sample.measured_agents) == (0, 0, 0, 0)
+    assert (sample.available_mb, sample.swap_used_mb, sample.swap_total_mb, sample.agent_mb) == (1000, 0, 0, 0)
+    assert sample.measured_agents == 0
 
 
 def test_read_host_without_available_memory_reads_nothing(tmp_path, monkeypatch):
