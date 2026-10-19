@@ -111,6 +111,21 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
 
 
+def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
+    from scripts.ci_mutation.measured import measured_costs
+
+    name = "scripts.sample.x_f__mutmut_1"
+    tests = {"scripts.sample.x_f": ["a", "b"]}
+    results = [
+        {"tests": tests, "durations": {"a": 30.0}, "cpu": 10.0},
+        {"tests": {}, "durations": {"b": 40.0}, "cpu": 10.0},
+        {"tests": {}, "durations": {"c": 20.0}, "cpu": 10.0},
+    ]
+    assert measured_costs([name], results) == pytest.approx({name: 5.6 + 1.25 * (30.0 + 40.0) / 3})
+    uncontended = [{"tests": tests, "durations": {"a": 3.0, "b": 4.0}, "cpu": 10.0}]
+    assert measured_costs([name], uncontended) == pytest.approx({name: 5.6 + 1.25 * 7.0})
+
+
 def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
     from scripts.ci_mutation.measured import plan_shards
 
