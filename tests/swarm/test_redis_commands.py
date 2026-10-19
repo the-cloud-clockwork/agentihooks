@@ -64,6 +64,16 @@ def test_a_redis_py_method_maps_to_the_command_it_sends():
     assert wire(redis.Redis, "blpop") == {"BLPOP"}
     assert wire(redis.Redis, "zscan_iter") == {"ZSCAN"}
     assert wire(redis.Redis, "pipeline") == frozenset()
+    assert wire(redis.Redis, "from_url") == frozenset()
+
+
+def test_a_method_no_sample_call_completes_is_refused(monkeypatch):
+    def unsampled(self, key):
+        raise TypeError(key)
+
+    monkeypatch.setattr(redis.Redis, "unsampled", unsampled, raising=False)
+    with pytest.raises(LookupError, match="Redis.unsampled"):
+        wire(redis.Redis, "unsampled")
 
 
 def test_lua_scripts_name_the_commands_they_call():

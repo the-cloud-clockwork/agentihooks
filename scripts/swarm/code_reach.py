@@ -29,7 +29,7 @@ class Unit:
     owner: str = ""
     names: set = field(default_factory=set)
     dotted: set = field(default_factory=set)
-    methods: set = field(default_factory=set)
+    reads: set = field(default_factory=set)
     own: set = field(default_factory=set)
     typed: set = field(default_factory=set)
 
@@ -146,7 +146,7 @@ class Program:
         elif base in bound:
             unit.typed.add((bound[base], node.attr))
         elif node.attr not in _stdlib():
-            unit.methods.add(node.attr)
+            unit.reads.add(node.attr)
 
     def _index(self, module: str, tree: ast.Module, is_package: bool) -> None:
         scope = self.scopes[module] = {}
@@ -220,7 +220,7 @@ class Program:
             if name not in _stdlib()
             and not any(owner in self.members for owner in self.resolve(unit.module, constructor, scope))
         }
-        return unit.methods | untyped | (unit.own - self.members.get(unit.owner, {}).keys())
+        return unit.reads | untyped | (unit.own - self.members.get(unit.owner, {}).keys())
 
     def reach(self, entries: tuple[str, ...]) -> dict[str, str]:
         """Every unit the entries reach, each mapped to the unit that first reached it."""

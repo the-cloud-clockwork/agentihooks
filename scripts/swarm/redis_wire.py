@@ -43,31 +43,41 @@ def _target(owner: type, recorder: redis.Redis):
     return recorder.pubsub() if owner is PubSub else recorder
 
 
-def _record(owner: type, name: str, values: tuple) -> list[str]:
+def _record(owner: type, name: str, values: tuple) -> tuple[list[str], bool]:
     recorder = _Recorder()
     target = _target(owner, recorder)
+    completed = False
     try:
         result = getattr(target, name)(*values)
         if inspect.isgenerator(result):
             list(result)
+        completed = True
     except REFUSED:
         pass
     if owner is Pipeline:
         recorder.sent.extend(str(args[0]).upper() for args, _ in target.command_stack)
-    return recorder.sent
+    return recorder.sent, completed
 
 
 @cache
 def wire(owner: type, name: str) -> frozenset[str]:
-    """The commands a redis-py method sends; empty for a method that sends none, such as pipeline or close."""
+    """The commands a redis-py method sends; empty for a class method or for a method that completed sending none,
+    such as pipeline or close. A method no sample call completes is refused, so it never drops out silently."""
+    if isinstance(inspect.getattr_static(owner, name), (classmethod, staticmethod)):
+        return frozenset()
     params = list(inspect.signature(getattr(owner, name)).parameters.values())[1:]
     params = [p for p in params if p.kind is p.POSITIONAL_OR_KEYWORD]
     required = sum(1 for p in params if p.default is p.empty)
+    completed = False
     for width in range(required, min(len(params), required + SPARE) + 1):
         for values in itertools.product(SAMPLES, repeat=width):
-            if sent := _record(owner, name, values):
+            sent, finished = _record(owner, name, values)
+            if sent:
                 return frozenset(sent)
-    return frozenset()
+            completed = completed or finished
+    if completed:
+        return frozenset()
+    raise LookupError(f"no sample call of {owner.__name__}.{name} completed, so its Redis command is unknown")
 
 
 @cache
