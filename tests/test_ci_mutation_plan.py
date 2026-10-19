@@ -118,23 +118,36 @@ def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_i
     from scripts.ci_mutation.measured import measured_costs
 
     memory = KillMemory(tmp_path / "killers")
-    for mutant, killer in (("scripts.sample.x_f__mutmut_1", "fast"), ("scripts.sample.x_gone__mutmut_1", "dropped")):
-        memory.mutant = mutant
+    killers = {"x_f": "fast", "x_gone": "dropped", "x_new": "unmeasured"}
+    for function, killer in killers.items():
+        memory.mutant = f"scripts.sample.{function}__mutmut_1"
         memory.pytest_runtest_logreport(SimpleNamespace(failed=True, nodeid=killer))
-    names = ["scripts.sample.x_f__mutmut_2", "scripts.sample.x_g__mutmut_1", "scripts.sample.x_gone__mutmut_3"]
+    names = [
+        "scripts.sample.x_f__mutmut_2",
+        "scripts.sample.x_g__mutmut_1",
+        "scripts.sample.x_gone__mutmut_3",
+        "scripts.sample.x_new__mutmut_2",
+    ]
     results = [
         {
             "tests": {
                 "scripts.sample.x_f": ["fast", "slow"],
                 "scripts.sample.x_g": ["fast", "slow"],
                 "scripts.sample.x_gone": ["fast", "slow"],
+                "scripts.sample.x_new": ["fast", "unmeasured"],
             },
             "durations": {"fast": 2.0, "slow": 200.0},
         }
     ]
     traced = 5.6 + 1.25 * 202.0
-    assert measured_costs(names, results, memory) == pytest.approx({names[0]: 8.1, names[1]: traced, names[2]: traced})
-    assert measured_costs(names, results) == pytest.approx(dict.fromkeys(names, traced))
+    # A killer the stats never timed costs as much as the slowest timed test.
+    unmeasured = 5.6 + 1.25 * 200.0
+    assert measured_costs(names, results, memory) == pytest.approx(
+        {names[0]: 8.1, names[1]: traced, names[2]: traced, names[3]: unmeasured}
+    )
+    assert measured_costs(names, results) == pytest.approx(
+        {**dict.fromkeys(names[:3], traced), names[3]: 5.6 + 1.25 * 202.0}
+    )
 
 
 def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp_path, monkeypatch):
