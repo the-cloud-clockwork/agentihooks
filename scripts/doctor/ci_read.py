@@ -18,7 +18,6 @@ TEST = re.compile(
 
 RUNS = "repos/{owner}/{repo}/actions"
 DEV_PUSHES = f"{RUNS}/runs?branch=dev&event=push&status=completed&per_page=100"
-LAST_GREEN = RUNS + "/workflows/{workflow}/runs?branch=dev&event=push&status=success&per_page=1"
 RUNS_JQ = ".workflow_runs[] | {id, name, path, conclusion, created_at, html_url} | @json"
 JOBS_JQ = ".jobs[] | {name, conclusion} | @json"
 
@@ -115,7 +114,12 @@ def dev_pushes(repo_dir: str, run: Callable = subprocess.run) -> dict:
     runs = _repo_rows(repo_dir, DEV_PUSHES, RUNS_JQ, run)
     green, jobs = {}, {}
     for path, streak in ci.red_streaks(runs).items():
-        last = _repo_rows(repo_dir, LAST_GREEN.format(workflow=path.split("/")[-1]), RUNS_JQ, run)
+        last = _repo_rows(
+            repo_dir,
+            f"{RUNS}/workflows/{path.split('/')[-1]}/runs?branch=dev&event=push&status=success&per_page=1",
+            RUNS_JQ,
+            run,
+        )
         if last:
             green[path] = last[0]
         found = _repo_rows(
