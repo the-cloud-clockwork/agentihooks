@@ -54,6 +54,12 @@ def store(monkeypatch):
 
 
 def fake_server(store, calls=None):
+    from tests.swarm_ledger.api_fakes import as_services
+
+    return as_services(server_parts(store, calls))
+
+
+def server_parts(store, calls=None):
     calls = [] if calls is None else calls
 
     def principal(admin, slug, token, agent):
@@ -257,10 +263,12 @@ def test_an_unreachable_swarm_store_answers_storage_error():
     def down():
         raise Unreachable("Redis is unreachable")
 
-    server = fake_server(None)
+    from tests.swarm_ledger.api_fakes import as_services
+
+    server = server_parts(None)
     server.swarm_store = down
     with pytest.raises(APIError) as caught:
-        routes.dispatch(request("GET"), server)
+        routes.dispatch(request("GET"), as_services(server))
     assert (caught.value.status, caught.value.code, str(caught.value)) == (503, "storage_error", "Redis is unreachable")
 
 

@@ -105,6 +105,7 @@ class Names(NamedTuple):
 APP_SERVER = "app_server"
 SPAWN = "AGENTIHOOKS_SWARM_SPAWN"
 PREDECESSOR = "AGENTIHOOKS_PREDECESSOR_SESSION"
+LAUNCHER_PIN = "AGENTIHOOKS_SWARM_LAUNCHER=$$ "
 SWARM_IDENTITY = (
     "AGENTIHOOKS_SWARM",
     "AGENTIHOOKS_SWARM_LANE",
@@ -348,7 +349,7 @@ def _viewer_lines(serve: str, launcher: Path, name: str, environ: dict[str, str]
         "--agent",
         name,
     ]
-    server = shlex.quote(f"{serve}; rm -f {shlex.join(inputs)}")
+    server = shlex.quote(f"{LAUNCHER_PIN}{serve}; rm -f {shlex.join(inputs)}")
     return f"setsid -f sh -c {server} </dev/null >>{shlex.quote(str(log))} 2>&1\n{shlex.join(viewer)}"
 
 

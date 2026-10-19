@@ -85,6 +85,7 @@ LOGO = ROOT / "media" / "agentihooks-logo.png"
 
 HUB = Hub()
 BIN_SWEEP_EVERY = 15
+SCHEDULER_UNAVAILABLE = threading.Event()
 LOADED_STAMP = code_stamp()
 
 
@@ -755,6 +756,54 @@ def write_gate(slug):
     return master_fence.Fence(slug, front_door.Door(slug, talk.Budget(slug)))
 
 
+def api_services():
+    from scripts.swarm_ledger import services
+    from scripts.swarm_ledger.api.services import HttpPolicy, LedgerService, MediaService, Services, SwarmService
+
+    ledger: LedgerService = services.Ledger(
+        core=core,
+        authority=authority,
+        hub=HUB,
+        layout_rows=ledger_layout.ROWS,
+        layout_lists=ledger_layout.LISTS,
+        home_summaries=home_summaries,
+        bin_summaries=bin_summaries,
+        bin_entries=ledger_bin.entries,
+        bin_ledger=ledger_bin.delete,
+        workspace_tails=workspace_tails,
+        stream_resources=stream_resources,
+        layout=ledger_layout.read,
+        write_layout=ledger_layout.write,
+        write_gate=write_gate,
+        relay_to_inbox=relay_to_inbox,
+        deliver_alerts=deliver_alerts,
+    )
+    swarm: SwarmService = services.Swarm(
+        doctor=DOCTOR,
+        store=swarm_store,
+        status=swarm_status,
+        models=swarm_models,
+        control=swarm_control,
+        lifecycle=lifecycle_control,
+        refresh_quota=refresh_quota,
+        control_argv=control_argv,
+        doctor_phrase=doctor_phrase,
+    )
+    media: MediaService = services.Media(
+        media_store=ledger_media,
+        artifact_store=ledger_artifacts,
+        resolve_media=ledger_media.resolve,
+        resolve_artifacts=ledger_artifacts.resolve,
+    )
+    return Services(
+        repository=repository,
+        ledger=ledger,
+        swarm=swarm,
+        media=media,
+        policy=HttpPolicy(allowed_hosts=ALLOWED_HOSTS, allowed_origins=ALLOWED_ORIGINS, max_body=MAX_BODY),
+    )
+
+
 def sample_streams():
     """Publish swarm status for every ledger a stream is open on."""
     HUB.evict()
@@ -892,7 +941,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
-            return api.handle(self, sys.modules[__name__])
+            return api.handle(self, api_services())
         route, slug = self.path.split("?", 1)[0], self.slug()
         if self.refused():
             return None
@@ -1097,7 +1146,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
-            return api.handle(self, sys.modules[__name__])
+            return api.handle(self, api_services())
         if self.refused():
             return None
         route = self.path.split("?", 1)[0]
@@ -1134,14 +1183,14 @@ class Handler(BaseHTTPRequestHandler):
 
         if not self.path.startswith("/api/v1/"):
             return self.send(404, "not found", "text/plain")
-        return api.handle(self, sys.modules[__name__])
+        return api.handle(self, api_services())
 
     @request_metrics.measured
     def do_PUT(self):
         if self.path.startswith("/api/v1/"):
             from scripts.swarm_ledger import api
 
-            return api.handle(self, sys.modules[__name__])
+            return api.handle(self, api_services())
         slug = self.slug()
         if self.refused():
             return None
@@ -1199,7 +1248,14 @@ def reloading(environ=os.environ) -> bool:
 def scheduled_wait(interval: float) -> None:
     from scripts.scheduler.process_timer import wait
 
-    wait(interval)
+    if not SCHEDULER_UNAVAILABLE.is_set():
+        try:
+            wait(interval)
+            return
+        except OSError as exc:
+            SCHEDULER_UNAVAILABLE.set()
+            sys.stderr.write(f"scheduler wait unavailable, sleeping instead: {exc}\n")
+    time.sleep(interval)
 
 
 def watch_ledgers(interval=2.0):

@@ -45,7 +45,7 @@ def test_hosted_apply_accepts_the_current_spec_even_with_an_old_task_guard(deplo
     operation = _operation(deployed)
     payload = {"operation_id": "direct-current", "ops": [operation], "guards": {schemas.target(operation): "f" * 64}}
 
-    reply = mutations.apply(ledger_server, SLUG, "", payload)
+    reply = mutations.apply(ledger_server.api_services(), SLUG, "", payload)
 
     assert reply["applied"] == ["worker-direct"]
     assert reply["rejected"] == []
@@ -65,7 +65,7 @@ def test_hosted_worker_apply_uses_the_current_redis_adapter_after_module_loading
         with patch("scripts.swarm.store.connect", return_value=_store()):
             importlib.reload(worker_writes)
 
-        reply = mutations.apply(ledger_server, SLUG, "", payload)
+        reply = mutations.apply(ledger_server.api_services(), SLUG, "", payload)
 
         assert reply["applied"] == ["worker-direct"]
         assert _held_task()["state"] == "pr"
