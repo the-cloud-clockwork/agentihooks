@@ -1,5 +1,4 @@
 import json
-import os
 import subprocess
 from types import SimpleNamespace
 
@@ -737,10 +736,16 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
     monkeypatch.setattr(p.queue, "run", run)
     active = p.store.key("sw", queue_priority.ACTIVE)
     busy = "another merge queue priority is running; try again when it ends"
-    hive = commands.hive_id()
-    gone = subprocess.Popen(["true"])
-    gone.wait()
-    for holder in (f"{hive}:{os.getpid()}:other", f"elsewhere:{gone.pid}:other"):
+    hive, live, gone = commands.hive_id(), 41, 42
+
+    def probe(pid, signal):
+        if pid == gone:
+            raise ProcessLookupError
+
+    monkeypatch.setattr(queue_priority.os, "kill", probe)
+    checked = []
+    monkeypatch.setattr(queue_priority.staged_compatibility, "require", lambda *args: checked.append(args[2]))
+    for holder in (f"{hive}:{live}:other", f"elsewhere:{gone}:other"):
         p.store.redis.set(active, holder)
         assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority waits: {busy}"]
         with pytest.raises(SwarmError) as held:
@@ -748,11 +753,12 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
         assert str(held.value) == busy
         assert p.store.redis.get(active) == holder
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
-    p.store.redis.set(active, f"{hive}:{gone.pid}:killed")
+    p.store.redis.set(active, f"{hive}:{gone}:killed")
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [
         f"requeued {URL[:-1]}{n} left out of the merge queue by an interrupted priority" for n in (2, 3)
     ]
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P2", "P3"]
+    assert checked == ["", ""]
 
 
 @pytest.mark.parametrize("head", ["head2", "moved"])
