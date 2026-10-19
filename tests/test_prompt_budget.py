@@ -111,7 +111,8 @@ from hooks.prompt_budget import process_start
 
 hook_manager._confirm_inbox = lambda session_id: inject_context("kept block", also_log=False, skip_compression=True)
 hook_manager._swarm_heartbeat = lambda *args, **kwargs: time.sleep(120)
-hook_manager.main(process_start())
+hook_manager._EVENT_STARTED = process_start()
+hook_manager.main()
 """
 
 
