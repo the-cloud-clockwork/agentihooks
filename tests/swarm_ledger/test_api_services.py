@@ -34,7 +34,12 @@ def fake_services(calls: list) -> Services:
         control=lambda slug, argv, command="swarm": calls.append((command, slug, argv)) or ({}, ""),
         control_argv=lambda body: ["pause"],
     )
-    repository = SimpleNamespace(token=lambda slug: "tok", exists=lambda slug: slug == SLUG)
+    state = {"tasks": [{"id": "t1"}, {"id": "t2"}], "_meta": {"rev": 1}}
+    repository = SimpleNamespace(
+        token=lambda slug: "tok",
+        exists=lambda slug: slug == SLUG,
+        current=lambda slug: SimpleNamespace(state=state, views={}),
+    )
     return Services(
         repository=repository,
         ledger=ledger,
@@ -86,6 +91,34 @@ def test_the_api_serves_swarm_reads_from_the_swarm_service():
     status, body = served(fake_services([]), "GET", f"/api/v1/ledgers/{SLUG}/swarm/agents")
     assert status == 200
     assert [row["name"] for row in body["data"]] == ["eng"]
+
+
+def test_a_ledger_collection_read_pages_by_the_request_query():
+    status, body = served(fake_services([]), "GET", f"/api/v1/ledgers/{SLUG}/tasks?limit=1")
+    assert status == 200
+    assert [row["id"] for row in body["data"]] == ["t1"]
+
+
+def test_a_swarm_collection_read_pages_by_the_request_query():
+    services = fake_services([])
+    services.swarm.status = lambda slug: {"state": "running", "agents": [{"name": "eng"}, {"name": "ci"}]}
+    status, body = served(services, "GET", f"/api/v1/ledgers/{SLUG}/swarm/agents?limit=1")
+    assert status == 200
+    assert [row["name"] for row in body["data"]] == ["eng"]
+
+
+def test_the_event_stream_serves_the_requested_ledger_from_the_ledger_hub(monkeypatch):
+    from scripts.swarm_ledger.events import stream
+
+    served_streams = []
+    monkeypatch.setattr(stream, "serve", lambda handler, hub, slug, load: served_streams.append((hub, slug, load())))
+    services = fake_services([])
+    services.ledger.hub = object()
+    services.ledger.stream_resources = lambda slug: {"ledger": slug}
+    handler = request("GET", f"/api/v1/ledgers/{SLUG}/events", extra={"Accept": "text/event-stream"})
+    api.handle(handler, services)
+    assert handler.sent == []
+    assert served_streams == [(services.ledger.hub, SLUG, {"ledger": SLUG})]
 
 
 def test_the_api_runs_swarm_controls_through_the_swarm_service():
