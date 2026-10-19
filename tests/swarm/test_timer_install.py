@@ -321,6 +321,9 @@ def test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_n
     import subprocess
     import sys
 
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", timer.Path("/proc"))
     left = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"]) for _ in range(2)]
     procs = tmp_path / "cgroup.procs"
     procs.write_text("".join(f"{pid}\n" for pid in [os.getpid(), *[p.pid for p in left]]))
@@ -353,6 +356,9 @@ def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_
     import sys
 
     deaf = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(600)"
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", timer.Path("/proc"))
     left = subprocess.Popen([sys.executable, "-c", deaf], stdout=subprocess.PIPE, text=True)
     procs = tmp_path / "cgroup.procs"
     procs.write_text(f"{os.getpid()}\n{left.pid}\n")

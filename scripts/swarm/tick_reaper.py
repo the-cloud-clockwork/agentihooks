@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-import hooks.config  # noqa: F401  loads the env files a tick reads its swarm Redis from
 from scripts.scheduler.service import runtime_dir
 
 PROC = Path("/proc")
@@ -70,6 +69,8 @@ def _environ(pid: int) -> dict[str, str]:
 
 
 def _leftovers() -> list[tuple[int, float, list[str], str]]:
+    import hooks.config  # noqa: F401  loads the env files a tick reads its swarm Redis from
+
     spared, uid, found = ancestors(), os.getuid(), []
     started = _environ(os.getpid())
     loaded = {key: value for key, value in os.environ.items() if key not in started}

@@ -21,6 +21,20 @@ SHELL = (
 )
 
 
+@pytest.fixture(autouse=True)
+def admit(tmp_path, monkeypatch):
+    view = tmp_path / "proc-view"
+    view.mkdir()
+    (view / "uptime").symlink_to("/proc/uptime")
+
+    def add(pid):
+        (view / str(pid)).symlink_to(f"/proc/{pid}")
+
+    add(os.getpid())
+    monkeypatch.setattr(tick_reaper, "PROC", view)
+    return add
+
+
 def _plant(code, *argv, stdout=None):
     return subprocess.Popen([sys.executable, "-c", code, *argv], start_new_session=True, stdout=stdout, text=True)
 
@@ -40,10 +54,12 @@ def test_a_tick_process_is_a_swarm_tick_or_its_scheduler_holder(argv, tick):
     assert tick_reaper.is_tick(argv) is tick
 
 
-def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group():
+def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group(admit):
     left = _plant(SHELL, "swarm", "tick", stdout=subprocess.PIPE)
     try:
         sibling = int(left.stdout.readline())
+        admit(left.pid)
+        admit(sibling)
         reaped = tick_reaper.reap(grace_s=2)
         mine = [record for record in reaped if record.pid == left.pid]
         assert len(mine) == 1
@@ -65,10 +81,11 @@ def test_a_host_without_proc_reaps_nothing(tmp_path, monkeypatch):
     assert tick_reaper.reap(grace_s=2) == []
 
 
-def test_a_leftover_with_an_undecodable_environment_is_still_reaped():
+def test_a_leftover_with_an_undecodable_environment_is_still_reaped(admit):
     left = subprocess.Popen(
         [sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env={**os.environ, "T1151": b"\xff"}
     )
+    admit(left.pid)
     try:
         assert left.pid in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert left.wait(15) == -signal.SIGTERM
@@ -77,10 +94,11 @@ def test_a_leftover_with_an_undecodable_environment_is_still_reaped():
         left.wait()
 
 
-def test_a_leftover_whose_name_holds_a_parenthesis_is_read_and_reaped(tmp_path):
+def test_a_leftover_whose_name_holds_a_parenthesis_is_read_and_reaped(tmp_path, admit):
     named = tmp_path / "tick) (x"
     named.symlink_to(sys.executable)
     left = subprocess.Popen([str(named), "-c", SLEEP, "swarm", "tick"], start_new_session=True)
+    admit(left.pid)
     try:
         for _ in range(100):
             if ")" in Path(f"/proc/{left.pid}/comm").read_text():
@@ -101,7 +119,8 @@ def test_a_process_gone_since_its_start_was_read_is_not_the_same():
     assert tick_reaper._same(gone.pid, "0") is False
 
 
-def test_the_ancestors_are_this_process_and_its_parents():
+def test_the_ancestors_are_this_process_and_its_parents(monkeypatch):
+    monkeypatch.setattr(tick_reaper, "PROC", Path("/proc"))
     found = tick_reaper.ancestors()
     assert {os.getpid(), os.getppid()} <= found
     assert None not in found
@@ -144,8 +163,9 @@ def test_the_namespace_is_read_from_this_process_environment(tmp_path, monkeypat
     assert asked[0] is os.environ
 
 
-def test_a_zombie_or_a_gone_process_is_not_alive():
+def test_a_zombie_or_a_gone_process_is_not_alive(admit):
     child = subprocess.Popen([sys.executable, "-c", "pass"])
+    admit(child.pid)
     for _ in range(200):
         if Path(f"/proc/{child.pid}/stat").read_text().rsplit(")", 1)[1].split()[0] == "Z":
             break
@@ -192,8 +212,9 @@ def test_an_unreadable_process_is_skipped_and_the_scan_goes_on(tmp_path, monkeyp
     assert found[0][1] == pytest.approx(1000 - 100 / os.sysconf("SC_CLK_TCK"))
 
 
-def test_a_leftover_that_ignores_terminate_is_killed():
+def test_a_leftover_that_ignores_terminate_is_killed(admit):
     left = _plant(DEAF, "swarm", "tick", stdout=subprocess.PIPE)
+    admit(left.pid)
     try:
         assert left.stdout.readline().strip() == "ready"
         reaped = [record for record in tick_reaper.reap(grace_s=0.5) if record.pid == left.pid]
@@ -204,8 +225,9 @@ def test_a_leftover_that_ignores_terminate_is_killed():
         left.wait()
 
 
-def test_a_tick_that_started_a_moment_ago_is_reaped_too():
+def test_a_tick_that_started_a_moment_ago_is_reaped_too(admit):
     young = _plant(SLEEP, "swarm", "tick")
+    admit(young.pid)
     try:
         assert young.pid in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert young.wait(15) == -signal.SIGTERM
@@ -232,8 +254,9 @@ def test_the_reaping_tick_spares_itself_and_its_ancestors():
     assert done.stdout.strip() == "[]"
 
 
-def test_a_process_of_another_user_is_never_a_leftover(monkeypatch):
+def test_a_process_of_another_user_is_never_a_leftover(monkeypatch, admit):
     left = _plant(SLEEP, "swarm", "tick")
+    admit(left.pid)
     try:
         uid = os.getuid()
         monkeypatch.setattr(tick_reaper.os, "getuid", lambda: uid + 1)
@@ -244,9 +267,10 @@ def test_a_process_of_another_user_is_never_a_leftover(monkeypatch):
         left.wait()
 
 
-def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
+def test_a_tick_of_another_swarm_redis_is_never_a_leftover(admit):
     other = {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0"}
     left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=other)
+    admit(left.pid)
     try:
         assert left.pid not in [record.pid for record in tick_reaper.reap(grace_s=2)]
         assert left.poll() is None
