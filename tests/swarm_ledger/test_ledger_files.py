@@ -1,3 +1,4 @@
+import os
 import sys
 from pathlib import Path
 
@@ -57,3 +58,29 @@ def test_atomic_write_replaces_the_file_and_returns_the_written_stat(tmp_path):
     assert target.read_text(encoding="utf-8") == "né"
     assert (written.st_size, written.st_ino) == (len("né".encode()), target.stat().st_ino)
     assert sorted(p.name for p in folder.iterdir()) == ["ledger.json"]
+
+
+def test_atomic_write_stages_a_hidden_utf8_file_beside_the_target(tmp_path, monkeypatch):
+    folder = tmp_path / "ledgers"
+    folder.mkdir()
+    staged, opened = [], []
+    replace, fdopen = os.replace, os.fdopen
+    monkeypatch.setattr(os, "replace", lambda src, dst: staged.append(Path(src)) or replace(src, dst))
+    monkeypatch.setattr(
+        os, "fdopen", lambda fd, *args, **kwargs: opened.append((args, kwargs)) or fdopen(fd, *args, **kwargs)
+    )
+    ledger_files.atomic_write(folder / "ledger.json", "x")
+    assert [(path.parent, path.name.startswith(".ledger.json.")) for path in staged] == [(folder, True)]
+    assert opened == [(("w",), {"encoding": "utf-8"})]
+
+
+def test_append_capped_opens_the_log_for_utf8_appends(tmp_path, monkeypatch):
+    opened = []
+    monkeypatch.setattr(
+        ledger_files,
+        "open",
+        lambda *args, **kwargs: opened.append((args, kwargs)) or open(*args, **kwargs),
+        raising=False,
+    )
+    ledger_files.append_capped(tmp_path / "hook.log", "x", limit=10)
+    assert opened == [((tmp_path / "hook.log", "a"), {"encoding": "utf-8"})]
