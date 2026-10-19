@@ -186,22 +186,70 @@ def test_a_tick_timer_that_cannot_be_disabled_keeps_its_files_for_a_later_pass(t
     )
 
 
-def test_an_upgrade_disables_and_deletes_the_tick_timer_without_stopping_a_running_tick(tmp_path, monkeypatch):
-    scheduled = []
-    monkeypatch.setattr(timer, "schedule", lambda: scheduled.append(True) or True)
+def _draining(calls, groups, clock):
+    import subprocess
+
+    def run(argv, **kwargs):
+        calls.append((argv, kwargs))
+        clock.append(clock[-1] + 1)
+        if argv[2] == "show":
+            group, tasks = groups.pop(0) if len(groups) > 1 else groups[0]
+            return subprocess.CompletedProcess(argv, 0, f"ControlGroup={group}\nTasksCurrent={tasks}\n", "")
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    return run
+
+
+SHOW = ["systemctl", "--user", "show", "-p", "ControlGroup", "-p", "TasksCurrent", "agentihooks-swarm.service"]
+KILL = ["systemctl", "--user", "kill", "--kill-whom=all"]
+
+
+def test_an_upgrade_ends_what_the_tick_service_left_and_waits_for_its_group_before_scheduling(tmp_path, monkeypatch):
+    calls, clock = [], [0.0]
+    monkeypatch.setattr(timer, "schedule", lambda: calls.append((["schedule"], {})) or True)
+    monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
+    monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\nOnUnitActiveSec=60s\n")
-    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\n")
-    calls = []
-    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\nType=oneshot\nKillMode=process\n")
+    group = "/user.slice/agentihooks-swarm.service"
+    groups = [(group, "3"), (group, "1"), ("", "[not set]")]
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_draining(calls, groups, clock))
     assert not (tmp_path / "agentihooks-swarm.timer").exists()
     assert not (tmp_path / "agentihooks-swarm.service").exists()
     argvs = [argv for argv, _ in calls]
-    assert argvs[0] == ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"]
+    assert argvs[:6] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        SHOW,
+        [*KILL, "--signal=SIGTERM", "agentihooks-swarm.service"],
+        SHOW,
+        SHOW,
+        ["systemctl", "--user", "daemon-reload"],
+    ]
     assert calls[0][1] == {"capture_output": True, "text": True, "timeout": 30, "check": False}
-    assert argvs[1] == ["systemctl", "--user", "daemon-reload"]
-    assert not [argv for argv in argvs if "agentihooks-swarm.service" in argv]
-    assert not [argv for argv in argvs if "stop" in argv]
-    assert scheduled == [True]
+    assert argvs[-1] == ["schedule"]
+
+
+def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(tmp_path, monkeypatch, capsys):
+    calls, clock = [], [0.0]
+    monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
+    monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
+    groups = [("/user.slice/agentihooks-swarm.service", "2")]
+    timer.ensure("/installed/bin/agentihooks", tmp_path, run=_draining(calls, groups, clock))
+    argvs = [argv for argv, _ in calls]
+    kills = [argv for argv in argvs if argv[:4] == KILL]
+    assert kills == [
+        [*KILL, "--signal=SIGTERM", "agentihooks-swarm.service"],
+        [*KILL, "--signal=SIGKILL", "agentihooks-swarm.service"],
+    ]
+    assert (tmp_path / "agentihooks-swarm.timer").exists()
+    assert (tmp_path / "agentihooks-swarm.service").exists()
+    assert ["systemctl", "--user", "daemon-reload"] not in argvs
+    assert capsys.readouterr().err == (
+        "the agentihooks-swarm service still runs 2 processes; its unit files stay until a later pass\n"
+    )
+    assert clock[-1] >= timer.DRAIN_S + timer.KILL_WAIT_S
 
 
 def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
@@ -211,8 +259,9 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
     assert not (tmp_path / "agentihooks-swarm.service").exists()
-    assert [argv for argv, _ in calls][:2] == [
+    assert [argv for argv, _ in calls][:3] == [
         ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        SHOW,
         ["systemctl", "--user", "daemon-reload"],
     ]
     calls.clear()
