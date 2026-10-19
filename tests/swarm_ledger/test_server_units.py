@@ -139,7 +139,7 @@ def test_the_ledger_watch_sleeps_two_seconds_between_passes(monkeypatch):
     monkeypatch.setattr(server.ledger_bin, "tidy", lambda: None)
     monkeypatch.setattr(server, "bin_closed_without_swarm", lambda: None)
     monkeypatch.setattr(server, "sample_streams", lambda: None)
-    monkeypatch.setattr(server.time, "sleep", sleep)
+    monkeypatch.setattr("scripts.scheduler.process_timer.wait", sleep)
     with pytest.raises(StopIteration):
         server.watch_ledgers()
     assert slept == [2.0]

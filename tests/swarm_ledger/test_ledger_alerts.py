@@ -792,7 +792,7 @@ def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
             assert alert["state"] == "done"
             raise InterruptedError("scan observed")
 
-    monkeypatch.setattr(ledger_server.time, "sleep", tick)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", tick)
     with pytest.raises(InterruptedError, match="scan observed"):
         ledger_server.watch_ledgers(interval=0)
     assert len(sleeps) == 16

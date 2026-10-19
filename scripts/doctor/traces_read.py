@@ -35,7 +35,7 @@ CACHE_DIR = "doctor-traces"
 class Budget:
     active_seconds: float = 15.0
     history_seconds: float = 45.0
-    request_seconds: float = 10.0
+    request_seconds: float = 7.0
     trace_pages: int = 20
     observation_pages: int = 20
     active_page: int = 10
@@ -109,7 +109,7 @@ def _listing(slug, get, budget, deadline, clock):
                 return rows, False, []
             page += 1
     except Exception as exc:  # noqa: BLE001
-        return rows, False, [f"trace listing failed: {type(exc).__name__}: {exc}"]
+        return rows, False, [f"trace listing failed: {registry.failure(exc)}"]
 
 
 def _backfill(get, cache, trace, budget, deadline, clock):
@@ -117,7 +117,7 @@ def _backfill(get, cache, trace, budget, deadline, clock):
         rows, whole = _pages(get, "observations", {"traceId": trace["id"]}, budget.observation_pages, deadline, clock)
         entry = {"updated_at": trace.get("updatedAt"), "whole": whole, "observations": [_observation(o) for o in rows]}
     except Exception as exc:  # noqa: BLE001
-        entry = {"updated_at": trace.get("updatedAt"), "failed": f"{type(exc).__name__}: {exc}"}
+        entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failure(exc)}
     if entry.get("whole") or entry.get("failed"):
         registry.save(_cache_path(cache, trace["id"]), entry)
     return entry

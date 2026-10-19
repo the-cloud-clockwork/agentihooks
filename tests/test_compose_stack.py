@@ -73,6 +73,7 @@ def test_swarm_init_ships_the_repository_stack_byte_for_byte():
     shipped = sorted(str(path.relative_to(bundled)) for path in bundled.rglob("*") if path.is_file())
     assert shipped == [
         "compose.yaml",
+        "deploy/compose/adopt.yaml",
         "deploy/compose/redis/healthcheck.sh",
         "deploy/compose/redis/start.sh",
         "deploy/compose/redis/users.acl.template",

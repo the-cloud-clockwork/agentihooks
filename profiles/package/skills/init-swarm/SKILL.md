@@ -1,19 +1,20 @@
 ---
 name: init-swarm
 description: >
-  Turn an accepted plan into a running swarm: ledger content with phases, phase dependencies and manual or automatic
-  planning, with PR sized tasks in the eng and ci lanes, then create and start the swarm. Takes
+  Turn an accepted plan into a running swarm: a name the operator picks, ledger content with phases, phase
+  dependencies and manual or automatic planning, one swarm init command that creates the swarm and its ledger,
+  PR sized tasks in the eng and ci lanes, then start. Takes
   code plans and plans for ops, troubleshooting, tuning or research work, whose
   tasks carry a kind and a proof contract. Use when the operator says
   "init swarm", "init-swarm", "start a swarm for this plan", or asks for an
   accepted plan to be run by agents.
-argument-hint: "<plan-file> --repo DIR [--template NAME] [--max-eng-agents N] [--max-ci-agents N]"
+argument-hint: "<plan-file> --repo DIR [--template NAME]"
 ---
 
 # Init Swarm
 
-The plan is accepted before this skill runs. This session writes the ledger
-and starts the swarm, then hands the operator to the swarm's **master**: the
+The plan is accepted before this skill runs. This session names the swarm,
+creates it with its ledger and starts it, then hands the operator to the swarm's **master**: the
 agent the swarm keeps online to answer the operator, keep the ledger current
 and steer the swarm. This session never claims a task and does not join the
 ledger as orchestrator; the master does.
@@ -30,7 +31,23 @@ ledger as orchestrator; the master does.
 - Small self explanatory changes, such as a style tweak or a loose layout
   change, stay standalone and never get a plan.
 
-## 1. Write the ledger content
+## 1. Name the swarm
+
+A swarm name is one or two lowercase words joined by a dash and ending in
+swarm, such as `rig-grade-swarm` or `dating-swarm`; it is also the ledger's
+name. Ask the operator for it with the question tool, offering two or three
+suggestions built from the plan title. Check every suggestion before you offer
+it, and the operator's answer before you use it:
+
+```bash
+agentihooks swarm names check <name> --plan <plan-file>
+```
+
+It prints `valid: <name>`, or `invalid:` with the reason, the rule and two
+free suggestions from the plan title. Never pick a name without the operator.
+Done when the operator's chosen name checks valid.
+
+## 2. Write the ledger content
 
 Write `content.json` under `~/scratchpad/<repo>/<task>/`
 (`agentihooks scratch new`, which prints the folder it built):
@@ -67,20 +84,42 @@ for phases whose tasks the plan already specifies, and each manual phase lands
 in review. Every phase passes the same checks as `phase add`; a phase without
 `id` takes the next free `p<n>`. A phase id already taken refuses the whole plan
 and the ledger is unchanged. Done when it prints the appended ids and their
-planning; then add tasks to the manual phases (step 3) and skip steps 2 and 4.
+planning; then add tasks to the manual phases (step 4) and skip steps 1, 3 and 5.
 A manual phase left without tasks gets one notice to the master from the swarm
 tick.
 
-## 2. Build the ledger
+## 3. Create the swarm and its ledger
 
 ```bash
-agentihooks ledger new --content <content.json> --plan <plan-file> --size swarm
+agentihooks swarm init <name> --plan <plan-file> --content <content.json> --repo <dir> [--template <name>]
 ```
 
-Done when it prints the slug (`"created": true`, or the existing ledger's paths).
-The slug is the swarm id below.
+It is the one way to create a swarm: it brings the swarm stack up when it is
+down, then creates the ledger and the swarm under the name, paused, and never
+starts it. Running it again for the same swarm prints its ledger page and
+changes nothing. A missing, invalid or taken name is refused with the rule and
+two suggestions. `ledger new --size swarm` and a typed `swarm <slug> create`
+are refused and name this command; only proof and demo swarms named by code
+keep them.
 
-## 3. Add the tasks
+Init creates both inside the stack, whose ledger page then serves them. In
+the shared ledger folder it refuses unless this session is a master seat or the
+operator's own, and refuses content with fewer than three phases or tasks unless
+`--operator-asked "<his words>"` quotes the operator asking for it. Content `sources` are host paths and stay out of the stack's
+ledger; the plan reaches it through `publish-plan` in step 4.
+
+A template sets the caps, compact limit and per lane agent, model, effort,
+role and default task kind. Use the one the operator names; list them with
+`agentihooks swarm templates`. With none, the caps are 2 eng and 1 ci and
+init-agent picks agent and model. Change one lane later with
+`agentihooks swarm <slug> set eng-model=<model>`, or a cap with
+`agentihooks swarm <slug> set max-eng-agents=<n>`;
+`agentihooks swarm <slug> save-template <name>` keeps the result for the next plan.
+
+Done when it prints the `Ledger page: <link>` line and the paused swarm. The
+swarm name is the slug below.
+
+## 4. Add the tasks
 
 Add tasks only to manual phases. Automatic phases stay empty: when their
 dependencies finish, the tick queues one plan task in the plan lane. Its planner
@@ -128,38 +167,26 @@ task, every automatic phase has no tasks, every task carries its plan slice and
 names its done condition, and every task beyond code
 carries its kind with `--must`, `--check` and `--judge`.
 
-## 4. Create and start
+## 5. Start
 
 ```bash
-agentihooks swarm <slug> create --repo <dir> [--template <name>] [--max-eng-agents N] [--max-ci-agents N]
 agentihooks swarm <slug> status
 agentihooks swarm <slug> start
 agentihooks swarm <slug> status
 ```
 
-Create refuses unless this session is a master seat or the operator's own, and
-refuses fewer than three tasks (each automatic phase still waiting counts as one)
-unless `--operator-asked "<his words>"` quotes the operator asking for it.
-
-After create, show the status report before start: automatic phases show
+Before start, show the status report: automatic phases show
 Needs a plan, or Waits for phase while dependencies remain open. Show the longest dependency chain,
 parallel width and engineer width. These are dependency limits for the whole
 plan; territories and agent caps may reduce concurrency. Start warns when
 engineer width is below the configured engineer cap.
-
-A template sets the caps, compact limit and per lane agent, model, effort,
-role and default task kind. Use the one the operator names; list them with
-`agentihooks swarm templates`. A cap flag wins over the template's cap. With
-neither, the caps are 2 eng and 1 ci and init-agent picks agent and model.
-Change one lane later with `agentihooks swarm <slug> set eng-model=<model>`;
-`agentihooks swarm <slug> save-template <name>` keeps the result for the next plan.
 
 Done when `status` shows the swarm running and a `master@<code>-<n>` agent
 in the master lane.
 
 ## Hand over to the master
 
-`create` and `start` end with a `Ledger page: <link>` line; `agentihooks swarm <slug> url`
+`init` and `start` end with a `Ledger page: <link>` line; `agentihooks swarm <slug> url`
 prints it again. Your final message gives the operator that line as printed and the
 master's name, then stop. When the line says the ledger server is not answering, run
 the command it names first and print the link again. From here

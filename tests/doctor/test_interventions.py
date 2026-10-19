@@ -3,6 +3,7 @@ import re
 import subprocess
 from argparse import Namespace
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 
@@ -131,6 +132,38 @@ def test_pull_dev_with_no_unapplied_fix_records_nothing(store):
     line = interventions.apply(ctx, "pull-dev", args())
     assert ctx.ledger.updates == []
     assert line == "The Doctor pulled dev into the main checkout of the watched swarm."
+
+
+class SourceRun(FakeRun):
+    def __init__(self, before, after):
+        super().__init__({"rev-parse": "dev\n"})
+        self.text, self.after = before, after
+
+    def __call__(self, argv, **kwargs):
+        done = super().__call__(argv, **kwargs)
+        if "pull" in argv:
+            self.text = self.after
+        return subprocess.CompletedProcess(argv, 0, self.text, "") if "show" in argv else done
+
+
+def test_pull_dev_of_the_tool_source_installs_a_newly_declared_dependency(store):
+    before = '[project]\ndependencies = ["redis>=5"]\n'
+    run = SourceRun(before, before.replace('"redis>=5"', '"redis>=5", "croniter>=6.2.4,<7", "rich"'))
+    ctx = context(store, run, source=Path("/repo"), python="/tool/python")
+    line = interventions.apply(ctx, "pull-dev", args())
+    assert run.calls[-1] == ["uv", "pip", "install", "--python", "/tool/python", "croniter>=6.2.4,<7", "rich"]
+    assert line == (
+        "The Doctor pulled dev into the main checkout of the watched swarm. "
+        "It installed croniter>=6.2.4,<7, rich into the agentihooks tool environment."
+    )
+    assert logged_on_both(ctx)
+
+
+def test_pull_dev_of_another_repository_installs_nothing(store):
+    run = SourceRun("", '[project]\ndependencies = ["croniter"]\n')
+    ctx = context(store, run, source=Path("/elsewhere"), python="/tool/python")
+    interventions.apply(ctx, "pull-dev", args())
+    assert not any("show" in call or "install" in call for call in run.calls)
 
 
 def test_record_applied_stamps_utc_whatever_the_local_zone(store, monkeypatch):
