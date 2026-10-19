@@ -36,6 +36,24 @@ def test_cli_records_the_agents_task_on_a_new_follow_up(monkeypatch):
     assert captured == [("add_item", {"list": "followups", "text": "Retry the notes build", "task": "t2"})]
 
 
+@pytest.mark.parametrize("extra", [{"task": "t2"}, {"hive": "h1"}, {"task": "t2", "hive": "h1"}])
+def test_the_add_item_schema_takes_the_task_and_hive_an_agent_sends(extra):
+    from scripts.swarm_ledger.api import schemas
+
+    op = {"op": "add_item", "id": "on-t2", "by": ENGINEER, "list": "followups", "text": "Retry the notes build"}
+    assert schemas.validate(schemas.operation_schema("add_item"), op | extra) is None
+
+
+def test_the_add_item_schema_refuses_a_task_that_is_not_text():
+    from scripts.swarm_ledger.api import schemas
+    from scripts.swarm_ledger.api.errors import APIError
+
+    op = {"op": "add_item", "id": "on-t2", "by": ENGINEER, "list": "followups", "text": "Retry", "task": 2}
+    with pytest.raises(APIError) as error:
+        schemas.validate(schemas.operation_schema("add_item"), op)
+    assert (error.value.status, error.value.code) == (400, "schema_invalid")
+
+
 def test_cli_adds_no_task_outside_a_task(monkeypatch):
     from scripts.swarm_ledger import ledger
 
