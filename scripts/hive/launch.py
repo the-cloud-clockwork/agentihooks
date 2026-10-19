@@ -12,7 +12,7 @@ from scripts.swarm.tick import Placed
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
-ROLE_PROFILES = {"engineer": "eng", "cicd": "ci"}
+ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan"}
 TTL_MS = 300000
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
@@ -25,6 +25,7 @@ class Selection:
     account: capacity.Account
     route_kind: str
     master_placement: placement.MasterPlacement | None = None
+    fallback: str = ""
 
 
 def loaded_hives(store: RedisStore) -> list[dict]:
@@ -114,10 +115,14 @@ class HiveLaunch:
         route_kind = task.get("route_kind", "subscription")
         reason = placement.Wait("no advertised Claude account has room")
         for row in sorted(candidates, key=lambda row: (row.sessions, row.name)):
-            hive = placement.place(role, "claude", row.name, route_kind, config.repo, hives, now)
-            if isinstance(hive, str):
-                return self._record_wait(lane, task, Selection(decision, hive, row, route_kind))
-            reason = hive
+            choice = placement.choose(role, "claude", row.name, route_kind, config.repo, hives, now)
+            if isinstance(choice, placement.Choice):
+                fallback = (
+                    f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
+                )
+                selected = Selection(decision, choice.hive, row, route_kind, fallback=fallback)
+                return self._record_wait(lane, task, selected)
+            reason = choice
         return self._record_wait(lane, task, reason)
 
     def _master_selection(self, config, decision, hives, now, rows):
@@ -199,6 +204,7 @@ class HiveLaunch:
                     if selected.master_placement is not None
                     else {}
                 ),
+                **({"placement_fallback": selected.fallback} if selected.fallback else {}),
             },
             harness="claude",
             account=selected.account.name,

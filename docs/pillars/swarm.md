@@ -442,7 +442,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item, which for a red Actions run names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
-| `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, the task's own fork from `origin/dev`), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
+| `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, or whose pull request already merged into `dev`, the task's own fork from `origin/dev`, see [Parking on a dependency already merged into dev](#parking-on-a-dependency-already-merged-into-dev)), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
@@ -569,6 +569,54 @@ a comment grants scope.
 | A prior cut follow up is still present | Retracing does not close existing follow ups. The master decides their disposition through the normal follow up workflow. |
 | The plan still fails after the piece is kept | Read `reasons`: authorized scope can still exceed one pull request. Narrow the plan without discarding the authorization record. |
 | The report says `unchecked` | The classifier did not answer. Edits are allowed and counted; run tracing again when the classifier is available. |
+
+## Parking on a dependency already merged into dev
+
+A dependency task can stay open after its pull request merged into `dev`, for
+example while it waits on the operator or on a deployed proof. Its branch is
+often deleted at merge. `swarm park` therefore reads the pull request of each
+open dependency that carries a `branch` before it fetches that branch:
+
+| Open dependency | Stacked base park records |
+|---|---|
+| `pr_url` names a pull request in state `MERGED` with base `dev` | The task's own fork from `origin/dev`. The dependency branch is never fetched, so a deleted branch does not stop the park. |
+| `pr_url` names an open pull request, a closed one, or one merged into another branch, and the dependency is in the task's repository | Where the task branch left `origin/<branch>` of that dependency, as before. A deleted branch still refuses with `cannot fetch <branch>`. |
+| No `pr_url` | Same as an unmerged pull request: the dependency branch is fetched. |
+| `branch_repo` names another repository and the pull request is not merged into `dev` | That branch is fetched from the other repository, and the base is the task's own fork from `origin/dev`. |
+| No `branch` | The dependency adds no base. It is still listed in `parked_on`. |
+
+The merged check comes first: a dependency merged into `dev` stacks on `dev`
+whether or not its `branch_repo` names another repository. That repository is
+still recorded in `parked_repos`.
+
+When several dependencies carry a branch, park keeps the base with the most
+commits behind it. A merged dependency stays in `parked_on`: the task still
+waits until that dependency is done, and `swarm restack` then rebases the
+task's commits from `stacked_base` onto `origin/dev` like any other parked
+task.
+
+Park reads each dependency's pull request with `gh pr view <pr_url> --json
+state,baseRefName`, so `gh` must be authenticated for that repository. A
+failed read refuses with `cannot read the dependency pull request` and parks
+nothing; fix `gh` access or the task's `pr_url`, then run park again.
+
+```bash
+agentihooks swarm <id> park DOC
+```
+
+With one dependency, `t42`, merged into `dev` and its branch deleted, the
+printed result reads like this, with `stacked_base` the commit where the task
+branch left `dev`:
+
+```json
+{"task": "t57", "parked_on": ["t42"], "stacked_base": "<fork-commit-from-dev>", "parked_repos": [], "worktree_removed": "...", "next": "..."}
+```
+
+Delivered by
+[pull request 3782](https://github.com/the-cloud-clockwork/agentihooks/pull/3782),
+with a regression that refused with `cannot fetch eng-a: remote branch deleted`
+in [a red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38981617229)
+before the change and passed in [the green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38982011506).
 
 ## Publishing after a successor prepares a branch
 

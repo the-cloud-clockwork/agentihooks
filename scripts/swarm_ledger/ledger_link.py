@@ -93,7 +93,10 @@ def transport(environ=os.environ) -> dict:
             raise SystemExit(f"{CA_FILE_ENV} names no file: {found}")
         return {}
     context = ssl.create_default_context()
-    context.load_verify_locations(cafile=str(found))
+    try:
+        context.load_verify_locations(cafile=str(found))
+    except ssl.SSLError as error:
+        raise SystemExit(f"the ledger CA file {found} holds no valid certificate: {error.reason}") from error
     return {"context": context}
 
 
