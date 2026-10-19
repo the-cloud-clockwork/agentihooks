@@ -219,6 +219,26 @@ def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monke
     assert "browser=false" in (tmp_path / "output").read_text().splitlines()
 
 
+def test_tests_whose_recorded_code_changed_since_the_record_stay_selected(tmp_path, monkeypatch):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    manifest["tests"]["tests/test_core.py::test_other"]["files"] = ["scripts/rules.json"]
+    core = tmp_path / "scripts/core.py"
+    core.write_text(core.read_text().replace("value + 1", "g(value)"))
+    (tmp_path / "scripts/rules.json").write_text("{}\n")
+    _commit(tmp_path, "drift")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {
+        "scripts/core.py": [
+            "tests/test_core.py::test_f",
+            "tests/test_core.py::test_g",
+            "tests/test_core.py::test_other",
+            "tests/test_edited.py",
+            "tests/test_fresh.py",
+        ]
+    }
+
+
 @pytest.mark.parametrize(
     "cause", ["helper", "dependency", "root module", "new function", "unrecorded test", "no commit"]
 )
