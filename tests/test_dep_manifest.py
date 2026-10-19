@@ -221,10 +221,44 @@ def test_the_inputs_plugin_records_opened_files_and_escapes(tmp_path):
     ]
 
 
+def test_the_context_plugin_gives_setup_call_and_teardown_of_a_test_one_context(tmp_path):
+    (tmp_path / "sample.py").write_text(
+        "def opened():\n    return 1\n\ndef ran():\n    return 2\n\ndef closed():\n    return 3\n"
+    )
+    (tmp_path / "test_sample.py").write_text(
+        "import pytest\nimport sample\n"
+        "@pytest.fixture\n"
+        "def value():\n    sample.opened()\n    yield\n    sample.closed()\n"
+        "def test_first(value):\n    sample.ran()\n"
+        "def test_second(value):\n    pass\n"
+    )
+    subprocess.run(
+        [sys.executable, "-m", "pytest", "-q", "-p", "tests.cov_contexts", "-p", "no:cacheprovider"]
+        + ["--cov=sample", "--cov-branch", "--cov-report=", "test_sample.py"],
+        cwd=tmp_path,
+        env={**os.environ, "PYTHONPATH": str(ROOT), "PYTEST_ADDOPTS": ""},
+        check=True,
+        capture_output=True,
+    )
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    data.read()
+    source = str(tmp_path / "sample.py")
+    assert data.measured_contexts() == {"", "test_sample.py::test_first|run", "test_sample.py::test_second|run"}
+    assert {line: sorted(contexts) for line, contexts in data.contexts_by_lineno(source).items()} == {
+        1: [""],
+        2: ["test_sample.py::test_first|run", "test_sample.py::test_second|run"],
+        4: [""],
+        5: ["test_sample.py::test_first|run"],
+        7: [""],
+        8: ["test_sample.py::test_first|run", "test_sample.py::test_second|run"],
+    }
+
+
 def test_the_coverage_shards_record_per_test_contexts_and_inputs():
     run = _step("unit", "Run tests")
     coverage_options = run["env"]["PYTEST_ADDOPTS"].split("||")[0]
-    assert "--cov-context=test" in coverage_options
+    assert "-p tests.cov_contexts" in coverage_options
+    assert "--cov-context" not in coverage_options
     assert "-p tests.dep_inputs" in coverage_options
     assert "dep-inputs" in run["env"]["DEP_INPUTS_DIR"].split("||")[0]
     assert "dep-inputs/" in _step("unit", "Upload coverage")["with"]["path"]
