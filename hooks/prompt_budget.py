@@ -47,7 +47,9 @@ class PromptBudget:
         soft: float | None = None,
         hard: float | None = None,
         clock: Callable[[], float] = time.monotonic,
+        keep: tuple[type[BaseException], ...] = (),
     ) -> None:
+        self.keep = keep
         self._clock = clock
         self._start = clock() if start is None else start
         self.soft = seconds("AGENTIHOOKS_PROMPT_BUDGET_S", SOFT_S) if soft is None else soft
@@ -75,7 +77,9 @@ class PromptBudget:
             result = step(*args)
             self._disarm()
             return result
-        except Spent:
+        except Spent as cut:
+            if isinstance(cut.__context__, self.keep):
+                raise cut.__context__ from None
             self.spent = True
             self.cut = name
             return None
@@ -107,7 +111,7 @@ class PromptBudget:
             self.report()
 
     def report(self) -> None:
-        slow = {name: round(took, 2) for name, took in self.times.items() if took >= SLOW_STEP_S}
+        slow = {name: round(took, 2) for name, took in list(self.times.items()) if took >= SLOW_STEP_S}
         if self.skipped or self.cut or slow:
             log(
                 "prompt hook budget",

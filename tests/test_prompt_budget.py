@@ -118,7 +118,7 @@ def test_the_soft_budget_boundary(now, ran):
     budget.run("step", step)
 
     assert step.called is ran
-    assert budget.spent is not ran
+    assert budget.spent is (not ran)
 
 
 def test_the_hard_budget_holds_back_steps_only_while_the_alarm_is_installed():
@@ -152,7 +152,41 @@ def test_the_alarm_is_cleared_after_each_step():
         assert budget._armed is False
 
 
-def test_a_cut_while_a_block_unwinds_keeps_the_block(monkeypatch):
+def test_a_cut_inside_a_step_raising_a_block_keeps_the_block():
+    from hooks.hook_manager import BlockAction
+
+    budget = PromptBudget(soft=5, hard=5, keep=(BlockAction,))
+
+    def step():
+        try:
+            raise BlockAction("denied")
+        finally:
+            budget._on_alarm(None, None)
+
+    with pytest.raises(BlockAction), budget.guarded():
+        budget.run("block", step)
+
+    assert budget.cut == ""
+
+
+def test_a_cut_inside_a_step_handling_another_error_is_still_a_cut():
+    from hooks.hook_manager import BlockAction
+
+    budget = PromptBudget(soft=5, hard=5, keep=(BlockAction,))
+
+    def step():
+        try:
+            raise OSError("redis down")
+        except OSError:
+            budget._on_alarm(None, None)
+
+    with budget.guarded():
+        assert budget.run("step", step) is None
+
+    assert budget.cut == "step"
+
+
+def test_a_cut_while_run_settles_keeps_the_block(monkeypatch):
     from hooks.hook_manager import BlockAction
     from hooks.prompt_budget import Spent
 
@@ -211,7 +245,7 @@ def test_the_budget_reads_its_settings(monkeypatch):
 def test_the_process_start_falls_back_to_now_without_proc(monkeypatch):
     from hooks.prompt_budget import process_start
 
-    monkeypatch.setattr("hooks.prompt_budget.Path.read_text", Mock(side_effect=OSError))
+    monkeypatch.setattr("hooks.prompt_budget.Path", Mock(side_effect=OSError))
 
     assert process_start(clock=lambda: 5.0) == 5.0
 
@@ -281,8 +315,9 @@ def test_the_prompt_handler_budgets_from_the_process_start(monkeypatch, started)
     seen = {}
 
     class FakeBudget:
-        def __init__(self, start):
+        def __init__(self, start, keep):
             seen["start"] = start
+            seen["keep"] = keep
 
         @contextmanager
         def guarded(self, on_overrun):
@@ -295,7 +330,11 @@ def test_the_prompt_handler_budgets_from_the_process_start(monkeypatch, started)
 
     hm.on_user_prompt_submit({"session_id": "s"})
 
-    assert seen == {"start": started, "overrun": hm._prompt_overrun if started is not None else None}
+    assert seen == {
+        "start": started,
+        "keep": (hm.BlockAction,),
+        "overrun": hm._prompt_overrun if started is not None else None,
+    }
 
 
 def test_the_watchdog_names_the_running_step_and_flushes(monkeypatch):
@@ -315,6 +354,20 @@ def test_the_watchdog_names_the_running_step_and_flushes(monkeypatch):
     otel_flush.assert_called_once_with()
     exit_.assert_called_once_with(0)
     assert log.call_args.args[1]["cut"] == "refocus"
+
+
+def test_the_watchdog_exits_even_when_its_flush_fails(monkeypatch):
+    from hooks import hook_manager as hm
+
+    exit_ = Mock()
+    monkeypatch.setattr("hooks.targets.emitter.flush", Mock(side_effect=OSError("closed pipe")))
+    monkeypatch.setattr(hm.os, "_exit", exit_)
+    monkeypatch.setattr("hooks.prompt_budget.log", Mock())
+
+    with pytest.raises(OSError):
+        hm._prompt_overrun(PromptBudget(soft=5, hard=5))
+
+    exit_.assert_called_once_with(0)
 
 
 def test_a_bad_budget_setting_falls_back_to_the_default(monkeypatch):

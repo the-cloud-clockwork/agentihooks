@@ -744,7 +744,7 @@ def on_user_prompt_submit(payload: dict) -> None:
     """Handle UserPromptSubmit event."""
     session_id = payload.get("session_id", "")
     log("User prompt submitted", {"session_id": session_id})
-    budget = PromptBudget(start=_EVENT_STARTED)
+    budget = PromptBudget(start=_EVENT_STARTED, keep=(BlockAction,))
     with budget.guarded(_prompt_overrun if _EVENT_STARTED is not None else None):
         _prompt_steps(budget, payload, session_id)
 
@@ -752,12 +752,14 @@ def on_user_prompt_submit(payload: dict) -> None:
 def _prompt_overrun(budget: PromptBudget) -> None:
     from hooks.targets import emitter
 
-    budget.cut = budget.running
-    budget.report()
-    emitter.flush("UserPromptSubmit")
-    sys.stdout.flush()
-    otel.flush()
-    os._exit(0)
+    try:
+        budget.cut = budget.running
+        budget.report()
+        emitter.flush("UserPromptSubmit")
+        sys.stdout.flush()
+        otel.flush()
+    finally:
+        os._exit(0)
 
 
 def _prompt_steps(budget: PromptBudget, payload: dict, session_id: str) -> None:
