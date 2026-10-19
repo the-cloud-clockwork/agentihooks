@@ -97,3 +97,11 @@ docker compose down
 ```
 
 Initialization reports missing Docker, daemon or Compose dependencies and unhealthy services with a suggested fix. `down` keeps named volumes; avoid `--volumes` when retaining ledger and Redis data. Keep service ports on loopback for local use; remote host admission and TLS require separate setup.
+
+## Share one database across hosts
+
+Set `AGENTIHOOKS_SWARM_DATABASE_URL` to the shared Postgres connection URL and `AGENTIHOOKS_SWARM_REDIS_URL` to the shared Redis connection URL before initialization. Both URLs are retained in the private stack settings and generated client settings. Every ledger server and swarm engine must use the same database and Redis. Without the database setting, the ledger uses SQLite in `LEDGER_DIR`.
+
+Supply credentials through environment settings or your secret manager. Hosted Kubernetes services use ExternalSecret references. Do not print connection URLs or paste generated client settings into chat. Keep TLS certificate verification enabled for remote connections.
+
+Provision the database before activation. Existing SQLite ledgers require one initial conversion with full history and per ledger task, event and artifact counts verified before changing writers. Keep SQLite read only afterward; run no recurring copies or synchronization. Confirm the cutover with one agent write visible within seconds through both the local page and the hosted Anton page, and verify both show the same live tasks and agents.

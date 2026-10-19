@@ -374,6 +374,50 @@ def _codex_answers(resp: Any) -> Any:
         return resp
 
 
+# Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
+_EXEC_CALL = re.compile(r"exec_command\(\s*\{")
+_EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
+_ROLLOUT_TAIL_BYTES = 1 << 20
+
+
+def _exec_calls(program: str) -> list[dict[str, Any]]:
+    decoder = json.JSONDecoder()
+    calls = []
+    for start in _EXEC_CALL.finditer(program):
+        fields: dict[str, Any] = {}
+        pos = start.end()
+        while field := _EXEC_FIELD.match(program, pos):
+            pos = field.end()
+            if program.startswith('"', pos):
+                fields[field.group(1)], pos = decoder.raw_decode(program, pos)
+        calls.append(fields)
+    return calls
+
+
+def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:
+    with open(transcript, "rb") as handle:
+        size = handle.seek(0, os.SEEK_END)
+        handle.seek(max(size - _ROLLOUT_TAIL_BYTES, 0))
+        lines = handle.read().splitlines()
+    for line in reversed(lines):
+        try:
+            item = json.loads(line)["payload"]
+        except (ValueError, KeyError, TypeError):
+            continue
+        if isinstance(item, dict) and item.get("type") == "custom_tool_call" and item.get("name") == "exec":
+            return _exec_calls(str(item.get("input")))
+    return []
+
+
+def _codex_workdir(transcript: str, command: str) -> str:
+    try:
+        calls = _last_exec_calls(transcript)
+    except (OSError, ValueError):
+        return ""
+    workdirs = {call.get("workdir") for call in calls if call.get("cmd") == command}
+    return (workdirs.pop() or "") if len(workdirs) == 1 else ""
+
+
 def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if is_copilot():
         return _normalize_copilot(payload)
@@ -383,6 +427,11 @@ def normalize_payload(payload: dict[str, Any]) -> dict[str, Any]:
     if payload.get("tool_name"):
         name, args = _codex_tool_call(str(payload["tool_name"]), payload.get("tool_input"))
         payload["tool_name"] = name
+        if name == "Bash" and not args.get("workdir"):
+            transcript = payload.get("transcript_path") or codex_rollout_path(str(payload.get("session_id")))
+            workdir = _codex_workdir(transcript, str(args.get("command")))
+            if workdir:
+                args["workdir"] = workdir
         if args:
             payload["tool_input"] = args
 

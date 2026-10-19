@@ -15,6 +15,7 @@ WAKER = "agentihooks-inbox-waker"
 DROPPED = ("agentihooks-alert-intake.service",)
 PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
+TICK_WATCH = "agentihooks-tick-watch"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
@@ -56,11 +57,21 @@ def units(binary):
         "[Timer]\nOnBootSec=15s\nOnUnitActiveSec=15s\nAccuracySec=1s\n\n"
         "[Install]\nWantedBy=timers.target\n"
     )
+    watch = (
+        "[Unit]\nDescription=agentihooks stale tick watcher, apart from the tick it watches\n\n"
+        "[Service]\nType=simple\nEnvironment=PYTHONUNBUFFERED=1\n"
+        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
+        "EnvironmentFile=-%h/.agentihooks/.env\n"
+        f'ExecStart="{binary}" swarm tick-watch\n'
+        "Restart=always\nRestartSec=5\n\n"
+        "[Install]\nWantedBy=default.target\n"
+    )
     return {
         f"{WAITS}.service": wait_service,
         f"{WAITS}.timer": wait_timer,
         f"{WAKER}.service": waker,
         f"{PROBER}.service": prober,
+        f"{TICK_WATCH}.service": watch,
     }
 
 

@@ -213,8 +213,9 @@ def test_a_completed_run_without_a_gate_stops_at_the_last_job(elapsed, count):
         assert found[0].measure == 901
 
 
-def test_a_completed_run_without_any_completion_has_no_invented_wall_time():
-    run = record([job(0, created=-901)], "merge_group", status="completed")
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+def test_a_completed_run_without_any_completion_has_no_invented_wall_time(conclusion):
+    run = record([job(0, created=-901)], "merge_group", status="completed", conclusion=conclusion)
     assert ci_speed.findings([run], NOW - 2000000, NOW) == []
 
 
@@ -223,7 +224,7 @@ def test_a_completed_gate_stops_wall_time_before_later_jobs_finish():
     first.update(status="completed", completed_at=stamp(0))
     gate = job(0, created=-400, name="Gate — Required", identity=12)
     gate.update(status="completed", completed_at=stamp(-300))
-    run = record([first, gate], "pull_request", status="completed")
+    run = record([first, gate], "pull_request", status="completed", conclusion="success")
     assert ci_speed.findings([run], NOW - 2000000, NOW) == []
 
 
