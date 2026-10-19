@@ -1,10 +1,7 @@
-from pathlib import Path
-
 import pytest
 
 from tests.swarm_ledger.ledger_page import fulfill_events, is_events, ledger_state, loaded, serve_modules, shell_html
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/done-rows"
 API = "http://ledger.test/api/__LEDGER_SLUG__"
 DOC = {

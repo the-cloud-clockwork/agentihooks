@@ -1515,9 +1515,11 @@ and at the attempt limit it is set aside the same way so the records behind it r
 treating them as delivered. The outbox depends on the local disk surviving and having space, and its limit
 is a refusal boundary. Restoring Redis lets replay free space; a send refused before queuing must be retried.
 
-Operator ledger writes and alerts retain their oldest unrelayed revision in `ledger-unrelayed.json` when
-neither Redis nor the outbox accepts them. The next write to that ledger retries the intervening events;
-the ledger watch also retries every five passes, about ten seconds at its default interval. Stable ids
+Operator ledger writes and alerts retain their oldest unrelayed revision in the ledger database's relay
+journal, through the ledger repository, when neither Redis nor the outbox accepts them. A
+`ledger-unrelayed.json` left by an older server is moved into the journal at server start. The next
+write to that ledger retries the intervening events; the ledger watch also retries every five passes,
+about ten seconds at its default interval. Stable ids
 prevent duplicate inbox items. Ledger replay is limited to its retained history of 2000 events: writes
 older than that history cannot be reconstructed by replay. The ledger records a notice naming the lost
 revision range for the operator; the watcher and tick also report trimmed history gaps.

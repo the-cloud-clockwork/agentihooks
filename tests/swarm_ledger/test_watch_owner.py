@@ -11,8 +11,10 @@ import new_ledger  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "watchowner-2026-01-01"
 MASTER = "watchowner-master-1"
@@ -24,7 +26,7 @@ CI = "watchowner-ci-1"
 def ledger(monkeypatch):
     monkeypatch.setattr(seen, "marks_for", lambda slug, environ=None: None)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)

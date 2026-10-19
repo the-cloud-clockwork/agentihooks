@@ -9,9 +9,11 @@ from scripts.hive import auth
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger import ledger_bin, proof_ledger, run
 from scripts.swarm_ledger.api import proofs
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
+
+repository = default_repository()
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 

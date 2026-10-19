@@ -13,9 +13,12 @@ import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 
 from scripts.swarm_ledger import ledger_bin, new_ledger  # noqa: E402
-from scripts.swarm_ledger.repository import bin_storage, repository
+from scripts.swarm_ledger.repository import bin_storage
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import browser_home
+
+repository = default_repository()
 
 DAY_MS = 24 * 60 * 60 * 1000
 T0 = 1_800_000_000_000
@@ -102,7 +105,7 @@ class SizeOnCreate(unittest.TestCase):
         with at(T0):
             create("home-small", "--as", "w")
             create("proof-a1b2c3-home-1", "--size", "swarm")
-        html_path = core.paths("home-legacy")[0]
+        html_path = legacy_page.paths("home-legacy", core)[0]
         html_path.write_text(legacy_page.render(new_ledger.build_doc(CONTENT, size=None), "home-legacy", 8765))
         core.sync("home-legacy")
         sizes = {s["slug"]: s["size"] for s in server.ledger_summaries()}
@@ -141,7 +144,7 @@ class Lifecycle(unittest.TestCase):
         with at(T0):
             create("proof-a1b2c3-life-1", "--size", "swarm")
             finish("proof-a1b2c3-life-1")
-            html_path = core.paths("life-legacy")[0]
+            html_path = legacy_page.paths("life-legacy", core)[0]
             html_path.write_text(legacy_page.render(new_ledger.build_doc(CONTENT, size=None), "life-legacy", 8765))
             core.sync("life-legacy")
         binned = bin_storage.auto_bin(now=T0 + 400 * DAY_MS)

@@ -18,7 +18,7 @@ core = server.core
 def ledger_page(monkeypatch):
     doc = new_ledger.build_doc({"title": "Doctor proof", "phases": [{"title": "Fix"}]})
     doc["tasks"] = [{"id": "fx-8be892c4-code", "title": "Inbox fix", "phase": "p1", "comments": []}]
-    html_path, _ = core.paths("demo")
+    html_path, _ = legacy_page.paths("demo", core)
     html_path.parent.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(doc, "demo", server.PORT))
     core.sync("demo", ops=[{"op": "join", "id": "join", "by": "engineer"}])
@@ -167,7 +167,9 @@ def test_audit_without_tasks_still_reports_real_hashes():
 
 
 def test_a_write_reconciles_the_ledger_once(ledger_page, monkeypatch):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     calls = []
     apply_ops = repository.apply_ops

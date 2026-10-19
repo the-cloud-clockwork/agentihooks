@@ -50,10 +50,15 @@ file). It is off by default, and off leaves every launch unchanged, including
 swarms on routed quota tokens or gateway API tokens. Turn it on only when the
 workers run on quota tokens separate from the master's login. A swarm config
 saved with the former per swarm `master_claude_login` field loads without it;
-`agentihooks swarm <slug> set` no longer takes `master-claude-login`. The
-former per swarm homes under `$AGENTIHOOKS_HOME/master-claude/<slug>` and
-recovery copies under `secret/agentihooks/master-claude/<slug>` are no longer
-read: run `agentihooks claude login --master` once after the upgrade.
+`agentihooks swarm <slug> set` no longer takes `master-claude-login`. A
+launch with no other live master, no login in the one home and no recovery
+copy adopts the single former per swarm login under
+`$AGENTIHOOKS_HOME/master-claude/<slug>/claude` into the home and removes that
+swarm's folder. Several such logins refuse the launch naming every path, and
+the operator keeps one; a former login still held by a live master refuses
+naming its path. With no login to use or adopt, the launch refuses without
+building an empty home. Recovery copies under
+`secret/agentihooks/master-claude/<slug>` are no longer read.
 
 With it on, the Claude front door master of every swarm, seat
 `master@<slug>` (or a master with no seat, which predates seats), launches

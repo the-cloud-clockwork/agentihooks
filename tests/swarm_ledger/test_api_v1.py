@@ -27,7 +27,7 @@ def live(authority_live):
 
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    html, document = core.paths(SLUG)
+    html, document = legacy_page.paths(SLUG, core)
     html.write_text(page)
     document.unlink(missing_ok=True)
     server.ledger_bin.restore(SLUG)

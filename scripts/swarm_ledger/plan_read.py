@@ -213,7 +213,7 @@ def main(argv=None, environ=None) -> int:
     task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     doc = read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, "tasks", "phases", "artifacts")
     if doc is None:

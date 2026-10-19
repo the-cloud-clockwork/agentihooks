@@ -114,8 +114,9 @@ import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
 from scripts.inbox import outbox
-from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, storage
+
+repository = storage.default()
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
@@ -610,6 +611,7 @@ def cmd_followup(args):
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
             **hive_fields(args),
+            **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
     elif args.action in ("flag", "unflag"):
         send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")

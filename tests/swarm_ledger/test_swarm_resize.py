@@ -39,7 +39,7 @@ FINDINGS = [
 def base(ledger_dir):
     for slug in SLUGS:
         content = {"title": slug, "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-        html_path, _ = core.paths(slug)
+        html_path, _ = legacy_page.paths(slug, core)
         html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         core.sync(slug)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)

@@ -316,7 +316,7 @@ def _number(url):
 def _required_app(check, required_checks):
     app_id = required_checks.get(check.get("name") or check.get("context"))
     app = ((check.get("checkSuite") or {}).get("app") or {}).get("databaseId")
-    return app_id is None or app == app_id
+    return bool(check.get("context")) or app_id is None or app == app_id
 
 
 def _required_pull_request(raw, required_checks):

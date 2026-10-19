@@ -279,7 +279,7 @@ def test_ledger_new_refuses_a_swarm_ledger_and_names_swarm_init(new_cli, capsys)
         "a swarm ledger is created with its swarm by one command: "
         "agentihooks swarm init <name> --plan <file> --repo <dir>"
     )
-    assert not new_ledger.repository.exists("mossy-rabin-2026-10-07")
+    assert not new_ledger.storage.default().exists("mossy-rabin-2026-10-07")
 
 
 def test_a_built_slug_is_still_accepted_by_name(new_cli, capsys):

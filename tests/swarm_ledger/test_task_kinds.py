@@ -17,7 +17,7 @@ CONTRACT = {"must": "the cache hit rate is above ninety percent", "check": "the 
 
 def make_ledger(tasks=()):
     content = {"title": "Demo", "overview": "o", "sources": [str(SCRIPTS)], "phases": [{"title": "one"}]}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -140,7 +140,9 @@ class Kinds(unittest.TestCase):
     def test_an_existing_ledger_without_kinds_loads_unchanged(self):
         make_ledger([{"task": "t1", "title": "a", "lane": "eng"}, {"task": "t2", "title": "b", "lane": "ci"}])
         core.sync(SLUG, ops=[done(1)])
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         before = repository.get_document(SLUG)
         for task in before["tasks"]:

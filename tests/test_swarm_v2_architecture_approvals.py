@@ -365,7 +365,9 @@ def test_the_signing_key_is_the_private_key_from_the_environment():
 
 
 def test_the_page_credential_comes_from_the_ledger_repository(monkeypatch):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     monkeypatch.setattr(repository, "token", {SLUG: "page-credential"}.get)
     assert architecture._page_credential(SLUG) == "page-credential"

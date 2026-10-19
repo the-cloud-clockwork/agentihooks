@@ -216,3 +216,36 @@ def test_attempt_reader_downloads_only_completed_unskipped_jobs():
         }
     ]
     assert len(calls) == 2
+
+
+def test_a_job_whose_log_was_removed_reads_no_tests_and_keeps_the_other_jobs():
+    workflow = {**load("ci")["runs"][0], "run_attempt": 2, "status": "in_progress"}
+
+    def gh(argv, **kwargs):
+        endpoint = argv[2]
+        if "/attempts/" in endpoint:
+            jobs = [
+                {"id": 1, "name": "sonar", "status": "completed", "conclusion": "failure"},
+                {"id": 2, "name": "unit", "status": "completed", "conclusion": "failure"},
+            ]
+            return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(job) for job in jobs), "")
+        if endpoint == "repos/o/r/actions/jobs/1/logs":
+            raise subprocess.CalledProcessError(1, argv, "<Code>BlobNotFound</Code>", "gh: HTTP 404\n")
+        return subprocess.CompletedProcess(argv, 0, "2026-10-05T00:00:00Z FAILED tests/test_x.py::test_x\n", "")
+
+    assert ci_read._attempts("o/r", [workflow], gh)[0]["tests"] == [
+        {"job": "unit", "nodeid": "tests/test_x.py::test_x", "outcome": "FAILED"}
+    ]
+
+
+def test_a_log_read_that_fails_for_another_reason_still_fails_the_detector():
+    workflow = {**load("ci")["runs"][0], "run_attempt": 2, "status": "in_progress"}
+
+    def gh(argv, **kwargs):
+        if "/attempts/" in argv[2]:
+            job = {"id": 1, "name": "unit", "status": "completed", "conclusion": "failure"}
+            return subprocess.CompletedProcess(argv, 0, json.dumps(job), "")
+        raise subprocess.CalledProcessError(1, argv, "", "gh: HTTP 502\n")
+
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_read._attempts("o/r", [workflow], gh)

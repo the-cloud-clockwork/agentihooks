@@ -16,7 +16,7 @@ ENGINEER = "engineer@abcdef-0002"
 def ledger_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     ops = [
         {"op": "task_add", "id": "seed-1", "by": "swarm", "task": "t1", "title": "task one", "lane": "eng"},

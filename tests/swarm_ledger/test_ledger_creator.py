@@ -1,4 +1,5 @@
 import datetime
+import importlib
 import json
 from pathlib import Path
 
@@ -7,7 +8,10 @@ import pytest
 from scripts.swarm import naming
 from scripts.swarm.store import DEFAULT_URL
 from scripts.swarm_ledger import ledger_creator, new_ledger
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
+
+repository = default_repository()
+
 
 pytestmark = pytest.mark.unit
 
@@ -37,7 +41,7 @@ def content_file(tmp_path, phases):
 
 def new(monkeypatch, tmp_path, folder, content, *extra, size="small"):
     monkeypatch.setenv("LEDGER_DIR", str(folder))
-    monkeypatch.setattr(new_ledger.core, "LEDGER_DIR", folder)
+    monkeypatch.setattr(importlib.import_module("ledger_core"), "LEDGER_DIR", folder)
     monkeypatch.setattr(new_ledger.ledger_link, "serving", lambda: str(folder))
     plan = tmp_path / "creator-plan.md"
     plan.write_text("plan")

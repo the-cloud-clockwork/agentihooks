@@ -56,14 +56,14 @@ def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) 
 
 
 def _pages(get, path, params, cap, deadline, clock):
-    rows, page = [], 1
+    rows, page = {}, 1
     while True:
         body = get(path, {**params, "page": page, "limit": OBSERVATION_PAGE})
-        rows += body["data"]
+        rows.update({row.get("id", (page, index)): row for index, row in enumerate(body["data"])})
         if page >= body["meta"]["totalPages"]:
-            return rows, True
+            return list(rows.values()), True
         if page >= cap or clock() >= deadline:
-            return rows, False
+            return list(rows.values()), False
         page += 1
 
 
@@ -93,7 +93,7 @@ def _cache_path(cache: Path, trace_id: str) -> Path:
 
 def _cached(cache: Path, trace: dict) -> dict:
     entry = registry.load(_cache_path(cache, trace["id"]))
-    usable = "observations" in entry or "failed" in entry
+    usable = entry.get("deduplicated") and ("observations" in entry or "failed" in entry)
     return entry if usable and entry.get("updated_at") == trace.get("updatedAt") else {}
 
 
@@ -118,6 +118,7 @@ def _backfill(get, cache, trace, budget, deadline, clock):
         entry = {"updated_at": trace.get("updatedAt"), "whole": whole, "observations": [_observation(o) for o in rows]}
     except Exception as exc:  # noqa: BLE001
         entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failure(exc)}
+    entry["deduplicated"] = True
     if entry.get("whole") or entry.get("failed"):
         registry.save(_cache_path(cache, trace["id"]), entry)
     return entry
@@ -137,6 +138,7 @@ def history(
     """
     deadline = clock() + budget.history_seconds
     listed, complete_listing, failures = _listing(slug, get, budget, deadline, clock)
+    listed = list({trace["id"]: trace for trace in listed}.values())
     entries = {t["id"]: _cached(cache, t) for t in listed}
     unread = [t for t in listed if not entries[t["id"]]]
     retried = [t for t in listed if entries[t["id"]].get("failed")]

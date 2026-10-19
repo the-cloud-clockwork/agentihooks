@@ -5,9 +5,8 @@ import os
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
-from scripts.swarm_ledger import ledger_plans
-from scripts.swarm_ledger.repository import hierarchy, repository
-from scripts.swarm_ledger.repository import sqlite as store
+from scripts.swarm_ledger import ledger_plans, storage
+from scripts.swarm_ledger.repository import LedgerRepository, hierarchy
 from scripts.swarm_ledger.repository.events import keep_events
 
 STANDALONE_DESCRIPTION = (
@@ -179,56 +178,34 @@ def preview(doc: dict, slug: str) -> tuple[dict, dict]:
     return after, report
 
 
-def commit(repo: store.SQLiteLedgerRepository, slug: str, by: str) -> dict:
-    with repo.domain.LOCK, repo.connect() as connection, connection:
-        connection.execute(store.BEGIN_IMMEDIATE)
-        entry = repo._entry(connection, slug)
+def commit(repo: LedgerRepository, slug: str, by: str) -> dict:
+    with repo.transaction() as transaction:
+        entry = transaction.entry(slug)
         after, report = preview(entry.state, slug)
         if report["refused"]:
             raise ValueError(json.dumps(report, sort_keys=True))
-        report["repaired"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
+        report["repaired"] = hierarchy.drift(transaction.hierarchy(slug), hierarchy.project(after))
         if after != entry.state or report["repaired"]["drift"]:
             meta = after["_meta"]
             ctx = repo.domain.Context(meta, repo.domain.now_ms())
             ctx.record(by, "backfilled", "hierarchy")
             meta.update(rev=ctx.rev, updated_at=ctx.at)
             keep_events(meta, ctx.events, repo.domain, ctx.at)
-            written = repo._write(connection, slug, entry, after, ctx.events)
-        else:
-            written = entry
+            transaction.write(slug, entry, after, ctx.events)
         report["applied"] = True
-        report["drift"] = hierarchy.drift(hierarchy.stored(connection, slug), hierarchy.project(after))
-    repo._remember(slug, written)
+        report["drift"] = hierarchy.drift(transaction.hierarchy(slug), hierarchy.project(after))
     return report
 
 
-def stored(connection, slug: str) -> tuple[dict, set]:
-    tables = {row[0] for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")}
-    nodes = (
-        {
-            node: (kind, parent, position)
-            for node, kind, parent, position in connection.execute(hierarchy.NODES, (slug,))
-        }
-        if "work_nodes" in tables
-        else {}
-    )
-    dependencies = set(connection.execute(hierarchy.DEPENDENCIES, (slug,))) if "work_dependencies" in tables else set()
-    return nodes, dependencies
-
-
-def backfill(repo: store.SQLiteLedgerRepository, slug: str, by: str, apply: bool = False) -> dict:
+def backfill(repo: LedgerRepository, slug: str, by: str, apply: bool = False) -> dict:
     if apply:
         return commit(repo, slug, by)
-    with store.read_only(repo.path.parent) as connection:
-        if connection is None:
-            raise store.Missing(slug)
-        connection.execute("BEGIN")
-        rows = store.read_rows(connection, slug)
-        if not rows:
-            raise store.Missing(slug)
-        doc = store.assemble(rows)
+    with repo.snapshot() as snapshot:
+        if snapshot is None:
+            raise storage.Missing(slug)
+        doc = snapshot.document(slug)
         _, report = preview(doc, slug)
-        report["drift"] = hierarchy.drift(stored(connection, slug), hierarchy.project(doc))
+        report["drift"] = hierarchy.drift(snapshot.hierarchy(slug), hierarchy.project(doc))
     return report
 
 
@@ -240,4 +217,4 @@ def run(args) -> None:
     by = args.name or os.environ.get("AGENTIHOOKS_AGENT_NAME")
     if args.apply and not by:
         raise SystemExit("--as is required to apply the hierarchy backfill")
-    print(json.dumps(backfill(repository, args.slug, by, args.apply), sort_keys=True))
+    print(json.dumps(backfill(storage.default(), args.slug, by, args.apply), sort_keys=True))
