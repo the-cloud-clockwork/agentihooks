@@ -76,6 +76,8 @@ class SwarmConfig:
     masters_step: int = 0
     caps_pinned: bool = False
     master_move_grace: int = DEFAULT_MASTER_MOVE_GRACE
+    pending_api_url: str = ""
+    ledger_staged_at: int = 0
     swap_full_share: float = DEFAULT_SWAP_FULL_SHARE
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
 
@@ -214,6 +216,8 @@ class RedisStore:
             int(raw.get("masters_step") or 0),
             raw.get("caps_pinned", "True") == "True",
             int(raw.get("master_move_grace") or DEFAULT_MASTER_MOVE_GRACE),
+            raw.get("pending_api_url", ""),
+            int(raw.get("ledger_staged_at") or 0),
             float(raw.get("swap_full_share") or DEFAULT_SWAP_FULL_SHARE),
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
         )
@@ -230,6 +234,10 @@ class RedisStore:
         if set(default_models.FIELDS.values()) & changes.keys():
             if refused := default_models.refusal(changes, model_catalog.catalog(os.environ, self.redis, time.time())):
                 raise SwarmError(refused)
+        if "pending_api_url" in changes:
+            from scripts.swarm import lease
+
+            changes["ledger_staged_at"] = lease.now_ms(self) if changes["pending_api_url"] else 0
         previous = self.config(slug)
         config = replace(previous, **changes)
         if {"lanes", "effort_min", "effort_max"} & set(changes):

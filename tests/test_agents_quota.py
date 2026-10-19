@@ -109,10 +109,10 @@ def test_rows_list_every_claude_account_and_codex():
         "2h13m",
         "0m",
     ]
-    default = table[3].split()
-    assert default[:8] == ["2", "codex", "default", "subscription", "OPEN", "1/6", "-", "6"]
+    assert table[3].split() == ["2", "codex", "alpha", "subscription", "UNKNOWN", "0/-", *["-"] * 8]
+    default = table[4].split()
+    assert default[:8] == ["-", "codex", "default", "interactive", "OPEN", "1/6", "-", "6"]
     assert default[9:11] == ["-", "-"] and default[8] == default[11]
-    assert table[4].split() == ["3", "codex", "alpha", "subscription", "UNKNOWN", "0/-", *["-"] * 8]
     assert "?" not in "\n".join(table) and "SOURCE" not in table[0]
 
 
@@ -397,11 +397,11 @@ def test_the_declared_masters_mark_their_rows_and_a_tokenless_claude_slug_gets_a
     assert [(row.agent, row.account, row.kind, row.state, row.sessions, row.master) for row in marked] == [
         ("claude", "tccgma", "subscription", "OK", 2, ""),
         ("claude", "home", "interactive", "MASTERS", 1, "MASTER max"),
-        ("codex", "default", "subscription", "UNKNOWN", 0, "MASTER"),
+        ("codex", "default", "interactive", "UNKNOWN", 0, "MASTER"),
     ]
     table = agents_quota.render(marked, now=1000).splitlines()
     assert table[3].split()[:6] == ["-", "claude", "home", "MASTER", "max", "interactive"]
-    assert table[4].split()[:4] == ["2", "codex", "default", "MASTER"]
+    assert table[4].split()[:5] == ["-", "codex", "default", "MASTER", "interactive"]
     subscription = {"claude": MasterAccount("claude", "tccgma", "", SUBSCRIPTION)}
     assert [row.master for row in agents_quota.with_masters(rows, subscription, {})] == ["MASTER", ""]
 
@@ -473,8 +473,22 @@ def test_every_quota_reader_marks_the_declared_masters(monkeypatch):
     rows = agents_quota.page_quota(now=100.0)["rows"]
     assert [(row["account"], row["kind"], row["master"]) for row in rows] == [
         ("home", "interactive", "MASTER"),
-        ("default", "subscription", "MASTER pro"),
+        ("default", "interactive", "MASTER pro"),
     ]
+
+
+def test_quota_rows_and_routing_read_each_codex_account_kind_from_one_source():
+    from scripts.codex_router import CodexAccountSource
+
+    accounts = [CodexAccount("default"), CodexAccount("alpha", "AH_CX_TOKEN_alpha")]
+    quota = codex_quota.CodexQuota(1000.0, "pro", QuotaWindow(used=10.0), QuotaWindow(used=20.0))
+    readings = dict.fromkeys(["default", "alpha"], quota)
+    offered = {slot.account: slot.kind for slot in CodexAccountSource().offer(accounts, readings, 1000.0)}
+
+    rows = agents_quota.codex_rows(accounts, {}, {}, now=1000)
+
+    assert [(row.account, row.kind) for row in rows] == [("default", INTERACTIVE), ("alpha", SUBSCRIPTION)]
+    assert {row.account: row.kind for row in rows} == offered == {account.name: account.kind for account in accounts}
 
 
 def test_masters_fall_back_to_the_file_routing_settings_without_redis(monkeypatch, tmp_path):

@@ -16,3 +16,9 @@ class Hive:
         from scripts.hive import launch
 
         return launch
+
+    @property
+    def reports(self):
+        from scripts.hive import reports
+
+        return reports

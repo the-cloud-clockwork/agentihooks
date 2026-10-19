@@ -59,7 +59,7 @@ def test_a_forced_launch_lists_each_unfinished_lead_with_its_state():
     ("pending", "reason"),
     [
         ({"name": "master@a1b2c3-0003"}, "master launch refused: startup pending for master@a1b2c3-0003"),
-        ({"alerted": True}, "master launch refused: startup retries exhausted, operator action is required"),
+        ({"alerted": True}, "master launch refused: startup retry backoff pending"),
         ({}, "no master launched"),
     ],
 )

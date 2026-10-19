@@ -99,6 +99,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from scripts.swarm_ledger import ledger_route
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ledger_authority as authority  # noqa: E402
@@ -136,15 +138,15 @@ OBJECT_FORMS = {
 }
 
 
-def base():
-    return BASE or ledger_link.base()
+def base(slug=""):
+    return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)
 
 
 def credentials(slug, service=False):
     from scripts.swarm_ledger.authority_context import tick_headers
 
     who = Who.from_env()
-    if ledger_link.remote():
+    if ledger_link.remote(slug=slug):
         tick = tick_headers(slug)
         if tick:
             return tick
@@ -172,7 +174,7 @@ def local_credentials(slug, agent, service):
 def replay(slug, ops, agent, service):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(base(), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+    return ResourceClient(base(slug), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
 
 
 def derived_token(slug, name):
@@ -191,7 +193,7 @@ def launch_token(slug, name):
             "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
             "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
         )
-    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
+    client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
         return client.request(slug, "agent-token", {})["data"]["token"]
     except urllib.error.HTTPError as exc:
@@ -203,7 +205,7 @@ def launch_token(slug, name):
 def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(base(), credentials(slug, service), timeout)
+    client = ResourceClient(base(slug), credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
@@ -213,19 +215,21 @@ def resource(
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        client = ResourceClient(base(), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
+        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        return ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})["data"]
+        return ResourceClient(base(slug), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})[
+            "data"
+        ]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
 
 
 class Missing(SystemExit):
@@ -246,7 +250,7 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug, ops=None, service=False):
-    if ledger_link.remote():
+    if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
     if outbox.waiting("ledger"):
@@ -1056,7 +1060,8 @@ def main():
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
         sys.exit("--slug and --as are required")
-    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    with ledger_route.session(args.slug):
+        globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
 
 if __name__ == "__main__":

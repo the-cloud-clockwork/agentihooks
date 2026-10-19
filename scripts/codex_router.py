@@ -82,6 +82,10 @@ class CodexAccount:
         return bool(self.env_name)
 
     @property
+    def kind(self) -> str:
+        return SUBSCRIPTION if self.is_token else INTERACTIVE
+
+    @property
     def is_api(self) -> bool:
         return bool(self.key_env)
 
@@ -438,7 +442,7 @@ class CodexAccountSource:
                 cap,
                 self.sessions.get(account.name, 0),
                 _spend_by(quota, now),
-                kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
+                kind=account.kind,
             )
             for account in pool
             if account.signed_in

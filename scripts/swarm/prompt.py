@@ -38,6 +38,7 @@ RESTACK = (
 )
 CONTRACT_LABELS = (("must", "Must be true"), ("check", "Checked by"), ("judge", "Judged by"))
 OLDER_RECAPS = 3
+CARRIED = "hive_opening"
 INBOX_LINE = (
     "Operator writes on the ledger reach you as inbox messages at your next tool call, and the swarm wakes you with a "
     "prompt when you sit idle."
@@ -271,6 +272,8 @@ def build_dispatcher(slug: str, repo: str, name: str, task: dict, autonomy: str 
 
 
 def build(slug, repo, lane, name, task, role="", autonomy=DELEGATE):
+    if (carried := task.get(CARRIED)) is not None:
+        return carried
     if lane == MASTER:
         return build_master(slug, repo, name, task, autonomy)
     if lane == DISPATCH:

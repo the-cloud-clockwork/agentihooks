@@ -161,24 +161,30 @@ def test_no_agent_roots_skip_the_process_scan(tmp_path, monkeypatch):
 
 def test_memory_room_is_zero_above_the_swap_use_share_while_available_memory_is_below_the_floor():
     assert host_budget.memory_room(_swapped(4095, 950, 1000), LIMITS) == 0
-    assert host_budget.memory_room(_swapped(4096, 950, 1000), LIMITS) == 4
+    assert host_budget.memory_room(_swapped(4096, 950, 1000), LIMITS) == 5
     assert host_budget.memory_room(_swapped(4095, 900, 1000), LIMITS) == 4
     assert host_budget.memory_room(_swapped(16000, 0, 0), LIMITS) == 22
 
 
-def test_stale_swap_above_the_share_leaves_room_while_available_memory_is_ample():
-    assert host_budget.memory_room(_swapped(9591, 3716, 4096), LIMITS) == 8
-    assert host_budget.memory_room(_swapped(16000, 3700, 4096), LIMITS) == 17
-    assert host_budget.memory_room(_swapped(4400, 3700, 4096), LIMITS) == 1
-    assert host_budget.memory_room(_swapped(4399, 3700, 4096), LIMITS) == 0
+def test_stale_swap_above_the_share_does_not_cut_room_from_available_memory():
+    assert host_budget.memory_room(_swapped(9591, 3716, 4096), LIMITS) == 13
+    assert host_budget.memory_room(_swapped(16000, 3700, 4096), LIMITS) == 22
+    assert host_budget.memory_room(_swapped(4197, 4058, 4096), LIMITS) == 5
+    assert host_budget.memory_room(_swapped(4096, 4058, 4096), LIMITS) == 5
+
+
+def test_full_swap_still_cuts_room_and_swap_below_the_share_still_comes_off():
+    assert host_budget.memory_room(_swapped(4095, 4058, 4096), LIMITS) == 0
+    assert host_budget.memory_room(_swapped(4095, 3686, 4096), LIMITS) == 0
+    assert host_budget.memory_room(_swapped(16000, 3686, 4096), LIMITS) == 17
 
 
 def test_the_swap_use_share_and_floor_are_configured():
     share = Thresholds(swap_full_share=0.5, swap_floor_mb=2000)
 
     assert host_budget.memory_room(_swapped(1999, 501, 1000), share) == 0
-    assert host_budget.memory_room(_swapped(2000, 501, 1000), share) == 2
-    assert host_budget.memory_room(_swapped(1999, 500, 1000), share) == 2
+    assert host_budget.memory_room(_swapped(2100, 501, 1000), share) == 3
+    assert host_budget.memory_room(_swapped(2100, 500, 1000), share) == 2
     assert Thresholds().swap_full_share == host_budget.SWAP_FULL_SHARE == 0.9
     assert Thresholds().swap_floor_mb == host_budget.SWAP_FLOOR_MB == 4096
     configured = host_budget.thresholds(SwarmConfig("sw", "/repo", 1, 1, swap_full_share=0.6, swap_floor_mb=3000))
@@ -216,11 +222,11 @@ def test_host_room_line_names_swap_and_the_per_agent_figure():
 def test_host_room_line_names_stale_swap_above_the_share():
     stale = host_budget.room(_swapped(9591, 3716, 4096), LIMITS)
 
-    assert (stale.room, stale.limit) == (8, "memory")
+    assert (stale.room, stale.limit) == (13, "memory")
     assert stale.reason == (
         "one minute load 0.00 per CPU is below the low watermark; swap 3716 of 4096 MB in use is above the 90% "
         "share but 9591 MB available memory is at or above the 4096 MB floor, so the swap reads stale; 9591 MB "
-        "available memory less 3716 of 4096 MB swap in use fits 8 at 700 MB each, the configured figure"
+        "available memory fits 13 at 700 MB each, the configured figure"
     )
 
 
