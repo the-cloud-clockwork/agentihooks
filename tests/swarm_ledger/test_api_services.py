@@ -3,7 +3,6 @@ import json
 import re
 import subprocess
 import sys
-from email.message import Message
 from io import BytesIO
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -45,11 +44,15 @@ def fake_services(calls: list) -> Services:
     )
 
 
-def request(command: str, path: str, payload: dict | None = None, origin: str | None = None) -> SimpleNamespace:
-    headers = Message()
-    headers["Host"] = "h"
-    if origin:
-        headers["Origin"] = origin
+class Headers(dict):
+    def get_content_type(self):
+        return self.get("Content-Type", "text/plain")
+
+
+def request(
+    command: str, path: str, payload: dict | None = None, origin: str | None = None, extra: dict | None = None
+) -> SimpleNamespace:
+    headers = Headers({"Host": "h", **({"Origin": origin} if origin else {}), **(extra or {})})
     raw = b""
     if payload is not None:
         raw = json.dumps(payload).encode()
@@ -103,9 +106,52 @@ def test_the_api_bins_through_the_ledger_service_and_stops_the_swarm():
 
 def test_the_api_refuses_hosts_outside_the_policy():
     handler = request("GET", "/api/v1/ledgers")
-    handler.headers.replace_header("Host", "elsewhere")
+    handler.headers["Host"] = "elsewhere"
     api.handle(handler, fake_services([]))
     assert handler.sent[0][0] == 403
+
+
+def test_the_api_writes_the_layout_through_the_ledger_service_for_an_allowed_origin():
+    calls = []
+    services = fake_services(calls)
+    services.ledger.layout_rows = {"main": ("left",)}
+    services.ledger.write_layout = lambda sizes: calls.append(("layout", sizes)) or sizes
+    status, body = served(services, "PUT", "/api/v1/layout", {"main": {"left": 3}}, origin="o")
+    assert (status, body["data"]) == (200, {"main": {"left": 3}})
+    assert calls == [("layout", {"main": {"left": 3}})]
+
+
+def test_a_controller_credential_reads_a_ledger_without_a_page_credential():
+    services = fake_services([])
+    services.ledger.authority = SimpleNamespace(
+        caller=lambda headers, admin, slug: None, controller=lambda credential: credential == "controller"
+    )
+    path = f"/api/v1/ledgers/{SLUG}/swarm/agents"
+    assert served(services, "GET", path, extra={"X-Controller-Credential": "controller"})[0] == 200
+    assert served(services, "GET", path)[0] == 403
+
+
+def test_a_hive_credential_issues_an_agent_token():
+    services = fake_services([])
+    services.ledger.authority = SimpleNamespace(
+        hive_member=lambda credential: "member" if credential == "hive" else None,
+        hive_agent=lambda member, slug, agent: member == "member",
+        hive_agent_token=lambda member, slug, agent: f"{member}-{agent}",
+    )
+    extra = {"X-Ledger-Agent": "eng", "X-Hive-Credential": "hive"}
+    status, body = served(services, "POST", f"/api/v1/ledgers/{SLUG}/agent-token", extra=extra)
+    assert (status, body) == (200, {"data": {"agent": "eng", "token": "member-eng"}})
+
+
+def test_proof_ledgers_require_the_exact_controller_credential_header():
+    services = fake_services([])
+    services.ledger.authority = SimpleNamespace(controller=lambda credential: credential == "controller")
+    assert (
+        proofs.require_controller(request("POST", "/", extra={"X-Controller-Credential": "controller"}), services)
+        is None
+    )
+    with pytest.raises(proofs.APIError):
+        proofs.require_controller(request("POST", "/"), services)
 
 
 def test_the_services_bundle_carries_interfaces_and_no_modules():
