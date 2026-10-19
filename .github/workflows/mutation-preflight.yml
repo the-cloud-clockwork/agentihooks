@@ -411,7 +411,10 @@ jobs:
 
       - name: Collect the tests that killed mutants
         if: always()
-        run: mkdir -p .mutation-killers && [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+        run: |
+          mkdir -p .mutation-killers
+          [[ ! -d .mutation-gate ]] || find .mutation-gate -path '*/killers/*' -type f -exec cp -t .mutation-killers {} +
+          echo "Functions with a recorded killing test: $(find .mutation-killers -type f | wc -l)"
 
       - name: Upload the tests that killed mutants
         if: always()
@@ -419,6 +422,7 @@ jobs:
         with:
           name: mutation-killers-${{ matrix.shard }}
           path: .mutation-killers/
+          include-hidden-files: true
           if-no-files-found: ignore
           retention-days: 1
           overwrite: true
