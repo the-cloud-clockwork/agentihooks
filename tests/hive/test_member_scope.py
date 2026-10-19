@@ -4,7 +4,7 @@ import pytest
 
 from scripts.swarm.keyspace import ROOT
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MEMBER_URL = "rediss://hive.example:6380/0"
 COMPOSE = {"AGENTIHOOKS_DEPLOYMENT": "compose"}

@@ -333,6 +333,32 @@ def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, c
     assert {a: 1} in stored and {b: 2} in stored
 
 
+def test_a_selected_test_id_keeps_its_own_tests_and_recollects_when_its_file_changes(tmp_path):
+    import json
+
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    _repository(root, {"tests/test_a.py": "def test_one():\n    pass\n\n\ndef test_two():\n    pass\n"})
+    entries = ["tests/test_a.py::test_one", "tests/test_a.py::test_two"]
+    one, two, wide = f"{entries[0]}[1]", entries[1], "tests/test_a.py::test_one_more"
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {"m.x_f": [one, two, wide]}, "durations": {one: 1, two: 2, wide: 4}, "cpu": 2}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    stored = [json.loads(path.read_text())["durations"] for path in cache.glob("*.json")]
+    assert sorted(stored, key=str) == sorted([{one: 1}, {two: 2}], key=str)
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries]
+    (root / "tests/test_a.py").write_text("def test_one():\n    assert True\n")
+    collect_cached_stats(root, cache, {}, entries, [], collect)
+    assert calls == [entries, entries]
+
+
 @pytest.mark.parametrize(
     ("layout", "helper"),
     [

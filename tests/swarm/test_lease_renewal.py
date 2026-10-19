@@ -8,7 +8,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -497,7 +497,6 @@ def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(en
 def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tmp_path):  # noqa: F811
     import subprocess
     import sys
-    from contextlib import nullcontext
     from unittest.mock import Mock
 
     from scripts.doctor import cli as doctor
@@ -514,7 +513,7 @@ def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tm
     monkeypatch.setattr("scripts.swarm.langfuse.refresh", lambda *args: [])
     monkeypatch.setattr(timer, "entry_point", lambda: "/agentihooks")
     monkeypatch.setattr(scheduled_tick, "runtime_dir", lambda: tmp_path)
-    monkeypatch.setattr(scheduled_tick, "machine_lock", lambda _name: nullcontext())
+    monkeypatch.setattr(scheduled_tick, "machine_lock", lambda _name: (tmp_path / "swarm-tick.lock").open("a+"))
     monkeypatch.setattr(scheduled_tick, "shutil", SimpleNamespace(which=lambda _name: None))
 
     def start_tick(command, **_options):

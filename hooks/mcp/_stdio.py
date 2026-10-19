@@ -4,7 +4,7 @@ import sys
 from importlib.metadata import version
 
 from hooks.mcp import _resolve_categories
-from hooks.mcp._catalog import CAPABILITIES, CATALOG, PROTOCOL_VERSIONS
+from hooks.mcp._catalog import CAPABILITIES, PROTOCOL_VERSIONS, get_catalog
 
 _SERVER_INFO = {"name": "agentihooks", "version": version("mcp")}
 _EMPTY_LISTS = {
@@ -15,11 +15,12 @@ _EMPTY_LISTS = {
 
 
 def list_tools() -> list[dict]:
+    catalog = get_catalog()
     categories = _resolve_categories()
-    unknown = [category for category in categories if category not in CATALOG]
+    unknown = [category for category in categories if category not in catalog]
     if unknown:
         print(
-            f"[agentihooks] WARNING: ignoring unknown MCP categories {unknown}; valid categories: {sorted(CATALOG)}",
+            f"[agentihooks] WARNING: ignoring unknown MCP categories {unknown}; valid categories: {sorted(catalog)}",
             file=sys.stderr,
         )
     allowed_raw = os.getenv("ALLOWED_TOOLS", "").strip()
@@ -27,7 +28,7 @@ def list_tools() -> list[dict]:
     tools = {
         tool["name"]: tool
         for category in categories
-        for tool in CATALOG.get(category, [])
+        for tool in catalog.get(category, [])
         if not allowed_raw or tool["name"].lower() in allowed
     }
     if not tools:

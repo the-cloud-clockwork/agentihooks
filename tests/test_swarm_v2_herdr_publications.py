@@ -7,7 +7,7 @@ from scripts.swarm_v2.herdr.endpoints import Scope
 from scripts.swarm_v2.herdr.publications import TransportRefused
 from scripts.swarm_v2.kubernetes.terminal import HostKeys
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 HOST = "swarm.homeofanton.com"
 SECRET = "fixture" + "-password"

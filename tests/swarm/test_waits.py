@@ -15,7 +15,6 @@ from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
 
 REAL_REQUIRED_GREEN = waits.required_green
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"

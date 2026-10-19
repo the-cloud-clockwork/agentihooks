@@ -6,6 +6,7 @@ from scripts.swarm.ledger_events import iso_ms
 
 GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
+COUNTED = {"success", "failure"}
 JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at")
 
 
@@ -50,6 +51,8 @@ def _wall(run, now_ms):
     jobs = run["jobs"]
     if event not in TIERS or not jobs:
         return []
+    if run["status"] == "completed" and run.get("conclusion") not in COUNTED:
+        return []
     gates = [job for job in jobs if job["name"] == GATE]
     if event == "pull_request" and not gates and run.get("path") != ".github/workflows/test.yml":
         return []
@@ -69,7 +72,10 @@ def _wall(run, now_ms):
             "ci tier wall time",
             f"{run['id']}-{run.get('run_attempt', 1)}",
             f"{TIERS[event]} tier took {seconds / 60:.2f} minutes",
-            (f"run {run['id']}, tier {event}, wall time {seconds} seconds",),
+            (
+                f"run {run['id']}, tier {event}, conclusion {run.get('conclusion') or run['status']}, "
+                f"wall time {seconds} seconds",
+            ),
             "tier wall time over 15 minutes",
             seconds,
         )

@@ -14,7 +14,6 @@ from tests.swarm_ledger.test_ledger_authority import MASTER, SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 live = _authority_live
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture

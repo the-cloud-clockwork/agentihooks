@@ -85,6 +85,7 @@ LOGO = ROOT / "media" / "agentihooks-logo.png"
 
 HUB = Hub()
 BIN_SWEEP_EVERY = 15
+FOLLOW_S = 0.25
 SCHEDULER_UNAVAILABLE = threading.Event()
 LOADED_STAMP = code_stamp()
 
@@ -235,6 +236,15 @@ def swarm_status(slug, state=None):
     except Exception as exc:
         sys.stderr.write(f"swarm status {slug}: {exc}\n")
         return None
+
+
+STREAM_UNREAD = ("history", "transfers", "launch_checks")
+
+
+def stream_swarm(slug, ledger):
+    """Swarm status for the page stream, without the records the page never reads."""
+    status = swarm_status(slug, ledger)
+    return status and {key: item for key, item in status.items() if key not in STREAM_UNREAD}
 
 
 def swarm_models():
@@ -697,7 +707,7 @@ def doctor_phrase(slug, state):
 
 def stream_resources(slug):
     ledger = ledger_view(repository.get_document(slug))
-    return {"ledger": ledger, "swarm": swarm_status(slug, ledger)}
+    return {"ledger": ledger, "swarm": stream_swarm(slug, ledger)}
 
 
 def workspace_tails(slug, task_id):
@@ -768,7 +778,7 @@ def sample_streams():
         if ledger is None:
             continue
         try:
-            HUB.publish(slug, "swarm", swarm_status(slug, ledger))
+            HUB.publish(slug, "swarm", stream_swarm(slug, ledger))
         except Exception as exc:  # the seed watcher that calls this must outlive any one ledger's readers
             sys.stderr.write(f"stream sample {slug}: {exc}\n")
 
@@ -1234,6 +1244,17 @@ def watch_ledgers(interval=2.0):
         scheduled_wait(interval)
 
 
+def follow_shared(interval=FOLLOW_S):
+    """Publish each watched ledger's newer stored generation, whichever host wrote it to the shared database."""
+    while True:
+        for slug in HUB.watched():
+            try:
+                repository.current(slug)
+            except Exception as exc:  # one unreadable ledger must not stop the others following
+                sys.stderr.write(f"shared follow {slug}: {exc}\n")
+        scheduled_wait(interval)
+
+
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     ledger_writer = ports.swarm().ledger_writer
@@ -1245,6 +1266,8 @@ def serve():
     adopt_unrelayed()
     metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
     threading.Thread(target=watch_ledgers, daemon=True).start()
+    if storage.shared():
+        threading.Thread(target=follow_shared, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)
     server.request_queue_size = 128
     server.server_bind()

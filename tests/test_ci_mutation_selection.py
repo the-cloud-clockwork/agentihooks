@@ -548,6 +548,55 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     ]
 
 
+def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_bound_kept_tests(tmp_path):
+    from scripts.ci_mutation.selection import file_seconds, keep_selected_tests, stats_shards
+
+    (tmp_path / "tests").mkdir()
+    for name in "abc":
+        (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
+    (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    (tmp_path / "tests/test_d.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    durations = {"tests/test_c.py::t1": 2, "tests/test_c.py::t1[p]@port": 1, "tests/test_c.py::t1x": 4}
+    durations |= {"tests/test_c.py::t2": 8, "tests/test_a.py::TestK::test_x": 5, "tests/test_b.py::t": 6}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    entries = [
+        "tests/test_a.py",
+        "tests/test_b.py::t",
+        "tests/test_c.py::t1",
+        "tests/test_c.py::t1x",
+        "tests/test_d.py",
+    ]
+    seconds = file_seconds(tmp_path, entries)
+    assert seconds == pytest.approx(
+        {
+            "tests/test_a.py": 5.01,
+            "tests/test_b.py::t": 6.01,
+            "tests/test_c.py::t1": 3.01,
+            "tests/test_c.py::t1x": 4.01,
+            "tests/test_d.py": 0.01,
+        }
+    )
+    assert stats_shards(tmp_path, entries, 3) == [
+        ["tests/test_c.py::t1", "tests/test_c.py::t1x"],
+        ["tests/test_b.py::t", "tests/test_d.py"],
+        ["tests/test_a.py"],
+    ]
+    reached = {
+        "tests/test_c.py::t1[p]",
+        "tests/test_c.py::t1x",
+        "tests/test_c.py::t2",
+        "tests/test_a.py::TestK::test_x",
+        "tests/test_e.py::t",
+    }
+    stats = {"scripts.sample.x_f": set(reached), "scripts.other.x_g": set(reached)}
+    allowed = {"scripts.sample.": {"tests/test_c.py::t1", "tests/test_a.py"}}
+    assert keep_selected_tests(stats, allowed) == {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"}
+    assert stats == {
+        "scripts.sample.x_f": {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"},
+        "scripts.other.x_g": set(),
+    }
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 6])
 def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
     from scripts.ci_mutation.selection import part_files

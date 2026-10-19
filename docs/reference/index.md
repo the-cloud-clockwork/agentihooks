@@ -33,6 +33,7 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Promotion and releases](promotion.md) | How a green `dev` push run of Tests rebase merges its graded revision into `main` through a snapshot branch, tags a patch release with generated notes, what blocks it, reruns and manual `release.yml` runs |
 | [CI result cache and in place retry](ci-result-cache.md) | The design for one CI algorithm: reuse a check's green result while its real inputs are unchanged, retry a failed test in place, retry durations downloads and uploads in place, before numbers and slices |
 | [Helm kind proof input keys](ci-result-cache.md#helm-kind-proof-input-keys) | Declared chart and image inputs, due decisions, dispatch examples, cache misses and proof measurements |
+| [Helm kind registration to readiness](../ci-timing.md#helm-kind-registration-to-readiness) | Preserved recovery checks, parallel work, kind probe settings, CI dispatch and measured intervals |
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
 | [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |

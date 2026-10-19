@@ -5,8 +5,6 @@ from hooks import hook_manager
 from hooks.targets.emitter import flush
 from scripts.inbox.store import InboxError, InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store(monkeypatch):

@@ -11,7 +11,6 @@ from scripts.swarm.tick import Placed
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 ROLES = {"planner": "planner", "engineer": "engineer", "qa": "qa", "cicd": "cicd", "frontend": "engineer"}
 
 

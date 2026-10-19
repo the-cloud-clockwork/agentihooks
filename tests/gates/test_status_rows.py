@@ -2,14 +2,11 @@
 
 from types import SimpleNamespace
 
-import pytest
-
 from scripts.gates import log
 from scripts.gates.base import Who
 from scripts.swarm import cli, status
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WHO = Who(name="engineer@1-1", swarm="sw", task="t1")
 
 

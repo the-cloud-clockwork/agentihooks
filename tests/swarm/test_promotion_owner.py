@@ -16,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 from scripts.swarm_ledger import ledger_core, new_ledger  # noqa: E402
 from scripts.swarm_ledger.api import schemas  # noqa: E402
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 WATCHED = "owner-proof"
 DOCTOR = "owner-proof-doctor"

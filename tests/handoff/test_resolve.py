@@ -8,8 +8,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 LEDGER = {"tasks": [{"id": "t1"}], "phases": [{"id": "p7"}], "questions": [], "followups": [{"id": "f1"}]}
 
 
