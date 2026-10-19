@@ -176,10 +176,22 @@ def test_a_codex_master_session_shows_its_title_while_herdr_keeps_the_agent_name
         init_agent.herdr_host, "name_session", lambda *args: calls.append(("session", *args)) or "named"
     )
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
-    named = init_agent._name_in_herdr("w1:p2", ("master@a1b2c3-0002", "master 2 · rig"), "codex", {}, "", 1.0)
+    named = init_agent._name_in_herdr(
+        "w1:p2", init_agent.Names("master@a1b2c3-0002", "master 2 · rig"), "codex", {}, "", 1.0
+    )
     assert named == ["agent_name=master-a1b2c3-0002", "session_name=master 2 · rig"]
     assert calls == [
         ("agent", "w1:p2", "master@a1b2c3-0002", {}),
         ("session", "w1:p2", "master 2 · rig", {}, ("index", "master 2 · rig")),
     ]
     assert marked == [{"session_name": "master 2 · rig"}]
+
+
+def test_a_served_codex_thread_shows_a_master_title_and_a_worker_name():
+    from scripts.codex_session import supervisor
+    from scripts.swarm.store import AgentRecord
+
+    backend = AgentRecord("master@a1b2c3-0002", "master", "master", seat="master-2@rig")
+    worker = AgentRecord("engineer@a1b2c3-0007", "eng", "t1", seat="eng-1@rig")
+    assert supervisor.shown_name("rig", backend) == "master 2 · rig"
+    assert supervisor.shown_name("rig", worker) == "engineer@a1b2c3-0007"

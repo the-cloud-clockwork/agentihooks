@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import NamedTuple
 
 from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
@@ -93,6 +94,11 @@ class AgentSpec:
     transport: str = ""
     seat: str = ""
     previous_execution: str = ""
+    title: str = ""
+
+
+class Names(NamedTuple):
+    agent: str
     title: str = ""
 
 
@@ -801,23 +807,21 @@ def _answer_channel_warning(pane: str, environ: dict[str, str]) -> str:
 
 def _name_in_herdr(
     pane: str,
-    names: tuple[str, str],
+    names: Names,
     agent: str,
     environ: dict[str, str],
     opening: str,
     since: float,
     served: bool = False,
 ) -> list[str]:
-    """names holds the agent name and the display title, empty when the agent name is shown. A served viewer's thread
-    is named by its server before the first turn."""
-    name, title = names
-    detected = herdr_host.rename_agent(pane, name, environ)
-    named = [f"agent_name={herdr_host.agent_name(name)}"] if detected else ["agent_name=unset"]
+    """A served viewer's thread is named by its server before the first turn."""
+    detected = herdr_host.rename_agent(pane, names.agent, environ)
+    named = [f"agent_name={herdr_host.agent_name(names.agent)}"] if detected else ["agent_name=unset"]
     if served:
         return named
     ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
     if detected and agent == "codex":
-        named += _name_codex_session(pane, title or name, environ, since, ready)
+        named += _name_codex_session(pane, names.title or names.agent, environ, since, ready)
     if opening:
         named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
     return named
@@ -1021,7 +1025,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     if pane and _names_pane(route, launcher, agent):
         report += _name_in_herdr(
             pane,
-            (name, args.title),
+            Names(name, args.title),
             agent,
             active_env,
             _held_prompt(launcher, agent),

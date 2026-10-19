@@ -544,7 +544,7 @@ class HerdrRuntime:
             return self._saved_choice(saved, profile, quota_transfer, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
-    def _route_kind(self, lane, harness, task, slug=""):
+    def _route_kind(self, lane, harness, task, slug):
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
             return "interactive"
         explicit = task.get("route_kind")
