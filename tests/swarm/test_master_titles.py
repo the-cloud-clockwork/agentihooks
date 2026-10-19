@@ -112,14 +112,51 @@ def test_the_title_names_the_claude_session_and_the_herdr_tab(tmp_path, monkeypa
     monkeypatch.setattr(
         init_agent.herdr_host,
         "open_pane",
-        lambda directory, title, *_: opened.append(title) or SimpleNamespace(workspace_id="w", tab_id="t", pane_id="p"),
+        lambda *args: opened.append(args) or SimpleNamespace(workspace_id="w", tab_id="t", pane_id="p"),
     )
     for title in ("master 2 · rig", ""):
-        args = SimpleNamespace(title=title, placement="tab", workspace="")
-        init_agent._start_herdr(tmp_path / "launch.sh", tmp_path, "master-a1", args, "claude", {})
-    assert opened == ["master 2 · rig", "master-a1"]
-    assert init_agent._parser().parse_args(["--title", "master 2 · rig"]).title == "master 2 · rig"
-    assert init_agent._parser().parse_args([]).title == ""
+        args = SimpleNamespace(title=title, placement="split", workspace="space")
+        init_agent._start_herdr(tmp_path / "launch.sh", tmp_path, "master-a1", args, "claude", {"E": "1"})
+    env = {"HERDR_AGENT": "claude"}
+    assert opened == [
+        (tmp_path, "master 2 · rig", env, "split", "space", {"E": "1"}),
+        (tmp_path, "master-a1", env, "split", "space", {"E": "1"}),
+    ]
+    parser = init_agent._parser()
+    assert parser.parse_args(["--title", "master 2 · rig"]).title == "master 2 · rig"
+    assert parser.parse_args([]).title == ""
+    [title] = [action for action in parser._actions if action.dest == "title"]
+    assert title.help == "Display name and herdr tab label in place of the name"
+
+
+def test_init_agent_hands_the_title_to_the_claude_session_and_herdr_naming(tmp_path, monkeypatch):
+    from scripts.herdr_host import Placement
+
+    launched, named = [], []
+    monkeypatch.setattr(init_agent.agent_choice, "choose", lambda requested, environ: ("claude", "rotation"))
+    monkeypatch.setattr(init_agent.herdr_host, "open_pane", lambda *a: Placement("w1", "w1:t3", "w1:p7", "term_7"))
+    monkeypatch.setattr(
+        init_agent.herdr_host,
+        "run",
+        lambda pane, launcher, environ: (
+            launched.append(launcher.read_text()) or launcher.with_suffix(".started").touch()
+        ),
+    )
+    monkeypatch.setattr(init_agent.herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(init_agent.herdr_host, "ensure_server", lambda environ: False)
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: None)
+    monkeypatch.setattr(init_agent, "_names_pane", lambda route, launcher, agent: True)
+    monkeypatch.setattr(init_agent, "_name_in_herdr", lambda pane, names, *rest, **kw: named.append(names) or [])
+    env = {
+        "HOME": str(tmp_path),
+        "XDG_RUNTIME_DIR": str(tmp_path / "rt"),
+        "AGENTIHOOKS_HOME": str(tmp_path),
+        init_agent.herdr_panes.ROOT_ENV: str(tmp_path / "panes"),
+    }
+    argv = ["--dir", str(tmp_path), "--name", "master-a1b2c3-0002", "--title", "master 2 · rig", "--host", "herdr"]
+    assert init_agent.main([*argv, "--start-timeout", "0.5", "--route-timeout", "0"], env) == 0
+    assert named == [init_agent.Names("master-a1b2c3-0002", "master 2 · rig")]
+    assert "--name 'master 2 · rig'" in launched[0]
 
 
 def _named(tmp_path, display, identity):
@@ -167,6 +204,38 @@ def test_a_front_door_on_an_exhausted_explicit_route_still_launches_on_the_login
     assert placed.route_kind == "interactive"
 
 
+@pytest.mark.parametrize(
+    ("harness", "task"),
+    [
+        ("", {"seat": "master@rig", "route_kind": "subscription"}),
+        ("claude", {"route_kind": "api"}),
+    ],
+)
+def test_the_login_route_covers_an_unset_harness_and_a_master_without_a_seat(tmp_path, harness, task):
+    runtime = HerdrRuntime(home=tmp_path, run=lambda *a, **k: None, choose=lambda *_: ("claude", "requested"))
+    assert runtime._route_kind("master", harness, task, "rig") == "interactive"
+
+
+def test_a_master_without_a_seat_launches_as_the_front_door_title(tmp_path):
+    seen = []
+
+    def run(argv, **kwargs):
+        seen.append(argv)
+        return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
+
+    config = SimpleNamespace(
+        slug="rig",
+        repo=str(tmp_path),
+        code="a1b2c3",
+        compact_limit=0,
+        lanes={"master": {"agent": "claude"}},
+        autonomy="delegate",
+    )
+    runtime = HerdrRuntime(home=tmp_path, run=run, choose=lambda *_: ("claude", "requested"))
+    runtime.spawn(config, "master", "agent", {"id": "master", "title": "rig"})
+    assert _title(seen[0]) == "master 1 · rig"
+
+
 def test_a_codex_master_session_shows_its_title_while_herdr_keeps_the_agent_name(monkeypatch):
     calls, marked = [], []
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: calls.append(("agent", *args)) or True)
@@ -193,5 +262,6 @@ def test_a_served_codex_thread_shows_a_master_title_and_a_worker_name():
 
     backend = AgentRecord("master@a1b2c3-0002", "master", "master", seat="master-2@rig")
     worker = AgentRecord("engineer@a1b2c3-0007", "eng", "t1", seat="eng-1@rig")
-    assert supervisor.shown_name("rig", backend) == "master 2 · rig"
-    assert supervisor.shown_name("rig", worker) == "engineer@a1b2c3-0007"
+    launch = SimpleNamespace(slug="rig")
+    assert supervisor.shown_name(launch, backend) == "master 2 · rig"
+    assert supervisor.shown_name(launch, worker) == "engineer@a1b2c3-0007"

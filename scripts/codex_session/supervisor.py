@@ -219,10 +219,11 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
     return thread
 
 
-def shown_name(slug: str, agent: AgentRecord) -> str:
+def shown_name(launch: Launch, agent: AgentRecord) -> str:
     from scripts.swarm_v2 import masters
 
-    return masters.title(slug, agent.seat) if agent.lane == MASTER else agent.name
+    title = masters.title(launch.slug, agent.seat)
+    return title if agent.lane == MASTER else agent.name
 
 
 def name_thread(connection: protocol.Connection, thread_id: str, name: str) -> None:
@@ -277,7 +278,7 @@ def _connect_bound(store, bindings, launch, agent, record, process, deps) -> tup
         bindings.put(launch.slug, record)
         agent = replace(agent, conversation_id=thread["id"])
         store.put_agent(launch.slug, agent)
-        name_thread(connection, thread["id"], shown_name(launch.slug, agent))
+        name_thread(connection, thread["id"], shown_name(launch, agent))
         if launch.opening and bindings.claim_opening(launch.slug, agent.execution_id, deps.now_ms()):
             record = replace(record, active_turn_id=protocol.start_turn(connection, thread["id"], launch.opening))
             bindings.put(launch.slug, record)

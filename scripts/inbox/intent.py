@@ -35,7 +35,8 @@ SAME = YesNo(
 
 
 def enabled() -> bool:
-    return os.environ.get(FLAG, "true").strip().lower() in ("1", "true", "yes", "on")
+    value = os.environ.get(FLAG)
+    return value is None or value.strip().lower() in ("1", "true", "yes", "on")
 
 
 def timeout_s() -> float:
