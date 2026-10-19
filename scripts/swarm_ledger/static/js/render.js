@@ -1,5 +1,6 @@
 import { ACTIVE_MS, PHASE_LABELS } from "./config.js";
-import { $, closedText, excerpt, grow, h, headCount, newId, span, when } from "./dom.js";
+import { $, closedText, excerpt, h, headCount, newId, span, when } from "./dom.js";
+import { renderCycle } from "./render_cycle.js";
 import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state.js";
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
@@ -273,73 +274,44 @@ function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
   if (!items.length) el.append(h("li", { class: "empty", text: "None." }));
 }
 
-let renderVersion = 0;
-let rendered = Promise.resolve();
-
 export function render(focusKey, cooperative = false) {
-  const version = ++renderVersion;
-  const active = document.activeElement;
-  const key = focusKey || (active && active.dataset ? active.dataset.focus : null);
-  const selection = !focusKey && active && active.tagName === "TEXTAREA" ? active : null;
-  document.title = doc.title;
-  $("title").textContent = doc.title;
-  $("overview").textContent = excerpt(doc.overview, 200);
-  $("closed-label").textContent = closedText(doc.closed_at);
-  $("closed-banner").hidden = !doc.closed_at;
-  const sections = [
-    () => {
-      $("sources-count").textContent = headCount([[doc.sources.length]]);
-      listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
-    },
-    () => {
-      $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
-      return phaseList(cooperative, () => version === renderVersion);
-    },
-    () => {
-      $("tasks-count").textContent = taskCounts(doc.tasks);
-      groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
-    },
-    () => {
-      $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
-      listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
-    },
-    () => {
-      $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
-      if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
-    },
-    () => {
-      $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
-      groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
-    },
-    () => { renderSync(); }, () => { renderPriorities(); }, () => { renderNotifications(); }, () => { renderAlerts(); },
-    () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
-    () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
-  ];
-  const paint = async () => {
-    for (const section of sections) {
-      if (cooperative) {
-        await scheduler.postTask(() => {}, { priority: "background" });
-        if (version !== renderVersion) return rendered;
-      }
-      try {
-        const drawing = section();
-        if (cooperative) await drawing;
-      } catch (error) {
-        console.error(error);
-      }
-    }
-    if (cooperative && document.activeElement !== document.body) return;
-    const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
-    if (!again) return;
-    again.focus();
-    if (again.tagName === "TEXTAREA") {
-      grow(again);
-      const end = again.value.length;
-      again.setSelectionRange(selection ? selection.selectionStart : end, selection ? selection.selectionEnd : end);
-    }
-  };
-  rendered = paint();
-  return rendered;
+  return renderCycle(focusKey, cooperative, (current) => {
+    document.title = doc.title;
+    $("title").textContent = doc.title;
+    $("overview").textContent = excerpt(doc.overview, 200);
+    $("closed-label").textContent = closedText(doc.closed_at);
+    $("closed-banner").hidden = !doc.closed_at;
+    const sections = [
+      () => {
+        $("sources-count").textContent = headCount([[doc.sources.length]]);
+        listInto("sources", doc.sources.map((s, n) => ({ id: n, text: s })), (s) => h("li", { id: `item-sources-${s.id}`, text: s.text }));
+      },
+      () => {
+        $("phases-count").textContent = stateCounts("phases", { open: "open", done: "done" });
+        return phaseList(cooperative, current);
+      },
+      () => {
+        $("tasks-count").textContent = taskCounts(doc.tasks);
+        groupedWork("tasks", doc.tasks, (t) => taskRow(t, doc.tasks));
+      },
+      () => {
+        $("questions-count").textContent = stateCounts("questions", { open: "open", done: "answered" });
+        listInto("questions", [...doc.questions].sort((a, b) => (a.answers || []).length - (b.answers || []).length), (q, i) => questionRow(q, i + 1));
+      },
+      () => {
+        $("notes-count").textContent = headCount([[doc.notes.filter((e) => !e.deleted).length]]);
+        if (sectionOpen("notes")) $("notes").replaceChildren(threadView("notes", doc.notes, "thread flat"));
+      },
+      () => {
+        $("followups-count").textContent = stateCounts("followups", { open: "open", done: "done" });
+        groupedWork("followups", doc.followups, (f) => checkRow("followups", f, 0, f.text, ""));
+      },
+      () => { renderSync(); }, () => { renderPriorities(); }, () => { renderNotifications(); }, () => { renderAlerts(); },
+      () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
+      () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
+    ];
+    return sections;
+  });
 }
 
 const NOUNS = { tasks: "tasks", followups: "follow-ups" };

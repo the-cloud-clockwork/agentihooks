@@ -23,6 +23,7 @@ ORDER = (
     "media",
     "artifacts",
     "threads",
+    "render_cycle",
     "render",
     "edits",
     "notices",
