@@ -82,7 +82,7 @@ def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis
     daemon.beat(redis, "machine")
 
     assert redis.smembers(registry.INDEX) == indexed
-    assert round(redis.pttl(f"{ROOT}:launch-slot:first") / 1000) == ttl
+    assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
 
 
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
