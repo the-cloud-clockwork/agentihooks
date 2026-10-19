@@ -57,7 +57,7 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `name` | text | the hive id | Display name. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
-| `roles` | comma list of `master`, `qa`, `frontend`, `eng`, `ci`, `plan` | none | Work the hive takes. |
+| `roles` | comma list of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` | none | Work the hive takes. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
 | `max-agents` | whole number, 1 or more | `1` | Working agents the hive runs at once. Masters do not count against it. |
 
@@ -76,7 +76,8 @@ agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-ag
 
 - The master runs on the PC while it is live, and on the VM when the PC is gone.
 - QA and frontend work runs on the VM, the only hive that takes them.
-- Engineer and CI work runs on the pods.
+- Engineer, CI, planner and dispatcher work runs on the pods. The PC takes the dispatcher when every pod is full only
+  once its roles list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
 
 ## Placement
 
