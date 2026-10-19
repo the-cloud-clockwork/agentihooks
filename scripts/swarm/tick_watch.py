@@ -60,7 +60,7 @@ class Repair:
 
 
 def _alert(store, slug, now, episode, evidence) -> list[str]:
-    episode = episode or {"since": now, "evidence": evidence, "told": []}
+    episode = episode or {"since": now, "told": []}
     fresh = [address for address in recipients(store, slug) if address not in episode["told"]]
     text = ALERT.format(slug=slug, evidence="; ".join(evidence))
     for address in fresh:

@@ -393,7 +393,8 @@ def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deploymen
     else:
         monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", deployment)
     runtime, ran, asked = object(), [], []
-    monkeypatch.setattr(cli, "routed", lambda herdr: runtime)
+    routed_with = []
+    monkeypatch.setattr(cli, "routed", lambda herdr: routed_with.append(herdr) or runtime)
     monkeypatch.setattr(cli, "HerdrRuntime", lambda: "herdr")
     monkeypatch.setattr(cli, "now_ms", lambda: START)
     monkeypatch.setattr(tick, "respawn_master", lambda *args: asked.append(args) or ["spawned"])
@@ -404,6 +405,7 @@ def test_the_watch_command_respawns_only_on_a_workstation(monkeypatch, deploymen
     (args,) = ran
     assert args[:2] == ("store", cli.now_ms)
     if respawns:
+        assert routed_with == ["herdr"]
         assert args[2].restart is scheduled_tick.restart
         assert args[2].respawn("sw") == ["spawned"]
         assert asked == [("sw", "store", runtime, START)]
@@ -462,6 +464,66 @@ def test_the_scheduler_restart_waits_for_the_supervisor_to_let_go():
     scheduled_tick.restart(lambda pid, sig: None, lambda: True, wait)
 
     assert waits == [1, 1, 1]
+
+
+def test_an_item_id_is_twelve_hex_characters():
+    found = tick_watch._item_id("sw", START, FRONT_DOOR, "alert")
+
+    assert len(found) == 12
+    assert int(found, 16) >= 0
+
+
+def test_the_watcher_run_hands_its_repair_to_every_stale_swarm(store):
+    beat(store, START - LIMIT)
+    asked = []
+
+    tick_watch.run(store, lambda: START, lambda slug, now: asked.append((slug, now)) or [], lambda s: None, passes=1)
+
+    assert asked == [("sw", START)]
+
+
+def test_an_alert_joins_every_piece_of_evidence(store):
+    beat(store, START - LIMIT, quota=START - 3 * LIMIT)
+
+    tick_watch.watch_pass(store, "sw", START, START)
+
+    evidence = tick_heartbeat.stale(tick_heartbeat.read(store, "sw"), START)
+    assert len(evidence) == 2
+    assert texts(store, FRONT_DOOR) == [tick_watch.ALERT.format(slug="sw", evidence="; ".join(evidence))]
+
+
+def test_the_scheduler_restart_registers_through_the_swarm_timer_by_default(monkeypatch):
+    from scripts.swarm import timer
+
+    monkeypatch.setattr(timer, "schedule", lambda: True)
+
+    assert scheduled_tick.restart(lambda *args: None, None, lambda s: None) == "restarted the scheduler tick"
+
+
+def test_respawn_master_adopts_a_live_master_of_this_swarm(store, monkeypatch):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    name = f"master@{store.ensure_code('sw').code}-0007"
+    runtime = FakeRuntime()
+    runtime.live.add(name)
+
+    assert tick.respawn_master("sw", store, runtime, START) == [f"adopted live master {name}"]
+    assert runtime.masters == []
+
+
+@pytest.mark.parametrize("state", ["stopped"])
+def test_respawn_master_leaves_a_stopped_swarm(store, monkeypatch, state):
+    from scripts.swarm import tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    store.update("sw", state=state)
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
+
+    assert tick.respawn_master("sw", store, FakeRuntime(), START) == []
+    assert "master@a1b2c3-0001" in {a.name for a in store.agents("sw")}
 
 
 def test_respawn_master_leaves_a_stopping_swarm(store, monkeypatch):
