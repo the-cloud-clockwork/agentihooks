@@ -79,7 +79,7 @@ def test_a_thread_read_pages_with_its_query_from_the_partial_read(live, whole_lo
     core.sync(SLUG, ops=[{"op": "add", "id": f"more-{n}", "thread": path, "text": f"Note {n}"} for n in range(2)])
     state = repository.get_document(SLUG)
     whole_loads.clear()
-    reply = routes.ledger_read(server, SLUG, path, {"limit": 1})
+    reply = routes.ledger_read(server.api_services(), SLUG, path, {"limit": 1})
     assert whole_loads == []
     assert reply == resources.read(state, path, {"limit": 1})
     assert len(reply["data"]) == 1

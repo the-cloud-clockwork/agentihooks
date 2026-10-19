@@ -167,13 +167,15 @@ jobs:
 
           from scripts.ci_mutation.browser import needs_browser
           from scripts.ci_select import changed_files, is_test
+          from scripts.ci_touched_tests import worker_count
 
           root = Path.cwd()
           tests = [path for path in changed_files(root, "origin/dev", "HEAD") if is_test(path) and (root / path).is_file()]
           browser = str(bool(tests) and needs_browser(root, tests)).lower()
+          workers = worker_count(tests) if tests else 1
           print("Touched tests:", *tests or ["none"], sep="\n")
           with Path(os.environ["GITHUB_OUTPUT"]).open("a") as stream:
-              stream.write(f"files={' '.join(tests)}\nbrowser={browser}\n")
+              stream.write(f"files={' '.join(tests)}\nbrowser={browser}\nworkers={workers}\n")
           PY
 
       - name: Install the browser that page tests drive
@@ -185,6 +187,7 @@ jobs:
         if: steps.touched.outputs.files != ''
         env:
           FILES: ${{ steps.touched.outputs.files }}
+          PYTEST_XDIST_AUTO_NUM_WORKERS: ${{ steps.touched.outputs.workers }}
           PYTHONUNBUFFERED: "1"
         run: |
           read -ra files <<< "$FILES"

@@ -1,12 +1,11 @@
 import os
 import time
-from collections.abc import Callable
-from types import ModuleType
 
 from scripts.routing.settings import VALIDATORS, SettingsStore
 
 from . import resources, schemas
 from .errors import APIError
+from .services import BodyReader, Services
 
 PATCH = {
     "type": "object",
@@ -23,11 +22,11 @@ def store() -> SettingsStore:
     return open_store(place._client(os.environ), os.environ)
 
 
-def _principal(handler: object, server: ModuleType) -> str | None:
+def _principal(handler: object, services: Services) -> str | None:
     slug = handler.headers.get("X-Ledger-Slug") or ""
-    if not server.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
+    if not services.ledger.core.SLUG_RE.fullmatch(slug) or not handler.exists(slug):
         return None
-    return server.authority.caller(handler.headers, server.repository.token(slug), slug)
+    return services.ledger.authority.caller(handler.headers, services.repository.token(slug), slug)
 
 
 def _write(settings: SettingsStore, payload: dict) -> None:
@@ -40,16 +39,16 @@ def _write(settings: SettingsStore, payload: dict) -> None:
         settings.set(key, value, "operator", now)
 
 
-def settings(handler: object, server: ModuleType, read_body: Callable[[object, ModuleType], dict]) -> dict:
+def settings(handler: object, services: Services, read_body: BodyReader) -> dict:
     if handler.command not in ("GET", "PATCH"):
         raise APIError(405, "method_not_allowed", "Use GET or PATCH")
     current = store()
     if handler.command == "PATCH":
-        principal = _principal(handler, server)
+        principal = _principal(handler, services)
         if principal is None:
             raise APIError(403, "forbidden", "Missing or wrong ledger credential")
         if principal:
             raise APIError(403, "forbidden", "Routing settings need the operator")
-        _write(current, read_body(handler, server))
+        _write(current, read_body(handler, services))
     data = current.all()
     return {"data": data, "revision": resources.revision(data)}
