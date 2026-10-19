@@ -425,7 +425,7 @@ The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.
 | Worker base | `docker/swarm-node/Dockerfile` | the tools: Claude CLI, Codex CLI, herdr, git and the rest of the swarm worker toolchain |
 | Hive layer | `deploy/worker/Dockerfile` | a wheel of the checked out agentihooks source, installed over the base, the `wt.sh` link and the worker start script |
 
-The hive layer's `WORKER_IMAGE` build argument defaults to the published base, `ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which the Swarm worker image workflow (`swarm-node-image.yml`) publishes on pushes to `dev`. The proof reuses that base and builds only the hive layer, unless the base's inputs changed since it was published. Before this change every run rebuilt the base and reinstalled every tool: about 115 of the 133 to 137 seconds the build took.
+The hive layer's `WORKER_IMAGE` build argument defaults to the published base, `ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which the Swarm worker image workflow (`swarm-node-image.yml`) publishes on pushes to `dev`. The proof reuses that base and builds only the hive layer, unless the base's inputs changed since it was published. Before this change every run rebuilt the base and reinstalled every tool, and the build took 133 to 137 seconds; on the published base it takes 58 to 76 seconds (see [Measurements](#measurements)).
 
 ### How the base is chosen
 
@@ -443,11 +443,20 @@ Before building, the script runs `deploy/worker/base-current.sh ghcr.io/the-clou
 
 The three warning reasons are `the published worker base revision cannot be read` (the pull or the manifest read failed), `the published worker base revision <revision> cannot be fetched` and `the worker base inputs cannot be compared with revision <revision>`. Every failure to decide falls back to the rebuild, so a missing or unreadable base slows the run but does not fail it.
 
-The base is also rebuilt on a `dev` push that changes a base input and runs before that push's own Swarm worker image run publishes the new base. The next run after publication returns to the published base.
+On a `dev` push that changes a base input, the Worker hive pod run and the same push's Swarm worker image run start independently. When the check pulls the base before that run publishes it, the base is rebuilt; when it pulls after, the base is current and only the hive layer is built.
 
-The base inputs are the sources the base Dockerfile copies that the hive layer does not replace: the hive layer's wheel reinstalls `pyproject.toml`, `README.md`, `hooks/` and `scripts/`, so changes there need no base rebuild. `tests/deployment/test_worker_hive_image.py` reads the `COPY` sources of `docker/swarm-node/Dockerfile` and fails when one of them is neither replaced by the wheel nor covered by the input list. When the base Dockerfile starts copying a new source, add its path to the `git diff` in `base-current.sh` and to the test's `INPUTS` in the same pull request.
+The base inputs are the sources the base Dockerfile copies that the hive layer does not replace: the hive layer's wheel reinstalls `pyproject.toml`, `README.md`, `hooks/` and `scripts/`, so changes there need no base rebuild, except `scripts/swarm_v2/worker_image.py`, which the base build runs to write its manifest. `tests/deployment/test_worker_hive_image.py` reads the `COPY` sources of `docker/swarm-node/Dockerfile` and fails when one of them is neither replaced by the wheel nor covered by the input list. ### Changing the base
 
-The rest of the proof is unchanged: the same tool version check inside the image, Pod registration and order acknowledgement, and on a `dev` push the same image is retained and published by the `publish` job.
+Change these together in one pull request; `tests/deployment/test_worker_hive_image.py` pins each:
+
+| Setting | Where |
+|---|---|
+| Published base image | the `base-current.sh` argument in `kind-proof.sh`, the `ARG WORKER_IMAGE=` default in `deploy/worker/Dockerfile` and the test's `BASE` |
+| Base inputs | the `git diff` paths in `base-current.sh` and the test's `INPUTS`; add a path when the base Dockerfile starts copying a new source |
+
+Limits: the check pulls and compares only the `linux/amd64` base, the kind node is pinned to `kindest/node:v1.37.0`, and the script needs `docker`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
+
+The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the same image is retained and published by the `publish` job.
 
 ### Reading the result
 
@@ -483,11 +492,19 @@ docker run --rm --entrypoint python \
   -c 'import json; print(json.load(open("/opt/swarm-node/manifest.json"))["source_revision"])'
 ```
 
-Run the proof on a branch without waiting for a `dev` push; `contracts_only=true` skips the `kind` job and renders only the chart:
+Run the full proof on a branch without waiting for a `dev` push:
 
 ```bash
 gh workflow run hive-worker.yml \
   --ref <branch>
+```
+
+Run only the chart proof; `contracts_only=true` skips the `kind` job:
+
+```bash
+gh workflow run hive-worker.yml \
+  --ref <branch> \
+  -f contracts_only=true
 ```
 
 ### Measurements
@@ -497,12 +514,12 @@ Build seconds from the step log; `kind` job seconds from the Actions jobs API, `
 | Run | When | `worker_base` | Build | `kind` job |
 |---|---|---|---|---|
 | [39100438484](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39100438484) | before [#4400](https://github.com/the-cloud-clockwork/agentihooks/pull/4400) | base always built | 133 s | 259 s |
-| [39213689135](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39213689135) | after | published | 60 s | |
-| [39214709671](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39214709671) | after | published | 76 s | |
+| [39213689135](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39213689135) | after | published | 60 s | not measured |
+| [39214709671](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39214709671) | after | published | 76 s | not measured |
 | [39215504493](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39215504493) | after | published | 58 s | 158 s |
 | [39210694361](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39210694361) | after, base inputs changed since `d7b3ce163` | rebuilt | 226 s | 340 s |
 
-Runs 39100700634 and 39099280946 before the change printed 134 and 137 seconds. A run that reuses the published base still pulls it, so its build time depends on the runner's image cache and registry speed.
+Runs [39100700634](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39100700634) and [39099280946](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099280946) before the change printed 134 and 137 seconds. A run that reuses the published base still pulls it, so its build time depends on the runner's image cache and registry speed.
 
 ### Troubleshooting
 
@@ -511,6 +528,7 @@ Runs 39100700634 and 39099280946 before the change printed 134 and 137 seconds. 
 | `worker_base=rebuilt` with `the worker base inputs changed since <revision>` | a base input changed since the published base was built, or this push's Swarm worker image run has not published yet | none; the run proves the Pod on the base it built. Check that the Swarm worker image run on `dev` published |
 | `worker_base=rebuilt` with a `Worker hive base` warning | the base could not be pulled or read, or its revision could not be fetched or compared | read the warning's reason; pull the base by hand or check that its revision still exists on `origin` |
 | `worker_base=published` but the Pod lacks a base change | a path the base copies is missing from the base inputs | add the path to `base-current.sh` and the test's `INPUTS`; `test_base_inputs_cover_every_base_source_the_wheel_does_not_replace` should fail first |
+| `pod did not register a live hive`, `pod did not acquire hive membership` or `scratch order not acknowledged` | the worker Pod started but failed the hive proof; the build choice does not cause this | read `pods.txt`, `failed-worker.txt`, `previous-worker.txt`, `join.txt` and `previous-join.txt` in the `worker-hive-proof` artifact, written when the script fails |
 | `test_worker_hive_image.py` fails on the build lines | `kind-proof.sh` no longer has one hive-only build and a base plus hive rebuild branch | restore that shape; the tests pin both branches and the `WORKER_IMAGE` default |
 
 ## Historical measurements
