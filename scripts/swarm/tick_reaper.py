@@ -75,6 +75,8 @@ def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str]]]:
     from scripts.scheduler.service import runtime_dir
 
     spared, uid, found = _ancestors(), os.getuid(), []
+    started = _environ(os.getpid())
+    loaded = {key: value for key, value in os.environ.items() if key not in started}
     mine = runtime_dir(os.environ)
     for entry in PROC.iterdir():
         if not entry.name.isdigit() or int(entry.name) in spared:
@@ -83,7 +85,7 @@ def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str]]]:
         try:
             if entry.stat().st_uid != uid or not is_tick(argv := _argv(pid)):
                 continue
-            if runtime_dir({**os.environ, **_environ(pid)}) != mine:
+            if runtime_dir({**loaded, **_environ(pid)}) != mine:
                 continue
             age = _age_s(pid)
         except (OSError, IndexError, ValueError):

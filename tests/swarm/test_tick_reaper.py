@@ -129,3 +129,20 @@ def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
     finally:
         left.kill()
         left.wait()
+
+
+def test_a_tick_started_for_a_scratch_redis_spares_the_ticks_of_the_installed_swarm():
+    installed = {key: value for key, value in os.environ.items() if key != "AGENTIHOOKS_SWARM_REDIS_URL"}
+    left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=installed)
+    reaper = "from scripts.swarm import tick_reaper; print([r.pid for r in tick_reaper.reap(min_age_s=0)])"
+    scratch = {**installed, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0", "PYTHONPATH": str(ROOT)}
+    try:
+        done = subprocess.run(
+            [sys.executable, "-c", reaper], cwd=ROOT, env=scratch, capture_output=True, text=True, timeout=60
+        )
+        assert done.returncode == 0, done.stderr
+        assert str(left.pid) not in done.stdout
+        assert left.poll() is None
+    finally:
+        left.kill()
+        left.wait()
