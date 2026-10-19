@@ -46,7 +46,7 @@ def test_grouped_files_keep_directory_fixtures(tmp_path, order, disable_autoload
     environ.pop("PYTEST_ADDOPTS", None)
     environ.pop("GROUPED_CLASSIFIER", None)
     result = subprocess.run(
-        [sys.executable, "-m", "pytest", "-q", "-n", "0", *(str(files[name]) for name in order)],
+        [sys.executable, "-m", "pytest", "-q", *(str(files[name]) for name in order)],
         cwd=tmp_path,
         env=environ,
         capture_output=True,
