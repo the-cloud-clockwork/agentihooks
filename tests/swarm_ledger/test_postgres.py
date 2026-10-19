@@ -22,6 +22,9 @@ class Cursor:
         if self.raw.fail is not None:
             raise self.raw.fail
 
+    def fetchone(self):
+        return None
+
     def executemany(self, sql, rows):
         self.raw.log.append((sql, list(rows)))
         if self.raw.fail is not None:
@@ -184,8 +187,12 @@ def test_postgres_failures_surface_as_the_sqlite_errors_callers_handle():
     with pytest.raises(sqlite3.IntegrityError, match="^duplicate$") as caught, postgres.mapped():
         raise psycopg2.IntegrityError("duplicate")
     assert isinstance(caught.value.__cause__, psycopg2.IntegrityError)
-    with pytest.raises(sqlite3.OperationalError, match="^gone$") as caught, postgres.mapped():
+    with pytest.raises(sqlite3.OperationalError, match="^absent$") as caught, postgres.mapped():
+        raise psycopg2.errors.UndefinedTable("absent")
+    assert isinstance(caught.value.__cause__, psycopg2.errors.UndefinedTable)
+    with pytest.raises(sqlite3.DatabaseError, match="^gone$") as caught, postgres.mapped():
         raise psycopg2.OperationalError("gone")
+    assert type(caught.value) is sqlite3.DatabaseError
     assert isinstance(caught.value.__cause__, psycopg2.OperationalError)
     with pytest.raises(ValueError, match="^other$"), postgres.mapped():
         raise ValueError("other")
@@ -219,7 +226,7 @@ def test_a_pool_that_cannot_connect_raises_the_sqlite_error(monkeypatch):
         raise psycopg2.OperationalError("refused")
 
     monkeypatch.setattr(psycopg2, "connect", refuse)
-    with pytest.raises(sqlite3.OperationalError, match="^refused$"):
+    with pytest.raises(sqlite3.DatabaseError, match="^refused$"):
         postgres.Pool(ADDRESS).take()
 
 
@@ -243,7 +250,7 @@ def test_a_connection_translates_statements_and_passes_their_parameters(opened):
     ]
 
 
-def test_pragmas_answer_nothing_without_reaching_the_database(opened):
+def test_pragmas_answer_nothing_and_hosted_fences_are_refused(opened):
     connection = postgres.Connection(ADDRESS)
     assert isinstance(connection.execute("PRAGMA foreign_keys=ON"), postgres.Empty)
     with pytest.raises(sqlite3.OperationalError, match="^hosted fences belong to SQLite ledger folders$"):
@@ -260,7 +267,7 @@ def test_begin_opens_a_repeatable_read_snapshot_only_as_the_first_statement(open
         connection.execute(sqlite.BEGIN)
     assert raw.log == [("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ())]
     raw.get_transaction_status = lambda: (_ for _ in ()).throw(psycopg2.InterfaceError("closed"))
-    with pytest.raises(sqlite3.OperationalError, match="^closed$"):
+    with pytest.raises(sqlite3.DatabaseError, match="^closed$"):
         connection.execute(sqlite.BEGIN)
 
 
@@ -279,7 +286,7 @@ def test_connection_failures_and_batches_are_mapped_and_translated(opened, monke
     with pytest.raises(sqlite3.IntegrityError, match="^taken$"):
         connection.executemany("SELECT ?", [(1,)])
     raw.cursor = lambda: (_ for _ in ()).throw(psycopg2.InterfaceError("cursor gone"))
-    with pytest.raises(sqlite3.OperationalError, match="^cursor gone$"):
+    with pytest.raises(sqlite3.DatabaseError, match="^cursor gone$"):
         connection.execute("SELECT 1")
 
 
@@ -304,9 +311,9 @@ def test_commit_and_rollback_failures_are_mapped(opened):
     connection = postgres.Connection(ADDRESS)
     raw = opened.raws[0]
     raw.commit = raw.rollback = lambda: (_ for _ in ()).throw(psycopg2.OperationalError("lost"))
-    with pytest.raises(sqlite3.OperationalError, match="^lost$"):
+    with pytest.raises(sqlite3.DatabaseError, match="^lost$"):
         connection.commit()
-    with pytest.raises(sqlite3.OperationalError, match="^lost$"):
+    with pytest.raises(sqlite3.DatabaseError, match="^lost$"):
         connection.rollback()
 
 
@@ -329,7 +336,7 @@ def test_the_database_folder_opens_a_pooled_connection_and_raises_when_unreachab
 
     monkeypatch.setattr(postgres, "POOLS", {})
     monkeypatch.setattr(psycopg2, "connect", refuse)
-    with pytest.raises(sqlite3.OperationalError, match="^refused$"), database.read_only():
+    with pytest.raises(sqlite3.DatabaseError, match="^refused$"), database.read_only():
         pass
 
 
@@ -398,6 +405,35 @@ def test_a_snapshot_reads_one_repeatable_read_transaction(opened):
         assert snapshot.connection.raw is opened.raws[0]
     assert opened.raws[0].log == [("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ())]
     assert opened.raws[0].commits == 1
+
+
+def test_events_since_reads_one_snapshot_and_relay_holds_take_the_writer_lock(opened):
+    repository = postgres.PostgresLedgerRepository(ADDRESS)
+    repository._ready.add(ADDRESS)
+    with pytest.raises(sqlite.Missing):
+        repository.events_since("s", 3)
+    raw = opened.raws[0]
+    assert raw.log == [
+        ("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ", ()),
+        ("SELECT 1 FROM ledgers WHERE slug=%s", ("s",)),
+    ]
+    lock = "SELECT pg_advisory_xact_lock(1279607879)"
+    for write, arguments, statement in (
+        (
+            repository.hold_revision,
+            ("inbox", "s", 4),
+            "INSERT INTO relay_journal VALUES (%s, %s, %s) ON CONFLICT DO NOTHING",
+        ),
+        (
+            repository.release_revisions,
+            ("inbox", "s", 1, 4),
+            "DELETE FROM relay_journal WHERE kind=%s AND slug=%s AND revision BETWEEN %s AND %s",
+        ),
+        (repository.drop_revisions, ("inbox", "s"), "DELETE FROM relay_journal WHERE kind=%s AND slug=%s"),
+    ):
+        raw.log.clear()
+        write(*arguments)
+        assert raw.log == [(lock, ()), (statement, arguments)]
 
 
 def test_storage_builds_the_shared_repository_only_for_the_default_folder(monkeypatch, tmp_path):

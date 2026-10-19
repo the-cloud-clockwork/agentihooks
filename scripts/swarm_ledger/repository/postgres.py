@@ -1,8 +1,9 @@
 import re
 import sqlite3
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from types import ModuleType
 
 from . import hierarchy
 from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Snapshot, SQLiteLedgerRepository
@@ -66,23 +67,26 @@ class Empty:
         return iter(())
 
 
-def errors():
+def errors() -> ModuleType:
     import psycopg2
+    import psycopg2.errors
     import psycopg2.extras
 
     return psycopg2
 
 
 @contextmanager
-def mapped():
+def mapped() -> Iterator[None]:
     """Raise Postgres failures as the sqlite3 errors every ledger caller already handles."""
     psycopg2 = errors()
     try:
         yield
     except psycopg2.IntegrityError as exc:
         raise sqlite3.IntegrityError(str(exc)) from exc
-    except psycopg2.Error as exc:
+    except psycopg2.errors.UndefinedTable as exc:
         raise sqlite3.OperationalError(str(exc)) from exc
+    except psycopg2.Error as exc:
+        raise sqlite3.DatabaseError(str(exc)) from exc
 
 
 class Pool:
@@ -91,7 +95,7 @@ class Pool:
     def __init__(self, address: str):
         self.address, self.idle, self.lock = address, [], threading.Lock()
 
-    def take(self):
+    def take(self) -> object:
         with self.lock:
             if self.idle:
                 return self.idle.pop()
@@ -128,7 +132,7 @@ class Connection:
         self.pool = pool(address)
         self.raw = self.pool.take()
 
-    def execute(self, sql: str, parameters=()):
+    def execute(self, sql: str, parameters: tuple | Mapping = ()) -> object:
         if sql.startswith(UNFENCEABLE):
             raise sqlite3.OperationalError("hosted fences belong to SQLite ledger folders")
         if sql.startswith("PRAGMA"):
@@ -142,7 +146,7 @@ class Connection:
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
 
-    def executemany(self, sql: str, rows) -> None:
+    def executemany(self, sql: str, rows: Iterable) -> None:
         with mapped(), self.raw.cursor() as cursor:
             errors().extras.execute_batch(cursor, translate(sql, False), list(rows))
 
@@ -164,7 +168,7 @@ class Connection:
     def __enter__(self):
         return self
 
-    def __exit__(self, kind, value, traceback):
+    def __exit__(self, kind, value, traceback) -> bool:
         if kind is None:
             self.commit()
         else:
@@ -177,7 +181,7 @@ class Database:
         self.address = address
 
     @contextmanager
-    def read_only(self):
+    def read_only(self) -> Iterator["Connection"]:
         connection = Connection(self.address)
         try:
             yield connection
@@ -203,7 +207,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
         return self.address, slug
 
     @contextmanager
-    def connect(self):
+    def connect(self) -> Iterator[Connection]:
         connection = Connection(self.address)
         try:
             if self.address not in self._ready:
@@ -222,7 +226,7 @@ class PostgresLedgerRepository(SQLiteLedgerRepository):
             self._ready.add(address)
 
     @contextmanager
-    def snapshot(self):
+    def snapshot(self) -> Iterator[Snapshot]:
         with self.connect() as connection, connection:
             connection.execute(BEGIN)
             yield Snapshot(self, connection)

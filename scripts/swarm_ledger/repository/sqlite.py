@@ -606,6 +606,7 @@ class SQLiteLedgerRepository:
     def events_since(self, slug: str, revision: int) -> list:
         self._adopt(slug)
         with self.connect() as connection:
+            connection.execute(BEGIN)
             if connection.execute(STORED, (slug,)).fetchone() is None:
                 raise Missing(slug)
             return read_events(connection, slug, revision)
@@ -678,12 +679,15 @@ class SQLiteLedgerRepository:
 
     def hold_revision(self, kind: str, slug: str, revision: int) -> None:
         with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             connection.execute(HOLD, (kind, slug, revision))
 
     def release_revisions(self, kind: str, slug: str, since: int, revision: int) -> None:
         with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             connection.execute(RELEASE, (kind, slug, since, revision))
 
     def drop_revisions(self, kind: str, slug: str) -> None:
         with self.connect() as connection, connection:
+            request_metrics.begin(connection, BEGIN_IMMEDIATE)
             connection.execute(DROP, (kind, slug))
