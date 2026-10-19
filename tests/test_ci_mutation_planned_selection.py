@@ -233,7 +233,9 @@ def _line_project(tmp_path, monkeypatch, mode):
     ):
         data.set_context(f"{test}|run")
         path = (
-            "scripts/aaa.py" if mode in {"separate", "deleted"} and test.endswith("test_other") else "scripts/core.py"
+            "scripts/aaa.py"
+            if mode in {"separate", "deleted", "dependency"} and test.endswith("test_other")
+            else "scripts/core.py"
         )
         data.add_lines({str(tmp_path / path): lines if path.endswith("core.py") else [2]})
     data.write()
@@ -257,6 +259,8 @@ def _line_contexts(tmp_path, manifest, mode):
         (tmp_path / "scripts/fresh.py").write_text("def fresh():\n    return 1\n")
     elif mode == "deleted":
         (tmp_path / "scripts/aaa.py").unlink()
+    elif mode == "dependency":
+        (tmp_path / "scripts/aaa.py").write_text("def other():\n    return 2\n")
 
 
 @pytest.mark.parametrize("shift", [0, 2])
@@ -276,6 +280,7 @@ def _line_contexts(tmp_path, manifest, mode):
         "new",
         "deleted",
         "trailing",
+        "dependency",
     ],
 )
 def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
@@ -285,7 +290,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
     if mode == "drift":
         new = source.replace("value + 1", "value + 2")
     elif mode == "module":
-        new += "\nSETTING = 1\n"
+        new = source + "\nSETTING = 1\n"
     elif mode == "trailing":
         new = source + "\n"
     if mode == "header":
@@ -303,7 +308,7 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         ]
     elif mode in {"missing", "parameter"}:
         expected = ["tests/test_core.py"]
-    elif mode in {"data", "deleted"}:
+    elif mode in {"data", "deleted", "dependency"}:
         expected.append("tests/test_core.py::test_other")
     assert selection["scripts/core.py"] == [
         *expected,
