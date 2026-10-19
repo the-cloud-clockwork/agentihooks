@@ -62,7 +62,7 @@ def test_dead_agent_with_room_resumes_its_conversation_and_seat(store, monkeypat
     assert reopened.generation == original.generation
     assert reopened.task == original.task
     assert reopened.pane_id == "reopened:pane"
-    assert reopened.started_at == STARTUP_GRACE_MS + 2
+    assert reopened.started_at == original.started_at
     assert reopened.launched_at == STARTUP_GRACE_MS + 2
     assert reopened.idle_ticks == 0
     assert (reopened.account, reopened.model, reopened.effort) == (original.account, original.model, original.effort)
