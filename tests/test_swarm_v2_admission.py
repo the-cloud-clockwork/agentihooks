@@ -24,7 +24,7 @@ from scripts.swarm_v2.admission import (
 from tests.sv2_ctl03_cases import build, fresh_store, inputs, outcomes, run_case
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 GENERAL = Template("general", Resources(16384, 4000))
 COMPUTE = Template("compute", Resources(8192, 8000))

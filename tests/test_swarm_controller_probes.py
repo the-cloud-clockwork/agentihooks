@@ -6,7 +6,7 @@ import pytest
 from scripts.swarm import controller_probes
 from scripts.swarm.controller import main
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "fixture"
 ENV = {"AGENTIHOOKS_CONTROL_API_PORT": "8780", "AGENTIHOOKS_CONTROL_SWARM": SLUG}
 

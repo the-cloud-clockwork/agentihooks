@@ -4,8 +4,6 @@ from scripts.doctor import inbox, read
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("slug", ["demo", "demo@partition"])
 def test_empty_successor_seat_is_an_aged_wait_until_a_live_agent_binds(slug):

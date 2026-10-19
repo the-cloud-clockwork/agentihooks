@@ -72,7 +72,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator task",
+    "add_item": "by list text needs_operator hive task",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",

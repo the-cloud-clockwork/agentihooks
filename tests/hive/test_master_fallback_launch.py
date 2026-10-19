@@ -5,8 +5,6 @@ import pytest
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def master(setup):
     from scripts.swarm.profile_choice import ProfileDecision

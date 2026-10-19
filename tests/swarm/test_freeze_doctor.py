@@ -13,7 +13,7 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_freeze import PHASES, PLANS, SLICES, FrozenLedger, record, spawned
 from tests.swarm.test_tick import FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 TASKS = [{"id": "fix", "phase": loop.FIX_PHASE}, {"id": "watch", "phase": "p1"}]
 

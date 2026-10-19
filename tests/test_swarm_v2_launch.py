@@ -21,7 +21,7 @@ from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Sessio
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
 from scripts.swarm_v2.runtime.routed import routed
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 ACCOUNT = "fixture"

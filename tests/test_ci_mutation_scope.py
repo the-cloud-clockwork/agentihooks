@@ -10,6 +10,29 @@ def test_hunks_include_only_added_and_changed_head_lines():
     assert changed_lines(diff) == {3, 4, 5, 13}
 
 
+@pytest.mark.parametrize(
+    ("entry", "test", "expected"),
+    [
+        ("tests/a.py", "tests/a.py::t", True),
+        ("tests/a.py", "tests/a.pyc::t", False),
+        ("tests/a.py::t", "tests/a.py::t", True),
+        ("tests/a.py::t", "tests/a.py::t[1]@port", True),
+        ("tests/a.py::t", "tests/a.py::t@port", True),
+        ("tests/a.py::t", "tests/a.py::tx", False),
+        ("tests/a.py::t", "tests/b.py::t", False),
+        ("tests/a.py::T", "tests/a.py::T::t", True),
+        ("tests/a.py::t[a@b]", "tests/a.py::t[a@b]", True),
+    ],
+)
+def test_a_selected_file_or_test_id_owns_its_parametrized_and_grouped_node_ids(entry, test, expected):
+    from scripts.ci_mutation.scope import selects, test_file
+
+    assert selects(entry, test) is expected
+    assert test_file(test) == test.partition("::")[0]
+    assert test_file("tests/a.py") == "tests/a.py"
+    assert test_file("tests/a.py::T::t[1]") == "tests/a.py"
+
+
 def test_tests_are_discovered_by_module_name_and_import(tmp_path):
     tests = tmp_path / "tests"
     tests.mkdir()

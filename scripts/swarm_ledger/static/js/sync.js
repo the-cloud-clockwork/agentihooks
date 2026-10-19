@@ -108,6 +108,7 @@ function applyServer(server) {
   const appliedRev = rev;
   Promise.resolve(render(null, true)).then(() => {
     if (rev !== appliedRev) return;
+    if (!performance.getEntriesByName("ledger-rendered").length) performance.mark("ledger-rendered");
     lsWrite();
     firstState();
   });

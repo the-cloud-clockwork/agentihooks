@@ -6,8 +6,6 @@ import pytest
 from scripts.inbox.store import InboxStore
 from scripts.swarm import delivery, ledger_client
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def test_reply_and_page_relay_retries_keep_one_answer_and_one_page_post(tmp_path, monkeypatch):
     import fakeredis

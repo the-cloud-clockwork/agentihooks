@@ -6,7 +6,7 @@ import pytest
 from scripts.scheduler import process_timer
 from scripts.scheduler.core import Scheduler
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -238,6 +238,20 @@ def test_process_timer_records_are_bounded_across_repeated_waits(redis, monkeypa
         assert redis.hlen(scheduler.key("entries")) == 0
         assert not redis.exists(timer.key)
         assert not redis.exists(scheduler.key("retired"))
+
+
+def test_a_scheduler_that_cannot_start_leaves_no_timer_behind(redis, monkeypatch):
+    def unwritable():
+        raise PermissionError("cache folder")
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", unwritable)
+    scheduler = Scheduler(redis)
+    with pytest.raises(PermissionError):
+        process_timer.Timer(5, redis=redis)
+    assert len(redis.hkeys(scheduler.key("retired"))) == 1
+    scheduler.run_due()
+    assert redis.hlen(scheduler.key("entries")) == 0
+    assert not redis.keys(scheduler.key("wake:*"))
 
 
 def test_delivered_wake_survives_a_paused_consumer(redis, monkeypatch):

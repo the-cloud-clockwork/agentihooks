@@ -11,8 +11,6 @@ from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _resuming
 from tests.swarm.test_tick import FakeRuntime, tasks
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

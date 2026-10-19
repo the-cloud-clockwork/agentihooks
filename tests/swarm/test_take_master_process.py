@@ -14,8 +14,6 @@ from tests.swarm.test_cli import env  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 from tests.swarm.test_take_master_remote import remote_taker  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def native_taker(remote_taker, monkeypatch):  # noqa: F811

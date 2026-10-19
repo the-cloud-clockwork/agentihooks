@@ -18,8 +18,6 @@ from scripts.swarm_ledger import ledger, ledger_server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "alerts-2026-01-01"
 LONG = " ".join(["word"] * 120)
 SIZE_TEXT = "phase {} description has 120 words, limit 100"
@@ -359,8 +357,8 @@ def test_versioned_write_delivers_alert_once(inbox):
         "ops": [op],
         "guards": {"phases": resources.resource_revision(state, "phases")},
     }
-    mutations.apply(ledger_server, SLUG, "", payload)
-    mutations.apply(ledger_server, SLUG, "", payload)
+    mutations.apply(ledger_server.api_services(), SLUG, "", payload)
+    mutations.apply(ledger_server.api_services(), SLUG, "", payload)
     items = inbox.inbox("master") + inbox.inbox(seat_address(SLUG, MASTER)) + inbox.inbox("operator")
     assert len(items) == 1
     assert "phase id p1 is already taken" in items[0].text
@@ -613,7 +611,9 @@ def test_write_with_fifty_alerts_resolves_a_bounded_number_of_names(inbox, monke
     op = {"op": "ack", "id": "one", "by": "writer", "rev": state["_meta"]["rev"]}
     if refused:
         op = {"op": "task_add", "id": "one", "by": "writer", "task": "t1", "title": "Proof", "lane": "eng"}
-    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}})
+    reply = mutations.apply(
+        ledger_server.api_services(), SLUG, "", {"operation_id": "timed", "ops": [op], "guards": {}}
+    )
     assert reply["rejected"] == (["one"] if refused else [])
     assert len(resolved) <= (4 if refused else 2), resolved
 

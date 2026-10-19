@@ -12,8 +12,6 @@ from scripts.swarm_v2.runtime.routed import routed
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("transport,harness", [("legacy", "codex"), ("app_server", "codex"), ("app_server", "claude")])
 @pytest.mark.parametrize("lane", ["eng", "master"])

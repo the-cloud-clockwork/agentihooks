@@ -35,6 +35,7 @@ ORDER += (
     "chat",
     "lifecycle",
     "roles",
+    "agent_cells",
     "swarm",
     "hives",
     "architecture",
