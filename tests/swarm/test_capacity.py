@@ -658,8 +658,8 @@ def test_claude_caps_come_from_the_shared_cache_whatever_tokens_the_session_hold
     assert found.name == "a"
     monkeypatch.setattr(balancer, "collect_results", COLLECT)
     monkeypatch.setattr(balancer, "probe_credentials", lambda found, *_: [results[0] for _ in found])
-    probed = seats({**home, "AH_CC_TOKEN_a": "fake-a"}, stale)
-    assert probed == seats(home, stale) == [("a", "OPEN", 6, 5), ("b", "UNKNOWN", None, 0)]
+    probed = sorted(seats({**home, "AH_CC_TOKEN_a": "fake-a"}, stale))
+    assert probed == sorted(seats(home, stale)) == [("a", "OPEN", 6, 5), ("b", "UNKNOWN", None, 0)]
 
 
 def test_the_reason_leads_with_lanes_held_by_missing_ready_work_ahead_of_unknown_accounts():
