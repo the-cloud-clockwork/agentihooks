@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/proofs.py:scripts.swarm_ledger.api.proofs.x_require_controller__mutmut_5:a5e1f07304b8f2b77671f71759c3f94356122e739476bdbb3b415d8ff9bbaaca": {
+    "reader": "standards_reader",
+    "reason": "Production handler.headers is an http.client.HTTPMessage (an email.message.Message), whose get() is case-insensitive, and require_controller is reached only through routes.global_resource then proofs.route with that real request handler, so both spellings return the same credential."
+  }
+}

@@ -400,7 +400,7 @@ def test_the_api_publishes_decisions_after_the_write(monkeypatch):
     for name in ("relay_to_inbox", "doctor_phrase", "deliver_alerts"):
         monkeypatch.setattr(ledger_server, name, lambda slug, state: None)
     ops = [{"op": "ack", "id": n, "by": LEAD_NAME, "rev": 1} for n in ("a", "b")]
-    reply = mutations.apply(ledger_server, SLUG, "", {"operation_id": "o1", "ops": ops, "guards": {}})
+    reply = mutations.apply(ledger_server.api_services(), SLUG, "", {"operation_id": "o1", "ops": ops, "guards": {}})
 
     assert [type(g).__name__ for g in gates] == ["Gate"]
     assert published == [["b"]]
