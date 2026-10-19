@@ -304,12 +304,12 @@ On an exact hit the build only reads the cache and nothing is saved. On a miss
 the build also writes every stage's layers (`mode=max`) to a separate folder.
 The job keeps and saves that folder under the exact key in its last steps:
 after the requalification match, the registry publication, the floating `dev`
-tag move and the release tagging, and before the attestation upload. The save
-follows the same gates as the publication steps above, so a refused candidate
-saves no cache. A failed publication step saves none either, because the
-remaining steps are skipped, and neither does a run that is cancelled or hits
-the job's sixty minute timeout before the save. A run that qualifies without
-publishing still saves once the requalification matches.
+tag move and the release tagging, and before the attestation upload. The keep
+and save steps have no condition beyond the cache miss. They are skipped when
+an earlier step fails, so a refused candidate or a failed publication saves no
+cache, and neither does a run that is cancelled or hits the job's sixty minute
+timeout before the save. A run that qualifies without publishing skips the
+publication steps and still saves once the requalification matches.
 `tests/contracts/image_manifest/test_workflow.py` checks that the cache is kept
 and saved only after the requalification match and every publication step.
 
