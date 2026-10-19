@@ -641,8 +641,12 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
         queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
     monkeypatch.setattr(p.queue, "run", run)
-    p.store.redis.set(p.store.key("sw", queue_priority.ACTIVE), URL)
+    p.store.redis.set(p.store.key("sw", queue_priority.ACTIVE), "other")
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    with pytest.raises(SwarmError) as held:
+        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+    assert str(held.value) == "another merge queue priority is running; try again when it ends"
+    assert p.store.redis.get(p.store.key("sw", queue_priority.ACTIVE)) == "other"
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
     p.store.redis.delete(p.store.key("sw", queue_priority.ACTIVE))
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [

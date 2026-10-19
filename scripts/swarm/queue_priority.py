@@ -1,5 +1,7 @@
 import json
 import subprocess
+import uuid
+from collections.abc import Collection
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
@@ -30,7 +32,7 @@ class Displaced:
         return sorted(found, key=lambda pull: -pull["order"])
 
 
-def owners(tasks: list[dict], urls) -> list[dict]:
+def owners(tasks: list[dict], urls: Collection[str]) -> list[dict]:
     return [
         task
         for task in tasks
@@ -41,9 +43,11 @@ def owners(tasks: list[dict], urls) -> list[dict]:
     ]
 
 
-def left_out(raw: dict | None, head: str) -> str | None:
-    if raw is None or raw["state"] != "OPEN" or raw["baseRefName"] != "dev" or raw["mergeQueueEntry"] is not None:
-        return None
+def settled(raw: dict | None) -> bool:
+    return raw is None or raw["state"] != "OPEN" or raw["baseRefName"] != "dev" or raw["mergeQueueEntry"] is not None
+
+
+def blocker(raw: dict, head: str) -> str:
     if raw.get("isDraft"):
         return "it became a draft"
     if raw["headRefOid"] != head:
@@ -51,35 +55,38 @@ def left_out(raw: dict | None, head: str) -> str | None:
     return ""
 
 
+def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason: str) -> str:
+    queue_record.Journal(url).write("priority-requeue-skipped", url, head, None, None, reason=reason)
+    for task in owners(tasks, [url]):
+        InboxStore(store.redis).send(
+            "swarm",
+            task["claimed_by"],
+            f"Your pull request {url} left the merge queue in an interrupted priority and stays out "
+            f"because {reason}. Queue it again once its checks pass.",
+            fyi=True,
+        )
+    return f"left {url} out of the merge queue after an interrupted priority: {reason}"
+
+
 def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
     displaced, actions = Displaced(store, slug), []
     for pull in displaced.pulls():
+        if store.redis.exists(store.key(slug, ACTIVE)):
+            break
         url, head = pull["url"], pull["headRefOid"]
         try:
             raw = merge_queue.graphql(merge_queue.STATE, {"url": url}, subprocess.run)["resource"]
-            reason = left_out(raw, head)
-            if reason is None:
+            if settled(raw):
                 displaced.discard(url)
-                continue
-            journal = queue_record.Journal(url)
-            if reason:
+            elif reason := blocker(raw, head):
                 displaced.discard(url)
-                journal.write("priority-requeue-skipped", url, head, None, None, reason=reason)
-                for task in owners(tasks, [url]):
-                    InboxStore(store.redis).send(
-                        "swarm",
-                        task["claimed_by"],
-                        f"Your pull request {url} left the merge queue in an interrupted priority and stays out "
-                        f"because {reason}. Queue it again once its checks pass.",
-                        fyi=True,
-                    )
-                actions.append(f"left {url} out of the merge queue after an interrupted priority: {reason}")
-                continue
-            staged_compatibility.require(url, head, raw.get("body") or "", subprocess.run)
-            merge_queue.graphql(merge_queue.QUEUE, {"id": pull["id"], "head": head}, subprocess.run)
-            displaced.discard(url)
-            journal.write("priority-requeue", url, head, None, None)
-            actions.append(f"requeued {url} left out of the merge queue by an interrupted priority")
+                actions.append(leave_out(store, tasks, url, head, reason))
+            else:
+                staged_compatibility.require(url, head, raw.get("body") or "", subprocess.run)
+                merge_queue.graphql(merge_queue.QUEUE, {"id": pull["id"], "head": head}, subprocess.run)
+                displaced.discard(url)
+                queue_record.Journal(url).write("priority-requeue", url, head, None, None)
+                actions.append(f"requeued {url} left out of the merge queue by an interrupted priority")
         except SwarmError as exc:
             if ledger is not None:
                 ledger.raise_alert(slug, f"merge-priority-requeue:{url}", f"Could not requeue {url}: {exc}")
@@ -110,14 +117,16 @@ def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -
 def apply(
     store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
 ) -> dict:
-    active = store.key(slug, ACTIVE)
-    store.redis.set(active, url, ex=ACTIVE_S)
+    active, token = store.key(slug, ACTIVE), uuid.uuid4().hex
+    if not store.redis.set(active, token, nx=True, ex=ACTIVE_S):
+        raise SwarmError("another merge queue priority is running; try again when it ends")
     try:
         result = merge_queue.prioritize(
             url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
         )
     finally:
-        store.redis.delete(active)
+        if store.redis.get(active) == token:
+            store.redis.delete(active)
     for task in owners(tasks, result["displaced"]):
         InboxStore(store.redis).send(
             sender,
@@ -176,7 +185,7 @@ def replay(
 
 
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
-    actions = [] if store.redis.exists(store.key(slug, ACTIVE)) else requeue(store, slug, tasks, ledger)
+    actions = requeue(store, slug, tasks, ledger)
     records = [(url, json.loads(raw)) for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items()]
     records.sort(key=lambda item: item[1].get("order", 0))
     while records:
