@@ -147,8 +147,8 @@ def pytest_configure(config):
 
 # Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
 # tracing for the whole coverage run. Deadlines are traced after each fixture once Playwright is loaded, so a fixture
-# that imports it lazily is covered before the next fixture opens a page; a test that first imports it in its own body
-# sets unscaled deadlines.
+# that imports it lazily is covered before the next fixture opens a page; a fixture or test that imports it and sets a
+# deadline in its own body sets that deadline unscaled.
 @pytest.hookimpl(hookwrapper=True)
 def pytest_fixture_setup(fixturedef, request):
     yield
