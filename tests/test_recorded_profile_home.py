@@ -55,6 +55,7 @@ def _launch(monkeypatch, world, capsys, target, between):
     seen = {}
 
     def start(launcher, directory, name, args, agent, environ):
+        assert (directory, name, agent) == (world, "recorded", target)
         init_agent._started_marker(launcher).touch()
         init_agent._route_report(launcher).write_text("status=routed\naccount=routed-account\n")
         between(renderer)
@@ -63,14 +64,11 @@ def _launch(monkeypatch, world, capsys, target, between):
         selected = {**_selected(capsys.readouterr().out), binding.REPORT: environ[binding.REPORT]}
         seen["home"] = selected.get(binding.HOMES[target])
         monkeypatch.setattr(binding, "process", lambda: (123, target, selected, "routed-account"))
-        try:
-            binding.validate(canary)
-        except (OSError, ValueError, KeyError):
-            pass
+        binding.validate(canary)
         return []
 
     monkeypatch.setattr(init_agent, "_start_herdr", start)
-    argv = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(world)]
+    argv = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(world), "--name", "recorded"]
     result = init_agent.main([*argv, "--route-timeout", "0.1"], {"XDG_RUNTIME_DIR": str(world / "runtime")})
     from scripts.swarm.runtime import parse_fields
 
@@ -127,6 +125,22 @@ def test_a_recorded_home_of_another_profile_is_refused_and_fails_the_launch_repo
         "state": "failed",
         "reason": "profile selection failed: profile mismatch in rendered binding",
     }
+
+
+@pytest.mark.parametrize("target", ["claude", "codex"])
+def test_init_agent_renders_even_when_its_caller_carries_a_recorded_home(monkeypatch, world, target):
+    stale = _rendered(world / "stale", target, "A home a caller left behind.\n")
+    renderer = Mock()
+    monkeypatch.setattr(select_profile.profiles, "render", renderer)
+    monkeypatch.setattr(select_profile.profiles, "profile_dir", lambda name, worn=(): world / "prepared")
+    monkeypatch.setattr(init_agent, "_launch_command", lambda *args: ("linux", ["terminal"]))
+    monkeypatch.setattr(init_agent.shutil, "which", lambda name: "/bin/agentihooks" if name == "agentihooks" else None)
+    environ = {"XDG_RUNTIME_DIR": str(world / "runtime"), select_profile.RECORDED_HOME: str(stale)}
+    argv = ["--agent", target, "--profile", "engineer", "--dir", str(world), "--dry-run"]
+    assert init_agent.main(argv, environ) == 0
+    renderer.assert_called_once_with(target, "engineer", overlays=[], bundle_revision="")
+    launcher = next((world / "runtime").rglob("*.sh"))
+    assert _selector_argv(launcher)[:2] == ["engineer", f"--home={world / 'prepared' / target}"]
 
 
 @pytest.mark.parametrize("agent", ["claude", "codex"])
