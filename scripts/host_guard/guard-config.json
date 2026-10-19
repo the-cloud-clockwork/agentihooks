@@ -14,6 +14,7 @@
     "dbus-daemon", "dbus-broker"
   ],
   "excludeCommands": [
-    "(^|[ /])agentihooks swarm tick( |$)"
+    "(^|[ /])agentihooks swarm tick( |$)",
+    " -m scripts[.]swarm[.]scheduled_tick( |$)"
   ]
 }
