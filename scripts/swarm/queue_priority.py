@@ -80,7 +80,7 @@ def replay(
     ledger: LedgerClient | None,
 ) -> None:
     try:
-        apply(store, slug, url, record["sender"], tasks, journal, record.get("ahead", ()))
+        apply(store, slug, url, record["sender"], tasks, journal, record.get("ahead"))
     except SwarmError as exc:
         journal.write("priority-failed", url, "", None, None, errors=[str(exc)], **record)
         if ledger is not None:

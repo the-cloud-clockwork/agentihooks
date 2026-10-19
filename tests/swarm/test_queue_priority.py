@@ -501,6 +501,30 @@ def test_deferred_priorities_keep_request_order_and_admit_unqueued_pull(priority
     assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
 
 
+def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monkeypatch):
+    p = priority
+    p.store.redis.set(p.store.key("sw", "merge-priority-order"), 11)
+    p.store.redis.hset(
+        p.store.key("sw", queue_priority.PENDING),
+        URL + "0",
+        json.dumps({"repo": "o/r", "group_head": "group-head", "run_id": 42, "sender": "master", "order": 11}),
+    )
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    p.run["status"] = "completed"
+    applied = []
+
+    def reorder(url, journal, **kwargs):
+        applied.append(url)
+        return {"displaced": [], "errors": []}
+
+    monkeypatch.setattr(merge_queue, "prioritize", reorder)
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"applied deferred merge queue priority for {URL}0",
+        f"applied deferred merge queue priority for {URL}",
+    ]
+    assert applied == [URL + "0", URL]
+
+
 def test_priority_help_explains_operator_lift(capsys):
     with pytest.raises(SystemExit) as stopped:
         cli.main(["sw", "merge", "--help"])
