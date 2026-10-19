@@ -14,6 +14,9 @@ from scripts.swarm_ledger import (
 from scripts.swarm_ledger.adapters import hive, hooks, swarm
 
 
+REAL_DECIDE = ledger_duplicates.decide
+
+
 class Refused(Exception):
     pass
 
@@ -80,9 +83,8 @@ def test_the_ledger_connects_through_the_bound_swarm_store(unbound):
     assert ledger_authority.connect({"SWARM": "x"}) == ("store", {"SWARM": "x"})
 
 
-def test_the_ledger_decides_duplicates_through_the_bound_hooks(monkeypatch):
-    monkeypatch.undo()
-    monkeypatch.setattr(ports, "BOUND", {})
+def test_the_ledger_decides_duplicates_through_the_bound_hooks(monkeypatch, unbound):
+    monkeypatch.setattr(ledger_duplicates, "decide", REAL_DECIDE)
     calls = []
 
     def decide(*args, **kwargs):
