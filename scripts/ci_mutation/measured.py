@@ -3,7 +3,6 @@ import ast
 import json
 import math
 import os
-import statistics
 import subprocess
 from pathlib import Path
 
@@ -22,9 +21,10 @@ SLICE_SECONDS = 120.0
 
 def function_tests(results: list[dict]) -> tuple[dict[str, set[str]], dict[str, float], float]:
     tests, durations = {}, {}
-    ratios = [sum(result["durations"].values()) / result["cpu"] for result in results if result.get("cpu")]
+    timed = [result for result in results if result.get("cpu")]
+    walls, cpu = sum(sum(result["durations"].values()) for result in timed), sum(result["cpu"] for result in timed)
     # Stats fork a bucket per visible CPU onto a runner whose quota is smaller, so recorded walls wait on each other.
-    contention = max(1.0, statistics.median(ratios)) if ratios else 1.0
+    contention = max(1.0, walls / cpu) if cpu else 1.0
     for result in results:
         for function, nodes in result["tests"].items():
             tests.setdefault(function, set()).update(nodes)

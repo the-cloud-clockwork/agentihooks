@@ -116,14 +116,20 @@ def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
 
     name = "scripts.sample.x_f__mutmut_1"
     tests = {"scripts.sample.x_f": ["a", "b"]}
+    contended = 5.6 + 1.25 * (30.0 + 40.0) / 3
     results = [
         {"tests": tests, "durations": {"a": 30.0}, "cpu": 10.0},
         {"tests": {}, "durations": {"b": 40.0}, "cpu": 10.0},
         {"tests": {}, "durations": {"c": 20.0}, "cpu": 10.0},
     ]
-    assert measured_costs([name], results) == pytest.approx({name: 5.6 + 1.25 * (30.0 + 40.0) / 3})
+    assert measured_costs([name], results) == pytest.approx({name: contended})
+    cached = [{**result, "cpu": cpu} for result, cpu in zip(results, (15.0, 5.0, 10.0), strict=True)]
+    cached.append({"tests": {}, "durations": {}, "cpu": 0.0})
+    assert measured_costs([name], cached) == pytest.approx({name: contended})
     uncontended = [{"tests": tests, "durations": {"a": 3.0, "b": 4.0}, "cpu": 10.0}]
     assert measured_costs([name], uncontended) == pytest.approx({name: 5.6 + 1.25 * 7.0})
+    untimed = [{"tests": tests, "durations": {"a": 30.0, "b": 40.0}}]
+    assert measured_costs([name], untimed) == pytest.approx({name: 5.6 + 1.25 * 70.0})
 
 
 def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
