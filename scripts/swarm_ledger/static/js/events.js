@@ -40,6 +40,7 @@ async function takeFrame(block) {
     const raw = data.join("\n");
     if (name === "snapshot" && raw === snapshot) resume();
     else {
+      await scheduler.postTask(() => {}, { priority: "background" });
       const parsed = JSON.parse(raw);
       await scheduler.postTask(() => {}, { priority: "background" });
       onStreamEvent(name, parsed);
