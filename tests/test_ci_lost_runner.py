@@ -446,3 +446,111 @@ def test_the_watchdog_workflow_runs_the_script_every_ten_minutes_with_the_app_to
     assert mint["with"]["permission-organization-self-hosted-runners"] == "read"
     assert steps[-1]["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}", "PYTHONUNBUFFERED": "1"}
     assert steps[-1]["run"] == 'python -m scripts.ci_lost_runner --repo "$GITHUB_REPOSITORY"'
+
+
+CLUSTER = json.loads((ROOT / "tests/fixtures/lost_runner_cluster.json").read_text())
+LOSS = datetime(2026, 10, 19, 17, 13, 27, tzinfo=UTC)
+BOUND = timedelta(seconds=ci_lost_runner.NODE_BOUND_SECONDS)
+
+
+def cluster(pods=None, nodes=None, now=LOSS):
+    return ci_lost_runner.ClusterRunners(
+        CLUSTER["pods"] if pods is None else pods, nodes or CLUSTER["nodes"], now, BOUND
+    )
+
+
+def test_a_runner_pod_running_on_a_ready_node_is_live():
+    assert "anton-oss-light-cpwxt-runner-live1" in cluster()
+
+
+def test_a_runner_pod_that_ended_without_reporting_is_lost_at_once():
+    assert "anton-oss-light-cpwxt-runner-clfn7" not in cluster()
+
+
+def test_a_runner_pod_on_a_node_not_ready_past_the_bound_is_lost():
+    assert "anton-oss-light-cpwxt-runner-down1" not in cluster()
+
+
+def test_a_runner_pod_on_a_node_not_ready_inside_the_bound_is_live():
+    since = datetime.fromisoformat(CLUSTER["nodes"][0]["status"]["conditions"][0]["lastTransitionTime"])
+    assert "anton-oss-light-cpwxt-runner-down1" in cluster(now=since + BOUND - timedelta(seconds=1))
+
+
+def test_a_runner_container_that_terminated_in_a_running_pod_is_lost():
+    pod = json.loads(json.dumps(CLUSTER["pods"][0]))
+    pod["status"]["containerStatuses"][0]["state"] = CLUSTER["pods"][1]["status"]["containerStatuses"][0]["state"]
+    assert "anton-oss-light-cpwxt-runner-live1" not in cluster(pods=[pod])
+
+
+def test_a_runner_pod_missing_from_a_visible_scale_set_is_lost():
+    assert "anton-oss-light-cpwxt-runner-gone1" not in cluster()
+
+
+@pytest.mark.parametrize("name", ["anton-batch-5d778-runner-x1y2z", "workstation", "GitHub Actions 1000223407"])
+def test_a_runner_the_cluster_cannot_see_is_never_counted_lost(name):
+    assert name in cluster()
+
+
+def test_no_runner_pods_means_no_loss():
+    assert "anton-oss-light-cpwxt-runner-gone1" in cluster(pods=[])
+
+
+def test_a_pod_ended_on_a_ready_node_makes_its_job_lost_with_no_grace():
+    jobs = [job("unit (3.12, 6)", "in_progress", None, "anton-oss-light-cpwxt-runner-clfn7", stamp(LOSS)), job("lint")]
+    assert ci_lost_runner.lost_jobs(jobs, cluster(), LOSS, timedelta(0)) == [jobs[0]]
+
+
+def test_cluster_runners_reads_labelled_pods_in_every_namespace_and_the_nodes(monkeypatch):
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        items = CLUSTER["pods"] if "pods" in command else CLUSTER["nodes"]
+        return subprocess.CompletedProcess(command, 0, json.dumps({"items": items}), "")
+
+    monkeypatch.setattr(ci_lost_runner.subprocess, "run", run)
+    runners = ci_lost_runner.cluster_runners("o")
+    assert [command for command, _ in calls] == [
+        ["kubectl", "get", "pods", "--all-namespaces", "-l", ci_lost_runner.SCALE_SET, "-o", "json"],
+        ["kubectl", "get", "nodes", "-o", "json"],
+    ]
+    assert all(kwargs["check"] and kwargs["timeout"] for _, kwargs in calls)
+    assert runners.live == {"anton-oss-light-cpwxt-runner-live1"}
+
+
+def test_a_refused_cluster_read_is_an_error_never_a_loss(monkeypatch, capsys, no_sleep):
+    def refused(command, **kwargs):
+        raise subprocess.CalledProcessError(1, command)
+
+    monkeypatch.setattr(ci_lost_runner.subprocess, "run", refused)
+    monkeypatch.setattr(ci_lost_runner, "_api", Api({RUNS: json.dumps(RUN), JOBS: lines(lost(), gate())}))
+    monkeypatch.chdir(ROOT)
+    assert ci_lost_runner.main(["--repo", "o/r", "--run-id", "7", "--cluster"]) == 1
+    assert json.loads(capsys.readouterr().out)["action"] == "error"
+
+
+def test_main_in_cluster_mode_acts_on_a_fresh_loss_after_a_short_confirmation(monkeypatch, capsys, no_sleep):
+    pages = {
+        RUNS: [json.dumps(RUN), json.dumps(RUN), json.dumps({**RUN, "status": "completed"})],
+        JOBS: [lines(job("lost", "in_progress", None, "anton-oss-light-cpwxt-runner-clfn7", ago(1)), gate())] * 2,
+    }
+    api = Api(pages)
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
+    monkeypatch.setattr(ci_lost_runner, "cluster_runners", lambda _org: cluster(now=datetime.now(UTC)))
+    monkeypatch.chdir(ROOT)
+    assert ci_lost_runner.main(["--repo", "o/r", "--run-id", "7", "--cluster"]) == 0
+    assert json.loads(capsys.readouterr().out)["action"] == "rerun"
+    assert no_sleep[0] == ci_lost_runner.CLUSTER_CONFIRM_SECONDS
+    assert RUNNER_LIST not in api.calls
+
+
+def test_main_leaves_the_run_to_a_watchdog_that_holds_the_lock(monkeypatch, capsys, tmp_path):
+    lock = tmp_path / "lost-runner.lock"
+    held = ci_lost_runner._hold(str(lock))
+    api = Api({})
+    monkeypatch.setattr(ci_lost_runner, "_api", api)
+    assert ci_lost_runner.main(["--repo", "o/r", "--cluster", "--lock", str(lock)]) == 0
+    assert json.loads(capsys.readouterr().out)["reason"] == "another watchdog holds the lock"
+    assert api.calls == []
+    held.close()
+    assert ci_lost_runner._hold(str(lock)) is not None

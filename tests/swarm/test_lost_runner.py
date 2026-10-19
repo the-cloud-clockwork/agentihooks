@@ -1,0 +1,88 @@
+import sys
+from types import SimpleNamespace
+
+import pytest
+
+from scripts.swarm import lost_runner
+from scripts.swarm.store import PREFIX
+
+NOW_MS = 1_792_430_000_000
+
+
+@pytest.fixture
+def swarm(tmp_path, monkeypatch):
+    import fakeredis
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    (tmp_path / "home").mkdir()
+    repo = tmp_path / "repo"
+    (repo / ".github/workflows").mkdir(parents=True)
+    (repo / ".github/workflows/test.yml").write_text("name: Tests\n")
+    return SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True)), SimpleNamespace(repo=str(repo))
+
+
+def spawned():
+    calls = []
+    return calls, lambda command, **kwargs: calls.append((command, kwargs))
+
+
+def kubectl(name):
+    return "/usr/bin/kubectl" if name == "kubectl" else None
+
+
+def test_the_tick_starts_the_cluster_watchdog_in_the_repository_with_its_lock(swarm, tmp_path):
+    store, config = swarm
+    calls, popen = spawned()
+    assert lost_runner.sweep("sw", config, store, NOW_MS, popen, kubectl) == []
+    [(command, kwargs)] = calls
+    assert command == [
+        sys.executable,
+        "-I",
+        "-m",
+        "scripts.ci_lost_runner",
+        "--repo",
+        "{owner}/{repo}",
+        "--cluster",
+        "--lock",
+        str(tmp_path / "home/lost-runner.lock"),
+    ]
+    assert kwargs["cwd"] == config.repo
+    assert kwargs["start_new_session"] is True
+    assert kwargs["stdout"].name == str(tmp_path / "home/lost-runner.log")
+
+
+def test_every_swarm_on_one_repository_starts_it_at_most_once_a_minute(swarm):
+    store, config = swarm
+    calls, popen = spawned()
+    lost_runner.sweep("sw", config, store, NOW_MS, popen, kubectl)
+    lost_runner.sweep("other", config, store, NOW_MS + 1000, popen, kubectl)
+    assert len(calls) == 1
+    assert 0 < store.redis.pttl(f"{PREFIX}:lost-runner:{config.repo}") <= lost_runner.INTERVAL_MS
+    store.redis.delete(f"{PREFIX}:lost-runner:{config.repo}")
+    lost_runner.sweep("sw", config, store, NOW_MS + lost_runner.INTERVAL_MS, popen, kubectl)
+    assert len(calls) == 2
+
+
+def test_a_host_without_kubectl_starts_nothing(swarm):
+    store, config = swarm
+    calls, popen = spawned()
+    assert lost_runner.sweep("sw", config, store, NOW_MS, popen, lambda name: None) == []
+    assert calls == []
+
+
+@pytest.mark.parametrize("repo", ["", "missing"])
+def test_a_repository_without_the_tests_workflow_starts_nothing(swarm, tmp_path, repo):
+    store, _ = swarm
+    calls, popen = spawned()
+    config = SimpleNamespace(repo=repo and str(tmp_path / repo))
+    assert lost_runner.sweep("sw", config, store, NOW_MS, popen, kubectl) == []
+    assert calls == []
+
+
+def test_the_tick_runs_the_sweep_next_to_ci_speed():
+    import inspect
+
+    from scripts.swarm import tick
+
+    source = inspect.getsource(tick.tick)
+    assert "skip_refused(lost_runner.sweep, slug, config, store, now_ms)" in source
