@@ -448,7 +448,7 @@ See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick re
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MCP_KEY_GATEWAY` | — | LiteLLM gateway key; its unit must allow the `grafana` server's `get_annotations` tool. Unset → the tick reads no alerts |
+| `MCP_KEY_GATEWAY` | — | LiteLLM gateway key; its LiteLLM unit must reach the `grafana` MCP server. Unset → the tick reads no alerts |
 | `LANGFUSE_MCP_URL` | — | Gateway MCP endpoint, shared with the Langfuse summary pass. Unset → the tick reads no alerts |
 
 ---

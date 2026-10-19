@@ -20,9 +20,9 @@ webhook posts from any private address. That command, its service and its
 
 ## Configuration
 
-| Variable | Default | Meaning |
+| Variable | Default | Description |
 |---|---|---|
-| `MCP_KEY_GATEWAY` | unset | The LiteLLM gateway key, sent as `Authorization: Bearer`. Its LiteLLM unit must allow the `grafana` MCP server's `get_annotations` tool. |
+| `MCP_KEY_GATEWAY` | unset | The LiteLLM gateway key, sent as `Authorization: Bearer`. Its LiteLLM unit must reach the `grafana` MCP server, whose `get_annotations` tool the gateway advertises as `grafana-get_annotations`. |
 | `LANGFUSE_MCP_URL` | unset | The gateway MCP endpoint. The Langfuse summary pass reads through the same endpoint; `agentihooks init` writes it into `~/.agentihooks/.env` from the profile's `env` block when the file does not set it already. |
 
 With either unset the tick reads nothing and leaves every finding as it is.
@@ -40,8 +40,10 @@ done
 
 ## What the tick reads
 
-Every host tick reads Grafana: `agentihooks swarm tick`, which the swarm timer
-runs, and the distributed controller's tick. Each one, per ledger:
+Only the scheduled tick reads Grafana: `agentihooks swarm tick`, which the
+swarm timer runs, and the distributed controller's tick. The immediate tick that
+`swarm <slug> start` or a master launch runs does not. Each scheduled tick, per
+ledger:
 
 1. Calls the gateway tool `grafana-get_annotations` with `Type: alert`, `From`
    one day back and `Limit: 1000`, bounded at ten seconds. A refused key, an
@@ -71,7 +73,7 @@ How a finding is judged, hidden and brought back is in the
 
 ### Example
 
-A Grafana alert state annotation the tick acts on:
+An alert state annotation of the shape the tick acts on, with illustrative values:
 
 ```json
 {
@@ -86,9 +88,9 @@ A Grafana alert state annotation the tick acts on:
 
 On the next scheduled tick of `rig-grade-swarm` this keeps
 `bottleneck-stage/ci_queue` at 2.5 task hours against a threshold of 1, and the
-tick prints `fired ci_queue on rig-grade-swarm`. A later annotation for the same
-rule with `newState` `Normal` clears it with `cleared ci_queue on
-rig-grade-swarm`.
+tick prints `rig-grade-swarm: fired ci_queue on rig-grade-swarm`. A later
+annotation for the same rule with `newState` `Normal` clears it and the tick
+prints `rig-grade-swarm: cleared ci_queue on rig-grade-swarm`.
 
 ## Alert rules
 
@@ -112,9 +114,10 @@ labels:
   threshold_hours: '1'
 ```
 
-The tick reads Grafana's alert state history, which Grafana records as
-annotations on every state change, so a rule needs no contact point for the
-swarm.
+The tick reads the alert state annotations Grafana writes when a rule changes
+state, and uses no contact point. The `swarm-ledger` webhook contact point and
+its `swarm=bottleneck` route in the same provisioning file still post to the
+removed intake on port 8796; those posts fail and change nothing.
 
 ## Upgrading from the push intake
 
@@ -131,7 +134,7 @@ are no longer read and can be removed from `~/.agentihooks/.env`.
 ls ~/.config/systemd/user/agentihooks-alert-intake.service   # No such file or directory
 ss -ltn | grep ':8796 '                                      # no output: nothing listens
 agentihooks swarm tick                                        # prints "<slug>: fired <stage> on <slug>" for a newly read firing
-agentihooks swarm <slug> status                               # Health lists bottleneck-stage/<stage> while its alert fires
+agentihooks swarm <slug> status                               # lists bottleneck-stage/<stage> among the health findings while its alert fires
 ```
 
 ## Troubleshooting
