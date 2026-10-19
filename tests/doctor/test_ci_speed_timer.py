@@ -247,12 +247,15 @@ def test_a_gap_window_beyond_the_call_budget_is_read_in_slices_until_caught_up(s
 
     store.redis.set(store.key(DOCTOR, "ci-speed"), json.dumps({"last": NOW - gap}))
     monkeypatch.setattr(ci_speed_read, "read", functools.partial(ci_speed_read.read, run=api))
-    reports = []
+    reports, statuses = [], []
     for minute in range(40):
         clock[0] = NOW + minute * 60000
-        cli.timer(store, DOCTOR, clock[0], False)
+        statuses += [action for action in cli.timer(store, DOCTOR, clock[0], False) if "CI speed" in action]
         reports.append(json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))["report"])
     complete = [report["complete"] for report in reports]
+    assert statuses[0].startswith("doctor CI speed: catching up;") and complete[0] is False
+    assert statuses[-1].startswith("doctor CI speed: complete;")
     assert min(start for start in range(len(complete) + 1) if all(complete[start:])) < 35
-    assert max(report["discovered_runs"] for report in reports) <= 51 + len(active)
+    runs_in_one_slice = loop.SPEED_SLICE_MINUTES * 5 + 1
+    assert max(report["discovered_runs"] for report in reports) <= runs_in_one_slice + len(active)
     assert json.loads(store.redis.get(store.key(DOCTOR, "ci-speed")))["last"] == clock[0]
