@@ -84,7 +84,7 @@ def _show(repo: Path, revision: str, path: str) -> str | None:
 
 
 def moved_lines(repo: Path, commit: str, head: str) -> dict[str, dict[int, int] | None]:
-    # --numstat makes a partial clone fetch every missing blob in one batch before the per file reads.
+    # In a partial clone --numstat fetches the missing blobs in one batch; --name-only fetches none.
     command = ["git", "-C", str(repo), "diff", "--no-renames", "--numstat", commit, head, "--", "*.py"]
     moved = {}
     for line in subprocess.run(command, check=True, capture_output=True, text=True).stdout.splitlines():
