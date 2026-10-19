@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/lease.py:scripts.swarm.lease.x__remote__mutmut_24:05b0c84a77fafa41f43eb8f9a08174181a5e6e80a0f59ea4957d276e399c4d86": {
+    "reader": "standards_reader",
+    "reason": "Every caller of _remote (current, acquire, transfer, renew, release) runs only under an if _address(slug) guard, where the scoped route's slug equals slug and its address is non-empty, so ledger_route.url(None) and url(slug) return the same address and the ResourceClient target is unchanged."
+  }
+}

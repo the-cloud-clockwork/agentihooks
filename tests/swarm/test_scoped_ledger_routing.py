@@ -12,8 +12,11 @@ from tests.swarm.test_cli import env as env
 from tests.swarm.test_cli import run
 
 
-def test_set_stores_the_swarm_api_address_and_clears_it(env, capsys):
+def test_set_stores_the_swarm_api_address_and_clears_it(env, capsys, monkeypatch):
+    from scripts.swarm import ledger_cutover
+
     store, _, _ = env
+    monkeypatch.setattr(ledger_cutover, "settings", lambda store, slug, changes: store.update(slug, **changes))
     run("sw", "create", "--repo", "/repo")
     assert store.config("sw").api_url == ""
     assert run("sw", "set", "api-url=https://swarm.example.test:8443") == 0

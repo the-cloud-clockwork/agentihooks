@@ -257,6 +257,7 @@ def tick(slug, store, ledger, runtime, now_ms):
             if config.state == "running":
                 actions += skip_refused(_spawn, slug, config, store, ledger, runtime, rows, doc, now_ms)
         actions += skip_refused(dispatch_seat.run, slug, config, store, runtime, doc, now_ms, sleeping)
+    actions += skip_refused(_night_watch, slug, store, ledger, runtime, doc, now_ms, sleeping)
     actions += timing.call(master_alarm.run, slug, store, runtime, tick_master.promoted(store, slug))
     timing.call(_conversations, slug, store, runtime)
     timing.call(_session_models, slug, store)
@@ -1209,7 +1210,19 @@ def _recover_master(slug, config, store, runtime, now_ms):
     return [f"adopted live master {name}"]
 
 
-def _master(slug, config, store, runtime, now_ms):
+def _night_watch(slug, store, ledger, runtime, doc, now_ms, sleeping):
+    from scripts.swarm.health import night_watch
+
+    def respawn():
+        if master_start.read(store, slug).get("alerted"):
+            store.redis.delete(store.key(slug, "master-start"))
+        with PLACING:
+            return _master(slug, store.config(slug), store, runtime, now_ms, past_host=True)
+
+    return night_watch.run(night_watch.Watch(store, slug, ledger, runtime, doc, now_ms, sleeping, respawn))
+
+
+def _master(slug, config, store, runtime, now_ms, past_host=False):
     store.redis.hdel(MASTER_WAITING, slug)
     agents = store.agents(slug)
     masters = [a for a in agents if a.lane == MASTER]
@@ -1228,7 +1241,7 @@ def _master(slug, config, store, runtime, now_ms):
     if refused := seat_spawn.no_slot(config, runtime, MASTER):
         store.redis.hset(MASTER_WAITING, slug, now_ms)
         return [refused]
-    if held := seat_spawn.host_hold(slug, store, now_ms, MASTER):
+    if not past_host and (held := seat_spawn.host_hold(slug, store, now_ms, MASTER)):
         return [held]
 
     def prepare(record):
