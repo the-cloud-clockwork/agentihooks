@@ -500,7 +500,7 @@ class InboxStore:
                 raw = pipe.hgetall(key)
                 if not raw or raw["state"] in CLOSED or (raw["address"], raw.get(POOL_HOLDER)) != (holder, holder):
                     return None
-                if not expected_receiver and not self.pool.reclaimable(pipe, holder):
+                if raw["state"] != "pending" and not expected_receiver and not self.pool.reclaimable(pipe, holder):
                     return None
                 if expected_receiver:
                     history = self.key("history", item_id)
