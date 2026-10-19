@@ -47,6 +47,16 @@ def texts(store, address):
     return [text for _, text, _ in mail(store, address)]
 
 
+def bounded(passes):
+    calls = []
+
+    def wait(seconds):
+        calls.append(seconds)
+        assert len(calls) <= passes, "the watcher ran past its passes"
+
+    return wait
+
+
 def test_a_pass_records_when_it_ended_and_when_each_input_it_decided_on_was_observed(store):
     found = beat(store, START, rev=7, host=START - 2_000, quota=START - 30_000)
 
@@ -318,6 +328,9 @@ def test_a_pass_that_ended_at_the_epoch_is_stale_a_full_limit_later():
     assert tick_heartbeat.stale(found, LIMIT) == [
         "no tick pass has completed for 10 minutes, the last ended at 00:00 UTC"
     ]
+    assert tick_heartbeat.stale(tick_heartbeat.Heartbeat(LIMIT, {"quota": 0}), LIMIT) == [
+        "the quota it decides on was 10 minutes old at its last pass"
+    ]
 
 
 def test_every_capacity_pass_refreshes_when_the_host_room_was_observed():
@@ -340,15 +353,20 @@ def test_every_capacity_pass_refreshes_when_the_host_room_was_observed():
 
 
 def test_respawn_master_spawns_a_master_into_an_empty_front_door_seat(store, monkeypatch):
-    from scripts.swarm import tick
+    from scripts.swarm import controller, tick
     from tests.swarm.test_tick import FakeRuntime
 
     monkeypatch.setenv("SWARM_HIVE_ID", "home")
     runtime = FakeRuntime()
     agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
 
+    taken, take = [], controller.take_tick_lock
+    monkeypatch.setattr(controller, "take_tick_lock", lambda *args: taken.append(args[-1]) or take(*args))
+
     actions = tick.respawn_master("sw", store, runtime, START)
 
+    assert taken[:1] == [lease.ttl_ms()]
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
     assert lease.current(store, "sw").owner == "home"
     assert actions[0] == "dropped the gone master master@a1b2c3-0001"
     assert len(runtime.masters) == 1
@@ -417,7 +435,7 @@ def test_the_watcher_reports_a_failing_swarm_and_goes_on(store, monkeypatch, cap
 
     monkeypatch.setattr(tick_watch, "watch_pass", failing)
     beat(store, START - LIMIT)
-    tick_watch.run(store, lambda: START, None, lambda seconds: None, passes=1)
+    tick_watch.run(store, lambda: START, None, bounded(1), passes=1)
 
     out = capsys.readouterr()
     assert "other: RuntimeError: redis went away" in out.err
@@ -517,7 +535,7 @@ def test_the_watcher_run_hands_its_repair_to_every_stale_swarm(store):
     beat(store, START - LIMIT)
     asked = []
 
-    tick_watch.run(store, lambda: START, lambda slug, now: asked.append((slug, now)) or [], lambda s: None, passes=1)
+    tick_watch.run(store, lambda: START, lambda slug, now: asked.append((slug, now)) or [], bounded(1), passes=1)
 
     assert asked == [("sw", START)]
 
