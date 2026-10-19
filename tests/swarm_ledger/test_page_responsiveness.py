@@ -32,6 +32,7 @@ def test_outline_marking_does_not_read_geometry_after_writing_link_classes(brows
           const nav = document.getElementById('outline');
           const link = nav.querySelector('a');
           link.classList.remove('on');
+          document.getElementById(link.dataset.target).getBoundingClientRect = () => ({top: 0});
           const reads = [];
           let wrote = false;
           for (const a of nav.querySelectorAll('a')) {
