@@ -251,6 +251,31 @@ def test_the_process_start_falls_back_to_now_without_proc(monkeypatch):
     assert process_start(clock=lambda: 5.0) == 5.0
 
 
+def test_the_process_start_reads_its_start_tick_from_proc(monkeypatch):
+    from types import SimpleNamespace
+
+    import hooks.prompt_budget as pb
+
+    fields = ["S", *(str(n) for n in range(1, 30))]
+    fields[19] = "50000"
+    stat = "4242 (py (x)) " + " ".join(fields)
+    monkeypatch.setattr(pb, "Path", lambda path: SimpleNamespace(read_text=lambda: stat))
+    monkeypatch.setattr(pb.time, "clock_gettime", lambda clock: {pb.time.CLOCK_BOOTTIME: 1000.0}[clock])
+    monkeypatch.setattr(pb.os, "sysconf", lambda name: {"SC_CLK_TCK": 100}[name])
+
+    assert pb.process_start(clock=lambda: 2000.0) == 1500.0
+
+
+def test_the_running_step_is_named_only_while_it_runs():
+    budget = PromptBudget(soft=5, hard=5)
+    seen = []
+
+    budget.run("probe", lambda: seen.append(budget.running))
+
+    assert seen == ["probe"]
+    assert budget.running == ""
+
+
 def test_the_process_start_counts_the_time_since_the_interpreter_began():
     code = "import time\nfrom hooks.prompt_budget import process_start\ntime.sleep(1.5)\nprint(time.monotonic() - process_start())"
 
@@ -378,7 +403,7 @@ def test_a_bad_budget_setting_falls_back_to_the_default(monkeypatch):
 
     assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 10.0
     assert PromptBudget().soft == 10.0
-    for value in ("nan", "inf", "-3"):
+    for value in ("nan", "inf", "-3", "0"):
         monkeypatch.setenv("AGENTIHOOKS_PROMPT_BUDGET_S", value)
         assert seconds("AGENTIHOOKS_PROMPT_BUDGET_S", 10.0) == 10.0
 
