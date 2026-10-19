@@ -527,6 +527,39 @@ def test_deferred_priority_keeps_sequence_after_a_process_restart(priority, monk
     assert applied == [URL + "0", URL]
 
 
+def test_deferred_priority_preserves_a_later_records_earlier_success(priority, monkeypatch):
+    p = priority
+    original_run = p.queue.run
+
+    def run(command, **kwargs):
+        if command[2] == "graphql" and "entries(" in command[4]:
+            command = ["url=" + URL if item.startswith("url=") else item for item in command]
+        return original_run(command, **kwargs)
+
+    monkeypatch.setattr(p.queue, "run", run)
+    monkeypatch.setattr(merge_queue, "require_green", lambda *args: None)
+    for url in (URL, URL + "0", URL + "00"):
+        assert cli.main(["sw", "merge", "priority", url]) == 0
+    key = p.store.key("sw", queue_priority.PENDING)
+    for url, run_id in ((URL + "0", 43), (URL + "00", 44)):
+        record = json.loads(p.store.redis.hget(key, url))
+        record["run_id"] = run_id
+        p.store.redis.hset(key, url, json.dumps(record))
+    states = {42: "in_progress", 43: "completed", 44: "in_progress"}
+    monkeypatch.setattr(merge_queue, "rest", lambda path, run: {"status": states[int(path.rsplit("/", 1)[-1])]})
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"applied deferred merge queue priority for {URL}0",
+    ]
+    assert [entry["pullRequest"]["id"] for entry in p.queue.entries] == ["P1", "P90", "P2", "P3"]
+    states.update({42: "completed", 44: "completed"})
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"applied deferred merge queue priority for {URL}",
+        f"applied deferred merge queue priority for {URL}00",
+    ]
+    assert [entry["pullRequest"]["id"] for entry in p.queue.entries] == ["P1", "P9", "P90", "P900", "P2", "P3"]
+    assert not p.store.redis.hgetall(key)
+
+
 def test_priority_help_explains_operator_lift(capsys):
     with pytest.raises(SystemExit) as stopped:
         cli.main(["sw", "merge", "--help"])
