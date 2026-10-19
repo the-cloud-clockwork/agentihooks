@@ -125,8 +125,9 @@ moment keeps its change. The write makes up to five attempts when a
 concurrent update conflicts, then refuses with
 `execution history kept changing; pane was not committed`. It leaves the
 agent's state-since time untouched, so a reopen never resets how long the agent
-has been in its current state. An execution identity with no stored record is refused with
-`unknown execution identity; display labels cannot identify attempts`. The new
+has been in its current state. An execution identity with no stored record is
+refused with `unknown execution identity; display labels cannot identify
+attempts`. The new
 viewer is also recorded as a viewer of the execution, as every reopened viewer
 is. A viewer that fails to open writes no pane, and the record keeps its
 earlier pane.
@@ -294,8 +295,9 @@ The live qualification also recorded these viewer limits:
 
 - Initial launch can leave its `/rename` command in the composer while the
   server starts work; the recorded thread remains the attachment identity.
-- A viewer pane that retirement leaves open, such as one whose pane id herdr
-  reused, can show `Reconnecting to server…`. Close that viewer pane
+- Retiring the execution left a reopened viewer showing
+  `Reconnecting to server…` during the qualification. A viewer pane that
+  retirement leaves open, as described above, shows the same; close it
   separately.
 - A Codex update prompt can interrupt attachment. Dismiss or complete it in
   the viewer before checking the conversation history.
@@ -309,8 +311,8 @@ The live qualification also recorded these viewer limits:
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |
 | Status or retire names a pane that no longer exists after a reopen | A revision before the reopen pane write left the launch pane on the agent record. Update to a revision that contains it; the next reopen records the new pane. |
-| Reopen fails with `execution history kept changing; pane was not committed` | The viewer is open and recorded as a viewer; the agent record keeps its earlier pane. Close that viewer or keep it, then run the reopen again; a rerun opens another viewer. See [Open and reopen a viewer](#open-and-reopen-a-viewer). |
-| Reopen fails with `unknown execution identity; display labels cannot identify attempts` | The agent is listed, but its execution history holds no entry for that execution identity. Check `agentihooks swarm <id> status` for the agent's current execution. |
+| Reopen fails with `execution history kept changing; pane was not committed` | The viewer is open and recorded as a viewer; the agent record keeps its earlier pane. Close that viewer, then run the reopen again. See [Open and reopen a viewer](#open-and-reopen-a-viewer). |
+| Reopen fails with `unknown execution identity; display labels cannot identify attempts` | The agent is listed, but its execution identity has no stored record. Check `agentihooks swarm <id> status` for the agent's current execution. |
 | Agent runs no attachable app-server | The recorded harness or transport lacks native terminal attachment. Use its normal terminal path. |
 | Closing a viewer leaves the agent working | Expected: the viewer does not own execution lifetime or inbox delivery. |
 
