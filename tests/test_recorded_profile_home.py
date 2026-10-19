@@ -45,7 +45,7 @@ def world(monkeypatch, tmp_path):
     return tmp_path
 
 
-def _launch(monkeypatch, world, capsys, target, between):
+def _launch(monkeypatch, world, capsys, target, between, continued=()):
     prepared = world / "prepared"
     recorded = _rendered(prepared, target, "Instructions init agent prepared.\n")
     canary = binding.inspect(recorded, "engineer", target)["canary"]
@@ -69,14 +69,18 @@ def _launch(monkeypatch, world, capsys, target, between):
 
     monkeypatch.setattr(init_agent, "_start_herdr", start)
     argv = ["--host", "herdr", "--agent", target, "--profile", "engineer", "--dir", str(world), "--name", "recorded"]
-    result = init_agent.main([*argv, "--route-timeout", "0.1"], {"XDG_RUNTIME_DIR": str(world / "runtime")})
+    argv += [*continued, "--route-timeout", "0.1"]
+    result = init_agent.main(argv, {"XDG_RUNTIME_DIR": str(world / "runtime")})
     from scripts.swarm.runtime import parse_fields
 
     return result, parse_fields(capsys.readouterr().out), seen, recorded, renderer
 
 
+@pytest.mark.parametrize("continued", [(), ("--resume", "conversation")])
 @pytest.mark.parametrize("target", ["claude", "codex"])
-def test_a_package_change_between_prepare_and_launch_mounts_the_recorded_home(monkeypatch, world, capsys, target):
+def test_a_package_change_between_prepare_and_launch_mounts_the_recorded_home(
+    monkeypatch, world, capsys, target, continued
+):
     pulled = world / "pulled"
     _rendered(pulled, target, "Instructions a later pull of dev renders.\n")
 
@@ -84,7 +88,7 @@ def test_a_package_change_between_prepare_and_launch_mounts_the_recorded_home(mo
         renderer.reset_mock()
         monkeypatch.setattr(select_profile.profiles, "profile_dir", lambda name, worn=(): pulled)
 
-    result, fields, seen, recorded, renderer = _launch(monkeypatch, world, capsys, target, pull)
+    result, fields, seen, recorded, renderer = _launch(monkeypatch, world, capsys, target, pull, continued)
     assert seen == {"selector": 0, "home": str(recorded)}
     renderer.assert_not_called()
     assert result == 0
@@ -125,6 +129,27 @@ def test_a_recorded_home_of_another_profile_is_refused_and_fails_the_launch_repo
         "state": "failed",
         "reason": "profile selection failed: profile mismatch in rendered binding",
     }
+
+
+@pytest.mark.parametrize("operator", [False, True])
+def test_a_swarm_codex_selector_mounts_its_recorded_home_but_never_the_operator_home(
+    monkeypatch, world, capsys, operator
+):
+    home = _rendered(world / "isolated", "codex", "Isolated swarm Codex home.\n")
+    monkeypatch.setattr(
+        select_profile.profiles, "operator_codex_home", lambda: home if operator else world / "operator"
+    )
+    renderer = Mock()
+    monkeypatch.setattr(select_profile.profiles, "render", renderer)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "slug")
+    argv = ["engineer", f"--home={home}", "--agent", "codex", "--dry-run", "--"]
+    assert select_profile.main(argv) == (2 if operator else 0)
+    renderer.assert_not_called()
+    output = capsys.readouterr()
+    if operator:
+        assert output.err == "agentihooks select-profile: swarm codex profile resolves to the operator Codex home\n"
+    else:
+        assert _selected(output.out)["CODEX_HOME"] == str(home)
 
 
 @pytest.mark.parametrize("target", ["claude", "codex"])
