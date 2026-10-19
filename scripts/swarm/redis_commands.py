@@ -39,9 +39,9 @@ def scheduler_keys(deployment: str) -> dict[str, str]:
         return {label: scheduler.key(suffix) for label, suffix in SCHEDULER_KEYS.items()}
 
 
-def consumer_map(deployment: str) -> dict:
+def consumer_map(deployment: str, root: Path = ROOT) -> dict:
     """Each consumer's Redis role, the commands it reaches with the code that sends each, and its scheduler keys."""
-    program = Program(parse(ROOT))
+    program = Program(parse(root))
     keys = scheduler_keys(deployment)
     consumers = {}
     for name, consumer in CONSUMERS.items():
@@ -52,8 +52,8 @@ def consumer_map(deployment: str) -> dict:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="python -m scripts.swarm.redis_commands", description=__doc__)
-    parser.add_argument("--deployment", default="distributed", help="the AGENTIHOOKS_DEPLOYMENT the consumers run in")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--deployment", default="distributed")
     args = parser.parse_args(argv)
     json.dump(consumer_map(args.deployment), sys.stdout, indent=1, sort_keys=True)
     print()

@@ -5,13 +5,13 @@ import itertools
 from functools import cache
 
 import redis
-from redis.client import Pipeline, PubSub
+from redis.client import PubSub
 from redis.lock import Lock
 
 LUA = "redis.call("
 SAMPLES = ("k", 1, ["k"], {"k": "v"})
 SPARE = 3
-REFUSED = (TypeError, ValueError, AttributeError, redis.RedisError)
+REFUSED = (TypeError, ValueError, AttributeError, IndexError, redis.RedisError)
 
 
 class _Recorder(redis.Redis):
@@ -22,9 +22,16 @@ class _Recorder(redis.Redis):
     def execute_command(self, *args, **options):
         name = str(args[0]).upper()
         self.sent.append(name)
-        if name.endswith("SCAN"):
-            return 0, []
         return 1 if name in ("SET", "EVALSHA") else None
+
+
+class _Subscriber(PubSub):
+    def __init__(self, recorder: _Recorder):
+        super().__init__(recorder.connection_pool)
+        self.recorder = recorder
+
+    def execute_command(self, *args):
+        self.recorder.sent.append(str(args[0]).upper())
 
 
 def lua(text: str) -> set[str]:
@@ -32,31 +39,21 @@ def lua(text: str) -> set[str]:
     found = set()
     for part in text.split(LUA)[1:]:
         quoted = part.lstrip()
-        if quoted[:1] in ("'", '"') and (end := quoted.find(quoted[0], 1)) > 1:
-            found.add(quoted[1:end].upper())
+        if quoted[:1] in ("'", '"'):
+            found.add(quoted[1:].partition(quoted[0])[0].upper())
     return found
-
-
-def _target(owner: type, recorder: redis.Redis):
-    if owner is Pipeline:
-        return recorder.pipeline(transaction=False)
-    return recorder.pubsub() if owner is PubSub else recorder
 
 
 def _record(owner: type, name: str, values: tuple) -> tuple[list[str], bool]:
     recorder = _Recorder()
-    target = _target(owner, recorder)
-    completed = False
+    target = _Subscriber(recorder) if owner is PubSub else recorder
     try:
         result = getattr(target, name)(*values)
         if inspect.isgenerator(result):
             list(result)
-        completed = True
     except REFUSED:
-        pass
-    if owner is Pipeline:
-        recorder.sent.extend(str(args[0]).upper() for args, _ in target.command_stack)
-    return recorder.sent, completed
+        return recorder.sent, False
+    return recorder.sent, True
 
 
 @cache

@@ -1,4 +1,5 @@
 import json
+import os
 
 import pytest
 import redis
@@ -11,17 +12,44 @@ pytestmark = pytest.mark.unit
 
 APP = """
 from scripts.lease import acquire
-from scripts.timer import Timer
+from scripts.store import connect
+from scripts.timer import Event, Other
 
 
 def main():
+    from scripts.timer import Timer
+
     acquire()
+    Other()
     with Timer() as timer:
         timer.wait()
+        timer.fire()
+    Timer.build()
+    items[0].zrem("k", "m")
+    helper.getrange()
+    helper.get("helper")
+    shelf.lrem()
+    shelf.keys()
+
+
+def later():
+    from scripts.timer import Timer
+
+    t = Timer()
+    t.wait()
+    o = Other()
+    o.blink()
+    Event()
+    s = connect()
+    s.drain()
 
 
 def admin(client):
     client.acl_setuser("member")
+
+
+if __name__ == "__main__":
+    admin(None)
 """
 LEASE = """
 EXTEND = "return redis.call('PEXPIRE', KEYS[1], ARGV[1])"
@@ -29,29 +57,137 @@ EXTEND = "return redis.call('PEXPIRE', KEYS[1], ARGV[1])"
 
 def acquire(redis):
     redis.incr("lease")
+    redis.execute_command("XINFO", "STREAM", "lease")
+    sub = redis.pubsub()
+    sub.subscribe("lease")
 """
 TIMER = """
 class Timer:
     def __enter__(self):
+        self.redis.rpush(self.key, "ready")
+        self.close()
         return self
+
+    def close(self):
+        self.redis.delete(self.key)
 
     def wait(self):
         self.redis.blpop(self.key)
+        self.listener.psubscribe("timer")
+
+    def __hidden(self):
+        self.redis.srem(self.key, "hidden")
+
+    @classmethod
+    def build(cls):
+        return cls.update()
+
+    @classmethod
+    def update(cls):
+        return cls.redis.persist("timer")
+
+
+class Other:
+    def fire(self):
+        self.redis.lpush(self.key, "fired")
+
+    def lrem(self):
+        return None
 
 
 class Event:
     def wait(self):
         self.redis.lpop(self.key)
+
+    def blink(self):
+        self.redis.ltrim(self.key, 0, 1)
 """
+STORE = """
+class Base:
+    def flush(self):
+        self.redis.unlink(self.key)
+
+
+class Store(Base):
+    def drain(self):
+        self.redis.zadd(self.key, {"m": 1})
+        self.flush()
+
+
+def connect():
+    return Store()
+
+
+def getrange():
+    return None
+"""
+PACKAGE = """
+from .sib import two
+
+
+def start():
+    from .rel import one
+
+    one()
+    two()
+"""
+ENTRY = """
+from .rel import one
+from sib import two
+import scripts.pkg.sib as sib_mod
+import scripts.pkg.sib
+
+
+def main():
+    one()
+    two()
+
+
+def aliased():
+    sib_mod.three()
+
+
+def dotted():
+    scripts.pkg.sib.four()
+"""
+SIB = """
+def two(redis):
+    redis.sadd("k", "m")
+
+
+def three(redis):
+    redis.scard("k")
+
+
+def four(redis):
+    redis.hlen("k")
+"""
+FILES = {
+    "scripts/__init__.py": "",
+    "scripts/app.py": APP,
+    "scripts/lease.py": LEASE,
+    "scripts/timer.py": TIMER,
+    "scripts/store.py": STORE,
+    "scripts/pkg/__init__.py": PACKAGE,
+    "scripts/pkg/entry.py": ENTRY,
+    "scripts/pkg/rel.py": "def one(redis):\n    redis.hset('k', 'f', 'v')\n",
+    "scripts/pkg/sib.py": SIB,
+    "scripts/pkg/deep/__init__.py": "",
+    "scripts/pkg/deep/leaf.py": "from ..rel import one\n\n\ndef main():\n    one()\n",
+}
 
 
 @pytest.fixture
-def program(tmp_path):
-    package = tmp_path / "scripts"
-    package.mkdir()
-    for name, text in {"__init__": "", "app": APP, "lease": LEASE, "timer": TIMER}.items():
-        (package / f"{name}.py").write_text(text)
-    return code_reach.Program(code_reach.parse(tmp_path))
+def tree(tmp_path):
+    for name, text in FILES.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return tmp_path
+
+
+@pytest.fixture
+def program(tree):
+    return code_reach.Program(code_reach.parse(tree))
 
 
 @pytest.fixture(scope="module")
@@ -83,15 +219,67 @@ def test_lua_scripts_name_the_commands_they_call():
 def test_only_commands_reached_from_the_entry_point_are_issued(program):
     reached = program.reach(("scripts.app:main",))
     issued = program.commands(reached)
-    assert set(issued) == {"INCRBY", "BLPOP", "PEXPIRE"}
+    assert set(issued) == {"INCRBY", "XINFO", "SUBSCRIBE", "PEXPIRE", "RPUSH", "DEL", "BLPOP", "PERSIST"}
     assert issued["INCRBY"] == {"scripts.lease:acquire"}
     assert issued["BLPOP"] == {"scripts.timer:Timer.wait"}
+    assert reached["scripts.app:main"] == ""
     assert reached["scripts.timer:Timer.wait"] == "scripts.app:main"
+    assert reached["scripts.timer:Timer.__enter__"] == "scripts.timer:Timer"
+
+
+def test_a_method_read_on_an_object_of_no_known_class_reaches_any_reached_class(program):
+    reached = program.reach(("scripts.app:later",))
+    assert set(program.commands(reached)) == {"BLPOP", "RPUSH", "DEL", "ZADD", "UNLINK"}
+    assert reached["scripts.store:Store.drain"] == "scripts.app:later"
+
+
+@pytest.mark.parametrize(
+    ("entry", "commands"),
+    [
+        ("scripts.pkg:start", {"HSET", "SADD"}),
+        ("scripts.pkg.entry:main", {"HSET", "SADD"}),
+        ("scripts.pkg.entry:aliased", {"SCARD"}),
+        ("scripts.pkg.entry:dotted", {"HLEN"}),
+        ("scripts.pkg.deep.leaf:main", {"HSET"}),
+    ],
+)
+def test_imports_resolve_relative_sibling_aliased_and_dotted(program, entry, commands):
+    assert set(program.commands(program.reach((entry,)))) == commands
 
 
 def test_an_entry_point_missing_from_the_code_is_refused(program):
-    with pytest.raises(KeyError, match="scripts.app:gone"):
-        program.reach(("scripts.app:main", "scripts.app:gone"))
+    with pytest.raises(KeyError, match="no function scripts.app:gone, scripts.app:lost under scripts, hooks"):
+        program.reach(("scripts.app:main", "scripts.app:gone", "scripts.app:lost"))
+
+
+def test_scheduler_keys_follow_the_deployment_outside_any_hive(monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_DEPLOYMENT", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "member")
+    assert redis_commands.scheduler_keys("distributed") == {
+        "scheduler entries": f"{ROOT}:scheduler:probe:entries",
+        "scheduler wake": f"{ROOT}:scheduler:probe:wake:probe",
+    }
+    assert os.environ["AGENTIHOOKS_HIVE_ID"] == "member"
+
+
+def test_the_map_lists_each_consumer_role_commands_senders_and_keys(monkeypatch, tree):
+    monkeypatch.setattr(redis_commands, "CONSUMERS", {"app": redis_commands.Consumer("worker", ("scripts.app:later",))})
+    assert redis_commands.consumer_map("distributed", tree) == {
+        "deployment": "distributed",
+        "consumers": {
+            "app": {
+                "role": "worker",
+                "commands": {
+                    "BLPOP": ["scripts.timer:Timer.wait"],
+                    "DEL": ["scripts.timer:Timer.close"],
+                    "RPUSH": ["scripts.timer:Timer.__enter__"],
+                    "UNLINK": ["scripts.store:Base.flush"],
+                    "ZADD": ["scripts.store:Store.drain"],
+                },
+                "keys": redis_commands.scheduler_keys("distributed"),
+            }
+        },
+    }
 
 
 def test_every_consumer_reaches_redis(published):
@@ -99,8 +287,7 @@ def test_every_consumer_reaches_redis(published):
 
 
 def test_the_tick_reads_the_swarm_index_before_ticking_each_swarm(published):
-    commands = published["tick"]["commands"]
-    assert "scripts.swarm.store:RedisStore.slugs" in commands["SMEMBERS"]
+    assert "scripts.swarm.store:RedisStore.slugs" in published["tick"]["commands"]["SMEMBERS"]
 
 
 def test_the_map_names_each_consumer_with_its_redis_role(published):
@@ -132,7 +319,9 @@ def test_administrator_commands_reach_no_consumer(published):
         assert not {command for command in consumer["commands"] if command.startswith(("ACL", "CONFIG"))}
 
 
-def test_main_prints_the_map_for_the_named_deployment(monkeypatch, capsys):
-    monkeypatch.setattr(redis_commands, "consumer_map", lambda deployment: {"deployment": deployment})
+def test_main_prints_the_sorted_map_for_the_distributed_deployment_by_default(monkeypatch, capsys):
+    monkeypatch.setattr(redis_commands, "consumer_map", lambda deployment: {"deployment": deployment, "a": 1})
+    assert redis_commands.main([]) == 0
+    assert capsys.readouterr().out == '{\n "a": 1,\n "deployment": "distributed"\n}\n'
     assert redis_commands.main(["--deployment", "cloud"]) == 0
-    assert json.loads(capsys.readouterr().out) == {"deployment": "cloud"}
+    assert json.loads(capsys.readouterr().out)["deployment"] == "cloud"

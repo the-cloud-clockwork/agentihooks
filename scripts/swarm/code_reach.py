@@ -15,11 +15,13 @@ from functools import cache
 from pathlib import Path
 
 import redis
-from redis.client import Pipeline, PubSub
+from redis.client import PubSub
 
 from scripts.swarm.redis_wire import HELPERS, lua, methods, wire
 
 PACKAGES = ("scripts", "hooks")
+OWN = ("self", "cls")
+RAW = "execute_command"
 
 
 @dataclass
@@ -48,7 +50,7 @@ def _module_name(root: Path, path: Path) -> str:
 
 def parse(root: Path) -> dict:
     return {
-        _module_name(root, path): (ast.parse(path.read_text(encoding="utf-8")), path.name == "__init__.py")
+        _module_name(root, path): (ast.parse(path.read_bytes()), path.stem == "__init__")
         for package in PACKAGES
         for path in sorted((root / package).rglob("*.py"))
     }
@@ -61,6 +63,8 @@ def _dotted(node: ast.expr) -> str:
 
 
 def _tail(node: ast.expr) -> str:
+    if isinstance(node, ast.Call):
+        return _tail(node.func)
     if isinstance(node, ast.Attribute):
         return node.attr
     return node.id if isinstance(node, ast.Name) else ""
@@ -71,30 +75,30 @@ def _walk(body: list):
         yield from ast.walk(statement)
 
 
-def _absolute(module: str, is_package: bool, node: ast.ImportFrom) -> str:
+def _absolute(module: str, is_package: bool, node: ast.ImportFrom, modules: dict) -> str:
+    package = module if is_package else module.rpartition(".")[0]
     if not node.level:
         base = node.module or ""
-        if base.split(".")[0] in PACKAGES:
-            return base
-        return f"{module if is_package else module.rpartition('.')[0]}.{base}"
-    parts = module.split(".") if is_package else module.split(".")[:-1]
+        sibling = f"{package}.{base}"
+        return sibling if sibling.partition(".")[0] in PACKAGES and sibling in modules else base
+    parts = package.split(".")
     parts = parts[: len(parts) - node.level + 1]
     return ".".join([*parts, *([node.module] if node.module else [])])
 
 
-def _bind(module: str, is_package: bool, node: ast.AST, scope: dict) -> None:
+def _bind(module: str, is_package: bool, node: ast.AST, scope: dict, modules: dict) -> None:
     if isinstance(node, ast.Import):
         for alias in node.names:
             target = alias.name if alias.asname else alias.name.split(".")[0]
             scope[alias.asname or target] = [f"@{target}"]
     elif isinstance(node, ast.ImportFrom):
-        base = _absolute(module, is_package, node)
+        base = _absolute(module, is_package, node, modules)
         for alias in node.names:
             scope[alias.asname or alias.name] = [f"@{base}.{alias.name}"]
 
 
 def _assigned(node: ast.AST) -> tuple[str, ast.Call] | None:
-    if isinstance(node, ast.Assign) and len(node.targets) == 1:
+    if isinstance(node, ast.Assign):
         target, value = node.targets[0], node.value
     elif isinstance(node, ast.withitem):
         target, value = node.optional_vars, node.context_expr
@@ -104,8 +108,7 @@ def _assigned(node: ast.AST) -> tuple[str, ast.Call] | None:
 
 
 def _main_guard(node: ast.AST) -> bool:
-    test = node.test if isinstance(node, ast.If) else None
-    return isinstance(test, ast.Compare) and isinstance(test.left, ast.Name) and test.left.id == "__name__"
+    return isinstance(node, ast.If) and "__name__" in {n.id for n in ast.walk(node.test) if isinstance(n, ast.Name)}
 
 
 def _dunder(name: str) -> bool:
@@ -120,17 +123,18 @@ class Program:
         self.units: dict[str, Unit] = {}
         self.scopes: dict[str, dict] = {}
         self.members: dict[str, dict[str, str]] = {}
+        self.defined: set[str] = set()
+        self.resolving: set[tuple[str, str]] = set()
         for module, (tree, is_package) in modules.items():
             self._index(module, tree, is_package)
         self.clients, self.subscribers = self._receivers()
 
     def _add(self, key: str, module: str, body: list, owner: str = "") -> None:
         unit = self.units[key] = Unit(module, body, owner)
-        bound = {
-            found[0]: found[1].func.id
-            for node in _walk(body)
-            if (found := _assigned(node)) and isinstance(found[1].func, ast.Name)
-        }
+        bound = {}
+        for node in _walk(body):
+            if (found := _assigned(node)) and isinstance(found[1].func, ast.Name):
+                bound[found[0]] = found[1].func.id
         for node in _walk(body):
             if isinstance(node, ast.Name):
                 unit.names.add(node.id)
@@ -138,10 +142,9 @@ class Program:
                 self._attribute(unit, node, bound)
 
     def _attribute(self, unit: Unit, node: ast.Attribute, bound: dict) -> None:
-        if "." in (dotted := _dotted(node)):
-            unit.dotted.add(dotted)
-        base = node.value.id if isinstance(node.value, ast.Name) else ""
-        if unit.owner and base in ("self", "cls"):
+        unit.dotted.add(_dotted(node))
+        base = _tail(node.value)
+        if unit.owner and base in OWN:
             unit.own.add(node.attr)
         elif base in bound:
             unit.typed.add((bound[base], node.attr))
@@ -155,11 +158,12 @@ class Program:
             if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 self._add(f"{module}:{node.name}", module, [node])
                 scope[node.name] = [f"{module}:{node.name}"]
+                self.defined.add(node.name)
             elif isinstance(node, ast.ClassDef):
                 scope[node.name] = [self._class(module, node)]
             elif not _main_guard(node):
                 loose.append(node)
-                _bind(module, is_package, node, scope)
+                _bind(module, is_package, node, scope, self.modules)
         self._add(f"{module}:", module, loose)
 
     def _class(self, module: str, node: ast.ClassDef) -> str:
@@ -170,13 +174,18 @@ class Program:
         for item in defs:
             members[item.name] = f"{owner}.{item.name}"
             self._add(members[item.name], module, [item], owner)
+            self.defined.add(item.name)
         return owner
 
-    def resolve(self, module: str, name: str, scope: dict | None = None) -> list[str]:
+    def resolve(self, module: str, name: str, scope: dict) -> list[str]:
         """The units a name read in a module stands for: a function, a class, or what an import binds it to."""
+        if (module, name) in self.resolving:
+            return []
+        self.resolving.add((module, name))
         found = []
-        for target in (scope or {}).get(name) or self.scopes.get(module, {}).get(name, []):
+        for target in scope.get(name) or self.scopes[module].get(name, []):
             found.extend(self._import(target[1:]) if target.startswith("@") else [target])
+        self.resolving.discard((module, name))
         return found
 
     def _import(self, dotted: str) -> list[str]:
@@ -184,14 +193,14 @@ class Program:
             return [f"{dotted}:"]
         owner, _, name = dotted.rpartition(".")
         if owner in self.modules:
-            return [f"{owner}:", *self.resolve(owner, name)]
-        return []
+            return [f"{owner}:", *self.resolve(owner, name, {})]
+        return self._import(owner) if owner else []
 
     def _nested(self, unit: Unit) -> dict:
         scope: dict = {}
         for node in _walk(unit.body):
             if isinstance(node, (ast.Import, ast.ImportFrom)):
-                _bind(unit.module, self.modules[unit.module][1], node, scope)
+                _bind(unit.module, self.modules[unit.module][1], node, scope, self.modules)
         return scope
 
     def edges(self, unit: Unit) -> list[str]:
@@ -203,13 +212,11 @@ class Program:
         for name in unit.dotted:
             head, _, rest = name.partition(".")
             for target in scope.get(head) or self.scopes[unit.module].get(head, []):
-                if target.startswith("@"):
-                    found.extend(self._import(f"{target[1:]}.{rest.split('.')[0]}"))
+                found.extend(self._import(f"{target[1:]}.{rest}") if target.startswith("@") else [])
         for constructor, name in unit.typed:
             for owner in self.resolve(unit.module, constructor, scope):
                 found.extend([self.members[owner][name]] if name in self.members.get(owner, {}) else [])
-        members = self.members.get(unit.owner, {})
-        return found + [members[name] for name in unit.own if name in members]
+        return found + [self.members[unit.owner][name] for name in unit.own if name in self.members[unit.owner]]
 
     def loose(self, unit: Unit) -> set[str]:
         """Method names a unit reads on objects of no known class, which any reached class may answer."""
@@ -220,7 +227,8 @@ class Program:
             if name not in _stdlib()
             and not any(owner in self.members for owner in self.resolve(unit.module, constructor, scope))
         }
-        return unit.reads | untyped | (unit.own - self.members.get(unit.owner, {}).keys())
+        inherited = {name for name in unit.own if name not in self.members[unit.owner]} if unit.owner else set()
+        return unit.reads | untyped | inherited
 
     def reach(self, entries: tuple[str, ...]) -> dict[str, str]:
         """Every unit the entries reach, each mapped to the unit that first reached it."""
@@ -241,18 +249,18 @@ class Program:
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 sent |= lua(node.value)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
-                sent |= self._call(node, _tail(node.func.value), node.func.attr)
+                sent |= self._call(node)
         return sent
 
-    def _call(self, node: ast.Call, receiver: str, name: str) -> frozenset[str]:
-        if name == "execute_command" and node.args and isinstance(node.args[0], ast.Constant):
-            return frozenset({str(node.args[0].value).upper()})
+    def _call(self, node: ast.Call) -> frozenset[str]:
+        receiver, name = _tail(node.func.value), node.func.attr
+        if name == RAW:
+            first = node.args[0] if node.args else None
+            return frozenset({str(first.value).upper()}) if isinstance(first, ast.Constant) else frozenset()
         if receiver in self.clients and name in HELPERS:
             return HELPERS[name]()
         if receiver in self.clients and name in methods(redis.Redis):
             return wire(redis.Redis, name)
-        if receiver in self.clients and name in methods(Pipeline):
-            return wire(Pipeline, name)
         if receiver in self.subscribers and name in methods(PubSub):
             return wire(PubSub, name)
         return frozenset()
@@ -260,8 +268,7 @@ class Program:
     def _receivers(self) -> tuple[set[str], set[str]]:
         """Names holding a Redis client, which call a command no function here or in the standard library defines,
         and names bound to a pubsub handle."""
-        common = _stdlib() | {name for members in self.members.values() for name in members}
-        common |= {key.partition(":")[2] for key in self.units}
+        common = _stdlib() | self.defined | {RAW}
         clients, subscribers = set(), set()
         for unit in self.units.values():
             for node in _walk(unit.body):
