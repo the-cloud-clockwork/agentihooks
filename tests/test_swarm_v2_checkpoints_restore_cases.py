@@ -15,4 +15,3 @@ def test_package_cases_match_committed_evidence(tmp_path, case):
     path = EVIDENCE / f"{case.lower()}-result.json"
     expected = json.loads(path.read_text()) if path.exists() else None
     assert observed == expected, json.dumps(observed, sort_keys=True)
-
