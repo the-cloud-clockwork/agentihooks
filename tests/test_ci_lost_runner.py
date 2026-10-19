@@ -614,3 +614,20 @@ def test_main_leaves_the_run_to_a_watchdog_that_holds_the_lock(monkeypatch, caps
     again = ci_lost_runner._hold(str(lock))
     assert again is not None
     again.close()
+
+
+def test_main_with_a_free_lock_holds_it_while_it_scans(monkeypatch, capsys, tmp_path):
+    lock = tmp_path / "lost-runner.lock"
+    seen = []
+    api = Api(listing())
+
+    def scan(*args):
+        seen.append(ci_lost_runner._hold(str(lock)))
+        return api(*args)
+
+    monkeypatch.setattr(ci_lost_runner, "_api", scan)
+    monkeypatch.chdir(ROOT)
+    assert ci_lost_runner.main(["--repo", "o/r", "--cluster", "--lock", str(lock)]) == 0
+    assert capsys.readouterr().out == ""
+    assert len(api.calls) == 5
+    assert seen == [None] * 5
