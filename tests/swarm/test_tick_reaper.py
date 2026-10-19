@@ -199,9 +199,13 @@ def _fake_proc(root, pid, argv, environ=b""):
     (entry / "environ").write_bytes(environ)
 
 
-def test_an_unreadable_process_is_skipped_and_the_scan_goes_on(tmp_path, monkeypatch):
+def test_unreadable_foreign_and_non_tick_processes_are_skipped_and_the_scan_goes_on(tmp_path, monkeypatch):
     (tmp_path / "uptime").write_text("1000.00 5.00\n")
     (tmp_path / "100").mkdir()
+    _fake_proc(tmp_path, 150, ["bash"])
+    _fake_proc(
+        tmp_path, 160, ["python", "/bin/agentihooks", "swarm", "tick"], b"AGENTIHOOKS_SWARM_REDIS_URL=redis://x:1/0\0"
+    )
     _fake_proc(tmp_path, os.getpid(), ["pytest"])
     _fake_proc(tmp_path, 200, ["python", "/bin/agentihooks", "swarm", "tick"])
     monkeypatch.setattr(tick_reaper, "PROC", tmp_path)
