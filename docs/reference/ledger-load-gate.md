@@ -57,7 +57,7 @@ The run fails on any of these, each printed as a `::error::` line:
 | Server log | no `Exception in thread` line | `a ledger server background thread died` |
 | Alert expiry sweep | no alert left past its quiet hour | `the expiry sweep left N alerts past their quiet hour open` |
 
-A server that exits before listening or does not listen within 60 s stops the run with `ledger server exited with N` or `ledger server did not listen on port P within 60s`.
+A server that exits before listening or does not listen within 60 s stops the run with `ledger server exited with N` or `ledger server did not listen on port P within 60.0s`.
 
 When write p95 is the only failure, the gate prints two `::notice::` lines, repeats the run once on a fresh ledger and grades the repeat alone. The repeat prints its own JSON measure line, and `tests.ledger_load.paired` reads the last one. Any other failure, a resource growth failure included, is final on the first run.
 
@@ -100,7 +100,7 @@ Each run prints one JSON line with the measure, then the error lines:
  "budget": {"write_p95_s": 2.0, "cores": 1.0, "thread_growth": 8, "rss_growth_kib": 65536}}
 ```
 
-`resources` holds every sample as `[monotonic seconds, threads, RSS KiB]`, so a failing run shows exactly when the growth started. Only the `budget` object reflects code; the measured values are illustrative. On a failure the gate also prints the last 4000 characters of the server log.
+`resources` holds every sample as `[monotonic seconds, threads, RSS KiB]`, so a failing run shows exactly when the growth started. The `budget` object and the `seconds`, `clients` and `write_every_s` values come from code; the measured values are illustrative. On a failure the gate also prints the last 4000 characters of the server log.
 
 ## Running it by hand
 
@@ -130,7 +130,7 @@ A dispatch never saves the input key unless the gate ran and passed.
 
 ## CI evidence
 
-Recorded in [pull request 4042](https://github.com/the-cloud-clockwork/agentihooks/pull/4042). The planted thread ran on a diffcheck branch that was never opened as a pull request:
+Recorded in [pull request 4042](https://github.com/the-cloud-clockwork/agentihooks/pull/4042). The planted thread ran on the `diffcheck/ci-323133-1138` branch:
 
 | Run | Change | Result |
 |---|---|---|
