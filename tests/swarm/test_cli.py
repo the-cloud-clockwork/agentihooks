@@ -1070,6 +1070,36 @@ def test_timer_from_the_installed_agentihooks_writes_the_shared_units(shared_uni
     assert calls[-1] == ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"]
 
 
+def test_timer_from_a_linked_git_worktree_leaves_the_shared_units_alone(shared_units, tmp_path, monkeypatch, capsys):
+    install, _, shared = shared_units
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    worktree = tmp_path / "worktrees" / "agentihooks" / "engineer-1"
+    worktree.mkdir(parents=True)
+    (worktree / ".git").write_text("gitdir: /home/dev/agentihooks/.git/worktrees/engineer-1\n")
+    monkeypatch.setattr(install, "AGENTIHOOKS_ROOT", worktree)
+    monkeypatch.setattr(install, "install_root", lambda: worktree)
+    shared.mkdir(parents=True)
+    (shared / "agentihooks-inbox-waker.service").write_text('ExecStart="/installed/bin/agentihooks" swarm waker\n')
+    (shared / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    before = {path.name: path.read_text() for path in shared.iterdir()}
+    calls = []
+    run = lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
+
+    assert timer.ensure("/worktree/bin/agentihooks", run=run) is False
+    assert timer.reconcile("/worktree/bin/agentihooks", run=run) is False
+
+    assert {path.name: path.read_text() for path in shared.iterdir()} == before
+    assert calls == []
+    refusal = (
+        f"this run comes from the git worktree {worktree}, "
+        f"so it leaves the shared swarm timer units in {shared} alone\n"
+    )
+    assert capsys.readouterr().err == refusal * 2
+
+    proof_dir = tmp_path / "proof-units"
+    assert timer.ensure("/worktree/bin/agentihooks", proof_dir, run=run)
+
+
 def test_main_runs_the_inbox_waker_and_renames_without_a_slug(monkeypatch):
     ran = []
     monkeypatch.setattr(cli, "connect", lambda: "store")
