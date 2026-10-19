@@ -72,6 +72,15 @@ def test_a_task_outside_a_follow_up_is_refused(listed):
     assert str(error.value) == "task needs a task id of up to 128 letters, digits, dots, underscores or hyphens"
 
 
+@pytest.mark.parametrize("task", ["t2", "fx-f517f382.code_1", "a" * 128])
+def test_a_task_id_on_a_follow_up_passes_the_check(task):
+    from scripts.swarm_ledger import ledger_agent_ops
+
+    op = {"op": "add_item", "id": "f", "by": ENGINEER, "list": "followups", "text": "Retry", "task": task}
+    ledger_agent_ops.check(op)
+    assert op["task"] == task
+
+
 def test_a_follow_up_on_a_task_belongs_to_the_tasks_owning_master(world):
     add(world, task="t2")
     doc = world.doc()
