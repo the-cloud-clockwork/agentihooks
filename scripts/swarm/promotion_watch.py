@@ -114,7 +114,7 @@ def runner_lost(job: dict, why: str) -> bool:
 
 
 def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple[str, str]]:
-    gone = [(job, why) for job, why in causes if runner_lost(named.get(job, {}), why)]
+    gone = [(job, why) for job, why in causes if runner_lost(named[job], why)]
     if not gone:
         return causes
     signs = [sign for sign in OUTAGE_SIGNS if any(sign in why for _, why in gone)]
