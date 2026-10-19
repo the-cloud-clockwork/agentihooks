@@ -9,10 +9,12 @@ import pytest
 
 from scripts import openbao_kv
 from scripts.swarm_ledger import ledger_ca, ledger_link
+from tests.swarm_ledger import test_ledger_tls
 from tests.swarm_ledger.test_ledger_authority import core
-from tests.swarm_ledger.test_ledger_tls import cert, tls_ledger  # noqa: F401
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
+
+cert, tls_ledger = test_ledger_tls.cert, test_ledger_tls.tls_ledger
 
 URL = "https://bao.example.test"
 SECRET_URL = f"{URL}/v1/secret/data/k8s/agentihooks-swarm-ledger-ca"
