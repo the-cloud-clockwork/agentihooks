@@ -25,7 +25,7 @@ For heartbeat handling, reconnect examples and the live replay regression, see
 | Concern | How it works now |
 |---|---|
 | Page load | Every page is a static shell of about 22 KB: `shell.html` for a ledger, `home.html` for HOME and BIN. A shell carries the page version, slug and token in meta tags and links its CSS and JS under `/static/<page version>/`, served with an immutable cache; it holds no ledger record and no inline script or style. Serving it never writes the record. Every HTML response carries an enforced Content-Security-Policy: scripts, styles, images and connections from the same origin only. |
-| Page rendering | The ledger page reads its metadata from `GET /api/v1/ledgers/{slug}` and its state from the event stream snapshot, then renders only what is visible: closed sections, folded comment threads, the Contract and proof fold and hidden panels render nothing until opened, lists show 50 items per page, the operator notes thread and question answers the latest 50, and every comment dropdown its newest eight ([Comment list paging](#comment-list-paging)). Proof bodies load from `GET /api/v1/ledgers/{slug}/tasks/{id}/workspace` when their fold opens. A deep link `#item-<list>-<id>` opens the section and page that hold its target. HOME and BIN render their rows from `GET /api/v1/ledgers` and `/api/v1/bin`. A ledger HTML file left from the old format is read only for its seed and token on import. |
+| Page rendering | The ledger page reads its metadata from `GET /api/v1/ledgers/{slug}` and its state from the event stream snapshot, then renders only what is visible: closed sections, folded comment dropdowns, the Contract and proof fold and hidden panels render nothing until opened, lists show 50 items per page, the operator notes list and question answers the latest 50, and every comment dropdown its newest eight ([Comment list paging](#comment-list-paging)). Proof bodies load from `GET /api/v1/ledgers/{slug}/tasks/{id}/workspace` when their fold opens. A deep link `#item-<list>-<id>` opens the section and page that hold its target. HOME and BIN render their rows from `GET /api/v1/ledgers` and `/api/v1/bin`. A ledger HTML file left from the old format is read only for its seed and token on import. |
 | Page code | Native ES modules under `static/js/` for the ledger page and `static/home/home.js` for HOME and BIN; stylesheets under `static/css/` beside `palette.css`. |
 | Operator write | The page sends `PUT /api/<slug>` with `{changes, ops}` and an `X-Ledger-Token`. The server answers with a bounded acknowledgment (applied and rejected ids, rev, warnings); the page takes the new state from the event stream. `GET /api/<slug>` is retired and answers 410. |
 | Agent write | The `agentihooks ledger` CLI sends schema checked operations to `POST /api/v1/ledgers/{slug}/operations`. `agentihooks ledger --slug <slug> show` prints the whole ledger for an agent to read. `watch_ledger` follows the event stream: one snapshot, then patches. |
@@ -36,12 +36,12 @@ For heartbeat handling, reconnect examples and the live replay regression, see
 ## Comment list paging
 
 Every comment dropdown on the ledger page opens on its newest eight comments:
-the comments under a task, a phase, a follow up, a question and an operator
-note. A **Show N older comments · M left** control sits under the list. Each
-click adds the next ten older comments above the ones already shown, so the
-control stays under the cursor; the last click shows what remains and the
-control disappears. The summary line, **Comments · N**, always counts every
-comment that is not deleted.
+the comments under a task, a phase, a follow up, a question and the comments
+on an operator note. A **Show N older comments · M left** control sits under the list. Each
+click adds the next ten older comments above the ones already shown; the last
+click shows what remains and the
+control disappears. Once an item has comments, the summary line reads **Comments · N** and counts
+every comment that is not deleted.
 
 | Comments on the item | Shown on open | Control |
 |---|---|---|
@@ -50,8 +50,8 @@ comment that is not deleted.
 | 25, after one click | Newest 18 | `Show 7 older comments · 7 left` |
 | 25, after two clicks | All 25 | None |
 
-Comments stay in the order they were written, oldest at the top and newest
-at the bottom, beside the **Add comment** box.
+Comments render in their stored order, newest at the bottom, above the
+**Add comment** button.
 
 ### Behaviour while the page is open
 
@@ -59,7 +59,7 @@ at the bottom, beside the **Add comment** box.
   leaves every other dropdown at eight.
 - A comment arriving from the event stream keeps that count: the list still
   shows the same number of comments, now ending at the new one, and **M left**
-  grows by one. The page does not scroll.
+  grows by one.
 - Folding a dropdown and opening it again keeps its count. Reloading the page
   or opening it in another tab starts every list at eight again; only the
   open or folded choice of each dropdown is remembered per viewer.
@@ -76,7 +76,7 @@ eight.
 
 The same pager drives every list on the page with a different page shape.
 Sections and the outline show 50 items per page with **Show 50 more …** under
-the list. The operator notes thread and question answers show the latest 50
+the list. The operator notes list and question answers show the latest 50
 with **Show 50 older …** above the entries. A deep link `#item-<list>-<id>`
 pages its target in.
 
@@ -99,7 +99,6 @@ page code, not settings: changing them is a code change through a pull request.
 | The control vanished before the oldest comment | It disappears only when every comment that is not deleted is shown. Compare the summary count with the comments shown; deleted comments are not counted. |
 | A list went back to eight comments | The page was reloaded or opened in a new tab, where every list starts at eight. |
 | **Show all comments** did not show older comments | That toggle only opens the dropdowns; use **Show N older comments** inside each one. |
-| An open dropdown shows no comments | Its comments render when the dropdown opens. Fold and open it again, then check the browser console for a page error. |
 
 ## What limits it
 
