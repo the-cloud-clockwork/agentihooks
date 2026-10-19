@@ -2,11 +2,54 @@ import json
 import subprocess
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import merge_queue, queue_record, ready
+from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import RedisStore, SwarmError
 
 PENDING = "queue-priority"
+DISPLACED = "queue-priority-displaced"
+
+
+class Displaced:
+    def __init__(self, store: RedisStore, slug: str):
+        self.redis = store.redis
+        self.key = store.key(slug, DISPLACED)
+        self.order = store.key(slug, "merge-priority-order")
+
+    def add(self, pull: dict) -> None:
+        self.redis.hset(self.key, pull["url"], json.dumps({**pull, "order": self.redis.incr(self.order)}))
+
+    def discard(self, url: str) -> None:
+        self.redis.hdel(self.key, url)
+
+    def pulls(self) -> list[dict]:
+        found = [json.loads(raw) for raw in self.redis.hgetall(self.key).values()]
+        return sorted(found, key=lambda pull: -pull["order"])
+
+
+def requeue(displaced: Displaced) -> list[str]:
+    actions = []
+    for pull in displaced.pulls():
+        url, head = pull["url"], pull["headRefOid"]
+        try:
+            raw = merge_queue.graphql(merge_queue.STATE, {"url": url}, subprocess.run)["resource"]
+            if (
+                raw is None
+                or raw["state"] != "OPEN"
+                or raw["baseRefName"] != "dev"
+                or raw["headRefOid"] != head
+                or raw["mergeQueueEntry"] is not None
+            ):
+                displaced.discard(url)
+                continue
+            staged_compatibility.require(url, head, raw.get("body") or "", subprocess.run)
+            merge_queue.graphql(merge_queue.QUEUE, {"id": pull["id"], "head": head}, subprocess.run)
+            displaced.discard(url)
+            queue_record.Journal(url).write("priority-requeue", url, head, None, None)
+            actions.append(f"requeued {url} left out of the merge queue by an interrupted priority")
+        except SwarmError as exc:
+            actions.append(f"could not requeue {url} after an interrupted priority: {exc}")
+    return actions
 
 
 def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -> dict | None:
@@ -32,7 +75,9 @@ def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -
 def apply(
     store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
 ) -> dict:
-    result = merge_queue.prioritize(url, journal=journal, **({"ahead": ahead} if ahead else {}))
+    result = merge_queue.prioritize(
+        url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
+    )
     for task in tasks:
         if (
             task.get("pr_url") in result["displaced"]
@@ -73,6 +118,8 @@ def drop_reason(url: str) -> str:
         return f"pull request is {raw['state']}"
     if raw["baseRefName"] != "dev":
         return "pull request no longer targets dev"
+    if raw.get("isDraft"):
+        return "pull request is a draft"
     return ""
 
 
@@ -95,7 +142,7 @@ def replay(
 
 
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
-    actions = []
+    actions = requeue(Displaced(store, slug))
     records = [(url, json.loads(raw)) for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items()]
     records.sort(key=lambda item: item[1].get("order", 0))
     while records:
