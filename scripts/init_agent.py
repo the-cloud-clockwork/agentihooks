@@ -543,10 +543,10 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
     return flags
 
 
-def _recorded_home(args: argparse.Namespace, agent: str, environ: dict[str, str]) -> str:
+def _recorded_home(agent: str, environ: dict[str, str]) -> str | None:
     from scripts.profiles import binding
 
-    return environ.get(binding.HOMES[agent], "") if args.profile else ""
+    return environ.get(binding.HOMES[agent])
 
 
 def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
@@ -932,7 +932,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 seat=args.seat,
                 previous_execution=args.previous_execution,
                 title=args.title,
-                home=_recorded_home(args, agent, active_env),
+                home=_recorded_home(agent, active_env),
             ),
         )
         host, explicit = _select_host(args.host, active_env)

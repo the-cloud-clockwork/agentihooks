@@ -664,3 +664,4 @@ def test_both_launch_commands_document_the_bundle_commit_flag(capsys):
         select_profile.main(["--help"])
     shown = " ".join(capsys.readouterr().out.split())
     assert "--bundle-revision BUNDLE_REVISION Render only from this bundle commit" in shown
+    assert "--home HOME Mount this rendered home instead of rendering" in shown

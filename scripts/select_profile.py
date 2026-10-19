@@ -43,7 +43,7 @@ def prepare(
     )
     revision = environ.get(BUNDLE_REVISION, "")
     isolate = agent == "codex" and bool(environ.get("AGENTIHOOKS_SWARM"))
-    recorded = environ.get(RECORDED_HOME, "")
+    recorded = environ.get(RECORDED_HOME)
     if recorded:
         binding.inspect(Path(recorded), name, agent)
     else:
@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--effort", choices=("minimal", "low", "medium", "high", "xhigh", "max"), default="")
     parser.add_argument("--overlay", action="append", default=[], help="Wear this overlay; repeat for up to three")
     parser.add_argument("--bundle-revision", default="", help="Render only from this bundle commit")
-    parser.add_argument("--home", default="", help="Mount this rendered home instead of rendering")
+    parser.add_argument("--home", help="Mount this rendered home instead of rendering")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(arguments[:split])
     try:
