@@ -1,0 +1,154 @@
+import pytest
+
+from scripts.swarm_v2 import masters
+from tests import sv2_mst04_cases as cases
+from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
+ON_TASK = "followups/on-t2"
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    monkeypatch.setattr(cases.core, "LEDGER_DIR", tmp_path / "ledgers")
+    cases.core.LEDGER_DIR.mkdir()
+    return cases.World()
+
+
+def add(world, **task):
+    op = {"op": "add_item", "id": ON_TASK.partition("/")[2], "by": ENGINEER, "list": "followups"}
+    return world.write(op | {"text": "Retry the notes build", **task})
+
+
+def decide(world, by, path="done", value=True):
+    op = {"op": "set", "id": f"set-{by}-{path}", "by": by, "path": f"{ON_TASK}/{path}", "value": value}
+    return world.write(op)
+
+
+def test_cli_records_the_agents_task_on_a_new_follow_up(monkeypatch):
+    from scripts.swarm_ledger import ledger
+
+    captured = []
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", "t2")
+    monkeypatch.setattr(ledger, "send", lambda args, op, **fields: captured.append((op, fields)) or {})
+    ledger.cmd_followup(ledger.build_parser().parse_args(["followup", "add", "Retry the notes build"]))
+    assert captured == [("add_item", {"list": "followups", "text": "Retry the notes build", "task": "t2"})]
+
+
+def test_cli_adds_no_task_outside_a_task(monkeypatch):
+    from scripts.swarm_ledger import ledger
+
+    captured = []
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setattr(ledger, "send", lambda args, op, **fields: captured.append(fields) or {})
+    ledger.cmd_followup(ledger.build_parser().parse_args(["followup", "add", "Retry the notes build"]))
+    assert captured == [{"list": "followups", "text": "Retry the notes build"}]
+
+
+def test_the_follow_up_row_keeps_its_task(world):
+    assert add(world, task="t2")["accepted"] is True
+    row = next(f for f in world.doc()["followups"] if f["id"] == "on-t2")
+    assert row["task"] == "t2"
+
+
+@pytest.mark.parametrize("task", ["", "a/b", "a\nb", 7, None, "a" * 129])
+def test_a_malformed_task_is_refused(task):
+    from scripts.swarm_ledger import ledger_agent_ops
+
+    op = {"op": "add_item", "id": "f", "by": ENGINEER, "list": "followups", "text": "Retry", "task": task}
+    with pytest.raises(ValueError) as error:
+        ledger_agent_ops.check(op)
+    assert str(error.value) == "task needs a task id of up to 128 letters, digits, dots, underscores or hyphens"
+
+
+@pytest.mark.parametrize("listed", [{"list": "questions"}, {}])
+def test_a_task_outside_a_follow_up_is_refused(listed):
+    from scripts.swarm_ledger import ledger_agent_ops
+
+    op = {"op": "add_item", "id": "q", "by": ENGINEER, "text": "Which port", "task": "t2"} | listed
+    with pytest.raises(ValueError) as error:
+        ledger_agent_ops.check(op)
+    assert str(error.value) == "task needs a task id of up to 128 letters, digits, dots, underscores or hyphens"
+
+
+@pytest.mark.parametrize("task", ["t2", "fx-f517f382.code_1", "a" * 128])
+def test_a_task_id_on_a_follow_up_passes_the_check(task):
+    from scripts.swarm_ledger import ledger_agent_ops
+
+    op = {"op": "add_item", "id": "f", "by": ENGINEER, "list": "followups", "text": "Retry", "task": task}
+    ledger_agent_ops.check(op)
+    assert op["task"] == task
+
+
+def test_a_follow_up_on_a_task_belongs_to_the_tasks_owning_master(world):
+    add(world, task="t2")
+    doc = world.doc()
+    table = masters.MasterSeats(world.redis)
+
+    def owners():
+        return table.owners(SLUG, doc)
+
+    assert masters.owner_of(ON_TASK, doc, owners()) == SECOND
+    assert masters.route(ON_TASK, doc, owners, [LEAD, SECOND], LEAD) == SECOND
+
+
+def test_a_follow_up_with_no_task_stays_with_the_front_door(world):
+    add(world)
+    doc = world.doc()
+    table = masters.MasterSeats(world.redis)
+
+    def owners():
+        return table.owners(SLUG, doc)
+
+    assert masters.owner_of(ON_TASK, doc, owners()) == ""
+    assert masters.route(ON_TASK, doc, owners, [LEAD, SECOND], LEAD) == LEAD
+
+
+def test_the_owning_master_decides_flags_and_comments_on_it(world):
+    add(world, task="t2")
+
+    assert decide(world, SECOND_NAME, "needs_operator") == {"accepted": True, "warnings": []}
+    assert decide(world, SECOND_NAME) == {"accepted": True, "warnings": []}
+    comment = {"op": "add", "thread": f"{ON_TASK}/comments", "id": "c-second", "by": SECOND_NAME}
+    assert world.write(comment | {"text": "Turned into a task"})["accepted"] is True
+    row = next(f for f in world.doc()["followups"] if f["id"] == "on-t2")
+    assert row["done"] is True
+    assert row["needs_operator"] is True
+    assert world.refusals() == 0
+
+
+@pytest.mark.parametrize("path", ["done", "needs_operator"])
+def test_another_master_is_refused_on_it(world, path):
+    add(world, task="t2")
+
+    assert decide(world, LEAD_NAME, path)["warnings"] == [f"{ON_TASK} belongs to {SECOND}, so {LEAD} cannot decide it"]
+    assert world.refusals() == 1
+
+
+def test_its_notice_goes_to_the_tasks_owning_master(world):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    inbox = InboxStore(world.redis)
+    ledger_events.event_pass(inbox, world.store, SLUG, world.doc(), None, 0)
+    add(world, task="t2")
+    ledger_events.event_pass(inbox, world.store, SLUG, world.doc(), None, 0)
+    ref = f"{SLUG}:event:{ON_TASK}"
+    assert [item.address for item in inbox.mailbox(SECOND_NAME) if item.ref == ref] == [SECOND]
+    assert [item for item in inbox.mailbox(LEAD_NAME) if item.ref == ref] == []
+
+
+def test_its_raised_notice_goes_to_the_tasks_owning_master(world):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events
+
+    inbox = InboxStore(world.redis)
+    ledger_events.event_pass(inbox, world.store, SLUG, world.doc(), None, 0)
+    add(world, task="t2")
+    doc = world.doc()
+    added = next(e for e in doc["_meta"]["events"] if e["target"] == ON_TASK)
+    ledger_events.event_pass(inbox, world.store, SLUG, doc, None, added["at"] + ledger_events.FOLLOWUP_RAISE_MS)
+    raised = "A follow-up on-t2 on ledger"
+    assert [item.address for item in inbox.mailbox(SECOND_NAME) if raised in item.text] == [SECOND]
+    assert [item for item in inbox.mailbox(LEAD_NAME) if raised in item.text] == []

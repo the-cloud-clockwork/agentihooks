@@ -26,7 +26,7 @@ CI = "watchowner-ci-1"
 def ledger(monkeypatch):
     monkeypatch.setattr(seen, "marks_for", lambda slug, environ=None: None)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)

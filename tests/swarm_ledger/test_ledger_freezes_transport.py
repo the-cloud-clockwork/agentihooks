@@ -18,7 +18,7 @@ def swarm(authority_live, monkeypatch):
     import fakeredis
 
     content = {"title": "Freeze transport", "phases": [{"title": "Proof"}]}
-    html, document = core.paths(SLUG)
+    html, document = legacy_page.paths(SLUG, core)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"]))
     document.unlink(missing_ok=True)
     core.sync(SLUG)

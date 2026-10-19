@@ -50,7 +50,7 @@ def ledger_doc():
 def make_ledger(slug=SLUG):
     content = {"title": "Demo", "overview": "Ship the thing.", "sources": [], "phases": [], "questions": []}
     content["followups"] = []
-    html_path, json_path = core.paths(slug)
+    html_path, json_path = legacy_page.paths(slug, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)

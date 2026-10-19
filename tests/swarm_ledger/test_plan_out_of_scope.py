@@ -16,7 +16,7 @@ IDS = itertools.count()
 def plan_ledger(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "LEDGER_DIR", tmp_path)
     content = {"title": "Scope", "overview": "Intent", "sources": [], "phases": [{"title": "Build"}]}
-    html, json_path = core.paths(SLUG)
+    html, json_path = legacy_page.paths(SLUG, core)
     json_path.unlink(missing_ok=True)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     core.sync(SLUG)

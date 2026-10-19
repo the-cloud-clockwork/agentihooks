@@ -16,7 +16,7 @@ def phase_ledger_dir(ledger_dir, monkeypatch):
 
 def make_ledger():
     content = {"title": "Demo", "phases": [{"title": "First"}]}
-    html, state = core.paths(SLUG)
+    html, state = legacy_page.paths(SLUG, core)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     state.unlink(missing_ok=True)
     return core.sync(SLUG)[0]
