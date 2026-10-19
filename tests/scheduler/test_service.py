@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     stop = asyncio.Event()
     calls = []
 
@@ -44,7 +44,7 @@ async def test_one_runner_drains_work_and_refuses_a_second_runner(monkeypatch, t
 async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     stop = asyncio.Event()
     timeouts = []
     drain = Mock()
@@ -65,7 +65,7 @@ async def test_runner_polls_again_after_the_wait_timeout(monkeypatch, tmp_path):
 def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     children = [Mock(), Mock()]
     children[0].poll.return_value = 1
     children[1].poll.return_value = 2
@@ -89,7 +89,7 @@ def test_supervisor_restarts_an_exited_runner_without_machine_timers(monkeypatch
 def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     child = Mock()
     child.poll.return_value = None
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=Mock(return_value=child)))
@@ -110,7 +110,7 @@ def test_agentihooks_starts_one_detached_supervisor_when_redis_is_configured(
 ):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     spawn = Mock()
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
     assert service.ensure_running({}) is False
@@ -210,9 +210,68 @@ def test_supervisor_entrypoint_stops_on_signals_and_restores_handlers(monkeypatc
 def test_machine_lock_directory_is_shared_across_profile_configurations(monkeypatch):
     from scripts.scheduler import service
 
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REDIS_URL", raising=False)
     directory = service.runtime_dir()
     monkeypatch.setenv("GH_CONFIG_DIR", str(Path.home() / ".config" / "gh"))
     monkeypatch.setenv("XDG_CONFIG_HOME", "/proof/one")
     monkeypatch.setenv("AGENTIHOOKS_HOME", "/proof/two")
     assert service.runtime_dir() == directory
     assert directory.relative_to(Path.home()).parts == (".cache", "agentihooks", "scheduler")
+
+
+def test_same_domain_refuses_a_second_runner_and_distinct_domains_coexist(tmp_path, monkeypatch):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    first = {
+        "AGENTIHOOKS_DEPLOYMENT": "cloud",
+        "AGENTIHOOKS_HIVE_ID": "first",
+        "AGENTIHOOKS_HIVE_REDIS_URL": "redis://one.invalid:6380/2",
+    }
+    other_member = {**first, "AGENTIHOOKS_HIVE_ID": "second"}
+    other_endpoint = {**first, "AGENTIHOOKS_HIVE_REDIS_URL": "redis://two.invalid:6380/2"}
+    with service.machine_lock("runner", environ=first):
+        with pytest.raises(service.AlreadyRunning):
+            with service.machine_lock("runner", environ=dict(first)):
+                pass
+        with service.machine_lock("runner", environ=other_member):
+            with service.machine_lock("runner", environ=other_endpoint):
+                assert len({service.runtime_dir(env) for env in (first, other_member, other_endpoint)}) == 3
+
+
+def test_domain_defaults_keep_equivalent_redis_endpoints_together(tmp_path, monkeypatch):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    default = tmp_path / ".cache" / "agentihooks" / "scheduler"
+    assert service.runtime_dir({}) == default
+    assert service.runtime_dir({"AGENTIHOOKS_HIVE_ID": "member"}) == default
+    assert service.runtime_dir({"AGENTIHOOKS_DEPLOYMENT": "cloud"}) == default
+    endpoint = service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://scheduler.invalid"})
+    assert endpoint.name == "ea64452fbe69cb75783b66872df777d82305b62c912ea1d2a82decf5afde3703"
+    assert service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "redis://scheduler.invalid:6379/0"}) == endpoint
+    assert service.runtime_dir({"AGENTIHOOKS_SWARM_REDIS_URL": "rediss://scheduler.invalid:6379/0"}) != endpoint
+
+
+def test_supervisor_startup_and_log_use_the_explicit_domain(tmp_path, monkeypatch):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    active = {
+        "AGENTIHOOKS_DEPLOYMENT": "cloud",
+        "AGENTIHOOKS_HIVE_ID": "member",
+        "AGENTIHOOKS_HIVE_REDIS_URL": "redis://scheduler.invalid:6380/2",
+    }
+    spawn = Mock()
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
+    directory = service.runtime_dir(active)
+    with service.machine_lock("startup", environ=active):
+        assert service.ensure_running(active) is False
+    with service.machine_lock("supervisor", environ=active):
+        assert service.ensure_running(active) is False
+    spawn.assert_not_called()
+    assert service.ensure_running(active) is True
+    assert spawn.call_args.kwargs["env"] == active
+    assert spawn.call_args.kwargs["stdout"].name == str(directory / "scheduler.log")
+    assert spawn.call_count == 1

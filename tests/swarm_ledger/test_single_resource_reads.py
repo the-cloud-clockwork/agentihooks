@@ -1,11 +1,14 @@
 import pytest
 
 from scripts.swarm_ledger.api import resources, routes
-from scripts.swarm_ledger.repository import repository, sqlite
+from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger.test_api_v1 import authority_live as _authority_live
 from tests.swarm_ledger.test_api_v1 import live as _live
 from tests.swarm_ledger.test_api_v1 import request
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, server
+
+repository = default_repository()
 
 pytestmark = pytest.mark.xdist_group("fakeredis")
 authority_live = _authority_live

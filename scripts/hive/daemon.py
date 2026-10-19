@@ -12,6 +12,7 @@ from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
 from scripts.hive import registry
 from scripts.routing import claude_api, codex_api
+from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
 
 if TYPE_CHECKING:
@@ -82,7 +83,7 @@ def run(redis: "Redis") -> None:
     while True:
         started = time.monotonic()
         beat(redis, local_id)
-        time.sleep(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+        scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
 
 
 def unit(binary: str) -> str:

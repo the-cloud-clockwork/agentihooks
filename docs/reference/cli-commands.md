@@ -21,9 +21,8 @@ The `agentihooks` CLI is installed globally via `uv tool install --editable .` a
 
 The single entry point for installing agentihooks. Handles global setup and bundle linking.
 
-Plain `agentihooks init` installs Claude and Codex. A previous Copilot install
-does not add it to this default. Use `--target copilot` to install Copilot alone,
-or `--with-copilot` to include it with Claude and Codex.
+Plain `agentihooks init` installs Claude Code and Codex. Use `--target claude`
+or `--target codex` to install one supported harness.
 
 Default output shows the linked bundle, installed profile, resolved profile
 chain and overlays, then each harness home and installed MCP server, skill and
@@ -64,8 +63,7 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
-| `--target claude\|codex\|copilot` | Install only the selected harness. |
-| `--with-copilot` | Include Copilot alongside the default harnesses. |
+| `--target claude\|codex` | Install only the selected supported harness. |
 | `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--force` | Clean install — resets install state (`state.json`, sync hashes, session caches, PID files, `prod_bypass/`, `controls_flags/`, `voice_flags/`, `force_refresh/`) and re-symlinks `~/.claude/` assets. **Preserves** broadcasts, enforcements, brain data, logs, quota accounts, `.env`, `.venv`. |
@@ -155,7 +153,7 @@ agentihooks settings-profile --clear
 
 ## `agentihooks broadcast`
 
-Send a message to all active Claude Code sessions simultaneously.
+Send a message to Claude Code and Codex sessions sharing the broadcast store.
 
 ```
 agentihooks broadcast [OPTIONS] MESSAGE
@@ -557,7 +555,7 @@ agentihooks gc                     # report what is safe to remove
 agentihooks gc --enforce           # act on findings that are due: remove, snapshot to wip/, archive
 agentihooks gc --json              # full report; also written to ~/.agentihooks/gc-last.json
 agentihooks gc --path ~/scratchpad/myrepo
-agentihooks gc --install-timer     # hourly systemd user timer (agentihooks install does this when LIFECYCLE_GC_ENABLED)
+agentihooks gc --install-timer     # hourly agentihooks scheduler cron (agentihooks install does this when LIFECYCLE_GC_ENABLED)
 agentihooks gc --remove-timer
 agentihooks lease <worktree>       # record the calling agent session as owner (wt.sh new calls this)
 agentihooks lease <dir> --kind scratch|ephemeral
@@ -578,12 +576,51 @@ A path is actionable only when it is **unused** and **removing it loses nothing*
 - An action is `due` only after two sweeps at least 1 h apart in the same boot, except removal of a clean pushed worktree whose owner left, which is due on first sight. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
 - `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree.
 - Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
-- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -u agentihooks-swarm.service`).
+- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -t agentihooks-swarm`).
 - Launch run folder (`$XDG_RUNTIME_DIR/agentihooks-claude-terminal`): launch scripts, route reports, prompts, start markers and profile reports older than a day are removed, and closing markers whose launcher has exited.
 
-Triggers: `agentihooks-gc.timer` runs `gc --enforce` hourly, first 2 h after boot. Every PreToolUse call that names a path inside a managed worktree or scratch task dir records the session as a lease holder; while gc is removing that path the call is blocked with a retry message. When free space (the smaller of `$HOME` and, on WSL, `/mnt/c`) drops below `AGENTIHOOKS_DISK_WARN_GB`, tool calls get a warning (at most every 10 min) and a sweep starts at once. SessionStart and SessionEnd start a sweep at most every `AGENTIHOOKS_GC_INTERVAL_MIN`; without systemd, the sweep runs as a detached hook task.
+Triggers: an `agentihooks-gc` cron on the agentihooks scheduler (`0 * * * *`) starts `gc --enforce` at the top of every hour; install and upgrade remove the older `agentihooks-gc.timer` systemd unit. Every PreToolUse call that names a path inside a managed worktree or scratch task dir records the session as a lease holder; while gc is removing that path the call is blocked with a retry message. When free space (the smaller of `$HOME` and, on WSL, `/mnt/c`) drops below `AGENTIHOOKS_DISK_WARN_GB`, tool calls get a warning (at most every 10 min) and a sweep starts at once. SessionStart and SessionEnd start a sweep at most every `AGENTIHOOKS_GC_INTERVAL_MIN`, as a detached hook task.
 
 Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in the bundle, each active profile and `~/.agentihooks/lifecycle.json`, merged by `id` (`"enabled": false` drops a root). Kinds: `worktrees`, `scratch`, `ttl` (delete idle entries), `archive` (gzip idle files matching `include`), `traces` (delete injection traces of ended sessions).
+
+### `lifecycle.json`
+
+Every layer is a JSON object with a `roots` list. Each root entry takes:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | Merge key across layers; an entry without a non-empty `id` is ignored |
+| `path` | required in the merged entry | Directory the root covers; `~` is expanded |
+| `kind` | required in the merged entry | One of the kinds above; any other value drops the root |
+| `idle_days` | `7` | Idle age before an entry is acted on |
+| `budget_gb` | `0` | `scratch` only: size above which the oldest dead dirs go |
+| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry. Dot names and the `archive` folder are always skipped |
+| `enabled` | `true` | `false` drops the root after the merge |
+
+Later layers update an earlier entry with the same `id` field by field, so an overlay names only what it changes. A personal `~/.agentihooks/lifecycle.json` that shortens the scratchpad idle time, turns off ledger archiving and adds a root of its own:
+
+```json
+{
+  "roots": [
+    {"id": "scratchpad", "idle_days": 3},
+    {"id": "ledgers", "enabled": false},
+    {"id": "build-cache", "path": "~/.cache/mybuild", "kind": "ttl", "idle_days": 2}
+  ]
+}
+```
+
+Each finding in `agentihooks gc --json` carries the `id` of the root it came from in its `root` field.
+
+A layer the reader cannot open or parse contributes no roots and the other layers still load: a missing file, a path that is a directory or cannot be read, text that is not JSON, JSON whose top level is not an object (`null`, `[]`) and an object with no `roots` all count as empty. Inside `roots`, entries that are not objects or have no `id` are skipped. Nothing reports a skipped layer or entry, so a broken overlay leaves the other layers' roots in force without a warning.
+
+Field types are not checked. These shapes raise out of the reader, which stops `agentihooks gc` with the error; on PreToolUse the lifecycle guard logs `lifecycle pre-tool failed` and lets the call through without recording a lease or blocking a path gc is removing:
+
+- A file that is not valid UTF-8.
+- `roots` set to `null` or a number; it must be a list.
+- `path` set to a number, or `kind` set to a list or object.
+- `include` set to `null`. `include` must be a list of strings: a bare string such as `"*.json"` is read as one pattern per character.
+
+`idle_days` and `budget_gb` must be numbers: a string loads without error, and the sweep can fail later when it computes an entry's age limit or the scratch size budget from it.
 
 ---
 

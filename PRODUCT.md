@@ -29,10 +29,10 @@ It is the only window onto an agentihooks swarm, and its records are the swarm's
 
 - **Stack (operator decision):** plain HTML, CSS and vanilla JavaScript only. No frameworks, bundlers or build step (no React, Next or similar).
 - **Architecture (delivered):** the presentation layer has its own architecture: versioned v1 resources, an event stream, static page shells and SQLite as the durable store in place of per-ledger JSON files. Legacy ledger files are imported once after a verified backup.
-- Front-end sources: `scripts/swarm_ledger/template.html` (ledger page), `scripts/swarm_ledger/home.html` (HOME and BIN), `palette.css` (every colour value, nowhere else), `tooltips.js`. The server fills `__LEDGER_*__` / `__HOME_*__` placeholders at render time.
+- Front-end sources: `scripts/swarm_ledger/shell.html` and `scripts/swarm_ledger/static/` (ledger page), `scripts/swarm_ledger/home.html` (HOME and BIN), `palette.css` (every colour value, nowhere else), `tooltips.js`. The server fills `__LEDGER_*__` / `__HOME_*__` placeholders at render time.
 - Only the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories and comment dropdowns fold, each remembering its choice per viewer; nothing else folds (chat and side windows, Stats, Overview, the Swarm control bar and Capacity, HOME, BIN), and a fold anywhere else fails its test.
 - Every column resizes by dragging its header edge (every ledger page table, the HOME and BIN columns), with the widths saved in the shared page layout beside the panel sizes; a column the grips cannot reach fails its test.
-- A page edit changes the page version (hash of template, palette and tooltips), and open ledger pages re-render from the template on their next load.
+- A page edit changes the page version (hash of the shell, the HOME page and every static asset), and open ledger pages load the new assets on their next load.
 - Vocabulary: ledger, phase, task, proof, follow-up, question, note, seat, lane (eng, ci, plan), master, swarm tick, gate, health finding, verdict, Doctor, inbox, BIN.
 
 ## Brand Commitments

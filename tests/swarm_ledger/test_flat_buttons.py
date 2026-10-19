@@ -1,10 +1,8 @@
 import re
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 STATES = re.compile(
     r":hover|:active|:focus|:disabled|:checked|::|\.armed|\.sending|\[aria-(?:pressed|selected|expanded)=\"true\"\]"
 )

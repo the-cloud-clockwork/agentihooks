@@ -251,8 +251,6 @@ class Consumer:
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
         config = replace(config, lanes={**config.lanes, order.lane: chosen})
-        if order.lane == "master" and order.route_kind != "interactive":
-            config = replace(config, master_claude_login=False)
         task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
         task["launch_assignment"] = {
             "profile": order.profile,

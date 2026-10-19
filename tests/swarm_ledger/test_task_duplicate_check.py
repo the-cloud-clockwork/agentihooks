@@ -65,7 +65,7 @@ def live(authority_live, monkeypatch):
         ],
     }
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     state, _ = core.sync(SLUG)
     first, second = (phase["id"] for phase in state["phases"])
     seed = [

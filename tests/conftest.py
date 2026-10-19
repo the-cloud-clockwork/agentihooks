@@ -194,6 +194,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
 
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("LIFECYCLE_GC_ENABLED", "false")
+    monkeypatch.setenv("MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS", "false")
     # Every swarm tick sweeps the launch run folder and the herdr server.
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "_run"))
     monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "_run" / "herdr.sock"))
@@ -444,6 +445,14 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
     from scripts.swarm import timer
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
+    monkeypatch.setattr(timer, "schedule", lambda: True)
+
+
+@pytest.fixture(autouse=True)
+def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
+    from scripts import tool_deps
+
+    monkeypatch.setattr(tool_deps, "SOURCE", tmp_path / "tool-source")
 
 
 @pytest.fixture(autouse=True)

@@ -39,7 +39,7 @@ FINDINGS = [
 def base(ledger_dir):
     for slug in SLUGS:
         content = {"title": slug, "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-        html_path, _ = core.paths(slug)
+        html_path, _ = legacy_page.paths(slug, core)
         html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         core.sync(slug)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
@@ -264,14 +264,14 @@ def test_reset_layout_restores_the_defaults_everywhere(visit):
 
 
 def test_phone_width_stacks_the_panels_hides_the_handles_and_ignores_saved_sizes(visit):
-    layout.write({"capacity-box": {"height": 400}, "agents-box": {"height": 90}})
+    layout.write({"capacity-box": {"height": 640}, "agents-box": {"height": 90}})
     page = visit(width=390)
     assert page.tab.locator("[data-grip]").count() == len(HEIGHT_ROWS)
     assert page.tab.eval_on_selector_all("[data-grip]", "gs => gs.filter(g => g.getClientRects().length).length") == 0
     full = page.box("swarm-box")["width"]
     for row in HEIGHT_ROWS:
         assert page.box(row)["width"] == pytest.approx(full, abs=1)
-    assert page.box("capacity-box")["height"] < 400
+    assert page.box("capacity-box")["height"] < 640
     assert page.tab.eval_on_selector("#agents-box", "el => el.scrollHeight <= el.clientHeight + 1")
     assert page.stored() == layout.read()
 

@@ -154,7 +154,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan():
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
     assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}
-    assert sized["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE"'
+    assert sized["run"] == "python -m scripts.ci_mutation." + 'plan --base "$BASE" --repository "$GITHUB_REPOSITORY"'
     assert jobs["stats"]["needs"] == "plan"
     assert jobs["stats"]["strategy"] == {
         "fail-fast": False,
@@ -183,6 +183,9 @@ def test_mutation_matrix_and_merge_use_the_plan_refined_after_statistics():
     measured = steps[names.index("Refine mutation shards from measured statistics")]
     assert measured["run"] == 'python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats'
     assert names.index("Download the shared mutation stats") < names.index(measured["name"])
+    selection = steps[names.index("Download planned mutation test selection")]
+    assert selection["with"] == {"name": "mutation-selection"}
+    assert names.index(selection["name"]) < names.index(measured["name"])
     assert jobs["mutation-shard"]["strategy"]["matrix"]["shard"] == "${{ fromJSON(needs.refine.outputs.shards) }}"
     assert "refine" in jobs["mutation-shard"]["needs"]
     assert "refine" in jobs["mutation"]["needs"]

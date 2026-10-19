@@ -50,7 +50,7 @@ POLICY = {
 
 @pytest.fixture(scope="module")
 def base(ledger_dir):
-    if not core.paths(SLUG)[1].exists():
+    if not legacy_page.paths(SLUG, core)[1].exists():
         new_ledger.create(SLUG, CONTENT)
     httpd = ThreadingHTTPServer(("127.0.0.1", 0), server.Handler)
     host = f"127.0.0.1:{httpd.server_port}"
@@ -101,7 +101,7 @@ def test_an_error_page_the_server_library_writes_carries_the_policy_too(base):
 
 def test_the_ledger_shell_holds_metadata_but_no_record_seed(base):
     _, _, body = get(f"{base}/{SLUG}")
-    token = legacy_page.stored_token(core.paths(SLUG)[0])
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
     assert f'<meta name="ledger-token" content="{token}">' in body
     assert f'<meta name="ledger-page" content="{core.page_version()}">' in body
     assert "<title>Shell &lt;ledger&gt;</title>" in body
@@ -175,7 +175,7 @@ def test_an_asset_edit_changes_the_version_the_shell_links(tmp_path):
 
 
 def test_the_task_work_folder_reads_on_demand(base, monkeypatch):
-    token = legacy_page.stored_token(core.paths(SLUG)[0])
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
     monkeypatch.setattr(server, "workspace_tails", lambda slug, task: {"progress": f"{slug} {task} line"})
     status, _, body = get(f"{base}/api/v1/ledgers/{SLUG}/tasks/t1/workspace", **{"X-Ledger-Token": token})
     assert status == 200
@@ -183,7 +183,7 @@ def test_the_task_work_folder_reads_on_demand(base, monkeypatch):
 
 
 def test_an_unknown_work_folder_answers_not_found(base, monkeypatch):
-    token = legacy_page.stored_token(core.paths(SLUG)[0])
+    token = legacy_page.stored_token(legacy_page.paths(SLUG, core)[0])
 
     def refuse(slug, task):
         raise ValueError("bad id")
@@ -243,7 +243,7 @@ def test_the_watch_loop_sweeps_the_bin_every_fifteenth_pass(monkeypatch):
         if len(passes) == 31:
             raise StopIteration
 
-    monkeypatch.setattr(server.time, "sleep", tick)
+    monkeypatch.setattr(server, "scheduled_wait", tick)
     with pytest.raises(StopIteration):
         server.watch_ledgers()
     assert sweeps == [0, 15, 30]

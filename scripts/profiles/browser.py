@@ -25,6 +25,12 @@ def enabled(chain: list[str]) -> bool:
     return any(name.removeprefix(PACKAGE_PREFIX) in ROLES for name in chain)
 
 
+def proxy_enabled(chain: list[str]) -> bool:
+    return enabled(chain) and any(
+        name.removeprefix(PACKAGE_PREFIX) in {"master", "qa", "documentation", "frontend"} for name in chain
+    )
+
+
 def spec() -> dict:
     install = _install_module()
     return {"command": str(install._detect_venv() or sys.executable), "args": ["-I", "-m", __name__]}
@@ -39,7 +45,7 @@ def configure(servers: dict, chain: list[str]) -> dict:
             for name, server in servers.items()
             if "playwright" not in name.lower() or name.startswith(EXTENSION)
         },
-        NAME: spec(),
+        **({NAME: spec()} if proxy_enabled(chain) else {}),
     }
 
 

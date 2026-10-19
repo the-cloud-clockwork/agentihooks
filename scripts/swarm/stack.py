@@ -303,6 +303,7 @@ def restack(slug: str, agent, ledger) -> dict:
     _out(["git", "fetch", "origin"], "cannot fetch origin")
     base, path = _restack_base(row, [slug, agent.task, branch, row["stacked_base"]])
     _rebase(base)
+    shell(["git", "branch", "--unset-upstream"])
     from . import publish
 
     root = Path(_out(["git", "rev-parse", "--show-toplevel"], "cannot locate the worktree"))

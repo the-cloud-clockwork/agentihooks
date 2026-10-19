@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import time
+import traceback
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timezone
@@ -13,7 +14,6 @@ from threading import Event
 ACTIVE = "working"
 TRACES_LIMIT = 5
 ATTEMPTS = 2
-WORKERS = 8
 WINDOW_BYTES = 1 << 20
 CORRELATION = "agentihooks.correlation."
 REMOTE_FIELDS = {
@@ -23,6 +23,11 @@ REMOTE_FIELDS = {
     "harness": "harness",
     "profile": "profile.resolved",
 }
+
+
+def failure(exc: BaseException) -> str:
+    frame = traceback.extract_tb(exc.__traceback__)[-1]
+    return f"{type(exc).__name__}: {exc} at {frame.filename}:{frame.lineno}"
 
 
 def _json(path: Path) -> dict:
@@ -192,7 +197,7 @@ def _attempts(get, slug: str, binding: dict, marks: dict, page: int, ended: Even
             slot.clear()
             return remote, kept
         except Exception as exc:  # noqa: BLE001
-            slot["error"] = f"active read of {binding['agent']} failed: {type(exc).__name__}: {exc}"
+            slot["error"] = f"active read of {binding['agent']} failed: {failure(exc)}"
     return _unread(), {}
 
 
@@ -200,7 +205,7 @@ def _read_all(get, slug: str, active: list[dict], marks: dict, page: int, remain
     if remaining <= 0:
         return [(_unread(), {}, None) for _ in active]
     slots: list[dict] = [{} for _ in active]
-    ended, pool = Event(), ThreadPoolExecutor(max_workers=WORKERS)
+    ended, pool = Event(), ThreadPoolExecutor(max_workers=max(len(active), 1))
     futures = [pool.submit(_attempts, get, slug, b, marks, page, ended, slot) for b, slot in zip(active, slots)]
     wait(futures, timeout=remaining)
     ended.set()
@@ -231,7 +236,7 @@ def read(
         try:
             merged["local"] = progress(merged["session_id"], merged["harness"]) if merged["session_id"] else None
         except (OSError, ValueError, TypeError) as exc:
-            error = error or f"exporter progress of {binding['agent']} unreadable: {type(exc).__name__}: {exc}"
+            error = error or f"exporter progress of {binding['agent']} unreadable: {failure(exc)}"
         failures += [error] if error else []
         found.append(merged)
     state["marks"] = {**marks, **kept} if failures else kept

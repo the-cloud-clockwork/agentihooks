@@ -34,9 +34,9 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [CI result cache and in place retry](ci-result-cache.md) | The design for one CI algorithm: reuse a check's green result while its real inputs are unchanged, retry a failed test in place, retry durations downloads and uploads in place, before numbers and slices |
 | [Helm kind proof input keys](ci-result-cache.md#helm-kind-proof-input-keys) | Declared chart and image inputs, due decisions, dispatch examples, cache misses and proof measurements |
 | [Codex CLI cache in unit jobs](../ci-timing.md#codex-cli-cache) | Seed the CLI on main, configure its release, diagnose cache misses and verify installation and shard timings |
+| [Worker profile proof](worker-profile-proof.md) | Offline Codex SessionStart replay, first registry write timing, surviving hook child failures, fixed limits and CI evidence |
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
 | [Managed Codex terminals](codex-managed-terminal.md) | Installed runtime dependencies, connection verification, transport selection, herdr viewer reopening, push master inbox duties, handoffs and attachment failures |
 | [Codex inbox transport](codex-inbox-transport.md) | The `app_server` default, the Claude inbox channel against broadcast topics and Bun plugins, qualified versions, canary order, failure diagnosis and rollback |
-| [COPILOT-COMPAT](COPILOT-COMPAT.md) | The `copilot` install target: hook contract, surface map, divergences |

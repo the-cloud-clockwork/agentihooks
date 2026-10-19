@@ -114,8 +114,9 @@ import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
 from scripts.inbox import outbox
-from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, storage
+
+repository = storage.default()
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
@@ -128,7 +129,10 @@ AUTH_FAILURES = collections.Counter()
 SHOW_JSON = functools.partial(json.dumps, indent=1, ensure_ascii=False)
 OBJECT_FORMS = {
     "proof": (ledger_kinds.PROOF_KEYS, "proof.evidence=E proof.output=O"),
-    "contract": (ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_FLAGS, "contract.must=M contract.check=C"),
+    "contract": (
+        ledger_kinds.CONTRACT_KEYS + ledger_kinds.CONTRACT_TIMES + ledger_kinds.CONTRACT_FLAGS,
+        "contract.must=M contract.check=C",
+    ),
 }
 
 
@@ -607,6 +611,7 @@ def cmd_followup(args):
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
             **hive_fields(args),
+            **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
     elif args.action in ("flag", "unflag"):
         send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")
@@ -786,47 +791,39 @@ def _add_task(args, title, fields):
     return {}
 
 
-def cmd_task(args):
-    refuse_unset_quote(args)
-    if args.action == "add":
-        if args.id == "-":
-            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
-        title = " ".join(args.values)
-        lists = {
-            k: comma_list(v)
-            for k, v in (
-                ("depends_on", args.depends_on),
-                ("territory", args.territory),
-                ("overlays", args.overlays),
-                ("repositories", args.repositories),
-            )
-            if v
-        }
-        if args.gain is not None:
-            lists["gain"] = args.gain
-        contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
-        if contract:
-            lists["contract"] = contract
-        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
-        options = (
-            ("kind", args.kind),
-            ("profile", args.profile),
-            ("rank", args.rank),
-            ("difficulty", args.difficulty),
-            ("plan_url", args.plan),
-            ("not_duplicate", args.not_duplicate),
-            ("plan_slice", args.plan_slice),
+def _task_add_fields(args):
+    lists = {
+        k: comma_list(v)
+        for k, v in (
+            ("depends_on", args.depends_on),
+            ("territory", args.territory),
+            ("overlays", args.overlays),
+            ("repositories", args.repositories),
         )
-        lists.update((key, value) for key, value in options if value)
-        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
-        return
-    if args.action in TASK_LISTS:
-        kind, field, shown = TASK_LISTS[args.action]
-        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
-        print(json.dumps({"task": args.id, shown: args.values}))
-        return
-    fields = dict(value.split("=", 1) for value in args.values if "=" in value)
-    if len(fields) != len(args.values):
+        if v
+    }
+    if args.gain is not None:
+        lists["gain"] = args.gain
+    contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
+    if contract:
+        lists["contract"] = contract
+    lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
+    options = (
+        ("kind", args.kind),
+        ("profile", args.profile),
+        ("rank", args.rank),
+        ("difficulty", args.difficulty),
+        ("plan_url", args.plan),
+        ("not_duplicate", args.not_duplicate),
+        ("plan_slice", args.plan_slice),
+    )
+    lists.update((key, value) for key, value in options if value)
+    return lists
+
+
+def _task_set_fields(values):
+    fields = dict(value.split("=", 1) for value in values if "=" in value)
+    if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
     for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
@@ -845,6 +842,24 @@ def cmd_task(args):
         if not isinstance(fields.get(name, {}), dict):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
+    return fields
+
+
+def cmd_task(args):
+    refuse_unset_quote(args)
+    if args.action == "add":
+        if args.id == "-":
+            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
+        title = " ".join(args.values)
+        lists = _task_add_fields(args)
+        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
+        return
+    if args.action in TASK_LISTS:
+        kind, field, shown = TASK_LISTS[args.action]
+        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
+        print(json.dumps({"task": args.id, shown: args.values}))
+        return
+    fields = _task_set_fields(args.values)
     refuse_plain_objects(fields)
     quote = vars(args).get("quote")
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))

@@ -53,7 +53,7 @@ CONTEXT_NODES = (
 SUITE_NODES = "nodes{status conclusion workflowRun{databaseId createdAt event workflow{id resourcePath}}} pageInfo{hasNextPage endCursor}"
 PULL_QUERY = (
     "query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} "
-    "mergeable isDraft "
+    "mergeable isDraft body "
     "commits(last:1){nodes{commit{id oid committedDate "
     'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
     + "statusCheckRollup{contexts(first:100){"
@@ -92,6 +92,8 @@ class PullRequest:
     latest_run_cancelled: bool = False
     checks_pending: bool = False
     checks_passed: bool = False
+    running: bool = False
+    body: str = ""
 
 
 def iso_ms(text):
@@ -166,6 +168,8 @@ def pull_request(raw):
         any((check.get("conclusion") or check.get("state")) in (None, "PENDING", "EXPECTED") for check in everything),
         any((check.get("conclusion") or check.get("state")) == "SUCCESS" for check in everything)
         and all((check.get("conclusion") or check.get("state")) in PASSED | {"NEUTRAL"} for check in everything),
+        running or any(result in PENDING for result in results),
+        raw.get("body") or "",
     )
 
 
@@ -312,7 +316,7 @@ def _number(url):
 def _required_app(check, required_checks):
     app_id = required_checks.get(check.get("name") or check.get("context"))
     app = ((check.get("checkSuite") or {}).get("app") or {}).get("databaseId")
-    return app_id is None or app == app_id
+    return bool(check.get("context")) or app_id is None or app == app_id
 
 
 def _required_pull_request(raw, required_checks):

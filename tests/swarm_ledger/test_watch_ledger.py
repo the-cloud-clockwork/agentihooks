@@ -17,15 +17,17 @@ from scripts.inbox import seen  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, Hub, stream  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "watchstream-2026-01-01"
 
 
 def make_ledger():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)

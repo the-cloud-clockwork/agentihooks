@@ -16,6 +16,7 @@ INTERVAL_ENV = "AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES"
 QUIET_ENV = "AGENTIHOOKS_DOCTOR_QUIET_MINUTES"
 INTERVAL_MINUTES = 10
 QUIET_MINUTES = 120
+SPEED_SLICE_MINUTES = 10
 JUDGED_REAL = ("established", "early-real")
 FIXES = ("code", "tune")
 FIX_PHASE = "p2"
@@ -84,10 +85,13 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     key = store.key(doctor, "ci-speed")
     state = json.loads(store.redis.get(key) or "{}")
     since = state.get("last", now_ms - MINUTE_MS)
-    snapshot = ci_speed_read.read(since, now_ms, pending=state.get("pending"))
+    end = min(now_ms, since + SPEED_SLICE_MINUTES * MINUTE_MS)
+    snapshot = ci_speed_read.read(
+        since, end, pending=state.get("pending"), known=state.get("known"), active=end == now_ms
+    )
     found = ci_speed.findings(snapshot["runs"], since, now_ms)
     report = {
-        "complete": snapshot["complete"],
+        "complete": snapshot["complete"] and end == now_ms,
         "runs": len(snapshot["runs"]),
         "discovered_runs": snapshot["discovered_runs"],
         "jobs": sum(len(run["jobs"]) for run in snapshot["runs"]),
@@ -120,10 +124,26 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             store.redis.sadd(notified, *(finding.id for finding in fresh))
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
-        state.update(last=now_ms, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
+        state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
+    finished = {
+        str(run["id"]): {
+            "status": run["status"],
+            "run_attempt": run.get("run_attempt"),
+            "jobs": [{field: job.get(field) for field in ci_speed.JOB_FIELDS} for job in run["jobs"]],
+        }
+        for run in snapshot["runs"]
+        if run["status"] == "completed"
+    }
+    state["known"] = {} if snapshot["complete"] else {**state.get("known", {}), **finished}
     state["report"] = report
     store.redis.set(key, json.dumps(state))
-    status = "complete" if report["complete"] else f"incomplete: {report['error']}"
+    status = (
+        "complete"
+        if report["complete"]
+        else "catching up"
+        if snapshot["complete"]
+        else f"incomplete: {report['error']}"
+    )
     return [
         f"doctor CI speed: {status}; {report['runs']} runs read of {report['discovered_runs']} discovered, "
         f"{report['jobs']} jobs, {report['crossings']} crossings, {report['api_calls']} API calls"

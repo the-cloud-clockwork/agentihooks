@@ -40,6 +40,7 @@ MOVED = {
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
+    ("hierarchy-cpu.yml", "hierarchy"): QUEUED,
     ("ledger-load.yml", "load"): QUEUED,
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
@@ -93,6 +94,8 @@ MOVED = {
     ("test.yml", "unit-selected"): STANDARD,
     ("worker-resources.yml", "measure"): BATCH,
 }
+if (WORKFLOWS / "actions-storage.yml").exists():
+    MOVED[("actions-storage.yml", "prune")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}

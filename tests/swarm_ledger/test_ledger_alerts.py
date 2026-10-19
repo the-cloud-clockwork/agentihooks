@@ -36,7 +36,7 @@ def make_ledger(description="d"):
         "sources": [],
         "phases": [{"title": "one", "description": description}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -792,7 +792,7 @@ def test_expiry_waits_one_scan_interval_after_startup(monkeypatch):
             assert alert["state"] == "done"
             raise InterruptedError("scan observed")
 
-    monkeypatch.setattr(ledger_server.time, "sleep", tick)
+    monkeypatch.setattr(ledger_server, "scheduled_wait", tick)
     with pytest.raises(InterruptedError, match="scan observed"):
         ledger_server.watch_ledgers(interval=0)
     assert len(sleeps) == 16

@@ -1,0 +1,214 @@
+import json
+
+import pytest
+
+import scripts.swarm_ledger.repository  # noqa: F401  puts the ledger folder on sys.path before ledger_core loads
+from scripts.inbox import cli as inbox_cli
+from scripts.inbox.store import InboxError, InboxStore
+from scripts.swarm import delivery
+from scripts.swarm.store import AgentRecord
+from scripts.swarm_ledger import ledger_core as core
+from scripts.swarm_v2 import master_fence, masters
+from tests import sv2_mst04_cases as cases
+from tests.sv2_mst04_cases import ENGINEER, LEAD, LEAD_NAME, SECOND, SECOND_NAME, SLUG
+
+pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+
+LOOSE = "t3"
+CLAIMANT = f"eng-1@{SLUG}"
+OWN_CLAIMANT = f"eng-2@{SLUG}"
+OTHER_ENGINEER = "engineer@abcdef-0006"
+
+
+@pytest.fixture
+def world(tmp_path, monkeypatch):
+    monkeypatch.setattr(core, "LEDGER_DIR", tmp_path / "ledgers")
+    core.LEDGER_DIR.mkdir()
+    built = cases.World()
+    built.store.names.adopt(SLUG, "abcdef", SLUG, "repo")
+    core.sync(
+        SLUG, ops=[{"op": "task_add", "id": "add-t3", "by": "swarm", "task": LOOSE, "title": "Loose", "lane": "eng"}]
+    )
+    for name, seat, task in ((ENGINEER, CLAIMANT, LOOSE), (OTHER_ENGINEER, OWN_CLAIMANT, "t2")):
+        built.store.put_agent(SLUG, AgentRecord(name, "eng", task, pane_id=f"p-{name}", seat=seat))
+        built.store.seats.occupy(seat, name, 1)
+
+    def state(slug):
+        if slug != SLUG:
+            pytest.fail(f"read the ledger of {slug}")
+        return built.doc()
+
+    monkeypatch.setattr(master_fence, "_ledger_state", state, raising=False)
+    return built
+
+
+def comment(world, by, task):
+    op = {"op": "add", "thread": f"tasks/{task}/comments", "id": f"c-{by}-{task}", "by": by, "text": "Cut over now"}
+    return world.write(op)
+
+
+def relay(world, by, task):
+    op = {"op": "relay", "id": f"r-{by}-{task}", "by": by, "item": f"tasks/{task}"}
+    return world.write(op | {"text": "Stage the turnover", "quote": "stage the authenticated turnover first"})
+
+
+@pytest.mark.parametrize(
+    ("op", "item"),
+    [
+        ({"op": "add", "thread": "tasks/t1/comments"}, "tasks/t1"),
+        ({"op": "relay", "item": "tasks/t1"}, "tasks/t1"),
+        ({"op": "relay", "item": "questions/q1"}, ""),
+        ({"op": "add", "thread": "tasks/t1/notes"}, ""),
+        ({"op": "add", "thread": "phases/p1/comments"}, ""),
+        ({"op": "add", "thread": "chat"}, ""),
+    ],
+)
+def test_task_comments_and_relays_are_covered(op, item):
+    assert master_fence.decision(op) == item
+
+
+def test_each_task_ruling_has_its_verb():
+    assert [master_fence.verb({"op": kind}) for kind in ("add", "relay")] == ["comment on", "relay onto"]
+
+
+def test_a_backend_master_comment_on_a_task_with_no_phase_is_refused_naming_the_front_door(world):
+    assert comment(world, SECOND_NAME, LOOSE) == {
+        "accepted": False,
+        "warnings": [f"tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot comment on it"],
+    }
+    task = next(t for t in world.doc()["tasks"] if t["id"] == LOOSE)
+    assert task["comments"] == []
+    assert world.refusals() == 1
+
+
+def test_the_front_door_comments_on_a_task_with_no_phase(world):
+    assert comment(world, LEAD_NAME, LOOSE) == {"accepted": True, "warnings": []}
+
+
+def test_a_phase_owner_comments_on_its_own_phase_and_not_on_another(world):
+    assert comment(world, SECOND_NAME, "t2") == {"accepted": True, "warnings": []}
+    assert comment(world, SECOND_NAME, "t1")["warnings"] == [
+        f"tasks/t1 belongs to {LEAD}, so {SECOND} cannot comment on it"
+    ]
+
+
+def test_a_backend_master_relay_onto_a_task_with_no_phase_is_refused_naming_the_front_door(world):
+    assert relay(world, SECOND_NAME, LOOSE) == {
+        "accepted": False,
+        "warnings": [f"tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot relay onto it"],
+    }
+    assert relay(world, LEAD_NAME, LOOSE)["warnings"] == []
+
+
+def test_an_engineer_comment_is_not_fenced(world):
+    assert comment(world, ENGINEER, LOOSE) == {"accepted": True, "warnings": []}
+
+
+def inbox(world):
+    return InboxStore(world.redis, session_id="s1")
+
+
+def test_a_backend_master_message_to_the_claimant_of_a_task_with_no_phase_is_refused(world):
+    with pytest.raises(InboxError) as refused:
+        master_fence.check_send(inbox(world), SECOND_NAME, CLAIMANT)
+
+    assert str(refused.value) == (
+        f"tasks/{LOOSE} belongs to {LEAD}, so {SECOND} cannot message its claimant; ask {LEAD} with agentihooks "
+        f'swarm {SLUG} masters-channel say "<text>"'
+    )
+    assert world.refusals() == 1
+
+
+@pytest.mark.parametrize(
+    ("sender", "address"),
+    [(LEAD_NAME, CLAIMANT), (SECOND_NAME, OWN_CLAIMANT), (OTHER_ENGINEER, CLAIMANT), (SECOND_NAME, LEAD)],
+)
+def test_owners_engineers_and_messages_to_agents_without_a_task_pass(world, sender, address):
+    master_fence.check_send(inbox(world), sender, address)
+
+    assert world.refusals() == 0
+
+
+def test_a_single_live_master_messages_without_reading_the_ledger(world, monkeypatch):
+    world.down(SECOND_NAME)
+    monkeypatch.setattr(master_fence, "_ledger_state", lambda slug: pytest.fail("read the ledger"))
+
+    master_fence.check_send(inbox(world), LEAD_NAME, CLAIMANT)
+
+
+def test_the_switch_off_lets_a_backend_master_message_through(world, monkeypatch):
+    monkeypatch.setenv(master_fence.SWITCH, master_fence.OFF)
+
+    master_fence.check_send(inbox(world), SECOND_NAME, CLAIMANT)
+
+
+def test_an_unreadable_ledger_lets_the_message_through_with_a_fail_open_row(world, monkeypatch, tmp_path):
+    def down(slug):
+        raise ConnectionError("ledger down")
+
+    rows = []
+    monkeypatch.setattr(master_fence, "_ledger_state", down)
+    monkeypatch.setattr(master_fence.log, "append", lambda slug, row, home=None: rows.append((slug, row)))
+
+    master_fence.check_send(inbox(world), SECOND_NAME, CLAIMANT)
+
+    assert [(slug, row.gate, row.kind, row.agent, row.tool, row.reason) for slug, row in rows] == [
+        (SLUG, "master-fence", "fail-open", SECOND_NAME, "inbox", "ConnectionError: ledger down")
+    ]
+
+
+def test_swarm_say_from_a_backend_master_to_the_claimant_is_refused(world):
+    with pytest.raises(InboxError, match=f"so {SECOND} cannot message its claimant"):
+        delivery.send(world.store, SLUG, "Cut over now", sender=SECOND_NAME, to=CLAIMANT)
+
+    assert inbox(world).mailbox(ENGINEER) == []
+
+
+def test_a_queued_swarm_say_from_a_backend_master_is_refused_on_replay(world):
+    entry = {"args": {"slug": SLUG, "to": CLAIMANT, "text": "Cut over now", "fyi": False}, "item": "i-say"}
+
+    with pytest.raises(InboxError, match=f"belongs to {LEAD}, so {SECOND} cannot message its claimant"):
+        delivery.apply_say(inbox(world), SECOND_NAME, entry)
+    assert inbox(world).mailbox(ENGINEER) == []
+
+
+def test_msg_send_from_a_backend_master_to_the_claimant_is_refused(world):
+    record = {"op": "send", "by": SECOND_NAME, "item": "i-send", "args": {"address": CLAIMANT, "text": "Cut over"}}
+
+    with pytest.raises(InboxError, match=f"so {SECOND} cannot message its claimant"):
+        inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})
+
+
+def test_msg_reply_from_a_backend_master_to_the_claimant_is_refused(world):
+    asked = inbox(world).send(CLAIMANT, SECOND, "Replicate without auth?")
+    record = {"op": "reply", "by": SECOND_NAME, "item": "i-reply", "args": {"id": asked.id, "text": "Yes, cut over"}}
+
+    with pytest.raises(InboxError, match=f"so {SECOND} cannot message its claimant"):
+        inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})
+    assert inbox(world).get(asked.id).state != "done"
+
+
+def test_the_front_door_replies_to_the_claimant(world):
+    asked = inbox(world).send(CLAIMANT, LEAD_NAME, "Replicate without auth?")
+    record = {"op": "reply", "by": LEAD_NAME, "item": "i-reply-lead", "args": {"id": asked.id, "text": "Stage it"}}
+
+    assert inbox_cli.apply(inbox(world), record | {"args": record["args"] | {"fyi": False}})["closed"] == asked.id
+
+
+def test_a_message_check_keeps_the_owner_of_every_phase(world):
+    master_fence.check_send(inbox(world), SECOND_NAME, OWN_CLAIMANT)
+
+    saved = json.loads(world.redis.hget(masters.MasterSeats(world.redis).key(SLUG), "owners"))
+    assert saved == {"p1": LEAD, "p2": SECOND}
+
+
+def test_a_message_check_reads_the_ledger_of_the_swarm_it_names(monkeypatch):
+    from scripts.swarm import ledger_client
+
+    class Client:
+        def state(self, slug):
+            return {"slug": slug}
+
+    monkeypatch.setattr(ledger_client, "LedgerClient", Client)
+
+    assert master_fence._ledger_state(SLUG) == {"slug": SLUG}

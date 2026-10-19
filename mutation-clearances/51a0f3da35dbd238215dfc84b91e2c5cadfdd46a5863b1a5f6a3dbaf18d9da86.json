@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/registry.py:scripts.doctor.registry.x__read_all__mutmut_7:798b539a43d20173a3623d3ffce7a6ab14b8ab1845129a5e2dc38d25d7485dbd": {
+    "reader": "standards-reader",
+    "reason": "With no or one active binding, both pool floors give every submitted read its own worker at once, so results, ordering, exceptions and timing are identical; the floor only keeps max_workers above zero."
+  }
+}

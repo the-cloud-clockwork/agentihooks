@@ -54,6 +54,7 @@ from scripts.swarm_ledger import (  # noqa: E402
     server_code,
     server_compose,
     server_lifetime,
+    storage,
 )
 from scripts.swarm_ledger.events import Hub  # noqa: E402
 from scripts.swarm_ledger.events.publishing import publishing  # noqa: E402
@@ -61,7 +62,6 @@ from scripts.swarm_ledger.repository import (
     hierarchy,  # noqa: E402
     legacy,  # noqa: E402
 )
-from scripts.swarm_ledger.repository import repository as stored  # noqa: E402
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
 from scripts.swarm_v2 import front_door, ledger_writer, master_fence  # noqa: E402
 
@@ -85,6 +85,7 @@ LOGO = ROOT / "media" / "agentihooks-logo.png"
 
 HUB = Hub()
 BIN_SWEEP_EVERY = 15
+SCHEDULER_UNAVAILABLE = threading.Event()
 LOADED_STAMP = code_stamp()
 
 
@@ -120,6 +121,7 @@ def publish_snapshot(slug: str, state: dict) -> None:
         HUB.publish_snapshot(slug, "ledger", ledger_view(state))
 
 
+stored = storage.default()
 repository = publishing(stored, publish_snapshot)
 
 
@@ -615,37 +617,13 @@ def deliver_alerts(slug, state):
 RELAY, ALERTS = "relay", "alerts"
 UNRELAYED = "ledger-unrelayed.json"
 REPLAY_EVERY = 5
-_UNRELAYED_LOCK = threading.Lock()
-
-
-def unrelayed_path() -> Path:
-    from hooks import config
-
-    return Path(config.AGENTIHOOKS_HOME) / UNRELAYED
 
 
 def unrelayed() -> dict:
-    """{kind: {slug: [revisions]}} the inbox could not take; kept on disk because Redis is what was down."""
     try:
-        found = json.loads(unrelayed_path().read_text())
-    except (OSError, ValueError):
+        return stored.held_revisions()
+    except (storage.Error, OSError):
         return {}
-    return found if isinstance(found, dict) else {}
-
-
-def _change_unrelayed(change) -> None:
-    with request_metrics.locked(_UNRELAYED_LOCK):
-        found = unrelayed()
-        change(found)
-        found = {kind: {s: revs for s, revs in slugs.items() if revs} for kind, slugs in found.items()}
-        found = {kind: slugs for kind, slugs in found.items() if slugs}
-        staged = unrelayed_path().with_suffix(".tmp")
-        staged.parent.mkdir(parents=True, exist_ok=True)
-        with staged.open("w") as handle:
-            handle.write(json.dumps(found))
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(staged, unrelayed_path())
 
 
 def unrelayed_since(kind, slug, rev) -> int:
@@ -654,24 +632,29 @@ def unrelayed_since(kind, slug, rev) -> int:
 
 def unrelayed_on(kind, slug, rev):
     """Keep the revision for replay whatever stopped the inbox from taking it."""
-
-    def keep(found):
-        held = found.setdefault(kind, {})
-        held[slug] = sorted({*held.get(slug, []), rev})
-
-    _change_unrelayed(keep)
+    stored.hold_revision(kind, slug, rev)
 
 
 def relayed(kind, slug, since, rev):
     """Forget the revisions a relay from since through rev covered; one recorded meanwhile outside it stays."""
-    if not unrelayed().get(kind, {}).get(slug):
+    if unrelayed().get(kind, {}).get(slug):
+        stored.release_revisions(kind, slug, since, rev)
+
+
+def adopt_unrelayed() -> None:
+    from hooks import config
+
+    path = Path(config.AGENTIHOOKS_HOME) / UNRELAYED
+    try:
+        found = json.loads(path.read_text())
+    except (OSError, ValueError):
         return
-
-    def forget(found):
-        held = found.get(kind, {})
-        held[slug] = [r for r in held.get(slug, []) if not since <= r <= rev]
-
-    _change_unrelayed(forget)
+    for kind, slugs in found.items() if isinstance(found, dict) else ():
+        for slug, revisions in slugs.items() if isinstance(slugs, dict) else ():
+            for rev in revisions if isinstance(revisions, list) else ():
+                if isinstance(rev, int):
+                    unrelayed_on(kind, slug, rev)
+    path.unlink()
 
 
 def replay_unrelayed() -> None:
@@ -681,7 +664,7 @@ def replay_unrelayed() -> None:
             try:
                 state = repository.get_document(slug)
             except KeyError:
-                _change_unrelayed(lambda found, kind=kind, slug=slug: found.get(kind, {}).pop(slug, None))
+                stored.drop_revisions(kind, slug)
                 continue
             REPLAYS[kind](slug, state)
 
@@ -1168,6 +1151,19 @@ def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
 
 
+def scheduled_wait(interval: float) -> None:
+    from scripts.scheduler.process_timer import wait
+
+    if not SCHEDULER_UNAVAILABLE.is_set():
+        try:
+            wait(interval)
+            return
+        except OSError as exc:
+            SCHEDULER_UNAVAILABLE.set()
+            sys.stderr.write(f"scheduler wait unavailable, sleeping instead: {exc}\n")
+    time.sleep(interval)
+
+
 def watch_ledgers(interval=2.0):
     started = code_stamp()
     reload = reloading()
@@ -1182,14 +1178,15 @@ def watch_ledgers(interval=2.0):
             bin_closed_without_swarm()
         if passes and passes % BIN_SWEEP_EVERY == 0:
             expire_alerts()
-        if passes % REPLAY_EVERY == 0 and unrelayed_path().exists():
+        if passes % REPLAY_EVERY == 0:
             try:
-                replay_unrelayed()
+                if unrelayed():
+                    replay_unrelayed()
             except Exception as exc:  # the watch loop also tidies the bin, expires alerts and samples streams
                 sys.stderr.write(f"unrelayed replay: {exc}\n")
         sample_streams()
         metrics_journal(request_metrics.persist)
-        time.sleep(interval)
+        scheduled_wait(interval)
 
 
 def serve():
@@ -1199,6 +1196,7 @@ def serve():
     except ledger_writer.WriterConflict as conflict:
         sys.exit(str(conflict))
     legacy.adopt(stored)
+    adopt_unrelayed()
     metrics_journal(request_metrics.restore, core.LEDGER_DIR / request_metrics.JOURNAL_NAME)
     threading.Thread(target=watch_ledgers, daemon=True).start()
     server = ThreadingHTTPServer((HOST, PORT), Handler, bind_and_activate=False)

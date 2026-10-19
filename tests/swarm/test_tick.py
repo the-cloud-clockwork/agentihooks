@@ -2037,6 +2037,52 @@ def test_an_overlap_names_the_live_owner_after_its_missing_claimant_is_repaired(
     assert runtime.tasks[1]["overlaps"] == [{"task": "t1", "claimant": runtime.spawned[0][1], "areas": ["hooks"]}]
 
 
+@pytest.mark.parametrize("claimant", ["engineer@a1b2c3-0099", "eng-1@sw", ""])
+def test_an_overlap_released_for_checks_has_no_coordination_recipient(store, claimant):
+    from scripts.swarm import prompt, ready
+
+    ledger = FakeLedger(
+        [
+            {"id": "t1", "state": "pr", "awaiting": "merge", "claimed_by": claimant, "territory": ["hooks"]},
+            {"id": "t2", "title": "Build it", "territory": ["hooks/x.py"]},
+        ]
+    )
+    ready.save(store, "sw", "t1", {"agent": claimant})
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert spawned_ids(runtime) == ["t2"]
+    overlap = runtime.tasks[0]["overlaps"]
+    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "checks": True}]
+    text = prompt.build("sw", "/repo", "eng", runtime.spawned[0][1], runtime.tasks[0])
+    assert "Task t1, waiting on checks with no agent; no coordination note needed, shares hooks/x.py." in text
+    assert f"claimed by {claimant}" not in text
+
+
+def test_a_reused_seat_does_not_make_its_new_agent_the_owner_of_an_overlap(store):
+    from scripts.swarm import prompt, ready
+
+    ledger = FakeLedger([{"id": "other", "territory": ["docs"]}])
+    runtime = FakeRuntime()
+    tick("sw", store, ledger, runtime, now_ms=1_000)
+    agent = store.agents("sw")[0]
+    ledger.rows.update(
+        FakeLedger(
+            [
+                {"id": "t1", "state": "pr", "awaiting": "merge", "claimed_by": agent.seat, "territory": ["hooks"]},
+                {"id": "t2", "title": "Build it", "territory": ["hooks/x.py"]},
+            ]
+        ).rows
+    )
+    ready.save(store, "sw", "t1", {"agent": "departed"})
+    tick("sw", store, ledger, runtime, now_ms=2_000)
+    assert spawned_ids(runtime) == ["other", "t2"]
+    overlap = runtime.tasks[1]["overlaps"]
+    assert overlap == [{"task": "t1", "claimant": "", "areas": ["hooks/x.py"], "checks": True}]
+    text = prompt.build("sw", "/repo", "eng", runtime.spawned[1][1], runtime.tasks[1])
+    assert "waiting on checks with no agent; no coordination note needed" in text
+    assert agent.name not in text and agent.seat not in text
+
+
 def test_territories_that_only_share_a_name_prefix_do_not_overlap(store):
     ledger = FakeLedger(
         [{"id": "t1", "territory": ["scripts/swarm"]}, {"id": "t2", "territory": ["scripts/swarm_ledger"]}]

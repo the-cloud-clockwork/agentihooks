@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/staged_compatibility.py:scripts.swarm.staged_compatibility.x_contracts__mutmut_45:645465a7f331dfa99e23db8a8e06fabe66fd9429b2492e10149718098d2a1af9": {
+    "reader": "standards_reader",
+    "reason": "Diagnostic decoration, capitalization or separator changes preserve the entire missing-piece information and rejection; no branch, returned data or admission result changes."
+  }
+}
