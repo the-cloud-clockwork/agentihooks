@@ -48,7 +48,7 @@ def caller_holder(session_id: str, proc: Path = Path("/proc"), start: int | None
 
 
 def candidate_paths(tool_input: dict) -> list[str]:
-    found = [str(tool_input[key]) for key in ("file_path", "notebook_path", "path") if tool_input.get(key)]
+    found = [str(tool_input[key]) for key in ("file_path", "notebook_path", "path", "workdir") if tool_input.get(key)]
     found += PATH_TOKEN.findall(str(tool_input.get("command", "")))
     return [os.path.expanduser(item) for item in found]
 
@@ -81,11 +81,9 @@ def claim(payload: dict, roots: list[Root] | None = None, home: Path | None = No
     for unit, kind in units:
         if being_removed(home, str(unit)):
             return f"BLOCKED: agentihooks gc is removing {unit} right now. Retry in a minute or work elsewhere."
-        lease = read_lease(unit, kind)
-        if lease and session and any(item.session_id == session for item in lease.holders):
-            continue
         holder = holder or caller_holder(session)
-        if holder:
+        lease = read_lease(unit, kind)
+        if holder and not (lease and holder in lease.holders):
             add_holder(unit, kind, holder, time.time())
     return ""
 
