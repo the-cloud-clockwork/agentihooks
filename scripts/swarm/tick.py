@@ -1295,9 +1295,7 @@ def respawn_master(slug, store, runtime, now_ms):
         config = store.ensure_code(slug)
         if config.state in ("stopping", "stopped"):
             return []
-        runtime = controller.FencedRuntime(
-            store, slug, held, runtime, os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL)
-        )
+        runtime = controller.FencedRuntime(store, slug, held, runtime, controller.LOCAL)
         live, actions = runtime.live_names(), []
         for agent in store.agents(slug):
             gone = agent.state not in ("finished", "starting") and agent.name not in live
