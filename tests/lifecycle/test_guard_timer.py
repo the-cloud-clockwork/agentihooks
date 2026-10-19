@@ -1,5 +1,6 @@
 import os
 import time
+from pathlib import Path
 
 import pytest
 
@@ -46,10 +47,29 @@ def test_claim_records_the_caller_on_a_bash_workdir(repo, tmp_path, owner):
 
 def test_claim_replaces_a_dead_holder_of_the_same_session(repo, tmp_path, owner):
     path = repo.worktree("task")
-    add_holder(path, "worktree", Holder("sess-1", 1111, 3, "boot-1"), time.time())
+    add_holder(path, "worktree", Holder("sess-1", 2**22 + 1, 3, "boot-1"), time.time())
     payload = {"session_id": "sess-1", "tool_input": {"file_path": str(path / "a.py")}}
     assert guard.claim(payload, roots_for(repo, tmp_path), tmp_path / "home") == ""
     assert read_lease(path, "worktree").holders == (owner,)
+
+
+def test_claim_keeps_a_running_holder_of_the_same_session_without_a_walk(repo, tmp_path, monkeypatch):
+    path = repo.worktree("task")
+    me = guard._process(os.getpid(), Path("/proc"))
+    live = Holder("sess-1", me.pid, me.start_time, "boot-1")
+    add_holder(path, "worktree", live, time.time())
+    monkeypatch.setattr(guard, "caller_holder", lambda session_id: pytest.fail("walked"))
+    payload = {"session_id": "sess-1", "tool_input": {"file_path": str(path / "a.py")}}
+    assert guard.claim(payload, roots_for(repo, tmp_path), tmp_path / "home") == ""
+    assert read_lease(path, "worktree").holders == (live,)
+
+
+def test_claim_writes_no_lease_without_a_caller_agent(repo, tmp_path, monkeypatch):
+    path = repo.worktree("task")
+    monkeypatch.setattr(guard, "caller_holder", lambda session_id: None)
+    payload = {"session_id": "sess-1", "tool_input": {"command": "git status", "workdir": str(path)}}
+    assert guard.claim(payload, roots_for(repo, tmp_path), tmp_path / "home") == ""
+    assert read_lease(path, "worktree") is None
 
 
 def test_claim_blocks_while_gc_removes_the_path(repo, tmp_path, owner):
