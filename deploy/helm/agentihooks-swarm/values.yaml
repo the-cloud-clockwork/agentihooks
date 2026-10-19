@@ -51,6 +51,8 @@ ledger:
     size: 1Gi
     storageClassName: ""
   env: {}
+  # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
+  secretEnv: []
   resources:
     requests:
       cpu: 50m

@@ -104,8 +104,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 {{- end -}}
 
-{{- define "swarm.controllerSecretEnv" -}}
-{{- range .Values.controller.secretEnv }}
+{{- define "swarm.secretKeyEnv" -}}
+{{- range . }}
 - name: {{ .name }}
   valueFrom:
     secretKeyRef:
