@@ -68,6 +68,11 @@ def _master_snapshot(environ: dict, now: float) -> dict[str, tuple[float, balanc
     return {master.slug: (at, balancer.ProbeResult(master.slug, "allowed", state, margin, five, week))}
 
 
+def _known(environ: dict) -> set[str]:
+    filed = {name.removeprefix(balancer.TOKEN_PREFIX) for name in balancer._current_tokens(environ)}
+    return filed | set(account_sessions.token_accounts(environ).values())
+
+
 def _claude(environ: dict, now: float) -> list[Account]:
     tokens = balancer.ClaudeTokenSource()
     observed = {result.account: (at, result) for at, result in balancer.cached_observations(environ=environ)}
@@ -75,7 +80,7 @@ def _claude(environ: dict, now: float) -> list[Account]:
     observed.update({result.account: (now, result) for result in fresh})
     observed.update(_master_snapshot(environ, now))
     counts = account_sessions.sessions_by_account(environ=environ)
-    routed = set(account_sessions.token_accounts(environ).values())
+    routed = _known(environ)
     rows = []
     for at, result in observed.values():
         token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")

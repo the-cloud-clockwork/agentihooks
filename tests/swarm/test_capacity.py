@@ -609,12 +609,15 @@ def test_a_cached_claude_record_without_its_token_or_a_live_session_is_pruned(mo
     assert [(row.name, row.state, row.sessions) for row in rows] == [("busy", "UNKNOWN", 1), ("mail", "OPEN", 0)]
 
 
-def test_claude_caps_come_from_the_shared_cache_whatever_tokens_the_session_holds(monkeypatch, tmp_path):
+@pytest.mark.parametrize("stored", ["shell block", "env file"])
+def test_claude_caps_come_from_the_shared_cache_whatever_tokens_the_session_holds(monkeypatch, tmp_path, stored):
     from scripts import operator_env
     from scripts.swarm import quota_handoff
 
     block = {"AH_CC_TOKEN_a": "fake-a", "AH_CC_TOKEN_b": "fake-b"}
-    monkeypatch.setattr(operator_env, "block_tokens", lambda: dict(block))
+    if stored == "env file":
+        (tmp_path / ".env").write_text("".join(f"{name}={value}\n" for name, value in block.items()))
+    monkeypatch.setattr(operator_env, "block_tokens", lambda: dict(block) if stored == "shell block" else {})
     results = [
         balancer.ProbeResult(
             "a", "allowed", "NORMAL", 90, balancer.QuotaWindow(used=10), balancer.QuotaWindow(used=10)
