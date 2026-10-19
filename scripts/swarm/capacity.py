@@ -84,10 +84,10 @@ def _claude(environ: dict, now: float) -> list[Account]:
     rows = []
     for at, result in observed.values():
         token = environ.get(f"{balancer.TOKEN_PREFIX}{result.account}")
-        known = result.account in routed
-        if not known and (token or not counts.get(result.account)):
+        listed = result.account in routed
+        if not listed and (token or not counts.get(result.account)):
             continue
-        cap = tokens.cap(result, now) if known and session_bands.fresh(at, now) else None
+        cap = tokens.cap(result, now) if listed and session_bands.fresh(at, now) else None
         five, week = _left(result.five_hour, now), _left(result.seven_day, now)
         reset = session_bands.upcoming(result.seven_day.resets_at, now)
         five_reset = session_bands.upcoming(result.five_hour.resets_at, now)
