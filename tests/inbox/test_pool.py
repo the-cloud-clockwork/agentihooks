@@ -463,6 +463,24 @@ def test_a_contended_return_stays_discoverable_for_the_next_pool_pass(swarm, inb
     assert (inbox.get(item.id).address, inbox.get(item.id).state) == (SECOND, "pending")
 
 
+def test_a_successor_receiving_during_reclaim_keeps_its_work(swarm, inbox, monkeypatch):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    original = inbox.return_to_pool
+
+    def successor_takes(item_id, holder):
+        swarm.seats.occupy(FRONT, "successor", at=2)
+        inbox.read(item.id, "successor")
+        return original(item_id, holder)
+
+    monkeypatch.setattr(inbox, "return_to_pool", successor_takes)
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "read")
+
+
 def test_a_redirected_item_stays_where_it_was_sent(swarm, inbox):
     _masters(swarm, 2)
     item = inbox.send("swarm", FRONT, "first")

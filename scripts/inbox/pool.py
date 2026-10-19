@@ -3,7 +3,7 @@ order, and each is claimed by exactly one live master, in round robin seat order
 
 from scripts.inbox import intent
 from scripts.inbox.seats import is_seat, master_of
-from scripts.inbox.store import POOL_SKIP
+from scripts.inbox.store import POOL_HOLDER, POOL_SKIP
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import MASTER, RedisStore
 from scripts.swarm_v2 import masters
@@ -89,6 +89,10 @@ class MasterPool:
         live = live_masters(self.redis, slug_of(master_of(holder)))
         return len(live) > 1 or holder not in live
 
+def reclaimable(self, pipe, holder: str) -> bool:
+        self.inbox.seats.watch(pipe, holder)
+        return holder not in live_masters(self.redis, slug_of(master_of(holder)))
+
     def keys_of(self, address: str) -> list[str]:
         slug = slug_of(address)
         keys = (self.key(slug), self.key(slug, "last"), self.key(slug, "holders"))
@@ -116,9 +120,13 @@ class MasterPool:
     def _reclaim(self, slug, live):
         """Unsettled items a master that is gone claimed go back to the pool."""
         for seat in sorted(self.redis.smembers(self.key(slug, "holders")) - set(live)):
+            retry = False
             for item in self.inbox.open_items(seat):
-                self.inbox.return_to_pool(item.id, seat)
-            self.redis.srem(self.key(slug, "holders"), seat)
+                moved = self.inbox.return_to_pool(item.id, seat)
+                if moved is None and self.redis.hget(self.inbox.key("item", item.id), POOL_HOLDER) == seat:
+                    retry = True
+            if not retry:
+                self.redis.srem(self.key(slug, "holders"), seat)
 
     def _routes(self, slug, live):
         """None with intent grouping off; else the matched master per waiting item, None leaving it to round robin."""
