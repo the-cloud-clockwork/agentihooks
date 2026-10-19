@@ -1,7 +1,9 @@
 """The swarm user services and the scheduler cron that runs `agentihooks swarm tick` every minute."""
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import sysconfig
@@ -18,6 +20,8 @@ RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
 DRAIN_S = 30
 KILL_WAIT_S = 10
 STOP_TIMEOUT_S = 120
+CGROUP_FILE = Path("/proc/self/cgroup")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
 def units(binary):
@@ -99,11 +103,39 @@ def _drain(run):
     return "" if left == "0" else left
 
 
-def _inside():
+def _own_group():
     try:
-        return Path("/proc/self/cgroup").read_text().rstrip().endswith(f"/{UNIT}.service")
+        lines = CGROUP_FILE.read_text().splitlines()
     except OSError:
-        return False
+        return None
+    for line in lines:
+        _, controllers, path = line.split(":", 2)
+        if path.endswith(f"/{UNIT}.service") and controllers in ("", "name=systemd"):
+            return CGROUP_ROOT / ("systemd" if controllers else "") / path.lstrip("/") / "cgroup.procs"
+    return None
+
+
+def _others(procs):
+    from scripts.swarm import tick_reaper
+
+    try:
+        pids = {int(pid) for pid in procs.read_text().split()}
+    except OSError:
+        return set()
+    return {pid for pid in pids - tick_reaper.ancestors() if tick_reaper.alive(pid)}
+
+
+def _drain_inside(procs):
+    for number, wait_s in ((signal.SIGTERM, DRAIN_S), (signal.SIGKILL, KILL_WAIT_S)):
+        for pid in _others(procs):
+            with contextlib.suppress(ProcessLookupError):
+                os.kill(pid, number)
+        deadline = time.monotonic() + wait_s
+        while (left := _others(procs)) and time.monotonic() < deadline:
+            time.sleep(1)
+        if not left:
+            return ""
+    return str(len(left))
 
 
 def _retire(unit_dir, run):
@@ -114,7 +146,8 @@ def _retire(unit_dir, run):
     if run(disable, capture_output=True, text=True, timeout=30, check=False).returncode:
         print(f"the {UNIT} timer could not be disabled; its unit files stay until a later pass", file=sys.stderr)
         return False
-    if not _inside() and (left := _drain(run)):
+    procs = _own_group()
+    if left := _drain_inside(procs) if procs else _drain(run):
         print(
             f"the {UNIT} service group did not empty ({left} processes left); its unit files stay until a later pass",
             file=sys.stderr,

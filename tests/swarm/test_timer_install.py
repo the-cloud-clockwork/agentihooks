@@ -1,3 +1,4 @@
+import os
 from argparse import Namespace
 
 import pytest
@@ -262,12 +263,25 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     assert scheduled == [True]
 
 
-def test_a_tick_running_inside_the_tick_service_retires_it_without_ending_itself(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(timer, "_inside", lambda: True)
+def test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_not_itself(tmp_path, monkeypatch):
+    import signal
+    import subprocess
+    import sys
+
+    left = [subprocess.Popen([sys.executable, "-c", "import time; time.sleep(600)"]) for _ in range(2)]
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text("".join(f"{pid}\n" for pid in [os.getpid(), *[p.pid for p in left]]))
+    monkeypatch.setattr(timer, "_own_group", lambda: procs)
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
-    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    calls = []
+    try:
+        assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+        assert [p.wait(15) for p in left] == [-signal.SIGTERM] * 2
+    finally:
+        for p in left:
+            p.kill()
+            p.wait()
     argvs = [argv for argv, _ in calls]
     assert argvs[:2] == [
         ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
@@ -278,16 +292,56 @@ def test_a_tick_running_inside_the_tick_service_retires_it_without_ending_itself
     assert not (tmp_path / "agentihooks-swarm.service").exists()
 
 
-def test_only_a_process_in_the_tick_service_group_counts_as_inside(tmp_path, monkeypatch):
+def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_keeps_the_units(
+    tmp_path, monkeypatch, capsys
+):
+    import signal
+    import subprocess
+    import sys
+
+    deaf = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(600)"
+    left = subprocess.Popen([sys.executable, "-c", deaf], stdout=subprocess.PIPE, text=True)
+    procs = tmp_path / "cgroup.procs"
+    procs.write_text(f"{os.getpid()}\n{left.pid}\n")
+    monkeypatch.setattr(timer, "DRAIN_S", 1)
+    try:
+        assert left.stdout.readline().strip() == "ready"
+        assert timer._drain_inside(procs) == ""
+        assert left.wait(15) == -signal.SIGKILL
+    finally:
+        left.kill()
+        left.wait()
+    monkeypatch.setattr(timer, "_others", lambda procs: {4242})
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 0)
+    monkeypatch.setattr(timer.os, "kill", lambda pid, number: None)
+    assert timer._drain_inside(procs) == "1"
+
+
+@pytest.mark.parametrize(
+    ("lines", "procs"),
+    [
+        ("0::/user.slice/user@1000.service/app.slice/agentihooks-swarm.service\n", "user.slice"),
+        (
+            "12:cpu,cpuacct:/user.slice\n1:name=systemd:/user.slice/user@1000.service/agentihooks-swarm.service\n",
+            "systemd/user.slice",
+        ),
+        ("0::/user.slice/user@1000.service/app.slice/agentihooks-swarm-waits.service\n", None),
+        (None, None),
+    ],
+)
+def test_the_own_group_is_the_tick_service_cgroup_on_either_hierarchy(tmp_path, monkeypatch, lines, procs):
     cgroup = tmp_path / "cgroup"
-    real = timer.Path
-    monkeypatch.setattr(timer, "Path", lambda path: cgroup if path == "/proc/self/cgroup" else real(path))
-    cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentihooks-swarm.service\n")
-    assert timer._inside()
-    cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentihooks-swarm-waits.service\n")
-    assert not timer._inside()
-    cgroup.unlink()
-    assert not timer._inside()
+    if lines is not None:
+        cgroup.write_text(lines)
+    monkeypatch.setattr(timer, "CGROUP_FILE", cgroup)
+    monkeypatch.setattr(timer, "CGROUP_ROOT", tmp_path / "fs")
+    found = timer._own_group()
+    if procs is None:
+        assert found is None
+    else:
+        assert found.name == "cgroup.procs"
+        assert found.parent.name == "agentihooks-swarm.service"
+        assert str(found).startswith(str(tmp_path / "fs" / procs))
 
 
 def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):

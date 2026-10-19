@@ -34,7 +34,7 @@ def _argv(pid: int) -> list[str]:
     return (PROC / str(pid) / "cmdline").read_bytes().decode(errors="replace").split("\0")[:-1]
 
 
-def _ancestors() -> set[int]:
+def ancestors() -> set[int]:
     pids, pid = set(), os.getpid()
     while pid > 1 and pid not in pids:
         pids.add(pid)
@@ -50,7 +50,7 @@ def _age_s(pid: int) -> float:
     return uptime - int(_stat(pid)[19]) / os.sysconf("SC_CLK_TCK")
 
 
-def _alive(pid: int) -> bool:
+def alive(pid: int) -> bool:
     try:
         return _stat(pid)[0] not in ("Z", "X")
     except OSError:
@@ -70,7 +70,7 @@ def _environ(pid: int) -> dict[str, str]:
 
 
 def _leftovers() -> list[tuple[int, float, list[str], str]]:
-    spared, uid, found = _ancestors(), os.getuid(), []
+    spared, uid, found = ancestors(), os.getuid(), []
     started = _environ(os.getpid())
     loaded = {key: value for key, value in os.environ.items() if key not in started}
     mine = runtime_dir(os.environ)
@@ -92,9 +92,9 @@ def _leftovers() -> list[tuple[int, float, list[str], str]]:
 
 def _wait(pids: list[int], grace_s: float) -> list[int]:
     deadline = time.monotonic() + grace_s
-    while (alive := [pid for pid in pids if _alive(pid)]) and time.monotonic() < deadline:
+    while (living := [pid for pid in pids if alive(pid)]) and time.monotonic() < deadline:
         time.sleep(0.1)
-    return alive
+    return living
 
 
 def _same(pid: int, start: str) -> bool:
@@ -110,8 +110,8 @@ def reap(grace_s: float = GRACE_S) -> list[Reaped]:
     found = _leftovers()
     for pid, _, _, _ in found:
         _signal(pid, signal.SIGTERM)
-    alive = set(_wait([pid for pid, _, _, _ in found], grace_s))
-    killed = {pid for pid, _, _, start in found if pid in alive and _same(pid, start)}
+    living = set(_wait([pid for pid, _, _, _ in found], grace_s))
+    killed = {pid for pid, _, _, start in found if pid in living and _same(pid, start)}
     for pid in killed:
         _signal(pid, signal.SIGKILL)
     return [
