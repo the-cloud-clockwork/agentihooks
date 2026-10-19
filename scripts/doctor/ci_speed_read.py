@@ -31,7 +31,7 @@ class _Api:
         )
         return json.loads(response.stdout)
 
-    def pages(self, endpoint: str, field: str) -> list[dict]:
+    def pages(self, endpoint: str, field: str, departed: Callable[[dict], int] | None = None) -> list[dict]:
         separator = "&" if "?" in endpoint else "?"
         for _ in range(2):
             rows, totals = {}, set()
@@ -48,6 +48,8 @@ class _Api:
                         return list(rows.values())
                     break
                 page += 1
+        if page == 1 and departed and len(rows) + departed(rows) >= total:
+            return list(rows.values())
         raise RuntimeError(
             "Actions API pagination ended before the full count: "
             f"endpoint={endpoint}; page={page}; rows={len(rows)}; total={total}"
@@ -78,7 +80,12 @@ def read(
         queries = [{"created": f"{since}..{until}"}]
         queries.extend({"status": status} for status in ACTIVE)
         for query in queries:
-            for workflow in api.pages(f"{root}?{urlencode(query)}", "workflow_runs"):
+            status = query.get("status")
+
+            def departed(rows: dict, status=status) -> int:
+                return sum(1 for i, w in discovered.items() if i not in rows and w.get("status") != status)
+
+            for workflow in api.pages(f"{root}?{urlencode(query)}", "workflow_runs", departed if status else None):
                 discovered[workflow["id"]] = workflow
         with ThreadPoolExecutor(max_workers=6) as pool:
             previous = [
