@@ -7,8 +7,6 @@ from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, ledger, new_ledger, operation, pinned
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 authority_live = _authority_live
 DISPATCHER, ENGINEER = "dispatcher@323133-0002", "engineer@323133-0256"
 

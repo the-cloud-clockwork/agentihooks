@@ -4,7 +4,7 @@ import pytest
 
 from hooks.context import operator_mode
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

@@ -1,11 +1,7 @@
-import pytest
-
 from scripts.swarm.status import findings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def test_repeated_failed_launches_report_the_errors_without_a_proof_loop():

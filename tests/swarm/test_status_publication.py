@@ -1,9 +1,6 @@
-import pytest
-
 from scripts.swarm import status
 from tests.swarm.test_commands import store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 __all__ = ["store"]
 
 

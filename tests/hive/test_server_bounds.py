@@ -11,8 +11,6 @@ import pytest
 
 from scripts.hive import auth, server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PUBLIC = "redis://hive.example:6380/2"
 
 

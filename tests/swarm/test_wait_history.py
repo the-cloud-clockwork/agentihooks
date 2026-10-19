@@ -5,8 +5,6 @@ import pytest
 from scripts.doctor import detect, traces_read
 from scripts.swarm import idle, waits
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis():

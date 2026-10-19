@@ -9,8 +9,6 @@ from scripts.swarm import capacity, dispatcher, grouping, metrics, priority_swee
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 MASTER_NAME = "master@abcdef-0001"

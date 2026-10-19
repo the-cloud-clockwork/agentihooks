@@ -22,8 +22,6 @@ from tests.swarm_ledger import legacy_page  # noqa: E402
 SLUG, ENG, SID = "talkexec-2026-01-01", "engineer@abcdef-0001", "sid-talk"
 BUDGET = 10
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch, ledger_port):

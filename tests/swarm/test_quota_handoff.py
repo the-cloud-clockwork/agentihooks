@@ -13,8 +13,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, store, tasks, workers  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 LAUNCH = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high", "account": "old"}
 
 

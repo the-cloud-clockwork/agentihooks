@@ -6,8 +6,6 @@ from scripts.swarm import capacity, cli, host_budget, tick
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CAPS = {"eng": 2, "ci": 1, "plan": 0}
 MEMORY = "2100 MB available memory fits 3 at 700 MB each"
 UNKNOWN = "host unknown: the process files cannot be read, so spawns pass"
