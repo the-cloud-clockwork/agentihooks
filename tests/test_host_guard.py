@@ -11,6 +11,9 @@ import pytest
 pytestmark = pytest.mark.unit
 
 GUARD = Path(__file__).resolve().parents[1] / "scripts" / "host_guard"
+NEEDS_HOST = pytest.mark.skipif(
+    not shutil.which("jq") or not Path("/proc/self/comm").exists(), reason="guard needs jq and /proc"
+)
 PROBE = "import ctypes, sys, time\nctypes.CDLL(None).prctl(15, sys.argv[1].encode(), 0, 0, 0)\ntime.sleep(600)\n"
 
 
@@ -25,14 +28,19 @@ def _probe(comm: str, *command: str) -> subprocess.Popen:
     raise AssertionError(f"probe {process.pid} never took comm {comm}")
 
 
-def _guard(home: Path) -> None:
-    subprocess.run(["bash", str(GUARD / "guard-daemon.sh")], env={**os.environ, "HOME": str(home)}, check=True)
+def _guard(home: Path, config: dict, comm: str) -> subprocess.CompletedProcess:
+    running = subprocess.run(["ps", "-u", str(os.getuid()), "-o", "comm="], capture_output=True, text=True, check=True)
+    names = {part for line in running.stdout.splitlines() if line.strip() for part in (line.strip(), line.split()[0])}
+    bystanders = sorted(names - {comm})
+    (home / "guard-config.json").write_text(json.dumps({**config, "excludes": config["excludes"] + bystanders}))
+    return subprocess.run(
+        ["bash", str(GUARD / "guard-daemon.sh")], env={**os.environ, "HOME": str(home)}, capture_output=True, text=True
+    )
 
 
-@pytest.mark.skipif(not shutil.which("jq") or not Path("/proc/self/comm").exists(), reason="guard needs jq and /proc")
+@NEEDS_HOST
 def test_guard_skips_a_long_lived_tick_and_still_reaps_the_other_old_processes(tmp_path):
-    config = json.loads((GUARD / "guard-config.json").read_text())
-    (tmp_path / "guard-config.json").write_text(json.dumps({**config, "threshold": 3, "timeout": "0s"}))
+    config = {**json.loads((GUARD / "guard-config.json").read_text()), "threshold": 3, "timeout": "0s"}
     comm = f"ahguard{os.getpid() % 100000}"
     tick = _probe(comm, "agentihooks", "swarm", "tick")
     others = [
@@ -40,9 +48,9 @@ def test_guard_skips_a_long_lived_tick_and_still_reaps_the_other_old_processes(t
         _probe(comm, "agentihooks", "swarm", "tick-watch"),
     ]
     try:
-        _guard(tmp_path)
+        assert _guard(tmp_path, config, comm).returncode == 0
         assert tick.poll() is None and all(other.poll() is None for other in others)
-        _guard(tmp_path)
+        assert _guard(tmp_path, config, comm).returncode == 0
         for other in others:
             other.wait(timeout=10)
         assert tick.poll() is None
@@ -54,3 +62,16 @@ def test_guard_skips_a_long_lived_tick_and_still_reaps_the_other_old_processes(t
         for process in [tick, *others]:
             process.kill()
             process.wait()
+
+
+@NEEDS_HOST
+@pytest.mark.parametrize(
+    ("commands", "logged"),
+    [(["("], "ERROR config_malformed excludeCommands pattern=("), ("tick", "ERROR config_malformed excludeCommands")],
+)
+def test_guard_refuses_a_malformed_command_exclude_before_reaping(tmp_path, commands, logged):
+    config = {**json.loads((GUARD / "guard-config.json").read_text()), "excludeCommands": commands}
+    assert _guard(tmp_path, config, "").returncode == 1
+    log = (tmp_path / "guard-daemon.log").read_text()
+    assert logged in log
+    assert "TICK_START" not in log

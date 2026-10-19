@@ -84,11 +84,21 @@ while IFS= read -r name; do
     EXCLUDES["$name_lower"]=1
 done < <(echo "$CONFIG" | jq -r '.excludes[]? // empty' 2>/dev/null)
 
+if ! echo "$CONFIG" | jq -e '(.excludeCommands // []) | type == "array" and all(type == "string")' &>/dev/null; then
+    guard_log "ERROR config_malformed excludeCommands"
+    exit 1
+fi
 EXCLUDE_COMMANDS=()
 while IFS= read -r pattern; do
     [[ -z "$pattern" ]] && continue
+    rc=0
+    [[ "" =~ $pattern ]] || rc=$?
+    if (( rc == 2 )); then
+        guard_log "ERROR config_malformed excludeCommands pattern=$pattern"
+        exit 1
+    fi
     EXCLUDE_COMMANDS+=("$pattern")
-done < <(echo "$CONFIG" | jq -r '.excludeCommands[]? // empty' 2>/dev/null)
+done < <(echo "$CONFIG" | jq -r '.excludeCommands // [] | .[]')
 
 excluded_command() {
     local args pattern
