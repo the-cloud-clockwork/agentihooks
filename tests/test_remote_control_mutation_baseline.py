@@ -6,7 +6,8 @@ import pytest
 from scripts.ci_mutation.runner import mutate_files
 from scripts.ci_mutation.stats import SharedStats
 
-# The baseline and grading passes run as two tests on one worker so neither test carries both under the one minute watchdog.
+# One xdist worker builds the baseline pass once; a module cache behind a function fixture keeps that pass inside
+# the function scoped home isolation, which a module fixture would run before.
 pytestmark = pytest.mark.xdist_group("remote_control_mutation")
 ROOT = Path(__file__).resolve().parents[1]
 SOURCE = "scripts/swarm/commands.py"
