@@ -723,7 +723,8 @@ def test_a_run_whose_failed_jobs_all_lost_their_runner_files_one_outage_task(sto
 @pytest.mark.parametrize(
     ("steps", "messages"),
     [
-        ([{"name": "Set up job", "conclusion": "failure"}], ["Failed to download archive after 3 attempts."]),
+        ([{"name": "Set up job", "conclusion": "failure"}], []),
+        (RAN, ["Failed to download archive after 3 attempts."]),
         ([*RAN[:1], {"name": "Run tests", "conclusion": None}], []),
         (RAN, ["The self-hosted runner: anton-x lost communication with the server."]),
         (RAN, ["The operation was canceled."]),
@@ -744,6 +745,24 @@ def test_a_failed_step_that_skipped_the_tests_files_its_own_fixer_and_no_outage(
     ]
     refresh(store, ledger, outage_run([("unit (3.12, 1)", steps, ["No matching distribution found for fakepkg"])]))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.12, 1)"]
+
+
+def test_a_job_whose_tests_passed_without_an_outage_sign_files_its_own_fixer(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("unit (3.12, 1)", RAN, ["Coverage fell below the floor"])]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: unit (3.12, 1)"]
+
+
+def test_the_outage_task_names_the_run_the_jobs_and_every_cause(store):
+    ledger = Ledger()
+    found = [("unit (3.11, 1)", RAN, DOWNLOAD), ("unit (3.11, 2)", RAN, ["The operation was canceled."])]
+    refresh(store, ledger, outage_run(found))
+    assert ledger.added[0][1]["description"] == (
+        f"The dev push run 900 of Tests lost its runner infrastructure at commit {SHA}: "
+        "https://github.com/o/r/actions/runs/900. Its cause: the jobs unit (3.11, 1), unit (3.11, 2) lost their "
+        "runner infrastructure (Failed to resolve action download info; The operation was canceled). "
+        "No code change is due; the swarm closes this task when a later dev push run passes."
+    )
 
 
 def test_a_real_failure_beside_an_outage_files_the_outage_task_and_its_own_fixer(store):
