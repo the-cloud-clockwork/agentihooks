@@ -4,6 +4,7 @@ import fcntl
 import json
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -158,6 +159,33 @@ def _delivered(at: float) -> None:
         record(Scheduler(redis_client()), ROOT, at)
     except RedisError as exc:
         print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
+
+
+def _held(name: str) -> bool:
+    try:
+        with machine_lock(name):
+            return False
+    except AlreadyRunning:
+        return True
+
+
+def restart(
+    kill: Callable[[int, int], None] = os.kill,
+    schedule: Callable[[], bool] | None = None,
+    wait: Callable[[float], None] = time.sleep,
+) -> str:
+    """The supervisor runs the code it started from, so a restart from the installed watcher replaces stale code."""
+    if _held("supervisor"):
+        kill(int((runtime_dir() / "supervisor.lock").read_text()), signal.SIGTERM)
+        for _ in range(STOP_S):
+            if not _held("supervisor"):
+                break
+            wait(1)
+    if schedule is None:
+        from scripts.swarm import timer
+
+        schedule = timer.schedule
+    return "restarted the scheduler tick" if schedule() else "restarted the scheduler, but the tick did not register"
 
 
 if __name__ == "__main__":

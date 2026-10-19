@@ -305,6 +305,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm init --adopt [--no-start]` | Hand the existing shared ledger folder, user and home to the bundle. Requires an earlier `--prepare-clients` run and refuses without its `swarm-client.env`. It records `SWARM_ADOPT_LEDGER_DIR`, `SWARM_ADOPT_HOME`, `SWARM_ADOPT_UID`, `SWARM_ADOPT_GID`, `SWARM_ADOPT_CODE` (this agentihooks checkout), `SWARM_ADOPT_REDIS_URL` (the Redis the prepared clients use) and `SWARM_PORT=8765` in the stack `.env`; later runs without `--adopt` keep them, and each `--adopt` run writes all seven again. While recorded, every stack Compose call adds `deploy/compose/adopt.yaml`, so the `swarm` service runs as that user on the host PID and network namespaces, bound to 127.0.0.1:8765, from that checkout with reload on, against that Redis, and serves the folder at its own path, so every swarm keeps its ledger, inbox items and seats; `ledger serve --ensure` and `--stop` for that folder, and the Doctor and watchdog restarts, go to the bundle `swarm` service and never restore the legacy `ledger` service of the `agentihooks-ledger` Compose project; another shared folder is refused by name; and the stack Redis `swarm` user is denied `FLUSHALL` and `FLUSHDB`. It moves no data or seats and activates no hive. Cannot be combined with `--prepare-clients`. Rollback: stop the bundle `swarm` service, move the adoption lines out of the stack `.env`, and run `ledger serve --ensure` to start the legacy service again. Details: [Docker Compose quick start](../getting-started/compose-quick-start.md#adopt-an-existing-workstation-ledger). |
 | `agentihooks swarm init --no-start` | Check Docker and the Compose plugin, write the stack files, `.env` (adoption included with `--adopt`) and `client.env`, then stop: no service, swarm or ledger is started or created. |
 | `agentihooks swarm list` | One line per swarm: state, caps, agent count, repo. |
+| `agentihooks swarm tick-watch` | The stale tick watcher, run by its own user service: one inbox alert per stale tick episode to the front door master seat and every live agent seat, a resolved notice when a fresh pass lands, and on a workstation a scheduler tick restart and a respawn of an empty front door master while the tick is stale (see [Tick heartbeat and stale watcher](#tick-heartbeat-and-stale-watcher)). |
 | `agentihooks swarm tick` | One reconcile pass over every swarm (the scheduler runs it every minute). |
 | `agentihooks swarm <id> controller` | Show the controller owner, epoch and expiry. |
 | `agentihooks swarm <id> controller release` | Release this hive's lease so another controller can take over at a higher epoch. |
@@ -1145,6 +1146,38 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Tick heartbeat and stale watcher
+
+Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
+input it decided on was last observed. The host room counts from its last capacity decision, the quota from the
+freshest account observation, and the ledger revision from the pass that last saw it change. The ledger probe
+writes the ledger every pass, so a revision that holds still is a write that never lands; a ledger the tick cannot
+read ends the pass early, which shows as no completed pass. An input never observed is recorded as unknown and
+never judged.
+
+The tick is stale when no pass has completed for 10 minutes, or when an input it decided on was 10 minutes old at
+its last pass. The tick never judges itself: `agentihooks swarm tick-watch`, a process apart from the tick that
+never runs a tick pass, checks every running, paused, stopping or drained swarm once a minute.
+
+- **Alerts.** A stale episode sends one information item from `swarm` through the Redis inbox to the front door
+  master seat and every live agent seat, carrying the evidence; a seat that comes live during the episode gets the
+  current evidence. When a fresh pass completes, every alerted seat gets one resolved notice; a swarm stopped mid
+  episode ends it with a notice that its tick is no longer watched. A restarted watcher judges an existing
+  heartbeat from its own time, so it alerts at once on a tick already stale.
+- **Scheduler restart.** On a workstation install (`AGENTIHOOKS_DEPLOYMENT` unset or `local`) the watcher restarts
+  the scheduler tick while it is stale, at most once per 10 minutes for the whole machine: it stops the running
+  scheduler supervisor, which runs the code it started from, and registers the tick again from the installed
+  agentihooks the watcher runs.
+- **Master respawn.** On a workstation the watcher also restarts an empty front door master while the tick is
+  stale: under this hive's controller lease and the tick lock it drops lead master records whose session is gone
+  and spawns the master as the tick would. A swarm that another hive ticks is left alone.
+
+A swarm whose ledger is gone, binned or in an open ledger outage is alerted but never repaired, since neither a
+restart nor a respawn can end that. The watcher runs as the `agentihooks-tick-watch` user service, installed and
+enabled with the other swarm services and restarted by systemd if it exits. The controller lease keeps one tick
+per swarm: while another hive holds a swarm's lease, a workstation tick of that swarm returns `the swarm belongs
+to another hive`.
 
 ### Controller lease during long steps
 

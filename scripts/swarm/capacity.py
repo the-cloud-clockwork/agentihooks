@@ -603,6 +603,7 @@ def apply(slug: str, config, store, ledger, runtime, now_ms: int) -> list[str]:
     }
     changed = any(previous.get(key) != decision[key] for key in ("configured", "effective", "reason"))
     decision["at"] = now_ms if changed else previous["at"]
+    decision["observed_at"] = now_ms
     text = status_line(decision)
     store.redis.set(store.key(slug, "quota-capacity"), json.dumps(decision))
     if changed and rows:
