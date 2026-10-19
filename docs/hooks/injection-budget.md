@@ -1,6 +1,6 @@
 ---
 title: Hook Injection Budget
-nav_order: 4
+nav_order: 6
 parent: Hook System
 permalink: /docs/hooks/injection-budget/
 ---
@@ -160,7 +160,7 @@ size may be one unit above the fitted text.
 
 The Claude budget and priority sorting do not apply to Codex or Copilot;
 those targets retain block arrival order and their own delivery limits.
-[Codex](../reference/CODEX-COMPAT.md#context-spilling) installs
+[Codex](../reference/CODEX-COMPAT.md) installs
 `additionalContextLimit: 0` per hook handler to disable its spilling behavior.
 Copilot's `postToolUse` context has a separate 10 KB limit, enforced in bytes
 with a visible truncation marker. Neither setting raises Claude Code's limit.
