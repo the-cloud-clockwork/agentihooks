@@ -223,7 +223,6 @@ def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
         if plan["head"] != stats.head or key not in plan["keys"]:
             return "measured mutation plan stale for this commit or selection"
         shutil.copy(plan_path, work / "shard-plan.json")
-    # The measured plan prices each function from its recorded killer, so the shard runs that test first.
     if (killers := stats.folder.parent / "killers").is_dir():
         shutil.copytree(killers, work / "killers")
     return ""
