@@ -1,3 +1,4 @@
+import ast
 import functools
 import hashlib
 import json
@@ -12,26 +13,63 @@ from scripts.ci_mutation.scope import imported_names, module_name
 SCHEMA = 3
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
-DYNAMIC_IMPORTS = ("importlib", "__import__")
+DYNAMIC_IMPORTS = ("import_module", "__import__", "spec_from_file_location", "module_from_spec")
+CONFIGURATION = {"pyproject.toml", "pytest.ini", "setup.cfg", "tox.ini", "uv.lock", ".coveragerc"}
 TRACKED = ("git", "ls-files", "-z")
 report = functools.partial(print, flush=True)
 encode = functools.partial(json.dumps, sort_keys=True)
 
 
 def test_inputs(
-    root: Path, path: str, modules: dict[str, str], records: dict[str, tuple[str, set[str]]]
+    root: Path,
+    path: str,
+    modules: dict[str, str],
+    records: dict[str, tuple[str, set[str]]],
+    resources: set[str],
 ) -> dict[str, str]:
-    pending = {path} | {name for name in modules.values() if Path(name).name == "conftest.py"}
+    pending = {path} | {
+        str(parent / "conftest.py") for parent in Path(path).parents if str(parent / "conftest.py") in modules.values()
+    }
     inputs = {}
     while pending:
         current = pending.pop()
         if current not in records:
             text = (root / current).read_text()
-            dependencies = (
-                set(modules.values())
-                if any(marker in text for marker in DYNAMIC_IMPORTS)
-                else {modules[name] for name in imported_names(text, Path(current).parent.parts) if name in modules}
-            )
+            dependencies = set()
+            if Path(current).suffix == ".py":
+                tree = ast.parse(text)
+                names = set(imported_names(text, Path(current).parent.parts))
+                dynamic = [
+                    node
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Call)
+                    and (
+                        getattr(node.func, "id", "") in DYNAMIC_IMPORTS
+                        or getattr(node.func, "attr", "") in DYNAMIC_IMPORTS
+                    )
+                ]
+                for node in dynamic:
+                    if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                        names.add(node.args[0].value)
+                    else:
+                        dependencies.update(modules.values())
+                for name in names:
+                    parts = name.split(".")
+                    dependencies.update(
+                        modules[prefix]
+                        for index in range(1, len(parts) + 1)
+                        if (prefix := ".".join(parts[:index])) in modules
+                    )
+                literals = {
+                    node.value
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.Constant) and isinstance(node.value, str) and node.value
+                }
+                dependencies.update(
+                    resource
+                    for resource in resources
+                    if any(resource == value or resource.endswith("/" + value) for value in literals)
+                )
             records[current] = (hashlib.sha256(text.encode()).hexdigest(), dependencies)
         digest, dependencies = records[current]
         inputs[current] = digest
@@ -51,18 +89,19 @@ def collect_cached_stats(
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
         for path in tracked
-        if path and (Path(path).suffix != ".py" or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
+        if path and (path in CONFIGURATION or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
     }
     versions = {distribution.metadata["Name"]: distribution.version for distribution in metadata.distributions()}
     context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     records = {}
     folder.mkdir(parents=True, exist_ok=True)
-    inputs = {path: test_inputs(root, path, modules, records) for path in files}
+    resources = {path for path in tracked if path and (root / path).is_file()}
+    inputs = {path: test_inputs(root, path, modules, records, resources) for path in files}
     for dependencies in inputs.values():
         if not any(not name.startswith("tests/") for name in dependencies):
-            for source in changes:
-                dependencies.update(test_inputs(root, source, modules, records))
+            for source in changes.keys() & resources:
+                dependencies.update(test_inputs(root, source, modules, records, resources))
     keys = {
         path: hashlib.sha256(
             encode(
