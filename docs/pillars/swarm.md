@@ -1156,7 +1156,7 @@ its last pass. The tick never judges itself; two watchdogs do:
   control API, fails while a running, paused, stopping or drained swarm whose controller lease this controller
   holds has a stale tick, so Kubernetes restarts the tick container. A restarted container is judged from the later
   of its own start and the heartbeat, so it has 10 minutes to complete a pass with fresh inputs. A swarm in an open
-  ledger outage, or whose ledger is gone, binned or closed, is left to the watcher, which neither restarts nor respawns it,
+  ledger outage, or whose ledger is gone or binned, is left to the watcher, which neither restarts nor respawns it,
   since a restart cannot end it, and swarms another hive holds are left to
   that hive's probe.
 - **Stale watcher.** `agentihooks swarm tick-watch` is a process apart from the tick that never runs a tick pass. It
