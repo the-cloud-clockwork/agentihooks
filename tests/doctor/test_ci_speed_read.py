@@ -217,6 +217,36 @@ def test_duplicate_rows_do_not_hide_a_persistently_incomplete_list(target):
     )
 
 
+@pytest.mark.parametrize("departed,complete", [(True, True), (False, False)])
+def test_a_status_count_still_holding_a_run_that_left_it_completes_only_when_that_run_was_read(departed, complete):
+    from scripts.doctor import ci_speed_read
+
+    queued = [{"id": n, "status": "queued", "event": "push"} for n in range(1, 7)]
+    finished = [{"id": 7, "status": "completed", "event": "pull_request"}] if departed else []
+
+    def run(args, **kwargs):
+        query = parse_qs(urlsplit(args[2]).query)
+        if "/jobs" in args[2]:
+            body = {"total_count": 0, "jobs": []}
+        elif "created" in query:
+            body = {"total_count": len(queued + finished), "workflow_runs": queued + finished}
+        elif query.get("status") == ["queued"]:
+            body = {"total_count": 7, "workflow_runs": queued}
+        else:
+            body = {"total_count": 0, "workflow_runs": []}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert result["complete"] is complete
+    if complete:
+        assert sorted(r["id"] for r in result["runs"]) == list(range(1, 8))
+    else:
+        assert result["error"] == (
+            "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+            "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?status=queued; page=1; rows=6; total=7"
+        )
+
+
 @pytest.mark.parametrize("elapsed,complete", [(24.5, True), (25, False), (25.5, False)])
 def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, elapsed, complete):
     from scripts.doctor import ci_speed_read
