@@ -84,6 +84,21 @@ while IFS= read -r name; do
     EXCLUDES["$name_lower"]=1
 done < <(echo "$CONFIG" | jq -r '.excludes[]? // empty' 2>/dev/null)
 
+EXCLUDE_COMMANDS=()
+while IFS= read -r pattern; do
+    [[ -z "$pattern" ]] && continue
+    EXCLUDE_COMMANDS+=("$pattern")
+done < <(echo "$CONFIG" | jq -r '.excludeCommands[]? // empty' 2>/dev/null)
+
+excluded_command() {
+    local args pattern
+    args=$(tr '\0' ' ' 2>/dev/null < "/proc/$1/cmdline" || true)
+    for pattern in "${EXCLUDE_COMMANDS[@]}"; do
+        [[ "$args" =~ $pattern ]] && return 0
+    done
+    return 1
+}
+
 # --- Load state (per process-name: firstFlagged timestamp) ---
 declare -A STATE_FLAGGED
 declare -A STATE_COUNT
@@ -145,6 +160,10 @@ for name in "${!PROC_COUNTS[@]}"; do
             hrs=$(awk "BEGIN{printf \"%.1f\", $elapsed/3600}")
             while IFS= read -r pid; do
                 [[ "$pid" == "$MY_PID" ]] && continue
+                if excluded_command "$pid"; then
+                    guard_log "SKIPPED pid=$pid name=$name reason=excluded_command"
+                    continue
+                fi
                 if [[ "$DRY_RUN" == "--dry-run" ]]; then
                     guard_log "DRY_RUN would_kill pid=$pid name=$name reason=ghost_detected count=$count elapsed=${hrs}h"
                     ((kill_count++)) || true
