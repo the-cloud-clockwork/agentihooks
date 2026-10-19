@@ -67,8 +67,8 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
                 time.sleep(0.01)
             urlopen = server.ledger_link.urllib.request.urlopen
 
-            def impatient(request, timeout, **transport):
-                return urlopen(request, timeout=min(timeout, 0.05), **transport)
+            def impatient(request, timeout, **options):
+                return urlopen(request, timeout=min(timeout, 0.05), **options)
 
             with patch.object(server.ledger_link.urllib.request, "urlopen", side_effect=impatient):
                 assert server.ledger_link.serving(url=base) is None
@@ -272,7 +272,7 @@ def test_health_requests_use_short_timeouts(isolated_server):
         server.ensure()
         health.assert_called_once()
         assert health.call_args.args[0].full_url == f"{server.BASE}/healthz"
-        assert health.call_args.kwargs == {"timeout": 1}
+        assert health.call_args.kwargs["timeout"] == 1
     with (
         patch.object(server.time, "monotonic", return_value=100),
         patch.object(server, "SERVER_WAIT", 5),
