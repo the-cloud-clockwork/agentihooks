@@ -359,8 +359,6 @@ def _legacy(tmp_path, trace_id, entry):
 
 
 OBSERVED = {"type": "TOOL", "name": "Bash", "start": 1, "end": 2, "turn": 1, "error": False, "tokens": 0}
-
-
 OTHER = {**OBSERVED, "name": "Read"}
 
 

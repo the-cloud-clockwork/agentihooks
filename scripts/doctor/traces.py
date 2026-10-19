@@ -55,6 +55,10 @@ def _gaps(trace):
     return [(a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS) for a, b in zip(turns, turns[1:])]
 
 
+def _partial(trace):
+    return () if trace.get("complete", True) else ("observations read up to the observation page cap only",)
+
+
 def tool_errors(record: dict, limits: Limits) -> list[Finding]:
     found = []
     for trace in record["traces"]:
@@ -73,6 +77,7 @@ def tool_errors(record: dict, limits: Limits) -> list[Finding]:
                     f"{errors}/{len(tools)} tool calls failed",
                     "failed tools: " + ", ".join(f"{name} {n}" for name, n in failed.most_common()),
                     f"trace {trace['id']}",
+                    *_partial(trace),
                 ),
                 f"over {limits.tool_error_pct}% of at least {limits.tool_error_min_calls} tool calls",
                 round(errors * 100 / len(tools)),
@@ -166,6 +171,7 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
                         f"turn {a} to turn {b}: {m} minutes; gap {start} to {end}; no declared wait covered it"
                         for a, b, m, start, end in long
                     ),
+                    *_partial(trace),
                 ),
                 f"over {limits.turn_gap_minutes} minutes between turns",
                 max(gap[2] for gap in long),
