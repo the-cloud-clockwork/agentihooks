@@ -1,11 +1,14 @@
+import re
 from dataclasses import replace
 from types import SimpleNamespace
 
 import pytest
 
 from scripts import init_agent, master_claude_login, terminate_agent
+from scripts.codex_session import supervisor
 from scripts.swarm import remote_control
 from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import AgentRecord
 from scripts.swarm_v2 import masters
 from tests.swarm.test_runtime import _passed, _resuming, validated
 
@@ -125,8 +128,9 @@ def test_the_title_names_the_claude_session_and_the_herdr_tab(tmp_path, monkeypa
     parser = init_agent._parser()
     assert parser.parse_args(["--title", "master 2 · rig"]).title == "master 2 · rig"
     assert parser.parse_args([]).title == ""
-    [title] = [action for action in parser._actions if action.dest == "title"]
-    assert title.help == "Display name and herdr tab label in place of the name"
+    monkeypatch.setenv("COLUMNS", "200")
+    shown = re.compile(r"^\s+--title TITLE\s+Display name and herdr tab label in place of the name$", re.M)
+    assert shown.search(init_agent._parser().format_help())
 
 
 def test_init_agent_hands_the_title_to_the_claude_session_and_herdr_naming(tmp_path, monkeypatch):
@@ -257,9 +261,6 @@ def test_a_codex_master_session_shows_its_title_while_herdr_keeps_the_agent_name
 
 
 def test_a_served_codex_thread_shows_a_master_title_and_a_worker_name():
-    from scripts.codex_session import supervisor
-    from scripts.swarm.store import AgentRecord
-
     backend = AgentRecord("master@a1b2c3-0002", "master", "master", seat="master-2@rig")
     worker = AgentRecord("engineer@a1b2c3-0007", "eng", "t1", seat="eng-1@rig")
     launch = SimpleNamespace(slug="rig")

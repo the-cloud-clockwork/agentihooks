@@ -19,6 +19,7 @@ from scripts.codex_session.binding import CONNECTED, EXITED, FAILED, RECORDS, Bi
 from scripts.profiles import binding
 from scripts.routing import envs
 from scripts.swarm.store import APP_SERVER_TRANSPORT, MASTER, AgentRecord, RedisStore
+from scripts.swarm_v2 import masters
 
 NO_DAEMON = "--no-daemon"
 REQUIRED_HOOKS = ("sessionStart", "userPromptSubmit", "preToolUse", "postToolUse", "stop")
@@ -220,8 +221,6 @@ def bind_thread(connection: protocol.Connection, launch: Launch) -> dict:
 
 
 def shown_name(launch: Launch, agent: AgentRecord) -> str:
-    from scripts.swarm_v2 import masters
-
     title = masters.title(launch.slug, agent.seat)
     return title if agent.lane == MASTER else agent.name
 
