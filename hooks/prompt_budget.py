@@ -1,4 +1,4 @@
-"""Deadline for the prompt hook's steps, so a slow step costs its own output and never the blocks already injected."""
+"""Deadline for the prompt hook's steps."""
 
 import math
 import os
@@ -8,6 +8,7 @@ import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 from hooks.common import log
 
@@ -62,7 +63,7 @@ class PromptBudget:
     def left(self, limit: float) -> float:
         return self._start + limit - self._clock()
 
-    def run(self, name: str, step: Callable, *args):
+    def run(self, name: str, step: Callable[..., Any], *args: Any) -> Any:
         if self.spent or self.left(self.soft) <= 0 or (self._installed and self.left(self.hard) <= 0):
             self.spent = True
             self.skipped.append(name)
@@ -79,13 +80,13 @@ class PromptBudget:
             self.cut = name
             return None
         finally:
-            self._disarm()
+            self._settle()
             self.running = ""
             self.times[name] = self._clock() - began
 
     @contextmanager
     def guarded(self, on_overrun: Callable[["PromptBudget"], None] | None = None) -> Iterator["PromptBudget"]:
-        previous, timer = self._install(), self._saved_timer()
+        installed = self._install()
         watchdog = None
         try:
             if on_overrun is not None:
@@ -96,10 +97,11 @@ class PromptBudget:
         except Spent:
             self.spent = True
         finally:
-            self._disarm()
+            self._settle()
             if watchdog is not None:
                 watchdog.cancel()
-            if previous is not _UNSET:
+            if installed is not _UNSET:
+                previous, timer = installed
                 signal.setitimer(signal.ITIMER_REAL, *timer)
                 signal.signal(signal.SIGALRM, previous)
             self.report()
@@ -117,18 +119,19 @@ class PromptBudget:
                 },
             )
 
-    def _install(self):
+    def _install(self) -> Any:
         try:
             previous = signal.signal(signal.SIGALRM, self._on_alarm)
         except (AttributeError, ValueError):
             return _UNSET
         self._installed = True
-        return signal.SIG_DFL if previous is None else previous
+        return (signal.SIG_DFL if previous is None else previous, signal.getitimer(signal.ITIMER_REAL))
 
-    def _saved_timer(self) -> tuple[float, float]:
-        if not self._installed:
-            return (0.0, 0.0)
-        return signal.getitimer(signal.ITIMER_REAL)
+    def _settle(self) -> None:
+        try:
+            self._disarm()
+        except Spent:
+            pass
 
     def _arm(self, seconds_left: float) -> None:
         if self._installed:
@@ -142,5 +145,4 @@ class PromptBudget:
 
     def _on_alarm(self, signum, frame) -> None:
         if self._armed:
-            self._armed = False
             raise Spent

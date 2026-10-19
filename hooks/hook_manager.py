@@ -756,6 +756,7 @@ def _prompt_overrun(budget: PromptBudget) -> None:
     budget.report()
     emitter.flush("UserPromptSubmit")
     sys.stdout.flush()
+    otel.flush()
     os._exit(0)
 
 

@@ -104,6 +104,219 @@ def test_the_budget_logs_the_cut_and_skipped_steps(monkeypatch):
     assert fields["skipped"] == ["after"]
 
 
+def test_a_fresh_budget_has_spent_nothing_and_holds_no_alarm():
+    budget = PromptBudget(soft=5, hard=5)
+
+    assert (budget.spent, budget._armed, budget._installed) == (False, False, False)
+
+
+@pytest.mark.parametrize(("now", "ran"), [(9.5, True), (10.0, False)])
+def test_the_soft_budget_boundary(now, ran):
+    step = Mock()
+    budget = PromptBudget(start=0.0, soft=10, hard=20, clock=lambda: now)
+
+    budget.run("step", step)
+
+    assert step.called is ran
+    assert budget.spent is not ran
+
+
+def test_the_hard_budget_holds_back_steps_only_while_the_alarm_is_installed():
+    step = Mock()
+    budget = PromptBudget(start=0.0, soft=30, hard=1, clock=lambda: 1.0)
+
+    budget.run("free", step)
+    with budget.guarded():
+        budget.run("held", step)
+
+    assert step.call_count == 1
+    assert budget.skipped == ["held"]
+
+
+def test_a_nearly_spent_hard_budget_still_cuts_quickly():
+    budget = PromptBudget(soft=5, hard=0.3)
+
+    with budget.guarded():
+        budget.run("slow", time.sleep, 0.9)
+
+    assert budget.cut == "slow"
+    assert budget.spent is True
+
+
+def test_the_alarm_is_cleared_after_each_step():
+    import signal
+
+    with PromptBudget(soft=5, hard=5).guarded() as budget:
+        budget.run("fast", lambda: None)
+        assert signal.getitimer(signal.ITIMER_REAL) == (0.0, 0.0)
+        assert budget._armed is False
+
+
+def test_a_cut_while_a_block_unwinds_keeps_the_block(monkeypatch):
+    from hooks.hook_manager import BlockAction
+    from hooks.prompt_budget import Spent
+
+    budget = PromptBudget(soft=5, hard=5)
+    monkeypatch.setattr(budget, "_disarm", Mock(side_effect=[Spent(), None]))
+
+    def block():
+        raise BlockAction("denied")
+
+    with pytest.raises(BlockAction):
+        budget.run("block", block)
+
+
+def test_the_report_names_slow_steps_and_elapsed_time(monkeypatch):
+    log = Mock()
+    monkeypatch.setattr("hooks.prompt_budget.log", log)
+    now = [100.0]
+    budget = PromptBudget(start=100.0, soft=10, hard=20, clock=lambda: now[0])
+
+    def step(seconds):
+        now[0] += seconds
+
+    budget.run("edge", step, 1.0)
+    budget.run("slow", step, 1.234)
+    budget.run("fast", step, 0.5)
+    budget.report()
+
+    log.assert_called_once_with(
+        "prompt hook budget",
+        {"elapsed_s": 2.73, "cut": "", "skipped": [], "slow": {"edge": 1.0, "slow": 1.23}},
+    )
+
+
+def test_the_report_names_skipped_steps_and_stays_quiet_otherwise(monkeypatch):
+    log = Mock()
+    monkeypatch.setattr("hooks.prompt_budget.log", log)
+
+    PromptBudget(soft=5, hard=5).report()
+    log.assert_not_called()
+
+    late = PromptBudget(start=0.0, soft=10, hard=20, clock=lambda: 11.0)
+    late.run("late", Mock())
+    late.report()
+    assert log.call_args.args[1]["skipped"] == ["late"]
+
+
+def test_the_budget_reads_its_settings(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_PROMPT_BUDGET_S", "7")
+    monkeypatch.setenv("AGENTIHOOKS_PROMPT_HARD_BUDGET_S", "9")
+
+    budget = PromptBudget()
+
+    assert (budget.soft, budget.hard) == (7.0, 9.0)
+
+
+def test_the_process_start_falls_back_to_now_without_proc(monkeypatch):
+    from hooks.prompt_budget import process_start
+
+    monkeypatch.setattr("hooks.prompt_budget.Path.read_text", Mock(side_effect=OSError))
+
+    assert process_start(clock=lambda: 5.0) == 5.0
+
+
+def test_the_process_start_counts_the_time_since_the_interpreter_began():
+    code = "import time\nfrom hooks.prompt_budget import process_start\ntime.sleep(1.5)\nprint(time.monotonic() - process_start())"
+
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, cwd=_PROJECT_ROOT, timeout=60)
+
+    assert 1.4 < float(done.stdout) < 30, done.stderr
+
+
+class _Recorder:
+    def __init__(self, typed):
+        self.calls = []
+        self._typed = typed
+
+    def run(self, name, step, *args):
+        self.calls.append((name, step, args))
+        return self._typed if name == "operator_words" else None
+
+
+@pytest.mark.parametrize("typed", [False, True])
+def test_the_prompt_steps_run_in_order_under_their_names(monkeypatch, typed):
+    from hooks import config
+    from hooks import hook_manager as hm
+
+    monkeypatch.setattr(config, "BROADCAST_ENABLED", True)
+    payload = {"session_id": "s", "prompt": "p", "cwd": "/w"}
+    budget = _Recorder(typed)
+
+    hm._prompt_steps(budget, payload, "s")
+
+    assert budget.calls == [
+        ("secrets", hm._prompt_secrets, (payload,)),
+        ("amygdala", hm._prompt_amygdala, ("s",)),
+        ("confirm_inbox", hm._confirm_inbox, ("s",)),
+        ("swarm_heartbeat", hm._swarm_heartbeat, ("working", "p")),
+        ("swarm_ledger", hm._swarm_ledger, (payload,)),
+        ("operator_words", hm._operator_words, (payload,)),
+        ("operator_mode", hm._operator_mode, (payload, typed)),
+        ("master_coding", hm._master_coding, (payload, typed)),
+        ("trace_flush", hm._request_trace_flush, (payload, "prompt")),
+        ("quota_usage", hm._prompt_quota_usage, ("s",)),
+        ("quota_policy", hm._prompt_quota_policy, (payload, "s")),
+        ("claude_md_cap", hm._prompt_claude_md_cap, (payload, "s")),
+        ("enforcements", hm._prompt_enforcements, (payload, "s")),
+        ("ci_manifesto", hm._prompt_ci_manifesto, ("s",)),
+        ("rules_refresh", hm._prompt_rules_refresh, ("s",)),
+        ("prod_bypass", hm._prompt_prod_bypass, (payload, "s")),
+        ("signals", hm._prompt_signals, (payload, "s", typed)),
+        *([("gate_lifts", hm._arm_gate_lifts, (payload,))] if typed else []),
+        ("voice", hm._prompt_voice, (payload, "s", typed)),
+        ("controls", hm._prompt_controls, (payload, "s", typed)),
+        ("broadcasts", hm._prompt_broadcasts, ("s",)),
+        ("refocus", hm._inject_refocus, ("s", "prompt")),
+        ("ledger_decision", hm._inject_ledger_decision, (payload,)),
+    ]
+
+
+@pytest.mark.parametrize("started", [None, 12.5])
+def test_the_prompt_handler_budgets_from_the_process_start(monkeypatch, started):
+    from contextlib import contextmanager
+
+    from hooks import hook_manager as hm
+
+    seen = {}
+
+    class FakeBudget:
+        def __init__(self, start):
+            seen["start"] = start
+
+        @contextmanager
+        def guarded(self, on_overrun):
+            seen["overrun"] = on_overrun
+            yield self
+
+    monkeypatch.setattr(hm, "PromptBudget", FakeBudget)
+    monkeypatch.setattr(hm, "_EVENT_STARTED", started)
+    monkeypatch.setattr(hm, "_prompt_steps", Mock())
+
+    hm.on_user_prompt_submit({"session_id": "s"})
+
+    assert seen == {"start": started, "overrun": hm._prompt_overrun if started is not None else None}
+
+
+def test_the_watchdog_names_the_running_step_and_flushes(monkeypatch):
+    from hooks import hook_manager as hm
+
+    flush, exit_, otel_flush, log = Mock(), Mock(), Mock(), Mock()
+    monkeypatch.setattr("hooks.targets.emitter.flush", flush)
+    monkeypatch.setattr(hm.os, "_exit", exit_)
+    monkeypatch.setattr(hm.otel, "flush", otel_flush)
+    monkeypatch.setattr("hooks.prompt_budget.log", log)
+    budget = PromptBudget(soft=5, hard=5)
+    budget.running = "refocus"
+
+    hm._prompt_overrun(budget)
+
+    flush.assert_called_once_with("UserPromptSubmit")
+    otel_flush.assert_called_once_with()
+    exit_.assert_called_once_with(0)
+    assert log.call_args.args[1]["cut"] == "refocus"
+
+
 def test_a_bad_budget_setting_falls_back_to_the_default(monkeypatch):
     from hooks.prompt_budget import seconds
 
@@ -131,17 +344,23 @@ def test_an_outer_real_timer_survives_the_budget():
     import signal
 
     fired = []
-    previous = signal.signal(signal.SIGALRM, lambda *_: fired.append(True))
+
+    def outer(*_):
+        fired.append(True)
+
+    previous = signal.signal(signal.SIGALRM, outer)
     signal.setitimer(signal.ITIMER_REAL, 50)
     try:
         with PromptBudget(soft=5, hard=0.2).guarded() as budget:
             budget.run("slow", time.sleep, 30)
         remaining, _ = signal.getitimer(signal.ITIMER_REAL)
+        restored = signal.getsignal(signal.SIGALRM)
     finally:
         signal.setitimer(signal.ITIMER_REAL, 0)
         signal.signal(signal.SIGALRM, previous)
 
     assert remaining > 40
+    assert restored is outer
     assert fired == []
 
 
