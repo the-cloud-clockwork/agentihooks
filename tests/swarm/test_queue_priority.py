@@ -12,6 +12,7 @@ from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
 
 pytestmark = pytest.mark.unit
 _fixture = env
+GRAPHQL = merge_queue.graphql
 
 
 @pytest.fixture
@@ -568,3 +569,60 @@ def test_priority_help_explains_operator_lift(capsys):
     assert " ".join(capsys.readouterr().out.split()).endswith(
         "--lift operator: prioritize immediately despite a running head group"
     )
+
+
+def draft_target(run):
+    def read(command, **kwargs):
+        done = run(command, **kwargs)
+        response = json.loads(done.stdout)
+        raw = response["data"].get("resource")
+        if raw and raw.get("id") == "P9":
+            raw["isDraft"] = True
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    return read
+
+
+def test_refresh_drops_a_deferred_priority_for_a_draft(priority, monkeypatch, capsys):
+    p = priority
+    assert cli.main(["sw", "merge", "priority", URL]) == 0
+    capsys.readouterr()
+    monkeypatch.setattr(p.queue, "run", draft_target(p.queue.run))
+    p.run["status"] = "completed"
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"dropped deferred merge queue priority for {URL}: pull request is a draft"
+    ]
+    assert p.queue.mutations == []
+    assert not p.store.redis.hgetall(p.store.key("sw", queue_priority.PENDING))
+
+
+def test_refresh_requeues_entries_an_interrupted_priority_left_out(priority, monkeypatch):
+    p = priority
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] not in ("P2", "P4")]
+    displaced = queue_priority.Displaced(p.store, "sw")
+    for number, head in ((2, "head2"), (3, "head3"), (4, "moved")):
+        displaced.add({"id": f"P{number}", "url": URL[:-1] + str(number), "headRefOid": head})
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"requeued {URL[:-1]}2 left out of the merge queue by an interrupted priority"
+    ]
+    assert p.queue.mutations == [("queue", 2)]
+    assert displaced.pulls() == []
+
+
+def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch):
+    p = priority
+
+    def graphql(query, variables, run):
+        if "enqueuePullRequest" in query:
+            raise SwarmError("GitHub unavailable")
+        return GRAPHQL(query, variables, p.queue.run)
+
+    monkeypatch.setattr(merge_queue, "graphql", graphql)
+    p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] != "P2"]
+    displaced = queue_priority.Displaced(p.store, "sw")
+    displaced.add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": "head2"})
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"could not requeue {URL[:-1]}2 after an interrupted priority: GitHub unavailable"
+    ]
+    assert [pull["url"] for pull in displaced.pulls()] == [URL[:-1] + "2"]
