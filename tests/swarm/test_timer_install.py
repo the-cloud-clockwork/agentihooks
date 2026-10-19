@@ -393,6 +393,7 @@ def test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_n
     assert not (tmp_path / "agentihooks-swarm.service").exists()
 
 
+@pytest.mark.wall_clock
 def test_a_group_member_that_ignores_terminate_is_killed_and_an_undrained_group_keeps_the_units(
     tmp_path, monkeypatch, capsys
 ):
