@@ -184,6 +184,21 @@ def test_a_cut_inside_a_step_raising_a_block_keeps_the_block():
     assert budget.cut == ""
 
 
+def test_a_cut_that_escapes_run_while_a_block_unwinds_keeps_the_block():
+    from hooks.hook_manager import BlockAction
+    from hooks.prompt_budget import Spent
+
+    budget = PromptBudget(soft=5, hard=5, keep=(BlockAction,))
+
+    with pytest.raises(BlockAction), budget.guarded():
+        try:
+            raise BlockAction("denied")
+        finally:
+            raise Spent
+
+    assert budget.spent is False
+
+
 def test_a_cut_inside_a_step_handling_another_error_is_still_a_cut():
     from hooks.hook_manager import BlockAction
 

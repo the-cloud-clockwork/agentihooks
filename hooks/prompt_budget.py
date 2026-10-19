@@ -98,7 +98,9 @@ class PromptBudget:
                 watchdog.daemon = True
                 watchdog.start()
             yield self
-        except Spent:
+        except Spent as cut:
+            if isinstance(cut.__context__, self.keep):
+                raise cut.__context__ from None
             self.spent = True
         finally:
             self._settle()
