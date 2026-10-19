@@ -570,16 +570,20 @@ a comment grants scope.
 
 A dependency task can stay open after its pull request merged into `dev`, for
 example while it waits on the operator or on a deployed proof. Its branch is
-often deleted at merge. `swarm park` therefore reads each open dependency's
-pull request before it fetches that dependency's branch:
+often deleted at merge. `swarm park` therefore reads the pull request of each
+open dependency that carries a `branch` before it fetches that branch:
 
 | Open dependency | Stacked base park records |
 |---|---|
 | `pr_url` names a pull request in state `MERGED` with base `dev` | The task's own fork from `origin/dev`. The dependency branch is never fetched, so a deleted branch does not stop the park. |
-| `pr_url` names an open pull request, a closed one, or one merged into another branch | Where the task branch left `origin/<branch>` of that dependency, as before. A deleted branch still refuses with `cannot fetch <branch>`. |
+| `pr_url` names an open pull request, a closed one, or one merged into another branch, and the dependency is in the task's repository | Where the task branch left `origin/<branch>` of that dependency, as before. A deleted branch still refuses with `cannot fetch <branch>`. |
 | No `pr_url` | Same as an unmerged pull request: the dependency branch is fetched. |
 | `branch_repo` names another repository and the pull request is not merged into `dev` | That branch is fetched from the other repository, and the base is the task's own fork from `origin/dev`. |
 | No `branch` | The dependency adds no base. It is still listed in `parked_on`. |
+
+The merged check comes first: a dependency merged into `dev` stacks on `dev`
+whether or not its `branch_repo` names another repository. That repository is
+still recorded in `parked_repos`.
 
 When several dependencies carry a branch, park keeps the base with the most
 commits behind it. A merged dependency stays in `parked_on`: the task still
@@ -593,7 +597,7 @@ failed read refuses with `cannot read the dependency pull request` and parks
 nothing; fix `gh` access or the task's `pr_url`, then run park again.
 
 ```bash
-agentihooks swarm <id> park <handoff-doc>
+agentihooks swarm <id> park DOC
 ```
 
 With one dependency, `t42`, merged into `dev` and its branch deleted, the
@@ -607,7 +611,8 @@ branch left `dev`:
 Delivered by
 [pull request 3782](https://github.com/the-cloud-clockwork/agentihooks/pull/3782),
 with a regression that refused with `cannot fetch eng-a: remote branch deleted`
-before the change.
+in [a red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38981617229)
+before the change and passed in [the green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38982011506).
 
 ## Publishing after a successor prepares a branch
 
