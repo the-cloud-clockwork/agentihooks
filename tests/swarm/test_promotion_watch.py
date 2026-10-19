@@ -492,3 +492,106 @@ def test_the_ledger_client_raises_and_closes_alerts_as_the_swarm(monkeypatch):
         (SLUG, [{"op": "alert_close", "by": "swarm", "target": "al-1", "outcome": "Dev passed"}]),
     ]
     assert [ops[0]["id"].split("-")[0] for _, ops in sent] == ["alert_raise", "alert_close"]
+
+
+SMOKE_URL = "https://api.github.com/repos/o/r/check-runs/77"
+
+
+def smoke_run(step, messages, run_id=900):
+    smoke = {
+        "name": "swarm-image / smoke",
+        "conclusion": "failure",
+        "check_run_url": SMOKE_URL,
+        "steps": [{"name": "Set up job", "conclusion": "success"}, {"name": step, "conclusion": "failure"}],
+    }
+    found = [smoke, {"name": "Gate — Required", "conclusion": "failure"}]
+    red = {**RED, "id": run_id, "html_url": f"https://github.com/o/r/actions/runs/{run_id}"}
+
+    def run(argv, **kwargs):
+        if "/annotations" in argv[2]:
+            body = [
+                {"annotation_level": "warning", "message": "Node.js 20 is deprecated."},
+                {"annotation_level": "failure", "message": "Process completed with exit code 1."},
+                *({"annotation_level": "failure", "message": m} for m in messages),
+            ]
+        elif "/jobs" in argv[2]:
+            body = found
+        else:
+            body = [red]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+def master_items(store):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm.ledger_events import Mail
+
+    return [item.text for item in InboxStore(store.redis).inbox(Mail(InboxStore(store.redis), store, SLUG).master)]
+
+
+def test_cause_names_the_failed_steps_and_failure_messages_with_numbers_and_hashes_normalised():
+    job = {
+        "name": "coverage-ratchet",
+        "check_run_url": SMOKE_URL,
+        "steps": [
+            {"name": "Hold every line the base ran", "conclusion": "failure"},
+            {"name": "Upload", "conclusion": "skipped"},
+        ],
+    }
+    messages = ["12 lines the base ran at deadbeef1234 are no longer run by any head test"]
+    found = promotion_watch.cause("/repo", job, smoke_run("x", messages))
+    assert found == (
+        "coverage-ratchet: Hold every line the base ran; # lines the base ran at # are no longer run by any head test"
+    )
+
+
+def test_cause_of_a_job_without_steps_or_check_run_is_its_name():
+    assert promotion_watch.cause("/repo", {"name": "lint", "conclusion": "failure"}, gh([])) == "lint"
+
+
+def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_alert_and_a_master_item(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", []))
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+    ledger.tasks[0]["state"] = "blocked"
+    step = "Bring up the local stack twice with swarm init from the installed package"
+    actions = refresh(store, ledger, smoke_run(step, ["swarm init refused a one task swarm"], 901), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
+    assert f"Its cause: {step}; swarm init refused a one task swarm." in ledger.added[1][1]["description"]
+    assert len(ledger.raised) == 2
+    assert "swarm-image / smoke" in ledger.raised[1][2] and "901" in ledger.raised[1][2]
+    assert actions == [
+        "filed promo-901-0 for the failed dev job swarm-image / smoke",
+        "raised the promotion alert for dev push run 901",
+        "told the master about the new promotion causes of dev push run 901",
+    ]
+    assert len(master_items(store)) == 2
+    assert "promo-901-0" in master_items(store)[-1]
+    assert filed(store) == {
+        "promo-900-0": "swarm-image / smoke: Build the image",
+        "promo-901-0": f"swarm-image / smoke: {step}; swarm init refused a one task swarm",
+    }
+
+
+def test_the_same_cause_on_a_held_job_files_nothing_and_stays_quiet_while_its_alert_is_live(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", ["layer 3 failed"]))
+    assert refresh(store, ledger, smoke_run("Build the image", ["layer 4 failed"], 901), NOW * 2) == []
+    assert len(ledger.added) == 1 and len(ledger.raised) == 1
+    assert len(master_items(store)) == 1
+
+
+def test_a_fixer_goes_to_the_eng_lane_when_quota_capacity_gives_the_ci_lane_no_seats(store):
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 3, "ci": 0, "plan": 0}}))
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    assert {fields["lane"] for _, fields, _ in ledger.added} == {"eng"}
+    assert {fields["kind"] for _, fields, _ in ledger.added} == {"ci"}
+
+
+def test_a_fixer_stays_in_the_ci_lane_while_quota_capacity_gives_it_seats(store):
+    store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"effective": {"eng": 3, "ci": 1, "plan": 0}}))
+    ledger = Ledger()
+    refresh(store, ledger, gh([RED], JOBS))
+    assert {fields["lane"] for _, fields, _ in ledger.added} == {"ci"}
