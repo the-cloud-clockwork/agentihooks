@@ -788,3 +788,83 @@ def test_an_open_outage_task_holds_a_later_outage_and_a_green_run_closes_it(stor
     assert len(ledger.raised) == 1
     refresh(store, ledger, gh([{**GREEN, "id": 903}]), NOW * 3)
     assert ledger.tasks[0]["state"] == "done"
+
+
+UPLOADED = [*RAN, {"name": "Upload durations", "conclusion": "failure"}]
+LOST_SHARDS = [
+    "unit (3.11, 1)",
+    "unit (3.11, 4)",
+    "unit (3.11, 5)",
+    "unit (3.12, 4)",
+    "unit (3.12, 9)",
+]
+CONSUMERS = [
+    (
+        "sonar",
+        [
+            {"name": "Wait for the coverage merge", "conclusion": "failure"},
+            {"name": "Hold the Delivery L2 conditions", "conclusion": "failure"},
+        ],
+        ["Process completed with exit code 2.", "Missing coverage for shard 1"],
+    ),
+    (
+        "shard-check (3.12)",
+        [{"name": "Check every collected test ran in exactly one shard", "conclusion": "failure"}],
+        ["27833 collected tests did not run in exactly one of 3 shards."],
+    ),
+    (
+        "shard-check (3.11)",
+        [
+            {"name": "Check every collected test ran in exactly one shard", "conclusion": "failure"},
+            {"name": "Summarize reused, ran and flaky tests", "conclusion": "failure"},
+        ],
+        [
+            "Process completed with exit code 2.",
+            "No shard durations at shard-durations/*/durations.json, so those shards cannot be graded.",
+        ],
+    ),
+    ("refresh-durations", [{"name": "Refresh measured durations", "conclusion": "failure"}], []),
+]
+FAILED_TESTS = [*RAN[:1], {"name": "Run tests", "conclusion": "failure"}]
+
+
+def recorded_outage(extra=()):
+    shards = [(name, UPLOADED, DOWNLOAD) for name in LOST_SHARDS]
+    return [*shards, ("unit (3.12, 10)", FAILED_TESTS, []), *CONSUMERS, *extra]
+
+
+def test_jobs_that_failed_for_want_of_lost_unit_shard_output_join_the_outage_task(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run(recorded_outage()))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: unit (3.12, 10)",
+    ]
+    description = ledger.added[0][1]["description"]
+    assert all(name in description for name, _, _ in CONSUMERS)
+    assert all(name in description for name in LOST_SHARDS)
+    assert "unit (3.12, 10)" not in description
+    assert len(ledger.raised) == 1
+
+
+def test_a_job_outside_the_shard_output_consumers_beside_an_outage_files_its_own_fixer(store):
+    ledger = Ledger()
+    lint = ("lint", [{"name": "Run ruff", "conclusion": "failure"}], ["F401 unused import"])
+    refresh(store, ledger, outage_run(recorded_outage([lint])))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: lint",
+        "Promotion red: unit (3.12, 10)",
+    ]
+    assert "lint" not in ledger.added[0][1]["description"]
+
+
+def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its_runner(store):
+    ledger = Ledger()
+    found = [("docs", RAN, DOWNLOAD), ("unit (3.12, 10)", FAILED_TESTS, []), *CONSUMERS[:1]]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: sonar",
+        "Promotion red: unit (3.12, 10)",
+    ]
