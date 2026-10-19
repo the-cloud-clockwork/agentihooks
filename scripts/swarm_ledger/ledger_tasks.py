@@ -595,10 +595,8 @@ def _apply_update(task, after, changed, op, ctx):
     ctx.dirty = ctx.dirty or bool(changed)
 
 
-def _update(doc, op, ctx):
-    task_id = op["item"].split("/")[1]
-    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
-    others = [t for t in doc["tasks"] if t["id"] != task_id]
+def _gated(doc, op, ctx, task):
+    others = [t for t in doc["tasks"] if t["id"] != op["item"].split("/")[1]]
     if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
         return False
     if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
@@ -606,6 +604,14 @@ def _update(doc, op, ctx):
     if refusal := update_refusal(doc, op, ctx.meta):
         ctx.refused.append(refusal)
         return False
+    return None
+
+
+def _update(doc, op, ctx):
+    task_id = op["item"].split("/")[1]
+    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
+    if (gated := _gated(doc, op, ctx, task)) is not None:
+        return gated
     op = _normalized(op)
     fields = _update_fields(task, op["fields"])
     after = {**task, **fields}
