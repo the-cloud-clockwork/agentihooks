@@ -217,27 +217,32 @@ def test_duplicate_rows_do_not_hide_a_persistently_incomplete_list(target):
     )
 
 
-@pytest.mark.parametrize("departed,complete", [(True, True), (False, False)])
-def test_a_status_count_still_holding_a_run_that_left_it_completes_only_when_that_run_was_read(departed, complete):
+@pytest.mark.parametrize("stale,complete", [(1, True), (2, True), (5, True), (6, False)])
+def test_a_status_count_still_holding_a_run_that_left_it_completes_once_the_count_settles(monkeypatch, stale, complete):
     from scripts.doctor import ci_speed_read
 
+    sleeps, reads = [], []
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
     queued = [{"id": n, "status": "queued", "event": "push"} for n in range(1, 7)]
-    finished = [{"id": 7, "status": "completed", "event": "pull_request"}] if departed else []
+    finished = [{"id": 7, "status": "completed", "event": "pull_request"}]
 
     def run(args, **kwargs):
         query = parse_qs(urlsplit(args[2]).query)
         if "/jobs" in args[2]:
             body = {"total_count": 0, "jobs": []}
         elif "created" in query:
-            body = {"total_count": len(queued + finished), "workflow_runs": queued + finished}
+            body = {"total_count": 7, "workflow_runs": queued + finished}
         elif query.get("status") == ["queued"]:
-            body = {"total_count": 7, "workflow_runs": queued}
+            reads.append(query["page"])
+            body = {"total_count": 7 if len(reads) <= stale else 6, "workflow_runs": queued}
         else:
             body = {"total_count": 0, "workflow_runs": []}
         return SimpleNamespace(stdout=json.dumps(body))
 
     result = ci_speed_read.read(NOW - 60000, NOW, run=run)
     assert result["complete"] is complete
+    assert reads == [["1"]] * min(stale + 1, 6)
+    assert sleeps == [1] * min(stale - 1, 4)
     if complete:
         assert sorted(r["id"] for r in result["runs"]) == list(range(1, 8))
     else:
