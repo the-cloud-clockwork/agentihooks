@@ -13,6 +13,7 @@ import re
 import sys
 import urllib.error
 import urllib.request
+from collections.abc import Callable
 from importlib import import_module
 
 from scripts.swarm_ledger import HERE
@@ -158,7 +159,7 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
-def _stored(doc: dict, phase: dict, task: dict, load=None) -> str:
+def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
     ref = phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
@@ -167,7 +168,9 @@ def _stored(doc: dict, phase: dict, task: dict, load=None) -> str:
     return _ledger("plan_ranges").stored_text(ref, doc, load)
 
 
-def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None, load=None) -> str:
+def read(
+    doc: dict, slug: str, task_id: str | None, phase_id: str | None, load: Callable[[str, str], bytes] | None = None
+) -> str:
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
@@ -216,8 +219,13 @@ def _served(env, slug: str, file_id: str) -> bytes:
     from scripts.swarm_ledger import ledger, ledger_link
 
     request = urllib.request.Request(f"{ledger_link.base(env)}/artifacts/{slug}/{file_id}")
-    with ledger_link.urlopen(request, ledger.REQUEST_TIMEOUT, env) as response:
-        return response.read()
+    try:
+        with ledger_link.urlopen(request, ledger.REQUEST_TIMEOUT, env) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        raise ValueError(f"no stored artifact {file_id}") from None
 
 
 def main(argv=None, environ=None) -> int:

@@ -1,3 +1,4 @@
+import io
 import json
 import re
 
@@ -418,20 +419,6 @@ def test_swarm_v2_package_read_appends_the_linked_cases(monkeypatch):
     assert result.count("- a body\n") == 1
 
 
-class Served:
-    def __init__(self, data):
-        self.data = data
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def read(self):
-        return self.data
-
-
 def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, tmp_path, monkeypatch, capsys):
     from scripts.swarm_ledger import ledger, ledger_link
     from scripts.swarm_ledger.storage import read_ledger
@@ -448,7 +435,7 @@ def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, t
 
     def urlopen(request, timeout, environ):
         opened.append((request.full_url, timeout, environ))
-        return Served(plan)
+        return io.BytesIO(plan)
 
     monkeypatch.setattr(ledger, "resource", resource)
     monkeypatch.setattr(ledger_link, "urlopen", urlopen)
@@ -479,6 +466,32 @@ def test_remote_hive_passes_on_other_hosted_server_refusals(monkeypatch):
 
     with pytest.raises(urllib.error.HTTPError) as caught:
         plan_read.main(["read", "--task", "mid"], hosted_refusal(monkeypatch, 503))
+    assert caught.value.code == 503
+
+
+def served_refusal(monkeypatch, code):
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger_link
+
+    def urlopen(request, timeout, environ):
+        raise urllib.error.HTTPError(request.full_url, code, "refused", {}, None)
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
+    return {"LEDGER_URL": "https://ledger.test", "AGENTIHOOKS_DEPLOYMENT": "compose"}
+
+
+def test_a_plan_the_hosted_server_does_not_hold_reads_as_a_missing_artifact(monkeypatch):
+    with pytest.raises(ValueError) as caught:
+        plan_read._served(served_refusal(monkeypatch, 404), "chunks", "abc.md")
+    assert str(caught.value) == "no stored artifact abc.md"
+
+
+def test_other_plan_refusals_from_the_hosted_server_pass_on(monkeypatch):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        plan_read._served(served_refusal(monkeypatch, 503), "chunks", "abc.md")
     assert caught.value.code == 503
 
 
