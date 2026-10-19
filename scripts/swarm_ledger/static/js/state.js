@@ -118,12 +118,31 @@ export function setState(item, field, value) {
   if (value && other in item) item[other] = false;
 }
 
+let cacheWorker = null;
+let cacheVersion = 0;
+
 export function lsRead() {
-  try { return JSON.parse(localStorage.getItem(LS_KEY) || "null"); } catch (e) { return null; }
+  try {
+    const saved = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+    const pending = JSON.parse(localStorage.getItem(`${LS_KEY}:pending`) || "null");
+    return pending ? { ...saved, ...pending } : saved;
+  } catch (e) { return null; }
 }
 
 export function lsWrite() {
-  try { localStorage.setItem(LS_KEY, JSON.stringify({ doc, ops, checks, at: Date.now() })); } catch (e) { /* storage blocked */ }
+  try {
+    const at = Date.now();
+    localStorage.setItem(`${LS_KEY}:pending`, JSON.stringify({ ops, checks, at }));
+    if (!cacheWorker) {
+      const main = document.querySelector("script[type=module]").src;
+      cacheWorker = new Worker(new URL("cache_worker.js", main));
+      cacheWorker.onmessage = ({ data }) => {
+        if (data.version !== cacheVersion) return;
+        try { localStorage.setItem(LS_KEY, data.value); } catch (e) { /* storage blocked */ }
+      };
+    }
+    cacheWorker.postMessage({ version: ++cacheVersion, value: { doc, ops, checks, at } });
+  } catch (e) { /* storage blocked */ }
 }
 
 export function phaseLifecycle(phase, doc) {

@@ -41,11 +41,14 @@ export function grow(el) {
   el.style.height = el.scrollHeight + 2 + "px";
 }
 
+const timeFormat = new Intl.DateTimeFormat([], { hour: "2-digit", minute: "2-digit" });
+const dayFormat = new Intl.DateTimeFormat([], { month: "short", day: "numeric" });
+
 export function when(at) {
   if (!at) return "";
   const d = new Date(at);
-  const time = d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-  return d.toDateString() === new Date().toDateString() ? time : `${d.toLocaleDateString([], { month: "short", day: "numeric" })} ${time}`;
+  const time = timeFormat.format(d);
+  return d.toDateString() === new Date().toDateString() ? time : `${dayFormat.format(d)} ${time}`;
 }
 
 export function newId(noun) {

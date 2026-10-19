@@ -97,7 +97,7 @@ export function toggle(key, value, field) {
   flush(false);
 }
 
-async function applyServer(server) {
+function applyServer(server) {
   if ((server._meta || {}).rev < rev) return;
   meta = server._meta || {};
   rev = meta.rev;
@@ -106,10 +106,11 @@ async function applyServer(server) {
   applyChecks(doc);
   banner([meta.seed_error]);
   const appliedRev = rev;
-  await render(null, true);
-  if (rev !== appliedRev) return;
-  lsWrite();
-  firstState();
+  Promise.resolve(render(null, true)).then(() => {
+    if (rev !== appliedRev) return;
+    lsWrite();
+    firstState();
+  });
 }
 
 export async function flush(unloading) {
