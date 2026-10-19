@@ -632,7 +632,8 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   default login shows `SIGNED_OUT` and a cancelled token `EXPIRED` with `-`
   values. Each Codex row carries its account fingerprint, `#<8 hex>`, after the
   name, and lines under the table name every refused duplicate and whether the
-  default login is a distinct ChatGPT account. `balance --current` marks this session's account `(current)`. Sessions on
+  default login is a distinct ChatGPT account. `balance --current` marks this
+  session's account `(current)`. Sessions on
   names that are not listed accounts are counted in one last line,
   `+N sessions on unlisted account names`, only when there are any. `quota
   --json` gives the same fields per row with `harness`. `balance --fable` prints
@@ -694,9 +695,10 @@ by identity, never by token value.
 `agentihooks balance` shows the fingerprints and the verdicts:
 
 ```text
-#  HARNESS  ACCOUNT           KIND          STATE  SESSIONS  ...  ROUTING LEFT  ...
-1  codex    team_a #5f0e9a71  subscription  OK     0         ...  88%           ...
-2  codex    ncgma #ab12cd34   subscription  OK     2         ...  71%           ...
+$ agentihooks balance
+#  HARNESS  ACCOUNT           KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET
+1  codex    team_a #5f0e9a71  subscription  NORMAL  0/6       -       6    88%           -        -         88%      4d02h
+2  codex    ncgma #ab12cd34   subscription  NORMAL  2/6       -       6    71%           90%      3h10m     71%      2d15h
 AH_CX_TOKEN_ncgma_b is the same ChatGPT account as ncgma; it is not routed
 codex default login #ab12cd34: same ChatGPT account as ncgma
 ```
