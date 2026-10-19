@@ -394,6 +394,16 @@ def test_the_swap_use_share_round_trips_and_an_old_config_reads_the_default(stor
     assert store.config("smoke").swap_full_share == DEFAULT_SWAP_FULL_SHARE == 0.9
 
 
+def test_the_swap_floor_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FLOOR_MB
+
+    store.create(config(swap_floor_mb=3000))
+    assert store.config("smoke").swap_floor_mb == 3000
+    assert store.update("smoke", swap_floor_mb=1).swap_floor_mb == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_floor_mb")
+    assert store.config("smoke").swap_floor_mb == DEFAULT_SWAP_FLOOR_MB == 4096
+
+
 def test_create_refuses_a_swap_use_share_outside_zero_to_one(store):
     with pytest.raises(SwarmError) as caught:
         store.create(config(swap_full_share=1.5))
@@ -424,6 +434,9 @@ def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
         {"swap_full_share": 1.01},
         {"swap_full_share": True},
         {"swap_full_share": "0.5"},
+        {"swap_floor_mb": 0},
+        {"swap_floor_mb": 0.5},
+        {"swap_floor_mb": True},
     ],
 )
 def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):

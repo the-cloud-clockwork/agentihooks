@@ -48,25 +48,28 @@ A standalone Claude Code or Codex session uses profiles and hooks without a swar
 A workstation that already runs the shared ledger folder and Redis outside Docker can hand the ledger server to the bundle without moving its data:
 
 ```bash
+agentihooks swarm init --prepare-clients
 agentihooks swarm init --adopt --no-start
 agentihooks swarm init --adopt
 ```
 
-`--adopt` records the current ledger folder (`LEDGER_DIR`, default `~/development-ledger`), the user and group ids, the home directory and the ledger port 8765 (`SWARM_PORT`) in the stack `.env`:
+`--adopt` needs the `swarm-client.env` that `--prepare-clients` writes and refuses without it. It records the current ledger folder (`LEDGER_DIR`, default `~/development-ledger`), the user and group ids, the home directory, this agentihooks checkout, the Redis URL the prepared clients use and the ledger port 8765 (`SWARM_PORT`) in the stack `.env`:
 
 ```bash
 SWARM_ADOPT_LEDGER_DIR=/home/me/development-ledger
 SWARM_ADOPT_HOME=/home/me
 SWARM_ADOPT_UID=1000
 SWARM_ADOPT_GID=1000
+SWARM_ADOPT_CODE=/home/me/agentihooks
+SWARM_ADOPT_REDIS_URL=redis://swarm:...@127.0.0.1:6379/0
 SWARM_PORT=8765
 ```
 
-The recording persists: later `agentihooks swarm init` runs without `--adopt` keep it, and each run with `--adopt` writes all five values again, resetting `SWARM_PORT` to 8765. `--no-start` still checks Docker and the Compose plugin, then writes the stack files, `.env` and `client.env` and starts no service, swarm or ledger; use it to check the recorded values first. `--adopt` and `--prepare-clients` cannot be combined.
+The recording persists: later `agentihooks swarm init` runs without `--adopt` keep it, and each run with `--adopt` writes all seven values again, resetting `SWARM_PORT` to 8765. `--no-start` still checks Docker and the Compose plugin, then writes the stack files, `.env` and `client.env` and starts no service, swarm or ledger; use it to check the recorded values first. `--adopt` and `--prepare-clients` cannot be combined.
 
 While `SWARM_ADOPT_LEDGER_DIR` is set:
 
-- Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID namespace, so server pidfiles stay valid on the host.
+- Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID and network namespaces, so server pidfiles stay valid on the host. It runs the ledger server from the recorded checkout with reload on, bound to 127.0.0.1:8765, against the recorded Redis, so every swarm keeps its ledger, inbox items and seats. Stop the legacy ledger container by its id before the bundle `swarm` service starts on that port.
 - `agentihooks ledger serve --ensure` and `--stop` for the adopted folder, and the Doctor and watchdog restarts built on them, start and stop the bundle `swarm` service. The legacy `ledger` service of the `agentihooks-ledger` Compose project and the host process server are not started again.
 - A shared ledger folder other than the adopted one is refused with `the swarm stack adopts <adopted>, not <folder>; the legacy ledger service stays down`.
 - The stack Redis gives the `swarm` user every command except `FLUSHALL` and `FLUSHDB` (`+@all -flushall -flushdb`). Redis answers a flush with a `NOPERM` error, so the bundle cannot empty the shared Redis data it takes over. Hive member users keep `-@dangerous` and the `default` user stays off.
@@ -94,3 +97,11 @@ docker compose down
 ```
 
 Initialization reports missing Docker, daemon or Compose dependencies and unhealthy services with a suggested fix. `down` keeps named volumes; avoid `--volumes` when retaining ledger and Redis data. Keep service ports on loopback for local use; remote host admission and TLS require separate setup.
+
+## Share one database across hosts
+
+Set `AGENTIHOOKS_SWARM_DATABASE_URL` to the shared Postgres connection URL and `AGENTIHOOKS_SWARM_REDIS_URL` to the shared Redis connection URL before initialization. Both URLs are retained in the private stack settings and generated client settings. Every ledger server and swarm engine must use the same database and Redis. Without the database setting, the ledger uses SQLite in `LEDGER_DIR`.
+
+Supply credentials through environment settings or your secret manager. Hosted Kubernetes services use ExternalSecret references. Do not print connection URLs or paste generated client settings into chat. Keep TLS certificate verification enabled for remote connections.
+
+Provision the database before activation. Existing SQLite ledgers require one initial conversion with full history and per ledger task, event and artifact counts verified before changing writers. Keep SQLite read only afterward; run no recurring copies or synchronization. Confirm the cutover with one agent write visible within seconds through both the local page and the hosted Anton page, and verify both show the same live tasks and agents.

@@ -67,8 +67,8 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
                 time.sleep(0.01)
             urlopen = server.ledger_link.urllib.request.urlopen
 
-            def impatient(request, timeout):
-                return urlopen(request, timeout=min(timeout, 0.05))
+            def impatient(request, timeout, **options):
+                return urlopen(request, timeout=min(timeout, 0.05), **options)
 
             with patch.object(server.ledger_link.urllib.request, "urlopen", side_effect=impatient):
                 assert server.ledger_link.serving(url=base) is None
@@ -267,7 +267,10 @@ def test_deadline_is_enforced_at_exact_expiry(isolated_server):
 
 
 def test_health_requests_use_short_timeouts(isolated_server):
-    with patch.object(server.ledger_link.urllib.request, "urlopen") as health:
+    with (
+        patch.object(server.ledger_link, "transport", return_value={}),
+        patch.object(server.ledger_link.urllib.request, "urlopen") as health,
+    ):
         health.return_value.__enter__.return_value.read.return_value = f'{{"dir": "{isolated_server}"}}'.encode()
         server.ensure()
         health.assert_called_once()

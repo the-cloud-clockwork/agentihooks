@@ -122,6 +122,7 @@ from scripts.swarm import (
     stall_watch,
     take_master,
     templates,
+    tick_heartbeat,
     tick_master,
     tick_stop,
     timer,
@@ -179,6 +180,7 @@ SCALING_KEYS = {
     "load-low": "load_low",
     "memory-per-agent": "memory_per_agent_mb",
     "swap-full-share": "swap_full_share",
+    "swap-floor": "swap_floor_mb",
 }
 ADDRESS_KEYS = {"api-url": "api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
@@ -271,6 +273,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
+                store.redis.set(store.key(slug, "ledger-binned"), 1)
                 _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
                 return [
                     f"the ledger is in the bin, still retiring {', '.join(left)}"
@@ -285,6 +288,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
+            store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
             if actions:
@@ -385,6 +389,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             started = timing.call(snapshot_job.start, store, slug, now_ms(), os.environ)
             store.redis.set(store.key(slug, "last-tick"), now_ms())
             doc = timing.call(ledger.state, slug)
+            tick_heartbeat.write(store, slug, now_ms(), doc)
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
@@ -473,6 +478,11 @@ def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
 def cmd_waits(store, args):
     if why := timer.installed_refusal():
         raise SwarmError(f"the wait pass refused to run: {why}")
+    try:
+        if not timer.guard(timer.entry_point()):
+            timing.emit(sys.stderr, "warning: the scheduled swarm tick guard could not enable the swarm tick timer")
+    except (OSError, subprocess.SubprocessError) as exc:
+        timing.emit(sys.stderr, f"the scheduled swarm tick guard failed: {type(exc).__name__}: {exc}")
 
     def check(slug):
         try:
@@ -575,6 +585,22 @@ def cmd_prober(store, args):
     from scripts.swarm import command_runner, quota_refresh
 
     quota_refresh.run(store, lambda slug, row: command_runner.execute(store, slug, row), quota_refresh.WAIT_S)
+
+
+def cmd_tick_watch(store, args):
+    from scripts.swarm import controller, scheduled_tick, tick_watch
+    from scripts.swarm.tick import respawn_master
+
+    repair = None
+    if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
+        runtime = routed(herdr=HerdrRuntime())
+
+        def respawn(slug):
+            return respawn_master(slug, store, runtime, now_ms())
+
+        repair = tick_watch.Repair(scheduled_tick.restart, respawn)
+
+    tick_watch.run(store, now_ms, repair)
 
 
 def cmd_create(store, args):
@@ -877,9 +903,9 @@ def run_control(store, args, who, handler):
 def scaling_value(key, value):
     if key == "scaling":
         return value
-    if key == "memory-per-agent":
+    if key in ("memory-per-agent", "swap-floor"):
         if not value.isdigit():
-            raise SwarmError("memory-per-agent takes a whole number of MB")
+            raise SwarmError(f"{key} takes a whole number of MB")
         return int(value)
     try:
         return float(value)
@@ -971,7 +997,7 @@ def cmd_set(store, args):
             raise SwarmError(
                 f"set takes {', '.join(SETTABLE)}=<whole number>, masters=N, master-per=N|hive|off, "
                 f"{masters.HIVE_KEY}<hive id>=<master seat>, autonomy={'|'.join(AUTONOMY)}, "
-                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, api-url=URL, codex-inbox-transport=legacy|app_server "
+                f"effort-min=E, effort-max=E, claude-model=M, codex-model=M, scaling=auto|manual, load-high=N, load-low=N, memory-per-agent=MB, swap-full-share=N, swap-floor=MB, api-url=URL, codex-inbox-transport=legacy|app_server "
                 f"or {', '.join(LANE_KEYS)}=<value>"
             )
         changes[SETTABLE[key]] = int(value)
@@ -1005,6 +1031,7 @@ def cmd_set(store, args):
                 "load_low": config.load_low,
                 "memory_per_agent_mb": config.memory_per_agent_mb,
                 "swap_full_share": config.swap_full_share,
+                "swap_floor_mb": config.swap_floor_mb,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},
@@ -2160,8 +2187,8 @@ def typed(argv):
 
 
 def dispatch(argv):
-    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "prober", "waits"):
-        handler, args = globals()[f"cmd_{argv[0]}"], argparse.Namespace()
+    if argv and argv[0] in ("list", "tick", "templates", "rename", "waker", "prober", "waits", "tick-watch"):
+        handler, args = globals()[f"cmd_{argv[0].replace('-', '_')}"], argparse.Namespace()
     else:
         if len(argv) > 1 and argv[1].partition("=")[0] in (
             *SETTABLE,

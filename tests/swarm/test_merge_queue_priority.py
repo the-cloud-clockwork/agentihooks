@@ -143,6 +143,8 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
         {"pr_url": URL[:-1] + "2", "claimed_by": "ci@owner"},
         {"pr_url": URL[:-1] + "3", "claimed_by": ""},
         {"pr_url": URL[:-1] + "4", "claimed_by": "ci@unrelated"},
+        {"pr_url": URL[:-1] + "5", "claimed_by": "ci@released", "state": "pr", "awaiting": "merge"},
+        {"pr_url": URL[:-1] + "6", "claimed_by": "ci@done", "state": "done"},
     ]
 
     def ledger_tasks(slug):
@@ -154,7 +156,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
     def prioritize(url, journal):
         assert url == URL
         assert isinstance(journal, queue_record.Journal) and journal.url == URL
-        return {"url": url, "displaced": [URL[:-1] + "2", URL[:-1] + "3"], "errors": errors}
+        return {"url": url, "displaced": [URL[:-1] + str(n) for n in (2, 3, 5, 6)], "errors": errors}
 
     monkeypatch.setattr(merge_queue, "prioritize", prioritize)
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: [])
@@ -162,7 +164,9 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
 
     def inbox(redis):
         assert redis is store.redis
-        return SimpleNamespace(send=lambda sender, recipient, text: sent.append((sender, recipient, text)))
+        return SimpleNamespace(
+            send=lambda sender, recipient, text, **flags: sent.append((sender, recipient, text, flags))
+        )
 
     monkeypatch.setattr(queue_priority, "InboxStore", inbox)
     assert cli.main(["sw", "merge", "priority", URL]) == status
@@ -171,13 +175,14 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
             "engineer@a1b2c3-0001",
             "ci@owner",
             f"Your pull request {URL[:-1]}2 was requeued in its original order after priority request {URL}.",
+            {"fyi": True},
         )
     ]
     output = capsys.readouterr()
     if errors:
         assert output.err == "swarm: restore refused; second refusal\n"
     else:
-        assert json.loads(output.out)["displaced"] == [URL[:-1] + "2", URL[:-1] + "3"]
+        assert json.loads(output.out)["displaced"] == [URL[:-1] + str(n) for n in (2, 3, 5, 6)]
 
 
 def test_worker_cannot_prioritize(monkeypatch, capsys):

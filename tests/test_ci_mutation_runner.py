@@ -942,6 +942,24 @@ def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(
         assert commands[0][-4:] == ["2", "4", "reuse", str(tmp_path / "work/shared-stats.json")]
 
 
+@pytest.mark.parametrize("kept", [True, False])
+def test_shards_start_from_the_killing_tests_kept_beside_the_shared_stats(tmp_path, monkeypatch, kept):
+    from scripts.ci_mutation.runner import mutate_files
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    _stats_run(tmp_path, monkeypatch, [0, 0])
+    selected = {"hooks/sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    write_part(stats.group(0).folder / "part-0.json", stats_key(stats.head, selected), (0, 1), [])
+    if kept:
+        (stats.folder / "killers").mkdir()
+        (stats.folder / "killers/digest").write_text("tests/test_sample.py::t")
+    rows, reason = mutate_files(tmp_path, tmp_path / "work", selected, 20, (0, 1), stats.group(0))
+    assert reason == ""
+    seeded = {path.name: path.read_text() for path in (tmp_path / "work").glob("killers/*")}
+    assert seeded == ({"digest": "tests/test_sample.py::t"} if kept else {})
+
+
 @pytest.mark.parametrize(
     ("head", "parts", "reason"),
     [

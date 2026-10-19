@@ -46,10 +46,11 @@ import ledger_link  # noqa: E402
 import ledger_media  # noqa: E402
 
 from scripts.gates import talk  # noqa: E402
-from scripts.swarm import freeze  # noqa: E402
 from scripts.swarm_ledger import (  # noqa: E402
+    composition,
     ledger_task_duplicates,
     page_policy,
+    ports,
     request_metrics,
     server_code,
     server_compose,
@@ -63,7 +64,6 @@ from scripts.swarm_ledger.repository import (
     legacy,  # noqa: E402
 )
 from scripts.swarm_ledger.server_code import CODE_DIRS, code_stamp  # noqa: E402
-from scripts.swarm_v2 import front_door, ledger_writer, master_fence  # noqa: E402
 
 HOST, PORT = ledger_link.address()
 BASE = f"{ledger_link.scheme()}://{HOST}:{PORT}"
@@ -106,18 +106,17 @@ NO_DOCTOR = ("", False)
 
 def page_view(state, fix_phase, watched):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    marks = freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    marks = ports.swarm().freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
     return {**state, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
 
 
 def doctor_holds(slug):
     from redis import RedisError
 
-    from scripts.swarm.store import SwarmError
-
+    SwarmError = ports.swarm().store.SwarmError
     try:
         store = swarm_store()
-        fix = freeze.fix_phase(store.config(slug))
+        fix = ports.swarm().freeze.fix_phase(store.config(slug))
         peer = fix and store.peer(slug)
         records = repository.get_document(peer).get("freezes") or [] if peer and repository.exists(peer) else []
     except (SwarmError, RedisError, ValueError, OSError):
@@ -239,14 +238,14 @@ def page_for(slug):
 
 @functools.cache
 def swarm_store():
-    from scripts.swarm.store import connect
+    connect = ports.swarm().store.connect
 
     return connect()
 
 
 def swarm_status(slug, state=None):
-    from scripts.swarm import commands
-    from scripts.swarm.store import SwarmError
+    commands = ports.swarm().commands
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         return commands.view(swarm_store(), slug)
@@ -267,8 +266,8 @@ def stream_swarm(slug, ledger):
 
 
 def swarm_models():
-    from scripts.swarm import model_catalog
-    from scripts.swarm.store import SwarmError
+    model_catalog = ports.swarm().model_catalog
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         redis = swarm_store().redis
@@ -278,7 +277,7 @@ def swarm_models():
 
 
 def swarm_state(slug):
-    from scripts.swarm.store import SwarmError
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         return swarm_store().config(slug).state
@@ -290,7 +289,7 @@ def swarm_state(slug):
 
 
 def bin_closed_without_swarm(now=None):
-    from scripts.swarm.store import SwarmError
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         store = swarm_store()
@@ -341,7 +340,7 @@ PAGE_LIMITS = {
 
 
 def model_pairs(body):
-    from scripts.swarm import default_models
+    default_models = ports.swarm().default_models
 
     changes = {key: body[key] for key in default_models.FIELDS.values() if key in body}
     if not changes:
@@ -410,9 +409,7 @@ def effort_refusal(slug, body):
         return None
     from redis import RedisError
 
-    from scripts.swarm import effort_range
-    from scripts.swarm.store import SwarmError
-
+    effort_range, SwarmError = ports.swarm().effort_range, ports.swarm().store.SwarmError
     try:
         config = swarm_store().config(slug)
     except (SwarmError, RedisError):
@@ -444,8 +441,8 @@ def scaling_pairs(body):
 
 
 def overlay_pairs(overlays):
-    from hooks.context.profile_chain import OVERLAY_CAP
-    from scripts.swarm.overlays import KEY, ROLES
+    OVERLAY_CAP = ports.hooks().profile_chain.OVERLAY_CAP
+    KEY, ROLES = ports.swarm().overlays.KEY, ports.swarm().overlays.ROLES
 
     name = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
     if (
@@ -502,7 +499,7 @@ def lift_argv(body):
 
 
 def master_move_argv(body):
-    from scripts.hive.registry import HIVE_ID
+    HIVE_ID = ports.hive().registry.HIVE_ID
 
     hive = body.get("hive")
     if not isinstance(hive, str) or not HIVE_ID.fullmatch(hive):
@@ -511,7 +508,7 @@ def master_move_argv(body):
 
 
 def verdict_argv(body):
-    from scripts.swarm.health.verdicts import VERDICTS
+    VERDICTS = ports.swarm().verdicts.VERDICTS
 
     finding, value, note = body.get("id"), body.get("verdict"), body.get("note", "")
     if not (isinstance(finding, str) and FINDING_RE.match(finding)):
@@ -532,7 +529,7 @@ def bin_request(body):
 
 
 def terminate_control(slug, name):
-    from scripts.swarm import commands
+    commands = ports.swarm().commands
 
     store = swarm_store()
     if not any(agent.name == name for agent in store.agents(slug)):
@@ -542,8 +539,8 @@ def terminate_control(slug, name):
 
 
 def swarm_control(slug, argv, command="swarm"):
-    from scripts.swarm import commands
-    from scripts.swarm.store import SwarmError
+    commands = ports.swarm().commands
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         if command == "swarm" and argv[0] == "terminate":
@@ -555,8 +552,8 @@ def swarm_control(slug, argv, command="swarm"):
 
 
 def lifecycle_control(slug, body, operator):
-    from scripts.swarm import lifecycle
-    from scripts.swarm.store import SwarmError
+    lifecycle = ports.swarm().lifecycle
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         stamps = repository.read(slug, "_meta.stamps").get("_meta", {}).get("stamps", {})
@@ -570,8 +567,8 @@ def lifecycle_control(slug, body, operator):
 
 
 def refresh_quota(slug: str) -> tuple[dict | None, str]:
-    from scripts.swarm import quota_refresh
-    from scripts.swarm.store import SwarmError
+    quota_refresh = ports.swarm().quota_refresh
+    SwarmError = ports.swarm().store.SwarmError
 
     try:
         quota_refresh.request(swarm_store(), slug)
@@ -596,10 +593,12 @@ def relay_to_inbox(slug, state):
         import watch_ledger
 
         from scripts.inbox.store import connect
-        from scripts.swarm import operator_mail
-        from scripts.swarm.store import RedisStore
+
+        operator_mail = ports.swarm().operator_mail
+        RedisStore = ports.swarm().store.RedisStore
         from scripts.swarm_ledger import chat_receipts
-        from scripts.swarm_v2 import masters
+
+        masters = ports.swarm().masters
 
         inbox = connect()
         store = RedisStore(inbox.redis)
@@ -647,8 +646,9 @@ def deliver_alerts(slug, state):
         return []
     try:
         from scripts.inbox.store import connect
-        from scripts.swarm import operator_mail
-        from scripts.swarm.store import RedisStore
+
+        operator_mail = ports.swarm().operator_mail
+        RedisStore = ports.swarm().store.RedisStore
 
         inbox = connect()
         agents = RedisStore(inbox.redis).agents(slug)
@@ -693,7 +693,7 @@ def relayed(kind, slug, since, rev):
 
 
 def adopt_unrelayed() -> None:
-    from hooks import config
+    config = ports.hooks().config
 
     path = Path(config.AGENTIHOOKS_HOME) / UNRELAYED
     try:
@@ -750,8 +750,8 @@ def stream_resources(slug):
 
 def workspace_tails(slug, task_id):
     """The latest work folder lines the hive tick published for one task, read when its proof fold opens."""
-    from scripts.swarm import commands
-    from scripts.swarm.store import SwarmError
+    commands = ports.swarm().commands
+    SwarmError = ports.swarm().store.SwarmError
 
     if not re.fullmatch(r"[A-Za-z0-9_-]+", task_id):
         raise ValueError(f"no work folder for task {task_id!r}")
@@ -763,7 +763,8 @@ def workspace_tails(slug, task_id):
 
 def write_gate(slug):
     """Every op write: masters fenced to the items they own, page chat to the front door, inside the talk budget."""
-    return master_fence.Fence(slug, front_door.Door(slug, talk.Budget(slug)))
+    swarm = ports.swarm()
+    return swarm.master_fence.Fence(slug, swarm.front_door.Door(slug, talk.Budget(slug)))
 
 
 def api_services():
@@ -1015,7 +1016,7 @@ class Handler(BaseHTTPRequestHandler):
                 control = functools.partial(swarm_control, slug, argv, command)
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
-        from scripts.swarm.lifecycle import Refused
+        Refused = ports.swarm().lifecycle.Refused
 
         try:
             status, error = control()
@@ -1306,6 +1307,7 @@ def follow_shared(interval=FOLLOW_S):
 
 def serve():
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
+    ledger_writer = ports.swarm().ledger_writer
     try:
         writer = ledger_writer.WriterLease(core.LEDGER_DIR).acquire(ledger_writer.owner())
     except ledger_writer.WriterConflict as conflict:
@@ -1431,6 +1433,7 @@ def main():
     group.add_argument("--serve", action="store_true")
     group.add_argument("--stop", action="store_true")
     args = parser.parse_args()
+    composition.wire()
     if args.serve:
         serve()
     elif args.ensure:

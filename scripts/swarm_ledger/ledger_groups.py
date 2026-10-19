@@ -5,7 +5,7 @@ The lead lists `group_members`; each member carries `merged_into` and leaves the
 
 import re
 
-from scripts.swarm_ledger import ledger_kinds
+from scripts.swarm_ledger import ledger_kinds, ports
 
 OPS = ("task_group", "task_ungroup")
 MAX_TASKS = 5
@@ -77,7 +77,7 @@ def _upstream(task, known):
 
 
 def apply(doc, op, ctx):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     if lane_of(op["by"]) in REFUSED_LANES:
         verb = "release" if op["op"] == "task_ungroup" else "set"
