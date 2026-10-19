@@ -53,10 +53,8 @@ def used(
 
 def _compose(action: list[str], folder: Path, environ: dict, run: Run) -> str:
     if adopted(folder, environ):
-        argv, env = (
-            ports.swarm().stack_init.compose(ports.swarm().stack_init.stack_home(environ), *action, ADOPTED_SERVICE),
-            environ,
-        )
+        stack_init = ports.swarm().stack_init
+        argv, env = stack_init.compose(stack_init.stack_home(environ), *action, ADOPTED_SERVICE), environ
     elif recorded := adoption(environ):
         return f"the swarm stack adopts {recorded}, not {folder}; the legacy ledger service stays down"
     else:

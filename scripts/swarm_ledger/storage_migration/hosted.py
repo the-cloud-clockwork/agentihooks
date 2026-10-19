@@ -232,6 +232,7 @@ def server_secret() -> str:
 def main() -> None:
     from scripts.swarm_ledger import ports
 
+    # Loading the hooks config reads the agentihooks env files this migration's settings come from.
     ports.hooks().config  # noqa: B018
 
     parser = argparse.ArgumentParser()

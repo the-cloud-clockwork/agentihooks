@@ -12,8 +12,6 @@ from dataclasses import asdict, dataclass
 
 from scripts.swarm_ledger import ledger_rank, ports
 
-classifier = ports.hooks().classifier
-decide = classifier.decide
 PURPOSE = "ledger-duplicate"
 SHORTLIST = 4
 UNCHECKED = "unchecked"
@@ -51,6 +49,7 @@ def find(doc: dict, kind: str, items: list[dict], judge: Callable | None = None)
         for i, found in enumerate(shortlists)
         for j, c in enumerate(found)
     ]
+    classifier = ports.hooks().classifier
     try:
         output = classifier.runner.run(PURPOSE, _state(items, shortlists), {"pairs": pairs}, decider=judge or decide)
     except classifier.ClassifierError:
@@ -138,9 +137,15 @@ def _verdicts(definition, state, params, answers):
     return {"duplicate": any(_yes(answers[_name(p["new"], p["slot"])].noul, floor) for p in params["pairs"])}
 
 
-RULE = classifier.code_rules.CodeRule(
-    classifier.code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False}
-)
+def decide(*args, **kwargs):
+    return ports.hooks().classifier.decide(*args, **kwargs)
+
+
+def __getattr__(name):
+    if name != "RULE":
+        raise AttributeError(name)
+    code_rules = ports.hooks().classifier.code_rules
+    return code_rules.CodeRule(code_rules.asked, _verdicts, {"duplicate": (True, False)}, {"duplicate": False})
 
 
 def main() -> None:

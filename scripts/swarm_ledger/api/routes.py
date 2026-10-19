@@ -10,7 +10,6 @@ from . import resources, schemas
 from .errors import APIError
 from .services import Services
 
-HiveError = ports.hive().auth.HiveError
 WORKSPACE_RE = re.compile(r"tasks/[\w.-]+/workspace")
 
 
@@ -79,7 +78,7 @@ def agent_token(handler: object, services: Services, slug: str) -> dict:
         raise APIError(403, "forbidden", "Agent is not placed on this member's hive")
     try:
         token = services.ledger.authority.hive_agent_token(member, slug, agent)
-    except HiveError as exc:
+    except ports.hive().auth.HiveError as exc:
         raise APIError(403, "forbidden", str(exc)) from exc
     return {"data": {"agent": agent, "token": token}}
 

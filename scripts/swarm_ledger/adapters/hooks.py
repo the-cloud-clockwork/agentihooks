@@ -25,8 +25,8 @@ class Hooks:
 
     @property
     def classifier(self):
-        import hooks.classifier
-        from hooks.classifier import code_rules, runner  # noqa: F401
+        import hooks.classifier.code_rules
+        import hooks.classifier.runner
 
         return hooks.classifier
 

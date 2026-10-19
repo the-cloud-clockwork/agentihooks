@@ -56,6 +56,7 @@ class Hooks(Protocol):
 BOUND: dict[str, object] = {}
 
 
+# API modules build their schemas from port constants at import, so bind before importing them.
 def bind(**adapters: object) -> None:
     BOUND.update(adapters)
 

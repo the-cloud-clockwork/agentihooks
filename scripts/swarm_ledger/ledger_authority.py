@@ -24,8 +24,8 @@ def resolve_name(name):
     return ports.swarm().naming.resolve_name(name)
 
 
-def connect():
-    return ports.swarm().store.connect()
+def connect(environ=None):
+    return ports.swarm().store.connect(environ)
 
 
 def agent_token(admin, slug, name):

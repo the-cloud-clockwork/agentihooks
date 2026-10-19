@@ -32,10 +32,10 @@ def check(op):
 def watched_masters(by: str) -> list[str]:
     from redis.exceptions import RedisError
 
-    get_redis = ports.hooks().redis
-    operator_words = ports.hooks().operator_words
     from scripts.doctor.priming import TEMPLATE
 
+    get_redis = ports.hooks().redis
+    operator_words = ports.hooks().operator_words
     RedisStore, SwarmError = ports.swarm().store.RedisStore, ports.swarm().store.SwarmError
 
     redis = get_redis()
