@@ -302,17 +302,21 @@ def stalled_redis():
 
 
 @pytest.mark.wall_clock
-def test_a_join_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound(stalled_redis, monkeypatch):
+@pytest.mark.parametrize(("path", "field"), [(server.JOIN_PATH, "code"), (server.REFRESH_PATH, "ledger_credential")])
+def test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound(
+    stalled_redis, path, field, monkeypatch
+):
     import redis
 
     monkeypatch.setattr(server, "MAX_HANDLERS", 1)
     monkeypatch.setattr(server, "REDIS_TIMEOUT_S", 1)
     httpd = server.make_server(redis.Redis.from_url(stalled_redis, decode_responses=True), PUBLIC, "127.0.0.1", 0)
     threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    body = json.dumps({field: "any"}).encode()
     try:
         started = time.monotonic()
         with socket.create_connection(("127.0.0.1", httpd.server_address[1]), timeout=5) as conn:
-            conn.sendall(b'POST /hive/join HTTP/1.0\r\nContent-Length: 15\r\n\r\n{"code": "any"}')
+            conn.sendall(b"POST %s HTTP/1.0\r\nContent-Length: %d\r\n\r\n%s" % (path.encode(), len(body), body))
             reply = b""
             while chunk := conn.recv(65536):
                 reply += chunk
@@ -321,7 +325,7 @@ def test_a_join_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound
 
         assert time.monotonic() - started < server.REDIS_TIMEOUT_S * 2
         assert int(reply.split()[1]) == 503
-        assert json.loads(reply.partition(b"\r\n\r\n")[2])["error"].startswith("the hive Redis did not answer (")
+        assert json.loads(reply.partition(b"\r\n\r\n")[2]) == {"error": server.REDIS_STALLED}
         assert not httpd._admitted
     finally:
         httpd.shutdown()

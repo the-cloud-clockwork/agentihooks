@@ -21,6 +21,7 @@ REQUEST_TIMEOUT_S = 10
 MAX_HANDLERS = 32
 REQUEST_DEADLINE_S = 30
 REDIS_TIMEOUT_S = 5
+REDIS_STALLED = "the hive Redis did not answer; try again"
 REFRESH_PATH = "/hive/refresh"
 BAD_BODY = "the body must be a JSON object with a string code"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"
@@ -67,14 +68,18 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
             value = self._field(field)
             if value is None:
                 return self._answer(400, {"error": bad_body})
+            from redis.exceptions import ConnectionError as Unreachable
             from redis.exceptions import RedisError
+            from redis.exceptions import TimeoutError as Stalled
 
             try:
                 return self._answer(200, getattr(auth, operation)(redis, value, redis_url))
             except auth.HiveError as exc:
-                return self._answer(403, {"error": str(exc)})
-            except RedisError as exc:
-                return self._answer(503, {"error": f"the hive Redis did not answer ({exc})"})
+                if not isinstance(exc.__cause__, (Stalled, Unreachable)):
+                    return self._answer(403, {"error": str(exc)})
+            except RedisError:
+                pass
+            return self._answer(503, {"error": REDIS_STALLED})
 
         def _field(self, field):
             try:
