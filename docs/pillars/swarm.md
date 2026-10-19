@@ -1141,19 +1141,21 @@ are refused. The tick lock prevents two ticks in the same epoch and lets a highe
 
 ### Controller lease during long steps
 
-A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and one pass has
-taken over seven minutes on a busy swarm. The pass keeps the lease in two ways.
+A tick pass can run longer than its lease: the lease lasts three ticks (180 seconds by default), and passes of 454
+seconds were observed on a busy swarm in October 2026. The pass keeps the lease in two ways.
 
-- **Before every step.** Each timed step of the pass first renews the lease, extends the tick lock and records the
-  swarm's last tick activity. A pass made of many short steps never comes near expiry.
+- **Before every step.** Each timed step of the pass, including every step wrapped to skip a refused ledger write,
+  first renews the lease, extends the tick lock and records the swarm's last tick activity. Renewal happens only at
+  step boundaries, so a single step longer than the lease still loses it.
 - **During a step that can outlast the lease.** Such a step runs inside a lease heartbeat: a background thread renews
   the lease once per tick interval until the step returns. The thread stops for good when the lease is no longer
   this controller's (a higher epoch took over) and tries again at the next beat after a Redis error. Today the
   Doctor timer of a `doctor` swarm runs this way.
 
-The automatic snapshot never runs inside the pass. Step 12 of the tick only starts the detached snapshot job and
-returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
-most 30 minutes, and a tick that finds the lock held starts no second job.
+The automatic snapshot never runs inside the pass. Step 12 of the list above only starts the detached snapshot job
+and returns, so a snapshot that takes minutes cannot cost the lease. The job takes the swarm's snapshot lock for at
+most 30 minutes once it starts; a tick that finds the lock held starts no second job. Two jobs started before
+either holds the lock race for it: the first to take it writes the snapshot, the other exits without one.
 
 A lease that expires mid pass ends the pass at its next step, fenced ledger call or spawn with this journal line:
 
@@ -1168,8 +1170,8 @@ journalctl --user -t agentihooks-swarm --since "-12h" | grep "controller lease i
 journalctl --user -t agentihooks-swarm --since "-12h" | grep '"event": "swarm_tick_step"' | grep '"phase": "finished"'
 ```
 
-The finished step records carry each step's name, outcome and `wall_s` duration. A stale lease error that repeats on the snapshot interval
-points at a step that runs inside the pass without a heartbeat. Any tick step that can run longer than the lease
+The finished step records carry each step's name, outcome and `wall_s` duration. The step that
+ran longer than the lease before the error is the one to move inside a heartbeat. Any tick step that can run longer than the lease
 belongs inside the heartbeat, the way the Doctor timer does:
 
 ```python
