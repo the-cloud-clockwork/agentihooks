@@ -146,7 +146,8 @@ def pytest_configure(config):
 
 
 # Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
-# tracing for the whole coverage run; the deadlines are traced once a test has loaded it.
+# tracing for the whole coverage run. Deadlines are traced before each test once a module has loaded Playwright, so a
+# test that first imports it in its own body sets unscaled deadlines.
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_setup(item):
     if "playwright.sync_api" in sys.modules:
