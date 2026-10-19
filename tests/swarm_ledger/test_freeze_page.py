@@ -357,3 +357,10 @@ def test_one_malformed_item_leaves_the_other_sections_rendered(page):
     tab, _ = page
     assert tab.locator("#item-tasks-t2").count() == 1
     assert tab.locator("#item-followups-u1").count() == 1
+
+
+@pytest.mark.parametrize("page", [[]], indirect=True)
+def test_the_page_marks_its_first_full_render_once(page):
+    tab, _ = page
+    marks = tab.evaluate("() => performance.getEntriesByName('ledger-rendered').map((m) => m.entryType)")
+    assert marks == ["mark"]

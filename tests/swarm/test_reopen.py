@@ -6,8 +6,6 @@ from scripts.swarm import cli
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_close import closing  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def closed(closing, monkeypatch):  # noqa: F811

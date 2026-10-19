@@ -7,8 +7,6 @@ import pytest
 from scripts.doctor import ci, ci_read
 from tests.doctor.recorded import load
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def test_gh_reader_reads_all_pages_and_attempts_and_excludes_other_prs():
     fixture = load("ci")

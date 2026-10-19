@@ -7,8 +7,6 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import Placed, SpawnError
 from tests.swarm.test_tick import FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ID = "0f8e6d4c-1111-2222-3333-444455556666"
 
 

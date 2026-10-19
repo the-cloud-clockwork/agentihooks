@@ -10,8 +10,6 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
-import pytest
-
 from tests.swarm_ledger.ledger_page import page_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
@@ -22,7 +20,6 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "swarm-panel-2026-01-01"
 STATUS = {
     "config": {"slug": "s", "max_eng": 2, "max_ci": 1, "state": "running"},

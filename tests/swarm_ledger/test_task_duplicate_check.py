@@ -27,8 +27,6 @@ from tests.swarm_ledger.test_ledger_authority import (
 )
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 authority_live = _authority_live
 REPEAT = "Publish the package to PyPI from the main branch"
 OPEN_REFUSAL = (

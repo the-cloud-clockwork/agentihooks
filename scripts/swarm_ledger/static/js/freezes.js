@@ -12,20 +12,38 @@ export function isSelector(target) {
   return /^(lane|kind):/.test(target);
 }
 
+const indexes = new WeakMap();
+
 function byId(list, id) {
-  return list.find((i) => i.id === id);
+  let index = indexes.get(list);
+  let at = index && index.get(id);
+  if (at === undefined || list[at]?.id !== id) {
+    index = new Map();
+    for (const [i, item] of list.entries()) if (!index.has(item.id)) index.set(item.id, i);
+    indexes.set(list, index);
+    at = index.get(id);
+  }
+  return at === undefined ? undefined : list[at];
 }
 
 export function ownFreeze(d, key) {
   return d.freezes.find((r) => r.verb === "freeze" && r.target === key);
 }
 
+const markSets = new WeakMap();
+
+function marked(list, key) {
+  let set = markSets.get(list);
+  if (!set || set.size !== list.length) markSets.set(list, (set = new Set(list)));
+  return set.has(key);
+}
+
 export function frozen(d, key) {
-  return d.marks.frozen.includes(key);
+  return marked(d.marks.frozen, key);
 }
 
 export function held(d, key) {
-  return d.marks.held.includes(key);
+  return marked(d.marks.held, key);
 }
 
 export function setFreeze(d, op, at) {

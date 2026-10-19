@@ -5,8 +5,6 @@ import pytest
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CAPTURE = Path(__file__).parents[1] / "fixtures/swarm/claude-import-prompt.txt"
 TITLE = "Allow external CLAUDE.md file imports?"
 

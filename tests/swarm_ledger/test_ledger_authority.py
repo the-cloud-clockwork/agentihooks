@@ -35,9 +35,6 @@ OTHER = "engineer@323133-0257"
 MASTER = "master@323133-0001"
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 def operation(kind, **fields):
     return {"op": kind, "id": uuid.uuid4().hex, **fields}
 

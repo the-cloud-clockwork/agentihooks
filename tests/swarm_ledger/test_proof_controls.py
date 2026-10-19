@@ -15,7 +15,6 @@ from tests.swarm_ledger.test_proof_ledgers import credential as _credential
 from tests.swarm_ledger.test_proof_ledgers import hive as _hive
 from tests.swarm_ledger.test_proof_ledgers import live as _live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 credential, hive, live = _credential, _hive, _live
 
 

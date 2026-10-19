@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_recorded_turn_sample_yields_one_standing_finding_per_breaching_account():

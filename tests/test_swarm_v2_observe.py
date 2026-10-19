@@ -20,7 +20,7 @@ from scripts.swarm_v2.runtime.observe import (
     rule,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 NOW = 1_800_000_000.0
 LIMITS = Thresholds(fresh_s=120.0, lost_after_s=600.0)
 

@@ -1,10 +1,12 @@
 """The swarm minute tick as an agentihooks scheduler cron, run by a holder that keeps one tick per machine."""
 
+import fcntl
 import os
 import shutil
 import subprocess
 import sys
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -22,6 +24,8 @@ TIMEOUT_S = 540
 STOP_S = 90
 KEEP = ("HOME", "LANG", "LOGNAME", "SHELL", "USER", "XDG_RUNTIME_DIR", "XDG_DATA_DIRS")
 ROOT = Path(__file__).resolve().parents[2]
+LOCK = "swarm-tick"
+HELD_FD = "AGENTIHOOKS_SWARM_TICK_LOCK_FD"
 
 
 def ensure(scheduler: Scheduler) -> str:
@@ -82,12 +86,37 @@ def _finish(tick: subprocess.Popen) -> int:
         return tick.wait()
 
 
+def _inherited(environ: Mapping[str, str]) -> int | None:
+    try:
+        fd = int(environ[HELD_FD])
+        same = os.path.samestat(os.fstat(fd), os.stat(runtime_dir() / f"{LOCK}.lock"))
+    except (KeyError, ValueError, OSError):
+        return None
+    return fd if same else None
+
+
+@contextmanager
+def tick_lock(environ: Mapping[str, str] = os.environ) -> Iterator[None]:
+    fd = _inherited(environ)
+    if fd is None:
+        with machine_lock(LOCK):
+            yield
+        return
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError as exc:
+        raise AlreadyRunning(f"scheduler {LOCK} is already running") from exc
+    yield
+
+
 def main(popen: Callable[..., subprocess.Popen] = subprocess.Popen) -> int:
     from scripts.swarm import timer
 
     try:
-        with machine_lock("swarm-tick"):
-            return _finish(popen(command(timer.entry_point()), env=environment(os.environ)))
+        with machine_lock(LOCK) as held:
+            fd = held.fileno()
+            env = {**environment(os.environ), HELD_FD: str(fd)}
+            return _finish(popen(command(timer.entry_point()), env=env, pass_fds=(fd,)))
     except AlreadyRunning:
         return 0
 

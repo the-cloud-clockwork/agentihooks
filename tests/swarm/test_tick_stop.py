@@ -10,7 +10,7 @@ import pytest
 from scripts.swarm import cli, controller, lease, tick_stop, timer, timing
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)

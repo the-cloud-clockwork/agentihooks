@@ -14,7 +14,6 @@ from scripts.swarm.ledger_events import view as read_pull
 from scripts.swarm.store import RedisStore, SwarmError
 from tests.swarm.test_cli import HANDOFF, env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 _fixture = env
 AGENT = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"

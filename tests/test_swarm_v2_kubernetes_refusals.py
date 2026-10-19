@@ -12,7 +12,7 @@ from scripts.swarm_v2.runtime.operations import Observation, Operation, Operatio
 from tests import sv2_kub02_cases as cases
 from tests.test_swarm_v2_kubernetes_runtime import defaulted, existing, operation, tamper_security, transport
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def squat(world, attempt) -> None:

@@ -15,7 +15,7 @@ from scripts.swarm_v2.operator_auth import OPERATOR
 from tests import sv2_hdr03_cases, sv2_hdr04_cases, sv2_hdr05_cases
 from tests.sv2_hdr05_cases import Clock, Workers
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "sw"
 FX = sv2_hdr05_cases.fixture()
 ROUTING = sv2_hdr04_cases.fixture()
