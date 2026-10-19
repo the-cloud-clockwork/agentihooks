@@ -142,6 +142,16 @@ def test_every_completed_tick_pass_writes_the_heartbeat(env, monkeypatch):  # no
     assert tick_heartbeat.read(store, "sw").at == START + MINUTE
 
 
+def test_a_pass_that_reads_the_ledger_clears_an_earlier_ledger_gone_mark(env):  # noqa: F811
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.redis.set(store.key("sw", "ledger-gone"), 1)
+
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+
+    assert not store.redis.exists(store.key("sw", "ledger-gone"))
+
+
 def test_a_stale_tick_alerts_the_front_door_and_every_live_agent_seat_with_the_evidence(store):
     agent(store, "engineer@a1b2c3-0001", "eng-1@sw")
     agent(store, "ci@a1b2c3-0001", "ci-1@sw", lane="ci")

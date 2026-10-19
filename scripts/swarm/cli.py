@@ -285,6 +285,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
+            store.redis.delete(store.key(slug, "ledger-gone"))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
             if actions:
