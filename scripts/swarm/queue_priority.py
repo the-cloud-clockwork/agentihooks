@@ -1,7 +1,9 @@
 import json
+import os
 import subprocess
 import uuid
 from collections.abc import Collection
+from contextlib import contextmanager
 
 from scripts.inbox.store import InboxStore
 from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
@@ -11,7 +13,7 @@ from scripts.swarm.store import RedisStore, SwarmError
 PENDING = "queue-priority"
 DISPLACED = "queue-priority-displaced"
 ACTIVE = "queue-priority-active"
-ACTIVE_S = 600
+ACTIVE_S = 3600
 ORDER = "merge-priority-order"
 
 
@@ -30,6 +32,35 @@ class Displaced:
     def pulls(self) -> list[dict]:
         found = [json.loads(raw) for raw in self.redis.hgetall(self.key).values()]
         return sorted(found, key=lambda pull: -pull["order"])
+
+
+class Busy(SwarmError):
+    pass
+
+
+def alive(holder: str) -> bool:
+    try:
+        os.kill(int(holder.split(":", 1)[0]), 0)
+    except ProcessLookupError:
+        return False
+    except (PermissionError, ValueError):
+        return True
+    return True
+
+
+@contextmanager
+def exclusive(store: RedisStore, slug: str):
+    key, token = store.key(slug, ACTIVE), f"{os.getpid()}:{uuid.uuid4().hex}"
+    holder = store.redis.get(key)
+    if holder is not None and not alive(holder):
+        store.redis.delete(key)
+    if not store.redis.set(key, token, nx=True, ex=ACTIVE_S):
+        raise Busy("another merge queue priority is running; try again when it ends")
+    try:
+        yield
+    finally:
+        if store.redis.get(key) == token:
+            store.redis.delete(key)
 
 
 def owners(tasks: list[dict], urls: Collection[str]) -> list[dict]:
@@ -71,16 +102,14 @@ def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason:
 def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
     displaced, actions = Displaced(store, slug), []
     for pull in displaced.pulls():
-        if store.redis.exists(store.key(slug, ACTIVE)):
-            break
         url, head = pull["url"], pull["headRefOid"]
         try:
             raw = merge_queue.graphql(merge_queue.STATE, {"url": url}, subprocess.run)["resource"]
             if settled(raw):
                 displaced.discard(url)
             elif reason := blocker(raw, head):
-                displaced.discard(url)
                 actions.append(leave_out(store, tasks, url, head, reason))
+                displaced.discard(url)
             else:
                 staged_compatibility.require(url, head, raw.get("body") or "", subprocess.run)
                 merge_queue.graphql(merge_queue.QUEUE, {"id": pull["id"], "head": head}, subprocess.run)
@@ -117,16 +146,16 @@ def blocking(url: str, journal: queue_record.Journal, head: str | None = None) -
 def apply(
     store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
 ) -> dict:
-    active, token = store.key(slug, ACTIVE), uuid.uuid4().hex
-    if not store.redis.set(active, token, nx=True, ex=ACTIVE_S):
-        raise SwarmError("another merge queue priority is running; try again when it ends")
-    try:
-        result = merge_queue.prioritize(
-            url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
-        )
-    finally:
-        if store.redis.get(active) == token:
-            store.redis.delete(active)
+    with exclusive(store, slug):
+        return reorder(store, slug, url, sender, tasks, journal, ahead)
+
+
+def reorder(
+    store: RedisStore, slug: str, url: str, sender: str, tasks: list[dict], journal: queue_record.Journal, ahead=()
+) -> dict:
+    result = merge_queue.prioritize(
+        url, journal=journal, displaced=Displaced(store, slug), **({"ahead": ahead} if ahead else {})
+    )
     for task in owners(tasks, result["displaced"]):
         InboxStore(store.redis).send(
             sender,
@@ -176,7 +205,7 @@ def replay(
     ledger: LedgerClient | None,
 ) -> None:
     try:
-        apply(store, slug, url, record["sender"], tasks, journal, record.get("ahead"))
+        reorder(store, slug, url, record["sender"], tasks, journal, record.get("ahead"))
     except SwarmError as exc:
         journal.write("priority-failed", url, "", None, None, errors=[str(exc)], **record)
         if ledger is not None:
@@ -185,7 +214,15 @@ def replay(
 
 
 def refresh(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
-    actions = requeue(store, slug, tasks, ledger)
+    try:
+        with exclusive(store, slug):
+            return requeue(store, slug, tasks, ledger) + pending(store, slug, tasks, ledger)
+    except Busy as exc:
+        return [f"merge queue priority waits: {exc}"]
+
+
+def pending(store: RedisStore, slug: str, tasks: list[dict], ledger) -> list[str]:
+    actions = []
     records = [(url, json.loads(raw)) for url, raw in store.redis.hgetall(store.key(slug, PENDING)).items()]
     records.sort(key=lambda item: item[1].get("order", 0))
     while records:

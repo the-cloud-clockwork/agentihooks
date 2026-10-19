@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -641,14 +642,18 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
         queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
     monkeypatch.setattr(p.queue, "run", run)
-    p.store.redis.set(p.store.key("sw", queue_priority.ACTIVE), "other")
-    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    active = p.store.key("sw", queue_priority.ACTIVE)
+    busy = "another merge queue priority is running; try again when it ends"
+    p.store.redis.set(active, f"{os.getpid()}:other")
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [f"merge queue priority waits: {busy}"]
     with pytest.raises(SwarmError) as held:
         queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
-    assert str(held.value) == "another merge queue priority is running; try again when it ends"
-    assert p.store.redis.get(p.store.key("sw", queue_priority.ACTIVE)) == "other"
+    assert str(held.value) == busy
+    assert p.store.redis.get(active) == f"{os.getpid()}:other"
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
-    p.store.redis.delete(p.store.key("sw", queue_priority.ACTIVE))
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    p.store.redis.set(active, f"{gone.pid}:killed")
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [
         f"requeued {URL[:-1]}{n} left out of the merge queue by an interrupted priority" for n in (2, 3)
     ]
