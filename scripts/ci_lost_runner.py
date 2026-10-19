@@ -3,6 +3,7 @@ import fcntl
 import json
 import subprocess
 import time
+from collections.abc import Callable, Container
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import IO
@@ -25,6 +26,7 @@ POLL_SECONDS = 10
 SCALE_SET = "actions.github.com/scale-set-name"
 NODE_BOUND_SECONDS = 60
 CLUSTER_CONFIRM_SECONDS = 30
+Source = Callable[[str], Container[str]]
 
 
 def live_runners(org: str) -> set[str]:
@@ -53,7 +55,9 @@ def _down(node: dict, now: datetime, bound: timedelta) -> bool:
 
 def _alive(pod: dict) -> bool:
     runner = [c for c in pod["status"].get("containerStatuses", []) if c["name"] == "runner"]
-    return pod["status"].get("phase") in ("Pending", "Running") and not any("terminated" in c["state"] for c in runner)
+    return pod["status"].get("phase") not in ("Failed", "Succeeded") and not any(
+        "terminated" in c["state"] for c in runner
+    )
 
 
 def _kubectl(*args: str) -> list[dict]:
@@ -137,7 +141,9 @@ def open_runs(repo: str, workflow: str) -> list[dict]:
     return runs
 
 
-def assess(repo: str, run: dict, workflow: dict, grace: timedelta, source=live_runners) -> tuple[bool, str, list[dict]]:
+def assess(
+    repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners
+) -> tuple[bool, str, list[dict]]:
     jobs = jobs_of(repo, run["id"])
     lost = lost_jobs(jobs, source(repo.split("/")[0]), datetime.now(UTC), grace)
     stuck, reason = stalled(jobs, lost, workflow)
@@ -148,14 +154,14 @@ def report(run: dict, action: str, reason: str) -> dict:
     return {"run": run["id"], "attempt": run["run_attempt"], "action": action, "reason": reason}
 
 
-def first_look(repo: str, run: dict, workflow: dict, grace: timedelta, source=live_runners) -> dict | None:
+def first_look(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
     if run["status"] == "completed":
         return report(run, "none", f"run completed with conclusion {run['conclusion']}")
     stuck, reason, _ = assess(repo, run, workflow, grace, source)
     return None if stuck else report(run, "none", reason)
 
 
-def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source=live_runners) -> dict:
+def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict:
     stuck, reason, jobs = assess(repo, run, workflow, grace, source)
     if not stuck:
         return report(run, "none", reason)
@@ -178,7 +184,7 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source=live_ru
     return report(run, "rerun", f"{reason}; {why}")
 
 
-def guarded(step, repo: str, run: dict, workflow: dict, grace: timedelta, source=live_runners) -> dict | None:
+def guarded(step, repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
     try:
         return step(repo, run, workflow, grace, source)
     except subprocess.SubprocessError as error:
@@ -194,8 +200,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cluster", action="store_true")
     parser.add_argument("--lock")
     args = parser.parse_args(argv)
-    held = _hold(args.lock) if args.lock else True
-    if not held:
+    held = _hold(args.lock) if args.lock else None
+    if args.lock and held is None:
         print(json.dumps({"action": "none", "reason": "another watchdog holds the lock"}))
         return 0
     source = cluster_runners if args.cluster else live_runners

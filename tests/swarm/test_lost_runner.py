@@ -79,10 +79,10 @@ def test_a_repository_without_the_tests_workflow_starts_nothing(swarm, tmp_path,
     assert calls == []
 
 
-def test_the_tick_runs_the_sweep_next_to_ci_speed():
-    import inspect
-
-    from scripts.swarm import tick
-
-    source = inspect.getsource(tick.tick)
-    assert "skip_refused(lost_runner.sweep, slug, config, store, now_ms)" in source
+def test_a_host_without_the_agentihooks_home_starts_nothing_and_keeps_the_minute(swarm, tmp_path):
+    store, config = swarm
+    (tmp_path / "home").rmdir()
+    calls, popen = spawned()
+    assert lost_runner.sweep("sw", config, store, NOW_MS, popen, kubectl) == []
+    assert calls == []
+    assert store.redis.get(f"{PREFIX}:lost-runner:{config.repo}") is None

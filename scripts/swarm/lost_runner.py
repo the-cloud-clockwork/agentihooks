@@ -31,8 +31,8 @@ def key(repo: str) -> str:
 
 
 def command(lock: Path) -> list[str]:
-    script = ["-I", "-m", "scripts.ci_lost_runner", "--repo", "{owner}/{repo}", "--cluster", "--lock", str(lock)]
-    return [sys.executable, *script]
+    args = ["-I", "-m", "scripts.ci_lost_runner", "--repo", "{owner}/{repo}", "--cluster", "--lock", str(lock)]
+    return [sys.executable, *args]
 
 
 def sweep(
@@ -43,10 +43,10 @@ def sweep(
     popen: Callable = subprocess.Popen,
     which: Callable = shutil.which,
 ) -> list[str]:
-    if not config.repo or not (Path(config.repo) / WORKFLOW).is_file() or not which("kubectl"):
-        return []
-    if not store.redis.set(key(config.repo), now_ms, nx=True, px=INTERVAL_MS):
+    ready = config.repo and (Path(config.repo) / WORKFLOW).is_file() and home().is_dir() and which("kubectl")
+    if not ready:
         return []
     with open(home() / "lost-runner.log", "a") as log:
-        popen(command(home() / "lost-runner.lock"), cwd=config.repo, stdout=log, stderr=log, start_new_session=True)
+        if store.redis.set(key(config.repo), now_ms, nx=True, px=INTERVAL_MS):
+            popen(command(home() / "lost-runner.lock"), cwd=config.repo, stdout=log, stderr=log, start_new_session=True)
     return []
