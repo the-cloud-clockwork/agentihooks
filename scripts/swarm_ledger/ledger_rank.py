@@ -91,9 +91,9 @@ def quoted(rank, words) -> bool:
 
 
 def urgent_refusal(task: dict, doc: dict) -> str:
-    claim_hold = ports.swarm().claim_hold
     from scripts.swarm_ledger.repository import hierarchy
 
+    claim_hold = ports.swarm().claim_hold
     if task.get("rank") != "urgent" or task.get("state", "open") != "open":
         return ""
     why = claim_hold.phased(task, doc) or claim_hold.freezes(task, doc, hierarchy.project(doc)[0])

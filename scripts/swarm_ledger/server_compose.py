@@ -30,11 +30,8 @@ def adopted(folder: Path, environ: dict = os.environ) -> bool:
 
 
 def adoption(environ: dict = os.environ) -> str:
-    return (
-        ports.swarm()
-        .stack_env.read_env(ports.swarm().stack_init.stack_home(environ) / ".env")
-        .get("SWARM_ADOPT_LEDGER_DIR", "")
-    )
+    swarm = ports.swarm()
+    return swarm.stack_env.read_env(swarm.stack_init.stack_home(environ) / ".env").get("SWARM_ADOPT_LEDGER_DIR", "")
 
 
 def used(

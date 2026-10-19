@@ -155,4 +155,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

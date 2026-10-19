@@ -20,10 +20,6 @@ EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
 
 
-def lane_of(name):
-    return ports.swarm().naming.lane_of(name)
-
-
 def resolve_name(name):
     return ports.swarm().naming.resolve_name(name)
 
@@ -65,7 +61,7 @@ def author(op, ctx) -> tuple[str, str] | None:
     by = op.get("by")
     if by is None:
         return "operator", op.get("quote")
-    if lane_of(resolve_name(by)) == DISPATCH:
+    if ports.swarm().naming.lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
     words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""

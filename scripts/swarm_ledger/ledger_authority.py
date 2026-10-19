@@ -16,10 +16,6 @@ from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_link import remote
 
 
-def lane_of(name):
-    return ports.swarm().naming.lane_of(name)
-
-
 def resolve_name(name):
     return ports.swarm().naming.resolve_name(name)
 
@@ -145,7 +141,11 @@ def refusal(name, op):
         return "only the operator writes without an author"
     if by != name and resolve_name(by) != resolve_name(name):
         return f"{name} cannot write as {by}"
-    if op["op"] == "join" and op.get("role", "member") != "member" and lane_of(resolve_name(name)) != "master":
+    if (
+        op["op"] == "join"
+        and op.get("role", "member") != "member"
+        and ports.swarm().naming.lane_of(resolve_name(name)) != "master"
+    ):
         return f"{name} cannot join as {op['role']}"
     if op["op"] == "claim":
         return claim_refusal(resolve_name(name))
