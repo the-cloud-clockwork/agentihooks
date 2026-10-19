@@ -97,7 +97,7 @@ export function toggle(key, value, field) {
   flush(false);
 }
 
-function applyServer(server) {
+async function applyServer(server) {
   if ((server._meta || {}).rev < rev) return;
   meta = server._meta || {};
   rev = meta.rev;
@@ -105,7 +105,9 @@ function applyServer(server) {
   for (const op of ops) applyOp(doc, op);
   applyChecks(doc);
   banner([meta.seed_error]);
-  render();
+  const appliedRev = rev;
+  await render(null, true);
+  if (rev !== appliedRev) return;
   lsWrite();
   firstState();
 }

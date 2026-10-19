@@ -256,7 +256,10 @@ function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
   if (!items.length) el.append(h("li", { class: "empty", text: "None." }));
 }
 
-export function render(focusKey) {
+let renderVersion = 0;
+
+export function render(focusKey, cooperative = false) {
+  const version = ++renderVersion;
   const active = document.activeElement;
   const key = focusKey || (active && active.dataset ? active.dataset.focus : null);
   const caret = !focusKey && active && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
@@ -294,22 +297,28 @@ export function render(focusKey) {
     () => { renderArtifacts(); }, () => { renderChat(); }, () => { renderChatBadge(); }, () => { renderStats(); },
     () => { renderSwarm(swarm); }, () => { renderOutline(); }, () => { markToggles(); },
   ];
-  for (const section of sections) {
-    try {
-      section();
-    } catch (error) {
-      console.error(error);
+  const paint = async () => {
+    for (const section of sections) {
+      if (cooperative) {
+        await new Promise((done) => setTimeout(done, 0));
+        if (version !== renderVersion) return;
+      }
+      try {
+        section();
+      } catch (error) {
+        console.error(error);
+      }
     }
-  }
-
-  const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
-  if (!again) return;
-  again.focus();
-  if (again.tagName === "TEXTAREA") {
-    grow(again);
-    const end = again.value.length;
-    again.setSelectionRange(caret ? caret[0] : end, caret ? caret[1] : end);
-  }
+    const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
+    if (!again) return;
+    again.focus();
+    if (again.tagName === "TEXTAREA") {
+      grow(again);
+      const end = again.value.length;
+      again.setSelectionRange(caret ? caret[0] : end, caret ? caret[1] : end);
+    }
+  };
+  return paint();
 }
 
 const NOUNS = { tasks: "tasks", followups: "follow-ups" };

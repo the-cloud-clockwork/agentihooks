@@ -115,7 +115,7 @@ export function renderOutline() {
     nav.replaceChildren(h("div", { class: "ol-tools" }, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } })),
       h("ul", {}, ...tree.map(outlineGroup)));
   }
-  markOutline();
+  requestAnimationFrame(markOutline);
   markPending();
 }
 
