@@ -295,7 +295,13 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: tick_stop.STOP.wait(10) and [])
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
     monkeypatch.setattr(cli, "_tickable", lambda slug: True)
-    cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
+    store = types.SimpleNamespace(
+        slugs=lambda: ["sw"],
+        config=lambda slug: types.SimpleNamespace(api_url="", pending_api_url=""),
+        redis=types.SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
+    cli.cmd_tick(store, None)
     assert swept == []
 
 

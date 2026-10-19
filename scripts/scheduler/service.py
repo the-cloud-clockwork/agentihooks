@@ -7,6 +7,7 @@ import os
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
@@ -15,6 +16,10 @@ from typing import TextIO
 from urllib.parse import urlsplit
 
 from scripts.scheduler.core import Scheduler
+
+ROOT = Path(__file__).resolve().parents[2]
+RECORD = "supervisor.json"
+DRAIN_S = 30
 
 
 class AlreadyRunning(RuntimeError):
@@ -57,7 +62,7 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
-    stopped = stop if stop is not None else asyncio.Event()
+    stopped = stop if stop is not None else _on_signals()
     with machine_lock("runner"):
         while not stopped.is_set():
             await asyncio.to_thread(scheduler.run_due)
@@ -67,13 +72,23 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
                 pass
 
 
+def _on_signals() -> asyncio.Event:
+    stopped = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stopped.set)
+    return stopped
+
+
 def _command(mode: str) -> list[str]:
     return [sys.executable, "-m", "scripts.scheduler.service", mode]
 
 
 def supervise(stop: Event | None = None) -> None:
     stopped = stop if stop is not None else Event()
+    loaded = revision(ROOT)
     with machine_lock("supervisor"):
+        _identify(loaded)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
@@ -83,6 +98,54 @@ def supervise(stop: Event | None = None) -> None:
                     return
             if stopped.wait(1):
                 return
+
+
+def _identify(loaded: str) -> None:
+    record = {"pid": os.getpid(), "root": str(ROOT), "revision": loaded, "started": time.time()}
+    (runtime_dir() / RECORD).write_text(json.dumps(record))
+
+
+def revision(root: Path | str) -> str:
+    try:
+        shown = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return shown.stdout.strip() if shown.returncode == 0 else ""
+
+
+def holder(environ: Mapping[str, str]) -> dict | None:
+    try:
+        with machine_lock("supervisor", environ=environ):
+            return None
+    except AlreadyRunning:
+        pass
+    directory = runtime_dir(environ)
+    try:
+        pid = int((directory / "supervisor.lock").read_text())
+    except (OSError, ValueError):
+        pid = 0
+    try:
+        record = json.loads((directory / RECORD).read_text())
+    except (OSError, ValueError):
+        return {"pid": pid}
+    return record if isinstance(record, dict) and record.get("pid") == pid else {"pid": pid}
+
+
+def drain(pid: int, environ: Mapping[str, str]) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + DRAIN_S
+    while holder(environ) is not None:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
+    return True
 
 
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:

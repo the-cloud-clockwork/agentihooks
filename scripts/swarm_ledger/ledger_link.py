@@ -11,6 +11,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from scripts.swarm_ledger import ledger_route
+
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 USER_AGENT = "agentihooks-swarm"
@@ -29,8 +31,10 @@ class Cleartext(SystemExit):
     pass
 
 
-def base(environ=os.environ) -> str:
-    if remote(environ):
+def base(environ=os.environ, slug="") -> str:
+    if selected := ledger_route.url(slug):
+        return selected
+    if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
         if not url:
             raise SystemExit("a remote ledger client needs SWARM_URL, the address of the hosted ledger server")
@@ -106,8 +110,14 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
     return urllib.request.urlopen(request, timeout=timeout, **transport(environ))
 
 
-def remote(environ=os.environ) -> bool:
-    return bool(environ.get("SWARM_URL")) or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+def remote(environ=os.environ, slug="") -> bool:
+    return (
+        bool(
+            ledger_route.url(slug)
+            or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
+        )
+        or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+    )
 
 
 def access_headers(environ=os.environ) -> dict:
@@ -157,7 +167,7 @@ def allowed_origins(environ=os.environ) -> set[str]:
 
 
 def page_url(slug):
-    return f"{base()}/{slug}"
+    return f"{base(slug=slug)}/{slug}"
 
 
 def folder(environ=os.environ) -> Path:

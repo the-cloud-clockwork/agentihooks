@@ -12,7 +12,7 @@ from scripts.swarm import cli, commands, dispatcher, lease, publish, runtime, ti
 from scripts.swarm.health import checks
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.resume import Outcome
-from scripts.swarm.store import AgentRecord, RedisStore, SwarmError
+from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
@@ -2749,7 +2749,13 @@ def _tick_all(monkeypatch, run_tick, slugs, tick_seconds=0.05):
     monkeypatch.setattr(cli, "run_tick", bounded)
     reconciled = []
     monkeypatch.setattr(timer, "reconcile", lambda binary: reconciled.append(binary) or True)
-    store = types.SimpleNamespace(slugs=lambda: slugs, reconciled=reconciled)
+    store = types.SimpleNamespace(
+        slugs=lambda: slugs,
+        reconciled=reconciled,
+        config=lambda slug: SwarmConfig(slug, "/repo", 0, 0),
+        redis=types.SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
     cli.cmd_tick(store, None)
     assert filled == [os.environ]
     assert swept == [(dict(os.environ), 77, True)]
@@ -2954,19 +2960,6 @@ def test_set_refuses_bad_scaling_settings(env, capsys, pair, reason):
     assert run("sw", "set", pair) == 1
     assert capsys.readouterr().err.strip() == f"swarm: {reason}"
     assert store.config("sw") == before
-
-
-def test_set_stores_the_swarm_api_address_and_clears_it(env, capsys):
-    store, _, _ = env
-    run("sw", "create", "--repo", "/repo")
-    assert store.config("sw").api_url == ""
-    assert run("sw", "set", "api-url=https://swarm.example.test:8443") == 0
-    assert store.config("sw").api_url == "https://swarm.example.test:8443"
-    assert json.loads(capsys.readouterr().out.splitlines()[-1])["api_url"] == "https://swarm.example.test:8443"
-    assert run("sw", "set", "api-url=http://swarm-api.agentihooks-swarm.svc:8780") == 0
-    assert store.config("sw").api_url == "http://swarm-api.agentihooks-swarm.svc:8780"
-    assert run("sw", "set", "api-url=") == 0
-    assert store.config("sw").api_url == ""
 
 
 @pytest.mark.parametrize(

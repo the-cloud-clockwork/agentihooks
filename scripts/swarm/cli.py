@@ -159,7 +159,7 @@ from scripts.swarm.store import (
     connect,
 )
 from scripts.swarm.tick import agent_status, primed, ready_in_order, skip_refused, spawn_holds, tick
-from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_workspace, plan_shape
+from scripts.swarm_ledger import ledger_creator, ledger_kinds, ledger_link, ledger_route, ledger_workspace, plan_shape
 from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.runtime.routed import routed
 
@@ -182,7 +182,7 @@ SCALING_KEYS = {
     "swap-full-share": "swap_full_share",
     "swap-floor": "swap_floor_mb",
 }
-ADDRESS_KEYS = {"api-url": "api_url"}
+ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
 CONFIG_KEYS = {
@@ -226,6 +226,7 @@ def _publish_tick_status(store, slug, doc):
 
 @timing.instrument_tick
 @outage.guard_tick
+@ledger_route.service
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
@@ -408,6 +409,7 @@ def cmd_list(store, args):
         )
 
 
+@ledger_route.tick
 def _tick_one(store, slug):
     try:
         if not _tickable(slug):
@@ -453,6 +455,7 @@ def _reconcile_services():
         print(f"warning: the swarm user services could not be installed or enabled{why}", file=sys.stderr)
 
 
+@ledger_route.tick
 def run_waits(store: RedisStore, slug: str, ledger=None) -> list[str]:
     from scripts.swarm import commands, lease
 
@@ -529,19 +532,13 @@ def _tick_host(store, started):
     from scripts.swarm_ledger import authority_context
 
     operator_env.fill(os.environ)
-    value = None
-    if os.environ.get("SWARM_URL"):
-        from scripts.swarm_ledger.storage_migration.hosted import server_secret
-
-        value = server_secret()
-    with authority_context.bound(value):
-        operator_env.classifier(os.environ)
-        if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
-            raise SwarmError(
-                "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
-                "and the host scheduler ticks every 60 seconds"
-            )
-        slugs = store.slugs()
+    if os.environ.get("AGENTIHOOKS_CONTROLLER_TICK_SECONDS"):
+        raise SwarmError(
+            "the tick refused to run: AGENTIHOOKS_CONTROLLER_TICK_SECONDS is for controller installs, "
+            "and the host scheduler ticks every 60 seconds"
+        )
+    operator_env.classifier(os.environ)
+    with authority_context.for_tick(store) as slugs:
         _reconcile_services()
         if slugs:
             firsts, until = _Firsts(len(slugs)), time.monotonic() + EXTRA_TICKS_UNTIL
@@ -2216,13 +2213,17 @@ def dispatch(argv):
         if "slug" in args:
             args.slug = store.names.swarm_slug(args.slug)
         action = getattr(args, "command", "")
-        before = control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
-        if action in clearance.COMMANDS:
-            run_control(store, args, who, handler)
-        else:
-            handler(store, args)
-        if action in control_notifications.CONTROLS:
-            control_notifications.notify(store, args, LedgerClient(), before, action)
+        route_slug = getattr(args, "slug", "")
+        with ledger_route.command(store, route_slug, who):
+            before = (
+                control_notifications.master(store, args.slug) if action in control_notifications.CONTROLS else None
+            )
+            if action in clearance.COMMANDS:
+                run_control(store, args, who, handler)
+            else:
+                handler(store, args)
+            if action in control_notifications.CONTROLS:
+                control_notifications.notify(store, args, LedgerClient(), before, action)
     except (SwarmError, InboxError, RedisError) as exc:
         if handler is cmd_status and outage.show(args.slug, args.json):
             return 0

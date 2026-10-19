@@ -137,7 +137,7 @@ def test_the_phase_pass_reads_every_page_of_a_ledger_above_the_cap(large, monkey
     flat = ledger_client._ledger()
     monkeypatch.setattr(api_client, "ResourceClient", lambda base, credentials, timeout: served)
     monkeypatch.setattr(flat, "credentials", lambda slug, service=False: {})
-    monkeypatch.setattr(flat, "base", lambda: "http://ledger.test")
+    monkeypatch.setattr(flat, "base", lambda slug="": "http://ledger.test")
     ticked = []
 
     class Ledger(ledger_client.LedgerClient):
