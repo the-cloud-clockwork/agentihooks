@@ -140,11 +140,12 @@ def test_forced_master_recovery_preserves_the_alert_and_its_backoff(store, monke
     assert len([note for note in ledger.notes if "reported no hook" in note]) == 1
 
 
-def test_forced_recovery_replaces_an_unalerted_stale_start(store):  # noqa: F811
+def test_forced_recovery_replaces_an_unalerted_stale_start(store, monkeypatch):  # noqa: F811
     from scripts.swarm import tick_master
     from scripts.swarm.tick import _master
     from tests.swarm.test_tick_master import direct
 
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_DOWN_MINUTES", "5")
     swarm, runtime = direct()
     master_start.save(swarm, "sw", {"name": "master@a1b2c3-0098", "task": {"id": MASTER}, "attempt": 1, "at": 0})
     config, ledger = swarm.config("sw"), tasks()
