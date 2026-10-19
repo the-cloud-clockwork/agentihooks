@@ -356,7 +356,7 @@ def test_every_close_is_reported_with_its_reason(env):
 def test_the_tick_closes_a_dead_swarm_pane_after_five_idle_minutes_and_keeps_live_and_foreign_panes(env):
     herdr = FakeHerdr()
     swarm = Owner(swarm="crew", route="routed", seen="")
-    launch(env, herdr, "w1:p2", "term_dead", Spot(info=CLAUDE), replace(swarm, name="eng@crew-1"))
+    launch(env, herdr, "w1:p2", "term_dead", Spot(info=SHELL), replace(swarm, name="eng@crew-1"))
     launch(env, herdr, "w1:p3", "term_live", Spot(info=CLAUDE), replace(swarm, name="eng@crew-2"))
     launch(env, herdr, "w1:p4", "term_master", Spot(info=CLAUDE), replace(swarm, name="master@crew-1"))
     launch(env, herdr, "w1:p5", "term_mine", owner=Owner(name="operator-session", route="routed", seen=""))
