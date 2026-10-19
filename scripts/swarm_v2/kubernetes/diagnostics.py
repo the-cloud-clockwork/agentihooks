@@ -19,15 +19,11 @@ def startup(pod: dict, api: Logs | None = None) -> dict | None:
         entry["state"]["terminated"].get("exitCode", 0) != 0 for entry in terminated
     ):
         return None
-    return {
-        "phase": status.get("phase", ""),
-        "reason": status.get("reason", ""),
-        "containers": [
-            {"name": entry["name"], "terminated": entry["state"]["terminated"]}
-            | ({} if api is None else {"log": api.pod_logs(pod["metadata"]["name"], entry["name"])})
-            for entry in terminated
-        ],
-    }
+    exits = [{"name": entry["name"], "terminated": entry["state"]["terminated"]} for entry in terminated]
+    if api is not None:
+        for entry in exits:
+            entry["log"] = api.pod_logs(pod["metadata"]["name"], entry["name"])
+    return {"phase": status.get("phase", ""), "reason": status.get("reason", ""), "containers": exits}
 
 
 def retain(store: RedisStore, slug: str, pod: dict, captured: dict) -> None:
