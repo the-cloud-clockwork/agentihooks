@@ -210,6 +210,34 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
     assert tests == NARROWED
 
 
+@pytest.mark.parametrize("shift", [0, 2])
+def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift):
+    from coverage import CoverageData
+
+    from tests.dep_manifest import build
+
+    _recorded_project(tmp_path, monkeypatch)
+    source = "def f(value):\n    if value:\n        return value + 1\n    return value - 1\n"
+    (tmp_path / "scripts/core.py").write_text(source)
+    commit = _commit(tmp_path, "shared function")
+    data = CoverageData(basename=str(tmp_path / ".coverage"))
+    for test, lines in (
+        ("test_f", [1, 2, 3]),
+        ("test_g[1]", [1, 2, 4]),
+        ("test_other", [1, 2, 3]),
+        ("TestSpawn::test_child", [1, 2, 3]),
+    ):
+        data.set_context(f"tests/test_core.py::{test}|run")
+        data.add_lines({str(tmp_path / "scripts/core.py"): lines})
+    data.write()
+    manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    (tmp_path / "scripts/core.py").write_text("\n" * shift + source.replace("value - 1", "value - 2"))
+    _commit(tmp_path, "edited branch")
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {4 + shift}}, selection, manifest)
+    assert selection["scripts/core.py"] == ["tests/test_core.py::test_g", "tests/test_edited.py", "tests/test_fresh.py"]
+
+
 def test_plan_publishes_covering_test_ids_and_checks_their_files(tmp_path, monkeypatch):
     manifest = _recorded_project(tmp_path, monkeypatch)
     monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
