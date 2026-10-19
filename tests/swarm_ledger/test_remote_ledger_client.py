@@ -81,6 +81,7 @@ def test_explicit_local_mode_reads_the_page_token_and_ignores_ledger_url(live):
         "LEDGER_HOST": "127.0.0.1",
         "LEDGER_PORT": "9",
     }
+    assert ledger_link.remote(local) is False
     assert ledger_link.base(local) == "http://127.0.0.1:9"
 
 
