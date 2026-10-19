@@ -2,8 +2,6 @@ import re
 from collections.abc import Callable
 from urllib.parse import urlsplit
 
-from scripts.swarm_ledger import ledger_artifacts
-
 ANCHOR = re.compile(r"^\s*<!--\s*slice:\s*([\w.-]+)\s*-->\s*$")
 LINES = re.compile(r"([1-9][0-9]*)-([1-9][0-9]*)")
 
@@ -159,8 +157,11 @@ def stored_text(ref: dict, doc: dict, load: Callable[[str, str], bytes] | None =
     _, _, slug, file_id = parts
     if not any(row.get("plan") is True and row["file"]["id"] == file_id for row in doc.get("artifacts", ())):
         raise ValueError("plan artifact is missing or is not marked as a plan")
-    data = load(slug, file_id) if load else ledger_artifacts.path_of(slug, file_id).read_bytes()
-    return data.decode()
+    if load:
+        return load(slug, file_id).decode()
+    from scripts.swarm_ledger import ledger_artifacts
+
+    return ledger_artifacts.path_of(slug, file_id).read_bytes().decode()
 
 
 def check_phase_ref(doc: dict, phase: dict) -> None:
