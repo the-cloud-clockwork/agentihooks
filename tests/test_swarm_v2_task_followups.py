@@ -26,6 +26,13 @@ def decide(world, by, path="done", value=True):
     return world.write(op)
 
 
+def api_checked(world, op):
+    from scripts.swarm_ledger.api import schemas
+
+    payload = {"operation_id": f"request-{op['id']}", "ops": [op], "guards": {}}
+    return schemas.check_operations(payload, cases.core, tuple(t["id"] for t in world.doc()["tasks"]))
+
+
 def test_cli_records_the_agents_task_on_a_new_follow_up(monkeypatch):
     from scripts.swarm_ledger import ledger
 
@@ -80,12 +87,6 @@ def test_a_task_id_on_a_follow_up_passes_the_check(task):
     ledger_agent_ops.check(op)
     assert op["task"] == task
 
-
-def api_checked(world, op):
-    from scripts.swarm_ledger.api import schemas
-
-    payload = {"operation_id": f"request-{op['id']}", "ops": [op], "guards": {}}
-    return schemas.check_operations(payload, cases.core, tuple(t["id"] for t in world.doc()["tasks"]))
 
 
 def test_a_follow_up_add_with_a_task_passes_the_api_schema_and_lands_on_its_owning_master(world):
