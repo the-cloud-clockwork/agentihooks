@@ -72,7 +72,9 @@ def test_outline_updates_when_a_tall_target_top_crosses_the_activation_line(brow
         }"""
     )
     page.evaluate("document.getElementById('outline-crossing').style.top = '88px'")
-    page.wait_for_function("() => document.querySelector('a[data-target=outline-crossing]').classList.contains('on')", timeout=3000)
+    page.wait_for_function(
+        "() => document.querySelector('a[data-target=outline-crossing]').classList.contains('on')", timeout=3000
+    )
     page.close()
 
 
