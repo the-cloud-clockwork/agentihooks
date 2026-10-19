@@ -11,8 +11,11 @@ from .sqlite import BEGIN_IMMEDIATE, read_registry
 
 
 def _repository():
-    from . import legacy, repository
+    from scripts.swarm_ledger import storage
 
+    from . import legacy
+
+    repository = storage.default()
     legacy.adopt_bin(repository)
     return repository
 

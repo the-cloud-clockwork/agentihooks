@@ -439,7 +439,9 @@ def test_cli_promote_holds_a_material_change_with_the_default_tolerance(tmp_path
 
 
 def test_cli_operator_authentication_refuses_worker_identity(tmp_path, monkeypatch):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     monkeypatch.setattr(repository, "token", lambda slug: {"fixture": "fixture-credential"}.get(slug))
     monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME", raising=False)

@@ -20,7 +20,9 @@ PAGE = (
 
 def stored_token(page_path):
     """The token of the ledger a legacy page file became once the repository imported it."""
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     return repository.token(Path(page_path).stem)
 
@@ -34,7 +36,9 @@ def paths(slug, core=ledger_core):
 
 def render(doc, slug, port, token=None):
     """The page text for `slug`; the stored ledger of that slug is dropped so the written page is imported fresh."""
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     for target in (repository, repository.bound(ledger_core)):
         with target.connect() as connection, connection:

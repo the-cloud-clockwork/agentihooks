@@ -17,8 +17,10 @@ from scripts.inbox import seen  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from scripts.swarm_ledger import watch_ledger  # noqa: E402
 from scripts.swarm_ledger.events import Expired, Hub, stream  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "watchstream-2026-01-01"
 

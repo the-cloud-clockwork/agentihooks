@@ -11,8 +11,10 @@ import new_ledger  # noqa: E402
 import watch_ledger  # noqa: E402
 
 from scripts.inbox import seen  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+repository = default_repository()
 
 SLUG = "watchowner-2026-01-01"
 MASTER = "watchowner-master-1"

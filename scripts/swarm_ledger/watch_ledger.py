@@ -158,7 +158,9 @@ def main():
     parser.add_argument("--as", dest="name")
     parser.add_argument("--since-rev", type=int)
     args = parser.parse_args()
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     if not repository.exists(args.slug):
         sys.exit(f"no ledger {args.slug} in {core.LEDGER_DIR}")

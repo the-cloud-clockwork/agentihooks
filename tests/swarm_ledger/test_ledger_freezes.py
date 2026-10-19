@@ -324,7 +324,9 @@ def test_the_first_freeze_on_a_ledger_without_a_freezes_collection_creates_it(ve
 
 
 def test_the_server_path_stores_the_first_focus_on_a_ledger_saved_without_freezes():
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     stored = repository.bound(core)
     state = stored.get_document(SLUG)

@@ -79,7 +79,7 @@ def test_dispatch_does_not_run_the_handler_for_an_unreadable_ledger(folder, monk
 def test_dispatch_reads_the_current_home_folder_after_an_earlier_event(folder, monkeypatch, configured):
     from unittest.mock import Mock
 
-    from scripts.swarm_ledger.repository import sqlite
+    from scripts.swarm_ledger import storage
 
     ledger_hook.dispatch({"session_id": "earlier", "hook_event_name": "PostToolUse", "tool_name": "Read"})
     home = folder / "home"
@@ -92,8 +92,8 @@ def test_dispatch_reads_the_current_home_folder_after_an_earlier_event(folder, m
         monkeypatch.delenv("LEDGER_DIR")
     else:
         monkeypatch.setenv("LEDGER_DIR", configured)
-    read = Mock(wraps=sqlite.read_ledger)
-    monkeypatch.setattr(sqlite, "read_ledger", read)
+    read = Mock(wraps=storage.read_ledger)
+    monkeypatch.setattr(storage, "read_ledger", read)
 
     ledger_hook.dispatch({"session_id": "s1", "hook_event_name": "PostToolUse", "tool_name": "Read"})
 

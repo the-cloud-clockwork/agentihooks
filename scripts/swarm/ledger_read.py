@@ -9,7 +9,7 @@ from scripts.swarm_ledger import ledger_link
 def parts(slug: str, *keys: str) -> dict:
     if not ledger_link.remote(os.environ):
         from scripts.swarm_ledger.repository.folder import ledger_folder
-        from scripts.swarm_ledger.repository.sqlite import read_ledger
+        from scripts.swarm_ledger.storage import read_ledger
 
         return read_ledger(ledger_folder(os.environ), slug, *keys) or {}
     return _hosted(slug, keys)

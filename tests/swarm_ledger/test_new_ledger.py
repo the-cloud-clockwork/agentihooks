@@ -67,12 +67,12 @@ def test_seed_task_ranks_are_refused_before_creation(ledger_dir, rank):
     with pytest.raises(SystemExit) as rejected:
         new_ledger.create("ranked-seed", content)
     assert str(rejected.value) == f"content rejected:\n  {reason}"
-    assert not new_ledger.repository.exists("ranked-seed")
+    assert not new_ledger.storage.default().exists("ranked-seed")
 
 
 def test_unranked_seed_tasks_can_be_created(ledger_dir):
     assert new_ledger.create("unranked-seed", {**CONTENT, "tasks": [{"title": "a", "phase": "p1"}]}) is True
-    stored = new_ledger.repository.export_document("unranked-seed")
+    stored = new_ledger.storage.default().export_document("unranked-seed")
     assert stored["tasks"][0]["title"] == "a"
     assert "rank" not in stored["tasks"][0]
 
@@ -82,7 +82,7 @@ def test_creating_a_stored_slug_reports_it_exists_and_changes_nothing(ledger_dir
     import sys
 
     new_ledger.create(SLUG, CONTENT)
-    before = new_ledger.repository.export_document(SLUG)
+    before = new_ledger.storage.default().export_document(SLUG)
     content = tmp_path / "content.json"
     content.write_text(json.dumps(dict(CONTENT, title="Other")))
     monkeypatch.setattr(new_ledger, "built_slug", lambda args: SLUG)
@@ -90,4 +90,4 @@ def test_creating_a_stored_slug_reports_it_exists_and_changes_nothing(ledger_dir
     new_ledger.main()
     first = capsys.readouterr().out.splitlines()[0]
     assert first == f'{{"slug": "{SLUG}", "created": false}}'
-    assert new_ledger.repository.export_document(SLUG) == before
+    assert new_ledger.storage.default().export_document(SLUG) == before

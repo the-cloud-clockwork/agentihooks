@@ -167,7 +167,9 @@ def test_audit_without_tasks_still_reports_real_hashes():
 
 
 def test_a_write_reconciles_the_ledger_once(ledger_page, monkeypatch):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     calls = []
     apply_ops = repository.apply_ops

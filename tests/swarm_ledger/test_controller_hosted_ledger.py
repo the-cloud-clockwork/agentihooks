@@ -14,7 +14,7 @@ from scripts.swarm import ledger_read, profile_choice, prompt
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
@@ -28,6 +28,8 @@ from tests.test_swarm_v2_control_service import (
     _register_and_beat,
     _store,
 )
+
+repository = default_repository()
 
 pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
 

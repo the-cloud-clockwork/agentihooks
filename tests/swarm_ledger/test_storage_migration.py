@@ -4,9 +4,11 @@ import sys
 import pytest
 
 from scripts.swarm_ledger import ledger_core, storage_migration
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_ledger.storage_migration import __main__ as command
 from tests.swarm_ledger.test_sqlite import document
+
+repository = default_repository()
 
 
 def run(monkeypatch, *argv):

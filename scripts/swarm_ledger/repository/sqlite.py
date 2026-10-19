@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import sqlite3
 import threading
@@ -8,8 +9,9 @@ from pathlib import Path
 from scripts.swarm_ledger import request_metrics
 
 from . import hierarchy
+from .entry import Entry
 from .events import append_events, read_events, trim_events, write_events
-from .fragments import document, encoded
+from .fragments import document
 from .rows import TABLES, assemble, diff, encode, flatten, read_rows, write_rows
 from .seeds import read_seeds, sync_values, write_seeds
 
@@ -22,6 +24,7 @@ CREATE TABLE IF NOT EXISTS seed_deltas (slug TEXT, revision TEXT, path TEXT, val
 CREATE TABLE IF NOT EXISTS events (slug TEXT, key TEXT, revision INTEGER, position INTEGER, value TEXT, PRIMARY KEY(slug,key));
 CREATE INDEX IF NOT EXISTS events_revision ON events(slug,revision);
 CREATE INDEX IF NOT EXISTS events_position ON events(slug,position);
+CREATE TABLE IF NOT EXISTS relay_journal (kind TEXT, slug TEXT, revision INTEGER, PRIMARY KEY(kind,slug,revision));
 """
 DATABASE = "ledgers.sqlite3"
 BEGIN = "BEGIN"
@@ -40,22 +43,23 @@ REGISTRY_TABLE = "registry"
 UPDATE = "UPDATE ledgers SET revision=?, generation=?, summary=?, touched_at=? WHERE slug=?"
 INSERT = "INSERT INTO ledgers VALUES (?, ?, ?, ?, ?, ?)"
 SUMMARY_KEYS = ("slug", "title", "overview", "closed_at", "size", "open", "done", "updated_at")
+HELD = "SELECT kind, slug, revision FROM relay_journal ORDER BY kind, slug, revision"
+HOLD = "INSERT OR IGNORE INTO relay_journal VALUES (?, ?, ?)"
+RELEASE = "DELETE FROM relay_journal WHERE kind=? AND slug=? AND revision BETWEEN ? AND ?"
+DROP = "DELETE FROM relay_journal WHERE kind=? AND slug=?"
+REGISTRIES = "SELECT slug,path,value FROM registry WHERE path=? ORDER BY slug,path"
+ADD_REGISTRY = "INSERT INTO registry VALUES (?,?,?)"
+TABLES_SQL = "SELECT name FROM sqlite_master WHERE type='table'"
+FENCES = "CREATE TABLE IF NOT EXISTS hosted_fences (slug TEXT PRIMARY KEY, destination TEXT NOT NULL)"
+FENCED = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*')"
+FENCE_DESTINATIONS = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*') OR ?='*'"
+TABLE_ID = re.compile(r"[a-z_]+\Z")
+# a fenced ledger's last relay must still be able to hold its revision
+UNFENCED = ("hosted_fences", "relay_journal")
 
 
 class Missing(KeyError, ValueError):
     pass
-
-
-class Entry:
-    """One ledger as last stored: its generation, canonical text, a parsed copy callers only read and views of it."""
-
-    def __init__(self, generation, text, state, fragments=None):
-        self.generation, self._text, self.state, self.views = generation, text, state, {}
-        self.fragments = fragments
-
-    @property
-    def text(self) -> str:
-        return encoded(self.fragments) if self._text is None else self._text
 
 
 def summarize(slug: str, state: dict) -> dict:
@@ -222,6 +226,109 @@ def read_document(directory, slug: str) -> dict | None:
 def without_events(state: dict) -> dict:
     """The document as its rows hold it: the event log lives in its own table."""
     return {**state, "_meta": {key: value for key, value in state["_meta"].items() if key != "events"}}
+
+
+def fenced(directory: Path, slug: str) -> bool:
+    """Whether the hosted migration fenced this ledger, or every ledger, in the folder's database."""
+    with read_only(directory) as connection:
+        exists = (
+            connection is not None
+            and connection.execute("SELECT 1 FROM sqlite_master WHERE name='hosted_fences'").fetchone()
+        )
+        return bool(exists and connection.execute(FENCED, (slug,)).fetchone())
+
+
+class Transaction:
+    """One immediate write transaction on the store, held under the core lock."""
+
+    def __init__(self, repository: "SQLiteLedgerRepository", connection):
+        self.repository, self.connection, self.written = repository, connection, {}
+
+    def exists(self, slug: str) -> bool:
+        return self.connection.execute(STORED, (slug,)).fetchone() is not None
+
+    def entry(self, slug: str) -> Entry:
+        return self.repository._entry(self.connection, slug)
+
+    def hierarchy(self, slug: str) -> tuple[dict, set]:
+        return hierarchy.stored(self.connection, slug)
+
+    def write(self, slug: str, entry: Entry, state: dict, events: list) -> Entry:
+        written = self.written[slug] = self.repository._write(self.connection, slug, entry, state, events)
+        return written
+
+    def insert(self, slug: str, state: dict, seeds: dict | None, token: str) -> None:
+        self.repository._insert(self.connection, slug, state, token, seeds)
+
+    def add_registries(self, rows: list) -> None:
+        self.connection.executemany(ADD_REGISTRY, rows)
+
+    def export(self, slug: str) -> dict:
+        return self.repository._export(self.connection, slug)
+
+    def prepare_fence(self, slug: str, destination: str) -> None:
+        connection = self.connection
+        connection.execute(FENCES)
+        previous = connection.execute(FENCE_DESTINATIONS, (slug, slug)).fetchall()
+        if any(row[0] != destination for row in previous):
+            raise ValueError("ledger already has a different hosted destination")
+        if slug != "*" and not self.exists(slug):
+            raise ValueError("no such ledger")
+        for (table,) in connection.execute(TABLES_SQL).fetchall():
+            if table in UNFENCED or not TABLE_ID.fullmatch(table):
+                continue
+            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+            if "slug" not in columns:
+                continue
+            column = "path" if table == "registry" else "slug"
+            for action, reference in (("INSERT", "NEW"), ("UPDATE", "OLD"), ("DELETE", "OLD")):
+                connection.execute(
+                    f"CREATE TRIGGER IF NOT EXISTS hosted_{table}_{action} BEFORE {action} ON {table} "
+                    f"WHEN EXISTS(SELECT 1 FROM hosted_fences WHERE slug IN ({reference}.{column}, '*')) "
+                    "BEGIN SELECT RAISE(ABORT,'ledger moved to hosted service'); END"
+                )
+
+    def fence(self, slug: str, destination: str) -> None:
+        self.connection.execute("INSERT OR IGNORE INTO hosted_fences VALUES (?,?)", (slug, destination))
+        self.connection.commit()
+
+
+class Snapshot:
+    """One read only snapshot of the stored folder."""
+
+    def __init__(self, repository: "SQLiteLedgerRepository", connection):
+        self.repository, self.connection = repository, connection
+
+    def slugs(self) -> list:
+        return [slug for (slug,) in self.connection.execute(SLUGS)]
+
+    def document(self, slug: str) -> dict:
+        """The ledger as its rows hold it, without its event log."""
+        rows = read_rows(self.connection, slug)
+        if not rows:
+            raise Missing(slug)
+        return assemble(rows)
+
+    def hierarchy(self, slug: str) -> tuple[dict, set]:
+        tables = {row[0] for row in self.connection.execute(TABLES_SQL)}
+        nodes = (
+            {
+                node: (kind, parent, position)
+                for node, kind, parent, position in self.connection.execute(hierarchy.NODES, (slug,))
+            }
+            if "work_nodes" in tables
+            else {}
+        )
+        dependencies = (
+            set(self.connection.execute(hierarchy.DEPENDENCIES, (slug,))) if "work_dependencies" in tables else set()
+        )
+        return nodes, dependencies
+
+    def export(self, slug: str) -> dict:
+        return self.repository._export(self.connection, slug)
+
+    def registries(self, slug: str) -> list:
+        return [list(row) for row in self.connection.execute(REGISTRIES, (slug,))]
 
 
 class SQLiteLedgerRepository:
@@ -532,3 +639,44 @@ class SQLiteLedgerRepository:
         from . import bin_storage
 
         return bin_storage.restore(slug, now)
+
+    @contextmanager
+    def transaction(self):
+        """One immediate write transaction under the core lock; entries it wrote are cached once it commits."""
+        with request_metrics.locked(self.domain.LOCK), self.connect() as connection:
+            with connection:
+                request_metrics.begin(connection, BEGIN_IMMEDIATE)
+                transaction = Transaction(self, connection)
+                yield transaction
+        for slug, entry in transaction.written.items():
+            self._remember(slug, entry)
+
+    @contextmanager
+    def snapshot(self):
+        """One read only snapshot of the stored folder, or None when it holds no database."""
+        with read_only(self.directory) as connection:
+            if connection is None:
+                yield None
+                return
+            connection.execute(BEGIN)
+            yield Snapshot(self, connection)
+
+    def held_revisions(self) -> dict:
+        """{kind: {slug: [revisions]}} the inbox could not take; kept on disk because Redis is what was down."""
+        held = {}
+        with self.connect() as connection:
+            for kind, slug, revision in connection.execute(HELD):
+                held.setdefault(kind, {}).setdefault(slug, []).append(revision)
+        return held
+
+    def hold_revision(self, kind: str, slug: str, revision: int) -> None:
+        with self.connect() as connection, connection:
+            connection.execute(HOLD, (kind, slug, revision))
+
+    def release_revisions(self, kind: str, slug: str, since: int, revision: int) -> None:
+        with self.connect() as connection, connection:
+            connection.execute(RELEASE, (kind, slug, since, revision))
+
+    def drop_revisions(self, kind: str, slug: str) -> None:
+        with self.connect() as connection, connection:
+            connection.execute(DROP, (kind, slug))

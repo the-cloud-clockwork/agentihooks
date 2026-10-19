@@ -184,7 +184,7 @@ def _names_folder(text: str, root: Path) -> bool:
 
 
 def _plans(env, slug: str):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger, read_ledgers
+    from scripts.swarm_ledger.storage import read_ledger, read_ledgers
 
     root, task_id = _ledger_dir(env), env.get("AGENTIHOOKS_SWARM_TASK")
     doc = read_ledger(root, slug, "artifacts", "phases", *([f"tasks/{task_id}"] if task_id else []))
