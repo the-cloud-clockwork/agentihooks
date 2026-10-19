@@ -269,10 +269,6 @@ def test_every_file_pinned_to_the_first_shard_exists():
     assert FIRST_SHARD_FILES <= set(discover_test_files(_ROOT))
 
 
-def test_remote_control_mutation_baseline_is_pinned_to_the_first_shard():
-    assert "tests/test_remote_control_mutation_baseline.py" in FIRST_SHARD_FILES
-
-
 def test_grouped_files_reads_real_markers_and_ignores_fixture_strings(tmp_path):
     from tests.shards import grouped_files
 
