@@ -132,7 +132,7 @@ def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkey
     opened = []
     body = stream.frame("snapshot", {"é": 1}, "c0") + stream.frame("heartbeat", {})
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         opened.append((request.full_url, dict(request.header_items()), timeout))
         return io.BytesIO(body)
 
@@ -153,7 +153,7 @@ def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkey
 
 @pytest.mark.parametrize(("code", "raised"), [(410, Expired), (403, urllib.error.HTTPError)])
 def test_stream_turns_only_a_410_into_expired(monkeypatch, code, raised):
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         raise urllib.error.HTTPError(request.full_url, code, "no", {}, None)
 
     monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", urlopen)

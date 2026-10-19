@@ -7,6 +7,7 @@ LEDGER = {
     "authority": "authority",
     "hub": "HUB",
     "layout_rows": "ledger_layout.ROWS",
+    "layout_lists": "ledger_layout.LISTS",
     "home_summaries": "home_summaries",
     "bin_summaries": "bin_summaries",
     "bin_entries": "ledger_bin.entries",
@@ -23,13 +24,19 @@ SWARM = {
     "doctor": "DOCTOR",
     "store": "swarm_store",
     "status": "swarm_status",
+    "models": "swarm_models",
     "control": "swarm_control",
     "lifecycle": "lifecycle_control",
     "refresh_quota": "refresh_quota",
     "control_argv": "control_argv",
     "doctor_phrase": "doctor_phrase",
 }
-MEDIA = {"resolve_media": "ledger_media.resolve", "resolve_artifacts": "ledger_artifacts.resolve"}
+MEDIA = {
+    "media_store": "ledger_media",
+    "artifact_store": "ledger_artifacts",
+    "resolve_media": "ledger_media.resolve",
+    "resolve_artifacts": "ledger_artifacts.resolve",
+}
 MISSING = object()
 
 

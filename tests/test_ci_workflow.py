@@ -1259,8 +1259,18 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
     downloads = ("Download the shared mutation stats", "Download the reused preflight report")
     setup = [step for step in setup if step.get("name") not in downloads]
-    assert stats["steps"][: len(setup)] == setup
-    collect = stats["steps"][len(setup)]
+    stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
+    assert stats_steps[: len(setup)] == setup
+    collect = stats_steps[len(setup)]
+    cache_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") == ".mutation-stats-cache"]
+    if cache_steps:
+        restore, save = cache_steps
+        assert restore["uses"] == "actions/cache/restore@v4"
+        assert save["uses"] == "actions/cache/save@v4"
+        assert restore["with"]["key"] == save["with"]["key"]
+        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
+        assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
@@ -1268,14 +1278,14 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
         ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
-    upload = stats["steps"][len(setup) + 1]
+    upload = stats_steps[len(setup) + 1]
     assert upload["uses"] == "actions/upload-artifact@v4"
     assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "error"
     assert upload["with"]["overwrite"] is True
-    evidence = stats["steps"][len(setup) + 2]
+    evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
     assert evidence["with"]["overwrite"] is True

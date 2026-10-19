@@ -124,6 +124,21 @@ if [[ "$(helm template "$release" "$chart" "${ingress[@]}")" == *backend-protoco
   exit 1
 fi
 printf 'the ingress verifies the TLS ledger certificate and leaves a plain ledger on http\n'
+ledger_reload() {
+  helm template "$release" "$chart" --show-only templates/ledger.yaml "$@" | python3 -c '
+import sys, yaml
+found = [doc for doc in yaml.safe_load_all(sys.stdin) if doc and doc["kind"] == "StatefulSet"]
+print((found[0]["metadata"].get("annotations") or {}).get("secret.reloader.stakater.com/reload", ""))'
+}
+if [[ "$(ledger_reload --set ledger.tls.secretName=swarm-ledger-tls)" != swarm-ledger-tls ]]; then
+  printf 'the TLS ledger StatefulSet does not roll when its TLS secret swarm-ledger-tls renews\n' >&2
+  exit 1
+fi
+if [[ -n "$(ledger_reload)" ]]; then
+  printf 'the plain http ledger StatefulSet asked Reloader to watch a TLS secret\n' >&2
+  exit 1
+fi
+printf 'the TLS ledger rolls when its TLS secret renews and a plain ledger watches no secret\n'
 digest="sha256:$(printf 'a%.0s' $(seq 64))"
 rendered="$(helm template "$release" "$chart" --set image.tag="dev@$digest")"
 if [[ $rendered != *":dev@$digest"* ]]; then

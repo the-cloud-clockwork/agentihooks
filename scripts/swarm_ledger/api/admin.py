@@ -14,10 +14,11 @@ def layout(handler: object, services: Services, payload: dict | None) -> dict:
                 "type": "object",
                 "minProperties": 1,
                 "additionalProperties": False,
-                "properties": {key: {"type": "integer"} for key in fields},
+                "properties": {key: {"type": "number"} for key in fields},
             }
             for row, fields in services.ledger.layout_rows.items()
         }
+        properties.update(dict.fromkeys(services.ledger.layout_lists, {}))
         schemas.validate({"type": "object", "additionalProperties": False, "properties": properties}, payload)
         try:
             data = services.ledger.write_layout(payload)

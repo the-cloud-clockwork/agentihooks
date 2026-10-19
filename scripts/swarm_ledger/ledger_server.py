@@ -101,25 +101,44 @@ def served_version():
     return served_page()[0]
 
 
-def ledger_view(state):
+NO_DOCTOR = ("", False)
+
+
+def page_view(state, fix_phase, watched):
     meta = {key: item for key, item in state["_meta"].items() if key not in ("seeds", "api_operations")}
-    meta.update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
-    graph = hierarchy.project(state)[0]
-    tasks = [
-        {**task, "freeze_ancestry": freeze.ancestry(task, graph)} if task.get("merged_into") else task
-        for task in state.get("tasks", [])
-    ]
-    return {**state, "tasks": tasks, "_meta": meta}
+    marks = freeze.marks(state, hierarchy.project(state)[0], fix_phase, watched)
+    return {**state, "marks": marks, "_meta": {**meta, "limits": PAGE_LIMITS}}
+
+
+def doctor_holds(slug):
+    from redis import RedisError
+
+    from scripts.swarm.store import SwarmError
+
+    try:
+        store = swarm_store()
+        fix = freeze.fix_phase(store.config(slug))
+        peer = fix and store.peer(slug)
+        records = repository.get_document(peer).get("freezes") or [] if peer and repository.exists(peer) else []
+    except (SwarmError, RedisError, ValueError, OSError):
+        return NO_DOCTOR
+    return fix, any(r.get("verb") == "focus" for r in records)
+
+
+def ledger_view(state, slug=None):
+    view = page_view(state, *(doctor_holds(slug) if slug else NO_DOCTOR))
+    view["_meta"].update(page_version=served_version(), crew=ledger_gate.crew(state["_meta"]))
+    return view
 
 
 def publish_ledger(slug, state):
     if HUB.has(slug):
-        HUB.publish(slug, "ledger", ledger_view(state))
+        HUB.publish(slug, "ledger", ledger_view(state, slug))
 
 
 def publish_snapshot(slug: str, state: dict) -> None:
     if HUB.has(slug):
-        HUB.publish_snapshot(slug, "ledger", ledger_view(state))
+        HUB.publish_snapshot(slug, "ledger", ledger_view(state, slug))
 
 
 stored = storage.default()
@@ -306,6 +325,19 @@ MAX_LOAD = 10.0
 MASTER_AGENTS = ("claude", "codex")
 MAX_NOTE = 500
 FINDING_RE = re.compile(r"^[a-z][a-z-]*/[\w.-]{1,64}$")
+CAPS = {
+    "max_eng": ("max-eng-agents", 0, MAX_CAP),
+    "max_ci": ("max-ci-agents", 0, MAX_CAP),
+    "max_plan": ("max-plan-agents", 0, MAX_CAP),
+    "masters_step": ("masters-step", 0, MAX_CAP),
+    "compact_limit": ("compact-limit", MIN_COMPACT, MAX_COMPACT),
+}
+PAGE_LIMITS = {
+    "capacity": {key: [low, high] for key, (_, low, high) in CAPS.items()},
+    "efforts": list(EFFORTS),
+    "sync_cooldown_ms": core.SYNC_COOLDOWN_MS,
+    "bin_days": ledger_artifacts.KEEP_DAYS,
+}
 
 
 def model_pairs(body):
@@ -339,17 +371,10 @@ def control_argv(body):
     if action != "set":
         raise ValueError("action must be start, pause, stop, stop_now, close, reopen, set or verdict")
     pairs = []
-    for key, flag, limit in (
-        ("max_eng", "max-eng-agents", MAX_CAP),
-        ("max_ci", "max-ci-agents", MAX_CAP),
-        ("max_plan", "max-plan-agents", MAX_CAP),
-        ("masters_step", "masters-step", MAX_CAP),
-        ("compact_limit", "compact-limit", MAX_COMPACT),
-    ):
+    for key, (flag, low, limit) in CAPS.items():
         value = body.get(key)
         if value is None:
             continue
-        low = MIN_COMPACT if key == "compact_limit" else 0
         if type(value) is not int or not low <= value <= limit:
             raise ValueError(f"{key} must be a whole number from {low} to {limit}")
         pairs.append(f"{flag}={value}")
@@ -378,6 +403,22 @@ def control_argv(body):
             "scaling, load_high, load_low, memory_per_agent_mb, claude_model, codex_model, master_agent, overlays or gates"
         )
     return ["set", *pairs]
+
+
+def effort_refusal(slug, body):
+    if body.get("action") != "set" or not {"effort_min", "effort_max"} & set(body):
+        return None
+    from redis import RedisError
+
+    from scripts.swarm import effort_range
+    from scripts.swarm.store import SwarmError
+
+    try:
+        config = swarm_store().config(slug)
+    except (SwarmError, RedisError):
+        return None
+    bounds = (body.get("effort_min", config.effort_min), body.get("effort_max", config.effort_max))
+    return effort_range.refusal(bounds, config.lanes)
 
 
 def scaling_pairs(body):
@@ -703,7 +744,7 @@ def doctor_phrase(slug, state):
 
 
 def stream_resources(slug):
-    ledger = ledger_view(repository.get_document(slug))
+    ledger = ledger_view(repository.get_document(slug), slug)
     return {"ledger": ledger, "swarm": stream_swarm(slug, ledger)}
 
 
@@ -734,6 +775,7 @@ def api_services():
         authority=authority,
         hub=HUB,
         layout_rows=ledger_layout.ROWS,
+        layout_lists=ledger_layout.LISTS,
         home_summaries=home_summaries,
         bin_summaries=bin_summaries,
         bin_entries=ledger_bin.entries,
@@ -750,13 +792,19 @@ def api_services():
         doctor=DOCTOR,
         store=swarm_store,
         status=swarm_status,
+        models=swarm_models,
         control=swarm_control,
         lifecycle=lifecycle_control,
         refresh_quota=refresh_quota,
         control_argv=control_argv,
         doctor_phrase=doctor_phrase,
     )
-    media: MediaService = services.Media(resolve_media=ledger_media.resolve, resolve_artifacts=ledger_artifacts.resolve)
+    media: MediaService = services.Media(
+        media_store=ledger_media,
+        artifact_store=ledger_artifacts,
+        resolve_media=ledger_media.resolve,
+        resolve_artifacts=ledger_artifacts.resolve,
+    )
     return Services(
         repository=repository,
         ledger=ledger,
@@ -962,6 +1010,8 @@ class Handler(BaseHTTPRequestHandler):
                 control = functools.partial(refresh_quota, slug)
             else:
                 command, argv = ("doctor", DOCTOR[action]) if action in DOCTOR else ("swarm", control_argv(body))
+                if refused := effort_refusal(slug, body):
+                    raise ValueError(refused)
                 control = functools.partial(swarm_control, slug, argv, command)
         except ValueError as exc:
             return self.send(400, str(exc), "text/plain")
@@ -1160,6 +1210,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.put_swarm(slug.removeprefix("swarm/"))
         if not self.path.startswith("/api/") or not self.exists(slug):
             return self.send(404, "no such ledger", "text/plain")
+        return self.put_ledger(slug)
+
+    def put_ledger(self, slug):
         if self.refused(slug):
             return None
         if not (self.headers.get("Content-Type") or "").startswith("application/json"):
