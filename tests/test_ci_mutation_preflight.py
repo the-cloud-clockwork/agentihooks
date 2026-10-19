@@ -97,6 +97,11 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
                 step["if"]
                 == "steps.plan.conclusion == 'success' && steps.plan.outputs.changed != '0' && github.workflow == 'Mutation preflight' && runner.environment == 'self-hosted'"
             )
+        elif (
+            step.get("uses", "").startswith(("actions/setup-python@", "astral-sh/setup-uv@"))
+            or step.get("name") == "Install dependencies"
+        ):
+            assert step["if"] == f"{gated} && steps.suite.outputs.changed != 'true'", step
         else:
             assert step["if"] == gated, step
 
