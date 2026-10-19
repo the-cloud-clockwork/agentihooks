@@ -156,6 +156,44 @@ def test_a_malformed_task_is_refused_by_the_api_schema(world, task):
     assert error.value.code == "schema_invalid"
 
 
+@pytest.mark.parametrize(
+    ("argv", "task", "carried"),
+    [
+        (["followup", "add", "Retry the notes build"], None, {}),
+        (["followup", "add", "Retry the notes build"], "t2", {"task": "t2"}),
+        (["followup", "add", "Retry the notes build", "--needs-operator"], None, {"needs_operator": True}),
+        (
+            ["followup", "add", "Retry the notes build", "--needs-operator"],
+            "t2",
+            {"needs_operator": True, "task": "t2"},
+        ),
+        (["followup", "add", "Retry the notes build", "--hive", "h1"], None, {"hive": "h1"}),
+        (["followup", "add", "Retry the notes build", "--hive", "h1"], "t2", {"hive": "h1", "task": "t2"}),
+        (
+            ["followup", "add", "Retry the notes build", "--needs-operator", "--hive", "h1"],
+            "t2",
+            {"needs_operator": True, "hive": "h1", "task": "t2"},
+        ),
+        (["question", "add", "Which port"], None, {}),
+        (["question", "add", "Which port", "--hive", "h1"], None, {"hive": "h1"}),
+    ],
+)
+def test_every_item_add_the_cli_sends_passes_the_api_schema(world, monkeypatch, argv, task, carried):
+    from scripts.swarm_ledger import ledger
+
+    sent = []
+    if task:
+        monkeypatch.setenv("AGENTIHOOKS_SWARM_TASK", task)
+    else:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM_TASK", raising=False)
+    monkeypatch.setattr(ledger, "call", lambda slug, ops, *rest: sent.extend(ops) or {})
+    args = ledger.build_parser().parse_args(["--slug", SLUG, "--as", ENGINEER, *argv])
+    {"followup": ledger.cmd_followup, "question": ledger.cmd_question}[args.command](args)
+    assert [op["op"] for op in sent] == ["add_item"]
+    assert {k: v for k, v in sent[0].items() if k in ("task", "hive", "needs_operator")} == carried
+    assert api_checked(world, sent[0]) == sent
+
+
 def test_a_follow_up_on_a_task_belongs_to_the_tasks_owning_master(world):
     add(world, task="t2")
     doc = world.doc()
