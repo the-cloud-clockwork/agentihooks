@@ -280,7 +280,7 @@ export function render(focusKey, cooperative = false) {
   const version = ++renderVersion;
   const active = document.activeElement;
   const key = focusKey || (active && active.dataset ? active.dataset.focus : null);
-  const caret = !focusKey && active && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
+  const selection = !focusKey && active && active.tagName === "TEXTAREA" ? active : null;
   document.title = doc.title;
   $("title").textContent = doc.title;
   $("overview").textContent = excerpt(doc.overview, 200);
@@ -328,13 +328,14 @@ export function render(focusKey, cooperative = false) {
         console.error(error);
       }
     }
+    if (cooperative && document.activeElement !== document.body) return;
     const again = key && document.querySelector(`[data-focus="${CSS.escape(key)}"]`);
     if (!again) return;
     again.focus();
     if (again.tagName === "TEXTAREA") {
       grow(again);
       const end = again.value.length;
-      again.setSelectionRange(caret ? caret[0] : end, caret ? caret[1] : end);
+      again.setSelectionRange(selection ? selection.selectionStart : end, selection ? selection.selectionEnd : end);
     }
   };
   rendered = paint();
