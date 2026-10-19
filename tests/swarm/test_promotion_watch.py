@@ -297,6 +297,10 @@ def test_a_red_run_files_one_urgent_ci_task_per_failed_job_with_run_and_sha(stor
         "told the master about the new promotion causes of dev push run 900",
     ]
     assert filed(store) == {"promo-900-0": "helm-kind: ", "promo-900-1": "unit (3.11, 1): "}
+    assert master_items(store) == [
+        "Dev push run 900 of Tests failed on new causes, so the swarm filed promo-900-0, promo-900-1 in the ci lane "
+        "and raised a promotion alert: https://github.com/o/r/actions/runs/900"
+    ]
     assert store.redis.get(promotion_watch.key(SLUG, "seen")) == "900"
 
 
@@ -555,7 +559,7 @@ def test_cause_names_the_failed_steps_and_failure_messages():
             {"name": "Upload", "conclusion": "skipped"},
         ],
     }
-    messages = ["12 lines the base ran at deadbeef1234 are no longer run by any head test"]
+    messages = ["", "12 lines the base ran at deadbeef1234 are no longer run by any head test"]
     found = promotion_watch.cause("/repo", job, smoke_run("x", messages))
     assert found == (
         "coverage-ratchet: Hold every line the base ran; "
@@ -596,9 +600,14 @@ def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_al
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
     ledger.tasks[0]["state"] = "blocked"
     step = "Bring up the local stack twice with swarm init from the installed package"
-    actions = refresh(store, ledger, smoke_run(step, ["swarm init refused a one task swarm"], 901), NOW * 2)
+    actions = refresh(store, ledger, smoke_run(step, ["swarm init refused a one task swarm."], 901), NOW * 2)
     assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-901-0"]
-    assert f"Its cause: {step}; swarm init refused a one task swarm." in ledger.added[1][1]["description"]
+    assert ledger.added[1][1]["lane"] == "ci"
+    assert ledger.added[1][1]["description"] == (
+        f"The dev push run 901 of Tests failed in the job swarm-image / smoke at commit {SHA}: "
+        f"https://github.com/o/r/actions/runs/901. Its cause: {step}; swarm init refused a one task swarm. "
+        "Fix it on dev; the swarm closes this task when a later dev push run passes."
+    )
     replaced = "Dev push run 901 of Tests failed on a new cause, so the swarm raised a new promotion alert."
     assert ledger.closed == [(SLUG, "al-0", replaced)]
     assert len(ledger.raised) == 2
@@ -611,11 +620,16 @@ def test_a_second_red_run_with_a_new_cause_on_a_held_job_files_a_new_fixer_an_al
         "raised the promotion alert for dev push run 901",
         "told the master about the new promotion causes of dev push run 901",
     ]
-    assert len(master_items(store)) == 2
-    assert "promo-901-0" in master_items(store)[-1]
+    items = InboxStore(store.redis).inbox(Mail(InboxStore(store.redis), store, SLUG).master)
+    assert [(item.text, item.ref) for item in items][-1] == (
+        "Dev push run 901 of Tests failed on new causes, so the swarm filed promo-901-0 in the ci lane and raised a "
+        "promotion alert: https://github.com/o/r/actions/runs/901",
+        "promo-901-0",
+    )
+    assert len(items) == 2
     assert filed(store) == {
         "promo-900-0": "swarm-image / smoke: Build the image",
-        "promo-901-0": f"swarm-image / smoke: {step}; swarm init refused a one task swarm",
+        "promo-901-0": f"swarm-image / smoke: {step}; swarm init refused a one task swarm.",
     }
 
 

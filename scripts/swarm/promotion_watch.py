@@ -129,7 +129,7 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         task_id = f"{TASK_PREFIX}{run_id}-{n}"
         if normal(job, why) in held or job in held or task_id in present:
             continue
-        detail = why.removeprefix(job).removeprefix(": ").rstrip(".")
+        detail = why.removeprefix(job).removeprefix(": ").removesuffix(".")
         description = (
             f"The dev push run {run_id} of Tests failed in the job {job} at commit {sha}: {url}. "
             + (f"Its cause: {detail}. " if detail else "")
@@ -142,7 +142,7 @@ def _red(slug, store, ledger, doc, last, causes, repo):
         actions.append(f"filed {task_id} for the failed dev job {job}")
         new.append((task_id, why))
     if new or not _live_alerts(doc):
-        named = [why.removesuffix(": ").rstrip(".") for _, why in new] or [job for job, _ in causes]
+        named = [why.removesuffix(": ").removesuffix(".") for _, why in new] or [job for job, _ in causes]
         actions += _alert(slug, ledger, doc, last, named)
     if new:
         actions += _tell_master(slug, store, last, [task_id for task_id, _ in new], lane)
