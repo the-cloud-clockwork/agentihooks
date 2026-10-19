@@ -519,7 +519,7 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     assert [argv[2] for argv, _ in calls] == ["enable"] * 3
 
 
-def test_ensure_fails_and_keeps_the_tick_timer_when_the_scheduled_tick_cannot_be_registered(tmp_path, monkeypatch):
+def test_ensure_fails_and_keeps_the_tick_timer_when_registration_fails_before_any_delivery(tmp_path, monkeypatch):
     monkeypatch.setattr(timer, "schedule", lambda: False)
     monkeypatch.setattr(timer, "undelivered", lambda: NONE_YET)
     calls = []
