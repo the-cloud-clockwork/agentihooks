@@ -213,12 +213,12 @@ def test_five_consecutive_failed_dev_pushes_of_a_workflow_raise_one_finding():
 
 
 def test_the_streak_counts_every_consecutive_failure_and_names_a_missing_green():
-    runs = [_push(n, "timed_out" if n % 2 else "failure") for n in range(10, 17)]
+    runs = [_push(n, ("failure", "timed_out", "startup_failure")[n % 3]) for n in range(10, 17)]
     [found] = ci.red_dev_workflows(_dev(runs))
     assert found.measure == 7
     assert found.summary == "Worker hive pod failed its last 7 dev push runs"
     assert found.evidence[:2] == ("no green dev push run found", "failing jobs in run 16: none read")
-    assert len(found.evidence) == 7
+    assert len(found.evidence) == 9
 
 
 @pytest.mark.parametrize(

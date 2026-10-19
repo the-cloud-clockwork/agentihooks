@@ -337,7 +337,7 @@ def test_the_dev_workflow_reader_judges_the_watched_repo_dev_pushes(monkeypatch)
         for n in range(10, 15)
     ]
     record = {"runs": runs, "green": {}, "jobs": {}}
-    monkeypatch.setattr(detect.ci_read, "dev_pushes", {"/repo": record}.get, raising=False)
+    monkeypatch.setattr(detect.ci_read, "dev_pushes", {"/repo": record}.get)
     reader = detect.readers(store, None, "sw", 1, environ={}).get("dev workflow", lambda: [])
     assert [f.id for f in reader()] == ["red-dev-workflow/hive-worker.yml"]
     record["runs"].insert(0, {**runs[0], "id": 15, "conclusion": "success"})

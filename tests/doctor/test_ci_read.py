@@ -251,6 +251,9 @@ def test_a_log_read_that_fails_for_another_reason_still_fails_the_detector():
         ci_read._attempts("o/r", [workflow], gh)
 
 
+RUNS_JQ = ".workflow_runs[] | {id, name, path, conclusion, created_at, html_url} | @json"
+
+
 def test_dev_pushes_reads_the_last_green_and_failing_jobs_of_each_red_workflow_only():
     hive = ".github/workflows/hive-worker.yml"
     runs = [
@@ -268,7 +271,9 @@ def test_dev_pushes_reads_the_last_green_and_failing_jobs_of_each_red_workflow_o
 
     def gh(argv, **kwargs):
         calls.append(argv[2])
-        assert argv[:2] == ["gh", "api"] and kwargs["cwd"] == "/repo" and kwargs["check"] is True
+        assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+        jq = ".jobs[] | {name, conclusion} | @json" if "/jobs?" in argv[2] else RUNS_JQ
+        assert argv == ["gh", "api", argv[2], "--jq", jq]
         replies = {
             ci_read.DEV_PUSHES: runs,
             ci_read.LAST_GREEN.format(workflow="hive-worker.yml"): [green],

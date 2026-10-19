@@ -103,6 +103,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         ),
         "context overrun": lambda: _overruns(store, slug),
         "ci": lambda: _ci(store, tasks(), now_ms),
+        "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
         "trace": lambda: _traces(store, tasks(), slug, now_ms, env),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}
