@@ -36,6 +36,8 @@ def estimate(
             covering &= line_covering_tests(root, manifest, changes, paths)
         recorded = {}
         for test in manifest["tests"]:
+            if "lines" in manifest and test not in manifest["lines"]:
+                continue
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
     for path, lines in changes.items():
