@@ -63,6 +63,17 @@ def test_models_keep_the_wire_shape():
     assert models.field_type("tasks", "lane") is str
 
 
+def test_model_helpers_read_the_dataclass_fields():
+    assert models.item_type(list[models.Entry]) is models.Entry
+    assert models.item_type(list[str]) is str
+    assert models.item_type(str) is None
+    assert models.threads(models.Question) == ("comments", "answers")
+    assert models.threads(models.Plan) == ()
+    assert models.shape(models.Question) == ("text", "out_of_scope")
+    assert models.shape(models.Note) == ("by", "at", "text")
+    assert models.checkboxes(models.Question) == ("out_of_scope",)
+
+
 def test_core_validation_derives_its_fields_from_the_models():
     assert core.LISTS is models.LISTS
     assert core.THREADS is models.THREADS
