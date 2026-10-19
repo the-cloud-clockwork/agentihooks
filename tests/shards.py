@@ -1,13 +1,14 @@
 import ast
 import importlib
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Every xdist worker of a shard rewrites each file it collects, while stored durations split between workers; measured.
 SECONDS_PER_SOURCE_BYTE = 3e-6
-FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py"})
+FIRST_SHARD_FILES = frozenset({"tests/routing/test_codex_api.py", "tests/test_remote_control_mutation_baseline.py"})
 
 
 def discover_test_files(root: Path) -> list[str]:
@@ -110,6 +111,12 @@ def _assign_work(
 
 def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float) -> list[str]:
     seconds = {nodeid: durations.get(nodeid.split("@", 1)[0], 0.0) for nodeid in nodeids}
+    # A group's later tests reuse what its first test built, so the group keeps collection order at its slowest place.
+    groups = {nodeid: match[1] for nodeid in nodeids if (match := re.search(r"@([^\[\]]*)$", nodeid))}
+    slowest = {}
+    for nodeid, group in groups.items():
+        slowest[group] = max(slowest.get(group, 0.0), seconds[nodeid])
+    seconds.update({nodeid: slowest[group] for nodeid, group in groups.items()})
     slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
     return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
 
