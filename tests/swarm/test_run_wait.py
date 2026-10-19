@@ -305,6 +305,19 @@ def test_a_failed_tick_guard_is_logged_and_the_wait_pass_goes_on(monkeypatch, ca
     assert output.err == "the scheduled swarm tick guard failed: OSError: no systemctl\n"
 
 
+def test_a_guard_that_cannot_enable_the_tick_timer_warns(monkeypatch, capsys):
+    from argparse import Namespace
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(cli.timer, "installed_refusal", lambda: "")
+    monkeypatch.setattr(cli.timer, "guard", lambda binary: False)
+    cli.cmd_waits(SimpleNamespace(slugs=lambda: []), Namespace())
+    assert capsys.readouterr() == (
+        "",
+        "warning: the scheduled swarm tick guard could not enable the swarm tick timer\n",
+    )
+
+
 def test_the_wait_command_refuses_a_run_outside_the_install(monkeypatch):
     from argparse import Namespace
 

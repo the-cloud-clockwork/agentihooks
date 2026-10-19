@@ -418,8 +418,17 @@ def test_guard_restores_the_tick_timer_once_delivery_goes_stale(tmp_path, monkey
     assert ensured == [("/installed/bin/agentihooks", tmp_path)]
     (tmp_path / "agentihooks-swarm.timer").write_text(TICK_TIMER)
     (tmp_path / "agentihooks-swarm.service").write_text(TICK_SERVICE)
-    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([])) is True
+    calls = []
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is True
     assert len(ensured) == 1
+    assert calls == [
+        (
+            ["systemctl", "--user", "is-enabled", "--quiet", "agentihooks-swarm.timer"],
+            {"capture_output": True, "text": True, "timeout": 30},
+        )
+    ]
+    assert real_guard("/installed/bin/agentihooks", tmp_path, run=_systemctl([], failing={"is-enabled"})) is False
+    assert len(ensured) == 2
 
 
 def test_guard_restores_the_tick_timer_when_delivery_cannot_be_read(tmp_path, monkeypatch):

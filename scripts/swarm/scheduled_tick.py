@@ -9,6 +9,8 @@ from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from redis.exceptions import RedisError
+
 from scripts.scheduler.core import Scheduler
 from scripts.scheduler.service import AlreadyRunning, machine_lock, runtime_dir
 
@@ -59,7 +61,10 @@ def fire(event: dict, delivery_id: str, redis: "Redis") -> None:
             stderr=log,
             start_new_session=True,
         )
-    record(redis, ROOT, event["fired_at"])
+    try:
+        record(redis, ROOT, event["fired_at"])
+    except RedisError as exc:
+        print(f"the swarm tick delivery could not be recorded: {type(exc).__name__}: {exc}", file=sys.stderr)
 
 
 def record(redis: "Redis", root: Path | str, at: float) -> None:
@@ -70,11 +75,15 @@ def undelivered(scheduler: Scheduler, installed: Path | str, now: float) -> str:
     raw = scheduler.redis.get(scheduler.key(DELIVERED))
     if not raw:
         return "no scheduler has delivered a swarm tick yet"
-    delivered = json.loads(raw)
-    if Path(delivered["root"]).resolve() != Path(installed).resolve():
-        return f"the last swarm tick was delivered by a scheduler running {delivered['root']}, not the installed {installed}"
-    if now - delivered["at"] > FRESH_S:
-        return f"the last swarm tick was delivered {int(now - delivered['at'])} seconds ago"
+    try:
+        delivered = json.loads(raw)
+        root, age = delivered["root"], now - delivered["at"]
+    except (ValueError, KeyError, TypeError):
+        return f"the swarm tick delivery record is unreadable: {raw}"
+    if Path(root).resolve() != Path(installed).resolve():
+        return f"the last swarm tick was delivered by a scheduler running {root}, not the installed {installed}"
+    if age > FRESH_S:
+        return f"the last swarm tick was delivered {int(age)} seconds ago"
     return ""
 
 

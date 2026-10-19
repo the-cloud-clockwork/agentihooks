@@ -473,7 +473,8 @@ def cmd_waits(store, args):
     if why := timer.installed_refusal():
         raise SwarmError(f"the wait pass refused to run: {why}")
     try:
-        timer.guard(timer.entry_point())
+        if not timer.guard(timer.entry_point()):
+            timing.emit(sys.stderr, "warning: the scheduled swarm tick guard could not enable the swarm tick timer")
     except (OSError, subprocess.SubprocessError) as exc:
         timing.emit(sys.stderr, f"the scheduled swarm tick guard failed: {type(exc).__name__}: {exc}")
 

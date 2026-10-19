@@ -256,3 +256,29 @@ def test_a_delivery_record_resolves_both_roots(tmp_path):
     (tmp_path / "link").symlink_to(tmp_path / "real")
     scheduled_tick.record(here.redis, tmp_path / "link", MINUTE_START)
     assert scheduled_tick.undelivered(here, tmp_path / "real", MINUTE_START) == ""
+
+
+def test_a_delivery_that_cannot_be_recorded_still_acknowledges_the_minute(monkeypatch, capsys):
+    from redis.exceptions import ConnectionError
+
+    def down(redis, root, at):
+        raise ConnectionError("down")
+
+    started = []
+    scheduler, here = _delivering(monkeypatch, lambda argv, **kwargs: started.append(argv))
+    monkeypatch.setattr(scheduled_tick, "record", down)
+    assert scheduler.run_due(now=MINUTE_START + 1) == 1
+    assert scheduler.run_due(now=MINUTE_START + 2) == 0
+    assert len(started) == 1
+    assert capsys.readouterr().err == "the swarm tick delivery could not be recorded: ConnectionError: down\n"
+
+
+@pytest.mark.parametrize("raw", ["not json", '{"root": "/installed"}', '["/installed"]', '{"root": "/i", "at": "x"}'])
+def test_an_unreadable_delivery_record_counts_as_undelivered(raw):
+    from scripts.scheduler.core import Scheduler
+
+    here = Scheduler(_scheduler().redis)
+    here.redis.set(here.key(scheduled_tick.DELIVERED), raw)
+    assert scheduled_tick.undelivered(here, "/installed", MINUTE_START) == (
+        f"the swarm tick delivery record is unreadable: {raw}"
+    )

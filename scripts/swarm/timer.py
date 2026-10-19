@@ -191,7 +191,12 @@ def ensure(binary, unit_dir=None, run=subprocess.run):
 def guard(binary, unit_dir=None, run=subprocess.run):
     unit_dir = unit_dir or UNIT_DIR
     supervise()
-    if not _kept() or all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()):
+    if not _kept():
+        return True
+    enabled = ["systemctl", "--user", "is-enabled", "--quiet", f"{UNIT}.timer"]
+    if all(_current(unit_dir / name, text) for name, text in tick_units(binary).items()) and not (
+        run(enabled, capture_output=True, text=True, timeout=30).returncode
+    ):
         return True
     return ensure(binary, unit_dir, run)
 
