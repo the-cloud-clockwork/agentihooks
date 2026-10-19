@@ -11,7 +11,7 @@ class Logs(Protocol):
     def pod_logs(self, name: str, container: str) -> str: ...
 
 
-def startup(pod: dict, api: Logs) -> dict | None:
+def startup(pod: dict, api: Logs | None = None) -> dict | None:
     status = pod.get("status", {})
     containers = status.get("initContainerStatuses", []) + status.get("containerStatuses", [])
     terminated = [entry for entry in containers if "terminated" in entry.get("state", {})]
@@ -23,11 +23,8 @@ def startup(pod: dict, api: Logs) -> dict | None:
         "phase": status.get("phase", ""),
         "reason": status.get("reason", ""),
         "containers": [
-            {
-                "name": entry["name"],
-                "terminated": entry["state"]["terminated"],
-                "log": api.pod_logs(pod["metadata"]["name"], entry["name"]),
-            }
+            {"name": entry["name"], "terminated": entry["state"]["terminated"]}
+            | ({} if api is None else {"log": api.pod_logs(pod["metadata"]["name"], entry["name"])})
             for entry in terminated
         ],
     }

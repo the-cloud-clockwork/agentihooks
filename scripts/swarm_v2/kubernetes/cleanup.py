@@ -7,8 +7,8 @@ from typing import Protocol
 
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2 import retention
-from scripts.swarm_v2.kubernetes.client import DELETABLE, PreconditionFailed
-from scripts.swarm_v2.kubernetes.diagnostics import startup
+from scripts.swarm_v2.kubernetes.client import DELETABLE, ApiRefused, PreconditionFailed
+from scripts.swarm_v2.kubernetes.diagnostics import LOG_READS, startup
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL, OWNER_LABEL, owner_for
 
@@ -130,7 +130,7 @@ class Cleanup:
         if {key: labels.get(key) for key in expected} != expected:
             return "unselected"
         if kind == "pods" and "startup" not in pinned:
-            captured = startup(current, self.api)
+            captured = self._startup(current, pinned, journal)
             if captured is not None:
                 pinned["startup"] = captured
                 self._save(journal)
@@ -142,6 +142,16 @@ class Cleanup:
             return "deleted" if self.api.delete(kind, pinned["name"], pinned["uid"]) else gone
         except PreconditionFailed:
             return "replaced"
+
+    def _startup(self, pod: dict, pinned: dict, journal: dict) -> dict | None:
+        try:
+            return startup(pod, self.api)
+        except (ApiRefused, OSError):
+            pinned["log_reads"] = pinned.get("log_reads", 0) + 1
+            self._save(journal)
+            if pinned["log_reads"] < LOG_READS:
+                raise
+            return startup(pod)
 
     def _labels(self, execution_id: str, generation: int) -> dict:
         return {OWNER_LABEL: self.owner, EXECUTION_LABEL: execution_id, GENERATION_LABEL: str(generation)}
