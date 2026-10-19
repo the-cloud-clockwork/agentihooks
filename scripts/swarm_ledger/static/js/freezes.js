@@ -12,8 +12,16 @@ export function isSelector(target) {
   return /^(lane|kind):/.test(target);
 }
 
+const indexes = new WeakMap();
+
 function byId(list, id) {
-  return list.find((i) => i.id === id);
+  let index = indexes.get(list);
+  if (!index || index.length !== list.length) {
+    index = { length: list.length, items: new Map() };
+    for (const item of list) if (!index.items.has(item.id)) index.items.set(item.id, item);
+    indexes.set(list, index);
+  }
+  return index.items.get(id);
 }
 
 export function ancestors(d, key, seen = new Set()) {
@@ -48,8 +56,8 @@ function matches(d, key, selector) {
   return task[field] === value;
 }
 
-function covers(d, key, target) {
-  return isSelector(target) ? matches(d, key, target) : ancestors(d, key).includes(target);
+function covers(d, key, target, up) {
+  return isSelector(target) ? matches(d, key, target) : up.includes(target);
 }
 
 export function ownFreeze(d, key) {
@@ -57,7 +65,8 @@ export function ownFreeze(d, key) {
 }
 
 export function frozen(d, key) {
-  return d.freezes.some((r) => r.verb === "freeze" && covers(d, key, r.target));
+  const up = ancestors(d, key);
+  return d.freezes.some((r) => r.verb === "freeze" && covers(d, key, r.target, up));
 }
 
 export function held(d, key) {
@@ -65,8 +74,9 @@ export function held(d, key) {
   if (!focus.length || frozen(d, key)) return false;
   const [list, id] = key.split("/");
   if (list === "tasks" && (byId(d.tasks, id) || {}).rank === "urgent") return false;
+  const up = ancestors(d, key);
   return !focus.some((r) => (isSelector(r.target) ? list !== "tasks" || matches(d, key, r.target)
-    : covers(d, key, r.target) || ancestors(d, r.target).includes(key)));
+    : covers(d, key, r.target, up) || ancestors(d, r.target).includes(key)));
 }
 
 export function setFreeze(d, op, at) {

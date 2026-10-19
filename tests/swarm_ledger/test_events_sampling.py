@@ -157,11 +157,19 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
 
     monkeypatch.setattr(server.repository, "get_document", get_document)
     monkeypatch.setattr(server, "ledger_view", lambda given: {**given, "view": True})
-    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or "S")
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1})
     monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
     view = {**state, "view": True}
-    assert server.stream_resources("s") == {"ledger": view, "swarm": "S"}
+    assert server.stream_resources("s") == {"ledger": view, "swarm": {"q": 1}}
     assert calls == [("document", "s"), ("swarm", "s", view)]
+
+
+def test_the_page_stream_leaves_out_the_swarm_records_the_page_never_reads(monkeypatch):
+    status = {"agents": [1], "history": [2], "transfers": {"a": 3}, "launch_checks": [4], "handoffs": [5]}
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: status)
+    assert server.stream_swarm("s", {}) == {"agents": [1], "handoffs": [5]}
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: None)
+    assert server.stream_swarm("s", {}) is None
 
 
 def test_sampling_leaves_work_folder_changes_to_the_lazy_read(folders, monkeypatch):
