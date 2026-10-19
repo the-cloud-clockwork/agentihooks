@@ -837,9 +837,8 @@ def test_review_budget_keeps_each_pull_requests_rounds(env, monkeypatch, capsys,
     first = "https://github.com/o/r/pull/1"
     second = "https://github.com/o/r/pull/2"
     if legacy:
-        rounds = tmp_path / "sw" / "gates" / "reviews" / "counts" / "t1" / "rounds"
-        rounds.parent.mkdir(parents=True)
-        rounds.write_text("3")
+        for _ in range(3):
+            cli.review_rounds.Budget("sw", "reviews").spend("t1", "rounds", 3)
     else:
         ledger.rows["t1"]["pr_url"] = first
         for n in (1, 2, 3):
