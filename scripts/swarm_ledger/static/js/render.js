@@ -104,10 +104,12 @@ function phaseRow(item, n) {
   return h("li", { class: itemClass(item, key), id: `item-phases-${item.id}` }, holdMark(key), row, commentsView(key, item.comments));
 }
 
+const sliceTaskCounts = new Map();
+
 function phaseSlices(phase) {
   const rows = doc.slices.filter((s) => s.phase === `phases/${phase.id}`);
   if (!rows.length) return null;
-  const count = (s) => doc.tasks.filter((t) => !t.deleted && t.slice === `slices/${s.id}`).length;
+  const count = (s) => sliceTaskCounts.get(`slices/${s.id}`) || 0;
   return h("div", { class: "phase-slices" }, h("span", { class: "phase-slices-label", text: "slices" }),
     ...rows.map((s) => h("span", { class: "slice" + holdClass(`slices/${s.id}`), id: `item-slices-${s.id}` }, holdMark(`slices/${s.id}`),
       h("span", { class: "slice-name", text: `${s.anchor} ${count(s)}` }), freezeButton(`slices/${s.id}`))));
@@ -138,6 +140,8 @@ function planRow({ key, id, title, phases, plan }) {
 }
 
 function phaseList() {
+  sliceTaskCounts.clear();
+  for (const task of doc.tasks) if (!task.deleted && task.slice) sliceTaskCounts.set(task.slice, (sliceTaskCounts.get(task.slice) || 0) + 1);
   if (!doc.plans.length) return listInto("phases", doc.phases, (p, i) => phaseRow(p, i + 1));
   if (sectionOpen("phases")) $("phases").replaceChildren(...planGroups().map(planRow));
 }
@@ -257,6 +261,7 @@ function listInto(id, items, make, idOf = (i) => `item-${id}-${i.id}`) {
 }
 
 let renderVersion = 0;
+let rendered = Promise.resolve();
 
 export function render(focusKey, cooperative = false) {
   const version = ++renderVersion;
@@ -301,7 +306,7 @@ export function render(focusKey, cooperative = false) {
     for (const section of sections) {
       if (cooperative) {
         await new Promise((done) => setTimeout(done, 0));
-        if (version !== renderVersion) return;
+        if (version !== renderVersion) return rendered;
       }
       try {
         section();
@@ -318,7 +323,8 @@ export function render(focusKey, cooperative = false) {
       again.setSelectionRange(caret ? caret[0] : end, caret ? caret[1] : end);
     }
   };
-  return paint();
+  rendered = paint();
+  return rendered;
 }
 
 const NOUNS = { tasks: "tasks", followups: "follow-ups" };
