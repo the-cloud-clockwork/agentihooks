@@ -110,9 +110,29 @@ def test_alerted_relaunch_attaches_the_retained_transfer_to_its_new_master(store
     assert len(runtime.masters) == 1
     name, task = runtime.masters[0]
     retry = task["transfer"]
-    assert retry["retry_of"] == transfer["id"]
+    previous = transfers.get(store, "sw", retry["retry_of"])
+    assert previous["retry_of"] == transfer["id"]
     assert retry["handoff"] == "Full handoff"
     assert retry["successor"] == name
     runtime.registered.add(name)
     tick("sw", store, ledger, runtime, 420_003)
     assert transfers.get(store, "sw", retry["id"])["binding"]["state"] == "live"
+
+
+def test_forced_master_recovery_preserves_the_alert_and_its_backoff(store, monkeypatch):  # noqa: F811
+    monkeypatch.setenv("AGENTIHOOKS_MASTER_DOWN_MINUTES", "5")
+    runtime, ledger = StartupRuntime(), tasks()
+    runtime.crash = RuntimeError("no master claude ai login")
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    tick("sw", store, ledger, runtime, 120_002)
+    pending = master_start.read(store, "sw")
+    with patch.object(runtime, "spawn", wraps=runtime.spawn) as spawn:
+        tick("sw", store, ledger, runtime, 300_001)
+        assert master_start.read(store, "sw") == pending
+        assert spawn.call_count == 0
+        actions = tick("sw", store, ledger, runtime, 420_002)
+        assert spawn.call_count == 1
+        assert "master spawn failed: no master claude ai login" not in actions
+    assert master_start.read(store, "sw")["alerted"] is True
+    assert len([note for note in ledger.notes if "reported no hook" in note]) == 1
