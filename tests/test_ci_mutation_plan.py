@@ -111,6 +111,32 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
 
 
+def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
+    from scripts.ci_mutation.measured import measured_costs, measured_splits
+
+    name = "scripts.sample.x_f__mutmut_1"
+    tests = {"scripts.sample.x_f": ["a", "b"]}
+    contended = 5.6 + 1.25 * (30.0 + 40.0) / 3
+    results = [
+        {"tests": tests, "durations": {"a": 30.0}, "cpu": 10.0},
+        {"tests": {}, "durations": {"b": 40.0}, "cpu": 10.0},
+        {"tests": {}, "durations": {"c": 20.0}, "cpu": 10.0},
+    ]
+    assert measured_costs([name], results) == pytest.approx({name: contended})
+    cached = [{**result, "cpu": cpu} for result, cpu in zip(results, (15.0, 5.0, 5.0), strict=True)]
+    cached += [{"tests": {}, "durations": {"c": 2.0}, "cpu": 5.0}, {"tests": {}, "durations": {}, "cpu": 4.0}]
+    assert measured_costs([name], cached) == pytest.approx({name: contended})
+    uncontended = [{"tests": tests, "durations": {"a": 3.0, "b": 4.0}, "cpu": 10.0}]
+    assert measured_costs([name], uncontended) == pytest.approx({name: 5.6 + 1.25 * 7.0})
+    quick = [{"tests": tests, "durations": {"a": 0.3, "b": 0.3}, "cpu": 0.2}]
+    assert measured_costs([name], quick) == pytest.approx({name: 5.6 + 1.25 * 0.2})
+    untimed = [{"tests": tests, "durations": {"a": 30.0, "b": 40.0}}]
+    assert measured_costs([name], untimed) == pytest.approx({name: 5.6 + 1.25 * 70.0})
+    long = [{"tests": tests, "durations": {"a": 300.0, "b": 300.0}, "cpu": 200.0}]
+    assert measured_splits([name], long) == {}
+    assert measured_splits([name], [{**long[0], "cpu": 600.0}])["scripts.sample.x_f"]["head"] == ["a"]
+
+
 def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
     from scripts.ci_mutation.measured import plan_shards
 

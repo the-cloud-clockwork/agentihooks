@@ -20,8 +20,6 @@ from tests.swarm.test_tick_lock import hold_tick
 
 real_reconcile = timer.reconcile
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 from tests.swarm.profile_fixture import validated
 

@@ -6,7 +6,7 @@ import pytest
 from scripts.scheduler import process_timer
 from scripts.scheduler.core import Scheduler
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

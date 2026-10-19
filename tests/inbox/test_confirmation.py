@@ -7,8 +7,6 @@ from scripts.inbox import channel, seen, wake
 from scripts.inbox.store import NOTIFY, InboxError, InboxStore, redelivery_ms
 from scripts.swarm.store import MASTER, AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 W = 300_000
 ENV = "AGENTIHOOKS_INBOX_REDELIVER_S"
 REDELIVERED = "redelivered: never confirmed inside the redelivery window"

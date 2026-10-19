@@ -7,7 +7,7 @@ import pytest
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_v2 import proof_swarm, retention
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "proof-323133-t351-1"
 OTHER = "proof-323133-t351-2"
 SETTING = json.dumps({"agent": "engineer@323133-1068", "task": "t351"})

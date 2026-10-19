@@ -5,7 +5,7 @@ from scripts.swarm import status
 from tests.swarm import test_cli
 
 env = test_cli.env
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_watchdog_mode_defaults_to_log_only_in_status(env, monkeypatch):

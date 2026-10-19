@@ -11,6 +11,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
+from typing import TextIO
 from urllib.parse import urlsplit
 
 from scripts.scheduler.core import Scheduler
@@ -37,7 +38,7 @@ def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
 
 
 @contextmanager
-def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iterator[None]:
+def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iterator[TextIO]:
     directory = runtime_dir(environ) if environ is not None else runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / f"{name}.lock").open("a+") as handle:
@@ -50,7 +51,7 @@ def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iter
             handle.truncate()
             handle.write(str(os.getpid()))
             handle.flush()
-            yield
+            yield handle
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 

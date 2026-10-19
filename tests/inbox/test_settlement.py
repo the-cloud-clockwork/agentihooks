@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox.store import InboxStore
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

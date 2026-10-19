@@ -12,7 +12,7 @@ from scripts.terminate_agent import Process, Session, main
 from tests.codex_session.fakes import Clock
 from tests.inbox.test_codex_pump import AppServer
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 OLD, NEW = "ci@abc-0815", "ci@abc-0816"

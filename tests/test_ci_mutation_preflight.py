@@ -327,3 +327,13 @@ def test_touched_tests_job_selects_and_runs_the_tests_the_branch_touches():
         'read -ra files <<< "$FILES"\npython -m pytest "${files[@]}" -n auto --tb=short -p no:cacheprovider\n'
     )
     assert not any(step.get("continue-on-error") for step in steps)
+
+
+def test_touched_test_selection_supplies_the_automatic_worker_limit():
+    steps, names = _steps(_workflow()["jobs"]["touched-tests"])
+    select = steps[names.index("Select the tests the branch touches")]
+    assert "from scripts.ci_touched_tests import worker_count" in select["run"]
+    assert "workers = worker_count(tests) if tests else 1" in select["run"]
+    assert "workers={workers}" in select["run"]
+    run = steps[names.index("Run the tests the branch touches")]
+    assert run["env"]["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "${{ steps.touched.outputs.workers }}"
