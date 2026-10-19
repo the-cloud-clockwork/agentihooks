@@ -67,8 +67,8 @@ def test_client_waits_for_a_reloading_server_without_starting_another(
                 time.sleep(0.01)
             urlopen = server.ledger_link.urllib.request.urlopen
 
-            def impatient(request, timeout):
-                return urlopen(request, timeout=min(timeout, 0.05))
+            def impatient(request, timeout, **transport):
+                return urlopen(request, timeout=min(timeout, 0.05), **transport)
 
             with patch.object(server.ledger_link.urllib.request, "urlopen", side_effect=impatient):
                 assert server.ledger_link.serving(url=base) is None
