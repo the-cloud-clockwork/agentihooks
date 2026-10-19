@@ -201,4 +201,5 @@ def test_file(entry: str) -> str:
 
 
 def selects(entry: str, test: str) -> bool:
+    test = re.sub(r"@[^\[\]]*$", "", test)
     return test == entry or test.startswith((f"{entry}::", f"{entry}["))

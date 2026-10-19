@@ -11,7 +11,7 @@ from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
 from scripts.ci_test_plan import find_record
-from tests.dep_manifest import _spans, line_units, node
+from tests.dep_manifest import GLOBAL_FILES, MEASURED, _spans, line_units, node
 
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
@@ -29,13 +29,15 @@ def estimate(
     if stale is not None:
         units, unrecorded = changed_recorded_units(root, manifest, changes)
         covering = covering_tests(manifest, units)
-        recorded = {test_file(test) for test in manifest["tests"]}
+        recorded = {}
+        for test in manifest["tests"]:
+            recorded.setdefault(test_file(test), set()).add(node(test).partition("[")[0].rpartition("::")[2])
     for path, lines in changes.items():
         chosen = select_tests(root, Path(path))
         if manifest is not None:
             chosen = sorted({*chosen, *recorded_tests(root, manifest, path, lines)})
         if stale is not None and path not in unrecorded:
-            chosen = narrow(chosen, covering, recorded, stale)
+            chosen = narrow(root, chosen, covering, recorded, stale)
         if selection is not None:
             selection[path] = chosen
         if not chosen:
@@ -64,12 +66,16 @@ def stale_test_files(root: Path, commit: str | None) -> set[str] | None:
     if commit is None:
         return None
     changed = subprocess.check_output(
-        ["git", "diff", "--no-renames", "--name-only", commit, "HEAD", "--", "tests"], cwd=root, text=True
+        ["git", "diff", "--no-renames", "--name-only", commit, "HEAD"], cwd=root, text=True
     ).split()
-    # A changed helper, conftest or fixture can move what any test reaches.
-    if any(not (path.endswith(".py") and Path(path).name.startswith("test_")) for path in changed):
+    tests = {path for path in changed if path.startswith("tests/")}
+    # A changed helper, conftest, fixture or dependency can move what any test reaches.
+    if any(not (path.endswith(".py") and Path(path).name.startswith("test_")) for path in tests) or any(
+        path in GLOBAL_FILES or (path.endswith(".py") and not path.startswith((*MEASURED, "tests/")))
+        for path in changed
+    ):
         return None
-    return set(changed)
+    return tests
 
 
 def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[int]]) -> tuple[set[int], set[str]]:
@@ -88,17 +94,23 @@ def changed_recorded_units(root: Path, manifest: dict, changes: dict[str, set[in
 
 
 def covering_tests(manifest: dict, units: set[int]) -> set[str]:
+    # A test reaching code only through a child process is never in mutmut's statistics, so it grades nothing.
     return {
-        node(test).partition("[")[0]
-        for test, found in manifest["tests"].items()
-        if found.get("escapes") or units.intersection(found["units"])
+        node(test).partition("[")[0] for test, found in manifest["tests"].items() if units.intersection(found["units"])
     }
 
 
-def narrow(chosen: list[str], covering: set[str], recorded: set[str], stale: set[str]) -> list[str]:
+def narrow(
+    root: Path, chosen: list[str], covering: set[str], recorded: dict[str, set[str]], stale: set[str]
+) -> list[str]:
     kept = set()
     for path in chosen:
-        if path in stale or path not in recorded:
+        defined = {
+            function.name
+            for function in ast.walk(ast.parse((root / path).read_text()))
+            if isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)) and function.name.startswith("test")
+        }
+        if path in stale or not defined <= recorded.get(path, set()):
             kept.add(path)
         else:
             kept.update(test for test in covering if test_file(test) == path)

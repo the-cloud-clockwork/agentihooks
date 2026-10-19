@@ -556,7 +556,7 @@ def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_b
         (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
     (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
     (tmp_path / "tests/test_d.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
-    durations = {"tests/test_c.py::t1": 2, "tests/test_c.py::t1[p]": 1, "tests/test_c.py::t1x": 4}
+    durations = {"tests/test_c.py::t1": 2, "tests/test_c.py::t1[p]@port": 1, "tests/test_c.py::t1x": 4}
     durations |= {"tests/test_c.py::t2": 8, "tests/test_a.py::TestK::test_x": 5, "tests/test_b.py::t": 6}
     (tmp_path / ".test_durations").write_text(json.dumps(durations))
     entries = [

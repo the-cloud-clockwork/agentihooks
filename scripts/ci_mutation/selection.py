@@ -77,9 +77,7 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     kept = set()
     for function, tests in stats.items():
         allowed = tests_by_prefix.get(function.rpartition(".")[0] + ".", set())
-        stats[function] = {
-            test for test in tests if test_file(test) in allowed or any(selects(entry, test) for entry in allowed)
-        }
+        stats[function] = {test for test in tests if any(selects(entry, test) for entry in allowed)}
         kept |= stats[function]
     return kept
 
