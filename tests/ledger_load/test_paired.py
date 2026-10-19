@@ -14,7 +14,11 @@ def log(*measures: dict) -> str:
 
 
 def test_one_noisy_pair_cannot_turn_the_median_pair_ratio_red():
-    pairs = [(BASE, {**BASE, "write_p95_s": 1.4, "busiest_cores": 0.7}), (BASE, BASE), (BASE, {**BASE, "write_p95_s": 3.0})]
+    pairs = [
+        (BASE, {**BASE, "write_p95_s": 1.4, "busiest_cores": 0.7}),
+        (BASE, BASE),
+        (BASE, {**BASE, "write_p95_s": 3.0}),
+    ]
     assert paired.regressions(pairs, 1.5) == []
 
 
@@ -72,9 +76,14 @@ def test_the_command_pairs_runs_in_order_and_refuses_a_margin_below_the_same_cod
     same_code.write_text(json.dumps({"runs": {"1": [[BASE, {**BASE, "write_p95_s": 1.3}]]}}))
     graded = ["--margin", "1.5", "--same-code", str(same_code)]
     assert paired.main(["--base", str(base), str(base), "--head", str(head), str(slow), *graded]) == 0
-    assert paired.main(["--base", str(base), str(base), str(base), "--head", str(head), str(slow), str(slow), *graded]) == 1
+    assert (
+        paired.main(["--base", str(base), str(base), str(base), "--head", str(head), str(slow), str(slow), *graded])
+        == 1
+    )
     assert "::error::head busiest CPU window median pair ratio 2.00 exceeds the 1.5x margin" in capsys.readouterr().out
-    assert paired.main(["--base", str(base), "--head", str(head), "--margin", "1.2", "--same-code", str(same_code)]) == 1
+    assert (
+        paired.main(["--base", str(base), "--head", str(head), "--margin", "1.2", "--same-code", str(same_code)]) == 1
+    )
     assert "::error::the margin 1.2x is below 1.30x" in capsys.readouterr().out
     assert paired.main(["--base", str(tmp_path / "absent.log"), "--head", str(head)]) == 1
     assert "::error::the base run of pair 1 printed no load measure" in capsys.readouterr().out
