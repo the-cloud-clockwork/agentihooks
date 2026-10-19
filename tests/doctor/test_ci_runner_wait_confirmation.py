@@ -125,6 +125,8 @@ def test_a_recorded_concurrency_held_run_is_labelled_a_hold_not_runner_supply():
     assert finding.id == 'ci-concurrency-hold/39287956231-1-["anton-oss-light"]'
     assert finding.threshold == "concurrency hold over 5 minutes"
     assert "concurrency group" in finding.summary
+    [unheld] = ci_speed.findings([{**HELD, "status": "queued", "jobs": [queued]}], now - 60000, now)
+    assert unheld.kind == "ci queue age unconfirmed"
 
 
 def test_a_job_held_by_its_own_concurrency_group_is_labelled_a_hold():
@@ -133,9 +135,24 @@ def test_a_job_held_by_its_own_concurrency_group_is_labelled_a_hold():
     assert finding.kind == "ci concurrency hold"
 
 
+def test_rereads_stop_at_the_pass_cap_and_leave_the_rest_unconfirmed():
+    stale = [{**STALE, "id": n} for n in range(ci_speed_read.REREADS + 1)]
+    run, calls = actions([PREFLIGHT], stale, {n: STALE for n in range(ci_speed_read.REREADS + 1)})
+    result = ci_speed_read.read(FOUND_AT - 60000, FOUND_AT, run=run)
+    assert sum("/actions/jobs/" in call for call in calls) == ci_speed_read.REREADS
+    [finding] = ci_speed.findings(result["runs"], FOUND_AT - 60000, FOUND_AT)
+    assert finding.kind == "ci queue age unconfirmed"
+
+
 def test_a_finding_superseded_by_a_corrected_read_is_retracted(store, monkeypatch):  # noqa: F811
-    reads = iter([[{**PREFLIGHT, "jobs": [STALE]}], [{**PREFLIGHT, "jobs": [REFINE]}]])
-    monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(next(reads)))
+    rereads = iter([STALE, REFINE])
+    original = ci_speed_read.read
+
+    def read(since, now, pending=None, known=None, active=True):
+        run, _ = actions([PREFLIGHT], [STALE], {REFINE["id"]: next(rereads)})
+        return original(since, now, pending, known, run=run, active=active)
+
+    monkeypatch.setattr(ci_speed_read, "read", read)
     cli.timer(store, DOCTOR, FOUND_AT, False)
     details = store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
     [raised] = [key for key in details if key.endswith('39278021878-1-["anton-oss-light"]')]
