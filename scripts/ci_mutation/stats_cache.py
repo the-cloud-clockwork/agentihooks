@@ -7,10 +7,10 @@ from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
-from scripts.ci_mutation.scope import imported_names, is_test_file, module_name
+from scripts.ci_mutation.scope import imported_names, module_name
 
-SCHEMA = 2
-CONTEXT_FIELDS = ("schema", "sources", "changes", "options", "runtime")
+SCHEMA = 3
+CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
 KEY_FIELDS = ("path", "tests")
 DYNAMIC_IMPORTS = ("importlib", "__import__")
 TRACKED = ("git", "ls-files", "-z")
@@ -21,7 +21,7 @@ encode = functools.partial(json.dumps, sort_keys=True)
 def test_inputs(
     root: Path, path: str, modules: dict[str, str], records: dict[str, tuple[str, set[str]]]
 ) -> dict[str, str]:
-    pending = {path}
+    pending = {path} | {name for name in modules.values() if Path(name).name == "conftest.py"}
     inputs = {}
     while pending:
         current = pending.pop()
@@ -51,18 +51,29 @@ def collect_cached_stats(
     sources = {
         path: hashlib.sha256((root / path).read_bytes()).hexdigest()
         for path in tracked
-        if path and not is_test_file(path) and (root / path).is_file()
+        if path and (Path(path).suffix != ".py" or path.startswith("scripts/ci_mutation/")) and (root / path).is_file()
     }
     versions = {distribution.metadata["Name"]: distribution.version for distribution in metadata.distributions()}
-    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, changes, options, [sys.version, sys.platform, versions])))
+    context = dict(zip(CONTEXT_FIELDS, (SCHEMA, sources, options, [sys.version, sys.platform, versions])))
     modules = {module_name(Path(path)): path for path in tracked if Path(path).suffix == ".py"}
     records = {}
     folder.mkdir(parents=True, exist_ok=True)
+    inputs = {path: test_inputs(root, path, modules, records) for path in files}
+    for dependencies in inputs.values():
+        if not any(not name.startswith("tests/") for name in dependencies):
+            for source in changes:
+                dependencies.update(test_inputs(root, source, modules, records))
     keys = {
         path: hashlib.sha256(
-            encode({**context, **dict(zip(KEY_FIELDS, (path, test_inputs(root, path, modules, records))))}).encode()
+            encode(
+                {
+                    **context,
+                    **dict(zip(KEY_FIELDS, (path, dependencies))),
+                    "scope": {source: lines for source, lines in changes.items() if source in dependencies},
+                }
+            ).encode()
         ).hexdigest()
-        for path in files
+        for path, dependencies in inputs.items()
     }
     stored = {path: folder / f"{key}.json" for path, key in keys.items()}
     reused = [json.loads(file.read_text()) for file in stored.values() if file.is_file()]
