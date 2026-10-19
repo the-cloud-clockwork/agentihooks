@@ -189,6 +189,56 @@ def test_stream_render_does_not_steal_focus_after_the_user_moves_to_another_cont
     page.close()
 
 
+def test_offscreen_phase_content_skips_layout_but_keeps_deep_navigation(browser):
+    page = browser.new_page(viewport={"width": 1920, "height": 1080})
+    phases = [{"id": f"p{i}", "title": f"Phase {i}", "description": "Details", "done": False} for i in range(30)]
+    show(page, shell_html(), ledger=ledger_state({"title": "Phase layout", "phases": phases}))
+    page.evaluate(
+        """() => {
+          document.getElementById(\'sec-phases\').style.marginTop = \'5000px\';
+          document.getElementById(\'phases-box\').open = true;
+        }"""
+    )
+    page.wait_for_function("() => !!document.getElementById('item-phases-p29')")
+    page.evaluate("async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); }")
+    session = page.context.new_cdp_session(page)
+    snapshot = session.send("DOMSnapshot.captureSnapshot", {"computedStyles": []})
+    strings = snapshot["strings"]
+    document = snapshot["documents"][0]
+    nodes = document["nodes"]
+    phase_nodes = {
+        index
+        for index, attrs in enumerate(nodes["attributes"])
+        if any(
+            strings[attrs[i]] == "id" and strings[attrs[i + 1]].startswith("item-phases-")
+            for i in range(0, len(attrs), 2)
+        )
+    }
+    laid_out = []
+    for index in document["layout"]["nodeIndex"]:
+        parent = nodes["parentIndex"][index]
+        while parent >= 0:
+            if parent in phase_nodes:
+                laid_out.append(index)
+                break
+            parent = nodes["parentIndex"][parent]
+    assert len(phase_nodes) == 30
+    assert laid_out == []
+    page.evaluate(
+        """async () => {
+          const main = document.querySelector(\'script[type=module]\').src;
+          const {revealTarget} = await import(new URL(\'outline.js\', main));
+          revealTarget(\'item-phases-p29\').scrollIntoView({block: \'center\'});
+        }"""
+    )
+    row = page.locator("#item-phases-p29")
+    row.wait_for(state="visible")
+    assert 0 <= row.bounding_box()["y"] < 1080
+    assert "Phase 29" in row.text_content()
+    session.detach()
+    page.close()
+
+
 def test_full_ledger_keeps_task_pagination_and_deep_navigation(browser):
     page = browser.new_page(viewport={"width": 1920, "height": 1080})
     tasks = [{"id": f"t{i}", "title": f"Task {i}", "state": "open", "lane": "eng"} for i in range(2400)]
