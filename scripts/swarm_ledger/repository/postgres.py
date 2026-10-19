@@ -38,7 +38,7 @@ def url(env: Mapping[str, str]) -> str | None:
     return env.get(URL) or None
 
 
-def translate(sql: str, named: bool) -> str:
+def translate(sql: str, named: bool = False) -> str:
     """The Postgres text of a statement the ledger repository writes for SQLite, with psycopg placeholders."""
     statement = STATEMENTS.get(sql, sql)
     for old, new in REWRITES:
@@ -148,7 +148,7 @@ class Connection:
 
     def executemany(self, sql: str, rows: Iterable) -> None:
         with mapped(), self.raw.cursor() as cursor:
-            errors().extras.execute_batch(cursor, translate(sql, False), list(rows))
+            errors().extras.execute_batch(cursor, translate(sql), list(rows))
 
     def executescript(self, script: str) -> None:
         for statement in ddl(script):
