@@ -295,7 +295,7 @@ class _Reach:
     def run(self) -> dict[str, str]:
         while self.pending:
             key, parent = self.pending.pop()
-            if key not in self.seen and key in self.program.units:
+            if key not in self.seen:
                 self.seen[key] = parent
                 self._visit(key, self.program.units[key])
         return self.seen
