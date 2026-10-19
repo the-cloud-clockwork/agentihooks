@@ -95,6 +95,7 @@ class AgentSpec:
     seat: str = ""
     previous_execution: str = ""
     title: str = ""
+    home: str = ""
 
 
 class Names(NamedTuple):
@@ -302,6 +303,8 @@ def _profile_command(command: list[str], spec: AgentSpec) -> list[str]:
     worn = [f"--overlay={overlay}" for overlay in spec.overlays]
     if spec.bundle_revision:
         worn.append(f"--bundle-revision={spec.bundle_revision}")
+    if spec.home:
+        worn.append(f"--home={spec.home}")
     return [command[0], "select-profile", spec.profile, *worn, "--agent", spec.agent, "--", *command[2:]]
 
 
@@ -537,6 +540,12 @@ def _prepare_profile(args: argparse.Namespace, agent: str, flags: list[str], env
     profile_env, flags = prepare(args.profile, agent, "", "", flags, environ, args.overlay)
     environ.update(profile_env)
     return flags
+
+
+def _recorded_home(args: argparse.Namespace, agent: str, environ: dict[str, str]) -> str:
+    from scripts.profiles import binding
+
+    return environ.get(binding.HOMES[agent], "") if args.profile else ""
 
 
 def _binding_request(args, agent: str, prompt: str, environ: dict[str, str], flags: list[str]) -> str:
@@ -922,6 +931,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
                 seat=args.seat,
                 previous_execution=args.previous_execution,
                 title=args.title,
+                home=_recorded_home(args, agent, active_env),
             ),
         )
         host, explicit = _select_host(args.host, active_env)
