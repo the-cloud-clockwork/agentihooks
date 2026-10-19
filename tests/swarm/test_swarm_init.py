@@ -130,7 +130,7 @@ def test_init_brings_up_the_stack_then_creates_the_paused_swarm_and_its_ledger_i
     assert (doc["size"], doc["title"], [p["title"] for p in doc["phases"]]) == ("swarm", TITLE, [TITLE])
     assert scratch.config("demo-swarm").state == "paused" and scratch.config("demo-swarm").repo == str(tmp_path)
     assert "  3. Start the swarm only when you want it: agentihooks swarm demo-swarm start\n" in out
-    created = {"created": "demo-swarm", "repo": str(tmp_path), "state": "paused", "template": ""}
+    created = {"created": "demo-swarm", "repo": str(tmp_path), "state": "paused", "template": "", "scaling": "auto"}
     assert out.endswith(f"{json.dumps(created)}\n{LINK}\n{PAUSED}")
 
 

@@ -104,6 +104,15 @@ def test_create_marks_the_ledger_as_a_swarm_ledger(env):
     assert ledger.swarm_sized == ["sw"]
 
 
+def test_create_stores_and_reports_automatic_scaling_even_with_pinned_caps(env, capsys):
+    store, _, _ = env
+    assert run("sw", "create", "--repo", "/repo", "--max-eng-agents", "2") == 0
+    report = json.loads(capsys.readouterr().out.splitlines()[0])
+    assert report == {"created": "sw", "repo": "/repo", "state": "paused", "template": "", "scaling": "auto"}
+    assert store.redis.hget(store.key("sw", "config"), "scaling") == "auto"
+    assert store.config("sw").scaling == "auto"
+
+
 def test_bare_pairs_set_the_caps(env):
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")

@@ -596,7 +596,17 @@ def cmd_create(store, args):
     from scripts.swarm import commands
 
     commands.bind(store, args.slug, commands.hive_id())
-    print(json.dumps({"created": args.slug, "repo": repo, "state": "paused", "template": args.template}))
+    print(
+        json.dumps(
+            {
+                "created": args.slug,
+                "repo": repo,
+                "state": "paused",
+                "template": args.template,
+                "scaling": config.scaling,
+            }
+        )
+    )
     print(ledger_link.page_line(args.slug))
 
 
