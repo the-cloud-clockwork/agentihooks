@@ -361,6 +361,28 @@ def test_an_inside_drain_with_no_time_left_never_sleeps(tmp_path, monkeypatch):
     assert timer._drain_inside(tmp_path / "cgroup.procs") == "1"
 
 
+def test_an_inside_drain_polls_each_second_until_each_deadline(tmp_path, monkeypatch):
+    import signal
+
+    clock, slept, sent = [0.0], [], []
+
+    def sleep(seconds):
+        if len(slept) > 20:
+            raise AssertionError("the drain kept polling past its deadlines")
+        slept.append(seconds)
+        clock[0] += seconds
+
+    monkeypatch.setattr(timer, "_others", lambda procs: {4242})
+    monkeypatch.setattr(timer, "DRAIN_S", 3)
+    monkeypatch.setattr(timer, "KILL_WAIT_S", 2)
+    monkeypatch.setattr(timer.os, "kill", lambda pid, number: sent.append((pid, number)))
+    monkeypatch.setattr(timer.time, "monotonic", lambda: clock[0])
+    monkeypatch.setattr(timer.time, "sleep", sleep)
+    assert timer._drain_inside(tmp_path / "cgroup.procs") == "1"
+    assert slept == [1] * 5
+    assert sent == [(4242, signal.SIGTERM), (4242, signal.SIGKILL)]
+
+
 def test_a_tick_running_inside_the_tick_service_ends_the_rest_of_its_group_but_not_itself(tmp_path, monkeypatch):
     import signal
     import subprocess

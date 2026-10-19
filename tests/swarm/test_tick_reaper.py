@@ -54,6 +54,13 @@ def test_a_tick_process_is_a_swarm_tick_or_its_scheduler_holder(argv, tick):
     assert tick_reaper.is_tick(argv) is tick
 
 
+def test_a_process_is_alive_unless_its_stat_state_is_zombie(monkeypatch):
+    states = {1: ["S", "0"], 2: ["Z", "1"]}
+    monkeypatch.setattr(tick_reaper, "_stat", states.__getitem__)
+    assert tick_reaper.alive(1) is True
+    assert tick_reaper.alive(2) is False
+
+
 def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group(admit):
     left = _plant(SHELL, "swarm", "tick", stdout=subprocess.PIPE)
     try:
