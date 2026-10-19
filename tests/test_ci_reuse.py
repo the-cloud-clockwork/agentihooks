@@ -266,7 +266,12 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         if "durations" in workflow["jobs"]
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
-    assert steps in [ci_reuse.gate_steps(**form, summary=summary) for form in forms for summary in (False, True)]
+    assert steps in [
+        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        for form in forms
+        for summary in (False, True)
+        for watcher_loss in (False, True)
+    ]
 
     assert workflow["jobs"]["gate-required"]["runs-on"] in gate_protected.runners(policy)
     assert workflow["jobs"]["reuse"] in gate_protected.reuse_jobs(policy)
@@ -945,6 +950,35 @@ def _gate(steps, needs, event="merge_group"):
     [step] = steps
     env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="false", KIND="false", EVENT=event, REUSED="false")
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled", "skipped", "pending", None])
+@pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
+def test_queue_watcher_loss_does_not_drop_passed_graded_jobs(watcher, failed):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    if watcher is not None:
+        needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
+    assert (result.returncode == 0) == (watcher in {"success", "failure", "cancelled"} and not failed), (
+        result.stdout + result.stderr
+    )
+
+
+@pytest.mark.parametrize("job", ["select", "split", "unit", "shard-check", "test-count"])
+@pytest.mark.parametrize("status", ["failure", "cancelled", "skipped", "pending", None])
+def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("select", "split", "unit", "shard-check", "test-count")}
+    needs["queue-fail-fast"] = {"result": "failure"}
+    if status is None:
+        del needs[job]
+    else:
+        needs[job]["result"] = status
+    result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
+    assert result.returncode != 0, result.stdout + result.stderr
 
 
 def test_queue_gate_keeps_legacy_duration_admission_by_default():

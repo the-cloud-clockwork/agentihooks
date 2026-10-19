@@ -1,4 +1,4 @@
-import { OFFLINE, PAGE, SYNC_COOLDOWN_MS } from "./config.js";
+import { OFFLINE, PAGE } from "./config.js";
 import { $, banner, newId, span, status } from "./dom.js";
 import { readMetadata, writeLedger } from "./api.js";
 import { applyChecks, applyOp, itemOf, lsRead, lsWrite, setState, withDefaults } from "./state.js";
@@ -40,7 +40,7 @@ function statsCheckText(check) {
 
 function cooldown(op, kind) {
   const last = lastSync(kind);
-  const wait = SYNC_COOLDOWN_MS - (Date.now() - Math.max(sentAt[op], last ? last.at : 0));
+  const wait = ((meta.limits || {}).sync_cooldown_ms || 0) - (Date.now() - Math.max(sentAt[op], last ? last.at : 0));
   return wait > 0 ? `again in ${Math.floor(wait / 60000)}m ${Math.ceil((wait % 60000) / 1000)}s` : "";
 }
 

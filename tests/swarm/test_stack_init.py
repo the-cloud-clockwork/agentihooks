@@ -1,14 +1,16 @@
 import io
 import json
+import shlex
 import stat
 import subprocess
 import urllib.error
 from pathlib import Path
 
 import pytest
-import yaml
 
 from scripts.swarm import stack_env, stack_init
+from scripts.swarm_ledger import server_compose
+from tests.swarm.compose_loader import compose_file
 
 PASSWORD = "pw-test"
 HEALTHY = [
@@ -157,13 +159,20 @@ def test_a_second_run_keeps_the_password_ports_and_edits(home, monkeypatch):
     assert docker.calls[2] == up(home, "42")
 
 
+ADOPTED_REDIS = "redis://swarm:" + "pw~x" + "@127.0.0.1:6379/0"
 ADOPTED = {
     "SWARM_ADOPT_LEDGER_DIR": "/srv/ledger",
     "SWARM_ADOPT_HOME": "/home/op",
     "SWARM_ADOPT_UID": "1234",
     "SWARM_ADOPT_GID": "5678",
+    "SWARM_ADOPT_CODE": str(server_compose.ROOT),
+    "SWARM_ADOPT_REDIS_URL": ADOPTED_REDIS,
     "SWARM_PORT": "8765",
 }
+
+
+def prepared(home):
+    (home / "swarm-client.env").write_text(f"AGENTIHOOKS_SWARM_REDIS_URL={shlex.quote(ADOPTED_REDIS)}\n")
 
 
 def test_adopt_records_the_ledger_folder_user_home_and_port_and_keeps_them(home, monkeypatch):
@@ -171,6 +180,7 @@ def test_adopt_records_the_ledger_folder_user_home_and_port_and_keeps_them(home,
     monkeypatch.setattr(stack_init.os, "getuid", lambda: 1234)
     monkeypatch.setattr(stack_init.os, "getgid", lambda: 5678)
     init(home, Docker())
+    prepared(home)
     docker = Docker()
     environ = {"AGENTIHOOKS_HOME": str(home), "LEDGER_DIR": "/srv/ledger"}
     code, out = init(home, docker, ["--adopt"], environ=environ)
@@ -194,6 +204,7 @@ def test_adopt_records_the_ledger_folder_user_home_and_port_and_keeps_them(home,
 
 def test_adopt_defaults_to_the_shared_ledger_folder_in_the_home(home, monkeypatch):
     monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
+    prepared(home)
     code, _ = init(home, Docker(), ["--adopt"])
     assert code == 0
     values = stack_env.read_env(stack(home) / ".env")
@@ -213,6 +224,7 @@ def test_adopt_and_prepare_clients_are_refused_together(home, capsys):
 
 def test_no_start_records_adoption_and_starts_no_service(home, monkeypatch):
     monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
+    prepared(home)
     docker = Docker()
     code, out = init(home, docker, ["--adopt", "--no-start"])
     folder = stack(home)
@@ -230,18 +242,84 @@ def test_no_start_records_adoption_and_starts_no_service(home, monkeypatch):
 
 
 def test_the_adoption_override_serves_the_host_folder_as_the_host_user():
-    text = (stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml").read_text()
-    swarm = yaml.safe_load(text)["services"]["swarm"]
+    swarm = compose_file(stack_init.BUNDLED / "deploy" / "compose" / "adopt.yaml")["services"]["swarm"]
     assert (
         swarm["user"]
         == "${SWARM_ADOPT_UID:?run agentihooks swarm init --adopt}:${SWARM_ADOPT_GID:?run agentihooks swarm init --adopt}"
     )
     assert swarm["pid"] == "host"
-    assert swarm["environment"] == {"HOME": "${SWARM_ADOPT_HOME}", "LEDGER_DIR": "${SWARM_ADOPT_LEDGER_DIR}"}
+    assert swarm["network_mode"] == "host"
+    assert swarm["ports"] == swarm["depends_on"] == "!reset"
+    assert "image" not in swarm
+    assert (swarm["mem_limit"], swarm["memswap_limit"], swarm["cpus"], swarm["pids_limit"]) == (
+        "1536m",
+        "1536m",
+        2,
+        200,
+    )
+    assert swarm["command"] == [
+        "python",
+        "${SWARM_ADOPT_CODE:?run agentihooks swarm init --adopt}/scripts/swarm_ledger/ledger_server.py",
+        "--serve",
+    ]
+    assert swarm["working_dir"] == "${SWARM_ADOPT_CODE}"
+    assert swarm["environment"] == {
+        "HOME": "${SWARM_ADOPT_HOME}",
+        "LEDGER_DIR": "${SWARM_ADOPT_LEDGER_DIR}",
+        "LEDGER_HOST": "127.0.0.1",
+        "LEDGER_TLS_CERT": "${LEDGER_TLS_CERT:-}",
+        "LEDGER_TLS_KEY": "${LEDGER_TLS_KEY:-}",
+        "PYTHONPATH": "${SWARM_ADOPT_CODE}",
+        "SWARM_RELOAD": "1",
+        "MALLOC_ARENA_MAX": "2",
+        "AGENTIHOOKS_SWARM_REDIS_URL": "${SWARM_ADOPT_REDIS_URL:?run agentihooks swarm init --adopt}",
+    }
     assert swarm["volumes"] == [
         "${SWARM_ADOPT_LEDGER_DIR}:${SWARM_ADOPT_LEDGER_DIR}",
         "${SWARM_ADOPT_HOME}/.agentihooks:${SWARM_ADOPT_HOME}/.agentihooks",
+        "${SWARM_ADOPT_CODE}:${SWARM_ADOPT_CODE}:ro",
     ]
+
+
+def test_adopt_refuses_without_a_prepared_client_and_records_nothing(home):
+    docker = Docker()
+    code, out = init(home, docker, ["--adopt", "--no-start"])
+    assert code == 1
+    assert out == (
+        "Swarm stack not ready: no prepared swarm Redis client to adopt.\n"
+        "  Fix: run agentihooks swarm init --prepare-clients, then agentihooks swarm init --adopt.\n"
+    )
+    assert "SWARM_ADOPT_LEDGER_DIR" not in stack_env.read_env(stack(home) / ".env")
+    assert docker.calls == [
+        ["docker", "info", "--format", "{{.ServerVersion}}"],
+        ["docker", "compose", "version", "--short"],
+    ]
+    (home / "swarm-client.env").write_text("OTHER=1\n")
+    assert init(home, Docker(), ["--adopt", "--no-start"])[0] == 1
+    assert "SWARM_ADOPT_LEDGER_DIR" not in stack_env.read_env(stack(home) / ".env")
+
+
+def test_adopted_client_settings_name_the_adopted_redis(home, monkeypatch):
+    monkeypatch.setattr(stack_init.Path, "home", lambda: Path("/home/op"))
+    prepared(home)
+    assert init(home, Docker(), ["--adopt", "--no-start"])[0] == 0
+    client = stack_env.read_env(stack(home) / "client.env")
+    assert client["AGENTIHOOKS_SWARM_REDIS_URL"] == shlex.quote(ADOPTED_REDIS)
+    assert shlex.split(client["AGENTIHOOKS_SWARM_REDIS_URL"]) == [ADOPTED_REDIS]
+    assert client["LEDGER_URL"] == "http://127.0.0.1:8765"
+
+
+def test_an_unhealthy_adopted_ledger_names_the_legacy_ledger_to_stop(home):
+    prepared(home)
+    rows = [HEALTHY[0], {"Service": "swarm", "State": "running", "Health": "unhealthy"}, HEALTHY[2]]
+    code, out = init(home, Docker(rows=rows, up_code=1), ["--adopt"])
+    assert code == 1
+    assert out.endswith(
+        "Swarm stack not ready: swarm is unhealthy.\n"
+        "  Fix: read its logs; the adopted ledger server serves port 8765 on the host network, "
+        "so stop the legacy ledger container by its id first, then run agentihooks swarm init again.\n"
+        "  Logs: docker compose --project-name agentihooks-swarm logs swarm\n"
+    )
 
 
 def test_stack_folder_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):

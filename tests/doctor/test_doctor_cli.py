@@ -584,6 +584,7 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "dev workflow",
         "trace",
         "runtime storage",
+        "scheduled tick",
     }
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]

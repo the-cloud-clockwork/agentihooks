@@ -30,6 +30,7 @@ export function withDefaults(d) {
     artifact_trash: (Array.isArray(d.artifact_trash) ? d.artifact_trash : []).filter((a) => a && typeof a.id === "string" && a.file && typeof a.file.id === "string"),
     plans: entries(d.plans), slices: entries(d.slices),
     freezes: entries(d.freezes).filter((r) => ["freeze", "focus"].includes(r.verb) && typeof r.target === "string"),
+    marks: Object.fromEntries(["frozen", "held"].map((k) => [k, (Array.isArray((d.marks || {})[k]) ? d.marks[k] : []).filter((key) => typeof key === "string")])),
     phases: list("phases", ["title", "description", "done", "out_of_scope", "depends_on", "planning", "release"], ["comments"]),
     questions: list("questions", ["text", "out_of_scope"], ["answers", "comments"]),
     followups: list("followups", ["text", "done", "out_of_scope"], ["comments"]),

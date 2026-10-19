@@ -29,7 +29,7 @@ class Reply:
 def test_the_probe_posts_an_empty_write_with_a_short_timeout():
     seen, reply = [], Reply()
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         seen.append((request.full_url, request.get_method(), request.data, timeout))
         return reply
 
@@ -51,7 +51,7 @@ def test_the_probe_posts_an_empty_write_with_a_short_timeout():
     ],
 )
 def test_a_slow_or_failed_probe_names_its_error(error, named):
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         raise error
 
     assert health.probe("http://127.0.0.1:9", urlopen) == named

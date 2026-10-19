@@ -2,7 +2,7 @@ import json
 import subprocess
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm import merge_queue, queue_record
+from scripts.swarm import merge_queue, queue_record, ready
 from scripts.swarm.store import RedisStore, SwarmError
 
 PENDING = "queue-priority"
@@ -33,11 +33,17 @@ def apply(
 ) -> dict:
     result = merge_queue.prioritize(url, journal=journal)
     for task in tasks:
-        if task.get("pr_url") in result["displaced"] and task.get("claimed_by"):
+        if (
+            task.get("pr_url") in result["displaced"]
+            and task.get("claimed_by")
+            and task.get("state") != "done"
+            and not ready.awaiting(task)
+        ):
             InboxStore(store.redis).send(
                 sender,
                 task["claimed_by"],
                 f"Your pull request {task['pr_url']} was requeued in its original order after priority request {url}.",
+                fyi=True,
             )
     if result["errors"]:
         raise SwarmError("; ".join(result["errors"]))

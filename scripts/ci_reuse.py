@@ -77,6 +77,7 @@ def gate_steps(
     consolidated: bool = False,
     summary: bool = False,
     docs: bool = False,
+    watcher_loss: bool = False,
 ) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if selected or queue_tier:
@@ -88,6 +89,21 @@ def gate_steps(
     if consolidated:
         run = run.replace('["durations", "split",', '["select", "split",').replace(
             '["durations", "select",', '["select",'
+        )
+    if watcher_loss:
+        run = (
+            run.replace(', "queue-fail-fast"]', "]")
+            .replace(
+                "and all($required[];",
+                'and ($event != "merge_group" or has("queue-fail-fast"))\n      and all($required[];',
+            )
+            .replace(
+                'then .value.result == "success" else .value.result == "skipped" end)',
+                'then .value.result == "success"'
+                ' elif $event == "merge_group" and $job == "queue-fail-fast" then'
+                ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
+                ' else .value.result == "skipped" end)',
+            )
         )
     if docs:
         run = run.replace('"lint", "semgrep"', '"lint", "docs", "semgrep"')

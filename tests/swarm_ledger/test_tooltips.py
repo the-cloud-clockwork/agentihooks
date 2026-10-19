@@ -91,12 +91,12 @@ def route(r, html):
         fulfill_events(r, ledger=ledger_state(DOC), swarm=STATUS)
     elif rows is not None:
         r.fulfill(json={"data": rows, "next_cursor": None})
-    elif "/api/swarm/" in url:
+    elif "/swarm/" in url:
         r.fulfill(json=STATUS)
+    elif "/files/" in url:
+        r.fulfill(body="# Shot", content_type="text/markdown")
     elif "/api/" in url:
         r.fulfill(json={})
-    elif "/media/" in url or "/artifacts/" in url:
-        r.fulfill(body="# Shot", content_type="text/markdown")
     else:
         r.fulfill(body=html, content_type="text/html")
 
