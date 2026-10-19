@@ -1167,6 +1167,16 @@ def test_a_pull_request_that_leaves_the_queue_unmerged_reopens_the_task(merging)
     assert merging.rows["t1"]["state"] == "open"
 
 
+def test_a_pull_request_that_leaves_the_queue_red_reopens_without_a_requeue(merging):
+    queued_at_now(merging)
+    merging.pulls[URL] = QUEUED
+    merging.run(NOW + 60_000)
+    merging.pulls[URL] = RED
+    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} left the merge queue without merging"
+    assert merging.exits.calls == [] and merging.queued == [("queue", URL)]
+    assert merging.rows["t1"]["state"] == "open"
+
+
 def left_queue_green(merging):
     queued_at_now(merging)
     merging.pulls[URL] = QUEUED
