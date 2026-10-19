@@ -4,6 +4,8 @@ from typing import Protocol
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.kubernetes.watch import EXECUTION_LABEL
 
+LOG_READS = 3
+
 
 class Logs(Protocol):
     def pod_logs(self, name: str, container: str) -> str: ...
