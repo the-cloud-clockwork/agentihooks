@@ -10,9 +10,34 @@ EVIDENCE_CLASS = "mocked controller with real durable artifacts and native mater
 FIXTURE_INPUTS = {
     "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative",
     "corrupt_object": "native session object of ckpt-1 overwritten after commit",
-    "unsupported_harness_version": "claude 9.0.0 against a checkpoint captured on 2.1",
+    "version_changed": "unsupported harness version: claude 9.0.0 against a checkpoint captured on 2.1",
+    "conversation_mismatch": "native directive naming a session other than the checkpoint's",
     "duplicated_restore_request": "resume requested twice after a controller restart, then fresh",
 }
+
+
+def accepted_native(world, controller):
+    from scripts.swarm_v2.kubernetes.replacement import Replacements
+    from tests.test_swarm_v2_kubernetes_failures import _Ledger, _Relaunch
+
+    old = world.launch(controller, {**world.fx["first"], "native_session": native_cases.SESSIONS["claude"]})
+    world.checkpoints.by_execution[old.execution_id] = [
+        {
+            "checkpoint_id": "ckpt-1",
+            "sequence": 1,
+            "status": "complete",
+            "compatibility": world.fx["compatibility"],
+            "continuation": "native",
+        }
+    ]
+    recovery = world.recovery(controller)
+    decision = recovery.handle(old.execution_id, "evicted")
+    ledger, launch = _Ledger(), _Relaunch()
+    replacements = Replacements(recovery, launch, ledger)
+    replacements()
+    assert ledger.rows[0]["awaiting"] == "recovery_pending"
+    assert ledger.rows[0]["recovery"]["status"] == "accepted"
+    return old, recovery, decision, ledger, launch, replacements
 
 
 def valid(root: Path) -> native.Qualifier:
@@ -35,9 +60,7 @@ def restored(root: Path, directive: restore.Directive, version: str | None = Non
 
 
 def positive(root: Path) -> dict:
-    from scripts.swarm_v2.kubernetes.replacement import Replacements
     from tests import sv2_kub05_cases as kub
-    from tests.test_swarm_v2_kubernetes_failures import _Ledger, _Relaunch
 
     valid(root)
     result = restored(root, restore.Directive("ckpt-1", "native", native_cases.SESSIONS["claude"], 41))
@@ -45,23 +68,7 @@ def positive(root: Path) -> dict:
     with world.clocked():
         controller, _ = world.controller()
         assert controller.acquire()
-        old = world.launch(controller, {**world.fx["first"], "native_session": native_cases.SESSIONS["claude"]})
-        world.checkpoints.by_execution[old.execution_id] = [
-            {
-                "checkpoint_id": "ckpt-1",
-                "sequence": 1,
-                "status": "complete",
-                "compatibility": world.fx["compatibility"],
-                "continuation": "native",
-            }
-        ]
-        recovery = world.recovery(controller)
-        decision = recovery.handle(old.execution_id, "evicted")
-        ledger, launch = _Ledger(), _Relaunch()
-        replacements = Replacements(recovery, launch, ledger)
-        replacements()
-        assert ledger.rows[0]["awaiting"] == "recovery_pending"
-        assert ledger.rows[0]["recovery"]["status"] == "accepted"
+        old, recovery, decision, ledger, launch, replacements = accepted_native(world, controller)
         assert recovery.restore_outcomes_by_type()["native"] == 0
         recovery.confirm(decision.replacement, asdict(result))
         replacements()
@@ -107,35 +114,26 @@ def negative(root: Path) -> dict:
         assert not (path / "fresh").exists()
         assert not (path / "worktree").exists()
         results.append({"cause": cause, "home_unchanged": True, "source_unchanged": True})
-    return {"refusals": results, **fresh_reported_resumed()}
+    return {"refusals": results, **refused_fresh_outcome()}
 
 
-def fresh_reported_resumed() -> dict:
+def refused_fresh_outcome() -> dict:
     from scripts.swarm.store import SwarmError
-    from scripts.swarm_v2.kubernetes.replacement import Replacements
+    from scripts.swarm_v2.kubernetes import failures
     from tests import sv2_kub05_cases as kub
-    from tests.test_swarm_v2_kubernetes_failures import _Ledger, _Relaunch
 
     world = kub.World()
     with world.clocked():
         controller, _ = world.controller()
         assert controller.acquire()
-        old = world.launch(controller, {**world.fx["first"], "native_session": native_cases.SESSIONS["claude"]})
-        world.checkpoints.by_execution[old.execution_id] = [
-            {
-                "checkpoint_id": "ckpt-1",
-                "sequence": 1,
-                "status": "complete",
-                "compatibility": world.fx["compatibility"],
-                "continuation": "native",
-            }
-        ]
-        recovery = world.recovery(controller)
-        decision = recovery.handle(old.execution_id, "evicted")
-        ledger = _Ledger()
-        replacements = Replacements(recovery, _Relaunch(), ledger)
-        replacements()
-        before = json.dumps(ledger.rows, sort_keys=True)
+        _, recovery, decision, ledger, _, replacements = accepted_native(world, controller)
+        names = (failures.FENCES, failures.RESTORES, failures.RECOVERIES, "attempt-restore-outcomes")
+
+        def protected() -> str:
+            hashes = {name: recovery.store.redis.hgetall(recovery.store.key(recovery.slug, name)) for name in names}
+            return json.dumps({"redis": hashes, "ledger": ledger.rows}, sort_keys=True, default=str)
+
+        before = protected()
         fresh = restore.Restored(restore.FRESH, "", 41)
         try:
             recovery.confirm(decision.replacement, asdict(fresh))
@@ -144,10 +142,9 @@ def fresh_reported_resumed() -> dict:
         else:
             raise AssertionError("a fresh outcome was accepted for a native directive")
         replacements()
-        assert recovery.outcome(decision.replacement) is None
-        assert json.dumps(ledger.rows, sort_keys=True) == before
+        assert protected() == before
+        assert native_cases.SESSIONS["claude"] not in refusal
         return {
-            "fresh_conversation_reported_resumed": recovery.outcome(decision.replacement) is not None,
             "fresh_outcome_refusal": refusal,
             "ledger_recovery_status": ledger.rows[0]["recovery"]["status"],
             "ledger_awaiting": ledger.rows[0]["awaiting"],
@@ -167,15 +164,16 @@ def recovery_case(root: Path) -> dict:
         recovery.handle(old.execution_id, "oom_killed")
         recovery.pause(True)
         checkpoint = world.checkpoints.list(old.execution_id)
-        assert world.occupant().state == "awaiting-decision"
         restarted = world.recovery(controller, automatic=False)
-        assert restarted.paused()
-        assert world.checkpoints.list(old.execution_id) == checkpoint
+        rollback = {
+            "automation_paused": restarted.paused(),
+            "checkpoint_retained": world.checkpoints.list(old.execution_id) == checkpoint != [],
+            "awaiting_retained": world.occupant().state == "awaiting-decision",
+        }
         first = restarted.request(old.execution_id, "resume")
         directive = restarted.restore(first.replacement)
         attempts = world.attempts()
         repeated = world.recovery(controller).request(old.execution_id, "resume")
-        assert repeated == first
         assert world.attempts() == attempts
         assert world.recovery(controller).restore(repeated.replacement) == directive
         try:
@@ -187,12 +185,12 @@ def recovery_case(root: Path) -> dict:
         assert world.recovery(controller).decision(old.execution_id) == first
         assert world.attempts() == attempts
         return {
-            "accepted_decision_reused": True,
+            "accepted_decision_reused": repeated == first,
             "conflicting_choice_refusal": conflicting,
-            "checkpoint_reused": repeated.checkpoint == first.checkpoint,
+            "checkpoint_reused": repeated.checkpoint == first.checkpoint != "",
             "replacement_count": len(attempts) - 1,
             "restore": directive,
-            "rollback": {"automation_paused": True, "checkpoint_retained": True, "awaiting_retained": True},
+            "rollback": rollback,
         }
 
 

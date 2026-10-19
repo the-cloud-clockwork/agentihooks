@@ -40,10 +40,11 @@
   "case": "A",
   "evidence_class": "mocked controller with real durable artifacts and native materialization",
   "fixture_inputs": {
+    "conversation_mismatch": "native directive naming a session other than the checkpoint's",
     "corrupt_object": "native session object of ckpt-1 overwritten after commit",
     "duplicated_restore_request": "resume requested twice after a controller restart, then fresh",
-    "unsupported_harness_version": "claude 9.0.0 against a checkpoint captured on 2.1",
-    "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative"
+    "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative",
+    "version_changed": "unsupported harness version: claude 9.0.0 against a checkpoint captured on 2.1"
   },
   "independent_fixtures": 2,
   "input_sha256": {

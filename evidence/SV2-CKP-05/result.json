@@ -27,10 +27,11 @@
     "status": "checkpoint_restore_proof_pending"
   },
   "fixture_inputs": {
+    "conversation_mismatch": "native directive naming a session other than the checkpoint's",
     "corrupt_object": "native session object of ckpt-1 overwritten after commit",
     "duplicated_restore_request": "resume requested twice after a controller restart, then fresh",
-    "unsupported_harness_version": "claude 9.0.0 against a checkpoint captured on 2.1",
-    "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative"
+    "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative",
+    "version_changed": "unsupported harness version: claude 9.0.0 against a checkpoint captured on 2.1"
   },
   "interfaces": [
     "Recovery.request",
@@ -49,7 +50,7 @@
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2773",
   "remaining_limitations": [
     "Live capture and restore on Anton is unproven: the isolated proof controller was removed and the primary controller must be healthy first.",
-    "A spawn superseded as a legacy specification is replaced fresh without a master choice, because it never applied and holds no conversation to continue.",
+    "Approved spec exception (master ruling, 19 October): a spawn superseded as a legacy specification is replaced fresh without a choice, because it never applied and holds no conversation, so fresh is its only outcome.",
     "Duplicate restore requests are idempotent per execution and choice; there is no separate request identity.",
     "Supported harness versions are claude 2.1 and codex 0.162; any other version refuses native resume."
   ],
