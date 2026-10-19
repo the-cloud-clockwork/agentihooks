@@ -2213,6 +2213,8 @@ jobs:
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
 
   queue-fail-fast:
+    outputs:
+      failed: ${{ steps.watch.outputs.failed }}
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}
     needs: [reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
@@ -2302,7 +2304,7 @@ jobs:
             if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
               (.select.outputs.scope // "") as $scope
               | (if $event == "merge_group" then
-                ["select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
+                ["select", "split", "unit", "shard-check", "test-count"]
               else
                 ["select", "test-count", "lint", "docs", "semgrep", "sonar"]
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
@@ -2310,9 +2312,10 @@ jobs:
               end) as $required
               | . as $jobs
               | ($event == "merge_group" or (($mutation == "true" or $mutation == "false") and ($scope == "full" or $scope == "selected" or $scope == "none")))
+                and ($event != "merge_group" or has("queue-fail-fast"))
                 and all($required[]; . as $job | $jobs[$job].result == "success")
                 and all(to_entries[]; .key as $job |
-                  if $required | index($job) then .value.result == "success" else .value.result == "skipped" end)
+                  if $required | index($job) then .value.result == "success" elif $event == "merge_group" and $job == "queue-fail-fast" then (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == "" else .value.result == "skipped" end)
             ' <<< "$NEEDS"; then
               echo "::error::Every gate required for this event must succeed and other gates must be skipped."
               exit 1
