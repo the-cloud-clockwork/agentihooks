@@ -64,17 +64,17 @@ export function ownFreeze(d, key) {
   return d.freezes.find((r) => r.verb === "freeze" && r.target === key);
 }
 
-export function frozen(d, key) {
-  const up = ancestors(d, key);
+export function frozen(d, key, up = ancestors(d, key)) {
   return d.freezes.some((r) => r.verb === "freeze" && covers(d, key, r.target, up));
 }
 
 export function held(d, key) {
   const focus = d.freezes.filter((r) => r.verb === "focus");
-  if (!focus.length || frozen(d, key)) return false;
+  if (!focus.length) return false;
+  const up = ancestors(d, key);
+  if (frozen(d, key, up)) return false;
   const [list, id] = key.split("/");
   if (list === "tasks" && (byId(d.tasks, id) || {}).rank === "urgent") return false;
-  const up = ancestors(d, key);
   return !focus.some((r) => (isSelector(r.target) ? list !== "tasks" || matches(d, key, r.target)
     : covers(d, key, r.target, up) || ancestors(d, r.target).includes(key)));
 }

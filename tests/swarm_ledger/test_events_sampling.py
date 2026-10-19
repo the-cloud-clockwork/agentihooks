@@ -77,7 +77,7 @@ def test_one_ledger_failing_its_swarm_read_never_stops_the_others(folders, monke
     def status(slug, state=None):
         if slug == "a":
             raise RuntimeError("redis went away")
-        return {"config": {"state": state["_meta"]["rev"]}}
+        return {"config": {"state": state["_meta"]["rev"]}, "history": [1]}
 
     monkeypatch.setattr(server, "swarm_status", status)
     for slug in ("a", "b"):
@@ -157,7 +157,7 @@ def test_stream_resources_loads_the_stored_view_without_reconciling(monkeypatch)
 
     monkeypatch.setattr(server.repository, "get_document", get_document)
     monkeypatch.setattr(server, "ledger_view", lambda given: {**given, "view": True})
-    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1})
+    monkeypatch.setattr(server, "swarm_status", lambda slug, ledger: calls.append(("swarm", slug, ledger)) or {"q": 1, "transfers": {}})
     monkeypatch.setattr(server, "workspace_tails", lambda *a: calls.append(("tails", *a)))
     view = {**state, "view": True}
     assert server.stream_resources("s") == {"ledger": view, "swarm": {"q": 1}}
