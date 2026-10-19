@@ -241,10 +241,11 @@ check is cited here.
 
 Reopening a viewer and retiring an execution are separate operations. Managed
 execution retirement uses its supervised runtime and closes the execution's
-recorded viewers; see [Retire a managed execution](#retire-a-managed-execution).
-The ordinary runtime resume path refuses a managed execution with `unsupported resume: a managed Codex
-execution continues through its supervised server`. Use terminal reopening for
-a live execution. Renaming a managed agent renames its herdr pane and registry
+recorded viewers; see [Retire a managed
+execution](#retire-a-managed-execution). The ordinary runtime resume path
+refuses a managed execution with `unsupported resume: a managed Codex execution
+continues through its supervised server`. Use terminal reopening for a live
+execution. Renaming a managed agent renames its herdr pane and registry
 identity without typing a session-name command into the viewer.
 
 The live qualification also recorded these viewer limits:
@@ -311,18 +312,18 @@ another pane, is left alone, as is a recorded viewer with no terminal id.
 
 Only a folder matching the socket layout is removed: its parent is named `cx`
 and its own name is the first sixteen characters of the execution id after the
-`exe-` prefix, as in
-`$HOME/.agentihooks/cx/<first 16 characters of the id after exe->`. The check
-is on those two names, not on the root. A
-binding whose recorded endpoint lies outside that layout keeps its folder; the
-binding is still marked exited. A folder already gone is skipped.
+`exe-` prefix, as in `$HOME/.agentihooks/cx/<first 16 characters of the id
+after exe->`. The check is on those two names, not on the root. A binding whose
+recorded endpoint lies outside that layout keeps its folder; the binding is
+still marked exited. A folder already gone is skipped.
 
 ### Refusals and retry
 
 A refusal leaves the binding connected and its viewer records in place, so the
 next tick retries the whole retirement; ending a server that is already gone
-does not refuse the retry. Each tick path that retires an agent logs its own
-`could not retire <agent> …, retrying next tick` line. Only the path that
+does not refuse the retry. Most tick paths that retire an agent log their own
+`could not retire <agent> …, retrying next tick` line; the lost agent and idle
+stall paths log nothing on a refusal. Only the path that
 retires an ended execution counts failures: from its third failing tick,
 `agentihooks swarm <id> status` lists a `retire failed` health finding naming
 the process and the refusal. The count clears when the agent is dropped from
@@ -340,20 +341,20 @@ on the ledger tracks it.
 | `viewer pane <pane>: <error>` | herdr refused to close the launch pane or a recorded viewer for a reason other than not found. |
 | `runtime home: <error>` | Removing the execution folder raised an `OSError`, for example a permission error. |
 
-The delivered behaviour is
-[pull request 3898](https://github.com/the-cloud-clockwork/agentihooks/pull/3898)
-([issue 3896](https://github.com/the-cloud-clockwork/agentihooks/issues/3896)),
-proved red on a test-only head in
-[run 39004056453](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39004056453)
-and green in
-[run 39004150106](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39004150106),
-covered by the managed
-lifecycle tests in `tests/swarm/test_managed_lifecycle.py` and the attach
-tests in `tests/codex_session/test_attach.py`. Rollout preservation before
-removal arrived later in
-[pull request 4339](https://github.com/the-cloud-clockwork/agentihooks/pull/4339).
-Those tests use fixture panes and folders; no live retirement of a herdr viewer
-is cited here.
+The delivered behaviour is [pull request
+3898](https://github.com/the-cloud-clockwork/agentihooks/pull/3898) ([issue
+3896](https://github.com/the-cloud-clockwork/agentihooks/issues/3896)), proved
+red on a test-only head in [run
+39004056453](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39004056453)
+and green in [run
+39004150106](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39004150106),
+covered by the managed lifecycle tests in
+`tests/swarm/test_managed_lifecycle.py` and the attach tests in
+`tests/codex_session/test_attach.py`. Rollout preservation before removal
+arrived later in [pull request
+4339](https://github.com/the-cloud-clockwork/agentihooks/pull/4339). Those
+tests use fixture panes and folders; no live retirement of a herdr viewer is
+cited here.
 
 See [Swarm inbox delivery](../pillars/swarm.md#delivered-then-confirmed) for
 receipt, redelivery and closure rules, and [Codex compatibility](CODEX-COMPAT.md)
