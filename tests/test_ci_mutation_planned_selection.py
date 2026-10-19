@@ -150,3 +150,86 @@ def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, m
     monkeypatch.setattr(measured.subprocess, "check_output", lambda *args, **kwargs: "head\n")
     assert measured.main() == 0
     assert refined == [{"scripts/sample.py": ({2}, ["tests/test_helper.py"])}]
+
+
+def _recorded_project(tmp_path, monkeypatch):
+    import subprocess
+
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    (tmp_path / "scripts/core.py").write_text(
+        "def f(value):\n    return value + 1\n\n\ndef g(value):\n    return value - 1\n"
+    )
+    (tmp_path / "tests/test_core.py").write_text("from scripts.core import f, g\n")
+    (tmp_path / "tests/test_edited.py").write_text("from scripts.core import g\n")
+    (tmp_path / "tests/conftest.py").write_text("")
+    git = ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path)]
+    subprocess.run([*git, "init", "-q"], check=True)
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "recorded"], check=True)
+    commit = subprocess.check_output([*git, "rev-parse", "HEAD"], text=True).strip()
+    (tmp_path / "tests/test_fresh.py").write_text("from scripts.core import g\n")
+    (tmp_path / "tests/test_edited.py").write_text("from scripts.core import g\n\n\ndef test_new():\n    pass\n")
+    subprocess.run([*git, "add", "."], check=True)
+    subprocess.run([*git, "commit", "-q", "-m", "head"], check=True)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    return {
+        "commit": commit,
+        "units": ["scripts/core.py::f", "scripts/core.py::g", "scripts/core.py::<module>"],
+        "tests": {
+            "tests/test_core.py::test_f": {"units": [0, 2], "escapes": False},
+            "tests/test_core.py::test_g[1]": {"units": [1, 2], "escapes": False},
+            "tests/test_core.py::test_g[2]@port": {"units": [1, 2], "escapes": False},
+            "tests/test_core.py::TestSpawn::test_child": {"units": [], "escapes": True},
+            "tests/test_core.py::test_other": {"units": [2], "escapes": False},
+            "tests/test_edited.py::test_old": {"units": [0, 2], "escapes": False},
+        },
+    }
+
+
+def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_it(tmp_path, monkeypatch):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    selection = {}
+    _, _, tests = plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {
+        "scripts/core.py": [
+            "tests/test_core.py::TestSpawn::test_child",
+            "tests/test_core.py::test_g",
+            "tests/test_edited.py",
+            "tests/test_fresh.py",
+        ]
+    }
+    assert tests == selection["scripts/core.py"]
+
+
+@pytest.mark.parametrize(
+    "change,helper",
+    [({"scripts/core.py": {6}}, True), ({"scripts/core.py": {10}}, False)],
+)
+def test_selection_keeps_whole_files_where_recorded_coverage_cannot_speak(tmp_path, monkeypatch, change, helper):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    if helper:
+        (tmp_path / "tests/conftest.py").write_text("X = 1\n")
+    else:
+        (tmp_path / "scripts/core.py").write_text(
+            (tmp_path / "scripts/core.py").read_text() + "\n\ndef h(value):\n    return value * 2\n"
+        )
+    import subprocess
+
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "-C", str(tmp_path), "commit", "-qam", "more"],
+        check=True,
+    )
+    selection = {}
+    plan.estimate(tmp_path, change, selection, manifest)
+    assert selection == {"scripts/core.py": ["tests/test_core.py", "tests/test_edited.py", "tests/test_fresh.py"]}
+
+
+def test_estimate_without_a_manifest_commit_keeps_whole_files(tmp_path, monkeypatch):
+    manifest = _recorded_project(tmp_path, monkeypatch)
+    del manifest["commit"]
+    selection = {}
+    plan.estimate(tmp_path, {"scripts/core.py": {6}}, selection, manifest)
+    assert selection == {"scripts/core.py": ["tests/test_core.py", "tests/test_edited.py", "tests/test_fresh.py"]}
