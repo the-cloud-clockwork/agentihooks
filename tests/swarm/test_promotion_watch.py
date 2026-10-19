@@ -906,3 +906,15 @@ def test_a_consumer_that_lost_its_own_runner_is_named_once_among_the_lost_jobs(s
     description = ledger.added[0][1]["description"]
     assert "the jobs sonar, unit (3.12, 1) lost their runner infrastructure" in description
     assert "unit shard output" not in description
+
+
+@pytest.mark.parametrize(("lost", "failed"), [("unit smoke (3.12)", "sonar"), ("unit (3.12, 1)", "sonar report")])
+def test_only_the_job_name_before_its_matrix_marks_a_unit_shard_or_a_consumer(store, lost, failed):
+    ledger = Ledger()
+    refresh(
+        store, ledger, outage_run([(lost, RAN, DOWNLOAD), (failed, [{"name": "Grade", "conclusion": "failure"}], [])])
+    )
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        f"Promotion red: {failed}",
+    ]
