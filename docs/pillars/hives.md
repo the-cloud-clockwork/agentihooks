@@ -161,8 +161,9 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
 4. Runs `agentihooks hive run`.
 
 Give exactly one of `workers.joinCodeSecret` or `workers.credentialSecret`. A join code allows one replica with a
-persistent home; a credential scales to `workers.replicas`. Credentials come from ExternalSecrets by name. The pod
-name is the hive id.
+persistent home; a credential scales to `workers.replicas`. Credentials come from ExternalSecrets by name. The hive
+id is the one minted when the code was exchanged, so replicas that mount the same credential report the same hive
+id; the pod name is used only when no credential is installed.
 
 ## Related pages
 
