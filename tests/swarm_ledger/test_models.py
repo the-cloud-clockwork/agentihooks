@@ -77,20 +77,23 @@ def test_core_validation_derives_its_fields_from_the_models():
             core.validate({key: 1})
 
 
-def test_api_schemas_derive_their_fields_from_the_models():
+def test_api_schemas_derive_their_fields_from_the_models(monkeypatch):
     assert resources.COLLECTIONS is models.COLLECTIONS
     assert resources.THREADS is models.THREADS
     validator = Draft202012Validator(schemas.MUTATION)
     for name, model in models.MODELS.items():
-        for field in fields(model):
+        for segment in {field.name for field in fields(model)} | set(models.CHECKBOXES) | {""}:
             body = {
                 "operation_id": "o",
                 "ops": [],
                 "guards": {},
                 "id": "c",
-                "changes": [{"path": f"{name}/a/{field.name}", "value": True}],
+                "changes": [{"path": f"{name}/a/{segment}", "value": True}],
             }
-            assert validator.is_valid(body) is (field.name in models.checkboxes(model)), (name, field.name)
+            assert validator.is_valid(body) is (segment in models.checkboxes(model)), (name, segment)
+    assert not validator.is_valid({**body, "changes": [{"path": "sources/a/done", "value": True}]})
+    monkeypatch.setattr(models, "MODELS", {"notes": models.Note, "plans": models.Plan})
+    assert schemas.checkbox_path() == "^((plans)/[^/]+/(out_of_scope))$"
 
 
 def test_storage_rows_derive_their_tables_from_the_models():

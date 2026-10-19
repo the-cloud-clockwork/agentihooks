@@ -9,8 +9,8 @@ from .errors import APIError
 def checkbox_path() -> str:
     groups = {}
     for name, model in models.MODELS.items():
-        if models.checkboxes(model):
-            groups.setdefault(models.checkboxes(model), []).append(name)
+        if boxes := models.checkboxes(model):
+            groups.setdefault(boxes, []).append(name)
     paths = (f"({'|'.join(names)})/[^/]+/({'|'.join(boxes)})" for boxes, names in groups.items())
     return f"^({'|'.join(paths)})$"
 

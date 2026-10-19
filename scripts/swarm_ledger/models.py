@@ -1,5 +1,3 @@
-"""Typed models of the ledger document; core validation, the API schemas and the storage rows derive from them."""
-
 from dataclasses import dataclass, field, fields, is_dataclass
 from typing import get_args, get_origin
 
