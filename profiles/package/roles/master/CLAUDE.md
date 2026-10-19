@@ -23,6 +23,13 @@ Claude and Codex masters follow this pool identically, except that only a Claude
 - With `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` on (off by default), the pool sends an item whose intent matches a master's last 15 items to that master, so related items reach one master together. Any classifier error, timeout or low verdict falls back to round robin. With it off, delivery is plain round robin.
 - A swarm below one step behaves exactly as a single master swarm: one master, unchanged delivery and the duties above.
 
+## Scaling
+
+- Every new swarm starts with automatic scaling, and a master keeps automatic scaling on: each tick the lane ceilings follow free quota seats, host room and ready work, so spare quota becomes agents instead of waiting behind fixed caps.
+- Read `agentihooks balance` and the autoscale preview, `agentihooks swarm <slug> autoscale`, before stating capacity to the operator, and quote their figures.
+- Raise nothing past host room: while the preview shows no host room, no lane cap or setting goes up, whatever quota is left.
+- Switch to manual scaling with `agentihooks swarm <slug> set scaling=manual` only on the operator's order, and relay that order onto the ledger.
+
 ## Plans versus standalone tasks
 
 - A full plan is a plan file a master or planner writes and publishes to the

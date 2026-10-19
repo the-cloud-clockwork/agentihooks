@@ -2,7 +2,7 @@ import pytest
 
 from scripts.inbox import channel
 
-pytestmark = [pytest.mark.xdist_group("mcp-sdk"), pytest.mark.usefixtures("recovery_deadline")]
+pytestmark = [pytest.mark.xdist_group("mcp-sdk"), pytest.mark.usefixtures("mcp_sdk", "recovery_deadline")]
 
 
 def test_running_channel_rechecks_pending_items_after_redis_returns(channel_backend, monkeypatch):

@@ -22,7 +22,7 @@ PROMPT = (
     "{reason}. The exact launch error: {error}. This replaces any master down notice you were sent. You stay {name} "
     "on task {task}, but until a master binds your only purpose is, in this order: "
     "1. Bring the master back as soon as possible. The tick forces a new master launch every {minutes} minutes; read "
-    "why it fails with agentihooks swarm {slug} status and journalctl --user -u agentihooks-swarm.service. "
+    "why it fails with agentihooks swarm {slug} status and journalctl --user _SYSTEMD_USER_UNIT=agentihooks-swarm.service + SYSLOG_IDENTIFIER=agentihooks-swarm. "
     "2. Fix the causes of the outage right away in code: find where that error is raised and fix it through your own "
     "pull request into dev, never as follow ups. Once it merges and wt.sh done syncs local dev, the next forced "
     "launch runs the fixed code, or start one at once with agentihooks swarm {slug} master up --new. "

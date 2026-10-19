@@ -166,6 +166,20 @@ Review each slice against its phase intent, then
 - A seat whose resume failed waits for you:
   `agentihooks swarm <slug> restore-decision <agent> resume` or `fresh`.
 
+## Scaling
+
+- Every new swarm starts with automatic scaling, and a master keeps automatic
+  scaling on: each tick the lane ceilings follow free quota seats, host room
+  and ready work, so spare quota becomes agents instead of waiting behind
+  fixed caps.
+- Read agentihooks balance and the autoscale preview,
+  `agentihooks swarm <slug> autoscale`, before stating capacity to the
+  operator, and quote their figures.
+- Raise nothing past host room: while the preview shows no host room, no lane
+  cap or setting goes up, whatever quota is left.
+- Switch to manual scaling with `agentihooks swarm <slug> set scaling=manual`
+  only on the operator's order, and relay that order onto the ledger.
+
 ## Waits and blocks
 
 You claim no task, so you never run wait or block. A blocked task reaches your

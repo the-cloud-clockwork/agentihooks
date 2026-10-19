@@ -146,6 +146,7 @@ def test_a_desktop_extension_browser_server_is_left_out_of_the_worker_home(
     from scripts.profiles import browser
 
     monkeypatch.setattr(browser, "enabled", lambda chain: browser_role)
+    monkeypatch.setattr(browser, "proxy_enabled", lambda chain: browser_role)
     monkeypatch.setattr(browser, "spec", lambda: {"command": "python", "args": ["-m", "scripts.profiles.browser"]})
     templates, volume = fixture
     mcp = templates / "fixture-claude" / ".mcp.json"

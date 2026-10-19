@@ -1168,6 +1168,12 @@ def reloading(environ=os.environ) -> bool:
     return environ.get("SWARM_RELOAD") == "1"
 
 
+def scheduled_wait(interval: float) -> None:
+    from scripts.scheduler.process_timer import wait
+
+    wait(interval)
+
+
 def watch_ledgers(interval=2.0):
     started = code_stamp()
     reload = reloading()
@@ -1189,7 +1195,7 @@ def watch_ledgers(interval=2.0):
                 sys.stderr.write(f"unrelayed replay: {exc}\n")
         sample_streams()
         metrics_journal(request_metrics.persist)
-        time.sleep(interval)
+        scheduled_wait(interval)
 
 
 def serve():
