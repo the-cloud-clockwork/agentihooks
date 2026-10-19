@@ -157,10 +157,12 @@ def test_the_api_writes_the_layout_through_the_ledger_service_for_an_allowed_ori
     calls = []
     services = fake_services(calls)
     services.ledger.layout_rows = {"main": ("left",)}
+    services.ledger.layout_lists = ("columns",)
     services.ledger.write_layout = lambda sizes: calls.append(("layout", sizes)) or sizes
-    status, body = served(services, "PUT", "/api/v1/layout", {"main": {"left": 3}}, origin="o")
-    assert (status, body["data"]) == (200, {"main": {"left": 3}})
-    assert calls == [("layout", {"main": {"left": 3}})]
+    sizes = {"main": {"left": 3}, "columns": {"tasks": [120]}}
+    status, body = served(services, "PUT", "/api/v1/layout", sizes, origin="o")
+    assert (status, body["data"]) == (200, sizes)
+    assert calls == [("layout", sizes)]
 
 
 def test_a_controller_credential_reads_a_ledger_without_a_page_credential():
