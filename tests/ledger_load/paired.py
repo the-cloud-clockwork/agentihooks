@@ -18,7 +18,7 @@ def graded_measure(log: str) -> dict | None:
 
 
 def pair_ratios(pairs: list[tuple[dict, dict]], key: str) -> list[float]:
-    return [head[key] / base[key] for base, head in pairs if base[key] is not None and head[key] is not None]
+    return [head[key] / base[key] for base, head in pairs if base[key] and head[key] is not None]
 
 
 def same_code_bound(runs: list[list[tuple[dict, dict]]]) -> float:
@@ -48,7 +48,7 @@ def regressions(pairs: list[tuple[dict | None, dict | None]], margin: float) -> 
             f"{label} was not measured on the {side} run of pair {number}"
             for number, pair in enumerate(pairs, 1)
             for side, run in zip(SIDES, pair)
-            if run[key] is None
+            if run[key] is None or side == "base" and not run[key]
         ]
         if unmeasured:
             problems += unmeasured

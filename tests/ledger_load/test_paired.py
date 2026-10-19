@@ -43,6 +43,9 @@ def test_a_pair_missing_its_run_is_named():
     assert paired.regressions([(None, BASE), (BASE, BASE)], 1.5) == ["the base run of pair 1 printed no load measure"]
     assert paired.regressions([(BASE, None)], 1.5) == ["the head run of pair 1 printed no load measure"]
     assert paired.regressions([], 1.5) == ["no paired runs were given"]
+    assert paired.regressions([({**BASE, "busiest_cores": 0.0}, BASE)], 1.5) == [
+        "busiest CPU window was not measured on the base run of pair 1"
+    ]
 
 
 def test_the_same_code_bound_is_the_widest_single_pair_ratio_in_either_direction():
