@@ -13,7 +13,6 @@ let outlinePick = null;
 
 let outlineFrame = 0;
 let outlineObserver = null;
-let outlineHeight = 0;
 const outlineTargets = new Map();
 const outlinePositions = new WeakMap();
 let markedCurrent = null;
@@ -121,7 +120,7 @@ export function renderOutline() {
     nav.replaceChildren(h("div", { class: "ol-tools" }, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } })),
       h("ul", {}, ...tree.map(outlineGroup)));
   }
-  requestAnimationFrame(() => setTimeout(markOutline, 0));
+  scheduleOutline();
   markPending();
 }
 
@@ -135,19 +134,13 @@ function markPending() {
 }
 
 function observeOutline(links) {
-  if (outlineObserver && outlineHeight !== innerHeight) {
-    outlineObserver.disconnect();
-    outlineTargets.clear();
-    outlineObserver = null;
-  }
-  outlineHeight = innerHeight;
   if (!outlineObserver) outlineObserver = new IntersectionObserver((entries) => {
     for (const entry of entries) outlinePositions.set(entry.target, {
       passed: entry.boundingClientRect.top <= 120,
       visible: !!(entry.boundingClientRect.width || entry.boundingClientRect.height),
     });
     markOutline();
-  }, { rootMargin: `-119px 0px -${Math.max(0, innerHeight - 120)}px 0px` });
+  });
   const targets = new Map();
   for (const link of links) {
     const id = link.dataset.target;
@@ -162,6 +155,16 @@ function observeOutline(links) {
     outlineTargets.set(id, target);
     outlineObserver.observe(target);
   }
+}
+
+function scheduleOutline() {
+  if (outlineFrame) return;
+  outlineFrame = requestAnimationFrame(() => setTimeout(() => {
+    outlineFrame = 0;
+    if (outlineObserver) outlineObserver.disconnect();
+    outlineTargets.clear();
+    markOutline();
+  }, 0));
 }
 
 export function markOutline() {
@@ -197,7 +200,8 @@ export function showOutline(open) {
 
 export function wireOutline() {
   $("outline-toggle").addEventListener("click", () => showOutline(!$("outline").classList.contains("open")));
-  document.querySelector(".col").addEventListener("toggle", () => setTimeout(markOutline, 0), true);
+  document.querySelector(".col").addEventListener("toggle", scheduleOutline, true);
+  document.addEventListener("scroll", (ev) => { if (ev.target !== $("outline")) scheduleOutline(); }, { capture: true, passive: true });
   $("outline").addEventListener("click", (ev) => {
     const a = ev.target.closest("a[data-target]");
     const el = a && revealTarget(a.dataset.target);
@@ -210,7 +214,5 @@ export function wireOutline() {
   });
   const userScroll = () => { outlinePick = null; };
   for (const ev of ["wheel", "touchstart", "keydown"]) window.addEventListener(ev, userScroll, { passive: true });
-  for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => {
-    if (!outlineFrame) outlineFrame = requestAnimationFrame(() => { outlineFrame = 0; markOutline(); });
-  }, { passive: true });
+  for (const ev of ["scroll", "resize"]) window.addEventListener(ev, scheduleOutline, { passive: true });
 }
