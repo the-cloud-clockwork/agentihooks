@@ -669,3 +669,91 @@ def test_a_fixer_stays_in_the_ci_lane_while_quota_capacity_gives_it_seats(store)
     ledger = Ledger()
     refresh(store, ledger, gh([RED], JOBS))
     assert {fields["lane"] for _, fields, _ in ledger.added} == {"ci"}
+
+
+DOWNLOAD = [
+    "Failed to resolve action download info.",
+    "Resource temporarily unavailable (launch.actions.githubusercontent.com:443)",
+]
+RAN = [{"name": "Set up job", "conclusion": "success"}, {"name": "Run tests", "conclusion": "success"}]
+
+
+def outage_run(found, run_id=900):
+    jobs = [
+        {
+            "name": name,
+            "conclusion": "failure",
+            "check_run_url": f"https://api.github.com/check-runs/{n}",
+            "steps": steps,
+        }
+        for n, (name, steps, _) in enumerate(found)
+    ]
+    messages = {f"https://api.github.com/check-runs/{n}": m for n, (_, _, m) in enumerate(found)}
+
+    def run(argv, **kwargs):
+        if "/annotations" in argv[2]:
+            body = [
+                {"annotation_level": "failure", "message": m}
+                for m in ["Process completed with exit code 1.", *messages[argv[2].split("/annotations")[0]]]
+            ]
+        elif "/jobs" in argv[2]:
+            body = [*jobs, {"name": "Gate — Required", "conclusion": "failure"}]
+        else:
+            body = [{**RED, "id": run_id}]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+def test_a_run_whose_failed_jobs_all_lost_their_runner_files_one_outage_task(store):
+    ledger = Ledger()
+    found = [(f"unit (3.11, {n})", RAN, DOWNLOAD) for n in range(1, 18)]
+    actions = refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    _, fields, _ = ledger.added[0]
+    assert (fields["task"], fields["kind"], fields["rank"]) == ("promo-900-0", "ci", "urgent")
+    assert "https://github.com/o/r/actions/runs/900" in fields["description"]
+    assert "unit (3.11, 1), unit (3.11, 2)" in fields["description"]
+    assert "Failed to resolve action download info" in fields["description"]
+    assert len(ledger.raised) == 1
+    assert "runner outage" in ledger.raised[0][2]
+    assert actions[0] == "filed promo-900-0 for the failed dev job runner outage"
+
+
+@pytest.mark.parametrize(
+    ("steps", "messages"),
+    [
+        ([{"name": "Set up job", "conclusion": "failure"}], ["Failed to download archive after 3 attempts."]),
+        ([*RAN[:1], {"name": "Run tests", "conclusion": "skipped"}], ["Unable to download artifact(s)"]),
+        (RAN, ["The self-hosted runner: anton-x lost communication with the server."]),
+        (RAN, ["The operation was canceled."]),
+    ],
+)
+def test_each_runner_infrastructure_signature_is_an_outage(store, steps, messages):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("unit (3.12, 1)", steps, messages), ("unit (3.12, 2)", RAN, DOWNLOAD)]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+
+
+def test_a_real_failure_beside_an_outage_files_the_outage_task_and_its_own_fixer(store):
+    ledger = Ledger()
+    found = [
+        ("unit (3.11, 1)", RAN, DOWNLOAD),
+        ("unit (3.11, 2)", RAN, DOWNLOAD),
+        ("unit (3.12, 3)", [*RAN[:1], {"name": "Run tests", "conclusion": "failure"}], ["1 failed, 900 passed"]),
+    ]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: unit (3.12, 3)",
+    ]
+    assert len(ledger.raised) == 1
+
+
+def test_an_open_outage_task_holds_a_later_outage_and_a_green_run_closes_it(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("unit (3.11, 1)", RAN, DOWNLOAD)]))
+    refresh(store, ledger, outage_run([("unit (3.12, 4)", RAN, ["The operation was canceled."])], 902), NOW * 2)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+    refresh(store, ledger, gh([{**GREEN, "id": 903}]), NOW * 3)
+    assert ledger.tasks[0]["state"] == "done"
