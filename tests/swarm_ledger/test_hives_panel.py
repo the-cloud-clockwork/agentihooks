@@ -94,6 +94,13 @@ def wait_for(page, check):
         page.tab.wait_for_timeout(100)
 
 
+def save(page, hive_id, field, edit):
+    box = page.tab.locator(f'#hive-{hive_id} [data-hive-field="{field}"]')
+    shown = box.element_handle()
+    edit(box)
+    page.tab.wait_for_function("box => !box.isConnected", arg=shown)
+
+
 def test_each_hive_shows_liveness_tags_roles_prefer_max_agents_slots_and_master(hives_page):
     page = hives_page()
     rows = page.table("swarm-hives")
@@ -144,16 +151,9 @@ def test_editing_max_agents_writes_it_as_the_operator(hives_page):
 
 def test_roles_prefer_and_flags_are_sent_in_their_api_shape(hives_page):
     page = hives_page()
-    roles = page.tab.locator('#hive-pod [data-hive-field="roles"]')
-    roles.fill("eng, ci,plan")
-    roles.press("Enter")
-    wait_for(page, lambda: len(page.patches) == 1)
-    prefer = page.tab.locator('#hive-pod [data-hive-field="prefer"]')
-    prefer.fill("eng:2,plan:1")
-    prefer.press("Enter")
-    wait_for(page, lambda: len(page.patches) == 2)
-    page.tab.locator('#hive-lab [data-hive-field="ephemeral"]').select_option("no")
-    wait_for(page, lambda: len(page.patches) == 3)
+    save(page, "pod", "roles", lambda box: (box.fill("eng, ci,plan"), box.press("Enter")))
+    save(page, "pod", "prefer", lambda box: (box.fill("eng:2,plan:1"), box.press("Enter")))
+    save(page, "lab", "ephemeral", lambda box: box.select_option("no"))
     assert [(hive_id, body) for hive_id, body, _, _ in page.patches] == [
         ("pod", {"roles": ["eng", "ci", "plan"]}),
         ("pod", {"prefer": {"eng": 2, "plan": 1}}),
