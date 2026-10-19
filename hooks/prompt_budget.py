@@ -78,8 +78,9 @@ class PromptBudget:
             self._disarm()
             return result
         except Spent as cut:
-            if isinstance(cut.__context__, self.keep):
-                raise cut.__context__ from None
+            kept = self._kept(cut)
+            if kept is not None:
+                raise kept from None
             self.spent = True
             self.cut = name
             return None
@@ -99,8 +100,9 @@ class PromptBudget:
                 watchdog.start()
             yield self
         except Spent as cut:
-            if isinstance(cut.__context__, self.keep):
-                raise cut.__context__ from None
+            kept = self._kept(cut)
+            if kept is not None:
+                raise kept from None
             self.spent = True
         finally:
             self._settle()
@@ -132,6 +134,12 @@ class PromptBudget:
             return _UNSET
         self._installed = True
         return (signal.SIG_DFL if previous is None else previous, signal.getitimer(signal.ITIMER_REAL))
+
+    def _kept(self, cut: Spent) -> BaseException | None:
+        error = cut.__context__
+        while error is not None and not isinstance(error, self.keep):
+            error = error.__context__
+        return error
 
     def _settle(self) -> None:
         try:

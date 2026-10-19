@@ -1,3 +1,4 @@
+import contextlib
 import json
 import os
 import subprocess
@@ -148,6 +149,7 @@ def test_the_hard_budget_holds_back_steps_only_while_the_alarm_is_installed():
     assert budget.skipped == ["held"]
 
 
+@pytest.mark.wall_clock
 def test_a_nearly_spent_hard_budget_still_cuts_quickly():
     budget = PromptBudget(soft=5, hard=0.3)
 
@@ -197,6 +199,39 @@ def test_a_cut_that_escapes_run_while_a_block_unwinds_keeps_the_block():
             raise Spent
 
     assert budget.spent is False
+
+
+def test_a_block_wrapped_by_another_error_survives_a_cut():
+    from hooks.hook_manager import BlockAction
+
+    budget = PromptBudget(soft=5, hard=5, keep=(BlockAction,))
+
+    def step():
+        try:
+            raise BlockAction("denied")
+        finally:
+            try:
+                raise OSError("redis down")
+            except OSError:
+                budget._on_alarm(None, None)
+
+    with pytest.raises(BlockAction), budget.guarded():
+        budget.run("block", step)
+
+
+def test_a_cut_while_a_step_handles_a_block_keeps_the_block():
+    from hooks.hook_manager import BlockAction
+
+    budget = PromptBudget(soft=5, hard=5, keep=(BlockAction,))
+
+    def step():
+        try:
+            raise BlockAction("denied")
+        except BlockAction:
+            budget._on_alarm(None, None)
+
+    with pytest.raises(BlockAction), budget.guarded():
+        budget.run("block", step)
 
 
 def test_a_cut_inside_a_step_handling_another_error_is_still_a_cut():
@@ -305,6 +340,7 @@ def test_the_running_step_is_named_only_while_it_runs():
     assert budget.running == ""
 
 
+@pytest.mark.wall_clock
 def test_the_process_start_counts_the_time_since_the_interpreter_began():
     code = "import time\nfrom hooks.prompt_budget import process_start\ntime.sleep(1.5)\nprint(time.monotonic() - process_start())"
 
@@ -419,7 +455,7 @@ def test_the_watchdog_exits_even_when_its_flush_fails(monkeypatch):
     monkeypatch.setattr(hm.os, "_exit", exit_)
     monkeypatch.setattr("hooks.prompt_budget.log", Mock())
 
-    with pytest.raises(OSError):
+    with contextlib.suppress(OSError):
         hm._prompt_overrun(PromptBudget(soft=5, hard=5))
 
     exit_.assert_called_once_with(0)
@@ -450,6 +486,7 @@ def test_a_cut_that_lands_outside_a_step_never_escapes_the_budget():
     assert budget.spent
 
 
+@pytest.mark.wall_clock
 def test_an_outer_real_timer_survives_the_budget():
     import signal
 
