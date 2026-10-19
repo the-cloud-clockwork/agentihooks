@@ -15,7 +15,7 @@ from scripts.swarm_v2.kubernetes.spec import pod_name
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from scripts.swarm_v2.runtime import observe
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "control-fixture"
 SECRET = b"k" * 32

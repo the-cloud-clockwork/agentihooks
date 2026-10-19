@@ -18,8 +18,6 @@ from scripts.hive import auth, cli, server
 from scripts.swarm import store
 from scripts.swarm.keyspace import ROOT
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PUBLIC = "redis://hive.example:6380/2"
 
 

@@ -4,7 +4,7 @@ import pytest
 
 from hooks.context import operator_mode
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -107,8 +107,7 @@ def test_expiry_retries_after_accepted_delivery_do_not_duplicate_the_notice(cloc
 
     operator_mode.observe("pane", "operator on", True, now=100)
     monkeypatch.setattr(InboxSlot, "deliver", accepted_before_crash)
-    with pytest.raises(RuntimeError, match="lost response"):
-        clocked_scheduler.run_due(now=400)
+    assert clocked_scheduler.run_due(now=400) == 1
     assert not operator_mode.present("pane", now=400)
     monkeypatch.setattr(InboxSlot, "deliver", deliver)
     assert clocked_scheduler.run_due(now=401) == 0

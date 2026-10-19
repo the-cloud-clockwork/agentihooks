@@ -12,8 +12,6 @@ from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 MINUTE = 60_000

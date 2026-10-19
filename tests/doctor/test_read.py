@@ -7,8 +7,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.store import RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 
 

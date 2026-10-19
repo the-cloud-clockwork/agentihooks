@@ -8,7 +8,7 @@ from scripts.swarm import delivery, idle
 from scripts.swarm.rename import _move_agent
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

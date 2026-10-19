@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.mark.parametrize("channel", [None, "scheduler-proof"])
@@ -24,8 +24,7 @@ def test_timer_broadcast_is_delivered_once_after_crash_and_clear(monkeypatch, ch
 
     with monkeypatch.context() as fault:
         fault.setattr(BroadcastSlot, "deliver", crash_after_publish)
-        with pytest.raises(RuntimeError, match="^runner died after transport accepted$"):
-            scheduler.run_due(now=100)
+        assert scheduler.run_due(now=100) == 1
     messages = broadcast.list_broadcasts()
     assert len(messages) == 1
     assert messages[0]["message"] == "fleet notice"
@@ -76,8 +75,7 @@ def test_scheduled_broadcast_retains_delivery_and_normal_broadcasts(monkeypatch)
 
     with monkeypatch.context() as fault:
         fault.setattr(BroadcastSlot, "deliver", crash)
-        with pytest.raises(RuntimeError, match="^crash$"):
-            scheduler.run_due(now=100)
+        assert scheduler.run_due(now=100) == 1
     scheduled = broadcast.list_broadcasts()[0]
     broadcast.mark_delivered("proof-session", scheduled["id"])
     broadcast.create_broadcast("ordinary")
@@ -108,8 +106,7 @@ def test_broadcast_recovers_a_crash_between_fire_and_publication(monkeypatch):
 
     with monkeypatch.context() as fault:
         fault.setattr(scheduled_broadcasts, "publish", crash)
-        with pytest.raises(RuntimeError, match="^crash before publication$"):
-            scheduler.run_due(now=101)
+        assert scheduler.run_due(now=101) == 1
     assert broadcast.list_broadcasts() == []
     restarted = Scheduler(redis, machine="proof")
     assert restarted.run_due(now=120) == 0

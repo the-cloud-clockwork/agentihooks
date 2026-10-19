@@ -7,7 +7,7 @@ import ledger_media
 from hooks.context import operator_words
 from scripts.swarm_ledger import request_metrics
 
-from .sqlite import BEGIN_IMMEDIATE, read_registry
+from .sqlite import BEGIN_IMMEDIATE
 
 
 def _repository():
@@ -29,7 +29,9 @@ def _transaction():
 
 
 def _registry(name):
-    return read_registry(_repository().directory, name)
+    from scripts.swarm_ledger import storage
+
+    return storage.read_registry(_repository().directory, name)
 
 
 def restored():

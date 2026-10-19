@@ -8,7 +8,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import SpawnError, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 DOC = "# Handoff v2\n## Next\nCheck the saved proof and verify it passed.\n## Read first\nNone\n"
 
 

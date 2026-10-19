@@ -131,7 +131,8 @@ class OnePush:
     def decide(self, call, who, state):
         if not (who.pinned and who.task) or lane_of(who.name) not in WORKERS:
             return Decision()
-        for kind, where, args in actions(call.command, call.cwd):
+        cwd = Path(call.cwd) / Path(call.tool_input.get("workdir") or "").expanduser()
+        for kind, where, args in actions(call.command, cwd):
             reason = self.opening(who, state, where) if kind == "open" else self.pushing(who, where, args)
             if reason:
                 return Decision.deny(reason)

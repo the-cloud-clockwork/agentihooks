@@ -6,8 +6,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import idle, stale_nudge
 from scripts.swarm.store import AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 LIMIT = stale_nudge.LIMIT_MS
 NAME = "engineer@a1b2c3-0001"
 BASE = 1_000 * LIMIT

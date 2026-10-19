@@ -10,7 +10,7 @@ import yaml
 
 from scripts import ci_select
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 WORKFLOW = Path(__file__).parents[1] / ".github/workflows/test.yml"
 EXPRESSION = re.compile(r"\$\{\{\s*([\w.]+)\s*\}\}")

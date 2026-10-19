@@ -10,8 +10,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import STARTUP_GRACE_MS, tick
 from tests.test_worktree_skill import WtBase
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PREDECESSOR = "engineer@a1b2c3-0001"
 SUCCESSOR = "engineer@a1b2c3-0002"
 CONTINUED = {

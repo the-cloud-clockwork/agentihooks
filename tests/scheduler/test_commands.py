@@ -3,7 +3,7 @@ import pytest
 from scripts.scheduler import commands
 from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, restore
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 OWNER = "engineer@323133-1958"
 
@@ -200,8 +200,7 @@ def test_a_timer_whose_delivery_is_in_flight_stays_listed(scheduler, monkeypatch
         raise RuntimeError("delivery lost")
 
     monkeypatch.setattr(InboxSlot, "deliver", lost)
-    with pytest.raises(RuntimeError, match="^delivery lost$"):
-        scheduler.run_due(now=120)
+    assert scheduler.run_due(now=120) == 1
     assert [(view["id"], view["state"]) for view in commands.entries(scheduler, "timer")] == [
         (soon["id"], "pending"),
         (late["id"], "active"),

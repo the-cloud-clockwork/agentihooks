@@ -8,8 +8,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

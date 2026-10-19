@@ -4,7 +4,7 @@ from scripts.doctor import traces, traces_read
 
 
 def _page(rows, pages):
-    return {"data": rows, "meta": {"totalPages": pages}}
+    return {"data": rows, "meta": {"totalPages": pages, "totalItems": len(rows) * pages}}
 
 
 @pytest.mark.parametrize("repeated", ["traces", "observations"])
@@ -26,7 +26,15 @@ def test_repeated_history_pages_count_each_session_and_generation_once(tmp_path,
     found, coverage, failures = traces_read.history("s", get, tmp_path, traces_read.Budget())
     record = {"now_ms": 0, "merged": ["large"], "traces": found}
     assert traces.measures(record)["tasks"] == [{"task": "large", "sessions": 1, "turns": 1, "tokens": 568388}]
-    assert coverage == {"listed": True, "traces": 1, "covered": 1, "complete": True, "unreadable": []}
+    assert coverage == {
+        "listed": True,
+        "unlisted": 0,
+        "traces": 1,
+        "covered": 1,
+        "capped": 0,
+        "complete": True,
+        "unreadable": [],
+    }
     assert failures == []
 
 
@@ -65,7 +73,8 @@ def test_old_cached_usage_is_read_again_before_task_cost_is_reported(tmp_path):
             "updated_at": "u",
             "whole": True,
             "observations": [
-                {"type": "GENERATION", "tokens": 1136776},
+                {"type": "GENERATION", "tokens": 568388},
+                {"type": "GENERATION", "tokens": 568388},
                 {"type": "SPAN", "turn": 1},
             ],
         },

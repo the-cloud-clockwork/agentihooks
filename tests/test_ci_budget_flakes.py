@@ -12,8 +12,6 @@ from scripts.swarm.notice_text import plain
 from scripts.swarm.store import PREFIX, SwarmError
 from scripts.swarm_ledger import ledger_comments
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW_MS = 1_791_700_000_000
 TEST = "tests/swarm_ledger/test_alerts_page.py::test_the_panel_fold_is_remembered_after_a_reload"
 OTHER = "tests/Inbox_Cases/test_Notify.py::TestNotify::test_Notify_Within_Budget"

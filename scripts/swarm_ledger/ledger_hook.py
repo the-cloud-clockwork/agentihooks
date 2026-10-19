@@ -281,13 +281,14 @@ HANDLERS = {"PostToolUse": on_tool, "UserPromptSubmit": on_prompt, "Stop": on_st
 def serve_ledgers():
     import ledger_link
 
-    from scripts.swarm_ledger import server_lifetime
-    from scripts.swarm_ledger.storage import DATABASE
+    from scripts.swarm_ledger import server_lifetime, storage
 
     if (
         os.environ.get("LEDGER_AUTOSTART") == "0"
         or ledger_link.remote()
-        or (not (LEDGER_DIR / DATABASE).exists() and not any(LEDGER_DIR.glob("*.json")))
+        or (
+            not storage.shared() and not (LEDGER_DIR / storage.DATABASE).exists() and not any(LEDGER_DIR.glob("*.json"))
+        )
     ):
         return
     try:

@@ -12,8 +12,6 @@ from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm_ledger import ledger_workspace
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG, ME, OTHER = "demo", "engineer@100001-0001", "engineer@100001-0002"
 MIN = 60_000
 NOW = 100 * MIN

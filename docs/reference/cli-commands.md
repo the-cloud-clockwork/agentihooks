@@ -583,6 +583,45 @@ Triggers: an `agentihooks-gc` cron on the agentihooks scheduler (`0 * * * *`) st
 
 Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in the bundle, each active profile and `~/.agentihooks/lifecycle.json`, merged by `id` (`"enabled": false` drops a root). Kinds: `worktrees`, `scratch`, `ttl` (delete idle entries), `archive` (gzip idle files matching `include`), `traces` (delete injection traces of ended sessions).
 
+### `lifecycle.json`
+
+Every layer is a JSON object with a `roots` list. Each root entry takes:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | Merge key across layers; an entry without a non-empty `id` is ignored |
+| `path` | required in the merged entry | Directory the root covers; `~` is expanded |
+| `kind` | required in the merged entry | One of the kinds above; any other value drops the root |
+| `idle_days` | `7` | Idle age before an entry is acted on |
+| `budget_gb` | `0` | `scratch` only: size above which the oldest dead dirs go |
+| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry. Dot names and the `archive` folder are always skipped |
+| `enabled` | `true` | `false` drops the root after the merge |
+
+Later layers update an earlier entry with the same `id` field by field, so an overlay names only what it changes. A personal `~/.agentihooks/lifecycle.json` that shortens the scratchpad idle time, turns off ledger archiving and adds a root of its own:
+
+```json
+{
+  "roots": [
+    {"id": "scratchpad", "idle_days": 3},
+    {"id": "ledgers", "enabled": false},
+    {"id": "build-cache", "path": "~/.cache/mybuild", "kind": "ttl", "idle_days": 2}
+  ]
+}
+```
+
+Each finding in `agentihooks gc --json` carries the `id` of the root it came from in its `root` field.
+
+A layer the reader cannot open or parse contributes no roots and the other layers still load: a missing file, a path that is a directory or cannot be read, text that is not JSON, JSON whose top level is not an object (`null`, `[]`) and an object with no `roots` all count as empty. Inside `roots`, entries that are not objects or have no `id` are skipped. Nothing reports a skipped layer or entry, so a broken overlay leaves the other layers' roots in force without a warning.
+
+Field types are not checked. These shapes raise out of the reader, which stops `agentihooks gc` with the error; on PreToolUse the lifecycle guard logs `lifecycle pre-tool failed` and lets the call through without recording a lease or blocking a path gc is removing:
+
+- A file that is not valid UTF-8.
+- `roots` set to `null` or a number; it must be a list.
+- `path` set to a number, or `kind` set to a list or object.
+- `include` set to `null`. `include` must be a list of strings: a bare string such as `"*.json"` is read as one pattern per character.
+
+`idle_days` and `budget_gb` must be numbers: a string loads without error, and the sweep can fail later when it computes an entry's age limit or the scratch size budget from it.
+
 ---
 
 ## `agentihooks refresh-rules`
