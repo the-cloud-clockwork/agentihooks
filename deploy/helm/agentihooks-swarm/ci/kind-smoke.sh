@@ -961,5 +961,6 @@ fi
 printf 'the controller start pass reached the herdr client and refused nothing\n'
 wait "$terminal"
 bash "$chart/ci/terminal-attach-proof.sh" "$terminal_image" "$release" "$slug"
+bash "$chart/ci/startup-refusal-proof.sh" "$image" "$release" "$slug"
 wait "$route"
 printf 'Helm chart kind proof passed\n'

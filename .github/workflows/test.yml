@@ -1155,6 +1155,7 @@ jobs:
       - name: Keep the reused tests' dev coverage
         if: *reused-coverage
         env:
+          ARTIFACT: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           COMMIT: ${{ needs.split.outputs.commit }}
           GRADER: ${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
         run: |
@@ -1259,6 +1260,13 @@ jobs:
           path: flakes.jsonl
           if-no-files-found: error
           retention-days: 14
+
+      - name: Check the coverage database
+        if: matrix.python-version == '3.12'
+        run: |
+          databases=(.coverage)
+          if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+          python -m tests.coverage_check "${databases[@]}"
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'

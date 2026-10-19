@@ -60,6 +60,9 @@ class ApiServer(kub02.ApiServer):
     def read(self, kind: str, name: str) -> dict | None:
         return copy.deepcopy((self.objects if kind == "pods" else self.services).get(name))
 
+    def pod_logs(self, name: str, container: str) -> str:
+        return self.objects[name].get("logs", {}).get(container, "")
+
     def delete(self, kind: str, name: str, uid: str) -> bool:
         self.deletes.append((kind, name, uid))
         table = self.objects if kind == "pods" else self.services
