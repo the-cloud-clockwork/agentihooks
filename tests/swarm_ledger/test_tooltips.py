@@ -24,6 +24,7 @@ sys.path.insert(0, str(LEDGER))
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
 
 URL = "http://ledger.test/tips"
 CONTROLS = 'button, [role="tab"], [role="button"], [role="switch"], a.sync, a.fab'
@@ -353,7 +354,7 @@ def test_the_page_version_follows_the_tip_module(tmp_path):
     before = core.page_version()
     changed = tmp_path / "tooltips.js"
     changed.write_text(core.TOOLTIPS.read_text() + ";")
-    with patch.object(core, "TOOLTIPS", changed):
+    with patch.object(page_assets, "TOOLTIPS", changed):
         after = core.page_version()
     assert re.fullmatch(r"[0-9a-f]{12}", before)
     assert after != before

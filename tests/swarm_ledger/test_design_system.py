@@ -12,6 +12,7 @@ sys.path.insert(0, str(SCRIPTS))
 import ledger_core as core  # noqa: E402
 import ledger_server as server  # noqa: E402
 
+from scripts.swarm_ledger import page_assets  # noqa: E402
 from tests.swarm_ledger.ledger_page import page_source  # noqa: E402
 from tests.swarm_ledger.test_swarm_layout import NOW_MS, browser, open_page, status  # noqa: E402, F401
 
@@ -89,7 +90,7 @@ class PaletteReachesEveryPage(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             edited = Path(tmp) / "palette.css"
             edited.write_text(palette().replace("--accent:", "--accent: var(--red-500); --was:"), encoding="utf-8")
-            with mock.patch.object(core, "PALETTE", edited):
+            with mock.patch.object(page_assets, "PALETTE", edited):
                 self.assertNotEqual(core.page_version(), before)
 
 

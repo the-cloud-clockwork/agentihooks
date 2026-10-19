@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 
 from scripts.swarm_ledger import ledger_core as core  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
+from scripts.swarm_ledger import page_assets  # noqa: E402
 from tests.swarm_ledger.ledger_page import ORDER, page_source  # noqa: E402
 
 MODULES = core.MODULES
@@ -102,7 +103,7 @@ def test_a_module_edit_changes_the_page_version(tmp_path):
     for path in MODULES.glob("*.js"):
         (tmp_path / path.name).write_text(path.read_text())
     (tmp_path / "chat.js").write_text((tmp_path / "chat.js").read_text() + ";")
-    with patch.object(core, "MODULES", tmp_path):
+    with patch.object(page_assets, "MODULES", tmp_path):
         assert core.page_version() != before
 
 
@@ -134,7 +135,7 @@ def test_a_version_url_serves_the_bytes_its_version_was_computed_from(base, tmp_
         (tmp_path / path.name).write_text(path.read_text())
     (tmp_path / "chat.js").write_text(original + ";")
     try:
-        with patch.object(core, "MODULES", tmp_path):
+        with patch.object(page_assets, "MODULES", tmp_path):
             served = get(f"{base}/static/{version}/js/chat.js")
     finally:
         server.served_page.cache_clear()
