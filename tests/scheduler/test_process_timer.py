@@ -195,7 +195,7 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     assert not redis.exists(timers[0].key)
 
 
-def test_host_scheduler_keys_remain_unchanged_without_member_identity(redis, monkeypatch):
+def test_controller_namespace_changes_only_in_hosted_mode(redis, monkeypatch):
     from hooks._redis import redis_key
     from scripts.swarm.keyspace import ROOT
 
