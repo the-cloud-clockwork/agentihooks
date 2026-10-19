@@ -229,6 +229,7 @@ def order_for(setup, request, selected):
         "prompt",
         setup.held.epoch,
         0,
+        selected.hive,
     )
 
 
@@ -433,8 +434,8 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     _, order, ack = live_order(setup, route)
-    live = setup.store.execution_registry.get("fixture", order.execution_id)
     result = setup.launcher.complete(order, ack)
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
     assert result == Outcome(
         "spawn",
         Status.OK,
@@ -463,11 +464,12 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     live = setup.store.execution_registry.get("fixture", order.execution_id)
     current = setup.store.execution_occupants("fixture")
     if bad == "target":
+        setup.launcher.complete(order, ack)
         ack = replace(ack, target={**ack.target, "pid": 99})
     elif bad == "generation":
         order = replace(order, generation=order.generation + 1)
     elif bad == "state":
-        setup.store.execution_registry.update("fixture", replace(live, state="launching"))
+        setup.store.execution_registry.update("fixture", replace(live, state="suspect"))
     elif bad == "missing occupant":
         current = {}
     else:

@@ -51,6 +51,7 @@ def setup():
         "prompt",
         held.epoch,
         lease.now_ms(store) + 60000,
+        "host",
     )
     placed = Placed(
         "pane",
@@ -85,15 +86,14 @@ def test_order_ack_and_live_execution(setup):
     assert ack.status == "live"
     assert ack.failure == ""
     assert ack.target == {"host_id": "host", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
-    live = setup.store.execution("fixture", setup.agent.execution_id)
-    assert live.generation == setup.agent.generation
-    assert live.pane_id == "pane"
-    assert live.state == "working"
-    assert live.runtime_target == ack.target
+    assert setup.store.execution("fixture", setup.agent.execution_id) == setup.agent
     placed = setup.runtime.spawn.return_value.value
-    assert live.model == placed.model
-    assert live.effort == placed.effort
-    assert live.profile_decision == placed.profile_decision
+    assert ack.execution == {
+        "pane_id": placed.pane_id,
+        "model": placed.model,
+        "effort": placed.effort,
+        "profile_decision": placed.profile_decision,
+    }
     request = setup.runtime.spawn.call_args.args[0]
     assert request.name == setup.agent.name
     assert request.lane == "eng"
@@ -157,9 +157,15 @@ def test_crashed_launch_is_ambiguous_and_never_relaunched(setup):
 def test_wrong_host_cannot_admit_execution(setup):
     from scripts.hive.orders import Consumer
 
-    setup.orders.send("other", setup.order)
+    item = setup.orders.send("other", setup.order)
     Consumer(setup.redis, "other", setup.runtime).poll()
-    assert setup.orders.ack(setup.order).failure == "identity"
+    assert json.loads(setup.redis.hget(f"{setup.orders.stream('other')}:acks", item)) == {
+        "status": "failed",
+        "target": {},
+        "failure": "identity",
+    }
+    assert setup.orders.ack(setup.order) is None
+    assert not setup.redis.xrange(setup.orders.stream("other"))
     setup.runtime.spawn.assert_not_called()
 
 
@@ -456,8 +462,9 @@ def test_order_keys_isolate_hives_and_execution_receipts(setup):
     assert setup.orders.stream("other") != setup.orders.stream("host")
     assert setup.orders.receipt(replace(setup.order, slug="other")) != setup.orders.receipt(setup.order)
     assert setup.orders.store.redis is setup.redis
+    assert setup.orders.receipt(replace(setup.order, hive="other")) != setup.orders.receipt(setup.order)
     assert setup.orders.receipt(setup.order) == (
-        f"{setup.store.key('fixture', 'launch-orders')}:{setup.order.execution_id}:{setup.order.generation}"
+        f"{registry.key('host')}:launch-orders:fixture:{setup.order.execution_id}:{setup.order.generation}"
     )
 
 

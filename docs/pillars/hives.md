@@ -34,6 +34,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
 - The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`. It
   always serves TLS from `SWARM_TLS_DIR`.
 - Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys.
+  A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
+  records the execution as working, with the hive's process target, pane, model and effort.
   Invites and credentials sit outside what a member can read.
 - `hive install` writes and enables the `agentihooks-hive` user service, which runs `hive run` and restarts five
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
