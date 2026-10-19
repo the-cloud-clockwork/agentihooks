@@ -210,25 +210,7 @@ def test_a_changed_line_selects_only_the_tests_whose_recorded_coverage_reaches_i
     assert tests == NARROWED
 
 
-@pytest.mark.parametrize("shift", [0, 2])
-@pytest.mark.parametrize(
-    "mode",
-    [
-        "line",
-        "legacy",
-        "missing",
-        "inserted",
-        "header",
-        "parameter",
-        "drift",
-        "separate",
-        "data",
-        "module",
-        "new",
-        "deleted",
-    ],
-)
-def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
+def _line_project(tmp_path, monkeypatch, mode):
     from coverage import CoverageData
 
     from tests.dep_manifest import build
@@ -256,6 +238,10 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         data.add_lines({str(tmp_path / path): lines if path.endswith("core.py") else [2]})
     data.write()
     manifest = build(tmp_path / ".coverage", [], tmp_path, commit, "test")
+    return manifest, source
+
+
+def _line_contexts(tmp_path, manifest, mode):
     if mode == "legacy":
         del manifest["lines"]
     elif mode == "missing":
@@ -271,11 +257,37 @@ def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, m
         (tmp_path / "scripts/fresh.py").write_text("def fresh():\n    return 1\n")
     elif mode == "deleted":
         (tmp_path / "scripts/aaa.py").unlink()
+
+
+@pytest.mark.parametrize("shift", [0, 2])
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "line",
+        "legacy",
+        "missing",
+        "inserted",
+        "header",
+        "parameter",
+        "drift",
+        "separate",
+        "data",
+        "module",
+        "new",
+        "deleted",
+        "trailing",
+    ],
+)
+def test_statistics_select_only_contexts_executing_the_edited_branch(tmp_path, monkeypatch, shift, mode):
+    manifest, source = _line_project(tmp_path, monkeypatch, mode)
+    _line_contexts(tmp_path, manifest, mode)
     new = source.replace("value - 1", "value - 2")
     if mode == "drift":
         new = source.replace("value + 1", "value + 2")
     elif mode == "module":
         new += "\nSETTING = 1\n"
+    elif mode == "trailing":
+        new += "\n"
     if mode == "header":
         new = new.replace("def f(value)", "def f(value=1)")
     if mode == "inserted":
