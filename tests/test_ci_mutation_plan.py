@@ -151,7 +151,7 @@ def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp
     selected = {"sample.py": ({2}, ["tests/test_sample.py"])}
     stats = SharedStats(tmp_path / "stats", "head")
     key = stats_key(stats.head, selected)
-    results = [{"tests": {"sample.x_outer": ["fast", "slow"]}, "durations": {"fast": 2.0, "slow": 200.0}}]
+    results = [{"tests": {"sample.x_outer": ["fast", "slow"]}, "durations": {"fast": 2.0, "slow": 100.0}}]
     write_part(stats.group(0).folder / "part-0.json", key, (0, 1), results)
     traced = measured.refine_plan(tmp_path, selected, stats)["costs"]
     memory = KillMemory(stats.folder / "killers")
@@ -159,7 +159,7 @@ def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp
     memory.pytest_runtest_logreport(SimpleNamespace(failed=True, nodeid="fast"))
     killed = measured.refine_plan(tmp_path, selected, stats)["costs"]
     assert traced and set(killed) == set(traced)
-    assert list(traced.values()) == pytest.approx([5.6 + 1.25 * 202.0] * len(traced))
+    assert list(traced.values()) == pytest.approx([5.6 + 1.25 * 102.0] * len(traced))
     assert list(killed.values()) == pytest.approx([8.1] * len(killed))
 
 
