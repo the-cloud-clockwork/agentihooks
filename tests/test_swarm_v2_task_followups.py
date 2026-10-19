@@ -62,12 +62,14 @@ def test_a_malformed_task_is_refused(task):
     assert str(error.value) == "task needs a task id of up to 128 letters, digits, dots, underscores or hyphens"
 
 
-def test_a_task_on_a_question_is_refused():
+@pytest.mark.parametrize("listed", [{"list": "questions"}, {}])
+def test_a_task_outside_a_follow_up_is_refused(listed):
     from scripts.swarm_ledger import ledger_agent_ops
 
-    op = {"op": "add_item", "id": "q", "by": ENGINEER, "list": "questions", "text": "Which port", "task": "t2"}
-    with pytest.raises(ValueError):
+    op = {"op": "add_item", "id": "q", "by": ENGINEER, "text": "Which port", "task": "t2"} | listed
+    with pytest.raises(ValueError) as error:
         ledger_agent_ops.check(op)
+    assert str(error.value) == "task needs a task id of up to 128 letters, digits, dots, underscores or hyphens"
 
 
 def test_a_follow_up_on_a_task_belongs_to_the_tasks_owning_master(world):

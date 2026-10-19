@@ -77,7 +77,7 @@ def check_task(op):
     if op["op"] != "add_item" or "task" not in op:
         return
     task = op["task"]
-    if op["list"] != "followups" or not isinstance(task, str) or not ID_RE.fullmatch(task):
+    if op.get("list") != "followups" or not isinstance(task, str) or not ID_RE.fullmatch(task):
         raise ValueError("task needs a task id of up to 128 letters, digits, dots, underscores or hyphens")
 
 
