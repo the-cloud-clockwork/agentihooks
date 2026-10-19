@@ -48,6 +48,7 @@ def test_the_tick_starts_the_cluster_watchdog_in_the_repository_with_its_lock(sw
     ]
     assert kwargs["cwd"] == config.repo
     assert kwargs["start_new_session"] is True
+    assert kwargs["stderr"] is kwargs["stdout"]
     assert kwargs["stdout"].name == str(tmp_path / "home/lost-runner.log")
 
 
@@ -86,3 +87,9 @@ def test_a_host_without_the_agentihooks_home_starts_nothing_and_keeps_the_minute
     assert lost_runner.sweep("sw", config, store, NOW_MS, popen, kubectl) == []
     assert calls == []
     assert store.redis.get(f"{PREFIX}:lost-runner:{config.repo}") is None
+
+
+def test_the_home_defaults_to_the_agentihooks_folder_in_the_user_home(monkeypatch, tmp_path):
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert lost_runner.home() == tmp_path / ".agentihooks"

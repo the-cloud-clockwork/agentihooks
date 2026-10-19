@@ -36,33 +36,36 @@ def live_runners(org: str) -> set[str]:
 
 class ClusterRunners:
     def __init__(self, sets: set[str], pods: list[dict], nodes: list[dict], now: datetime, bound: timedelta):
-        states = {node["metadata"]["name"]: _state(node, now, bound) for node in nodes}
+        away = {node["metadata"]["name"]: _not_ready_for(node, now) for node in nodes}
         self.sets = sets
-        self.live = {pod["metadata"]["name"] for pod in pods if _alive(pod, states)}
+        self.live = {pod["metadata"]["name"] for pod in pods if _alive(pod, away, bound)}
 
     def __contains__(self, name: str) -> bool:
         return name in self.live or name.rpartition("-runner-")[0].rpartition("-")[0] not in self.sets
 
 
-def _state(node: dict, now: datetime, bound: timedelta) -> str:
+def _not_ready_for(node: dict, now: datetime) -> timedelta | None:
     ready = next((c for c in node["status"].get("conditions", []) if c["type"] == "Ready"), None)
     if not ready or ready["status"] == "True":
-        return "ready"
-    return "grace" if now - datetime.fromisoformat(ready["lastTransitionTime"]) < bound else "down"
+        return None
+    return now - datetime.fromisoformat(ready["lastTransitionTime"])
 
 
-def _alive(pod: dict, states: dict[str, str]) -> bool:
+def _alive(pod: dict, away: dict[str, timedelta | None], bound: timedelta) -> bool:
     node = pod["spec"].get("nodeName")
-    state = states.get(node, "down") if node else "ready"
     phase = pod["status"].get("phase")
     runner = [c for c in pod["status"].get("containerStatuses", []) if c["name"] == "runner"]
-    ended = phase in ("Failed", "Succeeded") or any("terminated" in c["state"] for c in runner)
-    return not ended and state != "down" and (phase != "Unknown" or state == "grace")
+    if (node and node not in away) or phase in ("Failed", "Succeeded"):
+        return False
+    if any("terminated" in c["state"] for c in runner):
+        return False
+    down_for = away.get(node)
+    return phase != "Unknown" if down_for is None else down_for < bound
 
 
 def _kubectl(*args: str) -> list[dict]:
     command = ["kubectl", "get", *args, "-o", "json"]
-    return json.loads(subprocess.run(command, check=True, capture_output=True, text=True, timeout=60).stdout)["items"]
+    return json.loads(subprocess.run(command, check=True, capture_output=True, timeout=60).stdout)["items"]
 
 
 def cluster_runners(_org: str) -> ClusterRunners:

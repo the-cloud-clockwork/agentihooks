@@ -500,6 +500,17 @@ def test_a_runner_container_that_terminated_in_a_running_pod_is_lost():
     assert "anton-oss-light-cpwxt-runner-live1" not in cluster(pods=[pod])
 
 
+@pytest.mark.parametrize("phase", ["Failed", "Succeeded"])
+def test_a_runner_pod_whose_phase_ended_is_lost_while_its_container_still_reads_running(phase):
+    pod = json.loads(json.dumps(CLUSTER["pods"][0]))
+    pod["status"]["phase"] = phase
+    assert "anton-oss-light-cpwxt-runner-live1" not in cluster(pods=[pod])
+
+
+def test_a_scale_set_whose_name_holds_the_runner_word_is_still_matched():
+    assert "arc-runner-pool-abcde-runner-x1y2z" not in cluster(pods=[], sets={"arc-runner-pool"})
+
+
 def test_a_runner_pod_missing_from_a_visible_scale_set_is_lost():
     assert "anton-oss-light-cpwxt-runner-gone1" not in cluster()
 
@@ -554,7 +565,7 @@ def test_cluster_runners_reads_runner_sets_labelled_pods_and_nodes(monkeypatch):
         ["kubectl", "get", "pods", "--all-namespaces", "-l", ci_lost_runner.SCALE_SET, "-o", "json"],
         ["kubectl", "get", "nodes", "-o", "json"],
     ]
-    assert all(kwargs["check"] and kwargs["timeout"] for _, kwargs in calls)
+    assert all(kwargs == {"check": True, "capture_output": True, "timeout": 60} for _, kwargs in calls)
     assert runners.sets == set(CLUSTER["sets"])
     assert runners.live == {"anton-oss-light-cpwxt-runner-live1"}
 
@@ -579,7 +590,7 @@ def test_a_refused_or_timed_out_cluster_read_is_an_error_never_a_loss(monkeypatc
 def test_main_in_cluster_mode_acts_on_a_fresh_loss_after_a_short_confirmation(monkeypatch, capsys, no_sleep):
     pages = {
         RUNS: [json.dumps(RUN), json.dumps(RUN), json.dumps({**RUN, "status": "completed"})],
-        JOBS: [lines({**CLUSTER["job"], "name": "queue-fail-fast", "started_at": ago(1)}, gate())] * 2,
+        JOBS: [lines({**CLUSTER["job"], "name": "queue-fail-fast", "started_at": ago(0.1)}, gate())] * 2,
     }
     api = Api(pages)
     monkeypatch.setattr(ci_lost_runner, "_api", api)
@@ -597,7 +608,7 @@ def test_main_leaves_the_run_to_a_watchdog_that_holds_the_lock(monkeypatch, caps
     api = Api({})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
     assert ci_lost_runner.main(["--repo", "o/r", "--cluster", "--lock", str(lock)]) == 0
-    assert json.loads(capsys.readouterr().out)["reason"] == "another watchdog holds the lock"
+    assert json.loads(capsys.readouterr().out) == {"action": "none", "reason": "another watchdog holds the lock"}
     assert api.calls == []
     held.close()
     again = ci_lost_runner._hold(str(lock))
