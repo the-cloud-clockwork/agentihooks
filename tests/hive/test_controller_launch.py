@@ -822,6 +822,19 @@ def test_old_controller_cannot_admit_after_lease_takeover(setup):
         setup.launcher.admit(request, selected)
 
 
+def test_old_controller_cannot_record_an_acknowledgement_after_lease_takeover(setup):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    admitted = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert lease.release(setup.store, "fixture", setup.held)
+    lease.acquire(setup.store, "fixture", "next controller")
+    with pytest.raises(SwarmError):
+        setup.launcher.record(admitted, order, ack)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
 @pytest.mark.parametrize("lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("eng", "frontend")])
 def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lane, profile):
     from scripts.hive.orders import Consumer

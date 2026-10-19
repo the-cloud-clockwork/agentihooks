@@ -275,8 +275,8 @@ class HiveLaunch:
             effort=ack.execution.get("effort", agent.effort),
             profile_decision={**decision, **kept},
         )
-        with lease.fencing(self.held.epoch):
-            self.store.execution_registry.update(self.slug, live)
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
+        self.store.execution_registry.update(self.slug, live)
         return live
 
     def end(self, agent: AgentRecord, reason: str) -> None:

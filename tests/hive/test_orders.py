@@ -578,6 +578,25 @@ def test_a_joined_hive_acknowledges_an_unknown_execution_when_redis_denies_the_c
     setup.runtime.spawn.assert_not_called()
 
 
+def test_a_refused_launch_terminates_the_placed_pane_and_process(setup):
+    placed = setup.runtime.spawn.return_value.value
+    setup.runtime.spawn.return_value = replace(setup.runtime.spawn.return_value, value=replace(placed, profile="qa"))
+    setup.orders.send("host", setup.order)
+    setup.consumer.poll()
+    stopped = setup.runtime.terminate.call_args.args[0]
+    assert stopped.runtime_target == {"host_id": "host", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    assert stopped.pane_id == "pane"
+
+
+def test_an_order_for_another_hive_does_not_hold_back_the_rest_of_the_batch(setup):
+    stray = setup.orders.send("host", replace(setup.order, hive="other"))
+    setup.orders.send("host", setup.order)
+    assert setup.consumer.poll() == 2
+    assert json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", stray))["failure"] == "identity"
+    assert setup.orders.ack(setup.order).status == "live"
+    assert not setup.redis.xrange(setup.orders.stream("host"))
+
+
 @pytest.mark.parametrize(
     "agent_model,agent_effort,lane_model,expected_model,expected_effort",
     [
