@@ -168,7 +168,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
     monkeypatch.setattr("os.sched_getaffinity", lambda pid: set(range(6)) if pid == 0 else set())
-    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: None, raising=False)
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: None)
     selection = tmp_path / "lines.json"
     selection.write_text(
         json.dumps(
@@ -986,7 +986,7 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
 def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, quota, expected, capsys):
     from scripts.ci_mutation.selection import run_selected
 
-    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: quota, raising=False)
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: quota)
     if ci is None:
         monkeypatch.delenv("CI", raising=False)
     else:
