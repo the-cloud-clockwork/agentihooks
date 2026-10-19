@@ -120,8 +120,12 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     if kind == HIVES:
         return owners.get(f"{HIVES}/{item}", "")
     if kind in ("questions", "followups"):
-        hive = next((row.get("hive") for row in doc.get(kind, []) if row.get("id") == item), None)
-        return owners.get(f"{HIVES}/{hive}", "") if hive else ""
+        row = next((row for row in doc.get(kind, []) if row.get("id") == item), {})
+        if row.get("hive"):
+            return owners.get(f"{HIVES}/{row['hive']}", "")
+        if not row.get("task"):
+            return ""
+        kind, item = "tasks", row["task"]
     if kind == "tasks":
         item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":

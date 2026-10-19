@@ -6,6 +6,7 @@ import pytest
 from scripts.swarm_ledger import ledger_artifacts, plan_read
 from scripts.swarm_ledger import ledger_core as core
 from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository
+from tests.swarm_ledger import legacy_page
 
 PLAN = "".join(f"line {n}\n" for n in range(1, 41))
 
@@ -162,7 +163,7 @@ def test_refused_for_a_missing_ledger(slug):
 
 def test_refused_for_an_invalid_slug_or_a_ledger_file_that_is_not_stored(slug):
     assert refusal(["--task", "mid", "--slug", "../x"], {}) == "no ledger ../x"
-    core.paths("filed")[1].write_text(json.dumps({"tasks": [{"id": "mid"}]}))
+    legacy_page.paths("filed", core)[1].write_text(json.dumps({"tasks": [{"id": "mid"}]}))
     assert refusal(["--task", "mid"], {"AGENTIHOOKS_SWARM": "filed"}) == "no ledger filed"
 
 

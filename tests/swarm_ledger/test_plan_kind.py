@@ -14,7 +14,7 @@ def plan_ledger(tmp_path, monkeypatch):
     monkeypatch.setitem(core.EXTENSION_OPS, "task_add", ledger_tasks)
     monkeypatch.setitem(core.EXTENSION_OPS, "task_update", ledger_tasks)
     content = {"title": "Plan proof", "overview": "Project intent", "sources": [], "phases": [{"title": "Build"}]}
-    html, json_path = core.paths("plan-proof")
+    html, json_path = legacy_page.paths("plan-proof", core)
     json_path.unlink(missing_ok=True)
     html.parent.mkdir(parents=True, exist_ok=True)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), "plan-proof", 8765))

@@ -27,14 +27,12 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ledger_core as core  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_size  # noqa: E402
 
 from scripts.swarm import naming
 from scripts.swarm_ledger import storage
 
-TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
 
 

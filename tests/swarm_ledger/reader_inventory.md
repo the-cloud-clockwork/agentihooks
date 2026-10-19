@@ -6,7 +6,7 @@ the one time legacy import in the repository's `legacy` module.
 
 Evidence: reproduce with
 `rg -n 'read_ledgers?\(|read_document\(|read_slugs\(|read_ids\(|read_registry\(|repository\.[a-z_]+\(' hooks scripts --glob '*.py'` for the call
-sites below, and `rg -n 'core\.paths|load_state|parse_seed|read_token|\{slug\}\.(json|html)' hooks scripts --glob
+sites below, and `rg -n 'load_state|parse_seed|read_token|\{slug\}\.(json|html)' hooks scripts --glob
 '*.py'`, which finds no ledger document reader outside the repository's `legacy` module (the remaining hits are
 session, telemetry and install state files).
 

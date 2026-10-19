@@ -19,7 +19,7 @@ def cli(monkeypatch, ledger_port, capsys):
     core = server.core
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     document = new_ledger.build_doc({"title": "Task contract", "phases": [{"title": "Proof"}]})
-    core.paths(slug)[0].write_text(legacy_page.render(document, slug, ledger_port))
+    legacy_page.paths(slug, core)[0].write_text(legacy_page.render(document, slug, ledger_port))
     core.sync(slug, ops=[])
     host = f"127.0.0.1:{ledger_port}"
     monkeypatch.setattr(server, "ALLOWED_HOSTS", {host})

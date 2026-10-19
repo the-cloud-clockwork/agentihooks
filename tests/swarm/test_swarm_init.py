@@ -1,4 +1,5 @@
 import contextlib
+import importlib
 import io
 import json
 import os
@@ -98,7 +99,7 @@ def scratch(env, home, monkeypatch, tmp_path):
     ledgers = tmp_path / "stack-ledgers"
     ledgers.mkdir()
     as_lane(monkeypatch, "operator", ledgers)
-    monkeypatch.setattr(new_ledger.core, "LEDGER_DIR", ledgers)
+    monkeypatch.setattr(importlib.import_module("ledger_core"), "LEDGER_DIR", ledgers)
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://127.0.0.1:6390/0")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
     monkeypatch.setattr(Stack, "ledgers", ledgers)

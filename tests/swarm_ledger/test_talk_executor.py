@@ -44,7 +44,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     ledgers.mkdir()
     monkeypatch.setattr(core, "LEDGER_DIR", ledgers)
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [{"title": "one", "description": "d"}]}
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     (tmp_path / "home" / ".agentihooks").mkdir(parents=True)
