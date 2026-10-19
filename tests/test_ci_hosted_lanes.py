@@ -30,6 +30,7 @@ DIRECT = {
 }
 LANE_USERS = {
     "hierarchy-cpu.yml",
+    "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
     "proofs.yml",
