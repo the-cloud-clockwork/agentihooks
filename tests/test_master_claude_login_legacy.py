@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 
@@ -85,8 +86,17 @@ def test_a_launch_replaces_an_empty_global_home_with_the_legacy_login(ah, render
 
 def test_several_legacy_logins_refuse_naming_every_path(ah, rendered, tmp_path):
     first, second = _legacy(ah, "doctor"), _legacy(ah, "rig")
-    message = f"^several legacy master claude ai logins, keep one: {first / 'claude'}, {second / 'claude'}$"
-    with pytest.raises(login.LoginRefused, match=message):
+    message = f"several legacy master claude ai logins, keep one: {first / 'claude'}, {second / 'claude'}"
+    with pytest.raises(login.LoginRefused, match=f"^{re.escape(message)}$"):
         login.prepare(_environ(rendered), tmp_path)
     assert not login.home().exists()
     assert (first / "claude" / login.CREDENTIALS).is_file() and (second / "claude" / login.CREDENTIALS).is_file()
+
+
+def test_a_launch_with_only_the_recovery_copy_restores_it(rendered, tmp_path, monkeypatch):
+    copy = {"grant": json.dumps(GRANT[login.GRANT]), "account": json.dumps(MASTER_ACCOUNT), "epoch": "0"}
+    monkeypatch.setattr(login, "stored", lambda bao: copy)
+    monkeypatch.setattr(login, "keep", lambda *_: False)
+    target, found = login.prepare(_environ(rendered), tmp_path)
+    assert found == "masteratexample_com"
+    assert json.loads((target / login.CREDENTIALS).read_text()) == GRANT

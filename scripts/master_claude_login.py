@@ -62,6 +62,8 @@ HELD = "the master login is held by {owner}, still running"
 API_HELPER = "{path} sets apiKeyHelper"
 SETS = "{path} sets {names}"
 FORCED = "{path} sets forceLoginMethod {value}"
+SEVERAL = "several legacy master claude ai logins, keep one: {paths}"
+LEGACY = "master-claude"
 PUBLISH_FAILED = "master login recovery copy not stored: {error}"
 RECOVERY_FAILED = "master login recovery copy not read: {error}"
 
@@ -151,6 +153,19 @@ def _rebuild(folder: Path, rendered: Path) -> Path:
     shutil.rmtree(target, ignore_errors=True)
     staging.rename(target)
     return target
+
+
+def _adopt() -> None:
+    target = home()
+    if _private(target):
+        return
+    legacy = sorted(path for path in (Path(hooks_config.AGENTIHOOKS_HOME) / LEGACY).glob("*/claude") if _private(path))
+    if len(legacy) > 1:
+        raise LoginRefused(SEVERAL.format(paths=", ".join(map(str, legacy))))
+    if legacy:
+        shutil.rmtree(target, ignore_errors=True)
+        legacy[0].rename(target)
+        shutil.rmtree(legacy[0].parent)
 
 
 def refusal(target: Path, cwd: Path, managed: Path | None = None) -> str:
@@ -292,6 +307,10 @@ def prepare(environ: Mapping[str, str], cwd: Path) -> tuple[Path, str]:
         epoch, shared = _claim(
             folder, environ["AGENTIHOOKS_AGENT_NAME"], os.getpid(), _alive, int(copy.get("epoch", 0))
         )
+        if not shared:
+            _adopt()
+            if not (_private(home()) or copy.get("grant")):
+                raise LoginRefused(NO_LOGIN)
         target = home() if shared else _rebuild(folder, rendered)
     if environ.get(binding.REPORT):
         binding.rehome(Path(environ[binding.REPORT]), target)
