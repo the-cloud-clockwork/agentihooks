@@ -8,7 +8,7 @@ from scripts.swarm import cli, ledger_events, merge_queue, queue_priority, queue
 from scripts.swarm.store import SwarmError
 from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
-from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
+from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue, Killed
 
 pytestmark = pytest.mark.unit
 _fixture = env
@@ -573,12 +573,12 @@ def test_priority_help_explains_operator_lift(capsys):
     )
 
 
-def draft_target(run):
+def draft_target(run, pull="P9"):
     def read(command, **kwargs):
         done = run(command, **kwargs)
         response = json.loads(done.stdout)
         raw = response["data"].get("resource") if command[2] == "graphql" else None
-        if raw and raw.get("id") == "P9":
+        if raw and raw.get("id") == pull:
             raw["isDraft"] = True
         return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
 
@@ -601,15 +601,54 @@ def test_refresh_drops_a_deferred_priority_for_a_draft(priority, monkeypatch, ca
 def test_refresh_requeues_entries_an_interrupted_priority_left_out(priority, monkeypatch):
     p = priority
     monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
-    p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] not in ("P2", "P4")]
+    monkeypatch.setattr(p.queue, "run", draft_target(p.queue.run, "P5"))
+    sent = []
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
+    )
+    p.tasks += [{"pr_url": URL[:-1] + n, "claimed_by": f"eng@{n}"} for n in ("4", "5")]
+    p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] not in ("P2", "P4", "P5")]
     displaced = queue_priority.Displaced(p.store, "sw")
-    for number, head in ((2, "head2"), (3, "head3"), (4, "moved")):
+    for number, head in ((2, "head2"), (3, "head3"), (4, "moved"), (5, "head5")):
         displaced.add({"id": f"P{number}", "url": URL[:-1] + str(number), "headRefOid": head})
     assert queue_priority.refresh(p.store, "sw", p.tasks) == [
-        f"requeued {URL[:-1]}2 left out of the merge queue by an interrupted priority"
+        f"left {URL[:-1]}5 out of the merge queue after an interrupted priority: it became a draft",
+        f"left {URL[:-1]}4 out of the merge queue after an interrupted priority: its head moved",
+        f"requeued {URL[:-1]}2 left out of the merge queue by an interrupted priority",
     ]
     assert p.queue.mutations == [("queue", 2)]
     assert displaced.pulls() == []
+    assert [(recipient, text.rsplit("because ", 1)[1]) for _, recipient, text, _ in sent] == [
+        ("eng@5", "it became a draft. Queue it again once its checks pass."),
+        ("eng@4", "its head moved. Queue it again once its checks pass."),
+    ]
+
+
+def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypatch):
+    p = priority
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    run = p.queue.run
+
+    def kill(command, **kwargs):
+        if "enqueuePullRequest" in " ".join(command) and "id=P9" in command:
+            raise Killed
+        return run(command, **kwargs)
+
+    monkeypatch.setattr(p.queue, "run", kill)
+    with pytest.raises(Killed):
+        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
+    monkeypatch.setattr(p.queue, "run", run)
+    p.store.redis.set(p.store.key("sw", queue_priority.ACTIVE), URL)
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1"]
+    p.store.redis.delete(p.store.key("sw", queue_priority.ACTIVE))
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"requeued {URL[:-1]}{n} left out of the merge queue by an interrupted priority" for n in (2, 3)
+    ]
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P2", "P3"]
 
 
 def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch):
@@ -624,7 +663,12 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch):
     p.queue.entries = [e for e in p.queue.entries if e["pullRequest"]["id"] != "P2"]
     displaced = queue_priority.Displaced(p.store, "sw")
     displaced.add({"id": "P2", "url": URL[:-1] + "2", "headRefOid": "head2"})
-    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+    alerts = []
+    ledger = SimpleNamespace(raise_alert=lambda *args: alerts.append(args))
+    assert queue_priority.refresh(p.store, "sw", p.tasks, ledger) == [
         f"could not requeue {URL[:-1]}2 after an interrupted priority: GitHub unavailable"
     ]
     assert [pull["url"] for pull in displaced.pulls()] == [URL[:-1] + "2"]
+    assert alerts == [
+        ("sw", f"merge-priority-requeue:{URL[:-1]}2", f"Could not requeue {URL[:-1]}2: GitHub unavailable")
+    ]
