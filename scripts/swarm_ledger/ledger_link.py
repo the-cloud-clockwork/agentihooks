@@ -107,7 +107,10 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
 
 
 def remote(environ=os.environ) -> bool:
-    return bool(environ.get("SWARM_URL")) or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+    mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
+    if mode is None:
+        return bool(environ.get("SWARM_URL") or environ.get("LEDGER_URL"))
+    return bool(environ.get("SWARM_URL")) or mode != "local"
 
 
 def access_headers(environ=os.environ) -> dict:
