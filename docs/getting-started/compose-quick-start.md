@@ -43,6 +43,46 @@ Use the printed location if `AGENTIHOOKS_HOME` overrides the default. Source thi
 
 A standalone Claude Code or Codex session uses profiles and hooks without a swarm. A swarm adds a shared task ledger, a master and coordinated workers. Initialization creates no swarm and launches no agents. Connect an admitted execution host before starting swarm work; Compose services alone do not provision workers. Use the [swarm guide](../pillars/swarm.md) for creation, host setup and deployment controls.
 
+## Adopt an existing workstation ledger
+
+A workstation that already runs the shared ledger folder and Redis outside Docker can hand the ledger server to the bundle without moving its data:
+
+```bash
+agentihooks swarm init --adopt --no-start
+agentihooks swarm init --adopt
+```
+
+`--adopt` records the current ledger folder (`LEDGER_DIR`, default `~/development-ledger`), the user and group ids, the home directory and the default ledger port 8765 in the stack `.env`:
+
+```bash
+SWARM_ADOPT_LEDGER_DIR=/home/me/development-ledger
+SWARM_ADOPT_HOME=/home/me
+SWARM_ADOPT_UID=1000
+SWARM_ADOPT_GID=1000
+SWARM_PORT=8765
+```
+
+The recording is lasting. Later `agentihooks swarm init` runs, with or without `--adopt`, keep it. `--no-start` writes the stack files, `.env` and `client.env` and starts no service, swarm or ledger; use it to check the recorded values first. `--adopt` and `--prepare-clients` cannot be combined.
+
+While `SWARM_ADOPT_LEDGER_DIR` is set:
+
+- Every Compose call on the stack adds `deploy/compose/adopt.yaml`. The `swarm` service runs as the recorded user and group, mounts the ledger folder at its own absolute path and the host `~/.agentihooks` at the same path, and shares the host PID namespace, so server pidfiles stay valid on the host.
+- `agentihooks ledger serve --ensure` and `--stop` for the adopted folder, and the Doctor and watchdog restarts built on them, start and stop the bundle `swarm` service. The legacy `agentihooks-ledger` Compose service and the host process server are not started again.
+- A shared ledger folder other than the adopted one is refused with `the swarm stack adopts <adopted>, not <folder>; the legacy ledger service stays down`.
+- The stack Redis gives the `swarm` user every command except `FLUSHALL` and `FLUSHDB` (`+@all -flushall -flushdb`). Redis answers a flush with a `NOPERM` error, so the bundle cannot empty the shared Redis data it takes over. Hive member users keep `-@dangerous` and the `default` user stays off.
+
+`LEDGER_SERVER_RUNTIME=process` still forces the host process server. Adoption prepares the move only: it does not transfer Redis data, move live swarm seats or activate hives.
+
+To check adoption on a running stack:
+
+```bash
+cd "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack"
+grep '^SWARM_ADOPT_\|^SWARM_PORT' .env
+docker compose exec redis grep -c 'flushall -flushdb' /data/users.acl
+```
+
+The count is `1` when adoption is recorded. Redis rebuilds the ACL from its template on every start, so a stack started before `--adopt --no-start` picks up the flush deny once `agentihooks swarm init` brings Redis up again with the adoption overlay.
+
 ## Diagnose or stop the stack
 
 ```bash
