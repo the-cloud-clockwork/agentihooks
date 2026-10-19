@@ -1262,6 +1262,15 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
     assert stats_steps[: len(setup)] == setup
     collect = stats_steps[len(setup)]
+    cache_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") == ".mutation-stats-cache"]
+    if cache_steps:
+        restore, save = cache_steps
+        assert restore["uses"] == "actions/cache/restore@v4"
+        assert save["uses"] == "actions/cache/save@v4"
+        assert restore["with"]["key"] == save["with"]["key"]
+        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
+        assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"

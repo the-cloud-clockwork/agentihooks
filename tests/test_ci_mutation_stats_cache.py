@@ -423,6 +423,42 @@ def test_dynamic_import_dependencies_invalidate_stats_alongside_static_imports(t
     assert calls == [files, files]
 
 
+@pytest.mark.parametrize(
+    "target", ["pyproject.toml", "scripts/ci_mutation/example.py", "assets/image.bin", "scripts/fixture.py"]
+)
+def test_configuration_collector_fixture_and_binary_resource_changes_recollect_stats(tmp_path, target):
+    from scripts.ci_mutation.stats_cache import collect_cached_stats
+
+    root = tmp_path / "repo"
+    files = ["tests/test_sample.py"]
+    _repository(
+        root,
+        {
+            files[0]: "import scripts.a\nfrom pathlib import Path\nPath('assets/image.bin').read_bytes()\n",
+            "scripts/a.py": "value = 1\n",
+            "scripts/fixture.py": "value = 1\n",
+            "tests/conftest.py": "import scripts.fixture\n",
+            "scripts/ci_mutation/example.py": "value = 1\n",
+            "pyproject.toml": "[tool.pytest.ini_options]\n",
+            "assets/image.bin": "original",
+        },
+    )
+    (root / "assets/image.bin").write_bytes(bytes([0, 255]))
+    calls = []
+
+    def collect(chosen):
+        calls.append(chosen)
+        return [{"status": 0, "tests": {}, "durations": {}, "cpu": 1}]
+
+    cache = tmp_path / "cache"
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files]
+    (root / target).write_text("value = 2\n")
+    collect_cached_stats(root, cache, {}, files, [], collect)
+    assert calls == [files, files]
+
+
 def test_each_stored_file_keeps_only_its_own_tests_from_every_bucket(tmp_path, capsys):
     import json
 

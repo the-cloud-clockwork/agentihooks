@@ -40,17 +40,40 @@ def test_inputs(
                 text = content.decode()
                 tree = ast.parse(text)
                 names = set(imported_names(text, Path(current).parent.parts))
+                loaders = {name: name for name in DYNAMIC_IMPORTS} | {
+                    alias.asname or alias.name: alias.name
+                    for node in ast.walk(tree)
+                    if isinstance(node, ast.ImportFrom) and node.module in ("importlib", "importlib.util", "builtins")
+                    for alias in node.names
+                    if alias.name in DYNAMIC_IMPORTS
+                }
                 dynamic = [
                     node
                     for node in ast.walk(tree)
                     if isinstance(node, ast.Call)
-                    and (
-                        getattr(node.func, "id", "") in DYNAMIC_IMPORTS
-                        or getattr(node.func, "attr", "") in DYNAMIC_IMPORTS
-                    )
+                    and (getattr(node.func, "id", "") in loaders or getattr(node.func, "attr", "") in DYNAMIC_IMPORTS)
                 ]
+                called = {id(node.func) for node in dynamic}
+                if any(
+                    id(node) not in called
+                    and (
+                        isinstance(node, ast.Name)
+                        and node.id in loaders
+                        or isinstance(node, ast.Attribute)
+                        and node.attr in DYNAMIC_IMPORTS
+                    )
+                    for node in ast.walk(tree)
+                ):
+                    dependencies.update(modules.values())
                 for node in dynamic:
-                    if node.args and isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    if (
+                        node.args
+                        and isinstance(node.args[0], ast.Constant)
+                        and isinstance(node.args[0].value, str)
+                        and not node.args[0].value.startswith(".")
+                        and (getattr(node.func, "attr", "") or loaders.get(getattr(node.func, "id", ""), ""))
+                        not in ("spec_from_file_location", "module_from_spec")
+                    ):
                         names.add(node.args[0].value)
                     else:
                         dependencies.update(modules.values())
