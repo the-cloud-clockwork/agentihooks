@@ -105,15 +105,7 @@ def pytest_runtest_makereport(item, call):
 def drives_browser(root: Path, test: str) -> bool:
     from scripts.ci_mutation.browser import needs_browser
 
-    return needs_browser(root, [test], scanned=_scan)
-
-
-# The scan runs traced under coverage; sharing it across test files parses each module once per worker.
-@functools.cache
-def _scan(root: Path, path: Path) -> tuple[bool, list[Path]]:
-    from scripts.ci_mutation.browser import scan
-
-    return scan(root, path)
+    return needs_browser(root, [test])
 
 
 def track_greenlets(config, path: Path) -> None:
