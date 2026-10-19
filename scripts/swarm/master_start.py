@@ -26,6 +26,11 @@ def save(store: RedisStore, slug: str, pending: dict) -> None:
     store.redis.set(store.key(slug, "master-start"), json.dumps(pending))
 
 
+def clear_unalerted(store: RedisStore, slug: str) -> None:
+    if not read(store, slug).get("alerted"):
+        store.redis.delete(store.key(slug, "master-start"))
+
+
 def begin(store: RedisStore, slug: str, name: str, task: dict, at: int) -> None:
     pending = read(store, slug)
     state = {"name": name, "task": task, "attempt": pending.get("attempt", 0) + 1, "at": at}
@@ -36,7 +41,7 @@ def begin(store: RedisStore, slug: str, name: str, task: dict, at: int) -> None:
 
 def blocked(pending: dict, at: int) -> bool:
     if pending.get("alerted"):
-        return at - pending.get("at", at) < RETRY_MS
+        return at - pending["at"] < RETRY_MS
     return bool(pending.get("name"))
 
 
