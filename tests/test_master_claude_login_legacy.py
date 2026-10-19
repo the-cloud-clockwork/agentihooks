@@ -100,3 +100,25 @@ def test_a_launch_with_only_the_recovery_copy_restores_it(rendered, tmp_path, mo
     target, found = login.prepare(_environ(rendered), tmp_path)
     assert found == "masteratexample_com"
     assert json.loads((target / login.CREDENTIALS).read_text()) == GRANT
+
+
+def test_the_recovery_copy_wins_over_a_legacy_login(ah, rendered, tmp_path, monkeypatch):
+    copy = {"grant": json.dumps({"refreshToken": "newer"}), "account": json.dumps(MASTER_ACCOUNT), "epoch": "0"}
+    monkeypatch.setattr(login, "stored", lambda bao: copy)
+    monkeypatch.setattr(login, "keep", lambda *_: False)
+    legacy = _legacy(ah, "rig")
+    target, _ = login.prepare(_environ(rendered), tmp_path)
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: {"refreshToken": "newer"}}
+    assert (legacy / "claude" / login.CREDENTIALS).is_file()
+
+
+def test_a_legacy_login_held_by_a_live_master_refuses_naming_it(ah, rendered, tmp_path):
+    import os
+
+    legacy = _legacy(ah, "rig")
+    (legacy / login.OWNER).write_text(json.dumps({"owner": "master@rig-1", "pid": os.getppid(), "epoch": 3}))
+    message = f"the legacy master login {legacy / 'claude'} is held by master@rig-1, still running"
+    with pytest.raises(login.LoginRefused, match=f"^{re.escape(message)}$"):
+        login.prepare(_environ(rendered), tmp_path)
+    assert (legacy / "claude" / login.CREDENTIALS).is_file()
+    assert not login.home().exists()
