@@ -496,12 +496,27 @@ def _tickable(slug):
 
 @outage.guard_command
 def cmd_tick(store, args):
-    from scripts import operator_env
-    from scripts.swarm_ledger import authority_context
+    from scripts.swarm import scheduled_tick, tick_reaper
 
     started = time.monotonic()
     if why := timer.installed_refusal():
         raise SwarmError(f"the tick refused to run: {why}")
+    try:
+        with scheduled_tick.tick_lock():
+            for left in tick_reaper.reap():
+                print(
+                    f"reaped leftover swarm tick process {left.pid} after {left.age_s} seconds "
+                    f"with {left.signal}: {left.command}"
+                )
+            _tick_host(store, started)
+    except scheduled_tick.AlreadyRunning:
+        print("another swarm tick is running on this machine", file=sys.stderr)
+
+
+def _tick_host(store, started):
+    from scripts import operator_env
+    from scripts.swarm_ledger import authority_context
+
     operator_env.fill(os.environ)
     value = None
     if os.environ.get("SWARM_URL"):
