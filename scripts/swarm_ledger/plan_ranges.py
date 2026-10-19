@@ -1,4 +1,5 @@
 import re
+from collections.abc import Callable
 from urllib.parse import urlsplit
 
 from scripts.swarm_ledger import ledger_artifacts
@@ -150,7 +151,7 @@ def _owner(entries: list[tuple[int, int, str]], anchor: int) -> tuple[int, int]:
     return anchor, headings[-1] if headings else 6
 
 
-def stored_text(ref: dict, doc: dict, load=None) -> str:
+def stored_text(ref: dict, doc: dict, load: Callable[[str, str], bytes] | None = None) -> str:
     check_ref(ref)
     parts = urlsplit(ref["artifact"]).path.split("/")
     if len(parts) != 4 or parts[1] != "artifacts":

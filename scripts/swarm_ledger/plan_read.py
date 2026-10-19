@@ -11,6 +11,7 @@ import functools
 import os
 import re
 import sys
+import urllib.error
 import urllib.request
 from importlib import import_module
 
@@ -200,10 +201,15 @@ def _without(source: str, lines: str, own: str | None) -> str:
     )
 
 
-def _hosted(slug: str, keys: tuple) -> dict:
+def _hosted(slug: str, keys: tuple) -> dict | None:
     from scripts.swarm_ledger import ledger
 
-    return {key: ledger.resource(slug, key, collection=True) for key in keys}
+    try:
+        return {key: ledger.resource(slug, key, collection=True) for key in keys}
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        return None
 
 
 def _served(env, slug: str, file_id: str) -> bytes:

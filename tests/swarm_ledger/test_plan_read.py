@@ -458,6 +458,30 @@ def test_remote_hive_reads_the_ledger_and_plan_through_the_hosted_server(slug, t
     assert opened == [(f"https://ledger.test/artifacts/{slug}/{file_id}", ledger.REQUEST_TIMEOUT, environ)]
 
 
+def hosted_refusal(monkeypatch, code):
+    import urllib.error
+
+    from scripts.swarm_ledger import ledger
+
+    def resource(name, path, collection=False):
+        raise urllib.error.HTTPError(f"https://ledger.test/{path}", code, "refused", {}, None)
+
+    monkeypatch.setattr(ledger, "resource", resource)
+    return {"AGENTIHOOKS_SWARM": "gone", "AGENTIHOOKS_DEPLOYMENT": "compose", "LEDGER_URL": "https://ledger.test"}
+
+
+def test_remote_hive_names_a_ledger_the_hosted_server_does_not_hold(monkeypatch):
+    assert refusal(["--task", "mid"], hosted_refusal(monkeypatch, 404)) == "no ledger gone"
+
+
+def test_remote_hive_passes_on_other_hosted_server_refusals(monkeypatch):
+    import urllib.error
+
+    with pytest.raises(urllib.error.HTTPError) as caught:
+        plan_read.main(["read", "--task", "mid"], hosted_refusal(monkeypatch, 503))
+    assert caught.value.code == 503
+
+
 def test_stored_plan_text_comes_from_the_given_loader(slug, tmp_path):
     from scripts.swarm_ledger import plan_ranges
     from scripts.swarm_ledger.storage import read_ledger
