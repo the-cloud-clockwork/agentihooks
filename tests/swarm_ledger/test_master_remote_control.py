@@ -6,7 +6,7 @@ from tests.swarm_ledger.ledger_page import page_source
 STUBS = """
 const h = (tag, attrs, ...kids) => ({tag, attrs, kids});
 const label = (text, tone) => ({label: text, tone});
-const cells = (...values) => values;
+const cells = (...values) => Object.assign(values, {cells: []});
 const withId = (row) => row;
 const idCell = (text) => text;
 const transportCell = (c) => c ? "transport" : "—";
