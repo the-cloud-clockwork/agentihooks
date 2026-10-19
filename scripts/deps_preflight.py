@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from scripts import mcp_daemon
+from scripts import mcp_daemon, tool_deps
 
 try:
     import fcntl
@@ -143,6 +143,21 @@ def refresh_codex_wrapper(caller: str) -> None:
         print(f"[agentihooks {caller}] hook wrapper refresh skipped: {exc}", file=sys.stderr)
 
 
+def install_declared(*, quiet: bool) -> None:
+    specs = tool_deps.missing_here()
+    if not specs:
+        return
+    if not quiet:
+        print(
+            f"[agentihooks] deps: installing {', '.join(specs)} into the agentihooks tool environment", file=sys.stderr
+        )
+    try:
+        tool_deps.install(specs, tool_deps.call, sys.executable)
+    except RuntimeError as exc:
+        if not quiet:
+            print(f"[agentihooks] deps: {exc}", file=sys.stderr)
+
+
 def ensure(*, quiet: bool = False) -> int:
     from scripts.skill_links import repair
 
@@ -154,6 +169,7 @@ def ensure(*, quiet: bool = False) -> int:
     with _lock():
         if stamp_fresh(path):
             return 0
+        install_declared(quiet=quiet)
         missing_system = []
         for dep in parse(json.loads(path.read_text())):
             if satisfied(dep):
@@ -181,20 +197,50 @@ def unsatisfied() -> list[Dep]:
     missing = [
         Dep(id=f"skill:{link.name}", kind="skill", check=(), hint=f"dangling link: {link}") for link in dangling()
     ]
+    missing.extend(
+        Dep(
+            id=spec,
+            kind="python",
+            check=(),
+            hint="declared in pyproject.toml but missing from the agentihooks tool environment; install it with "
+            f"uv pip install --python {sys.executable} '{spec}'",
+        )
+        for spec in tool_deps.missing_here()
+    )
     path = manifest_path()
     if path is not None:
         missing.extend(dep for dep in parse(json.loads(path.read_text())) if not satisfied(dep))
     return missing
 
 
+def sync() -> int:
+    repo = str(tool_deps.SOURCE)
+    try:
+        branch = tool_deps.call(["git", "-C", repo, "rev-parse", "--abbrev-ref", "HEAD"])
+        if branch != "dev":
+            print(f"deps sync: {repo} is on {branch}, not dev", file=sys.stderr)
+            return 1
+        installed = tool_deps.pull(repo, tool_deps.call, sys.executable)
+    except RuntimeError as exc:
+        print(f"deps sync: {exc}", file=sys.stderr)
+        return 1
+    if installed:
+        print(f"deps sync: installed {', '.join(installed)} into the agentihooks tool environment")
+    else:
+        print("deps sync: pulled dev; declared dependencies unchanged")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(prog="agentihooks deps")
-    parser.add_argument("action", choices=["check", "ensure", "mark-changed"])
+    parser.add_argument("action", choices=["check", "ensure", "mark-changed", "sync"])
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--reason", default="manual", help="mark-changed: what changed (recorded in the install log)")
     args = parser.parse_args(argv)
     if args.action == "ensure":
         return ensure(quiet=args.quiet)
+    if args.action == "sync":
+        return sync()
     if args.action == "mark-changed":
         _record(Dep(id=args.reason, kind="system", check=(), affects_sessions=True), ok=True)
         return 0

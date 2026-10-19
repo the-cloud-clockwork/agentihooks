@@ -2,12 +2,12 @@ import argparse
 import json
 import os
 import sys
-import time
 import uuid
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
@@ -272,7 +272,7 @@ def main(argv: list[str]) -> int:
             proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
             if args.once:
                 return 0
-            time.sleep(lease.tick_ms() / 1000)
+            scheduled_wait(lease.tick_ms() / 1000)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1

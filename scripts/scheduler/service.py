@@ -1,6 +1,8 @@
 import argparse
 import asyncio
 import fcntl
+import hashlib
+import json
 import os
 import signal
 import subprocess
@@ -9,6 +11,7 @@ from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
+from urllib.parse import urlsplit
 
 from scripts.scheduler.core import Scheduler
 
@@ -17,13 +20,25 @@ class AlreadyRunning(RuntimeError):
     pass
 
 
-def runtime_dir() -> Path:
-    return Path.home() / ".cache" / "agentihooks" / "scheduler"
+def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
+    from scripts.swarm.keyspace import ROOT
+    from scripts.swarm.store import redis_url
+
+    env = os.environ if environ is None else environ
+    url = urlsplit(redis_url(env))
+    endpoint = (url.scheme, url.hostname, url.port or 6379, url.path or "/0")
+    member = env.get("AGENTIHOOKS_HIVE_ID") if env.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" else ""
+    directory = Path.home() / ".cache" / "agentihooks" / "scheduler"
+    if endpoint == ("redis", "127.0.0.1", 6379, "/0") and not member:
+        return directory
+    namespace = f"{ROOT}:hive:{member}" if member else ""
+    identity = json.dumps((endpoint, namespace)).encode()
+    return directory / hashlib.sha256(identity).hexdigest()
 
 
 @contextmanager
-def machine_lock(name: str) -> Iterator[None]:
-    directory = runtime_dir()
+def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iterator[None]:
+    directory = runtime_dir(environ) if environ is not None else runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / f"{name}.lock").open("a+") as handle:
         try:
@@ -76,10 +91,10 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     ):
         return False
     try:
-        with machine_lock("startup"):
-            with machine_lock("supervisor"):
+        with machine_lock("startup", environ=active):
+            with machine_lock("supervisor", environ=active):
                 pass
-            with (runtime_dir() / "scheduler.log").open("ab") as log:
+            with (runtime_dir(active) / "scheduler.log").open("ab") as log:
                 subprocess.Popen(
                     _command("supervise"),
                     cwd=Path(__file__).resolve().parents[2],

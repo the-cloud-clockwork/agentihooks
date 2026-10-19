@@ -448,6 +448,13 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
+    from scripts import tool_deps
+
+    monkeypatch.setattr(tool_deps, "SOURCE", tmp_path / "tool-source")
+
+
+@pytest.fixture(autouse=True)
 def _swarm_snapshot_job_runs_inline(request, monkeypatch):
     from scripts.swarm import snapshot_job
 

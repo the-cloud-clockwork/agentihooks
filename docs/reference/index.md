@@ -39,4 +39,3 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
 | [Managed Codex terminals](codex-managed-terminal.md) | Installed runtime dependencies, connection verification, transport selection, herdr viewer reopening, push master inbox duties, handoffs and attachment failures |
 | [Codex inbox transport](codex-inbox-transport.md) | The `app_server` default, the Claude inbox channel against broadcast topics and Bun plugins, qualified versions, canary order, failure diagnosis and rollback |
-| [COPILOT-COMPAT](COPILOT-COMPAT.md) | The `copilot` install target: hook contract, surface map, divergences |

@@ -265,6 +265,31 @@ def test_rendered_claude_and_codex_masters_carry_the_same_master_pool(world):
     assert [phrase for phrase in MASTER_POOL if phrase not in skill] == []
 
 
+MASTER_SCALING = (
+    "keeps automatic scaling on",
+    "agentihooks balance",
+    "agentihooks swarm <slug> autoscale",
+    "before stating capacity",
+    "nothing past host room",
+)
+
+
+def test_rendered_claude_and_codex_masters_carry_the_scaling_rule(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    claude = out.parent / "claude"
+    rules = {
+        home: " ".join(_section(persona.read_text(), "## Scaling").split())
+        for home, persona in (("claude", claude / "CLAUDE.md"), ("codex", out / "AGENTS.md"))
+    }
+    skill = " ".join(_section((claude / "skills" / "swarm-master" / "SKILL.md").read_text(), "## Scaling").split())
+
+    assert rules["claude"] == rules["codex"]
+    assert [phrase for phrase in MASTER_SCALING if phrase not in rules["claude"]] == []
+    assert [phrase for phrase in MASTER_SCALING if phrase not in skill] == []
+
+
 def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
     docs = ROLES.parents[2] / "docs" / "pillars" / "swarm.md"
     text = " ".join(_section(docs.read_text(), "### Master pool", "\n### ").split())

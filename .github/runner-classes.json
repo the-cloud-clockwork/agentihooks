@@ -1,5 +1,6 @@
 {
   "access-audit.yml/audit": "light",
+  "actions-storage.yml/prune": "light",
   "brain-smoke.yml/smoke": "standard",
   "branch-lanes.yml/grade": "light",
   "ci-templates.yml/actionlint": "hosted",

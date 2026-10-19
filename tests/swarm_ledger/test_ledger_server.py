@@ -339,7 +339,7 @@ def test_the_home_shell_bins_nothing_and_the_watch_loop_bins_closed_ledgers_with
     with (
         patch.object(server, "swarm_store", return_value=Swarms()),
         patch.object(server, "sample_streams"),
-        patch.object(server.time, "sleep", finish),
+        patch.object(server, "scheduled_wait", finish),
         pytest.raises(RuntimeError, match="watch ended"),
     ):
         server.watch_ledgers()

@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from hooks.observability.trace_flush import start_time
+from scripts import tool_deps
 from scripts.inbox.seats import of_swarm, seat_address
 from scripts.inbox.store import InboxStore
 from scripts.swarm import apply_wait, control_notifications, stack
@@ -40,6 +41,8 @@ class Context:
     run: Callable = subprocess.run
     code: Path = LEDGER_DIR
     pidfile: Path = field(default_factory=_pidfile)
+    source: Path = tool_deps.SOURCE
+    python: str = sys.executable
 
 
 def _call(ctx, argv):
@@ -55,14 +58,14 @@ def pull_dev(ctx, args):
     if branch != "dev":
         raise SwarmError(f"the main checkout {repo} is on {branch}, not dev; the Doctor pulls only into dev")
     merged = merged_fixes(ctx, repo)
-    _call(ctx, ["git", "-C", repo, "pull", "--ff-only", "origin", "dev"])
+    installed = tool_deps.pull(repo, lambda argv: _call(ctx, argv), ctx.python, ctx.source)
     stamped = record_applied(ctx, merged)
-    if not stamped:
-        return "The Doctor pulled dev into the main checkout of the watched swarm."
-    return (
-        "The Doctor pulled dev into the main checkout of the watched swarm "
-        f"and recorded {len(stamped)} merged fixes applied."
-    )
+    line = "The Doctor pulled dev into the main checkout of the watched swarm"
+    if stamped:
+        line += f" and recorded {len(stamped)} merged fixes applied"
+    if installed:
+        line += f". It installed {', '.join(installed)} into the agentihooks tool environment"
+    return line + "."
 
 
 def merged_fixes(ctx, repo):

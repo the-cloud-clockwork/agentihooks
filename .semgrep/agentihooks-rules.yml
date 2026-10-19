@@ -694,7 +694,7 @@ rules:
                   raise $ERROR from $CAUSE
               ...
     paths:
-      exclude: [/scripts/scheduler/, /hooks/serena_router/app.py, /scripts/hive/daemon.py, /scripts/swarm_ledger/ledger_server.py, /scripts/swarm_ledger/watch_ledger.py, /scripts/swarm/controller.py, /scripts/swarm/lease.py, /scripts/swarm_ledger/events/stream.py, /hooks/observability/trace_flush.py]
+      exclude: [/scripts/scheduler/, /scripts/swarm_ledger/watch_ledger.py, /scripts/swarm/lease.py, /scripts/swarm_ledger/events/stream.py]
 
   - id: periodic-wait-loop
     message: A loop that waits on an event with a timeout runs a timed job outside the agentihooks scheduler. Register the job with scripts.scheduler instead.

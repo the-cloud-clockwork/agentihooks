@@ -1,5 +1,5 @@
 import { ACTIVE_MS, PHASE_LABELS } from "./config.js";
-import { $, closedText, grow, h, headCount, newId, span, when } from "./dom.js";
+import { $, closedText, excerpt, grow, h, headCount, newId, span, when } from "./dom.js";
 import { inScope, itemState, phaseLifecycle, taskRank, taskRanks } from "./state.js";
 import { doc, meta, queue, renderSync, toggle } from "./sync.js";
 import { renderArtifacts } from "./artifacts.js";
@@ -262,7 +262,7 @@ export function render(focusKey) {
   const caret = !focusKey && active && active.tagName === "TEXTAREA" ? [active.selectionStart, active.selectionEnd] : null;
   document.title = doc.title;
   $("title").textContent = doc.title;
-  $("overview").textContent = doc.overview;
+  $("overview").textContent = excerpt(doc.overview, 200);
   $("closed-label").textContent = closedText(doc.closed_at);
   $("closed-banner").hidden = !doc.closed_at;
   const sections = [

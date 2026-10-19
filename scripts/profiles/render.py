@@ -145,7 +145,7 @@ def _stamp(bundle: Path | None, dirs: list[tuple[str, Path]]) -> dict:
         "chain": chain,
         "overlays": _overlays(dirs),
         "enabled_plugins": _plugins(chain, _settings("claude", bundle, dirs).get("enabledPlugins") or {}),
-        **({"browser": browser.spec()} if browser.enabled(chain) else {}),
+        **({"browser": browser.spec()} if browser.proxy_enabled(chain) else {}),
         "corrections": quarantine.digest(),
     }
 

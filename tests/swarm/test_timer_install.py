@@ -217,14 +217,14 @@ def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     ]
     calls.clear()
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
-    assert [argv[2] for argv, _ in calls] == ["enable"] * 4
+    assert [argv[2] for argv, _ in calls] == ["enable"] * 3
 
 
 def test_ensure_fails_when_the_scheduled_tick_cannot_be_registered(tmp_path, monkeypatch):
     monkeypatch.setattr(timer, "schedule", lambda: False)
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls)) is False
-    assert [argv[2] for argv, _ in calls][-4:] == ["enable"] * 4
+    assert [argv[2] for argv, _ in calls][-3:] == ["enable"] * 3
 
 
 def test_reconcile_reruns_ensure_while_a_retired_tick_unit_is_left(tmp_path, monkeypatch):
