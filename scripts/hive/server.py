@@ -20,6 +20,7 @@ MAX_BODY = 4096
 REQUEST_TIMEOUT_S = 10
 MAX_HANDLERS = 32
 REQUEST_DEADLINE_S = 30
+REDIS_TIMEOUT_S = 5
 REFRESH_PATH = "/hive/refresh"
 BAD_BODY = "the body must be a JSON object with a string code"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"

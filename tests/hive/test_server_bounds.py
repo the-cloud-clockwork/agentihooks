@@ -279,3 +279,44 @@ def test_reaping_continues_when_an_expired_socket_shutdown_raises(admin, monkeyp
     failed.shutdown.assert_called_once_with(socket.SHUT_RDWR)
     expired.shutdown.assert_called_once_with(socket.SHUT_RDWR)
     unexpired.shutdown.assert_not_called()
+
+
+@pytest.fixture
+def stalled_redis():
+    listener = socket.create_server(("127.0.0.1", 0))
+    accepted = []
+
+    def accept():
+        while True:
+            try:
+                accepted.append(listener.accept()[0])
+            except OSError:
+                return
+
+    threading.Thread(target=accept, daemon=True).start()
+    yield f"redis://127.0.0.1:{listener.getsockname()[1]}/0"
+    listener.shutdown(socket.SHUT_RDWR)
+    listener.close()
+    for conn in accepted:
+        conn.close()
+
+
+@pytest.mark.wall_clock
+def test_a_join_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound(stalled_redis, monkeypatch):
+    import redis
+
+    monkeypatch.setattr(server, "MAX_HANDLERS", 1)
+    monkeypatch.setattr(server, "REDIS_TIMEOUT_S", 0.5)
+    httpd = server.make_server(redis.Redis.from_url(stalled_redis, decode_responses=True), PUBLIC, "127.0.0.1", 0)
+    threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.05}, daemon=True).start()
+    try:
+        started = time.monotonic()
+        assert _join(httpd.server_address[1], "any") == 503
+        while httpd._admitted and time.monotonic() - started < 5:
+            time.sleep(0.05)
+
+        assert time.monotonic() - started < server.REDIS_TIMEOUT_S + 1
+        assert not httpd._admitted
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
