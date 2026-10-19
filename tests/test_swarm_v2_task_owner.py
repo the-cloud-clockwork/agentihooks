@@ -114,6 +114,9 @@ def doctor_world(world):
     sender = "master@fedcba-0001"
     world.store.names.adopt(doctor, "fedcba", doctor, "repo")
     world.store.create(SwarmConfig(doctor, "/repo", 1, 0))
+    world.store.names.next(doctor, "master")
+    for _ in range(3):
+        world.store.names.next(SLUG, "master")
     world.store.set_peer(SLUG, doctor)
     world.store.set_peer(doctor, SLUG)
     world.store.put_agent(doctor, AgentRecord(sender, "master", "master", seat=f"master@{doctor}"))
@@ -121,7 +124,7 @@ def doctor_world(world):
     masters.MasterSeats(world.redis).set_count(SLUG, 3)
     for name, seat, task in (
         (SECOND_NAME, SECOND, "master-2"),
-        ("master@abcdef-0007", f"master-3@{SLUG}", "master-3"),
+        ("master@abcdef-0003", f"master-3@{SLUG}", "master-3"),
     ):
         world.store.put_agent(SLUG, AgentRecord(name, "master", task, seat=seat))
         world.store.seats.occupy(seat, name, 1)
@@ -129,7 +132,7 @@ def doctor_world(world):
 
 
 @pytest.mark.parametrize("front_door", [True, False])
-@pytest.mark.parametrize("address", [SECOND, SECOND_NAME, f"master-3@{SLUG}", "master@abcdef-0007"])
+@pytest.mark.parametrize("address", [SECOND, SECOND_NAME, f"master-3@{SLUG}", "master@abcdef-0003"])
 def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, front_door, address):
     world, _, sender = doctor_world
     if not front_door:
@@ -147,6 +150,49 @@ def test_a_linked_doctor_master_messages_live_watched_masters(doctor_world, fron
     assert result["to"] == address
     assert inbox(world).get(result["id"]).text == "Apply the merged fix"
     assert world.refusals() == 0
+
+
+@pytest.mark.parametrize("link", ["none", "other", "watched-only", "doctor-only", "retired"])
+def test_only_a_live_linked_doctor_master_can_bypass_the_claimant_fence(doctor_world, link):
+    world, doctor, sender = doctor_world
+    if link == "none":
+        world.store.clear_peer(SLUG)
+        world.store.clear_peer(doctor)
+    elif link == "other":
+        world.store.set_peer(SLUG, "another-doctor")
+        world.store.set_peer(doctor, "another-swarm")
+    elif link == "watched-only":
+        world.store.clear_peer(doctor)
+    elif link == "doctor-only":
+        world.store.clear_peer(SLUG)
+    else:
+        world.store.seats.record_exit(sender, f"master@{doctor}", "retired")
+    record = {
+        "op": "send",
+        "by": sender,
+        "item": "i-unlinked",
+        "args": {"address": SECOND, "text": "Coordinate", "fyi": False},
+    }
+
+    with pytest.raises(InboxError, match="cannot message its claimant"):
+        inbox_cli.apply(inbox(world), record)
+
+    assert inbox(world).mailbox(SECOND) == []
+
+
+def test_a_linked_doctor_master_cannot_message_another_masters_task_claimant(doctor_world):
+    world, _, sender = doctor_world
+    record = {
+        "op": "send",
+        "by": sender,
+        "item": "i-claimant",
+        "args": {"address": CLAIMANT, "text": "Cut over now", "fyi": False},
+    }
+
+    with pytest.raises(InboxError, match="cannot message its claimant"):
+        inbox_cli.apply(inbox(world), record)
+
+    assert inbox(world).mailbox(CLAIMANT) == []
 
 
 def test_a_backend_master_message_to_the_claimant_of_a_task_with_no_phase_is_refused(world):
