@@ -3,10 +3,6 @@ import socket
 import threading
 
 import pytest
-from redis.backoff import NoBackoff
-from redis.exceptions import ConnectionError as Unreachable
-from redis.exceptions import TimeoutError as Stalled
-from redis.retry import Retry
 
 from scripts.hive import auth, server
 
@@ -54,12 +50,13 @@ def _wrapped(cause):
         return exc
 
 
-@pytest.mark.parametrize(
-    "error",
-    [Stalled("Timeout reading from socket"), Unreachable("refused"), _wrapped(Stalled()), _wrapped(Unreachable())],
-)
-def test_a_redis_that_does_not_answer_gets_a_fixed_503(port, error, monkeypatch):
-    monkeypatch.setattr(auth, "exchange", _raises(error))
+@pytest.mark.parametrize("kind", ["TimeoutError", "ConnectionError"])
+@pytest.mark.parametrize("wrap", [False, True])
+def test_a_redis_that_does_not_answer_gets_a_fixed_503(port, kind, wrap, monkeypatch):
+    from redis import exceptions
+
+    error = getattr(exceptions, kind)("Timeout reading from socket")
+    monkeypatch.setattr(auth, "exchange", _raises(_wrapped(error) if wrap else error))
 
     assert _post(port, server.JOIN_PATH, {"code": "any"}) == (503, {"error": server.REDIS_STALLED})
 
@@ -74,6 +71,9 @@ def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
 
 
 def test_the_join_service_redis_client_drops_connections_made_before_its_bound(admin):
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
     admin.set_retry(Retry(NoBackoff(), 3))
     early = admin.connection_pool.get_connection()
     admin.connection_pool.release(early)
