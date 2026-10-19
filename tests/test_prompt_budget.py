@@ -120,6 +120,50 @@ def test_the_guard_installs_its_alarm_handler_and_restores_the_previous_one():
     assert signal.getsignal(signal.SIGALRM) == previous
 
 
+def test_the_guard_restores_a_python_alarm_handler():
+    import signal
+
+    def outer(*_):
+        pass
+
+    previous = signal.signal(signal.SIGALRM, outer)
+    try:
+        with PromptBudget(soft=5, hard=5).guarded():
+            pass
+        restored = signal.getsignal(signal.SIGALRM)
+    finally:
+        signal.signal(signal.SIGALRM, previous)
+
+    assert restored is outer
+
+
+def _fake_alarm(monkeypatch, left):
+    timers = []
+    monkeypatch.setattr("hooks.prompt_budget.signal.setitimer", lambda which, seconds: timers.append(seconds))
+    budget = PromptBudget(start=0.0, soft=10, hard=left, clock=lambda: 0.0)
+    budget._installed = True
+    return budget, timers
+
+
+def test_each_step_arms_the_alarm_for_the_hard_budget_left(monkeypatch):
+    budget, timers = _fake_alarm(monkeypatch, 0.25)
+
+    budget.run("step", lambda: None)
+
+    assert timers == [0.25, 0]
+
+
+def test_an_alarm_during_a_step_marks_the_budget_spent(monkeypatch):
+    budget, _ = _fake_alarm(monkeypatch, 5)
+    after = Mock()
+
+    budget.run("slow", lambda: budget._on_alarm(None, None))
+    budget.run("after", after)
+
+    assert (budget.spent, budget.cut, budget.skipped) == (True, "slow", ["after"])
+    after.assert_not_called()
+
+
 def test_a_fresh_budget_has_spent_nothing_and_holds_no_alarm():
     budget = PromptBudget(soft=5, hard=5)
 
