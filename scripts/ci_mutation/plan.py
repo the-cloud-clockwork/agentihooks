@@ -36,7 +36,8 @@ def estimate(
             covering &= line_covering_tests(root, manifest, changes, paths)
         recorded = {}
         for test in manifest["tests"]:
-            if "lines" in manifest and test not in manifest["lines"]:
+            if not manifest["tests"][test]["units"] or "lines" in manifest and test not in manifest["lines"]:
+                stale.add(test_file(test))
                 continue
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
@@ -138,6 +139,9 @@ def recorded_lines(root: Path, manifest: dict, changes: dict[str, set[int]]) -> 
                     for first, _, last, name in _spans(ast.parse(source)):
                         if first <= end and start < last and (unit := f"{path}::{name}") in index:
                             fallback.add(index[unit])
+        by_line = line_units(old)
+        if any(line not in by_line for line in affected) or "<module>" in changed_units(old, new):
+            fallback.update(number for unit, number in index.items() if unit.startswith(f"{path}::"))
         lines[path] = affected | {mapping[line] for line in changes.get(path, ()) if line in mapping}
     return lines, fallback
 
