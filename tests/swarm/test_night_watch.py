@@ -206,8 +206,14 @@ def held_master(store, runtime):
 
 
 def ready(monkeypatch, tasks=1):
-    rows = [{"id": f"t{n}", "lane": "eng"} for n in range(tasks)]
-    monkeypatch.setattr(capacity, "ready_work", lambda slug, store, doc: ({}, {"eng": rows, "ci": [], "plan": []}))
+    rows, calls = [{"id": f"t{n}", "lane": "eng"} for n in range(tasks)], []
+
+    def ready_work(slug, store, doc):
+        calls.append((slug, store, doc))
+        return {}, {"eng": rows, "ci": [], "plan": []}
+
+    monkeypatch.setattr(capacity, "ready_work", ready_work)
+    return calls
 
 
 def decide(store, **decision):
@@ -577,9 +583,10 @@ def test_the_spawn_finding_and_alert_carry_their_exact_words(store, monkeypatch)
     enforce(store)
     rig = Rig()
     held_master(store, rig.runtime)
-    ready(monkeypatch, 2)
+    calls = ready(monkeypatch, 2)
     decide(store, host={"room": 0, "granted_at": NOW, "limit": 4, "reason": "load is high"})
     until(store, rig, NOW, NOW + 30 * MINUTE)
+    assert calls[0] == (SLUG, store, {"tasks": []})
     why = "host 4 room 0, 0 spawned since it was granted: load is high"
     assert rig.ledger.alerts == [
         ("spawn", f"Swarm sw has had 2 ready tasks and no agent launch for 30 minutes, held by host room: {why}")

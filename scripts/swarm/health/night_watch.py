@@ -185,20 +185,13 @@ def _merge(watch, state):
     if config.state != "running" or watch.sleeping:
         return _clear(watch, state, MERGE, CLEARED.format(what="the swarm is not running"))
     found = timing.call(merge_stall.findings, watch.store, watch.slug, config.repo, watch.now_ms)
-    observed = json.loads(watch.store.redis.get(watch.store.key(watch.slug, "merge-stall")) or "{}")
-    if observed.get("error"):
-        return []
     if not found:
         return _clear(watch, state, MERGE, CLEARED.format(what="no merge finding stands"))
     kinds, episode, actions = sorted(finding.kind for finding in found), state.get(MERGE), []
-    if (
-        episode is None
-        or episode["merged"] != observed.get("merged")
-        or not set(kinds) <= set(episode.get("kinds", ()))
-    ):
+    if episode is None or not set(kinds) <= set(episode.get("kinds", ())):
         if (episode or {}).get("raised"):
             actions = _close(watch, MERGE, CLEARED.format(what="a new merge finding replaces it"))
-        episode = state[MERGE] = {"merged": observed.get("merged"), "kinds": kinds}
+        episode = state[MERGE] = {"kinds": kinds}
     summary = "; ".join(finding.summary for finding in found)
     evidence = "; ".join(line for finding in found for line in finding.evidence)
     text = MERGE_ALERT.format(slug=watch.slug, summary=summary, evidence=evidence)
