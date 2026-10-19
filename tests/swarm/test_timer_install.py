@@ -75,18 +75,28 @@ def test_a_run_from_a_linked_git_worktree_leaves_the_shared_units_alone(monkeypa
     (shared / "agentihooks-swarm.timer").write_text("[Timer]\n")
     before = {path.name: path.read_text() for path in shared.iterdir()}
     calls = []
-    run = lambda argv, **kw: calls.append(argv) or subprocess.CompletedProcess(argv, 0)  # noqa: E731
+
+    def run(argv, **kw):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
 
     assert timer.ensure("/worktree/bin/agentihooks", run=run) is False
     assert timer.reconcile("/worktree/bin/agentihooks", run=run) is False
-
     assert {path.name: path.read_text() for path in shared.iterdir()} == before
+
+    (shared / "agentihooks-swarm.timer").unlink()
+    for name, text in timer.units("/worktree/bin/agentihooks").items():
+        (shared / name).write_text(text)
+    current = {path.name: path.read_text() for path in shared.iterdir()}
+    assert timer.reconcile("/worktree/bin/agentihooks", run=run) is False
+    assert {path.name: path.read_text() for path in shared.iterdir()} == current
+
     assert calls == []
     refusal = (
         f"this run comes from the git worktree {worktree}, "
         f"so it leaves the shared swarm timer units in {shared} alone\n"
     )
-    assert capsys.readouterr().err == refusal * 2
+    assert capsys.readouterr().err == refusal * 3
 
     proof_dir = tmp_path / "proof-units"
     assert timer.ensure("/worktree/bin/agentihooks", proof_dir, run=run)
