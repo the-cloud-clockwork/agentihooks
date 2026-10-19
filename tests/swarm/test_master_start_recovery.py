@@ -35,3 +35,84 @@ def test_alerted_master_relaunches_with_original_handoff_within_five_minutes(sto
     tick("sw", store, ledger, runtime, 420_003)
     assert master_start.read(store, "sw") == {}
     assert store.handoff("sw", MASTER) == ""
+
+
+@pytest.mark.parametrize("error", ["no master claude ai login", "route unavailable"])
+def test_alerted_failure_keeps_one_notice_and_waits_five_minutes_between_attempts(store, error):  # noqa: F811
+    runtime, ledger = StartupRuntime(), tasks()
+    runtime.crash = RuntimeError(error)
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    tick("sw", store, ledger, runtime, 120_002)
+    notices = list(ledger.notes)
+    with patch.object(runtime, "spawn", wraps=runtime.spawn) as spawn:
+        actions = tick("sw", store, ledger, runtime, 420_002)
+        assert spawn.call_count == 1
+        assert f"master spawn failed: {error}" not in actions
+        assert master_start.read(store, "sw")["alerted"] is True
+        tick("sw", store, ledger, runtime, 720_001)
+        assert spawn.call_count == 1
+        tick("sw", store, ledger, runtime, 720_002)
+        assert spawn.call_count == 2
+    assert ledger.notes == notices
+    from scripts.swarm import master_alarm
+
+    assert master_alarm.read(store, "sw")["error"] == f"master spawn failed: {error}"
+
+
+@pytest.mark.parametrize("name", ["", "master@a1b2c3-0098"])
+def test_legacy_alerted_record_rechecks_capacity_and_relaunches_at_the_deadline(store, name):  # noqa: F811
+    runtime, ledger = StartupRuntime(), tasks()
+    original = {"id": MASTER, "handoff": "Retained handoff"}
+    master_start.save(store, "sw", {"name": name, "task": original, "attempt": 2, "at": 0, "alerted": True})
+    runtime.full = True
+    tick("sw", store, ledger, runtime, 300_000)
+    assert not runtime.masters
+    assert master_start.read(store, "sw")["alerted"] is True
+    runtime.full = False
+    tick("sw", store, ledger, runtime, 300_001)
+    assert len(runtime.masters) == 1
+    assert runtime.masters[0][1]["handoff"] == "Retained handoff"
+
+
+def test_unreported_recovery_is_retired_and_retried_without_another_notice(store):  # noqa: F811
+    runtime, ledger = StartupRuntime(), tasks()
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 120_001)
+    tick("sw", store, ledger, runtime, 240_001)
+    notices = list(ledger.notes)
+    tick("sw", store, ledger, runtime, 540_001)
+    assert len(runtime.masters) == 3
+    name = runtime.masters[-1][0]
+    tick("sw", store, ledger, runtime, 660_001)
+    assert name in runtime.killed
+    assert master_start.read(store, "sw")["alerted"] is True
+    assert ledger.notes == notices
+    tick("sw", store, ledger, runtime, 960_001)
+    assert len(runtime.masters) == 4
+
+
+def test_alerted_relaunch_attaches_the_retained_transfer_to_its_new_master(store):  # noqa: F811
+    from scripts.handoff import transfers
+    from scripts.swarm.store import AgentRecord
+
+    old = AgentRecord("master@a1b2c3-0098", MASTER, MASTER, state="finished", seat="master@sw")
+    store.put_agent("sw", old)
+    transfer = transfers.record(store, "sw", old, "recycle", "Full handoff", 0)
+    store.put_handoff("sw", MASTER, "Full handoff", seat=old.seat)
+    runtime, ledger = StartupRuntime(), tasks()
+    runtime.crash = RuntimeError("no master claude ai login")
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    tick("sw", store, ledger, runtime, 120_002)
+    runtime.crash = None
+    tick("sw", store, ledger, runtime, 420_002)
+    assert len(runtime.masters) == 1
+    name, task = runtime.masters[0]
+    retry = task["transfer"]
+    assert retry["retry_of"] == transfer["id"]
+    assert retry["handoff"] == "Full handoff"
+    assert retry["successor"] == name
+    runtime.registered.add(name)
+    tick("sw", store, ledger, runtime, 420_003)
+    assert transfers.get(store, "sw", retry["id"])["binding"]["state"] == "live"
