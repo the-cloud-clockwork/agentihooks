@@ -1384,7 +1384,8 @@ card. The swarm writes these values:
 
 | Value | Written by | Cleared when |
 |---|---|---|
-| `merge` | `swarm ready`, which releases the seat of a task whose reviewed pull request waits only on checks and the merge queue; the task stays `pr` | The merge pass closes the task on the merge, or red checks, a closed pull request or a queue ejection reopen it |
+| `merge` | `swarm ready`, which releases the seat of a task whose reviewed pull request waits only on checks and the merge queue; the task stays `pr` | The merge pass closes the task after the merge, or reopens a task of a kind other than code or ci for its proof; a reopen for a fix writes `fix` instead; withdrawing the ready record or a stalled claim release writes it empty |
+| `fix` | The merge pass, when a released task's checks go red, its pull request closes unmerged, the queue ejects it or GitHub refuses the queue; the task reopens `open` with no claimant and counts as resumed work in claim order | The next engineer's `swarm pr` or `swarm ready` overwrites it |
 | `approval` | `swarm pr` at `assist` autonomy, so the merge waits on the operator; the task sits in Priorities while it is `pr` | A later `swarm pr` at another autonomy writes it empty; the label hides once the task is `done` |
 | `verify` | The merge pass, when a task with post merge proof merges before its evidence is recorded; the task reopens `open` | The evidence is recorded and the task closes, or the master runs `task set ID awaiting=` (see [Post merge proof](../reference/post-merge-proof.md)) |
 | `recovery_pending` | The Kubernetes controller, while a fenced attempt's replacement has not launched or not yet reported its recovery outcome | The replacement reports; the controller writes back the value the task held before, so a `merge` or `approval` wait returns |
@@ -1400,8 +1401,9 @@ agentihooks ledger --slug example --as master task set t12 awaiting=
 
 Each task row on the ledger page shows a non empty `awaiting` value as a label in the row meta, right after the
 task state: a task in `pr` with `awaiting` set to `merge` reads `pr` then `MERGE`. Underscores and dashes
-become spaces, so `recovery_pending` shows as `RECOVERY PENDING`. The label is bold, uppercase and spaced like the
-kind label, in the palette's `--accent-2` colour from `palette.css`; it adds no colour of its own.
+become spaces, so `recovery_pending` shows as `RECOVERY PENDING`. The label has the kind label's bold
+weight, uppercase and letter spacing, in the palette's `--accent-2` colour from `palette.css`; it adds no colour of
+its own.
 
 A row shows no label when the field is empty or absent, and a `done` task never shows one, even when a stale value
 remains on its record. The label is display only: it carries no control, and the value changes only through the
@@ -1413,6 +1415,8 @@ writers above or `task set`.
   replacement has not reported. The controller writes the prior value back on its next pass once the replacement
   reports. A controller log line `the ledger refused the recovery mark on task ID` means the ledger rejected the
   write, and the label stays until a later pass succeeds.
+- **A task shows `FIX`.** Its released pull request went red, closed or left the queue. The next engineer
+  continues it from the stored handoff and the existing pull request.
 - **A task shows `MERGE` but its pull request merged.** The merge pass closes it on the next tick. A task of a kind
   other than code or ci goes back to `open` instead, with a comment that it awaits its proof.
 - **A task shows `VERIFY` with no engineer.** The post merge measurement window has not matured or has no maturity
