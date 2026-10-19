@@ -261,6 +261,34 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     assert scheduled == [True]
 
 
+def test_a_tick_running_inside_the_tick_service_retires_it_without_ending_itself(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(timer, "_inside", lambda: True)
+    (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
+    (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))
+    argvs = [argv for argv, _ in calls]
+    assert argvs[:2] == [
+        ["systemctl", "--user", "disable", "--now", "agentihooks-swarm.timer"],
+        ["systemctl", "--user", "daemon-reload"],
+    ]
+    assert not [argv for argv in argvs if argv[2] in ("stop", "kill", "show")]
+    assert not (tmp_path / "agentihooks-swarm.timer").exists()
+    assert not (tmp_path / "agentihooks-swarm.service").exists()
+
+
+def test_only_a_process_in_the_tick_service_group_counts_as_inside(tmp_path, monkeypatch):
+    cgroup = tmp_path / "cgroup"
+    real = timer.Path
+    monkeypatch.setattr(timer, "Path", lambda path: cgroup if path == "/proc/self/cgroup" else real(path))
+    cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentihooks-swarm.service\n")
+    assert timer._inside()
+    cgroup.write_text("0::/user.slice/user-1000.slice/user@1000.service/app.slice/agentihooks-swarm-waits.service\n")
+    assert not timer._inside()
+    cgroup.unlink()
+    assert not timer._inside()
+
+
 def test_removing_one_leftover_tick_unit_still_reloads_systemd(tmp_path):
     calls = []
     assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl(calls))

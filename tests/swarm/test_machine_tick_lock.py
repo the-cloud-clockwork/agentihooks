@@ -34,7 +34,7 @@ def test_the_tick_the_holder_started_runs_under_the_holders_lock():
 
 
 @pytest.mark.parametrize("forged", ["other-file", "closed", "not-a-number"])
-def test_a_descriptor_that_is_not_the_tick_lock_takes_the_lock_itself(tmp_path, forged):
+def test_a_descriptor_that_is_not_the_tick_lock_is_refused_while_the_holder_runs(tmp_path, forged):
     other = (tmp_path / "other").open("a+")
     value = {"other-file": str(other.fileno()), "closed": "987", "not-a-number": "x"}[forged]
     try:

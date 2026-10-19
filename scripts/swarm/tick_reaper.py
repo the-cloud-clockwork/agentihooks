@@ -6,6 +6,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+import hooks.config  # noqa: F401  loads the env files a tick reads its swarm Redis from
+from scripts.scheduler.service import runtime_dir
+
 PROC = Path("/proc")
 MIN_AGE_S = 60
 GRACE_S = 10
@@ -57,10 +60,7 @@ def _alive(pid: int) -> bool:
 
 def _signal(pid: int, number: int) -> None:
     try:
-        if os.getpgid(pid) == pid and pid != os.getpgid(0):
-            os.killpg(pid, number)
-        else:
-            os.kill(pid, number)
+        os.kill(pid, number)
     except ProcessLookupError:
         pass
 
@@ -70,10 +70,7 @@ def _environ(pid: int) -> dict[str, str]:
     return dict(item.partition("=")[::2] for item in raw.split("\0") if "=" in item)
 
 
-def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str]]]:
-    import hooks.config  # noqa: F401  loads the env files a tick reads its swarm Redis from
-    from scripts.scheduler.service import runtime_dir
-
+def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str], str]]:
     spared, uid, found = _ancestors(), os.getuid(), []
     started = _environ(os.getpid())
     loaded = {key: value for key, value in os.environ.items() if key not in started}
@@ -87,11 +84,11 @@ def _leftovers(min_age_s: float) -> list[tuple[int, float, list[str]]]:
                 continue
             if runtime_dir({**loaded, **_environ(pid)}) != mine:
                 continue
-            age = _age_s(pid)
+            age, start = _age_s(pid), _stat(pid)[19]
         except (OSError, IndexError, ValueError):
             continue
         if age >= min_age_s:
-            found.append((pid, age, argv))
+            found.append((pid, age, argv, start))
     return found
 
 
@@ -102,13 +99,23 @@ def _wait(pids: list[int], grace_s: float) -> list[int]:
     return alive
 
 
+def _same(pid: int, start: str) -> bool:
+    try:
+        return _stat(pid)[19] == start
+    except (OSError, IndexError):
+        return False
+
+
 def reap(min_age_s: float = MIN_AGE_S, grace_s: float = GRACE_S) -> list[Reaped]:
+    if not PROC.is_dir():
+        return []
     found = _leftovers(min_age_s)
-    for pid, _, _ in found:
+    for pid, _, _, _ in found:
         _signal(pid, signal.SIGTERM)
-    killed = set(_wait([pid for pid, _, _ in found], grace_s))
+    alive = set(_wait([pid for pid, _, _, _ in found], grace_s))
+    killed = {pid for pid, _, _, start in found if pid in alive and _same(pid, start)}
     for pid in killed:
         _signal(pid, signal.SIGKILL)
     return [
-        Reaped(pid, int(age), " ".join(argv), "SIGKILL" if pid in killed else "SIGTERM") for pid, age, argv in found
+        Reaped(pid, int(age), " ".join(argv), "SIGKILL" if pid in killed else "SIGTERM") for pid, age, argv, _ in found
     ]

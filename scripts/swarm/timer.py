@@ -99,6 +99,13 @@ def _drain(run):
     return "" if left == "0" else left
 
 
+def _inside():
+    try:
+        return Path("/proc/self/cgroup").read_text().rstrip().endswith(f"/{UNIT}.service")
+    except OSError:
+        return False
+
+
 def _retire(unit_dir, run):
     present = [unit_dir / name for name in RETIRED if (unit_dir / name).exists()]
     if not present:
@@ -107,7 +114,7 @@ def _retire(unit_dir, run):
     if run(disable, capture_output=True, text=True, timeout=30, check=False).returncode:
         print(f"the {UNIT} timer could not be disabled; its unit files stay until a later pass", file=sys.stderr)
         return False
-    if left := _drain(run):
+    if not _inside() and (left := _drain(run)):
         print(
             f"the {UNIT} service still runs {left} processes; its unit files stay until a later pass", file=sys.stderr
         )

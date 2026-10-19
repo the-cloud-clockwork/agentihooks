@@ -1,8 +1,8 @@
+import contextlib
 import os
 import signal
 import subprocess
 import sys
-import time
 from pathlib import Path
 
 import pytest
@@ -14,27 +14,14 @@ pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("tick-reaper")]
 ROOT = Path(__file__).resolve().parents[2]
 SLEEP = "import time; time.sleep(600)"
 DEAF = "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); print('ready', flush=True); time.sleep(600)"
-PARENT = (
-    "import subprocess, sys; child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)']); "
-    "print(child.pid, flush=True); child.wait()"
+SHELL = (
+    "import subprocess, sys, time; sibling = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(600)']); "
+    "print(sibling.pid, flush=True); time.sleep(600)"
 )
 
 
 def _plant(code, *argv, stdout=None):
     return subprocess.Popen([sys.executable, "-c", code, *argv], start_new_session=True, stdout=stdout, text=True)
-
-
-def _gone(pid, within=15.0):
-    deadline = time.monotonic() + within
-    while time.monotonic() < deadline:
-        try:
-            state = Path(f"/proc/{pid}/stat").read_text().rsplit(")", 1)[1].split()[0]
-        except (FileNotFoundError, ProcessLookupError):
-            return True
-        if state in ("Z", "X"):
-            return True
-        time.sleep(0.1)
-    return False
 
 
 @pytest.mark.parametrize(
@@ -52,10 +39,10 @@ def test_a_tick_process_is_a_swarm_tick_or_its_scheduler_holder(argv, tick):
     assert tick_reaper.is_tick(argv) is tick
 
 
-def test_a_planted_leftover_tick_and_its_process_group_are_reaped_and_recorded():
-    left = _plant(PARENT, "swarm", "tick", stdout=subprocess.PIPE)
+def test_a_planted_leftover_tick_is_reaped_and_recorded_without_touching_its_group():
+    left = _plant(SHELL, "swarm", "tick", stdout=subprocess.PIPE)
     try:
-        child = int(left.stdout.readline())
+        sibling = int(left.stdout.readline())
         reaped = tick_reaper.reap(min_age_s=0)
         mine = [record for record in reaped if record.pid == left.pid]
         assert len(mine) == 1
@@ -63,10 +50,18 @@ def test_a_planted_leftover_tick_and_its_process_group_are_reaped_and_recorded()
         assert mine[0].age_s >= 0
         assert mine[0].signal == "SIGTERM"
         assert left.wait(15) == -signal.SIGTERM
-        assert _gone(child)
+        assert sibling not in [record.pid for record in reaped]
+        os.kill(sibling, 0)
     finally:
         left.kill()
         left.wait()
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(left.pid, signal.SIGKILL)
+
+
+def test_a_host_without_proc_reaps_nothing(tmp_path, monkeypatch):
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "proc")
+    assert tick_reaper.reap(min_age_s=0) == []
 
 
 def test_a_leftover_that_ignores_terminate_is_killed():
