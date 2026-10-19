@@ -194,3 +194,12 @@ def select_tests(root: Path, source: Path) -> list[str]:
             break
         reaching |= added
     return [path.relative_to(root).as_posix() for path in modules if path in reaching and path.name.startswith("test_")]
+
+
+def test_file(entry: str) -> str:
+    return entry.partition("::")[0]
+
+
+def selects(entry: str, test: str) -> bool:
+    test = re.sub(r"@[^\[\]]*$", "", test)
+    return test == entry or test.startswith((f"{entry}::", f"{entry}["))

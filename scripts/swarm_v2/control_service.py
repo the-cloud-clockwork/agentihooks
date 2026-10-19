@@ -204,7 +204,7 @@ class ControlService:
             self.writer.acquire(ledger_writer.owner())
         except ledger_writer.WriterConflict as conflict:
             print(f"controller: serves the tasks API read only for {self.controller.slug}: {conflict}", flush=True)
-        ledger = storage.build(folder / storage.DATABASE)
+        ledger = storage.build(None if storage.shared() else folder / storage.DATABASE)
         self.tasks_api = TasksAPI(self.grants, self.tasks, ledger, self.writer.held)
 
     def stop(self) -> None:

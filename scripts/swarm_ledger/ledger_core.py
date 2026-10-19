@@ -9,12 +9,10 @@ they are imported.
 """
 
 import difflib
-import hashlib
 import json
 import os
 import re
 import sys
-import tempfile
 import threading
 import time
 from pathlib import Path
@@ -46,18 +44,24 @@ from scripts.swarm_ledger import (
     ledger_splits,
     models,
 )
+from scripts.swarm_ledger.ledger_files import LOG_MAX_BYTES, append_capped, atomic_write, rotate_if_full  # noqa: F401
+from scripts.swarm_ledger.page_assets import (  # noqa: F401
+    HOME,
+    MODULES,
+    PAGE_RE,
+    PAGES,
+    PALETTE,
+    SEED_RE,
+    SHELL,
+    TOKEN_RE,
+    TOOLTIPS,
+    page_version,
+    read_token,
+    static_assets,
+)
 
 LEDGER_DIR = Path(os.environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,120}$")
-SEED_RE = re.compile(r'(<script id="ledger-data" type="application/json">)(.*?)(</script>)', re.S)
-PAGE_RE = re.compile(r'<meta name="ledger-page" content="([0-9a-f]+)">')
-PAGES = Path(__file__).resolve().parent
-PALETTE = PAGES / "palette.css"
-TOOLTIPS = PAGES / "tooltips.js"
-MODULES = PAGES / "static" / "js"
-SHELL = PAGES / "shell.html"
-HOME = PAGES / "home.html"
-TOKEN_RE = re.compile(r'<meta name="ledger-token" content="([A-Za-z0-9_-]{16,})">')
 LEGACY_LINE_RE = re.compile(r"^([A-Za-z][\w.-]*)(?: [0-9:]+Z?| \([^)]*\))?: (.+)$")
 LISTS = models.LISTS
 BOOL_FIELDS = models.CHECKBOXES
@@ -78,7 +82,6 @@ EVENTS_KEPT = 2000
 EVENTS_CEILING = 10000
 EVENTS_WINDOW_MS = 24 * 60 * 60 * 1000
 MAX_TEXT = 20000
-LOG_MAX_BYTES = 5 << 20
 LOCK = threading.Lock()
 
 EXTENSION_OPS = {
@@ -285,58 +288,9 @@ def watch_path(slug, name):
     return next((path for path in paths if path.exists()), paths[0])
 
 
-def static_assets():
-    """Every file a page loads, by its path under /static/<page version>/."""
-    static = MODULES.parent
-    return {
-        "palette.css": PALETTE,
-        "tooltips.js": TOOLTIPS,
-        **{f"css/{p.name}": p for p in sorted((static / "css").glob("*.css"))},
-        **{f"js/{p.name}": p for p in sorted(MODULES.glob("*.js"))},
-        **{f"home/{p.name}": p for p in sorted((static / "home").glob("*.js"))},
-    }
-
-
-def page_version(assets=None):
-    if assets is None:
-        assets = {name: path.read_bytes() for name, path in static_assets().items()}
-    digest = hashlib.sha256(SHELL.read_bytes() + HOME.read_bytes())
-    for name, data in assets.items():
-        digest.update(name.encode() + b"\0" + data)
-    return digest.hexdigest()[:12]
-
-
-def read_token(html):
-    match = TOKEN_RE.search(html)
-    return match.group(1) if match else None
-
-
 def seed_text(doc, rev=None):
     body = doc if rev is None else {"_rev": rev, **doc}
     return "\n" + pretty(body).replace("<", "\\u003c") + "\n"
-
-
-def rotate_if_full(path, limit=LOG_MAX_BYTES):
-    try:
-        if path.stat().st_size >= limit:
-            path.replace(path.with_name(path.name + ".1"))
-    except FileNotFoundError:
-        pass
-
-
-def append_capped(path, text, limit=LOG_MAX_BYTES):
-    rotate_if_full(path, limit)
-    with open(path, "a", encoding="utf-8") as fh:
-        fh.write(text)
-
-
-def atomic_write(path, text):
-    fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
-    with os.fdopen(fd, "w", encoding="utf-8") as fh:
-        fh.write(text)
-    written = os.stat(tmp)
-    os.replace(tmp, path)
-    return written
 
 
 def text_diff(old, new):

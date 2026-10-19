@@ -4,7 +4,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.artifacts import base, local
 from scripts.swarm_v2.auth_context import GrantRefused, LaunchAuthority, LaunchKey
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 PROJECT = "github.com/the-cloud-clockwork/agentihooks"

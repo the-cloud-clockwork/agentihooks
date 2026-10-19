@@ -6,7 +6,7 @@ from scripts.swarm import outage, pane, provider_probe
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 CAPACITY = "\x1b[31m■ Selected model is at capacity. Please try a different model.\x1b[0m"
 

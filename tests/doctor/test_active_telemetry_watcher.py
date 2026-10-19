@@ -9,8 +9,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.doctor.test_active_telemetry import AGENT, LIMITS, NOW, _binding, _local, _record
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

@@ -22,7 +22,7 @@ CREDENTIAL_HEADERS = (
     "X-Ledger-Tick",
     "X-Ledger-Migration",
 )
-TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM"
+TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV, CA_FILE_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM", "LEDGER_CA_FILE"
 
 
 class Cleartext(SystemExit):
@@ -81,7 +81,22 @@ def guard(url: str, headers: dict) -> None:
 
 def transport(environ=os.environ) -> dict:
     pem = environ.get(CA_ENV, "").strip()
-    return {"context": ssl.create_default_context(cadata=pem)} if pem else {}
+    if pem:
+        return {"context": ssl.create_default_context(cadata=pem)}
+    found = ca_file(environ)
+    if not found.is_file():
+        if environ.get(CA_FILE_ENV):
+            raise SystemExit(f"{CA_FILE_ENV} names no file: {found}")
+        return {}
+    context = ssl.create_default_context()
+    context.load_verify_locations(cafile=str(found))
+    return {"context": context}
+
+
+def ca_file(environ=os.environ) -> Path:
+    if environ.get(CA_FILE_ENV):
+        return Path(environ[CA_FILE_ENV]).expanduser()
+    return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-ca.pem"
 
 
 def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ):

@@ -9,8 +9,6 @@ from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable, tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PAGE = "scripts/swarm_ledger/static/js/render.js"
 
 

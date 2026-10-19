@@ -16,8 +16,6 @@ from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import DOC, taker  # noqa: F401
 from tests.test_terminate_agent import process
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("registered", [False, True, "alias"])
 def test_a_named_session_confirms_and_writes_as_its_new_master(taker, monkeypatch, tmp_path, capsys, registered):  # noqa: F811

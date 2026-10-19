@@ -15,7 +15,7 @@ from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests import sv2_kub05_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-05"
 POD = {"metadata": {}, "spec": {}, "status": {}}

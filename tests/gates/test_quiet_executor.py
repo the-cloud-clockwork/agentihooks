@@ -14,8 +14,6 @@ from scripts.gates.verdicts import Verdicts
 from scripts.swarm import idle
 from scripts.swarm.store import AgentRecord, RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ROOT = Path(__file__).resolve().parents[2]
 ME, SLUG, SID = "engineer@100001-0001", "demo", "sid-quiet"
 MIN = 60_000

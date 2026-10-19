@@ -99,6 +99,8 @@ def test_noncanonical_float_signatures_reuse_committed_rows():
 
 
 def test_operation_relay_borrows_the_committed_state(tmp_path, monkeypatch):
+    from dataclasses import replace
+
     from scripts.swarm_ledger.api import mutations
     from tests.swarm_ledger import operations_cpu_replay as replay
     from tests.swarm_ledger.test_operations_cpu_contract import small_corpus
@@ -106,16 +108,15 @@ def test_operation_relay_borrows_the_committed_state(tmp_path, monkeypatch):
     apply = mutations.apply
     observed = []
 
-    def check_borrowed(server, slug, principal, payload):
-        relay = server.relay_to_inbox
+    def check_borrowed(services, slug, principal, payload):
+        relay = services.ledger.relay_to_inbox
 
         def relay_borrowed(slug, state):
-            assert state is server.repository.current(slug).state
+            assert state is services.repository.current(slug).state
             return relay(slug, state)
 
-        with monkeypatch.context() as boundary:
-            boundary.setattr(server, "relay_to_inbox", relay_borrowed)
-            reply = apply(server, slug, principal, payload)
+        borrowing = replace(services, ledger=replace(services.ledger, relay_to_inbox=relay_borrowed))
+        reply = apply(borrowing, slug, principal, payload)
         observed.append(reply)
         return reply
 

@@ -9,8 +9,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2.checkpoints import native
 from tests import sv2_ckp03_cases as cases
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CLAUDE = "engineer@a1b2c3-0001"
 CODEX = "engineer@a1b2c3-0002"
 

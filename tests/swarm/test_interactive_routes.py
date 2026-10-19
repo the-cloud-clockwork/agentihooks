@@ -9,8 +9,6 @@ from scripts.swarm.store import AgentRecord, RedisStore
 from scripts.swarm.tick import Placed, placed_record
 from tests.swarm.test_runtime import _passed, _resuming, validated
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture(autouse=True)
 def native_status(monkeypatch):

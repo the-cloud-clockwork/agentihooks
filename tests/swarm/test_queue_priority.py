@@ -10,7 +10,7 @@ from tests.swarm.test_cli import env
 from tests.swarm.test_merge_queue import swarm_of
 from tests.swarm.test_merge_queue_priority import READ_PULL, URL, FakeQueue
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 _fixture = env
 
 

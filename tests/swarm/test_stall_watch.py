@@ -14,8 +14,6 @@ from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeLedger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 URL = "https://github.com/o/r/pull/7"
 OWNER = "engineer@abc-0001"

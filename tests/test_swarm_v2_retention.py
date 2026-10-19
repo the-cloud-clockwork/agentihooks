@@ -8,7 +8,7 @@ from scripts.swarm_v2 import retention
 from scripts.swarm_v2.retention import Final
 from tests import sv2_kub04_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = cases.SLUG
 

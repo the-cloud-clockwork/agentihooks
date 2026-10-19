@@ -8,8 +8,6 @@ from scripts.swarm.tick import tick
 from scripts.swarm_ledger import ledger_workspace, plan_read
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CONTRACT = {"must": "the folder exists", "check": "ls", "judge": "the master"}
 
 

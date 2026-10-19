@@ -7,8 +7,6 @@ from scripts.swarm.store import AUTONOMY, MASTER, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, home, run  # noqa: F401
 from tests.swarm.test_runtime import _spawn_env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 TASK = {"id": "t1", "title": "x", "phase": "p1"}
 
 
