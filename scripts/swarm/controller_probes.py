@@ -32,8 +32,7 @@ def live(
 
 
 def _frozen(store: RedisStore, owner: str | None, age_ms: Callable[[], int]) -> str:
-    """A restart cannot end a ledger outage, so a swarm in one is left to the stale watcher."""
-    from scripts.swarm import commands, outage
+    from scripts.swarm import commands
 
     now, mine = lease.now_ms(store), owner or commands.hive_id()
     since = now - age_ms()
@@ -41,8 +40,7 @@ def _frozen(store: RedisStore, owner: str | None, age_ms: Callable[[], int]) -> 
         held = lease.current(store, slug)
         if held is None or held.owner != mine or store.config(slug).state not in tick_heartbeat.JUDGED:
             continue
-        gone = store.redis.exists(store.key(slug, "ledger-gone"))
-        if gone or any(record["kind"] == "ledger" for record in outage.open_records(slug)):
+        if tick_heartbeat.halted(store, slug):
             continue
         if evidence := tick_heartbeat.stale(tick_heartbeat.read(store, slug), now, since):
             return f"{slug}: {'; '.join(evidence)}"

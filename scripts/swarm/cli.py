@@ -271,6 +271,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
             controls = timing.call(command_runner.consume, store, slug)
             if timing.call(ledger.binned, slug):
+                store.redis.set(store.key(slug, "ledger-binned"), 1)
                 _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
                 return [
                     f"the ledger is in the bin, still retiring {', '.join(left)}"
@@ -285,7 +286,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 return (
                     [f"{exc}; agentihooks swarm remove {slug} clears this swarm once it has no agents"] if first else []
                 )
-            store.redis.delete(store.key(slug, "ledger-gone"))
+            store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
             actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
             if actions:

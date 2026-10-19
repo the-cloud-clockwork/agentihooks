@@ -11,6 +11,7 @@ KEY = "tick-heartbeat"
 LIMIT_MS = 600_000
 HOST, QUOTA, LEDGER = "host room", "quota", "ledger revision"
 JUDGED = ("running", "paused", "stopping", "drained")
+HALTS = ("ledger-gone", "ledger-binned")
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,15 @@ def write(store, slug, at: int, doc: dict) -> Heartbeat:
     )
     store.redis.set(store.key(slug, KEY), json.dumps(asdict(beat)))
     return beat
+
+
+def halted(store, slug) -> bool:
+    """A restart cannot end a ledger that is gone, binned or in an outage, so only the stale watcher alerts on it."""
+    from scripts.swarm import outage
+
+    if any(store.redis.exists(store.key(slug, mark)) for mark in HALTS):
+        return True
+    return any(record["kind"] == "ledger" for record in outage.open_records(slug))
 
 
 def stale(beat: Heartbeat | None, now: int, since: int | None = None, limit: int = LIMIT_MS) -> list[str]:

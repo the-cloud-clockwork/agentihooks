@@ -188,13 +188,40 @@ def test_one_alert_per_stale_episode_however_many_passes_see_it(store):
     assert len(mail(store, "eng-1@sw")) == 1
 
 
-def test_a_seat_that_comes_live_during_the_episode_gets_the_same_alert(store):
+def test_a_seat_that_comes_live_during_the_episode_gets_the_current_evidence(store):
     beat(store, START)
     tick_watch.watch_pass(store, "sw", START + LIMIT, START)
     agent(store, "engineer@a1b2c3-0001", "eng-1@sw")
 
     assert tick_watch.watch_pass(store, "sw", START + LIMIT + MINUTE, START) == ["told eng-1@sw the tick is stale"]
-    assert texts(store, "eng-1@sw") == texts(store, FRONT_DOOR)
+    evidence = f"no tick pass has completed for 11 minutes, the last ended at {tick_heartbeat.clock(START)}"
+    assert texts(store, "eng-1@sw") == [tick_watch.ALERT.format(slug="sw", evidence=evidence)]
+    assert len(texts(store, FRONT_DOOR)) == 1
+
+
+@pytest.mark.parametrize("mark", tick_heartbeat.HALTS)
+def test_a_halted_ledger_is_alerted_but_neither_restarted_nor_respawned(store, lease_clock, mark):
+    beat(store, START - 3 * LIMIT)
+    store.redis.set(store.key("sw", mark), 1)
+    asked = []
+
+    assert probe(store, age=2 * LIMIT) == 0
+    assert tick_watch.watch_pass(store, "sw", START, START, lambda slug: asked.append(slug) or []) == [
+        f"told {FRONT_DOOR} the tick is stale"
+    ]
+    assert asked == []
+
+
+def test_a_binned_ledger_marks_the_swarm_halted_and_a_later_read_clears_it(env):  # noqa: F811
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    ledger.binned = lambda slug: True
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert tick_heartbeat.halted(store, "sw")
+
+    ledger.binned = lambda slug: False
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert not tick_heartbeat.halted(store, "sw")
 
 
 def test_a_fresh_pass_sends_the_resolved_notice_to_every_alerted_seat_once(store):

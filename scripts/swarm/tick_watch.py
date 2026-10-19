@@ -40,14 +40,15 @@ def watch_pass(
     beat = tick_heartbeat.read(store, slug)
     evidence = tick_heartbeat.stale(beat, now, None if beat else since)
     if evidence:
-        return _alert(store, slug, now, episode, evidence) + (respawn(slug) if respawn else [])
+        respawned = respawn(slug) if respawn and not tick_heartbeat.halted(store, slug) else []
+        return _alert(store, slug, now, episode, evidence) + respawned
     return _resolve(store, slug, now, episode, RESOLVED, "runs again") if episode else []
 
 
 def _alert(store, slug, now, episode, evidence) -> list[str]:
     episode = episode or {"since": now, "evidence": evidence, "told": []}
     fresh = [address for address in recipients(store, slug) if address not in episode["told"]]
-    text = ALERT.format(slug=slug, evidence="; ".join(episode["evidence"]))
+    text = ALERT.format(slug=slug, evidence="; ".join(evidence))
     for address in fresh:
         _send(store, address, text, _item_id(slug, episode["since"], address, "alert"))
     _save(store, slug, {**episode, "told": sorted([*episode["told"], *fresh])})
