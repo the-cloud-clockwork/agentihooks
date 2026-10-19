@@ -150,11 +150,13 @@ def test_a_ca_file_that_holds_no_certificate_is_named(tmp_path, named):
     bad = tmp_path / "ledger-ca.pem"
     bad.write_text("not a certificate\n")
     environ = {"LEDGER_CA_FILE": str(bad)} if named else {"AGENTIHOOKS_HOME": str(tmp_path)}
+    with pytest.raises(ssl.SSLError) as raw:
+        ssl.create_default_context().load_verify_locations(cafile=str(bad))
 
     with pytest.raises(SystemExit) as refused:
         ledger_link.transport(environ)
 
-    assert str(refused.value).startswith(f"the ledger CA file {bad} holds no valid certificate: ")
+    assert str(refused.value) == f"the ledger CA file {bad} holds no valid certificate: {raw.value.reason}"
 
 
 def test_the_metrics_command_trusts_the_ledger_ca(monkeypatch, cert, capsys):
