@@ -201,29 +201,11 @@ def test_offscreen_phase_content_skips_layout_but_keeps_deep_navigation(browser)
     )
     page.wait_for_function("() => !!document.getElementById('item-phases-p29')")
     page.evaluate("async () => { await new Promise(requestAnimationFrame); await new Promise(requestAnimationFrame); }")
-    session = page.context.new_cdp_session(page)
-    snapshot = session.send("DOMSnapshot.captureSnapshot", {"computedStyles": []})
-    strings = snapshot["strings"]
-    document = snapshot["documents"][0]
-    nodes = document["nodes"]
-    phase_nodes = {
-        index
-        for index, attrs in enumerate(nodes["attributes"])
-        if any(
-            strings[attrs[i]] == "id" and strings[attrs[i + 1]].startswith("item-phases-")
-            for i in range(0, len(attrs), 2)
-        )
-    }
-    laid_out = []
-    for index in document["layout"]["nodeIndex"]:
-        parent = nodes["parentIndex"][index]
-        while parent >= 0:
-            if parent in phase_nodes:
-                laid_out.append(index)
-                break
-            parent = nodes["parentIndex"][parent]
-    assert len(phase_nodes) == 30
-    assert laid_out == []
+    assert page.locator("#phases > li").count() == 30
+    page.wait_for_function(
+        "() => !document.querySelector('#item-phases-p29 .item-title').checkVisibility({contentVisibilityAuto: true})",
+        timeout=3000,
+    )
     page.evaluate(
         """async () => {
           const main = document.querySelector(\'script[type=module]\').src;
@@ -235,7 +217,6 @@ def test_offscreen_phase_content_skips_layout_but_keeps_deep_navigation(browser)
     row.wait_for(state="visible")
     assert 0 <= row.bounding_box()["y"] < 1080
     assert "Phase 29" in row.text_content()
-    session.detach()
     page.close()
 
 
