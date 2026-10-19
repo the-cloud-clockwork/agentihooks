@@ -1,9 +1,15 @@
 {
-  "package": "SV2-CKP-05",
+  "fixture_inputs": {
+    "corrupt_object": "native session object of ckpt-1 overwritten after commit",
+    "duplicated_restore_request": "resume requested twice after a controller restart, then fresh",
+    "unsupported_harness_version": "claude 9.0.0 against a checkpoint captured on 2.1",
+    "valid_checkpoint": "ckpt-1 captured from the context-only transcript and committed authoritative"
+  },
   "input_sha256": {
     "context-only.json": "0bef305b2565a336c5021606d2bf4b1a6f4b35f9cade44aee8c6720da27e5fda"
   },
-  "tested_commit": "47c3369d31b30f5e2b051588ac5e4bc28c8f9708",
+  "mocked": true,
+  "package": "SV2-CKP-05",
   "run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38210282982",
-  "mocked": true
+  "tested_commit": "47c3369d31b30f5e2b051588ac5e4bc28c8f9708"
 }
