@@ -122,3 +122,15 @@ def test_a_legacy_login_held_by_a_live_master_refuses_naming_it(ah, rendered, tm
         login.prepare(_environ(rendered), tmp_path)
     assert (legacy / "claude" / login.CREDENTIALS).is_file()
     assert not login.home().exists()
+
+
+def test_a_launch_beside_a_live_master_never_moves_a_legacy_login_into_its_home(ah, rendered, tmp_path):
+    import os
+
+    login.build(rendered)
+    legacy = _legacy(ah, "rig")
+    login.claim("master@doctor-1", os.getppid())
+    with pytest.raises(login.LoginRefused, match="^no master claude ai login: run agentihooks claude login --master$"):
+        login.prepare(_environ(rendered), tmp_path)
+    assert (legacy / "claude" / login.CREDENTIALS).is_file()
+    assert not (login.home() / login.CREDENTIALS).exists()
