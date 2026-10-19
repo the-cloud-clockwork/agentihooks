@@ -233,6 +233,7 @@ def test_a_tick_service_group_that_will_not_empty_is_killed_and_keeps_its_units(
     calls, clock = [], [0.0]
     monkeypatch.setattr(timer.time, "monotonic", lambda: clock[-1])
     monkeypatch.setattr(timer.time, "sleep", lambda seconds: None)
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=_systemctl([]))
     (tmp_path / "agentihooks-swarm.timer").write_text("[Timer]\n")
     (tmp_path / "agentihooks-swarm.service").write_text("[Service]\n")
     groups = [("/user.slice/agentihooks-swarm.service", "2")]

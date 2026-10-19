@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 UNIT = "agentihooks-swarm"
@@ -14,6 +15,8 @@ PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
+DRAIN_S = 30
+KILL_WAIT_S = 10
 
 
 def units(binary):
@@ -64,6 +67,33 @@ def _services(names):
     return [name for name in names if name.endswith(".service") and name != f"{WAITS}.service"]
 
 
+def _left(run):
+    shown = run(
+        ["systemctl", "--user", "show", "-p", "ControlGroup", "-p", "TasksCurrent", f"{UNIT}.service"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    ).stdout
+    props = dict(line.partition("=")[::2] for line in (shown or "").splitlines())
+    return "0" if not props.get("ControlGroup") else props.get("TasksCurrent", "")
+
+
+def _drain(run):
+    for name, wait_s in (("SIGTERM", DRAIN_S), ("SIGKILL", KILL_WAIT_S)):
+        if _left(run) == "0":
+            return ""
+        kill = ["systemctl", "--user", "kill", "--kill-whom=all", f"--signal={name}", f"{UNIT}.service"]
+        run(kill, capture_output=True, text=True, timeout=30, check=False)
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if _left(run) == "0":
+                return ""
+            time.sleep(1)
+    left = _left(run)
+    return "" if left == "0" else left
+
+
 def _retire(unit_dir, run):
     present = [unit_dir / name for name in RETIRED if (unit_dir / name).exists()]
     if not present:
@@ -71,6 +101,11 @@ def _retire(unit_dir, run):
     disable = ["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"]
     if run(disable, capture_output=True, text=True, timeout=30, check=False).returncode:
         print(f"the {UNIT} timer could not be disabled; its unit files stay until a later pass", file=sys.stderr)
+        return False
+    if left := _drain(run):
+        print(
+            f"the {UNIT} service still runs {left} processes; its unit files stay until a later pass", file=sys.stderr
+        )
         return False
     for path in present:
         path.unlink()

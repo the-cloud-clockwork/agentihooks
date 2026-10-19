@@ -118,3 +118,14 @@ def test_a_process_of_another_user_is_never_a_leftover(monkeypatch):
     finally:
         left.kill()
         left.wait()
+
+
+def test_a_tick_of_another_swarm_redis_is_never_a_leftover():
+    other = {**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": "redis://127.0.0.1:6390/0"}
+    left = subprocess.Popen([sys.executable, "-c", SLEEP, "swarm", "tick"], start_new_session=True, env=other)
+    try:
+        assert left.pid not in [record.pid for record in tick_reaper.reap(min_age_s=0)]
+        assert left.poll() is None
+    finally:
+        left.kill()
+        left.wait()
