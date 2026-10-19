@@ -594,7 +594,7 @@ Every layer is a JSON object with a `roots` list. Each root entry takes:
 | `kind` | required in the merged entry | One of the kinds above; any other value drops the root |
 | `idle_days` | `7` | Idle age before an entry is acted on |
 | `budget_gb` | `0` | `scratch` only: size above which the oldest dead dirs go |
-| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry |
+| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry except dot names and the `archive` folder |
 | `enabled` | `true` | `false` drops the root after the merge |
 
 Later layers update an earlier entry with the same `id` field by field, so an overlay names only what it changes. A personal `~/.agentihooks/lifecycle.json` that shortens the scratchpad idle time, turns off ledger archiving and adds a root of its own:
@@ -613,11 +613,14 @@ Each finding in `agentihooks gc --json` carries the `id` of the root it came fro
 
 A layer the reader cannot open or parse contributes no roots and the other layers still load: a missing file, a path that is a directory or cannot be read, text that is not JSON, JSON whose top level is not an object (`null`, `[]`) and an object with no `roots` all count as empty. Inside `roots`, entries that are not objects or have no `id` are skipped. Nothing reports a skipped layer or entry, so a broken overlay leaves the other layers' roots in force without a warning.
 
-These shapes raise out of the reader. `agentihooks gc` stops with the error; on PreToolUse the lifecycle guard logs `lifecycle pre-tool failed` and lets the call through without recording a lease or blocking a path gc is removing:
+Field types are not checked. These shapes raise out of the reader, which stops `agentihooks gc` with the error; on PreToolUse the lifecycle guard logs `lifecycle pre-tool failed` and lets the call through without recording a lease or blocking a path gc is removing:
 
 - A file that is not valid UTF-8.
 - `roots` set to `null` or a number; it must be a list.
+- `path` set to a number, or `kind` set to a list or object.
 - `include` set to `null`. `include` must be a list of strings: a bare string such as `"*.json"` is read as one pattern per character.
+
+`idle_days` and `budget_gb` must be numbers: a string loads without error, and the sweep can fail later when it compares an entry's age or size against it.
 
 ---
 
