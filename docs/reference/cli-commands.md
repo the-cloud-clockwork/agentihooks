@@ -594,7 +594,7 @@ Every layer is a JSON object with a `roots` list. Each root entry takes:
 | `kind` | required in the merged entry | One of the kinds above; any other value drops the root |
 | `idle_days` | `7` | Idle age before an entry is acted on |
 | `budget_gb` | `0` | `scratch` only: size above which the oldest dead dirs go |
-| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry except dot names and the `archive` folder |
+| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry. Dot names and the `archive` folder are always skipped |
 | `enabled` | `true` | `false` drops the root after the merge |
 
 Later layers update an earlier entry with the same `id` field by field, so an overlay names only what it changes. A personal `~/.agentihooks/lifecycle.json` that shortens the scratchpad idle time, turns off ledger archiving and adds a root of its own:
@@ -620,7 +620,7 @@ Field types are not checked. These shapes raise out of the reader, which stops `
 - `path` set to a number, or `kind` set to a list or object.
 - `include` set to `null`. `include` must be a list of strings: a bare string such as `"*.json"` is read as one pattern per character.
 
-`idle_days` and `budget_gb` must be numbers: a string loads without error, and the sweep can fail later when it compares an entry's age or size against it.
+`idle_days` and `budget_gb` must be numbers: a string loads without error, and the sweep can fail later when it computes an entry's age limit or the scratch size budget from it.
 
 ---
 
