@@ -83,7 +83,7 @@ def test_outline_updates_when_a_target_crosses_or_jumps_over_the_activation_line
         end_top,
     )
     page.wait_for_function(
-        "() => document.querySelector(\'a[data-target=outline-crossing]\').classList.contains(\'on\')",
+        "() => document.querySelector('a[data-target=outline-crossing]').classList.contains('on')",
         timeout=3000,
     )
     page.evaluate(
@@ -93,7 +93,7 @@ def test_outline_updates_when_a_target_crosses_or_jumps_over_the_activation_line
         }"""
     )
     page.wait_for_function(
-        "() => !document.querySelector(\'a[data-target=outline-crossing]\').classList.contains(\'on\')",
+        "() => !document.querySelector('a[data-target=outline-crossing]').classList.contains('on')",
         timeout=3000,
     )
     page.close()
