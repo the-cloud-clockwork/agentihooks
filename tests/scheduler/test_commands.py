@@ -3,7 +3,7 @@ import pytest
 from scripts.scheduler import commands
 from scripts.scheduler.slots import BroadcastSlot, InboxSlot, SwarmSlot, restore
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 OWNER = "engineer@323133-1958"
 

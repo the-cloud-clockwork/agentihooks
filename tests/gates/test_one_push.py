@@ -128,6 +128,36 @@ def test_an_open_after_both_reviews_with_the_work_on_origin_passes(tree, tmp_pat
     assert gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed
 
 
+@pytest.mark.parametrize("folder", ["cd", "workdir", "relative-workdir", "workdir-cd"])
+@pytest.mark.parametrize("unpushed_command", [False, True])
+def test_ready_counts_the_command_checkout_instead_of_the_session_checkout(tree, tmp_path, folder, unpushed_command):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    changed = work if unpushed_command else tree
+    (changed / "a.txt").write_text("unpublished\n")
+    git(changed, "commit", "-q", "-am", "unpublished")
+    tool_input = {"command": "gh pr ready 1"}
+    if folder == "cd":
+        tool_input["command"] = f"cd {work} && gh pr ready 1"
+    elif folder == "workdir-cd":
+        tool_input["workdir"] = str(tmp_path)
+        tool_input["command"] = "cd command && gh pr ready 1"
+    else:
+        tool_input["workdir"] = "../command" if folder == "relative-workdir" else str(work)
+    call = Call.from_payload({"tool_name": "Bash", "tool_input": tool_input, "cwd": str(tree)})
+    decision = gate(target="codex").decide(call, ME, state(tmp_path))
+    assert decision.allowed is not unpushed_command, decision.reason
+    if unpushed_command:
+        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
+def test_ready_without_a_command_folder_counts_the_session_checkout(tree, tmp_path):
+    (tree / "a.txt").write_text("unpublished\n")
+    git(tree, "commit", "-q", "-am", "unpublished")
+    decision = gate(target="codex").decide(bash("gh pr ready 1", tree), ME, state(tmp_path))
+    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
 def test_a_reader_named_by_its_sub_agent_type_counts(tree, tmp_path):
     budget = SubagentBudget()
     for reader in ("standards-reader", "spec-reader"):

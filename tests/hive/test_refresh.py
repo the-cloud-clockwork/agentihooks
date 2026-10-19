@@ -11,8 +11,6 @@ import pytest
 from scripts.hive import auth, cli, registry, server
 from scripts.swarm import store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PUBLIC = "rediss://hive.example:6380/0"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"
 NO_MEMBER = "the ledger credential belongs to no hive member"

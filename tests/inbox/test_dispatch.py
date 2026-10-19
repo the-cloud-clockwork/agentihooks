@@ -9,8 +9,6 @@ from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks, claim, first_showing, 
 from scripts.inbox.store import OWNER_TTL_ENV, InboxStore, now_ms, owner_key, owner_ttl_s
 from scripts.swarm.naming import NameRegistry
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def server():

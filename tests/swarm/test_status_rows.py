@@ -5,7 +5,6 @@ import pytest
 from scripts.swarm import status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 MIDNIGHT = 1_791_244_800_000
 HOUR = 3_600_000
 

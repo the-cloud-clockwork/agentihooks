@@ -9,7 +9,7 @@ from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_metrics_swarm import AGENT, DONE, NOW, SLUG, TASK, assert_node, delivered, doc, event
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

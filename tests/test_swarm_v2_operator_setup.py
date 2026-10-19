@@ -24,7 +24,7 @@ from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.operator_setup import SetupRefused
 from scripts.swarm_v2.kubernetes import operator_terminal
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 BAO_URL = "https://bao.test"
 POLICY = {**json.loads((FIXTURES / "pod-policy.json").read_text()), "provider_accounts": []}

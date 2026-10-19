@@ -5,8 +5,6 @@ import pytest
 from scripts.hive import registry
 from scripts.routing import aggregate
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis():

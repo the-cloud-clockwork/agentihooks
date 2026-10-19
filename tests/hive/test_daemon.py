@@ -5,7 +5,7 @@ import pytest
 
 from scripts.hive import daemon, registry
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

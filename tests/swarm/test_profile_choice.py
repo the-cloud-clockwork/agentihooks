@@ -7,8 +7,6 @@ from scripts.swarm import dispatcher, profile_choice, runtime, store, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 from tests.swarm_ledger import legacy_page
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 REAL_INSTALLED = profile_choice.installed
 REMEDY = (
     "set it with agentihooks ledger --slug sw task set t9 profile=<frontend|engineer|qa>, "

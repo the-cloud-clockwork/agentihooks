@@ -449,6 +449,13 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "no-proc")
+
+
+@pytest.fixture(autouse=True)
 def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
     from scripts import tool_deps
 

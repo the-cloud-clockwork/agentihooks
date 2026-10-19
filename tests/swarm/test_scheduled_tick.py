@@ -6,7 +6,7 @@ import pytest
 from scripts.scheduler.service import machine_lock, runtime_dir
 from scripts.swarm import scheduled_tick
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MINUTE_START = 1_792_000_040.0
 

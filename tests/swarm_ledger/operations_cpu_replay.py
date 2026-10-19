@@ -83,7 +83,7 @@ def replay(tmp_path, monkeypatch, profiled=False):
             profiler.enable()
         start = time.thread_time()
         try:
-            reply = mutations.apply(server, SLUG, "", payload)
+            reply = mutations.apply(server.api_services(), SLUG, "", payload)
         except APIError as exc:
             reply = {"status": exc.status, **exc.envelope()}
         seconds.append(time.thread_time() - start)

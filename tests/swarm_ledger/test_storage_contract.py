@@ -21,8 +21,6 @@ from tests.swarm_ledger.test_sqlite import CONTENT, store  # noqa: E402
 
 repository = default_repository()
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def ledger_files(folder, slug):
     return sorted(p.name for p in Path(folder).iterdir() if p.stem == slug)

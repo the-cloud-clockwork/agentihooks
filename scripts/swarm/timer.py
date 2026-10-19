@@ -1,10 +1,13 @@
 """The swarm user services and the scheduler cron that runs `agentihooks swarm tick` every minute."""
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import sysconfig
+import time
 from pathlib import Path
 
 UNIT = "agentihooks-swarm"
@@ -14,6 +17,11 @@ PROBER = "agentihooks-quota-prober"
 WAITS = "agentihooks-swarm-waits"
 UNIT_DIR = Path.home() / ".config" / "systemd" / "user"
 RETIRED = (f"{UNIT}.timer", f"{UNIT}.service")
+DRAIN_S = 30
+KILL_WAIT_S = 10
+STOP_TIMEOUT_S = 120
+CGROUP_FILE = Path("/proc/self/cgroup")
+CGROUP_ROOT = Path("/sys/fs/cgroup")
 
 
 def units(binary):
@@ -64,6 +72,72 @@ def _services(names):
     return [name for name in names if name.endswith(".service") and name != f"{WAITS}.service"]
 
 
+def _left(run):
+    shown = run(
+        ["systemctl", "--user", "show", "-p", "ControlGroup", "-p", "TasksCurrent", f"{UNIT}.service"],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    if shown.returncode:
+        return "unknown"
+    props = dict(line.partition("=")[::2] for line in shown.stdout.splitlines())
+    return "0" if not props.get("ControlGroup") else props.get("TasksCurrent", "unknown")
+
+
+def _drain(run):
+    stop = ["systemctl", "--user", "stop", f"{UNIT}.service"]
+    run(stop, capture_output=True, text=True, timeout=STOP_TIMEOUT_S, check=False)
+    for name, wait_s in (("SIGTERM", DRAIN_S), ("SIGKILL", KILL_WAIT_S)):
+        if _left(run) == "0":
+            return ""
+        kill = ["systemctl", "--user", "kill", "--kill-who=all", f"--signal={name}", f"{UNIT}.service"]
+        run(kill, capture_output=True, text=True, timeout=30, check=False)
+        deadline = time.monotonic() + wait_s
+        while time.monotonic() < deadline:
+            if _left(run) == "0":
+                return ""
+            time.sleep(1)
+    left = _left(run)
+    return "" if left == "0" else left
+
+
+def _own_group():
+    try:
+        lines = CGROUP_FILE.read_text().splitlines()
+    except OSError:
+        return None
+    for line in lines:
+        _, controllers, path = line.split(":", 2)
+        if path.endswith(f"/{UNIT}.service") and controllers in ("", "name=systemd"):
+            return CGROUP_ROOT / ("systemd" if controllers else "") / path.lstrip("/") / "cgroup.procs"
+    return None
+
+
+def _others(procs):
+    from scripts.swarm import tick_reaper
+
+    pids = {int(pid) for pid in procs.read_text().split()}
+    return {pid for pid in pids - tick_reaper.ancestors() if tick_reaper.alive(pid)}
+
+
+def _drain_inside(procs):
+    try:
+        for number, wait_s in ((signal.SIGTERM, DRAIN_S), (signal.SIGKILL, KILL_WAIT_S)):
+            for pid in _others(procs):
+                with contextlib.suppress(ProcessLookupError):
+                    os.kill(pid, number)
+            deadline = time.monotonic() + wait_s
+            while (left := _others(procs)) and time.monotonic() < deadline:
+                time.sleep(1)
+            if not left:
+                return ""
+    except OSError:
+        return "unknown"
+    return str(len(left))
+
+
 def _retire(unit_dir, run):
     present = [unit_dir / name for name in RETIRED if (unit_dir / name).exists()]
     if not present:
@@ -71,6 +145,13 @@ def _retire(unit_dir, run):
     disable = ["systemctl", "--user", "disable", "--now", f"{UNIT}.timer"]
     if run(disable, capture_output=True, text=True, timeout=30, check=False).returncode:
         print(f"the {UNIT} timer could not be disabled; its unit files stay until a later pass", file=sys.stderr)
+        return False
+    procs = _own_group()
+    if left := _drain_inside(procs) if procs else _drain(run):
+        print(
+            f"the {UNIT} service group did not empty ({left} processes left); its unit files stay until a later pass",
+            file=sys.stderr,
+        )
         return False
     for path in present:
         path.unlink()

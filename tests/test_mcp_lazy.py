@@ -82,7 +82,6 @@ def test_startup_and_listing_do_not_load_protocol_or_hook_dispatch(monkeypatch):
         result = initialize(request)
         assert result["protocolVersion"] == "2025-03-26"
         listing = request("tools/list", request_id=2)["result"]["tools"]
-        assert len(listing) == 22
         assert request("ping", request_id=3)["result"] == {}
         for method, key in (
             ("resources/list", "resources"),

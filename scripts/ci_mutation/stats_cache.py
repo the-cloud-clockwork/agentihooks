@@ -8,7 +8,7 @@ from collections.abc import Callable
 from importlib import metadata
 from pathlib import Path
 
-from scripts.ci_mutation.scope import imported_names, module_name
+from scripts.ci_mutation.scope import imported_names, module_name, selects, test_file
 
 SCHEMA = 3
 CONTEXT_FIELDS = ("schema", "sources", "options", "runtime")
@@ -117,7 +117,7 @@ def collect_cached_stats(
             parts = Path(path).parts
             for index in range(len(parts)):
                 resources.setdefault("/".join(parts[index:]), set()).add(path)
-    inputs = {path: test_inputs(root, path, modules, records, resources) for path in files}
+    inputs = {path: test_inputs(root, test_file(path), modules, records, resources) for path in files}
     for dependencies in inputs.values():
         if not any(not name.startswith("tests/") for name in dependencies):
             for source in changes.keys() & resources:
@@ -143,10 +143,7 @@ def collect_cached_stats(
         raise SystemExit(1)
     for path in missing:
         durations = {
-            test: seconds
-            for result in fresh
-            for test, seconds in result["durations"].items()
-            if test.partition("::")[0] == path
+            test: seconds for result in fresh for test, seconds in result["durations"].items() if selects(path, test)
         }
         tests = {
             function: sorted(

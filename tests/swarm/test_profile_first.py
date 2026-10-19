@@ -6,8 +6,6 @@ import pytest
 from scripts.swarm import profile_choice, profile_first
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PLACED = SimpleNamespace(router=SimpleNamespace(placement=object()))
 DECISION = profile_choice.ProfileDecision("frontend", "classifier", "frontend", "m1", 0.9, True, ("task:t1",))
 ENGINEER = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.8, True)

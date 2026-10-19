@@ -73,11 +73,12 @@ def test_task_route_reuses_entry_revision(monkeypatch):
 
     from scripts.swarm_ledger.api import resources, routes
     from scripts.swarm_ledger.repository.sqlite import Entry
+    from tests.swarm_ledger.api_fakes import as_services
 
     doc = {"tasks": [{"title": "Visible é", "id": "t1"}, {"id": "t2", "title": "Outside"}], "_meta": {"rev": 7}}
     expected = f"{7:064x}"
     entry = Entry(1, "", doc)
-    server = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+    server = as_services(SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry)))
     original = resources.revision
 
     def refuse_collection_hash(value):
@@ -106,10 +107,11 @@ def test_task_route_peak_allocation_is_bounded_by_page():
 
     from scripts.swarm_ledger.api import routes
     from scripts.swarm_ledger.repository.sqlite import Entry
+    from tests.swarm_ledger.api_fakes import as_services
 
     doc = {"tasks": [{"id": f"t{index}", "title": "é" * 4096} for index in range(2000)]}
     entry = Entry(1, "", doc)
-    server = SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry))
+    server = as_services(SimpleNamespace(repository=SimpleNamespace(current=lambda slug: entry)))
     tracemalloc.start()
     try:
         reply = routes.ledger_read(server, "ledger", "tasks", {"limit": 2})

@@ -16,7 +16,7 @@ from tests.swarm.test_cli import env as env
 from tests.swarm.test_create_gate import as_lane
 from tests.swarm.test_stack_init import Docker, compose, page, up
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 TITLE = "One way to create a swarm, with an operator given name"
 RULE = (
