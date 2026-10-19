@@ -1,6 +1,3 @@
-import subprocess
-import sys
-
 import pytest
 
 
@@ -14,16 +11,9 @@ class Selection:
         self.maximum = session.config.hook.pytest_xdist_auto_num_workers(config=session.config)
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = sys.argv[1:] if argv is None else argv
+def worker_count(args: list[str]) -> int:
     selection = Selection()
     status = pytest.main([*args, "--collect-only", "-q", "-n", "0"], plugins=[selection])
     if status:
-        return int(status)
-    workers = max(1, min(selection.maximum, selection.count))
-    print(f"Touched tests: {selection.count}; workers: {workers}", flush=True)
-    return subprocess.run([sys.executable, "-m", "pytest", *args, "-n", str(workers)]).returncode
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+        raise SystemExit(status)
+    return max(1, min(selection.maximum, selection.count))

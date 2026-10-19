@@ -1,13 +1,15 @@
 import re
+import subprocess
+import sys
 
 import pytest
 
 
-@pytest.mark.parametrize(("selected", "maximum", "workers"), [(4, 8, 4), (10, 2, 2), (1, 8, 1), (None, 8, None)])
-def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypatch, capfd, selected, maximum, workers):
-    from scripts.ci_touched_tests import main
+@pytest.mark.parametrize(("selected", "maximum", "workers"), [(4, 8, 4), (10, 2, 2), (1, 0, 1), (None, 8, None)])
+def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypatch, selected, maximum, workers):
+    from scripts.ci_touched_tests import worker_count
 
-    suite = tmp_path / "test_selection.py"
+    suite = tmp_path / f"test_selection_{selected}.py"
     suite.write_text(
         "invalid python!\n"
         if selected is None
@@ -16,15 +18,20 @@ def test_touched_test_workers_follow_the_collected_selection(tmp_path, monkeypat
     monkeypatch.delenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", raising=False)
     monkeypatch.setenv("PYTEST_ADDOPTS", "")
     monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", str(maximum))
-    status = main([str(suite), "--tb=short", "-p", "no:cacheprovider"])
-    captured = capfd.readouterr()
-    output = captured.out + captured.err
+    args = [str(suite), "--tb=short", "-p", "no:cacheprovider"]
     if selected is None:
-        assert status != 0, output
-        assert "SyntaxError" in output
-        assert "created:" not in output
+        with pytest.raises(SystemExit) as failure:
+            worker_count(args)
+        assert failure.value.code == pytest.ExitCode.INTERRUPTED
     else:
-        assert status == 0, output
+        chosen = worker_count(args)
+        assert chosen == workers
+        monkeypatch.setenv("PYTEST_XDIST_AUTO_NUM_WORKERS", str(chosen))
+        result = subprocess.run(
+            [sys.executable, "-m", "pytest", *args, "-n", "auto"], capture_output=True, text=True, timeout=90
+        )
+        output = result.stdout + result.stderr
+        assert result.returncode == 0, output
         started = re.search(r"created: (\d+)/", output)
         assert started is not None, output
         assert int(started[1]) == workers, output
