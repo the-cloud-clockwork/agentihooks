@@ -85,6 +85,8 @@ def transport(environ=os.environ) -> dict:
         return {"context": ssl.create_default_context(cadata=pem)}
     found = ca_file(environ)
     if not found.is_file():
+        if environ.get(CA_FILE_ENV):
+            raise SystemExit(f"{CA_FILE_ENV} names no file: {found}")
         return {}
     context = ssl.create_default_context()
     context.load_verify_locations(cafile=str(found))

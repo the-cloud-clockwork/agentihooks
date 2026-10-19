@@ -60,9 +60,10 @@ def test_install_creates_the_agentihooks_home(tmp_path, cert):
     assert (home / "ledger-ca.pem").is_file()
 
 
-@pytest.mark.parametrize("value", [None, "", "  \n", "not a certificate", "key"])
+@pytest.mark.parametrize("value", [None, "", "  \n", "not a certificate", "key", "pair"])
 def test_install_keeps_the_file_when_openbao_holds_no_certificate(tmp_path, cert, value):
-    data = {} if value is None else {"ca.crt": Path(cert[1]).read_text() if value == "key" else value}
+    pems = {"key": Path(cert[1]).read_text(), "pair": Path(cert[0]).read_text() + Path(cert[1]).read_text()}
+    data = {} if value is None else {"ca.crt": pems.get(value, value)}
     (tmp_path / "ledger-ca.pem").write_text("kept")
 
     said = ledger_ca.install(bao(tmp_path), opener({"data": {"data": data}}, []))
@@ -135,6 +136,15 @@ def test_the_ca_pem_wins_over_the_ca_file(monkeypatch, cert):
 
 def test_no_pem_and_no_ca_file_leave_the_default_transport(tmp_path):
     assert ledger_link.transport({"AGENTIHOOKS_HOME": str(tmp_path)}) == {}
+
+
+def test_a_named_ca_file_that_is_missing_is_refused(tmp_path):
+    missing = tmp_path / "missing.pem"
+
+    with pytest.raises(SystemExit) as refused:
+        ledger_link.transport({"LEDGER_CA_FILE": str(missing)})
+
+    assert str(refused.value) == f"LEDGER_CA_FILE names no file: {missing}"
 
 
 def test_a_client_verifies_the_hosted_ledger_through_the_ca_file(tls_ledger, cert, monkeypatch, tmp_path):

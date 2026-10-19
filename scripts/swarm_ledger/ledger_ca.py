@@ -12,7 +12,7 @@ FIELD = "ca.crt"
 
 
 def certificate(pem: object) -> bool:
-    if not isinstance(pem, str) or not pem.strip():
+    if not isinstance(pem, str) or not pem.strip() or "PRIVATE KEY" in pem:
         return False
     try:
         ssl.create_default_context(cadata=pem)
