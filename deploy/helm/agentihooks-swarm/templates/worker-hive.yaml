@@ -1,5 +1,9 @@
 {{- if gt (int .Values.workers.replicas) 0 }}
 {{- $workers := .Values.workers }}
+{{- $github := $workers.githubAuth }}
+{{- if not (has $github.mode (list "token" "app")) }}
+{{- fail "workers.githubAuth.mode must be token or app" }}
+{{- end }}
 {{- $credential := $workers.credentialSecret }}
 {{- $code := $workers.joinCodeSecret }}
 {{- if eq (empty $credential.name) (empty $code.name) }}
@@ -63,6 +67,21 @@ spec:
           imagePullPolicy: {{ $workers.image.pullPolicy }}
           {{- include "swarm.containerSecurity" . | nindent 10 }}
           env:
+            - name: HIVE_GITHUB_AUTH_MODE
+              value: {{ $github.mode | quote }}
+            {{- if $github.secretName }}
+            {{- $keys := dict "GITHUB_TOKEN" $github.tokenKey }}
+            {{- if eq $github.mode "app" }}
+            {{- $keys = dict "GITHUB_APP_ID" $github.appIdKey "GITHUB_APP_INSTALLATION_ID" $github.installationIdKey "GITHUB_APP_PRIVATE_KEY" $github.privateKeyKey }}
+            {{- end }}
+            {{- range $name, $key := $keys }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $github.secretName }}
+                  key: {{ required "each selected workers.githubAuth Secret key is required" $key }}
+            {{- end }}
+            {{- end }}
             - name: SWARM_HIVE_ID
               valueFrom:
                 fieldRef:

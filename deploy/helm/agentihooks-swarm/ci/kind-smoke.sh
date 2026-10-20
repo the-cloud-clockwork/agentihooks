@@ -21,6 +21,7 @@ if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
   rm -f "$KIND_LAYER_CACHE/complete"
 fi
 python3 tests/kind_request.py
+python3 tests/chart_github_auth.py "$chart"
 
 finish() {
   status=$?

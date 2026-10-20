@@ -535,6 +535,16 @@ def _launcher_text(tmp_path, environ, agent="claude", name="swarm-buildout-eng-4
     return launcher.read_text()
 
 
+def test_hive_launch_refreshes_github_credentials_by_reference(tmp_path):
+    launcher = _launcher_text(tmp_path, {"HIVE_GITHUB_AUTH_MODE": "app", "GITHUB_APP_PRIVATE_KEY": "fixture"})
+    assert "scripts.github_app_cli exec" in launcher
+    assert "fixture" not in launcher
+
+
+def test_workstation_launch_without_hive_auth_keeps_its_existing_github_environment(tmp_path):
+    assert "scripts.github_app_cli" not in _launcher_text(tmp_path, {})
+
+
 def test_swarm_display_name_preserves_the_inbox_identity(monkeypatch, tmp_path):
     text = _dry_launcher(
         monkeypatch,
