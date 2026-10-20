@@ -1,5 +1,6 @@
 """Production workflow and image guards; CI alone owns protected promotion."""
 
+import json
 import re
 import shlex
 import subprocess
@@ -20,6 +21,11 @@ _SESSION_SIGNAL_TTL = 14400  # 4 hours — session-scoped signals (release, hotf
 # Legacy hotfix/emergency vocabulary — kept for backwards-compat.
 # Full signal vocabulary now sourced from CI Manifesto via ci_manifesto.py.
 BYPASS_PHRASES: list[str] = ["--emergency-prod", "prod override", "emergency"]
+
+_MERGE_QUEUE = (
+    "query($url: URI!, $branch: String!) { resource(url: $url) { ... on PullRequest {"
+    " repository { mergeQueue(branch: $branch) { id } } } } }"
+)
 
 _BLOCKED: list[tuple[re.Pattern, str, str, str]] = [
     (
@@ -277,23 +283,43 @@ def _merge_view_command(line: str) -> list[str] | None:
     command = ["gh", "pr", "view", *selectors]
     if repo:
         command.extend(["--repo", repo])
-    return [*command, "--json", "baseRefName", "--jq", ".baseRefName"]
+    return [*command, "--json", "baseRefName,url", "--jq", '.baseRefName + " " + .url']
 
 
-def _check_pr_merge(line: str, cwd: str) -> None:
+def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
     try:
         command = _merge_view_command(line)
         if command is None:
             return
-        base = subprocess.run(command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd).stdout.strip()
-        if not base:
-            raise ValueError
+        base, url = subprocess.run(
+            command, capture_output=True, text=True, check=True, timeout=10, cwd=cwd
+        ).stdout.split()
     except (OSError, ValueError, StopIteration, subprocess.SubprocessError):
         raise BlockAction(
             "BLOCKED: Cannot resolve the pull request base; promotion protection remains closed."
         ) from None
     if base in {"main", "master", "v1"}:
         raise BlockAction("BLOCKED [gh pr merge to main/master/v1]: CI alone promotes dev into protected branches.")
+    if bypass:
+        return
+    try:
+        queue = subprocess.run(
+            ["gh", "api", "graphql", "-f", f"query={_MERGE_QUEUE}", "-f", f"url={url}", "-f", f"branch={base}"],
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=10,
+            cwd=cwd,
+        ).stdout
+        queued = json.loads(queue)["data"]["resource"]["repository"]["mergeQueue"] is not None
+    except (OSError, ValueError, KeyError, TypeError, subprocess.SubprocessError):
+        raise BlockAction(f"BLOCKED: Cannot tell whether '{base}' has a merge queue; the merge stays closed.") from None
+    if queued:
+        raise BlockAction(
+            f"BLOCKED [gh pr merge into a merge queue branch]: '{base}' merges only through its merge queue, "
+            "and gh pr merge lands it directly. Queue it with `agentihooks swarm <slug> merge queue "
+            f"{url}`, or outside a swarm with the GitHub enqueuePullRequest mutation."
+        )
 
 
 def check_prod_lockdown(payload: dict) -> None:
@@ -332,4 +358,4 @@ def check_prod_lockdown(payload: dict) -> None:
 
     cwd = _resolve_cwd(command, payload.get("cwd", ""))
     for line in check_text.splitlines():
-        _check_pr_merge(line, cwd)
+        _check_pr_merge(line, cwd, controls_off)

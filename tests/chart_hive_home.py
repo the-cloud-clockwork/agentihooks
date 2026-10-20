@@ -12,6 +12,8 @@ HOST = {
         "tolerations": [{"key": "dedicated", "operator": "Exists", "effect": "NoSchedule"}],
         "maxAgents": 1,
         "worktreeMinFreeGb": 70,
+        "worktreeMaxPerRepo": 40,
+        "worktreeStaleDays": 3,
         "memoryPerAgentMi": {"request": 512, "limit": 2048},
     }
 }
@@ -23,6 +25,29 @@ def hive(text: str) -> dict:
         for d in yaml.safe_load_all(text)
         if d and d["kind"] == "Deployment" and d["metadata"]["name"].endswith("worker-hive")
     ]
+    [settings] = [
+        d["data"]
+        for d in yaml.safe_load_all(text)
+        if d and d["kind"] == "ConfigMap" and d["metadata"]["name"].endswith("-worktrees")
+    ]
+    found["worktrees"] = settings
+    return found
+
+
+def worktree_problems(deployment: dict, workers: dict | None) -> list[str]:
+    limits = workers or {}
+    expected = {
+        "WT_MIN_FREE_GB": str(limits.get("worktreeMinFreeGb", 50)),
+        "WT_MAX_PER_REPO": str(limits.get("worktreeMaxPerRepo", 60)),
+        "WT_STALE_DAYS": str(limits.get("worktreeStaleDays", 7)),
+    }
+    found = (
+        [] if deployment["worktrees"] == expected else [f"worktrees are {deployment['worktrees']}, expected {expected}"]
+    )
+    container = deployment["spec"]["template"]["spec"]["containers"][0]
+    sources = [item["configMapRef"]["name"] for item in container.get("envFrom", []) if "configMapRef" in item]
+    if not any(name.endswith("-worktrees") for name in sources):
+        found.append("the hive does not take its environment from the worktrees ConfigMap")
     return found
 
 
@@ -30,13 +55,7 @@ def problems(deployment: dict, workers: dict | None) -> list[str]:
     spec = deployment["spec"]["template"]["spec"]
     home = next(v for v in spec["volumes"] if v["name"] == "home")
     strategy = deployment["spec"].get("strategy", {}).get("type")
-    env = {e["name"]: e.get("value") for e in spec["containers"][0]["env"]}
-    floor = str((workers or {}).get("worktreeMinFreeGb", 50))
-    found = (
-        []
-        if env.get("WT_MIN_FREE_GB") == floor
-        else [f"WT_MIN_FREE_GB is {env.get('WT_MIN_FREE_GB')}, expected {floor}"]
-    )
+    found = worktree_problems(deployment, workers)
     if workers is None:
         if home != {"name": "home", "emptyDir": {}}:
             found.append(f"the default home volume is {home}, expected an emptyDir")
@@ -77,6 +96,9 @@ def main(chart: str) -> list[str]:
     planted["spec"].pop("strategy", None)
     if not problems(planted, HOST["workers"]):
         found.append("the check passed a hive with no Recreate rollout")
+    planted["spec"]["template"]["spec"]["containers"][0].pop("envFrom", None)
+    if not worktree_problems(planted, HOST["workers"]):
+        found.append("the check passed a hive that ignores the worktrees ConfigMap")
     both = {"workers": {"homeVolume": {"hostPath": HOST["workers"]["homeVolume"]["hostPath"]}}}
     try:
         render(chart, yaml.safe_dump(both))

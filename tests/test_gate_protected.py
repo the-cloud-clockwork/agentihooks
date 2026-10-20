@@ -858,6 +858,39 @@ def test_the_reviewed_summary_may_run_outside_required_grading(separate, declare
     assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
 
 
+@pytest.mark.parametrize("shell", [None, "bash", "sh", "pwsh"])
+@pytest.mark.parametrize("declared_on_base", [False, True])
+def test_the_separate_summary_accepts_only_the_reviewed_shell(shell, declared_on_base):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    steps = ci_reuse.summary_steps()
+    if shell is not None:
+        steps[-1]["shell"] = shell
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": steps,
+    }
+    head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+    head["jobs"]["gate-required"]["needs"].append("unit-selected")
+    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    problems = gate_protected.grade(
+        {"test.yml": base},
+        config if declared_on_base else {},
+        {"test.yml": head},
+        config,
+        _TODAY,
+        _POLICY,
+    )
+    if shell in (None, "bash"):
+        assert problems == []
+    else:
+        assert "The test summary must use the reviewed reporting job." in problems
+
+
 @pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
 @pytest.mark.parametrize("declared_on_base", [False, True])
 def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_base):

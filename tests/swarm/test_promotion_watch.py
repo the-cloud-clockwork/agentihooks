@@ -11,7 +11,7 @@ from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import PREFIX, RedisStore, SwarmConfig
 
 RUNS = "repos/{owner}/{repo}/actions/workflows/test.yml/runs?branch=dev&event=push&status=completed&per_page=20"
-JOBS_JQ = ".jobs[] | {name, conclusion, check_run_url, steps} | @json"
+JOBS_JQ = ".jobs[] | {id, name, conclusion, check_run_url, steps} | @json"
 SHA = "c0ffee" + "0" * 34
 RED = {"id": 900, "conclusion": "failure", "head_sha": SHA, "html_url": "https://github.com/o/r/actions/runs/900"}
 GREEN = {
@@ -972,3 +972,308 @@ def test_a_refresh_naming_lost_shards_files_its_own_fixer_when_nothing_lost_its_
     ledger = Ledger()
     refresh(store, ledger, outage_run([CONSUMERS[-1]]))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: refresh-durations"]
+
+
+def recorded_test_failure(
+    run_id,
+    shards,
+    tests=("tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api",),
+    missing=True,
+    messages=None,
+    steps=None,
+    sonar="sonar",
+):
+    found = [
+        {
+            "id": n,
+            "name": f"unit ({python}, {shard})",
+            "conclusion": "failure",
+            "steps": FAILED_TESTS,
+        }
+        for n, (python, shard) in enumerate(shards, 1)
+    ]
+    if missing:
+        found.append(
+            {
+                "name": sonar,
+                "conclusion": "failure",
+                "check_run_url": "https://api.github.com/check-runs/sonar",
+                "steps": steps
+                if steps is not None
+                else [{"name": "Wait for the coverage merge", "conclusion": "failure"}],
+            }
+        )
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            job_id = argv[2].split("/jobs/")[1].split("/")[0]
+            assert argv == ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"]
+            assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
+            output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
+            return subprocess.CompletedProcess(argv, 0, output, "")
+        if "/annotations" in argv[2]:
+            body = [
+                {"annotation_level": "failure", "message": message}
+                for message in (messages if messages is not None else [f"Missing coverage for shard {shards[-1][1]}"])
+            ]
+        elif "/jobs" in argv[2]:
+            body = found
+        else:
+            body = [{**RED, "id": run_id}]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+def test_the_same_failing_test_in_two_recorded_runs_files_one_fixer_across_shard_moves(store):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(39424239023, [("3.11", 3), ("3.12", 10)]))
+    refresh(store, ledger, recorded_test_failure(39425295161, [("3.11", 5), ("3.12", 5)]), NOW * 2)
+    assert len(ledger.added) == 1
+    description = ledger.added[0][1]["description"]
+    assert "tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api" in description
+    assert "sonar" in description
+    assert "unit (3.11, 3)" in description
+    assert "unit (3.12, 10)" in description
+    assert (
+        "failed in unit (3.11, 3), unit (3.12, 10); consequences: sonar: Wait for the coverage merge; Missing coverage for shard 10."
+        in description
+    )
+    assert len(ledger.raised) == 1
+    assert len(master_items(store)) == 1
+
+
+def test_each_distinct_failing_test_keeps_its_own_fixer_across_runs(store):
+    ledger = Ledger()
+    refresh(
+        store,
+        ledger,
+        recorded_test_failure(900, [("3.12", 1)], tests=("tests/test_api.py::test_rule[1]",), missing=False),
+    )
+    refresh(
+        store,
+        ledger,
+        recorded_test_failure(901, [("3.12", 2)], tests=("tests/test_api.py::test_rule[2]",), missing=False),
+        NOW * 2,
+    )
+    assert len(ledger.added) == 2
+    assert "tests/test_api.py::test_rule[1]" in ledger.added[0][1]["description"]
+    assert "tests/test_api.py::test_rule[2]" in ledger.added[1][1]["description"]
+
+
+def test_two_tests_failing_in_the_same_shards_each_get_one_fixer(store):
+    ledger = Ledger()
+    refresh(
+        store,
+        ledger,
+        recorded_test_failure(
+            900, [("3.11", 1), ("3.12", 2)], tests=("tests/test_api.py::test_first", "tests/test_api.py::test_second")
+        ),
+    )
+    assert len(ledger.added) == 2
+    assert all("sonar" in fields["description"] for _, fields, _ in ledger.added)
+
+
+@pytest.mark.parametrize(
+    "messages",
+    [
+        ["Missing coverage for shard 99"],
+        ["Quality gate failed"],
+        ["Missing coverage for shard 2", "Quality gate failed"],
+    ],
+)
+def test_a_sonar_failure_not_explained_by_the_named_failing_test_keeps_its_fixer(store, messages):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], messages=messages))
+    assert len(ledger.added) == 2
+    assert any(fields["title"] == "Promotion red: sonar" for _, fields, _ in ledger.added)
+
+
+def test_a_failed_unit_job_without_named_tests_keeps_its_job_cause(store):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], tests=()))
+    assert {fields["title"] for _, fields, _ in ledger.added} == {
+        "Promotion red: sonar",
+        "Promotion red: unit (3.12, 2)",
+    }
+
+
+def test_an_unreadable_unit_log_leaves_the_run_unhandled(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 2)])
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            raise subprocess.CalledProcessError(1, argv, stderr="log is unavailable")
+        return recorded(argv, **kwargs)
+
+    assert refresh(store, ledger, run) == []
+    assert ledger.added == []
+    assert not store.redis.get(promotion_watch.key(SLUG, "seen"))
+
+
+def test_different_tests_together_explain_all_missing_sonar_shards(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(
+        900, [("3.12", 1), ("3.12", 2)], messages=["Missing coverage for shard 1", "Missing coverage for shard 2"]
+    )
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            test = "first" if "/jobs/1/" in argv[2] else "second"
+            return subprocess.CompletedProcess(argv, 0, f"FAILED tests/test_api.py::test_{test} - AssertionError", "")
+        return recorded(argv, **kwargs)
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 2
+    assert all("sonar" in fields["description"] for _, fields, _ in ledger.added)
+
+
+def test_setup_errors_and_test_failures_keep_distinct_causes_across_shard_moves(store):
+    ledger = Ledger()
+
+    def recorded(run_id, shard):
+        original = recorded_test_failure(
+            run_id,
+            [("3.12", shard)],
+            tests=("tests/test_api.py::test_setup", "tests/test_api.py::test_body"),
+            missing=False,
+        )
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[2].endswith("/logs"):
+                result.stdout = result.stdout.replace(
+                    "FAILED tests/test_api.py::test_setup", "ERROR tests/test_api.py::test_setup"
+                )
+            return result
+
+        return run
+
+    refresh(store, ledger, recorded(900, 1))
+    refresh(store, ledger, recorded(901, 2), NOW * 2)
+    assert len(ledger.added) == 2
+    assert "tests/test_api.py::test_body" in ledger.added[0][1]["description"]
+    assert "tests/test_api.py::test_setup" in ledger.added[1][1]["description"]
+
+
+def test_an_independent_failed_step_beside_a_failing_test_keeps_its_own_fixer(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 2)], missing=False)
+
+    def run(argv, **kwargs):
+        result = recorded(argv, **kwargs)
+        if "/jobs?" in argv[2]:
+            jobs = [json.loads(line) for line in result.stdout.splitlines()]
+            jobs[0]["steps"] = [*jobs[0]["steps"], {"name": "Upload durations", "conclusion": "failure"}]
+            result.stdout = "\n".join(json.dumps(job) for job in jobs)
+        return result
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 2
+    assert (
+        "tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api"
+        in ledger.added[0][1]["description"]
+    )
+    assert "Upload durations" in ledger.added[1][1]["description"]
+
+
+def test_a_held_test_cause_ignores_changed_shard_count_and_missing_coverage_consequences(store):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.11", 1), ("3.12", 2)]))
+    refresh(store, ledger, recorded_test_failure(901, [("3.12", 5)], missing=False), NOW * 2)
+    assert len(ledger.added) == 1
+
+
+@pytest.mark.parametrize("sonar", ["sonar", "sonar (3.12)"])
+def test_both_failed_sonar_coverage_steps_fold_with_exit_annotations(store, sonar):
+    ledger = Ledger()
+    steps = [
+        {"name": "Set up job", "conclusion": "success"},
+        {"name": "Wait for the coverage merge", "conclusion": "failure"},
+        {"name": "Hold the Delivery L2 conditions", "conclusion": "failure"},
+    ]
+    messages = ["Process completed with exit code 2.", "Missing coverage for shard 2"]
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], messages=messages, steps=steps, sonar=sonar))
+    assert len(ledger.added) == 1
+    assert (
+        f"; consequences: {sonar}: Wait for the coverage merge; Hold the Delivery L2 conditions; Process completed with exit code 2.; Missing coverage for shard 2."
+        in ledger.added[0][1]["description"]
+    )
+
+
+@pytest.mark.parametrize(
+    "sonar,steps",
+    [
+        ("sonar", [{"name": "Upload coverage", "conclusion": "failure"}]),
+        ("sonar report", [{"name": "Wait for the coverage merge", "conclusion": "failure"}]),
+    ],
+)
+def test_missing_coverage_does_not_hide_a_different_sonar_step_or_job(store, sonar, steps):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], steps=steps, sonar=sonar))
+    assert len(ledger.added) == 2
+
+
+@pytest.mark.parametrize(
+    "name,steps",
+    [
+        ("unit smoke (3.12, 1)", FAILED_TESTS),
+        (
+            "unit (3.12, 1)",
+            [{"name": "Run tests", "conclusion": "success"}, {"name": "Upload durations", "conclusion": "failure"}],
+        ),
+    ],
+)
+def test_only_an_actual_failed_unit_test_step_reads_pytest_failure_logs(store, name, steps):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 1)], missing=False)
+
+    def run(argv, **kwargs):
+        assert not argv[2].endswith("/logs")
+        result = recorded(argv, **kwargs)
+        if "/jobs?" in argv[2]:
+            job = json.loads(result.stdout)
+            job.update(name=name, steps=steps)
+            result.stdout = json.dumps(job)
+        return result
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 1
+    assert f"failed in the job {name}" in ledger.added[0][1]["description"]
+
+
+def test_unit_progress_lines_without_a_summary_still_name_the_failed_test(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 1)], missing=False)
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            return subprocess.CompletedProcess(
+                argv, 0, "[gw0] FAILED tests/test_api.py::test_rule\nworker exited\n", ""
+            )
+        return recorded(argv, **kwargs)
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 1
+    assert "unit test tests/test_api.py::test_rule" in ledger.added[0][1]["description"]
+
+
+def test_multiple_matching_coverage_consumers_are_named_as_consequences(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 1)])
+
+    def run(argv, **kwargs):
+        result = recorded(argv, **kwargs)
+        if "/jobs?" in argv[2]:
+            jobs = [json.loads(line) for line in result.stdout.splitlines()]
+            jobs.append({**jobs[-1], "name": "sonar (3.12)"})
+            result.stdout = "\n".join(json.dumps(job) for job in jobs)
+        return result
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 1
+    assert (
+        "; consequences: sonar: Wait for the coverage merge; Missing coverage for shard 1; sonar (3.12): Wait for the coverage merge; Missing coverage for shard 1."
+        in ledger.added[0][1]["description"]
+    )
