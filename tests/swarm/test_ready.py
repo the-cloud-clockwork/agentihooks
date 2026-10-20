@@ -1766,7 +1766,7 @@ def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging
     queued_at_now(merging)
     merging.pulls[URL] = pull_request({"state": "OPEN", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}})
 
-    def dequeue(action, url):
+    def dequeue(action, url, journal=None):
         assert (action, url) == ("dequeue", URL)
         if failure != "still queued":
             raise SwarmError(failure)
@@ -1775,10 +1775,10 @@ def test_a_dequeue_that_does_not_finish_keeps_the_task_for_the_next_tick(merging
     assert merging.run(NOW + 60_000, queuer=dequeue)
     assert merging.rows["t1"]["state"] == "pr"
     assert merging.rows["t1"]["claimed_by"] == AGENT
-    assert ready.record(merging.store, "sw", "t1") is not None
+    assert ready.record(merging.store, "sw", "t1")["on"]["kind"] == "merge"
     assert merging.ledger.comments == []
     merging.queue.extra = {"queued": False}
-    assert merging.run(NOW + 120_000)[0] == f"task t1 reopened, {URL} is marked unmergeable by GitHub"
+    assert merging.run(NOW + 120_000) == [f"dequeued {URL} for task t1: {ready.TRANSIENT}"]
 
 
 def test_a_merge_racing_the_dequeue_is_confirmed_before_the_task_finishes(merging):
