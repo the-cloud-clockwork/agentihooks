@@ -12,6 +12,7 @@ IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "star
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
+ORPHAN_STATES = ("working", "starting")
 
 
 if TYPE_CHECKING:
@@ -275,11 +276,11 @@ class ExecutionRegistry:
                     continue
         raise SwarmError("execution history kept changing; pane was not committed")
 
-    def reconcile(self, slug: str, runtime: Runtime) -> list[str]:
+    def reconcile(self, slug: str, runtime: Runtime, now_ms: int) -> list[str]:
         recorded = {agent.name for agent in self.agents(slug)}
         live, actions = runtime.live_names(), []
         for agent in self.occupants(slug).values():
-            if agent.state != "working" or agent.name in recorded or agent.name in live:
+            if not _orphan_state(agent, now_ms) or agent.name in recorded or agent.name in live:
                 continue
             if _process_gone(self.redis, agent, runtime) and self.end_orphan(slug, agent):
                 actions.append(f"ended orphan execution {agent.execution_id} for {agent.name}")
@@ -295,7 +296,7 @@ class ExecutionRegistry:
                 current = self.occupants(slug).get(agent.seat)
                 if (
                     current != agent
-                    or agent.state != "working"
+                    or agent.state not in ORPHAN_STATES
                     or pipe.hexists(self.store.key(slug, "agents"), agent.name)
                 ):
                     return False
@@ -356,6 +357,14 @@ def _has_identity(agent):
     return bool(
         agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target or agent.hive
     )
+
+
+def _orphan_state(agent: AgentRecord, now_ms: int) -> bool:
+    from scripts.swarm.master_start import DEADLINE_MS
+
+    if agent.state == "starting":
+        return now_ms - agent.started_at >= DEADLINE_MS
+    return agent.state == "working"
 
 
 def _process_gone(redis: Redis, agent: AgentRecord, runtime: Runtime) -> bool:

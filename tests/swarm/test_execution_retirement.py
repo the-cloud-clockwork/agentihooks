@@ -190,7 +190,7 @@ def test_reconciliation_requires_an_absent_agent_and_a_dead_process(store, case)
         observe=lambda current: SimpleNamespace(state=observed if current == agent else "unknown"),
     )
     with patch("scripts.hive.reports.host", return_value="remote" if remote else ""):
-        actions = store.execution_registry.reconcile("fixture", runtime)
+        actions = store.execution_registry.reconcile("fixture", runtime, 0)
     expected = [f"ended orphan execution {agent.execution_id} for {agent.name}"] if ended else []
     assert actions == expected
     expected_agent = replace(agent, state="ended") if ended else agent
@@ -237,7 +237,7 @@ def test_a_remote_process_reported_after_the_live_snapshot_is_preserved(store):
     store.redis.set(reports.key("remote"), json.dumps({"names": [agent.name]}))
     runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
     with patch("scripts.hive.reports.host", return_value="remote"):
-        assert store.execution_registry.reconcile("fixture", runtime) == []
+        assert store.execution_registry.reconcile("fixture", runtime, 0) == []
     assert store.execution("fixture", agent.execution_id) == agent
 
 
@@ -310,7 +310,7 @@ def test_reconciliation_skips_unavailable_runtime_reads_for_non_orphans(store, s
     if not projected:
         store.redis.hdel(store.key("fixture", "agents"), agent.name)
     runtime = SimpleNamespace(live_names=lambda: set(), reported=Mock(side_effect=RuntimeError("runtime unavailable")))
-    assert store.execution_registry.reconcile("fixture", runtime) == []
+    assert store.execution_registry.reconcile("fixture", runtime, 0) == []
     assert store.execution("fixture", agent.execution_id) == agent
     runtime.reported.assert_not_called()
 
@@ -324,7 +324,7 @@ def test_a_recorded_seat_does_not_hide_a_later_dead_orphan(store):
     )
     store.redis.hdel(store.key("fixture", "agents"), orphan.name)
     runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
-    assert store.execution_registry.reconcile("fixture", runtime) == [
+    assert store.execution_registry.reconcile("fixture", runtime, 0) == [
         f"ended orphan execution {orphan.execution_id} for {orphan.name}"
     ]
     assert store.execution("fixture", recorded.execution_id) == recorded
