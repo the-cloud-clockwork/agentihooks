@@ -24,7 +24,7 @@ def world(monkeypatch):
         "current",
         lambda harness, environ: reservation.Reservation(harness, *masters[harness]) if harness in masters else None,
     )
-    monkeypatch.setattr(reservation, "_store", lambda environ: store)
+    monkeypatch.setattr(reservation, "_store", lambda environ: store if environ is not None else None)
     monkeypatch.setattr(aggregate, "enabled", lambda environ=None: False)
     return store, rows, masters
 
@@ -46,6 +46,19 @@ def test_a_reserved_account_stays_closed_for_workers_when_the_live_master_count_
     assert second[0].reserved == reservation.reason(2)
     assert second[0].unreserved_cap == 6
     assert [(row.name, row.state, row.cap) for row in capacity.unreserved(second)][0] == ("main", "OPEN", 6)
+
+
+def test_a_remembered_closure_keeps_every_other_row_in_place(world):
+    _, rows, masters = world
+    rows += [_row("before"), _row(), _row("after")]
+    capacity.accounts({}, NOW, refresh=False)
+    masters["claude"] = ("main", 1)
+
+    assert [(row.name, row.state) for row in capacity.accounts({}, NOW + 60, refresh=False)] == [
+        ("before", "OPEN"),
+        ("main", "CLOSED"),
+        ("after", "OPEN"),
+    ]
 
 
 def test_the_closure_lasts_until_the_account_week_resets(world):
