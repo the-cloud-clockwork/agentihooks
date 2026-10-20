@@ -117,13 +117,16 @@ class HiveLaunch:
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
         self.opening = orders.build_opening
-        self.role = ""
 
     def hives(self) -> list[dict]:
         return loaded_hives(self.store)
 
-    def _record_wait(self, lane: str, task: dict, selected: Selection | placement.Wait) -> Selection | placement.Wait:
-        reason = selected.reason if isinstance(selected, placement.Wait) else ""
+    def _record_wait(
+        self, lane: str, task: dict, selected: Selection | placement.Wait, role: str = ""
+    ) -> Selection | placement.Wait:
+        reason = ""
+        if isinstance(selected, placement.Wait):
+            reason, selected = selected.reason, replace(selected, role=role)
         placement_waits.observe(self.store, self.slug, lane, task["id"], reason, lease.now_ms(self.store))
         return selected
 
@@ -134,11 +137,11 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
-        role = self.role = ROLE_PROFILES.get(decision.profile, decision.profile)
+        role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
-            return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"))
+            return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"), role)
         rows = getattr(self.herdr, "_quota_accounts", None)
         rows = capacity.accounts(dict(os.environ), now / 1000, refresh=False) if rows is None else rows
         if lane == "master" and not task.get("route_kind"):
@@ -165,7 +168,7 @@ class HiveLaunch:
                 if isinstance(matched, placement.Wait)
                 else Selection(decision, choice.hive, row, route_kind, fallback=fallback, origin=matched)
             )
-        return self._record_wait(lane, task, found)
+        return self._record_wait(lane, task, found, role)
 
     def _master_selection(self, config, decision, hives, now, rows):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}

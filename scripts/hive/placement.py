@@ -2,7 +2,7 @@
 
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from scripts.hive.registry import UI_ROLES, live
 
@@ -21,6 +21,7 @@ UNRANKED = math.inf
 @dataclass(frozen=True)
 class Wait:
     reason: str
+    role: str = field(default="", compare=False)
 
 
 @dataclass(frozen=True)

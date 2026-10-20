@@ -116,18 +116,18 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     setup.store.update(setup.config.slug, local_max_agents=2)
     setup.store.create(SwarmConfig("other", "agentihooks", 1, 1))
     local_agents(setup, 1, slug="other")
-    put = setup.store.put_agent
-    put(setup.config.slug, AgentRecord("master-1", "master", "master"))
-    put(setup.config.slug, AgentRecord("eng-hive", "eng", "on-hive", seat="eng-8@fixture", hive="anton"))
-    pod = {"pod_namespace": "anton", "pod_name": "eng-pod"}
-    put(
-        setup.config.slug,
-        AgentRecord("eng-pod", "eng", "on-pod", seat="eng-9@fixture", runtime_backend="kubernetes", runtime_target=pod),
-    )
-    put(setup.config.slug, AgentRecord("eng-done", "eng", "done", state="finished"))
-    put(setup.config.slug, AgentRecord("eng-self", "eng", "task", state="starting"))
+    stored = setup.store.agents
+    others = [
+        AgentRecord("master-1", "master", "master"),
+        AgentRecord("eng-hive", "eng", "on-hive", hive="anton"),
+        AgentRecord("eng-pod", "eng", "on-pod", runtime_backend="kubernetes"),
+        AgentRecord("eng-done", "eng", "done", state="finished"),
+        AgentRecord("eng-self", "eng", "task", state="starting"),
+    ]
+    agents = {"other": stored("other"), setup.config.slug: others}
+    monkeypatch.setattr(setup.store, "agents", lambda slug: agents.get(slug, []))
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    local_agents(setup, 1)
+    agents[setup.config.slug] = [*others, AgentRecord("eng-1", "eng", "busy")]
     assert fenced.placement_refusal("eng", {"id": "task"}) == f"{FULL}, and the local machine runs 2 of its 2 agents"
 
 
@@ -155,7 +155,8 @@ def test_the_role_comes_from_the_hive_profile_decision_not_the_task_fields(setup
     fill_anton(setup)
     task = {"id": "task", "profile": "qa", "profile_decision": {"profile": "qa"}}
     assert fenced.placement_refusal("eng", task) == ""
-    assert fenced.runtime.hive_launch.role == "eng"
+    selected = fenced.runtime.hive_launch.select(setup.config, "eng", task)
+    assert (selected, selected.role) == (Wait(FULL), "eng")
 
 
 def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
