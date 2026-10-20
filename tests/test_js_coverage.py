@@ -320,3 +320,15 @@ def test_a_page_test_that_cannot_launch_chromium_fails_while_coverage_is_recorde
     report = SimpleNamespace(outcome=outcome, skipped=outcome == "skipped", longrepr=("f.py", 1, f"Skipped: {reason}"))
     browser_coverage.failed_launch(report)
     assert report.outcome == after
+
+
+def test_only_test_files_that_reach_playwright_count_as_browser_tests():
+    from tests import browser_coverage
+
+    root = Path(__file__).resolve().parents[1]
+    browser_coverage.drives_browser.cache_clear()
+    try:
+        assert browser_coverage.drives_browser(root, "tests/test_ci_gate_workflow.py") is False
+        assert browser_coverage.drives_browser(root, "tests/swarm_ledger/test_mutation_deadlines.py") is True
+    finally:
+        browser_coverage.drives_browser.cache_clear()

@@ -35,7 +35,10 @@ Run `agentihooks swarm rename` to rename every live registered swarm's agents an
 `agentihooks swarm <id> rename` for one swarm. Running it again makes no changes. Running sessions retain
 their launch names; durable aliases keep inbox delivery, crew ownership, terminate selection, waits and
 heartbeats working under either name. Herdr uses dashes where canonical names use an at sign, as approved
-by the operator.
+by the operator. For each swarm with agents, a rename takes the swarm's tick lock for up to ten minutes, so no tick
+runs beside it, and fails for a swarm whose tick is running or that another hive controls. A rename killed mid run on
+the same machine does not hold up the next tick (see
+[Tick lock holder record](#tick-lock-holder-record)).
 
 Every swarm agent is named `<type>@<code>-<number>`: `master@a1b2c3-0001`, `engineer@a1b2c3-0002`,
 `ci@a1b2c3-0001`. The type is `master`, `engineer` or `ci`. The code is six lowercase hex characters minted once
@@ -837,6 +840,56 @@ instead. For an intentional re-export, write `import name as name` or list the
 name in `__all__`; ruff accepts both without a suppression. Old suppressed
 lines outside the diff still pass, because they are not changed lines.
 
+#### Touched functions
+
+The size and complexity stage grades a function only when its syntax tree
+differs from the same named function at the merge base. The comparison
+ignores line and column positions, so reformatting, rewrapping or reindenting
+a function, moving it within the file, or editing comments inside it leaves it
+untouched and ungraded, however far over a limit it already is. A change to
+its statements, arguments, decorators, default values or docstring touches
+it, as does a change to a function nested inside it. Every function in a new
+file, and a function new to a file, is touched. File length is graded for
+every changed file.
+
+Function names are qualified by their enclosing classes and functions
+(`Reconciler.apply`, `outer.inner`); a repeated name in one file gets a
+counter (`handler#2`).
+
+#### Shrink only allowlist
+
+The fallback reads `tests/SIZE_ALLOWLIST.json` from the merge base, never from
+the worktree, so an entry added or raised on a branch has no effect on that
+branch's push. A repository without the file has no allowlist. The file uses
+the `scripts.size_limits` format: function entries are keyed
+`<path>::<qualified name>`, file entries by path.
+
+```json
+{
+  "scripts/reconcile.py::reconcile_unit": {"C901": 25, "PLR0912": 25},
+  "scripts/reconcile.py::Reconciler.apply": {"PLR0913": 9, "function-lines": 340},
+  "scripts/reconcile.py": {"file-lines": 3400}
+}
+```
+
+`C901`, `PLR0912` and `PLR0913` grade the rule of that name, `function-lines`
+the function length and `file-lines` the file length. A listed unit's cap is
+the smaller of its listed value and its merge base value when the unit is
+already over its limit at the base, and the listed value otherwise. An
+allowlisted offender that is over its limit at the base can therefore stay
+the same size or shrink, never grow, and raising its entry gives it no extra
+room. Over its cap it fails with `grew from <cap> to <head>`.
+
+Measured in [pull request 4082](https://github.com/the-cloud-clockwork/agentihooks/pull/4082)
+on litellm-state `origin/dev` 53949d4, `scripts/reconcile.py`, a file with ten
+existing complexity offenders, among them `reconcile_unit` at `C901` 25:
+
+| Change | Result |
+|---|---|
+| A format only rewrite of 175 lines, including `reconcile_unit` | Passes: no function's logic changed |
+| A new 8 argument function carrying `# noqa: PLR0913` | Fails: `proof_wide PLR0913 ... (8 > 7)`; the suppression is ignored |
+| One extra branch planted in `reconcile_unit` | Fails: `C901` and `PLR0912` grew from 25 to 26 |
+
 #### Reports and failures
 
 A failed gate stops the publication. The error names the fallback and the
@@ -850,7 +903,7 @@ finding is one report line:
 | `path:row: would reformat a changed line` | `ruff format` would rewrite that changed line; `row` is the first such line. Run `ruff format path` and review the diff. |
 | `path: name RULE message` | A touched function over a complexity limit. |
 | `path: name exceeds 300 lines` or `path: file exceeds 3000 lines` | A touched function or changed file over its size limit. |
-| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base grew. |
+| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base, or listed in the allowlist, grew above its base value or cap `N`. |
 | `ruff check exited N` or `ruff format exited N` | Ruff could not run, usually an invalid ruff configuration in the repository. When ruff writes its own error, the publication error shows that text instead of this line. |
 
 On a pass the gate records the passing head, which `publish` requires before
@@ -1462,31 +1515,49 @@ every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
-### Tick lock
+### Tick lock holder record
 
-Every tick pass of a swarm takes the swarm's tick lock right after the controller lease and before any work. The
-lock is one Redis key, `<prefix>:swarm:<id>:tick-lock`, where the prefix is `AGENTIHOOKS_SWARM_KEY_PREFIX`
-(default `agentihooks`). It holds a JSON record and expires after ten minutes; the pass extends it before every
-step, so a long pass keeps it.
+The tick lock is the Redis key `tick-lock` of the swarm, set for ten minutes. A running tick extends it to ten
+minutes again before every step; a rename does not extend it, so a rename that runs past ten minutes loses the lock.
+Its value is a holder record, a JSON object written by whoever takes the lock:
 
-| Field | Meaning |
-|---|---|
-| `epoch` | The controller lease epoch the pass ticks under. |
-| `token` | A random value; only the pass that wrote it releases the lock. |
-| `host` | The machine boot id and the pass's process namespace. |
-| `pid`, `start` | The tick process id and its start time from `/proc`. |
+```json
+{"epoch": 7, "token": "4f1c...", "host": "<boot id>:pid:[4026531836]", "pid": 41237, "start": "8812345"}
+```
 
-A pass that finds the lock taken returns `another tick is running` and does nothing else, unless one of these holds:
+`epoch` is the controller lease epoch, `token` is random per take, `host` joins the machine's boot id with the
+taker's process namespace, and `pid` and `start` name the process and its start time from `/proc`. Only the holder
+whose record matches exactly can extend or release the lock, so a holder that lost its lock never deletes another's.
 
-- the record carries a different epoch, so a newer controller takes over;
-- the holder record names this host and its process is gone: the process id no longer exists, is a zombie, or now
-  belongs to a process with another start time.
+A take succeeds when the key is empty, holds a record from another lease epoch, or holds a record of the same epoch
+whose holder is dead. A holder is dead only when its `host` equals the taker's and its process is gone, a zombie, or a
+different process with a reused pid (another start time). In the same epoch, a record from another host or pid
+namespace, a record missing `pid` or `start`, and a bare token that is not a JSON record are never judged dead; they
+block until the key expires, ten minutes after the holder's last extension. A take that races another write on the
+key gets no lock; one that races a change of the controller lease fails with `the controller lease is stale`.
 
-In either case the pass replaces the lock and ticks at once. A record in the same epoch from another host, or
-one with no holder fields, is never judged dead: it blocks the swarm until it expires. Ticks run by an install
-that predates holder records write such locks.
+`agentihooks swarm tick` and `agentihooks swarm rename` take the lock the same way. Each first acquires the
+controller lease for this hive (the hive id from `scripts.swarm.commands.hive_id`: the hive membership, else
+`SWARM_HIVE_ID`, else the seeded registry id, else the hostname), then takes the tick lock with its own holder record,
+and releases it with its own token when it ends. A tick or rename killed mid run, by `kill -9`, a closed terminal or
+an out of memory kill, costs no wait: the next tick of this hive on the same machine gets the same lease epoch back
+while the lease is live and sees the dead holder, or gets a new epoch after the lease expired; either way it takes the
+lock at once.
 
-The pass releases the lock in its `finally` on every return: the ledger in the bin (`the ledger is in the bin,
+A tick prints each action as `<id>: <action>` on stdout and ends normally; a rename fails with the error, and
+`agentihooks swarm rename` exits 1 with it on stderr after the swarm id
+(`swarm: <id>: swarm <id>: another tick or rename is running`).
+
+| Situation at take | `swarm tick` output | `swarm rename` error |
+|---|---|---|
+| Another hive holds the controller lease | `the swarm belongs to another hive` | `swarm <id>: belongs to another hive` |
+| A live tick or rename holds the lock in this epoch | `another tick is running` | `swarm <id>: another tick or rename is running` |
+| A killed tick or rename of this hive left the lock on this machine | takes it at once | takes it at once |
+| A holder on another machine, or a bare token, holds it in this epoch | `another tick is running` until the key expires | `swarm <id>: another tick or rename is running` until the key expires |
+
+#### Release on every return
+
+A tick pass releases the lock in its `finally` on every return: the ledger in the bin (`the ledger is in the bin,
 stopped`), a ledger that is gone, a failed ledger health probe (`Ledger health probe failed`), an exception
 partway through, and a normal end. A tick pass stopped at its 450 second deadline, or by `SIGTERM` from the
 service, releases every lock it holds before it exits and prints `the swarm tick stopped <why>; released <n> held

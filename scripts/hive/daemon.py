@@ -208,6 +208,17 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
 
 
 def repositories() -> list[str]:
+    checkouts = _checkouts()
+    identities = {origin(path) for path in checkouts} - {""}
+    return sorted(identities | {str(path) for path in checkouts})
+
+
+def local_checkout(repo: str) -> str:
+    matches = sorted(str(path) for path in _checkouts() if origin(path) == repo)
+    return matches[0] if matches else repo
+
+
+def _checkouts() -> list[Path]:
     root = Path(os.environ.get("HIVE_REPO_ROOT") or Path.home() / "dev").expanduser()
     if not root.is_dir():
         return []
@@ -218,9 +229,7 @@ def repositories() -> list[str]:
         if parent.is_dir() and not (parent / ".git").exists()
         for child in parent.iterdir()
     ]
-    checkouts = [path for path in candidates + nested if (path / ".git").exists()]
-    identities = {origin(path) for path in checkouts} - {""}
-    return sorted(identities | {str(path) for path in checkouts})
+    return [path for path in candidates + nested if (path / ".git").exists()]
 
 
 def origin(checkout: Path) -> str:

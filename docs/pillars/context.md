@@ -102,7 +102,10 @@ What covers live re-emphasis now, at a fraction of the token cost:
 - **One-shot `agentihooks refresh-rules`** — when a rule file is *edited*
   mid-session, this pushes the new content to already-running sessions exactly
   once. This is the only case where re-sending a rule file earns its tokens: the
-  copy at position zero is now stale.
+  copy at position zero is now stale. It also re-renders every installed
+  profile home from the bundle checkout, so merged bundle doctrine, once pulled
+  into that checkout, reaches every profile with no operator `init`; see
+  [`agentihooks refresh-rules`](../reference/cli-commands.md#agentihooks-refresh-rules).
 
 ## Token Compression Preprocessor
 
