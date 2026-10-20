@@ -191,6 +191,8 @@ def test_record_failure_names_the_gh_error_text():
     assert plan.record_failure(error) == "CalledProcessError: gh: Server Error (HTTP 502)"
     assert plan.record_failure(zipfile.BadZipFile("File is not a zip file")) == "BadZipFile: File is not a zip file"
     assert plan.record_failure(KeyError("manifest.json")) == "KeyError: 'manifest.json'"
+    garbled = subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: bad \xff byte\n")
+    assert plan.record_failure(garbled) == "CalledProcessError: gh: bad � byte"
 
 
 def test_every_test_selection_passes_the_planner_contracts_on_this_tree():
