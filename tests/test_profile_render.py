@@ -957,6 +957,19 @@ def test_claude_render_mcp_and_shared_data(world, capsys):
         assert os.readlink(out / name) == str(home / ".claude" / name)
 
 
+def test_claude_render_creates_the_shared_folders_a_fresh_home_lacks(world):
+    from scripts.profiles import render
+
+    shared = world["home"] / ".claude"
+    for name in ("projects", "sessions", "todos"):
+        if (shared / name).exists():
+            shutil.rmtree(shared / name)
+    out = render.render_claude("rb-role")
+    for name in ("projects", "sessions", "todos"):
+        assert (shared / name).is_dir()
+        assert (out / name).resolve() == (shared / name).resolve()
+
+
 @pytest.mark.parametrize("present", [True, False])
 def test_claude_render_links_operator_keybindings(world, present):
     from scripts.profiles import render
