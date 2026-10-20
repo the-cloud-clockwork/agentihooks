@@ -524,6 +524,12 @@ PROC_ENVIRON_READS = [
     "cd /proc/1 && cat environ",
     "while read -d '' l; do echo $l; done < /proc/thread-self/environ",
     "python3 <<'EOF'\nprint(open(f'/proc/{1}/environ').read())\nEOF",
+    "cat /proc/1/envi*",
+    "cat /proc/1/envir?n",
+    "cat /proc/1/env''iron",
+    "cat /proc/1/env\\iron",
+    "f=environ; cat /proc/1/$f",
+    "cat /proc/1/*",
 ]
 
 PROC_ALLOWED = [
@@ -531,12 +537,11 @@ PROC_ALLOWED = [
     "python3 -c \"import os; print(os.listdir('/proc/1'))\"",
     'test -n "${REDIS_URL:-}" && echo set || echo unset',
     "ls /proc/1/status",
+    "cat /proc/*/st*",
 ]
 
 
 class TestProcEnvironReads:
-    """Observed: tr on an agent's environ under proc printed the swarm Redis password."""
-
     @pytest.mark.parametrize("command", PROC_ENVIRON_READS)
     def test_read_is_refused_with_the_leak_free_alternative(self, command):
         verdict = decide(_bash(command))

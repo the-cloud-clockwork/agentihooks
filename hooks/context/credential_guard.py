@@ -100,6 +100,11 @@ SECRETISH_NAME = re.compile(
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
 
+QUOTING = re.compile(r"[\"'\\]")
+PROC_DIR = re.compile(r"/proc\b")
+PROC_PATH = re.compile(r"/proc/\S+")
+BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
+
 # --- bash lexing --------------------------------------------------------------
 
 READER_VERBS = {
@@ -463,12 +468,12 @@ def env_dump_verdict(command):
     )
 
 
-PROC_DIR = re.compile(r"/proc\b")
-BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
-
-
 def proc_environ_verdict(command):
-    if PROC_DIR.search(command) and BARE_ENVIRON.search(command):
+    flat = QUOTING.sub("", command)
+    if not PROC_DIR.search(flat):
+        return None
+    globs = [path.rsplit("/", 1)[-1] for path in PROC_PATH.findall(flat)]
+    if BARE_ENVIRON.search(flat) or any(fnmatch.fnmatchcase("environ", g) for g in globs):
         return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
     return None
 
