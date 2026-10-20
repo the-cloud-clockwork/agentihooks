@@ -1495,9 +1495,17 @@ def test_an_empty_head_read_with_no_saved_head_reopens_for_repair(merging):
     ready.save(merging.store, "sw", "t1", found)
     merging.queue.extra = {"queued": False}
     merging.pulls[URL] = transient(head="")
-    assert merging.run(NOW + 60_000)[0] == f"task t1 reopened, {URL} is marked unmergeable by GitHub"
+    assert merging.run(NOW + 60_000) == [f"task t1 reopened, {URL} is marked unmergeable by GitHub"]
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
     assert merging.queued == [("queue", URL), ("dequeue", URL)]
+
+
+def test_a_read_head_at_the_dequeue_wins_over_the_saved_head(merging):
+    queued_at_now(merging)
+    merging.queue.extra = {"queued": False}
+    merging.pulls[URL] = transient(head="c" * 40)
+    assert merging.run(NOW + 60_000) == [f"dequeued {URL} for task t1: {ready.TRANSIENT}"]
+    assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": ready.RECOVER, "head": "c" * 40}
 
 
 @pytest.mark.parametrize(
