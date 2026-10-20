@@ -11,6 +11,8 @@ _DECLARED = [
     *sorted(path.relative_to(_ROOT).as_posix() for path in (_ROOT / ".github/workflows").glob("*.yml")),
     ".github/input-keys.json",
     "README.md",
+    "index.md",
+    "sonar-project.properties",
     "docs/getting-started/index.md",
     "docs/getting-started/compose-quick-start.md",
     "profiles/package/skills/swarm-ledger/SKILL.md",
