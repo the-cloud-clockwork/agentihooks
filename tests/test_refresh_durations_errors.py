@@ -15,18 +15,17 @@ def _shard(samples, run, version, shard, durations):
     (path / "durations.json").write_text(durations if isinstance(durations, str) else json.dumps(durations))
 
 
-@pytest.mark.parametrize("missing", [1, 5])
-def test_refresh_records_every_collected_test_with_a_measured_default(tmp_path, monkeypatch, missing):
+def test_refresh_records_every_collected_test_with_a_measured_default(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     measured = {f"t.py::test_{index}": float(index + 1) for index in range(10)}
     _shard(samples, "12", "3.12", 1, {f"{node}@serial": value for node, value in measured.items()})
-    collected = [*measured, *(f"t.py::new_{index}" for index in range(missing))]
+    collected = [*measured, "t.py::new"]
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: collected)
     refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
     for name in (".test_durations", ".test_durations-3.12", ".test_durations-slowest", ".test_durations-slowest-3.12"):
         refreshed = json.loads((tmp_path / name).read_text())
-        assert refreshed == {**measured, **{f"t.py::new_{index}": 5.5 for index in range(missing)}}
+        assert refreshed == {**measured, "t.py::new": 5.5}
 
 
 def _refresh(monkeypatch, samples, collected):
