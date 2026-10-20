@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
 import json
+import os
 import shutil
+import signal
 import subprocess
 import time
 from pathlib import Path
@@ -9,10 +12,11 @@ from pathlib import Path
 from hooks.lifecycle.guard import _home
 
 STAMP_TTL_SECONDS = 6 * 3600
+WAIT_SECONDS = 1.0
 
 
 def kick(home: Path | None = None) -> bool:
-    """Start `agentihooks deps ensure` detached when the last full check is stale."""
+    """Run `agentihooks deps ensure` when the last full check is stale, killing it after WAIT_SECONDS."""
     try:
         ok_at = json.loads(((home or _home()) / "deps.stamp").read_text()).get("ok_at", 0)
     except (OSError, ValueError):
@@ -20,11 +24,17 @@ def kick(home: Path | None = None) -> bool:
     exe = shutil.which("agentihooks")
     if time.time() - ok_at < STAMP_TTL_SECONDS or exe is None:
         return False
-    subprocess.Popen(  # noqa: S603
+    process = subprocess.Popen(  # noqa: S603
         [exe, "deps", "ensure", "--quiet"],
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
+    try:
+        process.wait(timeout=WAIT_SECONDS)
+    except subprocess.TimeoutExpired:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait()
     return True
