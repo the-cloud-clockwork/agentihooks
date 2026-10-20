@@ -194,9 +194,9 @@ def program(tree):
 
 @pytest.fixture(scope="module")
 def published():
-    # The whole repository map takes about a minute under the coverage tracer, past the hung test dump bound.
+    # Built in a subprocess: under the coverage tracer the repository map runs near the hung test dump bound.
     command = [sys.executable, "-m", "scripts.swarm.redis_commands"]
-    out = subprocess.run(command, cwd=redis_commands.ROOT, capture_output=True, text=True, check=True).stdout
+    out = subprocess.run(command, cwd=redis_commands.ROOT, stdout=subprocess.PIPE, text=True, check=True).stdout
     return json.loads(out)["consumers"]
 
 
