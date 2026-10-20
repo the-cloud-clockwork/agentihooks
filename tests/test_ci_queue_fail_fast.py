@@ -310,7 +310,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         for job_id, job in jobs.items()
         if "github.event_name == 'push'" in str(job.get("if", "")) and "merge_group" not in str(job.get("if", ""))
     }
-    queued = set(jobs) - push_only - {"admission", "gate-required"}
+    queued = set(jobs) - push_only - {"admission", "gate-required", "test-summary"}
     expected = {
         "promote",
         "refresh-durations",

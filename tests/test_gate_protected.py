@@ -276,9 +276,12 @@ def test_main_refuses_an_unknown_head(repo):
 
 
 def test_the_repository_grades_itself_green():
+    from scripts import ci_runner_trust
+
     workflows = ci_wiring.load(_ROOT)
     config = json.loads((_ROOT / ci_wiring.CONFIG).read_text())
-    assert gate_protected.grade(workflows, config, workflows, config, _TODAY) == []
+    actors = json.loads((_ROOT / ci_runner_trust.ACTORS).read_text())
+    assert gate_protected.grade(workflows, config, workflows, config, _TODAY, actors) == []
 
 
 def _protected_workflow():

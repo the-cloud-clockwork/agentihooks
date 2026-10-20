@@ -75,6 +75,7 @@
   "test.yml/split": "standard",
   "test.yml/stage-budget": "light",
   "test.yml/test-count": "standard",
+  "test.yml/test-summary": "light",
   "test.yml/unit": "standard",
   "test.yml/unit-selected": "standard",
   "test.yml/writer-lock": "standard",
