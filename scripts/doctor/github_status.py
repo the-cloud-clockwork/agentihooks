@@ -53,7 +53,7 @@ def track(known: dict, current: list[dict] | None, now_ms: int) -> dict:
         if incident["end"] is None and identity not in listed:
             incident["end"] = now_ms
     for incident in current:
-        kept.setdefault(incident["id"], {**incident, "end": None, "noticed": False})
+        kept[incident["id"]] = {"noticed": False, **kept.get(incident["id"], {}), **incident, "end": None}
     return kept
 
 

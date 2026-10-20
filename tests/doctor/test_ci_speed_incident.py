@@ -165,3 +165,18 @@ def test_an_incident_named_for_actions_without_components_holds_findings(store, 
     runs(monkeypatch, [waiting(1, "2026-10-19T16:01:00Z")])
     cli.timer(store, DOCTOR, DURING, False)
     assert details(store) == []
+
+
+def test_a_resolved_incident_listed_again_holds_without_a_second_notice(store, monkeypatch):  # noqa: F811
+    status(monkeypatch, INCIDENT)
+    runs(monkeypatch, [])
+    cli.timer(store, DOCTOR, DURING, False)
+    status(monkeypatch)
+    cli.timer(store, DOCTOR, DURING + 60000, False)
+    status(monkeypatch, INCIDENT)
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:01:00Z")])
+    actions = cli.timer(store, DOCTOR, DURING + 120000, False)
+    assert details(store) == []
+    assert any("held during GitHub incident" in action for action in actions)
+    for texts in items(store).values():
+        assert len(texts) == 1
