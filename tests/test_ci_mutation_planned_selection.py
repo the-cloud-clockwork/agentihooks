@@ -132,6 +132,8 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
         (2, subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")),
         (2, subprocess.TimeoutExpired(["gh"], 60)),
         (2, zipfile.BadZipFile("File is not a zip file")),
+        (2, json.JSONDecodeError("Expecting value", "", 0)),
+        (2, KeyError("There is no item named 'manifest.json' in the archive")),
     ],
 )
 def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path, monkeypatch, capsys, failures, error):
@@ -150,7 +152,7 @@ def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path
     calls, pauses = [], []
 
     def record(repository, before):
-        calls.append(repository)
+        calls.append((repository, before))
         if len(calls) <= failures:
             raise error
         return {"id": 7}, manifest
@@ -164,7 +166,8 @@ def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path
     monkeypatch.setattr(plan, "find_record", record)
     monkeypatch.setattr(plan.time, "sleep", pauses.append)
     assert plan.main() == 0
-    assert calls == ["owner/repo", "owner/repo"]
+    assert [repository for repository, _ in calls] == ["owner/repo", "owner/repo"]
+    assert calls[0][1] == calls[1][1]
     assert pauses == [plan.RECORD_RETRY_SECONDS]
     selected = json.loads((tmp_path / ".mutation-selection.json").read_text())["scripts/core.py"]
     out = capsys.readouterr().out

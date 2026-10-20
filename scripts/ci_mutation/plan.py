@@ -88,9 +88,10 @@ def record_failure(error: Exception) -> str:
 
 
 def read_record(repository: str) -> tuple[tuple[dict, dict] | None, str]:
+    before, reason = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), ""
     for attempt in (1, 2):
         try:
-            return find_record(repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")), ""
+            return find_record(repository, before), ""
         except RECORD_ERRORS as error:
             reason = record_failure(error)
             print(f"Reading the recorded dev coverage failed on attempt {attempt}: {reason}")
