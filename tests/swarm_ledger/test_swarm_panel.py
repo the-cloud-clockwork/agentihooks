@@ -10,6 +10,8 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from tests.swarm_ledger.ledger_page import page_source
 
 SCRIPTS = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger"
@@ -678,6 +680,18 @@ def test_a_quota_probe_failure_names_its_cause():
             patch.object(server.subprocess, "run", **effect),
         ):
             assert command_runner.run(["quota"], {}) == expected
+
+
+def test_a_refused_swarm_read_answers_nothing_more():
+    handler = server.Handler.__new__(server.Handler)
+    handler.exists = lambda slug: True
+    handler.refused = lambda slug: True
+    handler.send = lambda *args: pytest.fail("refused already answered the request")
+    with patch.object(server, "swarm_status") as status, patch.object(server, "swarm_models") as models:
+        assert handler.get_swarm(SLUG, "") is None
+        assert handler.get_swarm(SLUG, "models") is None
+    status.assert_not_called()
+    models.assert_not_called()
 
 
 if __name__ == "__main__":
