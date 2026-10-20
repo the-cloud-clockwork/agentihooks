@@ -239,8 +239,7 @@ def test_merge_into_a_merge_queue_branch_is_refused(session, monkeypatch):
     assert "branch=dev" in seen[1]
 
 
-@pytest.mark.parametrize("opened", [set_controls_disabled, prod_lockdown.set_bypass])
-def test_operator_bypass_lets_a_merge_skip_the_queue(session, monkeypatch, opened):
+def test_operator_bypass_lets_a_merge_skip_the_queue(session, monkeypatch):
     import subprocess
 
     seen = []
@@ -250,9 +249,21 @@ def test_operator_bypass_lets_a_merge_skip_the_queue(session, monkeypatch, opene
         return subprocess.CompletedProcess(argv, 0, *gh(argv, queue={"id": "MQ"}))
 
     monkeypatch.setattr(subprocess, "run", run)
-    opened(session)
+    set_controls_disabled(session)
     check("gh pr merge 123 --squash", session)
     assert [argv[1:3] for argv in seen] == [["pr", "view"]]
+
+
+def test_emergency_phrase_does_not_open_the_merge_queue(session, monkeypatch):
+    import subprocess
+
+    monkeypatch.setattr(
+        subprocess, "run", lambda argv, **kwargs: subprocess.CompletedProcess(argv, 0, *gh(argv, queue={"id": "MQ"}))
+    )
+    prod_lockdown.set_bypass(session)
+    with pytest.raises(BlockAction) as blocked:
+        check("gh pr merge 123 --squash", session)
+    assert str(blocked.value).startswith("BLOCKED [gh pr merge into a merge queue branch]")
 
 
 @pytest.mark.parametrize("answer", ["failed", "{}", "not json", '{"data": {"resource": null}}'])

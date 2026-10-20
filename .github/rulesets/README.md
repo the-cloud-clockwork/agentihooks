@@ -28,7 +28,7 @@ when the queue run passes the gate. The installed gh predates merge queues, so
 `gh pr merge --squash` calls the direct merge mutation, and the admin bypass
 actor below lets it land past the queue and cancel the running group build.
 The prod lockdown guard refuses `gh pr merge` into any branch with a merge
-queue unless the operator ran `disable controls` or `--emergency-prod`.
+queue unless the operator ran `disable controls`.
 The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind

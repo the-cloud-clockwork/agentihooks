@@ -194,11 +194,11 @@ Prevents destructive git operations that bypass the normal PR and release workfl
 | `git push --force-with-lease` | Force push variant — same risk |
 | `git tag` | Tagging is a release operation; must go through CI |
 
+The prod lockdown guard also refuses `gh pr merge` into a base branch with a merge queue: the installed gh predates merge queues and lands the pull request directly through the admin bypass, cancelling the running group build. Queue it with `agentihooks swarm <slug> merge queue <url>` (the GraphQL `enqueuePullRequest` mutation). Only bypass mode lifts this refusal. The guard reads `gh pr merge` only; a merge through `gh api` is not checked.
+
 All blocked operations return exit code 2 with a human-readable explanation. CI alone promotes green `dev` into `main` and issues release tags. Agent pull requests target `dev`; no signal or bypass opens their creation or merge into `main`, `master` or `v1`.
 
 ### What is allowed
-
-`gh pr merge` into a base branch with a merge queue is refused: the installed gh predates merge queues and lands the pull request directly through the admin bypass, cancelling the running group build. Queue it with `agentihooks swarm <slug> merge queue <url>` (the GraphQL `enqueuePullRequest` mutation). Bypass mode or `--emergency-prod` lifts this refusal.
 
 Normal pushes to worktree branches and read-only inspection are allowed. Direct pushes and commits to `main` or `master` remain blocked. Pull requests must name an explicit base; `--base dev` needs no PR signal.
 

@@ -286,7 +286,7 @@ def _merge_view_command(line: str) -> list[str] | None:
     return [*command, "--json", "baseRefName,url", "--jq", '.baseRefName + " " + .url']
 
 
-def _check_pr_merge(line: str, cwd: str, bypass: bool = False) -> None:
+def _check_pr_merge(line: str, cwd: str, bypass: bool) -> None:
     try:
         command = _merge_view_command(line)
         if command is None:
@@ -358,4 +358,4 @@ def check_prod_lockdown(payload: dict) -> None:
 
     cwd = _resolve_cwd(command, payload.get("cwd", ""))
     for line in check_text.splitlines():
-        _check_pr_merge(line, cwd, controls_off or full_bypass)
+        _check_pr_merge(line, cwd, controls_off)
