@@ -152,15 +152,16 @@ def test_a_failed_reschedule_keeps_the_running_schedule(tmp_path, scheduler, mon
     assert len(_records(scheduler)) == 1
 
 
-def test_reconcile_starts_the_scheduler_for_a_guard_in_sync(tmp_path, scheduler, calls):
+def test_reconcile_starts_the_scheduler_for_a_guard_in_sync(tmp_path, scheduler, monkeypatch, calls):
     from scripts.scheduler import service
+    from scripts.swarm import store
 
     sync.install(tmp_path, enable=True)
     service.ensure_running.reset_mock()
+    monkeypatch.setattr(store, "redis_url", lambda environ: "redis://proof:6379/0")
     assert sync.reconcile(tmp_path) == f"[OK] Host guard in sync with {sync.REPO}"
     service.ensure_running.assert_called_once()
-    started_with = service.ensure_running.call_args.args[0]
-    assert started_with["AGENTIHOOKS_SWARM_REDIS_URL"] == os.environ["AGENTIHOOKS_SWARM_REDIS_URL"]
+    assert service.ensure_running.call_args.args[0]["AGENTIHOOKS_SWARM_REDIS_URL"] == "redis://proof:6379/0"
 
 
 def test_installing_one_home_keeps_the_schedule_of_another(tmp_path, scheduler, calls):
@@ -266,6 +267,38 @@ def test_systemctl_reads_a_missing_or_hung_manager_as_failure(monkeypatch):
     assert sync._systemctl("daemon-reload") is False
 
 
+def test_the_account_home_is_read_from_the_password_database(monkeypatch):
+    seen = []
+    monkeypatch.setattr(sync.os, "getuid", lambda: 4242)
+    monkeypatch.setattr(sync.pwd, "getpwuid", lambda uid: seen.append(uid) or Mock(pw_dir="/home/proof"))
+    assert sync._account_home() == Path("/home/proof")
+    assert seen == [4242]
+
+
+def test_the_scheduler_uses_the_swarm_redis(monkeypatch):
+    from scripts.swarm import store
+
+    client = Mock()
+    monkeypatch.setattr(store, "redis_client", lambda: client)
+    assert sync._scheduler().redis is client
+
+
+def test_install_removes_a_lone_systemd_timer(tmp_path, scheduler, calls):
+    _units(tmp_path).mkdir(parents=True)
+    (_units(tmp_path) / "guard-daemon.timer").write_text("[Unit]\n")
+    assert sync.install(tmp_path, enable=True) == _installed(tmp_path)
+    assert not (_units(tmp_path) / "guard-daemon.timer").exists()
+
+
+def test_reconcile_relinks_an_unscheduled_guard_without_scheduling_it(tmp_path, scheduler, calls):
+    (tmp_path / "guard-config.json").write_text("{}")
+    assert sync.reconcile(tmp_path) == (
+        f"[--] Host guard linked in {tmp_path} from {sync.REPO}; agentihooks host-guard install schedules it"
+    )
+    assert _records(scheduler) == []
+    assert (tmp_path / "guard-config.json").readlink() == sync.REPO / "guard-config.json"
+
+
 def test_the_live_home_is_the_account_home(tmp_path, monkeypatch):
     monkeypatch.setattr(sync, "_account_home", lambda: tmp_path / "link")
     (tmp_path / "link").symlink_to(tmp_path)
@@ -321,8 +354,11 @@ def test_reconcile_reports_a_guard_already_in_sync(tmp_path, scheduler, calls):
 def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, scheduler, capsys, calls):
     (tmp_path / "guard-config.json").write_text("{}")
     assert sync.run("check", tmp_path) == 1
-    out = capsys.readouterr().out
-    assert f"{tmp_path / 'guard-config.json'} is not a link to {sync.REPO / 'guard-config.json'}" in out
+    assert capsys.readouterr().out.splitlines() == [
+        f"{tmp_path / 'guard-daemon.sh'} is missing",
+        f"{tmp_path / 'guard-config.json'} is not a link to {sync.REPO / 'guard-config.json'}",
+        f"{tmp_path / 'guard-daemon.sh'} is not scheduled every 60s on the agentihooks scheduler",
+    ]
     assert sync.run("install", tmp_path) == 0
     assert capsys.readouterr().out == f"{_installed(tmp_path)}\n"
     assert sync.run("check", tmp_path) == 0
@@ -333,7 +369,7 @@ def test_tick_runs_the_home_script_once_per_delivery(monkeypatch):
     import fakeredis
 
     started = []
-    monkeypatch.setattr(sync.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(sync.shutil, "which", lambda name: "/usr/bin/timeout" if name == "timeout" else None)
     monkeypatch.setattr(sync.subprocess, "Popen", lambda command, **options: started.append((command, options)))
     redis = fakeredis.FakeRedis(decode_responses=True)
     event = {"payload": json.dumps({"script": "/home/me/guard-daemon.sh"})}
@@ -346,8 +382,11 @@ def test_tick_runs_the_home_script_once_per_delivery(monkeypatch):
             {"stdin": devnull, "stdout": devnull, "stderr": devnull, "start_new_session": True},
         )
     ]
-    [key] = redis.keys()
-    assert sync.OWNER in key and key.endswith(":delivery")
+    from hooks._redis import redis_key
+
+    key = redis_key("scheduler", "agentihooks-host-guard:delivery")
+    assert redis.keys() == [key]
+    assert redis.get(key) == "1"
     assert 0 < redis.ttl(key) <= 3600
 
 
@@ -372,7 +411,7 @@ def test_tick_runs_without_timeout_and_logs_a_failed_start(monkeypatch):
 
 def test_the_gc_command_parses_host_guard_actions():
     parser = gc_cli._parser()
-    assert HELP in " ".join(parser.format_help().split())
+    assert f" host-guard {HELP} options:" in " ".join(parser.format_help().split())
     for action in ("install", "check"):
         args = parser.parse_args(["host-guard", action])
         assert (args.command, args.action) == ("host-guard", action)

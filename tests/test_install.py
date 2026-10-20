@@ -2723,6 +2723,16 @@ class TestInstallGlobalHonoursTarget:
         install.install_global(argparse.Namespace(profile="tiny", settings_profile="", install_target=target))
         return Path.home()
 
+    def test_global_install_reconciles_the_lifecycle_sweep_and_host_guard(self, tmp_path, monkeypatch, capsys):
+        from hooks.lifecycle import guard, timer
+
+        seen = []
+        monkeypatch.setattr(guard, "enabled", lambda: "enabled-flag")
+        monkeypatch.setattr(timer, "reconcile_units", lambda *args: seen.append(args) or "[OK] units reconciled")
+        self._run(tmp_path, monkeypatch, "claude")
+        assert seen == [(sys.executable, str(install.AGENTIHOOKS_ROOT), "enabled-flag")]
+        assert "  [OK] units reconciled" in capsys.readouterr().out
+
     def test_codex_target_writes_codex_and_not_claude(self, tmp_path, monkeypatch):
         home = self._run(tmp_path, monkeypatch, "codex")
         assert (home / ".codex" / "config.toml").exists(), "codex config.toml not written"
