@@ -100,6 +100,30 @@ def test_the_newest_commit_on_dev_names_its_subject_and_age(tmp_path):
     }
 
 
+def test_a_merge_queue_commit_is_aged_from_its_pull_request_merge_not_its_older_commit_time(monkeypatch, tmp_path):
+    real = subprocess.run
+
+    def run(argv, **kwargs):
+        if argv[0] == "gh":
+            return subprocess.CompletedProcess(argv, 0, "2026-10-19T21:20:03Z\n", "")
+        return real(argv, **kwargs)
+
+    stamp = {
+        "GIT_AUTHOR_DATE": "@1792441723 +0000",
+        "GIT_COMMITTER_DATE": "@1792441723 +0000",
+        "GIT_AUTHOR_NAME": "a",
+        "GIT_AUTHOR_EMAIL": "a@b",
+        "GIT_COMMITTER_NAME": "a",
+        "GIT_COMMITTER_EMAIL": "a@b",
+        "PATH": "/usr/bin:/bin",
+    }
+    for args in (("init", "-q"), ("commit", "-q", "--allow-empty", "-m", "Queue built (#4864)")):
+        real(["git", "-C", str(tmp_path), *args], check=True, capture_output=True, env=stamp)
+    real(["git", "-C", str(tmp_path), "update-ref", "refs/remotes/origin/dev", "HEAD"], check=True)
+    monkeypatch.setattr(ledger_host.subprocess, "run", run)
+    assert ledger_host.newest_on_dev(tmp_path, 1_792_445_763) == {"newest": "Queue built (#4864)", "merged_minutes": 16}
+
+
 class Git:
     def __init__(self, stdout="", code=0, error=None):
         self.stdout, self.code, self.error, self.calls = stdout, code, error, []
