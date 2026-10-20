@@ -981,18 +981,38 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
     assert result.returncode != 0, result.stdout + result.stderr
 
 
-@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled"])
+def test_the_watcher_loss_rule_is_written_once_for_the_watcher_job():
+    from scripts import ci_queue_fail_fast, ci_reuse
+
+    assert ci_reuse.WATCHER == ci_queue_fail_fast.SELF
+    assert ci_reuse.WATCHER in ci_reuse.WATCHER_LOSS
+    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True)
+    assert step["run"].count(ci_reuse.WATCHER_LOSS) == 1
+    [plain] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    assert ci_reuse.WATCHER_LOSS not in plain["run"]
+
+
+@pytest.mark.parametrize("watcher", ["success", "failure", "cancelled", None])
 @pytest.mark.parametrize("failed", ["", "unit (3.11, 1)", "queue group is no longer current"])
 @pytest.mark.parametrize("graded", ["success", "failure", "cancelled", "skipped"])
 def test_the_workflow_gate_distinguishes_watcher_loss_from_reported_failures(watcher, failed, graded):
+    from scripts.ci_queue_fail_fast import SELF
+
     jobs = yaml.safe_load((PROGRAM.parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    assert SELF in jobs
+    assert SELF in jobs["gate-required"]["needs"]
     required = {"select", "split", "unit", "shard-check", "test-count"}
     needs = {name: {"result": "success" if name in required else "skipped"} for name in jobs["gate-required"]["needs"]}
-    needs["queue-fail-fast"] = {"result": watcher, "outputs": {"failed": failed}}
+    if watcher is None:
+        del needs[SELF]
+    else:
+        needs[SELF] = {"result": watcher, "outputs": {"failed": failed}}
     needs["unit"]["result"] = graded
     step = next(step for step in jobs["gate-required"]["steps"] if step.get("name") == "Require every gate to succeed")
     result = _gate([step], needs)
-    assert (result.returncode == 0) == (not failed and graded == "success"), result.stdout + result.stderr
+    assert (result.returncode == 0) == (watcher is not None and not failed and graded == "success"), (
+        result.stdout + result.stderr
+    )
 
 
 def test_the_workflow_watcher_exports_reported_failures_to_the_gate():
