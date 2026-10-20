@@ -31,7 +31,9 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         'if [[ "$*" == "hive join "* ]]; then\n'
         '  [[ "$REFUSE" != join ]] || exit 9\n'
         '  touch "$AGENTIHOOKS_HOME/hive.env"\nfi\n'
+        'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
+        '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
         'if [[ "$*" == "deps ensure" ]]; then [[ "$REFUSE" != deps ]] || exit 4; fi\n'
@@ -103,6 +105,7 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands.splitlines() == [
         "hive join https://join.example.test fixture-code",
+        "bundle unlink",
         "init",
         "deps ensure",
         "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1",
@@ -133,9 +136,10 @@ def test_ssh_checks_its_config_then_serves_the_mounted_keys_before_init(tmp_path
     state = home / "ssh"
     config = (state / "sshd_config").read_text()
     lines = commands.splitlines()
-    assert lines[1:4] == [
+    assert lines[1:5] == [
         f"sshd -t -f {state}/sshd_config",
         f"sshd -D -e -f {state}/sshd_config",
+        "bundle unlink",
         "init",
     ]
     assert (state / "host_key").stat().st_mode & 0o777 == 0o600
@@ -158,12 +162,18 @@ def test_failed_profile_init_never_runs_the_worker(tmp_path):
 
 
 def test_failed_init_with_the_bundle_runs_again_on_the_package_roles(tmp_path):
-    result, commands, _, repo = startup(tmp_path, refuse="bundle-init", bundle=True)
+    result, commands, home, repo = startup(tmp_path, refuse="bundle-init", bundle=True)
     assert result.returncode == 0, result.stderr
     assert (
         "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone\n" in result.stderr
     )
-    assert commands.splitlines()[1:4] == [f"init --bundle {repo.parent / 'agentihooks-bundle'}", "init", "deps ensure"]
+    assert commands.splitlines()[1:5] == [
+        f"init --bundle {repo.parent / 'agentihooks-bundle'}",
+        "bundle unlink",
+        "init",
+        "deps ensure",
+    ]
+    assert not (home / "linked-bundle").exists()
     assert commands.endswith("hive run\n")
 
 
@@ -199,6 +209,7 @@ def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     branch = subprocess.run(["git", "-C", str(bundle), "branch", "--show-current"], capture_output=True, text=True)
     assert branch.stdout == "dev\n"
     assert commands.splitlines()[1:3] == [f"init --bundle {bundle}", "deps ensure"]
+    assert (repo.parent.parent / "state/linked-bundle").read_text() == str(bundle)
     assert commands.endswith("hive run\n")
 
 
@@ -233,5 +244,14 @@ def test_a_failed_bundle_clone_is_logged_and_the_hive_runs_on_the_package_roles(
     assert result.returncode == 0, result.stderr
     assert "worker-hive: bundle clone failed; init runs on the package roles alone\n" in result.stderr
     assert not (repo.parent / "agentihooks-bundle").exists()
-    assert commands.splitlines()[1:3] == ["init", "deps ensure"]
+    assert commands.splitlines()[1:4] == ["bundle unlink", "init", "deps ensure"]
     assert commands.endswith("hive run\n")
+
+
+def test_an_emptied_origin_unlinks_the_bundle_a_persistent_home_kept(tmp_path):
+    kept = tmp_path / "repos/agentihooks-bundle"
+    (kept / ".git").mkdir(parents=True)
+    result, commands, _, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert f"init --bundle {kept}" not in commands
+    assert commands.splitlines()[1:4] == ["bundle unlink", "init", "deps ensure"]

@@ -87,12 +87,15 @@ EOF
   kill -0 "$sshd_pid"
 fi
 bundle=()
-[[ -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
+[[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
 if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
   echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
   bundle=()
 fi
-(( ${#bundle[@]} )) || agentihooks init
+if (( ! ${#bundle[@]} )); then
+  agentihooks bundle unlink
+  agentihooks init
+fi
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"

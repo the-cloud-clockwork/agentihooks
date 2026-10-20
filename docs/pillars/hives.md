@@ -715,12 +715,13 @@ agentihooks hive bundle-origin --path <record> # another record under the secret
 ```
 
 It needs `OPENBAO_URL` and `OPENBAO_TOKEN`, keeps the record's other keys, and writes an empty origin when no bundle
-is linked. An empty `HIVE_BUNDLE_URL` clones nothing and init runs on the package roles alone. A failed clone logs
-`worker-hive: bundle clone failed` and the pod still serves without the bundle, which `agentihooks hive compare` shows
-as a difference. A failed init with the bundle logs `worker-hive: agentihooks init with the bundle failed` and init
-runs again on the package roles alone; a failed init on the package roles stops the pod. A failed `deps ensure` logs
-its reason and each launch retries it. The image carries node, npm, uv and gh; npm global installs and uv tools land
-in `~/.local` under the worker home.
+is linked. A linked bundle with no `origin` remote naming a host and repository is refused. An empty `HIVE_BUNDLE_URL`
+clones nothing, unlinks any bundle a persistent home kept, and init runs on the package roles alone. A failed clone
+logs `worker-hive: bundle clone failed` and the pod still serves without the bundle, which `agentihooks hive compare`
+shows as a difference. A failed init with the bundle logs `worker-hive: agentihooks init with the bundle failed` and
+init runs again on the package roles alone, with the bundle unlinked; a failed init on the package roles stops the
+pod. A failed `deps ensure` logs its reason and each launch retries it. The image carries node, npm, uv and gh; npm
+global installs and uv tools land in `~/.local` under the worker home.
 
 Give exactly one of `workers.joinCodeSecret` or `workers.credentialSecret`. A join code runs with a persistent
 home. Credentials come from ExternalSecrets by name. The hive id is the one minted when the code was exchanged, so
