@@ -55,7 +55,7 @@ class Publishing:
                     self.publish(slug, entry.state)
                     self.published[slug] = entry.generation
             except Exception as exc:  # the next read of this ledger queues the generation again
-                sys.stderr.write(f"stream publish for {slug}: {exc}\n")
+                sys.stderr.write(f"stream publish for {slug} generation {entry.generation}: {exc}\n")
             finally:
                 with self.queued:
                     self.running -= 1

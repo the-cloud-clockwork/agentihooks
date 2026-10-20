@@ -75,7 +75,7 @@ def test_a_generation_whose_publication_failed_is_published_at_the_next_read(cap
     repository = Publishing(Store(), flaky)
     repository.current("s")
     repository.drain()
-    assert "stream publish for s: stream gone" in capsys.readouterr().err
+    assert "stream publish for s generation 0: stream gone" in capsys.readouterr().err
     repository.current("s")
     repository.drain()
     repository.current("s")
