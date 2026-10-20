@@ -537,6 +537,9 @@ PROC_ENVIRON_READS = [
     "cd /proc/1 && cat e*",
     "cd /proc/1; cat *",
     "pushd /proc/self && cat env*",
+    "cd -- /proc/1 && cat e*",
+    "cd -L /proc/1 && cat e*",
+    "cd /p*/1 && cat e*",
     "cat /p*c/1/environ",
     "cat /pr?c/self/environ",
     "cat /pr[o]c/1/environ",
@@ -550,6 +553,7 @@ PROC_ALLOWED = [
     "ls /proc/1/status",
     "cat /proc/*/status",
     "test -d /proc/$pid && echo alive",
+    "cd /home/x/procs && cat e*",
 ]
 
 
