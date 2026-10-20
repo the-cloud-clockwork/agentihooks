@@ -311,7 +311,8 @@ def watcher(base: str, credentials: dict, deadline: float, results: dict) -> Non
                 if not stream.read1(65536):
                     raise ConnectionError("the server closed the stream before the load ended")
     except Exception as exc:  # a dropped or silent stream is a red request
-        results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
+        if time.monotonic() < deadline:
+            results["errors"].append(f"event stream: {type(exc).__name__}: {exc}")
 
 
 def sample_cpu(pid: int, deadline: float, results: dict) -> None:
@@ -349,12 +350,14 @@ def load(port: int, token: str, pid: int, seconds: float) -> dict:
         )
         for n, (api, _, _) in enumerate(apis)
     ]
-    threads.append(threading.Thread(target=watcher, args=(base, {"X-Ledger-Token": token}, deadline, results)))
+    threads.append(
+        threading.Thread(target=watcher, args=(base, {"X-Ledger-Token": token}, deadline, results), daemon=True)
+    )
     threads.append(threading.Thread(target=sample_cpu, args=(pid, deadline, results)))
     for thread in threads:
         thread.start()
     for thread in threads:
-        thread.join()
+        thread.join(max(0.0, deadline - time.monotonic()) if thread.daemon else None)
     return results
 
 
