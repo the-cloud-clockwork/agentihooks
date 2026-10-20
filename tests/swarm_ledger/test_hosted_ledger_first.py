@@ -1,0 +1,149 @@
+import http.server
+import json
+import socket
+import threading
+
+import pytest
+
+from scripts.swarm_ledger import authority_context, ledger_link
+from scripts.swarm_ledger.storage_migration import hosted as hosted_migration
+from tests.test_swarm_v2_launch import FIRST, World
+
+pytestmark = pytest.mark.unit
+
+TOKEN = {"AGENTIHOOKS_LEDGER_AGENT_TOKEN": "agent-token"}
+HIVE = {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}
+
+
+@pytest.fixture(autouse=True)
+def fresh_probes(monkeypatch):
+    monkeypatch.setattr(ledger_link, "_answers", {})
+
+
+@pytest.fixture
+def answering():
+    class Health(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            body = json.dumps({"dir": "/data"}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Health)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{httpd.server_address[1]}"
+    httpd.shutdown()
+    httpd.server_close()
+
+
+@pytest.fixture
+def silent():
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    return f"http://127.0.0.1:{port}"
+
+
+def workstation(**extra):
+    return {"LEDGER_HOST": "127.0.0.1", "LEDGER_PORT": "8765", "LEDGER_DIR": "/scratch/ledger", **extra}
+
+
+WORKSTATION = "http://127.0.0.1:8765"
+
+
+def test_a_workstation_agent_resolves_the_answering_hosted_ledger_first(answering):
+    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering + "/"})
+
+    assert ledger_link.base(environ) == answering
+    assert ledger_link.remote(environ)
+
+
+def test_a_workstation_agent_falls_back_to_the_workstation_server_when_the_hosted_one_does_not_answer(silent):
+    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: silent})
+
+    assert ledger_link.base(environ) == WORKSTATION
+    assert not ledger_link.remote(environ)
+
+
+def test_a_session_without_a_hosted_credential_keeps_the_workstation_server(answering):
+    environ = workstation(**{ledger_link.HOSTED_ENV: answering})
+
+    assert ledger_link.base(environ) == WORKSTATION
+    assert not ledger_link.remote(environ)
+
+
+def test_a_hive_agent_resolves_the_hosted_ledger_before_its_swarm_address(answering, silent):
+    environ = {**HIVE, "AGENTIHOOKS_DEPLOYMENT": "distributed", "SWARM_URL": silent, ledger_link.HOSTED_ENV: answering}
+
+    assert ledger_link.base(environ) == answering
+    assert ledger_link.remote(environ)
+
+
+def test_a_hive_agent_falls_back_to_its_swarm_address_when_the_hosted_ledger_does_not_answer(silent):
+    environ = {
+        **HIVE,
+        "AGENTIHOOKS_DEPLOYMENT": "distributed",
+        "SWARM_URL": "https://workstation.example",
+        ledger_link.HOSTED_ENV: silent,
+    }
+
+    assert ledger_link.base(environ) == "https://workstation.example"
+
+
+def test_a_routed_swarm_address_still_wins_over_the_hosted_ledger(answering):
+    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering})
+
+    with ledger_link.ledger_route.scoped("demo", "https://routed.example"):
+        assert ledger_link.base(environ, slug="demo") == "https://routed.example"
+
+
+def test_the_workstation_tick_binds_the_hosted_secret_so_launches_carry_hosted_tokens(monkeypatch):
+    class Store:
+        def slugs(self):
+            return []
+
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setattr(hosted_migration, "server_secret", lambda: "hosted-secret")
+
+    with authority_context.for_tick(Store()):
+        assert authority_context.secret() == "hosted-secret"
+
+
+def test_the_workstation_tick_runs_without_a_hosted_secret(monkeypatch):
+    class Store:
+        def slugs(self):
+            return []
+
+    def unavailable():
+        raise ValueError("trusted OpenBao credentials unavailable")
+
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setattr(hosted_migration, "server_secret", unavailable)
+
+    with authority_context.for_tick(Store()):
+        assert authority_context.secret() is None
+
+
+def test_a_hive_launch_hands_the_hosted_ledger_address_to_the_worker_home(monkeypatch):
+    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example/")
+    world = World(monkeypatch)
+    world.launch(FIRST)
+    [spawned] = world.runtime.requests
+
+    assert spawned.task["endpoints"][ledger_link.HOSTED_ENV] == "https://hosted.example"
+
+
+def test_a_hive_launch_without_a_hosted_ledger_hands_only_the_swarm_api(monkeypatch):
+    monkeypatch.delenv(ledger_link.HOSTED_ENV, raising=False)
+    world = World(monkeypatch)
+    world.launch(FIRST)
+    [spawned] = world.runtime.requests
+
+    assert ledger_link.HOSTED_ENV not in spawned.task["endpoints"]
