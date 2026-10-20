@@ -82,3 +82,77 @@ def test_cli_is_registered_through_the_standard_delegate():
     from scripts.cli_delegates import delegated_cli
 
     assert delegated_cli(["github-app", "token"]) is github_app_cli.main
+
+
+def test_empty_selected_token_reports_only_the_fixed_refusal(monkeypatch):
+    monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "token")
+    monkeypatch.setenv("GITHUB_TOKEN", "")
+    with pytest.raises(github_app_cli.GitAuthRefused) as refused:
+        github_app_cli.token()
+    assert str(refused.value) == github_app_cli.REFUSED
+
+
+def test_unknown_mode_names_the_two_valid_modes(monkeypatch):
+    monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "other")
+    with pytest.raises(ValueError) as refused:
+        github_app_cli.token()
+    assert str(refused.value) == "GitHub authentication mode must be token or app"
+
+
+def helper_output(monkeypatch, request_text):
+    mint = Mock(return_value="fixture")
+    monkeypatch.setattr(github_app_cli, "token", mint)
+    output = io.StringIO()
+    assert github_app_cli.credential("get", io.StringIO(request_text), output) == 0
+    return output.getvalue(), mint
+
+
+@pytest.mark.parametrize(
+    "request_text",
+    [
+        "protocol=https\nhost=github.com \n\n",
+        "protocol=https\nhost=github.comX\n\n",
+        "protocol=https\nhost=github.com\nhost=github.com=evil\n\n",
+    ],
+)
+def test_credential_helper_matches_exact_host_values_only(monkeypatch, request_text):
+    output, mint = helper_output(monkeypatch, request_text)
+    assert output == ""
+    mint.assert_not_called()
+
+
+def test_credential_helper_accepts_values_that_contain_equals(monkeypatch):
+    plain, _ = helper_output(monkeypatch, "protocol=https\nhost=github.com\n\n")
+    extra, _ = helper_output(monkeypatch, "protocol=https\nhost=github.com\nwwwauth[]=Basic realm=GitHub\n\n")
+    assert plain.startswith("username=x-access-token\n")
+    assert extra == plain
+
+
+@pytest.mark.parametrize("operation", ["store", "erase"])
+def test_cli_helper_accepts_store_and_erase_without_output(monkeypatch, capsys, operation):
+    mint = Mock(return_value="fixture")
+    monkeypatch.setattr(github_app_cli, "token", mint)
+    monkeypatch.setattr(github_app_cli.sys, "stdin", io.StringIO("protocol=https\nhost=github.com\n\n"))
+    assert github_app_cli.main(["credential", operation]) == 0
+    assert capsys.readouterr() == ("", "")
+    mint.assert_not_called()
+
+
+def test_cli_help_describes_each_command(capsys):
+    with pytest.raises(SystemExit) as shown:
+        github_app_cli.main(["--help"])
+    assert shown.value.code == 0
+    out = " ".join(capsys.readouterr().out.split())
+    for text in (
+        "Use GitHub App installation credentials without saving tokens",
+        "Print a current installation token for scripts",
+        "Git HTTPS credential helper",
+        "Refresh GitHub credentials and execute a process",
+    ):
+        assert text in out
+
+
+def test_exec_without_a_command_names_the_missing_command(capsys):
+    with pytest.raises(SystemExit):
+        github_app_cli.main(["exec"])
+    assert capsys.readouterr().err.rstrip().endswith("error: exec requires a command")

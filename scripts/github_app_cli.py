@@ -31,8 +31,7 @@ def credential(operation: str, source: TextIO, output: TextIO) -> int:
         return 0
     fields = dict(line.rstrip("\n").split("=", 1) for line in source if "=" in line)
     if fields.get("protocol") == "https" and fields.get("host") == "github.com":
-        print("username=x-access-token", file=output)
-        print(f"password={token()}\n", file=output)
+        output.write(f"username=x-access-token\npassword={token()}\n\n")
     return 0
 
 

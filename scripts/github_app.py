@@ -24,7 +24,7 @@ class GitHubAppAuth:
 
     def get_token(self) -> str:
         now = int(time.time())
-        if self.cached and now < self.cached[1] - 300:
+        if self.cached is not None and now < self.cached[1] - 300:
             return self.cached[0]
         signed = jwt.encode({"iat": now - 60, "exp": now + 600, "iss": self.app_id}, self.key, algorithm="RS256")
         scope = (

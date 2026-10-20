@@ -110,3 +110,47 @@ def test_exec_refreshes_environment_without_putting_a_token_in_arguments(monkeyp
     assert arguments == ["fixture-command", "argument"]
     assert env["GH_TOKEN"] == env["GITHUB_TOKEN"] == "fixture"
     assert env["AGENTIHOOKS_GITHUB_AUTH_READY"] == "1"
+
+
+def scoped(monkeypatch, permissions, repositories):
+    module, _, _, post = app(monkeypatch)
+    post.return_value.json.return_value = {
+        "token": "scoped",
+        "expires_at": "2030-01-01T01:00:00Z",
+        "permissions": permissions,
+        "repositories": [{"full_name": name} for name in repositories],
+    }
+    return module, post
+
+
+def test_project_tokens_request_and_verify_only_contents_write_on_that_repository(monkeypatch):
+    module, post = scoped(monkeypatch, {"contents": "write", "metadata": "read"}, ["Example/Private"])
+    auth = module.GitHubAppAuth("github.com/Example/Private")
+    assert auth.project == "github.com/example/private"
+    assert auth.get_token() == "scoped"
+    assert post.call_args.kwargs["json"] == {"repositories": ["private"], "permissions": {"contents": "write"}}
+
+
+@pytest.mark.parametrize(
+    "permissions,repositories",
+    [
+        ({"contents": "read"}, ["example/private"]),
+        ({}, ["example/private"]),
+        ({"contents": "write"}, ["example/other"]),
+        ({"contents": "write"}, ["example/private", "example/other"]),
+        ({"contents": "write"}, []),
+    ],
+)
+def test_project_tokens_outside_the_requested_scope_are_refused(monkeypatch, permissions, repositories):
+    module, _ = scoped(monkeypatch, permissions, repositories)
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth("github.com/example/private").get_token()
+    assert str(refused.value) == module.REFUSED
+
+
+def test_rejected_exchange_reports_only_the_fixed_refusal(monkeypatch):
+    module, _, _, post = app(monkeypatch)
+    post.return_value.status_code = 403
+    with pytest.raises(module.GitAuthRefused) as refused:
+        module.GitHubAppAuth().get_token()
+    assert str(refused.value) == module.REFUSED
