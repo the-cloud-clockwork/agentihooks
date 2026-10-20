@@ -1502,6 +1502,7 @@ jobs:
 
       - name: Summarize reused, ran and flaky tests
         if: ${{ !cancelled() && github.event.pull_request.base.ref != 'main' }}
+        shell: bash
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
