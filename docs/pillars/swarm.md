@@ -950,8 +950,9 @@ The first pull request is written once, on the first `review` that sees a
 recorded pull request: the first entry of `split_pulls` when the task is split,
 otherwise its `pr_url`. Later calls read it back under a file lock, so two
 reviews racing on a fresh pull request agree on which one is first. The first
-pull request is the one the first review sees: a pull request recorded with
-`swarm pr` and replaced by another before any review never becomes first.
+pull request is the one the first review sees: when `swarm pr` records one
+pull request and then another before any review, the second one counts as
+`rounds` and the first one gets its own hashed counter.
 
 Rounds spent before a pull request exists therefore never count against the
 first pull request recorded later. A worker who runs three review rounds, then
