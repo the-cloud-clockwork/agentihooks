@@ -4,7 +4,9 @@
 The audit requires the operator to be the only organization member and the
 only collaborator with write or admin access. Agenticore App and the read-only
 TCC Main CI app are the only permitted organization installations.
-Dev and main retain their independent pull request rules without bypass actors.
+Dev and main retain their independent pull request rules. Main has no bypass
+actors; dev lets the admin role and Agenticore App bypass on pull requests
+so they can jump the merge queue, as `../rulesets/README.md` records.
 
 Agents prepare and review the change but cannot apply remote enforcement.
 The master opens an operator pane in the reviewed checkout. The operator uses
