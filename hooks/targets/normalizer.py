@@ -384,14 +384,20 @@ def exec_calls(program: str) -> list[dict[str, Any]]:
     decoder = json.JSONDecoder()
     calls = []
     for start in _EXEC_CALL.finditer(program):
-        fields: dict[str, Any] = {}
-        pos = start.end()
-        while field := _EXEC_FIELD.match(program, pos):
-            pos = field.end()
-            if program.startswith('"', pos):
-                fields[field.group(1)], pos = decoder.raw_decode(program, pos)
-        calls.append(fields)
+        try:
+            calls.append(_exec_fields(program, start.end(), decoder))
+        except ValueError:
+            continue
     return calls
+
+
+def _exec_fields(program: str, pos: int, decoder: json.JSONDecoder) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    while field := _EXEC_FIELD.match(program, pos):
+        pos = field.end()
+        if program.startswith('"', pos):
+            fields[field.group(1)], pos = decoder.raw_decode(program, pos)
+    return fields
 
 
 def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:

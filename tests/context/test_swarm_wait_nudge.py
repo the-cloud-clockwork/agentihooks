@@ -53,6 +53,8 @@ def _declare(redis, slug="rig", name=NAME):
         _bash('text(await tools.exec_command({cmd:"sleep 55"}));'),
         _bash('const r = await tools.exec_command({ cmd: "cd ~/x && sleep 300", workdir: "/w" });'),
         _bash('await tools.exec_command({cmd:"ls"}); await tools.exec_command({cmd:"gh run watch 1"});'),
+        _bash('await tools.exec_command({cmd:"echo \\$HOME"}); sleep 900'),
+        _bash('await tools.exec_command({cmd:"echo \\$HOME"}); await tools.exec_command({cmd:"sleep 900"});'),
     ],
 )
 def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
@@ -82,11 +84,20 @@ def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
         {"tool_name": "sleepy", "tool_input": {}},
         _bash('text(await tools.exec_command({cmd:"ls -la"}));'),
         _bash('await tools.exec_command({workdir:"/w"});'),
+        {"tool_name": "Read", "tool_input": {"command": "sleep 900"}},
+        {"tool_name": "Edit", "tool_input": {"command": "gh run watch 1"}},
         _bash('text("sleep 55"); await tools.exec_command({cmd:"git status"});'),
     ],
 )
 def test_a_call_that_is_not_a_wait_is_not_told(redis, payload):
     assert nudge.nudge(payload, environ=WORKER) == ""
+
+
+@pytest.mark.parametrize(
+    "program", ["await tools.exec_command({cmd:'sleep 900'});", "await tools.exec_command({cmd:`sleep 900`});"]
+)
+def test_only_double_quoted_nested_commands_are_read(redis, program):
+    assert nudge.nudge(_bash(program), environ=WORKER) == ""
 
 
 def test_a_worker_with_a_declared_wait_is_not_told(redis):
