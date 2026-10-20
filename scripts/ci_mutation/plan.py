@@ -88,7 +88,7 @@ def record_failure(error: Exception) -> str:
 
 
 def read_record(repository: str) -> tuple[tuple[dict, dict] | None, str]:
-    before, reason = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"), ""
+    before = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
     for attempt in (1, 2):
         try:
             return find_record(repository, before), ""
