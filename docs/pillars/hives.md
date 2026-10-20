@@ -74,8 +74,8 @@ by Redis with `NOPERM`. So every piece of state a member process writes lives be
 
 A process counts as the member only while it talks Redis as that member: `AGENTIHOOKS_HIVE_ID` is set and the
 Redis URL it resolves is `AGENTIHOOKS_HIVE_REDIS_URL`. `hive join` writes both to `hive.env`; a process resolves the
-hive Redis URL only when `AGENTIHOOKS_DEPLOYMENT` is `compose` or `distributed`. Any other process, the controller included, uses the
-controller keys under the plain root.
+hive Redis URL only when `AGENTIHOOKS_DEPLOYMENT` is `compose` or `distributed`. Any other process, the
+controller included, uses the controller keys under the plain root.
 
 The controller finds an agent's member from the agent's execution record: the hive it was placed on, when that hive
 is in the hive index and holds a member record. An agent on any other host, and every agent in local mode, keeps
