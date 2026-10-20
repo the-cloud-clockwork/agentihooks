@@ -92,6 +92,29 @@ def test_multiple_late_skips_raise_one_finding_for_the_worst_lag(skipped_run):
     assert "stage-budget" in finding.summary
 
 
+@pytest.mark.parametrize("attempt", [None, 2])
+def test_attempt_identity_and_original_historical_visibility(skipped_run, attempt):
+    if attempt is None:
+        del skipped_run["run_attempt"]
+    else:
+        skipped_run["run_attempt"] = attempt
+    skipped_run["jobs"][1].update(started_at="2026-10-19T16:30:14Z", created_at="2026-10-19T16:30:14Z")
+    [finding] = crossings(skipped_run)
+    assert finding.subject == f"39282034448-{attempt or 1}"
+    assert finding.measure == 1271
+    assert finding.evidence == (
+        f"run 39282034448 attempt {attempt or 1}, job stage-budget, started_at 2026-10-19T16:30:14Z, "
+        "skip decision completed_at 2026-10-19T16:09:03Z, lag 1271 seconds",
+    )
+
+
+def test_each_merge_group_run_has_its_own_finding(skipped_run):
+    other = copy.deepcopy(skipped_run)
+    other["id"] = 39282034449
+    found = ci_speed.findings([skipped_run, other], 0, 1792428000000)
+    assert [finding.subject for finding in found] == ["39282034448-1", "39282034449-1"]
+
+
 def test_timer_delivers_one_skipped_record_finding_per_run_to_both_masters(skipped_run, monkeypatch):
     import fakeredis
 
