@@ -361,8 +361,8 @@ credential is installed.
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
-below the request. The pod carries no node selector, affinity or host network: it schedules on any node and reaches a
-hive serve address on the tailnet through the cluster's own routes.
+below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
+network, so it schedules on any node.
 
 ## Related pages
 
