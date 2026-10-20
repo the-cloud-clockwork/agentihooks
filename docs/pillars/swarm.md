@@ -2006,6 +2006,63 @@ agentihooks swarm <id> status --json \
   | jq -r '.agents[] | select(.capabilities.push_inbox | not) | .name'
 ```
 
+### Agents panel cells that overflow
+
+From a page width of 1024 pixels, the Agents panel lays its columns out at fixed
+shares of the table width: agent, lane, profile, overlays, model, transport,
+task, state, then execution and terminal on remote swarms, then age. Every cell
+keeps to one line inside its column. A cell whose text does not fit ends in an
+ellipsis, and hovering it shows the cell's full text after the ledger page's one
+second tooltip delay. The actions cell at the row's end is the one exception: it
+holds buttons, not text, and keeps their own hover text.
+
+- **Ellipsis.** Each cell clips its content and ends in an ellipsis. The
+  transport and promoted state spans run inline, so their labels end in the
+  cell's ellipsis instead of being cut off. A detail line under a label, such as
+  a Remote Control detail or an execution's location, ends in its own ellipsis.
+  An agent name ellipsizes inside a narrowed agent column.
+- **Hover text.** The page builds one hover text per cell from everything the
+  cell shows, its words joined by spaces. The transport and promoted state spans
+  contribute their own summaries instead of their labels: `push · no native
+  terminal`, and `working · promoted`. That text goes on the cell and on every
+  element inside it that carries hover text, so the same full text opens
+  wherever the pointer lands in the cell.
+
+The cells, the text they show and the hover text they carry:
+
+| Column | Cell shows | Hover text |
+|---|---|---|
+| transport | `push` `no native terminal`, each with its dot | `push · no native terminal` |
+| transport, under Remote Control | `remote control live`, its detail line, the transport labels | `remote control live Remote session with complete detail push · no native terminal` |
+| state, promoted | `working` `promoted` | `working · promoted` |
+| execution | the observed state, how long ago it was seen, the location line | the same words on one line, location included |
+| terminal | the terminal state and its detail, `behind heartbeat` when the execution's terminal lags | the same words on one line |
+| any other column | its value | its value |
+
+Columns can be narrowed by dragging a header edge, or by focusing its grip and
+pressing the arrow keys; the ellipsis and hover text follow the new width, and
+Reset layout restores the default shares. Below 1024 pixels the table sizes its
+columns to their content: cells keep their full text on one line, nothing
+clips, and the panel scrolls sideways.
+
+The ledger design record states the rule for every ledger table: a cell that
+does not fit ends in an ellipsis and shows its full text on hover. The design
+system test `test_every_overflowing_agent_cell_ellipsizes_and_exposes_its_full_text`
+fills a remote swarm's agents with long profiles, overlays, a promoted state,
+Remote Control detail, an execution pool and a stale terminal, narrows every
+column at 1920 by 1080, and checks that each text cell clips with an ellipsis,
+that one hover text covers the whole cell and contains every word the cell
+shows, and that the hover tooltip over an execution cell opens with that text.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A cell's text is cut off with no ellipsis | A label inside the cell renders as a block or inline flex box, which clips without an ellipsis | Keep labels inside agent cells inline; a detail line takes the `sw-sub` class, which ellipsizes on its own line |
+| Hovering one part of a cell shows only that part's text | A new cell element sets its own hover text after the row is built | Build the cell inside the agent row renderer, which writes the cell's hover text onto every element in it |
+| A tooltip appears without the one second delay | The element uses a native `title` the browser times itself | Give it hover text through the ledger tooltip module; it moves a `title` to the accessible name on hover |
+| Below 1024 pixels a cell shows its full text and the panel scrolls sideways | The fixed column shares and clipping apply from 1024 pixels | Expected; widen the page to see the fixed layout |
+
 ### Delivered then confirmed
 
 The inbox keeps an item and its history until it is closed. A hook or channel claims a pending item and marks
