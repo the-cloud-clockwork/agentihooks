@@ -317,8 +317,8 @@ def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(set
     herdr = FakeRuntime()
     routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, controller.LOCAL)
-    fenced.spawn(setup.config, "dispatch", "dispatch name", {"id": "d"})
-    assert herdr.spawned == [("dispatch", "dispatch name", "d")]
+    fenced.spawn(setup.config, "doctor", "doctor name", {"id": "d"})
+    assert herdr.spawned == [("doctor", "doctor name", "d")]
 
 
 def host(hive_id: str, ui: str, **fields) -> dict:
