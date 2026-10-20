@@ -23,7 +23,7 @@ def test_a_runner_order_bias_cancels_across_alternating_pairs():
     assert hierarchy_paired.regressions(pairs, 1.3) == []
 
 
-def test_a_doubled_head_cpu_fails_through_the_order_bias():
+def test_a_doubled_head_cpu_fails_while_the_first_run_of_each_pair_costs_twice():
     pairs = [(report(0.08), report(0.08)), (report(0.04), report(0.16))] * 2
     assert hierarchy_paired.regressions(pairs, 1.3) == [
         "head hierarchy CPU geometric mean pair ratio 2.00 exceeds the 1.3x margin"
@@ -57,13 +57,18 @@ def test_the_recorded_same_code_runs_fit_inside_the_margin_the_workflow_states()
     recorded = hierarchy_paired.recorded_runs(ROOT / "tests/ledger_load/hierarchy_same_code.json")
     assert len(recorded) >= 3
     assert hierarchy_paired.same_code_bound(recorded) <= margin < 2
+    for pairs in recorded:
+        assert hierarchy_paired.regressions([(report(base), report(head)) for base, head in pairs], margin) == []
+    halving = [head <= base / 2 for pairs in recorded for base, head in pairs[::2]]
+    assert not all(halving)
 
 
 def test_the_workflow_runs_an_even_number_of_hierarchy_pairs_against_the_merge_base():
     job = workflow()["jobs"]["hierarchy"]
     pairs = job["strategy"]["matrix"]["pair"]
-    assert len(pairs) % 2 == 0
+    assert pairs == [1, 2, 3, 4]
     script = "\n".join(step.get("run", "") for step in job["steps"])
+    assert 'order=(base head)\n[[ "$PAIR" == [13] ]] || order=(head base)' in script
     assert "merge_base_commit" in script
     assert "did not halve" not in script
 
