@@ -735,7 +735,7 @@ class HerdrRuntime:
         )
         front = front_door.holds(config.slug, agent.seat)
         login = master_claude_login.enabled(config.slug, agent.seat, agent.lane, agent.harness)
-        login = login and agent.route_kind == "interactive"
+        login = login and not self._login_spent()
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if agent.route_kind == "interactive"

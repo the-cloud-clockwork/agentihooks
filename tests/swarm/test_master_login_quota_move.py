@@ -76,14 +76,15 @@ def test_a_reserved_login_is_judged_on_its_own_quota(tmp_path, login):
 
 
 @pytest.mark.parametrize(
-    ("kind", "route"), [("subscription", ["--route", "roomy"]), ("interactive", ["--route", master_claude_login.ROUTE])]
+    ("login_week_left", "route"), [(2.0, ["--route", "roomy"]), (50.0, ["--route", master_claude_login.ROUTE])]
 )
-def test_a_master_resumes_on_the_route_it_was_placed_on(tmp_path, login, kind, route):
+def test_a_moved_master_resumes_on_its_account_only_while_the_login_is_spent(tmp_path, login, login_week_left, route):
     from tests.swarm.test_runtime import _resuming
 
     runtime, config, agent, seen = _resuming(tmp_path, "c0ffee")
+    runtime._quota_accounts = _accounts(login_week_left)
     config.slug = "proof"
-    master = replace(agent, lane="master", task="master", seat="", account="roomy", route_kind=kind)
+    master = replace(agent, lane="master", task="master", seat="", account="roomy", route_kind="subscription")
     runtime.resume(config, master, "resume")
     argv = seen["runs"][0]
     assert argv[argv.index("--") + 1 :][:2] == route
