@@ -9,6 +9,7 @@ GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
 COUNTED = {"success", "failure"}
 SHORT_WAIT_MS = 300000
+WALL_MS = 900000
 UNCONFIRMED_WAIT_MS = SHORT_WAIT_MS + 600000
 JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
@@ -88,26 +89,31 @@ def cleared(records: list[dict]) -> list[str]:
     return gone
 
 
-def _wall(run, now_ms):
+def wall_ms(run: dict, now_ms: int) -> int | None:
     event = run["event"]
     jobs = run["jobs"]
     if event not in TIERS or not jobs:
-        return []
+        return None
     if run["status"] == "completed" and run.get("conclusion") not in COUNTED:
-        return []
+        return None
     gates = [job for job in jobs if job["name"] == GATE]
     if event == "pull_request" and not gates and run.get("path") != ".github/workflows/test.yml":
-        return []
+        return None
     completed = [iso_ms(job["completed_at"]) for job in gates if job.get("completed_at")]
     end = max(completed) if completed else now_ms
     if not completed and run["status"] == "completed":
         ends = [iso_ms(job["completed_at"]) for job in jobs if job.get("completed_at")]
         if not ends:
-            return []
+            return None
         end = max(ends)
-    elapsed = end - min(iso_ms(job["created_at"]) for job in jobs)
-    if elapsed <= 900000:
+    return end - min(iso_ms(job["created_at"]) for job in jobs)
+
+
+def _wall(run, now_ms):
+    elapsed = wall_ms(run, now_ms)
+    if elapsed is None or elapsed <= WALL_MS:
         return []
+    event = run["event"]
     seconds = elapsed // 1000
     return [
         Finding(

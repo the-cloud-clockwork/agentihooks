@@ -153,3 +153,9 @@ def read(
             "api_calls": api.calls,
             "discovered_runs": len(discovered),
         }
+
+
+def attempt(identity: int, number: int, *, run: Callable = subprocess.run, budget: tuple[int, int] = (20, 60)) -> dict:
+    api = _Api(run, *budget)
+    root = f"repos/{REPO}/actions/runs/{identity}/attempts/{number}"
+    return {**api.get(root), "jobs": api.pages(f"{root}/jobs", "jobs", 0)}

@@ -1,6 +1,7 @@
 import json
 import subprocess
 import time
+import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -122,6 +123,86 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
     assert notice in capsys.readouterr().out.splitlines()
     if tests:
         assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/core.py": tests}
+
+
+@pytest.mark.parametrize(
+    "failures, error",
+    [
+        (1, subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")),
+        (2, subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")),
+        (2, subprocess.TimeoutExpired(["gh"], 60)),
+        (2, zipfile.BadZipFile("File is not a zip file")),
+        (2, json.JSONDecodeError("Expecting value", "", 0)),
+        (2, KeyError("There is no item named 'manifest.json' in the archive")),
+    ],
+)
+def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path, monkeypatch, capsys, failures, error):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests/nested").mkdir(parents=True)
+    (tmp_path / "scripts/core.py").write_text("def judge(value):\n    return value + 1\n")
+    (tmp_path / "tests/test_helper.py").write_text("import json\n")
+    (tmp_path / "tests/test_core.py").write_text("from scripts.core import judge\n")
+    (tmp_path / "tests/nested/test_deep.py").write_text("import os\n")
+    (tmp_path / "tests/helpers.py").write_text("import os\n")
+    (tmp_path / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["scripts/"]\n')
+    manifest = {
+        "units": ["scripts/core.py::judge"],
+        "tests": {"tests/test_helper.py::test_judge": {"units": [0]}},
+    }
+    calls, pauses = [], []
+
+    def record(repository, before):
+        calls.append((repository, before))
+        if len(calls) <= failures:
+            raise error
+        return {"id": 7}, manifest
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GITHUB_OUTPUT", str(tmp_path / "output"))
+    monkeypatch.setattr("sys.argv", ["plan", "--repository", "owner/repo"])
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    monkeypatch.setattr(plan, "own_bases", lambda *args: ["base"])
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: {"scripts/core.py": {2}})
+    monkeypatch.setattr(plan, "find_record", record)
+    monkeypatch.setattr(plan.time, "sleep", pauses.append)
+    assert plan.main() == 0
+    assert [repository for repository, _ in calls] == ["owner/repo", "owner/repo"]
+    assert calls[0][1] == calls[1][1]
+    assert pauses == [plan.RECORD_RETRY_SECONDS]
+    selected = json.loads((tmp_path / ".mutation-selection.json").read_text())["scripts/core.py"]
+    out = capsys.readouterr().out
+    reason = plan.record_failure(error)
+    assert f"Reading the recorded dev coverage failed on attempt 1: {reason}" in out
+    if failures == 1:
+        assert selected == ["tests/test_core.py", "tests/test_helper.py"]
+        assert "Recorded coverage from dev run 7 adds the tests that executed a changed function." in out
+        assert "selection fallback" not in out
+    else:
+        assert selected == ["tests/nested/test_deep.py", "tests/test_core.py", "tests/test_helper.py"]
+        assert f"Reading the recorded dev coverage failed on attempt 2: {reason}" in out
+        assert (
+            "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
+            f" test module is selected for each changed file: {reason}"
+        ) in out.splitlines()
+
+
+def test_record_failure_names_the_gh_error_text():
+    error = subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: Server Error (HTTP 502)\n")
+    assert plan.record_failure(error) == "CalledProcessError: gh: Server Error (HTTP 502)"
+    assert plan.record_failure(zipfile.BadZipFile("File is not a zip file")) == "BadZipFile: File is not a zip file"
+    assert plan.record_failure(KeyError("manifest.json")) == "KeyError: 'manifest.json'"
+    garbled = subprocess.CalledProcessError(1, ["gh"], stderr=b"gh: bad \xff byte\n")
+    assert plan.record_failure(garbled) == "CalledProcessError: gh: bad � byte"
+
+
+def test_every_test_selection_passes_the_planner_contracts_on_this_tree():
+    root = Path(__file__).resolve().parent.parent
+    everything = plan.every_test(root)
+    assert set(everything) >= {
+        path for source in ("scripts/ci_mutation/plan.py",) for path in plan.select_tests(root, Path(source))
+    }
+    assert all(Path(path).name.startswith("test_") for path in everything)
+    plan.validate_tests(root, everything)
 
 
 def test_refine_grades_the_planned_selection_without_selecting_again(tmp_path, monkeypatch):

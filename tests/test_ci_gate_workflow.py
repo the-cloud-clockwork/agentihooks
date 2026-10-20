@@ -105,6 +105,7 @@ def test_required_gate_runs_after_parallel_unit_and_lint():
             "worker-image",
             "shard-check",
             "brain-smoke",
+            "writer-lock",
             "wiring",
             "size",
             "dependency-audit",
@@ -858,7 +859,7 @@ def test_mutation_runs_in_tests_beside_unit_and_lint():
     assert workflow["jobs"]["mutation-plan"].get("needs", []) in ([], ["admission"])
     assert job["if"] in (
         "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
-        "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+        "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
     )
     dispatch = workflow[True]["workflow_dispatch"]["inputs"]["base"]
     assert dispatch["required"] is True
