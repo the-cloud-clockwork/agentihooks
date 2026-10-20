@@ -7,6 +7,7 @@ export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
 mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT"
 git config --global credential.https://github.com.helper \
   '!f() { test "$1" = get || return 0; printf "username=x-access-token\npassword=%s\n" "${GITHUB_PERSONAL_ACCESS_TOKEN:?}"; }; f'
+[[ -z "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]] || export GH_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN"
 python3 - <<'PY'
 import json, os, re, subprocess
 from pathlib import Path

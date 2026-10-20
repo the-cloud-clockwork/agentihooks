@@ -37,6 +37,8 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
         'if [[ "$*" == "deps ensure" ]]; then [[ "$REFUSE" != deps ]] || exit 4; fi\n'
+        'if [[ "$*" == "hive run" && "${GH_TOKEN:-}" == "$GITHUB_PERSONAL_ACCESS_TOKEN" ]]; then\n'
+        '  touch "$AGENTIHOOKS_HOME/gh-token-matches"\nfi\n'
     )
     cli.chmod(0o755)
     home = tmp_path / "state"
@@ -218,6 +220,8 @@ def test_github_token_reaches_git_by_reference_and_is_never_written(tmp_path):
     assert result.returncode == 0, result.stderr
     config = (tmp_path / "home/.gitconfig").read_text()
     assert "GITHUB_PERSONAL_ACCESS_TOKEN" in config
+    assert (home / "gh-token-matches").exists()
+    assert "GH_TOKEN" not in (home / "hive-container.env").read_text()
     written = [path for root in (tmp_path / "home", home, repo.parent) for path in root.rglob("*") if path.is_file()]
     assert not [path for path in written if TOKEN.encode() in path.read_bytes()]
     assert TOKEN not in result.stdout + result.stderr

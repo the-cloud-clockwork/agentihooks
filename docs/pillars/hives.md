@@ -697,7 +697,7 @@ tick. On a machine in any other mode the setting changes nothing.
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:
 
 1. Points git at `GITHUB_PERSONAL_ACCESS_TOKEN` for github.com through a credential helper that reads the variable
-   when git asks, so the token is never written or printed.
+   when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
 3. Installs a mounted credential as `hive.env`, or joins with a mounted one time code.
