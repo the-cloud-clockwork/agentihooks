@@ -28,7 +28,7 @@ def test_download_checks_coverage_before_replacing_complete_durations(tmp_path, 
     monkeypatch.setenv("PYTEST_DISABLE_PLUGIN_AUTOLOAD", "1")
     dev_durations.main(["3.12", str(restored)])
     if missing == 10:
-        assert json.loads((tmp_path / ".test_durations").read_text()) == candidate
+        assert json.loads((tmp_path / ".test_durations").read_text()) == complete
     else:
         assert (tmp_path / ".test_durations").read_text() == committed
         assert "11 of 100 tests have no stored duration" in capsys.readouterr().out
