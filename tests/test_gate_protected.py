@@ -765,6 +765,17 @@ def test_a_head_adding_the_reviewed_summary_is_green(form, summary):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, summary=summary, inline_mutation=True)
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
 @pytest.mark.parametrize("change", ["extra", "before", "reordered", "altered", "partial"])
 def test_a_head_changing_the_summary_steps_is_red(change):
     from scripts import ci_reuse

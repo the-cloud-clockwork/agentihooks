@@ -981,6 +981,47 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
     assert result.returncode != 0, result.stdout + result.stderr
 
 
+def _mutation_gate(event, inline, stats="success", mutation="skipped"):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar")}
+    needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
+    needs["mutation-plan"] = {"result": "success"}
+    needs["mutation-stats"] = {"result": stats}
+    needs["mutation"] = {"result": mutation}
+    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, inline_mutation=True)
+    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT=event, REUSED="false")
+    env["INLINE"] = inline or ""
+    return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch"])
+@pytest.mark.parametrize(
+    ("inline", "stats", "mutation", "passes"),
+    [
+        ("true", "success", "skipped", True),
+        ("false", "success", "success", True),
+        ("false", "success", "skipped", False),
+        (None, "success", "skipped", False),
+        ("true", "failure", "skipped", False),
+        ("true", "skipped", "skipped", False),
+    ],
+)
+def test_the_inline_mutation_form_skips_the_shard_job_only_for_an_inline_plan(event, inline, stats, mutation, passes):
+    result = _mutation_gate(event, inline, stats, mutation)
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
+
+
+def test_the_inline_mutation_form_reads_the_plan_output_and_leaves_other_forms_unchanged():
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.gate_steps(queue_tier=True, consolidated=True, inline_mutation=True)
+    assert step["env"]["INLINE"] == "${{ needs.mutation-plan.outputs.inline }}"
+    [plain] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    assert "INLINE" not in plain["env"]
+    assert "$inline" not in plain["run"]
+
+
 def test_the_watcher_loss_rule_is_written_once_for_the_watcher_job():
     from scripts import ci_queue_fail_fast, ci_reuse
 
