@@ -174,10 +174,12 @@ def hive_controller(setup):
 
 
 @pytest.mark.parametrize("seat", ["master", "master-2", "master-3"])
-def test_every_master_seat_is_placed_by_the_ui_host_rule(setup, seat):
+def test_every_master_seat_is_placed_by_the_ui_host_rule(setup, monkeypatch, seat):
+    from scripts.swarm import controller
     from scripts.swarm.profile_choice import ProfileDecision
     from scripts.swarm_v2.masters import MasterSeats
 
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
     two_hosts(setup)
     setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
