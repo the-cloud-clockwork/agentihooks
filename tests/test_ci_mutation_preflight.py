@@ -168,7 +168,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
-    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
     from scripts.ci_mutation import plan as planner
     from tests.test_ci_mutation_plan import _project
 
@@ -268,7 +268,7 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     measured = steps[names.index("Refine mutation shards from measured statistics")]
     assert measured["if"] == single
     assert measured["id"] == "refine"
-    assert measured["env"] == {"BASES": "${{ needs.plan.outputs.bases }}"}
+    assert measured["env"] == {"BASES": "${{ needs.plan.outputs.bases }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
     assert measured["run"] == refine_steps[refine_names.index(measured["name"])]["run"]
     upload = steps[names.index("Upload the measured mutation plan")]
     assert upload["if"] == single

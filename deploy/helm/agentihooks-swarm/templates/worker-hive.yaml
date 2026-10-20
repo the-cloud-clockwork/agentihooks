@@ -14,6 +14,9 @@
 {{- if lt (int $workers.maxAgents) 1 }}
 {{- fail "workers.maxAgents must be positive" }}
 {{- end }}
+{{- if and $workers.ssh.enabled (not $credential.name) }}
+{{- fail "workers.ssh needs credentialSecret: the hive sshd keys ride in the member credential Secret" }}
+{{- end }}
 {{- $perAgent := $workers.memoryPerAgentMi }}
 {{- if or (lt (int $perAgent.request) 1) (lt (int $perAgent.limit) (int $perAgent.request)) }}
 {{- fail "workers.memoryPerAgentMi needs a positive request and a limit no lower than it" }}
@@ -82,6 +85,21 @@ spec:
             - name: SSL_CERT_FILE
               value: /run/hive-ca/ca.pem
             {{- end }}
+            - name: HIVE_PROFILE
+              value: {{ $workers.profile | quote }}
+            {{- if $workers.ssh.enabled }}
+            - name: HIVE_SSH_AUTHORIZED_KEYS_FILE
+              value: /run/hive-join/ssh/authorized_keys
+            - name: HIVE_SSH_HOST_KEY_FILE
+              value: /run/hive-join/ssh/host_key
+            - name: HIVE_SSH_PORT
+              value: {{ $workers.ssh.port | quote }}
+            {{- end }}
+          {{- if $workers.ssh.enabled }}
+          ports:
+            - name: ssh
+              containerPort: {{ $workers.ssh.port }}
+          {{- end }}
           {{- with $workers.envFromSecrets }}
           envFrom:
             {{- range . }}
@@ -112,6 +130,12 @@ spec:
             items:
               - key: {{ required "worker join Secret key is required" $secret.key }}
                 path: {{ $path }}
+              {{- if $workers.ssh.enabled }}
+              - key: authorized_keys
+                path: ssh/authorized_keys
+              - key: host_key
+                path: ssh/host_key
+              {{- end }}
         - name: home
           {{- if $code.name }}
           persistentVolumeClaim:

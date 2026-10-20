@@ -173,8 +173,27 @@ def test_lint_grades_dashboard_columns_with_the_antoncore_dev_checker():
     assert check is not None
     assert steps.index(token) < steps.index(checkout) < steps.index(check)
     assert '--agentihooks "$GITHUB_WORKSPACE"' in check["run"]
-    assert "orjson==" in check["run"]
     assert "No module named" in check["run"]
+
+
+def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_lint_steps():
+    steps = _workflow()["jobs"]["lint"]["steps"]
+    names = [step.get("name") for step in steps]
+    prepare = steps[names.index("Prepare the dashboard query checker in the background")]
+    check = steps[names.index("Run every Swarm Ledger dashboard query against this head's metrics tables")]
+    assert names.index(prepare["name"]) < min(names.index(name) for name in LINT_SETUP)
+    assert prepare["env"]["CLICKHOUSE"] == check["env"]["CLICKHOUSE"]
+    assert "orjson==" in prepare["run"]
+    assert "-m pip install" not in check["run"]
+    assert "docker run" not in check["run"]
+    for status in ("columns-venv.status", "clickhouse.status"):
+        assert f'echo $? > "$RUNNER_TEMP/{status}"' in prepare["run"]
+        assert f'-s "$RUNNER_TEMP/{status}"' in check["run"]
+        assert f'[[ "$(cat "$RUNNER_TEMP/{status}" 2>/dev/null)" == 0 ]] || {{' in check["run"]
+    assert check["run"].splitlines()[1].startswith('trap \'docker rm -f "$CLICKHOUSE"')
+    background = [line for line in prepare["run"].splitlines() if line.rstrip().endswith("&")]
+    assert len(background) == 2
+    assert all("2>&1 < /dev/null &" in line for line in background)
 
 
 def test_post_shard_graders_do_not_wait_on_each_other_and_the_gate_needs_each():

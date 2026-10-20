@@ -38,8 +38,6 @@ _DEFAULT_BRANCH_SIGNALS = [
     "branch it",
     "feature branch",
 ]
-PANE_SIGNALS = ["open pane", "open a pane", "open the pane"]
-_PANE_SIGNAL = re.compile("|".join(rf"\b{re.escape(phrase)}\b" for phrase in PANE_SIGNALS))
 _DEFAULT_PR_SIGNALS = [
     "open a pr",
     "open the pr",
@@ -226,14 +224,6 @@ def contains_branch_signal(text: str) -> bool:
 
 def contains_pr_signal(text: str) -> bool:
     return _signal_match(text, get_pr_signals())
-
-
-def contains_pane_signal(text: str) -> bool:
-    low = text.lower()
-    return any(
-        not any(low[: match.start()].strip().endswith(neg.strip()) for neg in _NEGATION_PREFIXES)
-        for match in _PANE_SIGNAL.finditer(low)
-    )
 
 
 # Claude Code injects hook stdout and additionalContext into the model's

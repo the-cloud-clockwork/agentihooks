@@ -50,6 +50,17 @@ WATCHER_LOSS = (
     ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
 )
 
+INLINE_REQUIRED = (
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)',
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats"]'
+    ' + (if $inline == "true" then [] else ["mutation"] end) else [] end)',
+)
+INLINE_SKIP = (
+    '.value.result == "skipped" and $mutation == "false")',
+    '.value.result == "skipped" and $mutation == "false")'
+    ' or (.key == "mutation" and .value.result == "skipped" and $inline == "true")',
+)
+
 
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
@@ -126,6 +137,21 @@ def gate_steps(
             "run": run,
         }
     ] + (summary_steps() if summary else [])
+
+
+def inline_mutation(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = (
+        aggregation["run"]
+        .replace('--arg mutation "$MUTATION"', '--arg mutation "$MUTATION" --arg inline "${INLINE:-}"')
+        .replace(*INLINE_REQUIRED)
+        .replace(*INLINE_SKIP)
+    )
+    env = {
+        **aggregation["env"],
+        "INLINE": "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}",
+    }
+    return [{**aggregation, "env": env, "run": run}, *rest]
 
 
 def summary_steps() -> list[dict]:

@@ -10,7 +10,7 @@ from mutmut.utils.format_utils import get_mutant_name
 
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import function_name
-from scripts.ci_mutation.plan import MUTANT_SECONDS, WORKERS, shard_count
+from scripts.ci_mutation.plan import MUTANT_SECONDS, shard_count, shard_workers
 from scripts.ci_mutation.scope import discover_changes, select_tests
 from scripts.ci_mutation.selection import selected_mutant_names
 from scripts.ci_mutation.stats import SharedStats, load_parts, stats_key
@@ -112,7 +112,7 @@ def plan_shards(costs: dict[str, float], target: float = 240, limit: int = 10, s
         "units": "worker seconds",
         "estimated_worker_seconds": seconds,
         "shard_worker_seconds": loads,
-        "workers": WORKERS,
+        "workers": shard_workers(),
         "splits": {function: splits[function] for function in sorted({function_name(name) for name in units})},
     }
 
