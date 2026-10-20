@@ -137,18 +137,6 @@ Claude process must remain running and have network access. According to the
   trust before launch; an untrusted noninteractive launch cannot answer the
   native trust prompt.
 
-Outside the explicitly enabled private login route, a Claude master tries its
-valid interactive login first. If that is unavailable, it falls back to normal
-subscription token placement and configured API capacity under the
-[live share rules](load-balancing.md#live-share-weight). With the default API
-weight of zero, the order is interactive login, token pool, then API overflow;
-a nonzero weight can select API capacity earlier. If no permitted account has
-room, launch fails. A fallback master may use the headroom reserved against
-workers, but cannot bypass a spent or otherwise ineligible account. Its desired
-interactive route is retained: the next handoff or recycle checks login again
-and returns to it when available, rather than changing credentials in the
-running process.
-
 Inspect `agentihooks swarm <id> status` and the ledger master card for the
 recorded launch decision:
 
@@ -163,6 +151,67 @@ recorded launch decision:
 
 Codex masters have no Claude Remote Control decision. These findings report
 lost access; they do not stop the master or change its authentication.
+
+#### Auth fallback and move back
+
+This behavior covers one host: the login probe, the placement and the recorded
+route all belong to the machine running the swarm tick. It applies outside the
+explicitly enabled private login route.
+
+| Master | Tries the login first | Records the desired interactive route |
+|---|---|---|
+| Front door Claude master (seat `master@<id>`, or no seat) with no ordered route | Yes | Yes |
+| Pool Claude master (`master-2@<id>` and later) with no ordered route | Yes | No |
+| Any master whose task orders a route (`route_kind`) | No: the ordered route is used | No |
+| Codex master, or the successor of a Codex master | No | No |
+
+A master with no harness set takes the login on Claude. A master whose
+predecessor ran on Codex stays on Codex, unless its profile is Claude only.
+
+A login is valid when `claude auth status --text` exits zero and prints
+`Login method: Claude account`. The probe runs without the routed credentials:
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL`, every `AH_CC_TOKEN_<slug>` and every `CLAUDE_CODE_USE_*`
+variable are removed. It runs when the route is chosen at every master spawn,
+including a handoff, a quota handoff and a recycle. A failed, timed out or
+expired check at that point sends the master to fallback placement. A master
+routed to the login is checked once more just before launch; a failure there
+refuses that launch as unavailable, and the
+[master outage](#master-outage-and-promotion) rules bring a master back.
+
+On fallback the master is placed with normal subscription token placement and
+configured API capacity under the
+[live share rules](load-balancing.md#live-share-weight). With the default API
+weight of zero, the order is interactive login, token pool, then API overflow;
+a nonzero weight can select API capacity earlier. The master may use room
+[reserved from workers](load-balancing.md#master-accounts-and-reserved-headroom),
+even when the declared master account is the only account with room. It cannot
+bypass a spent or otherwise ineligible account; if no permitted account has
+room, launch fails.
+
+A quota handoff whose successor finds a valid login skips the quota transfer to
+another token account and launches on the login. Without a valid login, the
+quota handoff moves to another account as for any agent.
+
+The desired route is stored per agent in the swarm's `desired-routes` record,
+outside the agent projection, and in the execution record. A resumed master
+keeps it, each new placement sets it again and dropping the agent removes it.
+The running master never changes credentials: the next handoff or recycle
+checks the login again and returns to it when it is valid, with no operator
+action. That successor launch clears `master-fallback-auth/<seat>`.
+
+Restore phone access after a fallback, in a shell with none of the routed
+credential variables above set:
+
+```bash
+claude auth status --text                 # must print: Login method: Claude account
+claude auth login                         # renew the native login if it is expired
+agentihooks swarm <id> status             # master-fallback-auth/<seat> stays until the next master launch
+```
+
+With `AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true`, renew the private login with
+`agentihooks claude login --master` instead; see
+[Master claude ai login](../reference/account-login.md#master-claude-ai-login).
 
 ### Master outage and promotion
 
