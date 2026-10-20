@@ -77,6 +77,13 @@ def main(chart: str) -> list[str]:
     planted["spec"].pop("strategy", None)
     if not problems(planted, HOST["workers"]):
         found.append("the check passed a hive with no Recreate rollout")
+    both = {"workers": {"homeVolume": {"hostPath": HOST["workers"]["homeVolume"]["hostPath"]}}}
+    try:
+        render(chart, yaml.safe_dump(both))
+        found.append("the chart rendered a home volume with both an emptyDir and a hostPath")
+    except subprocess.CalledProcessError as refused:
+        if "exactly one volume source" not in refused.stderr:
+            found.append(f"the chart refused two home sources with {refused.stderr.strip()!r}")
     return found
 
 

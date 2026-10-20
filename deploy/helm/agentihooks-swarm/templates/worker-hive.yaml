@@ -24,6 +24,9 @@
 {{- if or (hasKey ($workers.resources.requests | default dict) "memory") (hasKey ($workers.resources.limits | default dict) "memory") }}
 {{- fail "set worker hive memory with workers.memoryPerAgentMi, not workers.resources" }}
 {{- end }}
+{{- if ne (len $workers.homeVolume) 1 }}
+{{- fail "workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim" }}
+{{- end }}
 {{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
 apiVersion: apps/v1
 kind: Deployment
@@ -151,7 +154,7 @@ spec:
                 path: ssh/host_key
               {{- end }}
         - name: home
-          {{- toYaml (required "workers.homeVolume needs a volume source" $workers.homeVolume) | nindent 10 }}
+          {{- toYaml $workers.homeVolume | nindent 10 }}
         - name: tmp
           emptyDir: {}
         {{- if $workers.caSecret.name }}
