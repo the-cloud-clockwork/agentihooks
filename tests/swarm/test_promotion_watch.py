@@ -1099,3 +1099,20 @@ def test_an_unreadable_unit_log_leaves_the_run_unhandled(store):
     assert refresh(store, ledger, run) == []
     assert ledger.added == []
     assert not store.redis.get(promotion_watch.key(SLUG, "seen"))
+
+
+def test_different_tests_together_explain_all_missing_sonar_shards(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(
+        900, [("3.12", 1), ("3.12", 2)], messages=["Missing coverage for shard 1", "Missing coverage for shard 2"]
+    )
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            test = "first" if "/jobs/1/" in argv[2] else "second"
+            return subprocess.CompletedProcess(argv, 0, f"FAILED tests/test_api.py::test_{test} - AssertionError", "")
+        return recorded(argv, **kwargs)
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 2
+    assert all("sonar" in fields["description"] for _, fields, _ in ledger.added)

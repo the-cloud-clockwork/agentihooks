@@ -175,25 +175,16 @@ def test_causes(
             remaining.append((job, why))
         for test in sorted(tests):
             groups.setdefault(test, []).append(job)
+    jobs = [job for jobs in groups.values() for job in jobs]
+    consequences = [(job, why) for job, why in remaining if coverage_consequence(job, why, named, jobs)]
     grouped = []
     for test, jobs in groups.items():
-        consequences = []
-        for job, why in remaining:
-            if coverage_consequence(job, why, named, jobs):
-                consequences.append((job, why))
         identity = f"unit test {test}"
         detail = f"{identity}: failed in {', '.join(jobs)}"
         if consequences:
             detail += "; consequences: " + "; ".join(why for _, why in consequences)
         grouped.append((identity, detail))
-    return [
-        *grouped,
-        *[
-            (job, why)
-            for job, why in remaining
-            if not any(coverage_consequence(job, why, named, jobs) for jobs in groups.values())
-        ],
-    ]
+    return [*grouped, *[cause for cause in remaining if cause not in consequences]]
 
 
 def coverage_consequence(job: str, why: str, named: dict[str, dict], jobs: list[str]) -> bool:
