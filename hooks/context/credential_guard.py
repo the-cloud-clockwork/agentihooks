@@ -76,7 +76,7 @@ def sensitive_kind(token):
         return KIND_CREDENTIAL
     if base == "credentials" and ".aws" in token:
         return KIND_CREDENTIAL
-    if base == "environ" and token.startswith("/proc/"):
+    if base == "environ" and PROC_DIR.match("/" + token.lstrip("/")):
         return KIND_ENVIRONMENT
     return None
 
@@ -102,7 +102,7 @@ SECRETISH_NAME = re.compile(
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
-PROC_PATH = re.compile(r"/proc/\S+")
+PROC_FILE = re.compile(r"/proc/[^/\s]+/\S+")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
 # --- bash lexing --------------------------------------------------------------
@@ -468,14 +468,21 @@ def env_dump_verdict(command):
     )
 
 
-def proc_environ_verdict(command):
+def proc_environ_verdict(command, cwd=""):
     flat = QUOTING.sub("", command)
-    if not PROC_DIR.search(flat):
+    in_proc = bool(PROC_DIR.match(cwd))
+    if not (in_proc or PROC_DIR.search(flat)):
         return None
-    globs = [path.rsplit("/", 1)[-1] for path in PROC_PATH.findall(flat)]
-    if BARE_ENVIRON.search(flat) or any(fnmatch.fnmatchcase("environ", g) for g in globs):
+    leaves = [path.rsplit("/", 1)[-1] for path in PROC_FILE.findall(flat)]
+    if in_proc:
+        leaves += flat.split()
+    if BARE_ENVIRON.search(flat) or any(leaf_names_environ(leaf) for leaf in leaves):
         return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
     return None
+
+
+def leaf_names_environ(leaf):
+    return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
 
 
 def echo_secret_verdict(command):
@@ -829,10 +836,10 @@ def decide_bash(tool_input, ctx=None):
     command = tool_input.get("command") or ""
     if not command:
         return ALLOW
-    reason = proc_environ_verdict(command)
+    ctx = ctx or Context()
+    reason = proc_environ_verdict(command, ctx.cwd)
     if reason:
         return Verdict(block=reason)
-    ctx = ctx or Context()
     command, heredocs = mask_heredocs(command)
     parts = split_outside_quotes(SEGMENT_DELIM, command)
     changed = False

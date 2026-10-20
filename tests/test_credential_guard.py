@@ -530,6 +530,10 @@ PROC_ENVIRON_READS = [
     "cat /proc/1/env\\iron",
     "f=environ; cat /proc/1/$f",
     "cat /proc/1/*",
+    "cat /proc/1/env[i]ron",
+    "a=envi; b=ron; cat /proc/1/$a$b",
+    "cat /proc/1/$(printf envi)ron",
+    "cat /proc/1/`printf envi`ron",
 ]
 
 PROC_ALLOWED = [
@@ -538,6 +542,7 @@ PROC_ALLOWED = [
     'test -n "${REDIS_URL:-}" && echo set || echo unset',
     "ls /proc/1/status",
     "cat /proc/*/st*",
+    "test -d /proc/$pid && echo alive",
 ]
 
 
@@ -554,8 +559,19 @@ class TestProcEnvironReads:
     def test_neighbouring_commands_still_pass(self, command):
         assert decide(_bash(command)) is None
 
-    def test_read_tool_on_proc_environ_is_refused(self):
-        verdict = decide({"tool_name": "Read", "tool_input": {"file_path": "/proc/1/environ"}})
+    @pytest.mark.parametrize("command", ["cat environ", "cat envi*", "cat $f", "cat *"])
+    def test_read_from_a_proc_working_directory_is_refused(self, command):
+        verdict = decide(_bash(command, cwd="/proc/1"))
+        assert verdict is not None
+        assert ENV_NAMES_SAFE in verdict
+
+    def test_a_proc_working_directory_still_allows_other_files(self):
+        assert decide(_bash("cat status", cwd="/proc/1")) is None
+        assert decide(_bash("cat environ", cwd="/srv/procfiles")) is None
+
+    @pytest.mark.parametrize("path", ["/proc/1/environ", "//proc/1/environ"])
+    def test_read_tool_on_proc_environ_is_refused(self, path):
+        verdict = decide({"tool_name": "Read", "tool_input": {"file_path": path}})
         assert verdict is not None
         assert ENV_NAMES_SAFE in verdict
 
