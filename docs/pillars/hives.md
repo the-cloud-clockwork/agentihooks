@@ -308,6 +308,81 @@ Placement runs at every master launch, so the successor after the next handoff g
 is live then. `agentihooks swarm <id> master move --to HIVE` forces that move without waiting: the master hands
 off and its successor starts on the named hive.
 
+## Prompt and workspace transport
+
+A hive launch runs the agent on another machine, which has no copy of the ledger and no task work folder. The
+controller therefore builds everything the agent reads at start and sends it in the launch payload; the hive sends
+the agent's work folder lines back every heartbeat.
+
+### What the launch payload carries
+
+When placement picks a hive, the controller writes the payload to
+`<root>:swarm:<slug>:launch-prompt:<execution id>` (`<root>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`, default
+`agentihooks`). The key expires with the 300 second launch slot reservation. Next to the task fields and the
+profile decision it holds:
+
+| Field | Content |
+|---|---|
+| `hive_opening` | The full opening prompt, built on the controller where the ledger is, for the Claude harness. |
+| `hive_opening_digest` | The sha256 hex digest of `hive_opening`. |
+| `hive_seeds` | The task's work folder files: `steering.md` whole, and the last 65,536 characters of `progress.md` and `proof.md`. Empty when the task has no work folder. |
+
+The opening names the work folder as `~/.agentihooks/swarm/<slug>/tasks/<task id>`, so the same text is correct
+below whichever home the hive runs the agent in.
+
+### What the hive does with it
+
+An order the hive picks up after its 300 seconds is acknowledged as failed with the reason `expired` before the
+payload is read. Otherwise the hive checks the payload and acknowledges the order as failed with the reason `prompt`
+when:
+
+- the payload key is missing;
+- the payload is not JSON, or its task id differs from the order's;
+- `hive_opening` is missing or not text, or `hive_opening_digest` does not match it.
+
+The controller ends the execution, drops the launch order and reports the spawn refused with
+`hive launch failed: <reason>`.
+
+A payload that passes is written below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
+
+- `steering.md` is replaced with the controller's copy on every launch.
+- `progress.md` and `proof.md` are written only when the hive does not hold them yet. On a relaunch of the same task
+  on the same hive, its own lines stay and the controller's copy is not merged in.
+
+The agent then starts with `hive_opening` exactly as carried. The hive does not rebuild the prompt from the task.
+
+### Work folder lines on the ledger page
+
+On every fifteen second heartbeat, each hive writes the work folder lines of the executions it hosts to
+`<root>:hive:<hive id>:workspaces`, expiring after 45 seconds. Each entry holds `latest_progress` and
+`latest_proof`: the last three non-blank lines of `progress.md` and `proof.md`, read from the last 4,096 bytes of
+each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution,
+the live one or else the one started last, is a worker on that hive. Masters are left out.
+
+When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
+or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
+the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+
+### Resume and recovery prompts
+
+The restore prompt after a reboot and the resume prompt after an outage tell the agent to re-read its task folder.
+For an agent on a remote hive both prompts name `~/.agentihooks/swarm/<slug>/tasks/<task id>`, the folder below the
+hive's home, instead of the controller's absolute path.
+
+### Upgrading
+
+A hive refuses a launch payload without `hive_opening` and its digest, so an older controller cannot launch on a
+newer hive. Deploy the controller first, then the hives.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport and sends no opening and digest. | Upgrade the controller, then the hive. |
+| Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
+| A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
+| A relaunched agent on the same hive does not see proof lines written on another machine | `progress.md` and `proof.md` already on a hive are kept, never merged. | Copy the missing lines into the hive's work folder, or append them from the agent. |
+
 ## Failover timing
 
 | Clock | Value | Effect |
@@ -423,6 +498,16 @@ Fencing stops a superseded agent or controller from acting after its replacement
   `agentihooks swarm <id> controller release`.
 - **Ledger source.** Moving a workstation ledger into the hosted service with `--freeze` fences the source: its
   SQLite database refuses writes with "ledger moved to hosted service" and media writes answer 409.
+
+## Hive placement for one swarm on a local machine
+
+A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
+makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
+with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
+stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes roles=master,eng,ci,plan,dispatch
+max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
+tick. On a machine in any other mode the setting changes nothing.
 
 ## Worker hives in Kubernetes
 

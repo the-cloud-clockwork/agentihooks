@@ -80,6 +80,7 @@ class SwarmConfig:
     ledger_staged_at: int = 0
     swap_full_share: float = DEFAULT_SWAP_FULL_SHARE
     swap_floor_mb: int = DEFAULT_SWAP_FLOOR_MB
+    hive_placement: bool = False
 
 
 def scaling_refusal(config):
@@ -220,6 +221,7 @@ class RedisStore:
             int(raw.get("ledger_staged_at") or 0),
             float(raw.get("swap_full_share") or DEFAULT_SWAP_FULL_SHARE),
             int(raw.get("swap_floor_mb") or DEFAULT_SWAP_FLOOR_MB),
+            raw.get("hive_placement") == "True",
         )
 
     def update(self, slug, **changes):
