@@ -358,6 +358,12 @@ replicas that mount the same credential would report the same hive id and agent 
 `workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
 credential is installed.
 
+The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
+2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
+places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
+below the request. The pod carries no node selector, affinity or host network: it schedules on any node and reaches a
+hive serve address on the tailnet through the cluster's own routes.
+
 ## Related pages
 
 - [Deployment modes](../reference/deployment-modes.md): where the controller, ledger and Redis run, and the

@@ -41,6 +41,12 @@ if helm template proof "$chart" --set workers.replicas=2 \
   exit 1
 fi
 grep -q 'one hive credential is one hive' "$out/shared.err"
+if helm template proof "$chart" --set workers.replicas=1 --set workers.memoryPerAgentMi.limit=100 \
+  --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential > "$out/memory.out" 2> "$out/memory.err"; then
+  echo 'a per agent memory limit below its request was accepted' >&2
+  exit 1
+fi
+grep -q 'workers.memoryPerAgentMi needs a positive request' "$out/memory.err"
 if helm template proof "$chart" --set workers.replicas=2 --set workers.joinUrl=https://join.example.test \
   --set workers.joinCodeSecret.name=code --set workers.joinCodeSecret.key=code > "$out/reused.out" 2> "$out/reused.err"; then
   echo 'one time code accepted for multiple replicas' >&2
@@ -60,4 +66,4 @@ assert 'persistentVolumeClaim' in home, 'joined membership must survive pod repl
 assert any(o and o.get('kind') == 'PersistentVolumeClaim' and o['metadata']['name'] == home['persistentVolumeClaim']['claimName'] for o in objects)
 print('one time membership survives pod replacement: passed')
 PY
-echo 'missing, shared and reused join material: refused'
+echo 'missing, shared and reused join material and a per agent memory limit below its request: refused'
