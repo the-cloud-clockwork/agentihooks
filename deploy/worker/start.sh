@@ -1,13 +1,20 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
+  HIVE_GITHUB_AUTH_MODE=token
+  [[ -z "${GITHUB_APP_PRIVATE_KEY:-}" ]] || HIVE_GITHUB_AUTH_MODE=app
+fi
+export HIVE_GITHUB_AUTH_MODE
+if [[ "${AGENTIHOOKS_GITHUB_AUTH_READY:-}" != 1 ]]; then
+  exec python3 -m scripts.github_app_cli exec bash "$0" "$@"
+fi
 umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
 mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT"
 git config --global credential.https://github.com.helper \
-  '!f() { test "$1" = get || return 0; printf "username=x-access-token\npassword=%s\n" "${GITHUB_PERSONAL_ACCESS_TOKEN:?}"; }; f'
-[[ -z "${GITHUB_PERSONAL_ACCESS_TOKEN:-}" ]] || export GH_TOKEN="$GITHUB_PERSONAL_ACCESS_TOKEN"
+  '!python3 -m scripts.github_app_cli credential'
 python3 - <<'PY'
 import json, os, re, subprocess
 from pathlib import Path

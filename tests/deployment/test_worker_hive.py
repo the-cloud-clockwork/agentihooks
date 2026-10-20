@@ -72,6 +72,7 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         "PATH": f"{tools}:{os.environ['PATH']}",
         "HOME": str(tmp_path / "home"),
         "GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN,
+        "GITHUB_TOKEN": TOKEN,
         "HIVE_BUNDLE_URL": str(repo) if bundle else bundle_url,
         "HIVE_BUNDLE_REF": "dev",
         "AGENTIHOOKS_HOME": str(home),
@@ -219,7 +220,7 @@ def test_github_token_reaches_git_by_reference_and_is_never_written(tmp_path):
     result, _, home, repo = startup(tmp_path, bundle=True)
     assert result.returncode == 0, result.stderr
     config = (tmp_path / "home/.gitconfig").read_text()
-    assert "GITHUB_PERSONAL_ACCESS_TOKEN" in config
+    assert "scripts.github_app_cli credential" in config
     assert (home / "gh-token-matches").exists()
     assert "GH_TOKEN" not in (home / "hive-container.env").read_text()
     written = [path for root in (tmp_path / "home", home, repo.parent) for path in root.rglob("*") if path.is_file()]
@@ -228,7 +229,7 @@ def test_github_token_reaches_git_by_reference_and_is_never_written(tmp_path):
     fill = subprocess.run(
         ["git", "credential", "fill"],
         input="protocol=https\nhost=github.com\n\n",
-        env={**os.environ, "HOME": str(tmp_path / "home"), "GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN},
+        env={**os.environ, "HOME": str(tmp_path / "home"), "HIVE_GITHUB_AUTH_MODE": "token", "GITHUB_TOKEN": TOKEN},
         capture_output=True,
         text=True,
     )

@@ -27,6 +27,7 @@ RUN pip install --no-cache-dir --no-deps --force-reinstall /wheels/*.whl \
 ENV NPM_CONFIG_PREFIX=/home/worker/.local \
     PATH=/home/worker/.local/bin:$PATH
 COPY --chmod=0755 deploy/worker/start.sh /opt/worker-hive/start.sh
+COPY --chmod=0755 deploy/worker/gh /usr/local/bin/gh
 USER 10001:10001
 ENTRYPOINT ["/usr/bin/tini", "--", "/opt/worker-hive/start.sh"]
 CMD []
