@@ -31,8 +31,11 @@ agentihooks hive install          # user service that runs agentihooks hive run
 
 - `hive join` writes `~/.agentihooks/hive.env` (mode 0600) with the hive id, the swarm URL, a ledger credential
   and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
-- The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`. It
-  always serves TLS from `SWARM_TLS_DIR`.
+- The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
+  The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
+  and `--tls-key`, and refuses to serve on a non-loopback address without them. The join endpoint's request,
+  handler and Redis time limits, and the 503 it answers when Redis does not reply, are under
+  [Join service limits](#join-service-limits).
 - Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys;
   [Member keys](#member-keys) lists what lives there.
   A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
@@ -72,6 +75,102 @@ Placement drops a hive whose list lacks the task's repo, with "no hive for `<rol
 ("no headless hive for ..." when only headless hives were tried).
 When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
 the first by path when it holds several. A repo given as a path launches in that path.
+
+## Join service limits
+
+`agentihooks hive serve` answers `POST /hive/join` (a one time code for credentials) and `POST /hive/refresh` (a
+ledger credential for a new Redis password) on one thread per request. Every limit in this table is a constant in
+the service; no flag or environment variable changes one.
+
+| Limit | Value | Effect |
+|---|---|---|
+| Request body | 4096 bytes | A missing, oversize or non JSON body answers 400. |
+| Request socket timeout | 10 seconds | Bounds the TLS handshake and each read of the request. |
+| Concurrent handlers | 32 | A further connection waits until a handler gives its slot back. |
+| Request deadline | 30 seconds | The service shuts down the client socket of a request older than this. |
+| Redis socket timeout | 5 seconds | Bounds each socket operation of every Redis call the service makes, not a whole request: a request that makes several calls can hold its slot longer, and a Redis that keeps sending within 5 seconds is not cut off. A failed call is never retried. |
+
+The request deadline does not interrupt a handler waiting on Redis, which holds a separate connection, so the
+Redis client's own timeout is what frees a handler while Redis stalls. The swarm Redis client reads with a
+ten-second timeout; the join service lowers it to five seconds. A stalled call then raises after five seconds, the
+handler answers 503 and its slot is free for the next request.
+
+The service applies the bound when `agentihooks hive serve` builds the server. It sets the socket timeout on the
+Redis client it was given, sets the retry count to zero and drops every connection opened before, so no pooled
+connection keeps the earlier timeout. The swarm Redis client's three-second connect timeout is unchanged. It applies
+to each address tried, not to name lookup, and a `socket_connect_timeout` query argument in the Redis URL overrides
+it. A Redis that refuses the connection answers 503 at once; one that accepts it and stays silent answers after five
+seconds.
+
+### Answers
+
+| Status | Body `error` | Cause |
+|---|---|---|
+| 200 | none | The code or credential was accepted; the body carries the grant. |
+| 400 | `the body must be a JSON object with a string code` (`string ledger_credential` on refresh) | The body is missing, over 4096 bytes, not JSON, or lacks that string field. |
+| 403 | the refusal reason, such as `invite code is invalid, expired or already used` | The code or credential is not valid, or Redis returned an error other than a timeout, a lost connection or a refused login while the service wrote or refreshed the member. |
+| 404 | `not found` | The path is not `/hive/join` or `/hive/refresh`. |
+| 503 | `the hive Redis did not answer; try again` | A Redis call timed out, the connection to Redis was refused or dropped, or Redis refused the service's own login (`WRONGPASS`, `NOAUTH`). |
+
+The 503 text is fixed and carries no Redis detail. The service writes no request log, so for an answered request the
+client's reply is the only record.
+
+The first Redis call of a join, which deletes the invite, sits outside the 403 handling. A Redis error there other
+than a timeout, a lost connection or a refused login, such as an access control denial (`NOPERM`), gets no answer:
+the service prints a traceback to its standard error and closes the connection, and `hive join` reports the hive as
+unreachable.
+
+### What a client sees
+
+```text
+$ agentihooks hive join https://swarm.example.internal:8770 <code>
+hive join refused: the hive Redis did not answer; try again
+
+$ agentihooks hive refresh
+hive refresh refused: the hive Redis did not answer; try again
+```
+
+Both commands exit 1. The bound is per Redis call. When Redis stalls after the invite was deleted, a join spends one
+timeout on writing the member and a second on removing it, about ten seconds, which is as long as the client waits. The
+client may then report the timeout instead of the 503:
+
+```text
+hive join refused: the hive at https://swarm.example.internal:8770 is unreachable (timed out)
+```
+
+A hive whose own Redis credential was refused refreshes it through this service. When the service answers 503, the
+swarm Redis client raises `AuthenticationError` with `the hive Redis credential was refused and the hive refused a
+refresh (the hive Redis did not answer; try again)`. The `hive` commands print a `refused` line only for their own
+refusals. This error comes from the swarm's `redis_client()` helper, so commands that open the swarm Redis, such as
+`hive list`, `hive set`, `hive show` and `hive run`, end with a traceback whose last line carries this text.
+
+### Check the bound against a live service
+
+A made-up code reaches Redis through the service without consuming a real invite. Add `--cacert` for a private
+certificate authority.
+
+```bash
+curl -sS -m 15 -w '\nstatus %{http_code} in %{time_total}s\n' \
+  -d '{"code":"not-a-real-code"}' https://swarm.example.internal:8770/hive/join
+```
+
+| Redis state | Output |
+|---|---|
+| Answering | `{"error": "invite code is invalid, expired or already used"}` and `status 403` at once |
+| Accepting the connection, never replying | `{"error": "the hive Redis did not answer; try again"}` and `status 503` after about 5 seconds |
+
+The CI test `test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound` runs both routes
+against a listener that accepts connections and never replies, with one handler slot and a Redis timeout of one
+second: each answers 503 and the slot is free within twice that timeout.
+
+### Join service troubleshooting
+
+| Symptom | Reading | Action |
+|---|---|---|
+| `hive join` answers 503 or reports the hive unreachable, then the same code answers `invite code is invalid, expired or already used` | The service deletes the invite with its first Redis call, so a call that Redis applied before the timeout, or a later call that failed, leaves the code used. On a Redis error it tries to remove the partly created member. | Run `agentihooks hive invite <name>` on the swarm host for a new code. |
+| `hive refresh` answers 503 | The refresh did not complete, or completed without the reply reaching the client. | Run `agentihooks hive refresh` again. Each success replaces the previous Redis password, and the command takes a per-host lock so two callers do not retire each other's password. |
+| Every join and refresh answers 503 | Redis is stalled, unreachable or refusing the service's connection. | From the swarm host, run `agentihooks hive list`. It opens its own Redis connection with a 3-second connect and 10-second read timeout, so an error or a pause there points at Redis and not at the join service. Fix Redis, then repeat the request. |
+| 403 text `Redis refused the new member (...)` or `Redis refused the refreshed member (...)` | Redis returned an error other than a timeout, a lost connection or a refused login; see Answers. | Read the detail in the message. |
 
 ## Member keys
 
@@ -341,6 +440,81 @@ Placement runs at every master launch, so the successor after the next handoff g
 is live then. `agentihooks swarm <id> master move --to HIVE` forces that move without waiting: the master hands
 off and its successor starts on the named hive.
 
+## Prompt and workspace transport
+
+A hive launch runs the agent on another machine, which has no copy of the ledger and no task work folder. The
+controller therefore builds everything the agent reads at start and sends it in the launch payload; the hive sends
+the agent's work folder lines back every heartbeat.
+
+### What the launch payload carries
+
+When placement picks a hive, the controller writes the payload to
+`<root>:swarm:<slug>:launch-prompt:<execution id>` (`<root>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`, default
+`agentihooks`). The key expires with the 300 second launch slot reservation. Next to the task fields and the
+profile decision it holds:
+
+| Field | Content |
+|---|---|
+| `hive_opening` | The full opening prompt, built on the controller where the ledger is, for the Claude harness. |
+| `hive_opening_digest` | The sha256 hex digest of `hive_opening`. |
+| `hive_seeds` | The task's work folder files: `steering.md` whole, and the last 65,536 characters of `progress.md` and `proof.md`. Empty when the task has no work folder. |
+
+The opening names the work folder as `~/.agentihooks/swarm/<slug>/tasks/<task id>`, so the same text is correct
+below whichever home the hive runs the agent in.
+
+### What the hive does with it
+
+An order the hive picks up after its 300 seconds is acknowledged as failed with the reason `expired` before the
+payload is read. Otherwise the hive checks the payload and acknowledges the order as failed with the reason `prompt`
+when:
+
+- the payload key is missing;
+- the payload is not JSON, or its task id differs from the order's;
+- `hive_opening` is missing or not text, or `hive_opening_digest` does not match it.
+
+The controller ends the execution, drops the launch order and reports the spawn refused with
+`hive launch failed: <reason>`.
+
+A payload that passes is written below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
+
+- `steering.md` is replaced with the controller's copy on every launch.
+- `progress.md` and `proof.md` are written only when the hive does not hold them yet. On a relaunch of the same task
+  on the same hive, its own lines stay and the controller's copy is not merged in.
+
+The agent then starts with `hive_opening` exactly as carried. The hive does not rebuild the prompt from the task.
+
+### Work folder lines on the ledger page
+
+On every fifteen second heartbeat, each hive writes the work folder lines of the executions it hosts to
+`<root>:hive:<hive id>:workspaces`, expiring after 45 seconds. Each entry holds `latest_progress` and
+`latest_proof`: the last three non-blank lines of `progress.md` and `proof.md`, read from the last 4,096 bytes of
+each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution,
+the live one or else the one started last, is a worker on that hive. Masters are left out.
+
+When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
+or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
+the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+
+### Resume and recovery prompts
+
+The restore prompt after a reboot and the resume prompt after an outage tell the agent to re-read its task folder.
+For an agent on a remote hive both prompts name `~/.agentihooks/swarm/<slug>/tasks/<task id>`, the folder below the
+hive's home, instead of the controller's absolute path.
+
+### Upgrading
+
+A hive refuses a launch payload without `hive_opening` and its digest, so an older controller cannot launch on a
+newer hive. Deploy the controller first, then the hives.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport and sends no opening and digest. | Upgrade the controller, then the hive. |
+| Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
+| A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
+| A relaunched agent on the same hive does not see proof lines written on another machine | `progress.md` and `proof.md` already on a hive are kept, never merged. | Copy the missing lines into the hive's work folder, or append them from the agent. |
+
 ## Failover timing
 
 | Clock | Value | Effect |
@@ -460,33 +634,8 @@ Fencing stops a superseded agent or controller from acting after its replacement
 ## Launches on a hive
 
 The controller hands a hive a launch order; the hive's own Redis user receives it, launches the agent and writes
-the acknowledgement the controller reads.
-
-### What a launch carries
-
-The order points at a payload that carries everything the agent needs from the controller's machine:
-
-| Field | Content |
-|---|---|
-| Opening prompt | The full prompt the agent starts with, built on the controller. |
-| Digest | The sha256 of that prompt. |
-| Work folder seeds | `steering.md` whole, and the last 65536 characters of `progress.md` and `proof.md`, when the task has a work folder. |
-
-The hive refuses a payload with no opening prompt, or whose digest does not match it, and launches with the carried
-prompt unchanged. Because the hive now requires the prompt, upgrade controllers before hives.
-
-### Work folders on a hive
-
-The hive writes the seeds to `~/.agentihooks/swarm/<swarm>/tasks/<task>` under its own home, after it checks the
-controller epoch. `steering.md` always takes the controller's copy. `progress.md` and `proof.md` are written only
-when the hive holds no copy yet, so a task relaunched on the same hive keeps the lines its earlier agent wrote.
-Resume and recovery prompts name that folder as `~/.agentihooks/swarm/<swarm>/tasks/<task>`, the path on the
-hive.
-
-Every heartbeat the hive publishes the last three lines of `progress.md` and `proof.md` for the latest execution
-of each task it runs or last ran, masters excluded, under its own hive key. The copy expires 45 seconds after the
-last beat. The ledger page's work folder tails read the copy of the hive that runs, or last ran, the task's latest
-execution, and the controller's own folder for tasks with no hive.
+the acknowledgement the controller reads. What the order's payload carries and what the hive writes from it are in
+[Prompt and workspace transport](#prompt-and-workspace-transport).
 
 ### Refusal causes
 
@@ -502,6 +651,16 @@ failed with "hive launch failed: `<cause>`".
 | `expired` | The order expired before the hive took it, or the agent started after the expiry; the hive stops such an agent. |
 | `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
+
+## Hive placement for one swarm on a local machine
+
+A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
+makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
+with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
+stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes roles=master,eng,ci,plan,dispatch
+max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
+tick. On a machine in any other mode the setting changes nothing.
 
 ## Worker hives in Kubernetes
 
@@ -682,8 +841,6 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 |---|---|---|
 | A launch waits with "no hive for `<role>` lists the repo `<repo>`" | `agentihooks hive show <id>`, the `repos` list | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the swarm's repo name, or point `HIVE_REPO_ROOT` at the clones. |
 | A launch waits with "no live hive takes" a role | `agentihooks hive list`: `stale` hives, roles | Restart `agentihooks hive run` (`agentihooks hive install` keeps it running), or add the role with `agentihooks hive set`. |
-| Every launch on a hive fails with "hive launch failed: prompt" | The controller and hive versions | Upgrade the controller first; an older controller sends no opening prompt. |
-| A hive's agents show no work folder lines on the ledger page | The hive's heartbeat age in `agentihooks hive list` | The copy expires 45 seconds after the last beat; restart `hive run`. |
 | A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | A `cap` of 0 means the hive has no fresh quota reading for the account; otherwise end a session on that account or wait for its five hour window to recover. |
 
 ## Related pages
