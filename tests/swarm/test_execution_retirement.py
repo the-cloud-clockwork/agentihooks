@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm.execution import ExecutionRegistry
+from scripts.swarm.master_start import DEADLINE_MS
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
@@ -189,7 +190,7 @@ def test_reconciliation_requires_an_absent_agent_and_a_dead_process(store, case)
         observe=lambda current: SimpleNamespace(state=observed if current == agent else "unknown"),
     )
     with patch("scripts.hive.reports.host", return_value="remote" if remote else ""):
-        actions = store.execution_registry.reconcile("fixture", runtime)
+        actions = store.execution_registry.reconcile("fixture", runtime, 0)
     expected = [f"ended orphan execution {agent.execution_id} for {agent.name}"] if ended else []
     assert actions == expected
     expected_agent = replace(agent, state="ended") if ended else agent
@@ -203,8 +204,8 @@ def test_orphan_ending_does_not_touch_a_replaced_execution_or_restored_agent(sto
     replacement = store.start_execution(
         "fixture", AgentRecord(first.name, "eng", "task", seat=first.seat), first.execution_id
     )
-    assert store.execution_registry.end_orphan("fixture", first) is False
-    assert store.execution_registry.end_orphan("fixture", replacement) is False
+    assert store.execution_registry.end_orphan("fixture", first, 0) is False
+    assert store.execution_registry.end_orphan("fixture", replacement, 0) is False
     assert store.execution("fixture", first.execution_id) == first
     assert store.execution("fixture", replacement.execution_id) == replacement
 
@@ -221,7 +222,7 @@ def test_orphan_ending_refuses_a_projection_restored_during_the_transaction(stor
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
-        assert store.execution_registry.end_orphan("fixture", agent) is False
+        assert store.execution_registry.end_orphan("fixture", agent, 0) is False
     assert store.execution("fixture", agent.execution_id) == agent
     assert store.agents("fixture") == [agent]
 
@@ -236,7 +237,7 @@ def test_a_remote_process_reported_after_the_live_snapshot_is_preserved(store):
     store.redis.set(reports.key("remote"), json.dumps({"names": [agent.name]}))
     runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
     with patch("scripts.hive.reports.host", return_value="remote"):
-        assert store.execution_registry.reconcile("fixture", runtime) == []
+        assert store.execution_registry.reconcile("fixture", runtime, 0) == []
     assert store.execution("fixture", agent.execution_id) == agent
 
 
@@ -246,13 +247,13 @@ def test_orphan_ending_preserves_terminal_executions_and_absent_replacements(sto
         "fixture", AgentRecord(first.name, "eng", "task", seat=first.seat), first.execution_id
     )
     store.redis.hdel(store.key("fixture", "agents"), first.name)
-    assert store.execution_registry.end_orphan("fixture", first) is False
+    assert store.execution_registry.end_orphan("fixture", first, 0) is False
     assert store.execution("fixture", first.execution_id) == first
     assert store.execution("fixture", replacement.execution_id) == replacement
     terminal = replace(replacement, state="finished")
     store.put_agent("fixture", terminal)
     store.redis.hdel(store.key("fixture", "agents"), first.name)
-    assert store.execution_registry.end_orphan("fixture", terminal) is False
+    assert store.execution_registry.end_orphan("fixture", terminal, 0) is False
     assert store.execution("fixture", terminal.execution_id) == terminal
 
 
@@ -293,7 +294,7 @@ def test_orphan_ending_keeps_a_concurrent_execution_update(store):
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
-        assert store.execution_registry.end_orphan("fixture", agent) is False
+        assert store.execution_registry.end_orphan("fixture", agent, 0) is False
     assert store.execution("fixture", agent.execution_id) == changed
     assert store.agents("fixture") == []
 
@@ -309,7 +310,7 @@ def test_reconciliation_skips_unavailable_runtime_reads_for_non_orphans(store, s
     if not projected:
         store.redis.hdel(store.key("fixture", "agents"), agent.name)
     runtime = SimpleNamespace(live_names=lambda: set(), reported=Mock(side_effect=RuntimeError("runtime unavailable")))
-    assert store.execution_registry.reconcile("fixture", runtime) == []
+    assert store.execution_registry.reconcile("fixture", runtime, 0) == []
     assert store.execution("fixture", agent.execution_id) == agent
     runtime.reported.assert_not_called()
 
@@ -323,9 +324,84 @@ def test_a_recorded_seat_does_not_hide_a_later_dead_orphan(store):
     )
     store.redis.hdel(store.key("fixture", "agents"), orphan.name)
     runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
-    assert store.execution_registry.reconcile("fixture", runtime) == [
+    assert store.execution_registry.reconcile("fixture", runtime, 0) == [
         f"ended orphan execution {orphan.execution_id} for {orphan.name}"
     ]
     assert store.execution("fixture", recorded.execution_id) == recorded
     assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
     assert store.agents("fixture") == [recorded]
+
+
+def starting_master(store, slug, dropped=True):
+    orphan = store.start_execution(
+        slug,
+        AgentRecord(
+            store.next_name(slug, "master"), "master", "master", seat=f"master@{slug}", started_at=1, state="starting"
+        ),
+    )
+    if dropped:
+        store.redis.hdel(store.key(slug, "agents"), orphan.name)
+    return orphan
+
+
+@pytest.mark.parametrize(("offset", "ended"), [(0, True), (-1, False)])
+def test_tick_ends_a_starting_master_orphan_only_past_its_startup_window(store, offset, ended):
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
+    orphan = starting_master(store, "sw")
+    runtime = FakeRuntime()
+    tick("sw", store, FakeLedger([]), runtime, 1 + DEADLINE_MS + offset)
+    assert store.execution("sw", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
+    assert orphan.name not in runtime.killed
+
+
+@pytest.mark.parametrize(
+    ("offset", "projected", "named", "reported", "ended"),
+    [
+        (0, False, False, False, True),
+        (1, False, False, False, True),
+        (-1, False, False, False, False),
+        (0, True, False, False, False),
+        (0, False, True, False, False),
+        (0, False, False, True, False),
+    ],
+)
+def test_reconciliation_ends_a_starting_orphan_only_when_absent_dead_and_past_startup(
+    store, offset, projected, named, reported, ended
+):
+    from types import SimpleNamespace
+
+    orphan = starting_master(store, "fixture", dropped=not projected)
+    runtime = SimpleNamespace(
+        live_names=lambda: {orphan.name} if named else set(),
+        reported=lambda current: reported,
+    )
+    actions = store.execution_registry.reconcile("fixture", runtime, 1 + DEADLINE_MS + offset)
+    assert actions == ([f"ended orphan execution {orphan.execution_id} for {orphan.name}"] if ended else [])
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
+
+
+def test_reconciliation_ends_a_starting_engineer_orphan_past_the_startup_window(store):
+    from types import SimpleNamespace
+
+    orphan = store.start_execution(
+        "fixture",
+        AgentRecord(
+            store.next_name("fixture", "eng"), "eng", "task", seat="eng-1@fixture", started_at=1, state="starting"
+        ),
+    )
+    store.redis.hdel(store.key("fixture", "agents"), orphan.name)
+    runtime = SimpleNamespace(live_names=set, reported=lambda current: False)
+    assert store.execution_registry.reconcile("fixture", runtime, 1 + DEADLINE_MS) == [
+        f"ended orphan execution {orphan.execution_id} for {orphan.name}"
+    ]
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
+
+
+@pytest.mark.parametrize(("offset", "ended"), [(0, True), (-1, False)])
+def test_orphan_ending_ends_a_starting_execution_only_past_its_startup_window(store, offset, ended):
+    orphan = starting_master(store, "fixture")
+    assert store.execution_registry.end_orphan("fixture", orphan, 1 + DEADLINE_MS + offset) is ended
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")

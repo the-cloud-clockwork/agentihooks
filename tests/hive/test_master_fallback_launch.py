@@ -63,6 +63,40 @@ def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     assert stored.profile_decision["master_placement"] == admitted.profile_decision["master_placement"]
 
 
+def admit_after_starting_orphan(setup, offset, live=False):
+    from types import SimpleNamespace
+
+    from scripts.swarm.master_start import DEADLINE_MS
+    from scripts.swarm.tick import MASTER
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+    from tests.swarm.test_execution_retirement import starting_master
+
+    task = master(setup)
+    orphan = starting_master(setup.store, setup.config.slug)
+    runtime = SimpleNamespace(live_names=lambda: {orphan.name} if live else set(), reported=lambda agent: False)
+    setup.store.execution_registry.reconcile(setup.config.slug, runtime, 1 + DEADLINE_MS + offset)
+    task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
+    request = SpawnRequest(setup.config, MASTER, setup.store.next_name(setup.config.slug, MASTER), task)
+    return orphan, lambda: setup.launcher.admit(request, setup.launcher.select(setup.config, MASTER, task))
+
+
+def test_master_admission_replaces_a_starting_orphan_past_its_startup_window(setup):
+    orphan, admit = admit_after_starting_orphan(setup, 0)
+    admitted = admit()
+    assert (admitted.seat, admitted.generation) == (orphan.seat, orphan.generation + 1)
+    assert setup.store.execution_occupants(setup.config.slug)[orphan.seat] == admitted
+
+
+@pytest.mark.parametrize(("offset", "live"), [(-1, False), (0, True)])
+def test_master_admission_is_refused_while_a_starting_orphan_is_in_its_window_or_live(setup, offset, live):
+    from scripts.swarm.store import SwarmError
+
+    orphan, admit = admit_after_starting_orphan(setup, offset, live)
+    with pytest.raises(SwarmError, match="replacement does not match the current execution"):
+        admit()
+    assert setup.store.execution_occupants(setup.config.slug)[orphan.seat] == orphan
+
+
 def test_controller_routes_an_unpinned_primary_master_through_hive_placement(setup):
     from scripts.swarm import controller
     from scripts.swarm_v2.runtime.base import RuntimeRouter
