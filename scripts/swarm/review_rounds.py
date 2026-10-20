@@ -2,9 +2,12 @@
 
 import fcntl
 import hashlib
+import json
+import time
 from pathlib import Path
 
 from scripts.gates.budget import Budget
+from scripts.gates.log import gates_dir
 from scripts.swarm.store import SwarmError
 
 ROUNDS = 3
@@ -38,7 +41,13 @@ def start(
     slug: str, task: str, home: Path | None = None, pr_url: str | None = None, first_pr: str = ""
 ) -> dict[str, str | int]:
     budget = Budget(slug, "reviews", home)
-    allowed, spent = budget.spend(task, _counter(budget, task, pr_url, first_pr), ROUNDS)
+    counter = _counter(budget, task, pr_url, first_pr)
+    allowed, spent = budget.spend(task, counter, ROUNDS)
     if not allowed:
         raise SwarmError(f"task {task} gets no fourth review round. {CLOSED}")
+    log = gates_dir(slug, home) / "reviews" / "rounds.jsonl"
+    with log.open("a") as stream:
+        stream.write(
+            json.dumps({"task": task, "counter": counter, "round": spent, "at": int(time.time() * 1000)}) + "\n"
+        )
     return {"task": task, "round": spent, **({"notice": CLOSED} if spent == ROUNDS else {})}
