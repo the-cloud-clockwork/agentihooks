@@ -148,12 +148,14 @@ def show(redis: "Redis", hive_id: str) -> dict | None:
 
 
 def migrate(redis: "Redis", hive_id: str) -> None:
-    def drop(pipe: "Pipeline") -> None:
-        if pipe.hexists(key(hive_id), LEGACY):
-            pipe.multi()
-            pipe.hdel(key(hive_id), *LEGACY_FIELDS)
+    record = key(hive_id)
 
-    redis.transaction(drop, key(hive_id))
+    def drop(pipe: "Pipeline") -> None:
+        if pipe.hexists(record, LEGACY):
+            pipe.multi()
+            pipe.hdel(record, *LEGACY_FIELDS)
+
+    redis.transaction(drop, record)
 
 
 def seed(pipe: "Pipeline", hive_id: str) -> None:
