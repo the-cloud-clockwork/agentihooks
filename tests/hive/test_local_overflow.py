@@ -75,8 +75,9 @@ def test_a_spawn_no_hive_takes_falls_back_to_the_local_machine(setup, monkeypatc
     fill_anton(setup)
     local_agents(setup, 7)
     task = {"id": "task", "seat": "eng-1@fixture"}
+    placement_waits.observe(setup.store, setup.config.slug, "eng", "other", FULL, 1)
     assert fenced.placement_refusal("eng", task) == ""
-    assert placement_waits.read(setup.store, setup.config.slug) == {}
+    assert list(placement_waits.read(setup.store, setup.config.slug)) == ["other"]
     assert fenced.spawn(setup.config, "eng", "eng name", task) == "placed on the workstation"
     _, lane, name, sent = setup.herdr.spawn.call_args.args
     assert (lane, name, sent["id"], sent["controller_epoch"]) == ("eng", "eng name", "task", setup.held.epoch)
@@ -115,7 +116,11 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     put = setup.store.put_agent
     put(setup.config.slug, AgentRecord("master-1", "master", "master"))
     put(setup.config.slug, AgentRecord("eng-hive", "eng", "on-hive", hive="anton"))
-    put(setup.config.slug, AgentRecord("eng-pod", "eng", "on-pod", runtime_backend="kubernetes"))
+    pod = {"pod_namespace": "anton", "pod_name": "eng-pod"}
+    put(
+        setup.config.slug,
+        AgentRecord("eng-pod", "eng", "on-pod", seat="eng-9@fixture", runtime_backend="kubernetes", runtime_target=pod),
+    )
     put(setup.config.slug, AgentRecord("eng-done", "eng", "done", state="finished"))
     put(setup.config.slug, AgentRecord("eng-self", "eng", "task", state="starting"))
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
@@ -139,6 +144,18 @@ def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile)
     task = {"id": "task", "profile_decision": {"profile": profile}}
     assert fenced.placement_refusal("eng", task) == f"no live hive takes {profile}"
     setup.herdr.spawn.assert_not_called()
+
+
+def test_a_task_profile_without_a_decision_keeps_the_ui_host_rule(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    assert fenced.placement_refusal("eng", {"id": "task", "profile": "qa"}) == FULL
+
+
+def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    assert fenced._refusal("eng", {"id": "task"}) == "the local machine takes eng work"
 
 
 def test_a_task_pinned_to_a_hive_never_moves_to_the_local_machine(setup, monkeypatch):

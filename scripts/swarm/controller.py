@@ -16,6 +16,7 @@ from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
+    from scripts.hive.placement import Wait
     from scripts.swarm_v2.control_service import ControlService
 
 LOCAL, HYBRID, DISTRIBUTED = "local", "hybrid", "distributed"
@@ -23,7 +24,7 @@ NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
-OVERFLOW = "the local machine takes {lane} work: {reason}"
+OVERFLOW = "the local machine takes {lane} work"
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
@@ -128,7 +129,7 @@ class FencedRuntime:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
-    def _overflow(self, lane: str, task: dict, waited) -> str:
+    def _overflow(self, lane: str, task: dict, waited: "Wait") -> str:
         if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
             return waited.reason
         from scripts.hive import placement_waits
@@ -140,7 +141,7 @@ class FencedRuntime:
         if not isinstance(chosen, Choice):
             return chosen.reason
         placement_waits.observe(self.store, self.slug, lane, task["id"], "", lease.now_ms(self.store))
-        return OVERFLOW.format(lane=lane, reason=chosen.fallback)
+        return OVERFLOW.format(lane=lane)
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
@@ -187,7 +188,7 @@ def _local_agents(store: RedisStore, task: str) -> int:
 
 
 def _to_workstation(lane: str, refused: str) -> bool:
-    if refused.startswith(OVERFLOW.format(lane=lane, reason="")):
+    if refused == OVERFLOW.format(lane=lane):
         return True
     fallback_refusal = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
     return lane == "master" and fallback_refusal and _workstation_herdr()

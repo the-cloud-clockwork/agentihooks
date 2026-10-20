@@ -107,7 +107,6 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
 
 
 def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choice | Wait:
-    """A worker no hive takes runs on the local machine while that machine runs fewer agents than its own cap."""
     if role in UI_ROLES:
         return waited
     if local_agents >= local_max:
