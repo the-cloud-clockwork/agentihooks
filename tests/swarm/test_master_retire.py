@@ -4,7 +4,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox import exits
-from scripts.inbox.store import InboxStore
+from scripts.inbox.store import Contended, InboxStore
 from scripts.swarm import launch_check, lifetime, live_binding, master_retire
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
@@ -179,17 +179,21 @@ def test_forget_counts_a_missing_ask_item_as_already_forgotten(swarm):
     assert master_retire.forget(store, "sw", master.name) is False
 
 
-def test_forget_survives_an_ask_that_cannot_be_closed(swarm, monkeypatch):
-    from scripts.inbox.store import Contended
-
+def test_a_contended_close_keeps_the_request_for_the_next_forget(swarm, monkeypatch):
     store, _, _, master = swarm
     master_retire.hold(store, "sw", master, "test", True, 200)
+    (ask,) = asks(store, master.name)
+    close = InboxStore.close
 
     def contended(*_):
         raise Contended("changed meanwhile")
 
     monkeypatch.setattr(InboxStore, "close", contended)
     assert master_retire.forget(store, "sw", master.name) is True
+    assert master_retire.reason(store, "sw", master.name) == "test"
+    monkeypatch.setattr(InboxStore, "close", close)
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert InboxStore(store.redis).get(ask.id).state == "done"
     assert master_retire.reason(store, "sw", master.name) == ""
 
 
