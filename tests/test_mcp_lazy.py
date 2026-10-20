@@ -262,8 +262,9 @@ def test_invalid_protocol_message_keeps_server_reading(monkeypatch, invalid):
     assert process.returncode == 0
 
 
-def test_first_call_transfers_initialized_session_to_protocol_library(monkeypatch, capsys):
+def test_first_call_transfers_initialized_session_to_protocol_library(monkeypatch):
     from io import StringIO
+    from threading import Event
 
     from hooks.mcp._stdio import run
 
@@ -282,11 +283,30 @@ def test_first_call_transfers_initialized_session_to_protocol_library(monkeypatc
         {"jsonrpc": "2.0", "id": "listing", "method": "tools/list"},
         {"jsonrpc": "2.0", "id": "call", "method": "tools/call", "params": {"name": "channel_list", "arguments": {}}},
     ]
+    answered = Event()
+
+    class Stdout(_Stdout):
+        def write(self, text):
+            super().write(text)
+            if any(json.loads(line).get("id") == "call" for line in self.text.splitlines()):
+                answered.set()
+
+    # The protocol library cancels in-flight requests once stdin ends, so hold end of input
+    # until the call is answered, as a stdio client keeps its pipe open while it awaits a reply.
+    class Stdin(StringIO):
+        def readline(self, *args):
+            line = super().readline(*args)
+            if not line:
+                answered.wait(30)
+            return line
+
+    stdout = Stdout()
     monkeypatch.setenv("MCP_CATEGORIES", "channels")
     monkeypatch.delenv("ALLOWED_TOOLS", raising=False)
-    monkeypatch.setattr(sys, "stdin", StringIO("".join(json.dumps(message) + "\n" for message in messages)))
+    monkeypatch.setattr(sys, "stdin", Stdin("".join(json.dumps(message) + "\n" for message in messages)))
+    monkeypatch.setattr(sys, "stdout", stdout)
     run()
-    replies = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    replies = [json.loads(line) for line in stdout.text.splitlines()]
     assert [reply["id"] for reply in replies].count("init") == 1
     assert next(reply for reply in replies if reply["id"] == "listing")["result"]["tools"]
     result = next(reply for reply in replies if reply["id"] == "call")["result"]
