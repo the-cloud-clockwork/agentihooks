@@ -76,7 +76,7 @@ def test_tick_resolution_records_the_actual_end_of_the_wait(redis):
     ]
 
 
-@pytest.mark.parametrize("until, expected", [(3_660_000, []), (3_600_000, ["turn-gap/session"])])
+@pytest.mark.parametrize("until, expected", [(3_660_000, []), (1_800_000, ["turn-gap/session"])])
 def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatch, until, expected):
     record = {
         "traces": [

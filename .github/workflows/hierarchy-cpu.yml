@@ -1,6 +1,13 @@
 name: Hierarchy CPU proof
 
 on:
+  workflow_call:
+    inputs:
+      base:
+        description: Revision to compare on the same real ledger and runner; empty compares hierarchy against the previous dev head on a push, else the merge base with dev, and load against 726353637
+        type: string
+        required: false
+        default: ''
   workflow_dispatch:
     inputs:
       base:
@@ -12,34 +19,26 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
-  queue: max
-  cancel-in-progress: false
+  group: ${{ github.workflow == 'Hierarchy CPU proof' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('hierarchy-cpu-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Hierarchy CPU proof' && 'max' || 'single' }}
 
 jobs:
   hierarchy:
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
         pair: [1, 2, 3, 4]
-    services:
-      redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 2s
-          --health-retries 15
     steps:
-      - name: Resolve the base, the merge base with dev unless one was given
+      - name: Resolve the base, the previous dev head on a push or else the merge base with dev, unless one was given
         id: base
         env:
           GH_TOKEN: ${{ github.token }}
           BASE: ${{ inputs.base }}
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
+          [[ -n "$BASE" ]] || BASE="$BEFORE"
           [[ -n "$BASE" ]] || BASE=$(gh api "repos/$GITHUB_REPOSITORY/compare/dev...$GITHUB_SHA" --jq .merge_base_commit.sha)
           echo "sha=$BASE" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
@@ -56,6 +55,13 @@ jobs:
         with:
           version: '0.12.23'
           enable-cache: false
+      - name: Start Redis on this runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends redis-server
+          redis-server --port 6379 --save '' --appendonly no --daemonize yes
+          for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
+          exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
         run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
@@ -76,6 +82,9 @@ jobs:
             ( cd "$side" && HIERARCHY_CPU_REPORT="$GITHUB_WORKSPACE/hierarchy-evidence/$side.json" \
               python -m pytest tests/ledger_load/hierarchy_probe.py -n 0 -s --tb=short )
           done
+      - name: Stop Redis
+        if: always()
+        run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's hierarchy profiles and exact response bodies
         if: always()
         uses: actions/upload-artifact@v4
@@ -85,21 +94,12 @@ jobs:
           if-no-files-found: error
 
   load:
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 10
     strategy:
       fail-fast: false
       matrix:
         pair: [1, 2, 3, 4, 5]
-    services:
-      redis:
-        image: public.ecr.aws/docker/library/redis:7-alpine
-        ports:
-          - 6379:6379
-        options: >-
-          --health-cmd "redis-cli ping"
-          --health-interval 2s
-          --health-retries 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -115,6 +115,13 @@ jobs:
         with:
           version: '0.12.23'
           enable-cache: false
+      - name: Start Redis on this runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends redis-server
+          redis-server --port 6379 --save '' --appendonly no --daemonize yes
+          for _ in $(seq 30); do redis-cli -p 6379 ping 2>/dev/null | grep -q PONG && exit 0; sleep 1; done
+          exit 1
       - name: Install dependencies shared by both revisions
         working-directory: head
         run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
@@ -145,6 +152,9 @@ jobs:
             database=$((database + 1))
           done
           [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
+      - name: Stop Redis
+        if: always()
+        run: redis-cli -p 6379 shutdown nosave || true
       - name: Preserve the pair's load measurements and server logs
         if: always()
         uses: actions/upload-artifact@v4

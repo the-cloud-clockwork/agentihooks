@@ -1464,6 +1464,132 @@ The gate was delivered in [pull request 2116](https://github.com/the-cloud-clock
 [pull request 4736](https://github.com/the-cloud-clockwork/agentihooks/pull/4736)
 made it count commits in the folder the command runs in.
 
+## Promotion fixer intake
+
+The minute tick runs the promotion watch for every swarm. The watch reads the newest finished push run of Tests on
+`dev`. For a red run it files one urgent `ci` task per failed job with a new cause. When it files, or no promotion
+alert is live, it raises a promotion alert on the ledger, and it sends the master an inbox item for the new tasks. The
+tasks are named `promo-<run id>-<n>`. For a later green run it closes those tasks and the alert. Several swarms can
+watch one repository, a watched swarm and its Doctor most often. Only one of them, the intake owner, files and closes
+promotion fixer tasks for that repository. A failed check of one run is filed once, in the owner's ledger.
+
+### Choosing the owner
+
+Each repository has one owner record in Redis, `agentihooks:swarm:promotion-owner:<identity>`. The identity is the
+SHA-256 of the repository's git common directory (`git rev-parse --path-format=absolute --git-common-dir`). The
+primary checkout and all of its worktrees share one identity, and separate clones get separate ones. When `git` is
+missing or the path is not a repository, the resolved checkout path is the identity. `AGENTIHOOKS_SWARM_KEY_PREFIX`
+replaces the leading `agentihooks`.
+
+Each pass works under the record's lock, `<record>:lock`, held for at most 300 seconds. A swarm that finds the lock
+taken skips the pass and tries again on its next tick. Under the lock the watch elects the owner:
+
+1. The candidates are every running swarm whose repository has the same identity. Proof swarms (`proof-…`) are
+   never candidates and never run the watch.
+2. While the recorded owner is still a candidate, it stays the owner, even when a swarm it would lose to starts
+   again.
+3. Otherwise the new owner is the first candidate by name that is not a Doctor of its linked swarm, so a watched
+   swarm wins over its Doctor even when the Doctor's name sorts first. When only Doctors run, the first Doctor by
+   name owns intake. When no swarm is running, the swarm running the pass takes it.
+4. A new election writes `owner`, the former owner as `previous` (empty on the first election), and a
+   `swarm:<owner>` field, which is never removed. The `swarm:` fields are the history of every swarm that has owned
+   intake for the repository.
+
+Every other swarm returns from the watch with no action. Its ledger gets no promotion task or alert.
+
+### Handover
+
+An owner that stops, pauses, drains or is removed stops being a candidate. The next pass by another running swarm on
+the repository elects a new owner with no command from anyone. The new owner continues from the old one's state:
+
+- **Handled runs.** The record's `seen` field holds the newest run the owners have handled. The new owner starts from
+  the higher of that value and its own, so it does not file a run the old owner already handled again.
+- **Active repairs.** Before it files, the owner collects the causes held by promotion tasks that are not done in its
+  own ledger and in the ledger of every swarm in the history. A cause is the failed job and its failure text with
+  hashes and numbers masked, so the same failure on a later run matches. A cause already held by such a task in a
+  former owner's ledger is not filed again. That task, its claim, comments and proof stay where they are.
+- **Green runs.** A green run closes every open or blocked task whose id starts with `promo-`, and the live
+  promotion alerts, in the owner's ledger and in every former owner's ledger. It then releases every held cause that
+  is not claimed or in `pr`, so the next red run with the same cause files a fresh task.
+
+### Repeated observations and failed writes
+
+The watch reads GitHub at most once a minute per swarm and handles a run only once. A run already handled, a task id
+already in the ledger and a cause held by a task that is not done are all skipped, so every pass over the same red run
+files nothing new.
+
+The owner records a task's cause in its held causes before it writes the task to the ledger. When the ledger refuses
+the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the ledger refused its write: <reason>` to
+its standard error: the user journal (`journalctl --user -t agentihooks-swarm`), or `swarm-tick.log` in the runtime
+directory for a scheduled tick. The run is not marked handled, and the held cause is dropped on the next pass because
+no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same
+`promo-<run id>-<n>` task once.
+
+A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
+`dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
+runner still share one runner outage task.
+
+### Checking the owner
+
+Find the identity of a checkout and read its record. Like the code, the commands fall back to the resolved path when
+the checkout is not a git repository or `git` is missing:
+
+```bash
+REPO=~/dev/tcc-ecosystem/agentihooks
+COMMON=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$REPO")
+COMMON=$(realpath "$COMMON")
+ID=$(printf %s "$COMMON" | sha256sum | cut -d' ' -f1)
+P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
+redis-cli HGETALL "$P:swarm:promotion-owner:$ID"
+redis-cli TTL "$P:swarm:promotion-owner:$ID:lock"   # -2 when no pass holds the lock
+```
+
+| Field | Meaning |
+|---|---|
+| `owner` | The swarm that files and closes promotion fixer tasks for the repository |
+| `previous` | The owner before the last election; empty after the first one |
+| `swarm:<id>` | One field per swarm that has ever owned intake; former owners' ledgers are read for held causes and closed on green |
+| `seen` | The newest dev push run any owner has handled |
+
+An owner that is a Doctor while its watched swarm also runs took intake while the watched swarm was not running, and
+keeps it until it leaves the running state. Its ledger holds the repository's promotion fixer tasks meanwhile.
+
+Read the causes a swarm holds, keyed by task id, and the newest run it handled:
+
+```bash
+redis-cli HGETALL "$P:swarm:<id>:promotion:jobs"
+redis-cli GET "$P:swarm:<id>:promotion:seen"
+```
+
+To count fixer records for one run across linked ledgers, list the promotion tasks in each one:
+
+```bash
+RUN=<run id>
+for slug in rig-grade-swarm rig-grade-swarm-doctor; do
+  agentihooks ledger --slug "$slug" show | jq -r --arg run "promo-$RUN-" \
+    '.tasks[] | select(.id | startswith($run)) | [.id, .state, .title] | @tsv'
+done
+```
+
+A failed check of one run appears in one ledger only. A task with the same run in a second ledger was filed before
+intake ownership, or by a swarm on a different repository identity.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A running swarm never files promotion tasks | Another running swarm on the same repository owns intake | Read `owner` in the record. Promotion tasks and alerts for the repository live in that swarm's ledger |
+| A Doctor files promotion tasks | Its watched swarm was not running when an owner was last elected, and the Doctor keeps intake while it runs | Expected. The watched swarm takes intake back only after the Doctor stops running |
+| A new owner did not refile an open repair | The cause is held by a task that is not done in a former owner's ledger | Expected. Work the task in that ledger; a green run closes it there |
+| Two swarms on one repository both file | Their checkouts resolve to different git common directories, for example two separate clones | Compare `git rev-parse --git-common-dir` for both `repo` settings; point both swarms at the same clone or its worktrees |
+| No promotion task for a red run | The lock was held, the run was superseded before Sonar, or its causes are held by tasks that are not done | Check the lock `TTL`, whether the run's failed jobs failed only at `Check dev still points at this commit`, and `promotion:jobs` for every swarm in the history |
+| The same task id appears after a ledger outage | The first write was refused and the pass was retried | Expected: the retry files the task once, and later passes skip the id because the ledger already holds it |
+
+Delivered in [pull request 3937](https://github.com/the-cloud-clockwork/agentihooks/pull/3937), with
+[issue 3917](https://github.com/the-cloud-clockwork/agentihooks/issues/3917) as the spec. Its tests run two linked
+swarms on the real ledger operation schema and cover one fixer for a watched and Doctor pair, concurrent observers,
+independent repositories, worktree aliases, handover after a refused write and on a newer run, and green
+reconciliation across owners. A live count of fixer records per failed check, before and after the change over equal
+windows, is not recorded yet.
+
 ## Plan tracing for promotion fixer tasks
 
 Promotion failures create fixer tasks whose identifiers include the Actions run
@@ -1672,6 +1798,69 @@ before maturity existed read as `note`. The priming chain lists canon first, the
 shows data only as a count. `promote` only raises a note, never lowers it, and records each step with its
 reason. The culture is one text per swarm, kept in Redis outside the swarm's own keys, so like seat memory it
 survives `remove` and a swarm created again under the same id reads it.
+
+### Sessions that lose their swarm identity
+
+A hook knows a session belongs to a swarm from its environment: `AGENTIHOOKS_AGENT_NAME` names a swarm lane and
+`AGENTIHOOKS_SWARM` (or the slug inside the name) names the swarm. A session can lose those variables partway
+through its life. When the launch wrapper dies, the agent is reparented and `swarm_pin.unpin` strips those variables from
+its later hooks. Without the session pin described below, those hooks treat the session as an ordinary one: no preparation directive, no
+hard gate and no marker, however large the context grows. One tick spawned master reached 930 thousand tokens this
+way before the operator shut it down.
+
+The first time a hook sees a swarm session that already has a context usage snapshot, it writes a pin beside the
+markers: `~/.agentihooks/context_usage/<session id>.swarm`, a JSON object with the swarm slug and the compact limit.
+
+```json
+{"swarm": "rig-grade-swarm", "compact_limit": 600}
+```
+
+The minute tick writes the same pin for every live agent whose pane reports a conversation, with the swarm's
+configured `compact-limit` (or the default when none is set). A pin is written once and never overwritten. A later
+hook in that session that finds no swarm identity reads the slug from the pin, so the session still gets the
+preparation directive at the compact limit and, past the margin, the hard gate with its handoff command.
+
+| Session | Preparation and hard gate |
+|---|---|
+| Swarm identity in its environment | Yes; pinned once a usage snapshot exists |
+| Identity lost after a hook or the tick pinned it | Yes, from the pin |
+| No identity on any hook and never pinned by the tick | No |
+| Operator lane (`AGENTIHOOKS_SWARM_LANE=operator`) | No, and never pinned |
+| Nested session started from a swarm agent | Not from the parent's pin: it has its own session id |
+
+The preparation directive and the hard gate use the compact limit and margin of the hook process
+(`AGENTIHOOKS_COMPACT_LIMIT`, `AGENTIHOOKS_HANDOFF_MARGIN`). The limit stored in the pin is read by the Doctor
+detector below.
+
+### Doctor context overrun detector
+
+The Doctor's `context overrun` detector runs with the other detectors on every Doctor pass. For each agent of the
+watched swarm with a recorded conversation, it reads that session's context usage snapshot and raises a finding
+when the context is at or over the compact limit plus `AGENTIHOOKS_HANDOFF_MARGIN` and neither a `prepare` nor a
+`recycle` marker exists for the session. That state means the recycle directive never reached the session.
+
+The compact limit comes from the session's pin; a session with no pin uses the swarm's configured limit, else
+`AGENTIHOOKS_COMPACT_LIMIT` (default 600). The finding id is `context-overrun/<agent name>`, its evidence names
+the session, the context in thousands of tokens and the agent state, and its number is the context in thousands
+of tokens. Measure it before and after a fix:
+
+```bash
+agentihooks doctor rig-grade-swarm measure context-overrun/master@323133-0175
+```
+
+The command prints 0 once the finding is gone.
+
+### Troubleshooting context recycle
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| A swarm agent is past the hard gate and keeps working | `ls ~/.agentihooks/context_usage/<session id>.*` | No `.prepare` or `.recycle` marker and no `.swarm` pin: the session lost its identity before any hook or tick pinned it. The `context overrun` finding reports it; ask the agent for a handoff through the inbox. |
+| The snapshot reads under the limit while the pane shows more | `<session id>.json`, field `used_tokens` | The statusline has not refreshed the snapshot; the directive fires on the next hook after it does. |
+| A `context overrun` finding names the wrong limit | `<session id>.swarm`, field `compact_limit` | The pin keeps the limit from when it was written; `swarm set compact-limit` reaches only agents launched after it. |
+| An operator lane session gets no directive | `AGENTIHOOKS_SWARM_LANE` | Expected: operator sessions are never recycled or pinned. |
+
+[Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
+detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
 
 ## One task per agent life
 
@@ -2208,6 +2397,106 @@ agentihooks swarm <id> pr <final-pull-request-url>
 ```
 
 The task keeps each declaration in `pull_scopes`, a map from the pull request URL to its kind, `stage` or `prerequisite`, and its nonempty scope. The intent check grades a declared pull request against its declared scope alone, without the whole task text or the task's plan lines, and the parent intent stamped on its body names that scope in place of the task text. A declaration needs a GitHub pull request URL. A changed declaration is judged again. A pull request recorded without `--stage` or `--prerequisite` is the task's final pull request and is graded against the whole task contract; recording a declared pull request again without either option drops its declaration. A blank scope is refused, and one pull request declares one kind.
+
+### Proof loop health findings
+
+A `proof loop` finding identifies a task with **more than two reruns** or
+**more than three review rounds**, using the default caps. The health pass
+counts started agent lives and recorded review counters; moves into pull
+request state alone do not count as review rounds.
+
+#### Which starts count
+
+Started lives are read in start order for each task. The first started life
+never counts as a rerun, even when it has an excluded restart cause. Each later
+started life counts unless its recorded `after` cause excludes it:
+
+| Recorded cause | Meaning | Counts as a rerun? |
+|---|---|---|
+| `watchdog` | The stall watchdog reopened the task | No |
+| `park` | A continuation after `swarm park` | No |
+| `master` | The last recorded task state writer was a master | No |
+| Empty or absent | An ordinary restart with no recorded exclusion | Yes, after the first started life |
+
+The controller records these causes at launch; operators do not need to edit
+launch history. A failed launch that never reached `started` does not count.
+Exclusions apply to the marked start, so a later ordinary restart still counts.
+The current health pass also excludes a later start when its recorded pull
+request head differs from the preceding start and both heads are known.
+
+With no review counter over its cap and no change of recorded head:
+
+| Started lives in order | Counted reruns | Default finding? |
+|---|---|---|
+| First life, then four parked continuations | 0 | No |
+| First life, watchdog continuation, master continuation | 0 | No |
+| First life, then two ordinary restarts | 2 | No |
+| First life, then three ordinary restarts | 3 | Yes |
+| First life marked `park`, then three ordinary restarts | 3 | Yes |
+
+Review rounds use the **largest individual review counter** for the task,
+not their sum. For example, three rounds before the pull request and one on
+its first pull request give a review count of three. Four in one counter
+exceed the default cap. See [review round counters](#review-round-counters)
+for how those counters are separated and for the review gate's own limits.
+
+#### Configure the caps
+
+| Environment variable | Default | Finding condition |
+|---|---|---|
+| `AGENTIHOOKS_HEALTH_RERUNS` | `2` | Counted reruns strictly greater than this value |
+| `AGENTIHOOKS_HEALTH_REVIEW_ROUNDS` | `3` | Largest review counter strictly greater than this value |
+
+Values must be positive integers; zero, negative and nonnumeric values retain
+the defaults. Set them in the environment of the process running the health
+pass. For a manual status read with caps of four reruns and five review rounds:
+
+```bash
+AGENTIHOOKS_HEALTH_RERUNS=4 \
+AGENTIHOOKS_HEALTH_REVIEW_ROUNDS=5 \
+  agentihooks swarm <slug> status --json
+```
+
+Five counted reruns or six rounds in one counter would exceed these caps.
+This command configures only that invocation; configure the controller's
+launch environment for scheduled health passes. These health settings do not
+raise the review gate's three round limit or the separate claim cap. A start
+after a watchdog reopen still spends a claim even though it is excluded from
+the proof loop rerun count.
+
+#### Inspect and judge a finding
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+Read the finding's task, total starts, counted reruns and review rounds.
+Total starts can be high while counted reruns remain zero. Compare launch
+causes and head changes with the task's history before calling it a proof loop;
+a master hold or repeated parks alone are not evidence of repeated proof work.
+The master or operator records a verdict using the finding ID returned by status:
+
+```bash
+agentihooks swarm <slug> verdict 'proof-loop/<task>' false-positive \
+  --note 'The retained launch history shows only parked continuations'
+```
+
+Use that verdict only when the retained evidence supports it. A verdict hides
+the finding under the existing cooldown rules; it does not rewrite launch
+history or change either cap. If an excluded restart is still counted, check
+whether its started row retained the cause. Historical rows without a cause
+are treated as ordinary starts. The delivered change has a known gap if Redis
+fails between consuming a restart mark and recording the started row: the
+cause can be lost. Redis outage holds prevent spawning during an outage, but
+do not reconstruct a missing cause.
+
+[Pull request #3583](https://github.com/the-cloud-clockwork/agentihooks/pull/3583)
+records the restart exclusion change and its regression proofs, including a
+chain consisting only of parks. Its
+[green Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38937553476)
+validates the implementation; it does not establish a live reduction in false
+findings. Comparing before and after rates requires equal windows after the
+running controller has loaded the correction.
 
 ### Stalled activity findings
 
