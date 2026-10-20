@@ -73,11 +73,16 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands.splitlines() == [
         "hive join https://join.example.test fixture-code",
+        "init --profile engineer",
         "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1",
         "hive run",
     ]
     assert (repo / ".git").is_dir()
     assert (home / "hive.env").exists()
+    container_env = home / "hive-container.env"
+    assert container_env.stat().st_mode & 0o777 == 0o600
+    assert "AGENTIHOOKS_HIVE_ID=worker-member\n" in container_env.read_text()
+    assert "COMMAND_LOG=" not in container_env.read_text()
 
 
 def test_mounted_member_skips_join_and_keeps_private_credentials(tmp_path):

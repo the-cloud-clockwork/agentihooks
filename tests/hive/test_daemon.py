@@ -89,26 +89,52 @@ def _once(connection):
     return Mock(side_effect=[connection, AssertionError("reconnected")])
 
 
+def _quiet_quota(monkeypatch):
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
+
+
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     events = []
     connection = object()
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: events.append((redis, hive)))
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: events.append("refresh"))
+    monkeypatch.setattr(
+        daemon.quota_refresh,
+        "start",
+        lambda environ, worker, attempted_at: (
+            events.append(("start", environ, worker, attempted_at)) or ("worker", attempted_at + 1)
+        ),
+    )
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(daemon.time, "time", lambda: 50)
 
     def sleep(seconds):
         events.append(seconds)
-        raise KeyboardInterrupt
+        if events.count(15) == 2:
+            raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(_once(connection))
-    assert events == [(connection, "local"), 15]
+    environ = daemon.os.environ
+    assert events == [
+        "refresh",
+        ("start", environ, None, 50),
+        (connection, "local"),
+        15,
+        ("start", environ, "worker", 51),
+        (connection, "local"),
+        15,
+    ]
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
     timestamps = iter([100, 103])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
@@ -355,6 +381,8 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
 def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
     timestamps = iter([100, 116])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
@@ -388,6 +416,7 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
         server.connected = False
         now[0] = 2000.0
 
+    _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "machine")
     monkeypatch.setattr(
         daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
@@ -430,6 +459,7 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
         if len(waits) == 3:
             raise KeyboardInterrupt
 
+    _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", beat)
     monkeypatch.setattr(daemon.time, "sleep", sleeps.append)
@@ -441,6 +471,7 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypat
 
 
 def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch):
+    _quiet_quota(monkeypatch)
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", Mock(side_effect=ValueError("bad report")))
     monkeypatch.setattr(daemon.time, "sleep", Mock(side_effect=AssertionError("retried")))

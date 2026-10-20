@@ -31,8 +31,11 @@ agentihooks hive install          # user service that runs agentihooks hive run
 
 - `hive join` writes `~/.agentihooks/hive.env` (mode 0600) with the hive id, the swarm URL, a ledger credential
   and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
-- The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`. It
-  always serves TLS from `SWARM_TLS_DIR`.
+- The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
+  The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
+  and `--tls-key`, and refuses to serve on a non-loopback address without them. The join endpoint's request,
+  handler and Redis time limits, and the 503 it answers when Redis does not reply, are under
+  [Join service limits](#join-service-limits).
 - Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys;
   [Member keys](#member-keys) lists what lives there.
   A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
@@ -47,6 +50,127 @@ agentihooks hive install          # user service that runs agentihooks hive run
 
 A Kubernetes worker pod joins the same way from its entrypoint; see
 [Worker hives in Kubernetes](#worker-hives-in-kubernetes).
+
+## Repos and checkouts
+
+Each heartbeat reports the repos the hive can work in. `hive run` scans one folder, `HIVE_REPO_ROOT`, default
+`~/dev`: every direct child that is a git checkout, and every checkout one level below a child that is not one.
+Worktrees count; their origin is read from the shared git directory.
+
+For every checkout the hive reports two names, so a task matches whichever form its swarm uses:
+
+- the absolute path, such as `/home/me/dev/agentihooks`;
+- the origin identity, the `origin` remote as lowercase `host/owner/name`, such as
+  `github.com/the-cloud-clockwork/agentihooks`. A checkout with no `origin` remote reports only its path.
+
+```bash
+# Workers keep their clones under /srv/repos instead of ~/dev
+HIVE_REPO_ROOT=/srv/repos agentihooks hive run
+
+# The repos the swarm sees for one hive
+agentihooks hive show lab-vm        # the "repos" list
+```
+
+Placement drops a hive whose list lacks the task's repo, with "no hive for `<role>` lists the repo `<repo>`"
+("no headless hive for ..." when only headless hives were tried).
+When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
+the first by path when it holds several. A repo given as a path launches in that path.
+
+## Join service limits
+
+`agentihooks hive serve` answers `POST /hive/join` (a one time code for credentials) and `POST /hive/refresh` (a
+ledger credential for a new Redis password) on one thread per request. Every limit in this table is a constant in
+the service; no flag or environment variable changes one.
+
+| Limit | Value | Effect |
+|---|---|---|
+| Request body | 4096 bytes | A missing, oversize or non JSON body answers 400. |
+| Request socket timeout | 10 seconds | Bounds the TLS handshake and each read of the request. |
+| Concurrent handlers | 32 | A further connection waits until a handler gives its slot back. |
+| Request deadline | 30 seconds | The service shuts down the client socket of a request older than this. |
+| Redis socket timeout | 5 seconds | Bounds each socket operation of every Redis call the service makes, not a whole request: a request that makes several calls can hold its slot longer, and a Redis that keeps sending within 5 seconds is not cut off. A failed call is never retried. |
+
+The request deadline does not interrupt a handler waiting on Redis, which holds a separate connection, so the
+Redis client's own timeout is what frees a handler while Redis stalls. The swarm Redis client reads with a
+ten-second timeout; the join service lowers it to five seconds. A stalled call then raises after five seconds, the
+handler answers 503 and its slot is free for the next request.
+
+The service applies the bound when `agentihooks hive serve` builds the server. It sets the socket timeout on the
+Redis client it was given, sets the retry count to zero and drops every connection opened before, so no pooled
+connection keeps the earlier timeout. The swarm Redis client's three-second connect timeout is unchanged. It applies
+to each address tried, not to name lookup, and a `socket_connect_timeout` query argument in the Redis URL overrides
+it. A Redis that refuses the connection answers 503 at once; one that accepts it and stays silent answers after five
+seconds.
+
+### Answers
+
+| Status | Body `error` | Cause |
+|---|---|---|
+| 200 | none | The code or credential was accepted; the body carries the grant. |
+| 400 | `the body must be a JSON object with a string code` (`string ledger_credential` on refresh) | The body is missing, over 4096 bytes, not JSON, or lacks that string field. |
+| 403 | the refusal reason, such as `invite code is invalid, expired or already used` | The code or credential is not valid, or Redis returned an error other than a timeout, a lost connection or a refused login while the service wrote or refreshed the member. |
+| 404 | `not found` | The path is not `/hive/join` or `/hive/refresh`. |
+| 503 | `the hive Redis did not answer; try again` | A Redis call timed out, the connection to Redis was refused or dropped, or Redis refused the service's own login (`WRONGPASS`, `NOAUTH`). |
+
+The 503 text is fixed and carries no Redis detail. The service writes no request log, so for an answered request the
+client's reply is the only record.
+
+The first Redis call of a join, which deletes the invite, sits outside the 403 handling. A Redis error there other
+than a timeout, a lost connection or a refused login, such as an access control denial (`NOPERM`), gets no answer:
+the service prints a traceback to its standard error and closes the connection, and `hive join` reports the hive as
+unreachable.
+
+### What a client sees
+
+```text
+$ agentihooks hive join https://swarm.example.internal:8770 <code>
+hive join refused: the hive Redis did not answer; try again
+
+$ agentihooks hive refresh
+hive refresh refused: the hive Redis did not answer; try again
+```
+
+Both commands exit 1. The bound is per Redis call. When Redis stalls after the invite was deleted, a join spends one
+timeout on writing the member and a second on removing it, about ten seconds, which is as long as the client waits. The
+client may then report the timeout instead of the 503:
+
+```text
+hive join refused: the hive at https://swarm.example.internal:8770 is unreachable (timed out)
+```
+
+A hive whose own Redis credential was refused refreshes it through this service. When the service answers 503, the
+swarm Redis client raises `AuthenticationError` with `the hive Redis credential was refused and the hive refused a
+refresh (the hive Redis did not answer; try again)`. The `hive` commands print a `refused` line only for their own
+refusals. This error comes from the swarm's `redis_client()` helper, so commands that open the swarm Redis, such as
+`hive list`, `hive set`, `hive show` and `hive run`, end with a traceback whose last line carries this text.
+
+### Check the bound against a live service
+
+A made-up code reaches Redis through the service without consuming a real invite. Add `--cacert` for a private
+certificate authority.
+
+```bash
+curl -sS -m 15 -w '\nstatus %{http_code} in %{time_total}s\n' \
+  -d '{"code":"not-a-real-code"}' https://swarm.example.internal:8770/hive/join
+```
+
+| Redis state | Output |
+|---|---|
+| Answering | `{"error": "invite code is invalid, expired or already used"}` and `status 403` at once |
+| Accepting the connection, never replying | `{"error": "the hive Redis did not answer; try again"}` and `status 503` after about 5 seconds |
+
+The CI test `test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound` runs both routes
+against a listener that accepts connections and never replies, with one handler slot and a Redis timeout of one
+second: each answers 503 and the slot is free within twice that timeout.
+
+### Join service troubleshooting
+
+| Symptom | Reading | Action |
+|---|---|---|
+| `hive join` answers 503 or reports the hive unreachable, then the same code answers `invite code is invalid, expired or already used` | The service deletes the invite with its first Redis call, so a call that Redis applied before the timeout, or a later call that failed, leaves the code used. On a Redis error it tries to remove the partly created member. | Run `agentihooks hive invite <name>` on the swarm host for a new code. |
+| `hive refresh` answers 503 | The refresh did not complete, or completed without the reply reaching the client. | Run `agentihooks hive refresh` again. Each success replaces the previous Redis password, and the command takes a per-host lock so two callers do not retire each other's password. |
+| Every join and refresh answers 503 | Redis is stalled, unreachable or refusing the service's connection. | From the swarm host, run `agentihooks hive list`. It opens its own Redis connection with a 3-second connect and 10-second read timeout, so an error or a pause there points at Redis and not at the join service. Fix Redis, then repeat the request. |
+| 403 text `Redis refused the new member (...)` or `Redis refused the refreshed member (...)` | Redis returned an error other than a timeout, a lost connection or a refused login; see Answers. | Read the detail in the message. |
 
 ## Member keys
 
@@ -214,9 +338,9 @@ hive over an ephemeral one, then the hive id.
 the headless hives first and takes the UI hive only when no headless hive taking the role has room or none is live.
 A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
 agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. UI roles take only UI hives; the master keeps its headless fallback below. The
-engineer, cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa
-profile on any lane places as its UI role.
+hive records the pin as its reason. UI roles, the master included, take only UI hives. The engineer, cicd, planner
+and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
+its UI role.
 
 When no live hive takes the role:
 
@@ -228,14 +352,21 @@ A hive counts as live while its last heartbeat is under ninety seconds old. Code
 
 ### Master placement
 
-The master is placed in three tiers, each tried in `prefer` order:
+The master follows the same host rule as role placement: it runs only on a live UI hive with the `master` role
+that lists the repo. It is placed in two tiers, each tried in `prefer` order:
 
 1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
 2. A UI hive with the `master` role and a subscription or api slot for that harness.
-3. A headless hive, `ui=no`, with a subscription or api slot, whatever its roles.
 
-Every tier also needs the hive to be live and to list the repo. With no candidate the master waits with "no live
-hive can run the master with interactive, subscription or api authentication".
+A headless hive never runs the master, whatever its roles.
+
+A hive names a subscription slot by its `AH_CC_TOKEN_<slug>` slug; a hosted controller names the same account by
+its Secret key. The two may differ only in `_` against `-`, and master placement treats them as one account. A
+master on a hive is held to the session cap that hive reports for the account, not the hosted controller's cloud
+worker cap. The hive computes that cap from its own quota reading of the account, with the bands in
+[Claude account load balancing](load-balancing.md), and reports 0 while it has no fresh reading. When the
+reservations on the account already reach the cap, the launch is not started and reports "account reservation is
+full".
 
 ### Who writes placement
 
@@ -295,14 +426,16 @@ Limitations:
 | A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
 | A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
 
-## Headless fallback
+## Workstation fallback
 
-When every UI hive is gone, the master still runs: tier three starts it on a headless hive through the same hive
-launch, on a subscription or api slot. Two health findings mark the state until it ends:
+When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
+login for the master's harness, the hive controller leaves the master to the workstation herdr server. It refuses
+the launch with "the workstation hive spawns master work" followed by the placement reason, and the tick reports
+that line in its actions.
 
-- `master-headless`: the master runs on a headless hive.
-- `master-fallback-auth`: the master wanted its interactive login and runs on another route, so phone access
-  through Remote Control is lost.
+The `master-headless` health finding marks a master record placed on a headless hive before this rule. The
+`master-fallback-auth` finding marks a master that wanted its interactive login and runs on another route, so phone
+access through Remote Control is lost.
 
 Placement runs at every master launch, so the successor after the next handoff goes back to the best UI hive that
 is live then. `agentihooks swarm <id> master move --to HIVE` forces that move without waiting: the master hands
@@ -499,6 +632,27 @@ Fencing stops a superseded agent or controller from acting after its replacement
 - **Ledger source.** Moving a workstation ledger into the hosted service with `--freeze` fences the source: its
   SQLite database refuses writes with "ledger moved to hosted service" and media writes answer 409.
 
+## Launches on a hive
+
+The controller hands a hive a launch order; the hive's own Redis user receives it, launches the agent and writes
+the acknowledgement the controller reads. What the order's payload carries and what the hive writes from it are in
+[Prompt and workspace transport](#prompt-and-workspace-transport).
+
+### Refusal causes
+
+A launch the hive cannot complete is acknowledged `failed` with a cause, and the controller records the launch as
+failed with "hive launch failed: `<cause>`".
+
+| Cause | Meaning |
+|---|---|
+| `identity` | The order does not match the admitted execution: generation, lane, task, harness, profile, account slot, route, target hive or state differ, the seat holds a newer execution, or the started agent reported a different harness, profile or account. |
+| `prompt` | The payload is missing, is not the order's task, or carries no opening prompt or a digest that does not match it. |
+| `stale_epoch` | The order's controller epoch is older than the current controller lease when the hive takes it. |
+| `refused` | The controller epoch moved on between the order check and the launch or right after it, or the launch raised a swarm error. |
+| `expired` | The order expired before the hive took it, or the agent started after the expiry; the hive stops such an agent. |
+| `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
+| `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
+
 ## Hive placement for one swarm on a local machine
 
 A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
@@ -523,6 +677,12 @@ home. Credentials come from ExternalSecrets by name. The hive id is the one mint
 replicas that mount the same credential would report the same hive id and agent limit; the chart refuses
 `workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
 credential is installed.
+
+The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
+2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
+places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
+below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
+network, so it schedules on any node.
 
 ## Ledger Hives panel
 
@@ -681,6 +841,14 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 | An edit shows `prefer names qa, a role this hive does not take` | `prefer` named a role missing from `roles`. | Add the role first, then the rank. |
 | move master stays off | The hive is quiet, the master is already there, or a control is pending. | Wait for the hive's heartbeat or the pending control. |
 | A hive stays `quiet` | `hive run` is not publishing. | `systemctl --user status agentihooks-hive` on that machine. |
+
+## Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A launch waits with "no hive for `<role>` lists the repo `<repo>`" | `agentihooks hive show <id>`, the `repos` list | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the swarm's repo name, or point `HIVE_REPO_ROOT` at the clones. |
+| A launch waits with "no live hive takes" a role | `agentihooks hive list`: `stale` hives, roles | Restart `agentihooks hive run` (`agentihooks hive install` keeps it running), or add the role with `agentihooks hive set`. |
+| A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | A `cap` of 0 means the hive has no fresh quota reading for the account; otherwise end a session on that account or wait for its five hour window to recover. |
 
 ## Related pages
 

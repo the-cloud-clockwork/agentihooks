@@ -1,3 +1,5 @@
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -88,3 +90,46 @@ def test_release_grading_preserves_legacy_collection_and_dev_never_uses_it():
     assert legacy["if"] == install["if"] == "github.event.pull_request.base.ref == 'main'"
     assert trusted["if"] == download["if"] == "github.event.pull_request.base.ref != 'main'"
     assert legacy["run"] == "python -m tests.shard_check shard-durations/*/durations.json"
+
+
+_ACTIONS_SHELLS = {None: ["bash", "-e"], "bash": ["bash", "--noprofile", "--norc", "-eo", "pipefail"]}
+
+
+def _run_summary_step(tmp_path, python_body):
+    step = next(s for s in _jobs()["shard-check"]["steps"] if s.get("name") == "Summarize reused, ran and flaky tests")
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    fake = bin_dir / "python"
+    fake.write_text(f"#!/usr/bin/env bash\n{python_body}\n")
+    fake.chmod(0o755)
+    script = tmp_path / "step.sh"
+    script.write_text(step["run"])
+    summary = tmp_path / "summary.md"
+    env = {
+        "PATH": f"{bin_dir}:{os.environ['PATH']}",
+        "GITHUB_STEP_SUMMARY": str(summary),
+        "PYTHON_VERSION": "3.12",
+        "PLAN": "plan.json",
+    }
+    result = subprocess.run(
+        [*_ACTIONS_SHELLS[step.get("shell")], str(script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    return result, summary.read_text() if summary.exists() else ""
+
+
+def test_shard_summary_step_goes_red_when_the_summary_command_crashes(tmp_path):
+    result, _ = _run_summary_step(tmp_path, "echo 'No module named tests.shard_summary' >&2\nexit 1")
+    assert result.returncode != 0
+    assert "No module named tests.shard_summary" in result.stderr
+
+
+def test_shard_summary_step_passes_and_writes_a_normal_summary(tmp_path):
+    result, summary = _run_summary_step(tmp_path, "echo 'Ran 12 tests'")
+    assert result.returncode == 0
+    assert "Ran 12 tests" in result.stdout
+    assert "Ran 12 tests" in summary
