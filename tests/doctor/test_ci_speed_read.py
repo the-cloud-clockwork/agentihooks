@@ -354,6 +354,30 @@ def test_one_run_attempt_raises_when_the_api_fails():
         ci_speed_read.attempt(42, 1, run=run)
 
 
+@pytest.mark.parametrize("jobs, complete", [(1900, True), (1901, False)])
+def test_one_run_attempt_allows_twenty_requests_by_default(jobs, complete):
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api(jobs=[{"id": n} for n in range(jobs)])
+    if complete:
+        assert len(ci_speed_read.attempt(42, 1, run=run)["jobs"]) == jobs
+    else:
+        with pytest.raises(RuntimeError, match="budget exhausted"):
+            ci_speed_read.attempt(42, 1, run=run)
+    assert len(calls) == 20
+
+
+def test_one_run_attempt_allows_sixty_seconds_by_default(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    clock = iter([0, 59.5])
+    monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: next(clock, 60))
+    run, calls = api()
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        ci_speed_read.attempt(42, 1, run=run)
+    assert [kwargs["timeout"] for _, kwargs in calls] == [0.5]
+
+
 def test_the_default_request_budget_stops_after_sixty_calls():
     from scripts.doctor import ci_speed_read
 

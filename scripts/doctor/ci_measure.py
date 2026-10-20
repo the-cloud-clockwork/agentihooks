@@ -45,10 +45,10 @@ def _scope(labels):
 def waits(run: dict, kind: str, now_ms: int) -> dict[tuple, int]:
     longest = {}
     for job in run["jobs"]:
-        began = ci_speed.started(job)
-        if began != (kind == RUNNER_WAIT):
+        started = ci_speed.started(job)
+        if started != (kind == RUNNER_WAIT):
             continue
-        end = job["started_at"] if began else job.get("completed_at")
+        end = job["started_at"] if started else job.get("completed_at")
         labels = tuple(sorted(set(job["labels"])))
         elapsed = (iso_ms(end) if end else now_ms) - iso_ms(job["created_at"])
         longest[labels] = max(longest.get(labels, 0), elapsed)
@@ -110,5 +110,5 @@ def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) ->
     if not snapshot["complete"]:
         raise SwarmError(snapshot["error"])
     found = samples(goal.kind, snapshot["runs"], now_ms)
-    for name in [scope] if scope is not None else sorted(found) or ["all"]:
+    for name in [scope] if scope is not None else (sorted(found) or ["all"]):
         yield line(goal.kind, name, found.get(name, []), window)
