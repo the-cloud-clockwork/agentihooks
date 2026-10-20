@@ -222,3 +222,32 @@ def test_orphan_ending_refuses_a_projection_restored_during_the_transaction(stor
         assert store.execution_registry.end_orphan("fixture", agent) is False
     assert store.execution("fixture", agent.execution_id) == agent
     assert store.agents("fixture") == [agent]
+
+
+def test_a_remote_process_reported_after_the_live_snapshot_is_preserved(store):
+    from types import SimpleNamespace
+
+    agent = started(store)
+    store.redis.hdel(store.key("fixture", "agents"), agent.name)
+    runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
+    with patch("scripts.hive.reports.host", return_value="remote"), patch(
+        "scripts.hive.reports.Reports.read", return_value={"names": [agent.name]}
+    ):
+        assert store.execution_registry.reconcile("fixture", runtime) == []
+    assert store.execution("fixture", agent.execution_id) == agent
+
+
+def test_orphan_ending_preserves_terminal_executions_and_absent_replacements(store):
+    first = started(store)
+    replacement = store.start_execution(
+        "fixture", AgentRecord(first.name, "eng", "task", seat=first.seat), first.execution_id
+    )
+    store.redis.hdel(store.key("fixture", "agents"), first.name)
+    assert store.execution_registry.end_orphan("fixture", first) is False
+    assert store.execution("fixture", first.execution_id) == first
+    assert store.execution("fixture", replacement.execution_id) == replacement
+    terminal = replace(replacement, state="finished")
+    store.put_agent("fixture", terminal)
+    store.redis.hdel(store.key("fixture", "agents"), first.name)
+    assert store.execution_registry.end_orphan("fixture", terminal) is False
+    assert store.execution("fixture", terminal.execution_id) == terminal
