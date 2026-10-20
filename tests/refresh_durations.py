@@ -86,7 +86,7 @@ def local_samples(folder: Path) -> list[dict[str, float]]:
     return runs
 
 
-def main(argv: list[str] | None = None) -> None:
+def parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ci", type=int, default=0, metavar="RUNS", help="take the durations CI kept from its last RUNS runs"
@@ -95,7 +95,11 @@ def main(argv: list[str] | None = None) -> None:
     parser.add_argument(
         "--samples", type=Path, help="read run folders from here instead of GitHub, keeping only the newest RUNS"
     )
-    args = parser.parse_args(argv)
+    return parser
+
+
+def main(argv: list[str] | None = None) -> None:
+    args = parser().parse_args(argv)
     candidates = {}
     collected = collected_tests(_ROOT)
     with tempfile.TemporaryDirectory() as tmp:
@@ -145,13 +149,14 @@ def cli(argv: list[str] | None = None) -> None:
         cause = str(error) or type(error).__name__
     else:
         return
-    known = argparse.ArgumentParser(add_help=False)
-    known.add_argument("--samples", type=Path)
-    known.add_argument("--ci-run")
-    parsed, _ = known.parse_known_args(args)
-    if parsed.samples and parsed.ci_run and parsed.samples.is_dir():
-        if lost := missing_shards(parsed.samples, parsed.ci_run):
-            cause += f"; run {parsed.ci_run} kept no samples from {', '.join(lost)}"
+    parsed = parser().parse_args(args)
+    if (
+        parsed.samples
+        and parsed.ci_run
+        and parsed.samples.is_dir()
+        and (lost := missing_shards(parsed.samples, parsed.ci_run))
+    ):
+        cause += f"; run {parsed.ci_run} kept no samples from {', '.join(lost)}"
     print(f"::error::refresh durations: {' '.join(cause.split())}")
     raise SystemExit(1)
 

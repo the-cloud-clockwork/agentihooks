@@ -86,9 +86,7 @@ def test_every_failure_prints_one_named_line(monkeypatch, capsys, error, line):
 def test_a_usage_exit_and_a_success_keep_their_own_outcome(monkeypatch, capsys):
     monkeypatch.setattr(refresh_durations, "main", lambda argv: None)
     assert refresh_durations.cli(["--ci-run", "3"]) is None
-    monkeypatch.setattr(
-        refresh_durations, "main", lambda argv: refresh_durations.argparse.ArgumentParser().parse_args(argv)
-    )
+    monkeypatch.setattr(refresh_durations, "main", lambda argv: refresh_durations.parser().parse_args(argv))
     with pytest.raises(SystemExit) as stopped:
         refresh_durations.cli(["--unknown"])
     assert stopped.value.code == 2
