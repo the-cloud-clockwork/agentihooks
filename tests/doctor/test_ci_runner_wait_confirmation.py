@@ -218,3 +218,11 @@ def test_an_unconfirmed_queue_age_is_held_until_it_outlasts_the_next_doctor_pass
     assert finding.id == AGE_ID
     assert finding.measure == 901
     assert finding.threshold == "unconfirmed queue age over 15 minutes"
+
+
+def test_a_confirmed_wait_retracts_an_earlier_queue_age_of_its_still_queued_siblings():
+    late = {**REFINE, "id": 1, "started_at": "2026-10-19T15:37:00Z"}
+    sibling = {**OLD, "id": 2}
+    assert [finding.id for finding in ci_speed.findings([{**PREFLIGHT, "jobs": [sibling]}], 0, FOUND_AT)] == [AGE_ID]
+    gone = ci_speed.cleared([{**PREFLIGHT, "jobs": [late, sibling]}])
+    assert gone == [AGE_ID]
