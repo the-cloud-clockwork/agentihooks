@@ -475,7 +475,7 @@ gh api --paginate \
   --jq '.jobs[] | select(.name == "unit (3.12, 1)") | {html_url, conclusion, steps: [.steps[] | select(.name | contains("Codex CLI"))]}'
 ```
 
-Measure execution time from each job's `started_at` to `completed_at`, excluding time waiting for a runner. Compare shards within Python 3.12 in the same run; Python 3.11 runs a different workload. List the completed successful shards from slowest to fastest:
+Measure execution time from each job's `started_at` to `completed_at`, excluding time waiting for a runner. Compare shards within the same run. List the completed successful shards from slowest to fastest:
 
 ```bash
 gh api --paginate \

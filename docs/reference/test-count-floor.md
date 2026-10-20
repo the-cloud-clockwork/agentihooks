@@ -10,7 +10,7 @@ The `test-count` job in the Tests workflow fails when the head collects fewer te
 
 ## Where it runs
 
-`test-count` runs on Python 3.11 and 3.12 for pull requests, merge groups and dispatched runs that pass admission. Pushes do not run it. It checks out the base revision into a second worktree and runs the base revision's own `tests/count_floor.py`:
+`test-count` runs on Python 3.12 for pull requests, merge groups and dispatched runs that pass admission. Pushes do not run it. It checks out the base revision into a second worktree and runs the base revision's own `tests/count_floor.py`:
 
 ```bash
 cd "$RUNNER_TEMP/base"

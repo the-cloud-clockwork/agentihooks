@@ -11,7 +11,7 @@ Start the packaged swarm service bundle for **Claude Code and Codex**. It provid
 
 ## Prerequisites
 
-Install Python 3.11 or later, Docker with a running daemon, and the Docker Compose plugin. Install AgentiHooks:
+Install Python 3.12 or later, Docker with a running daemon, and the Docker Compose plugin. Install AgentiHooks:
 
 ```bash
 uv tool install agentihooks
