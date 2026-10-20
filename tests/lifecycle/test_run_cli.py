@@ -1,6 +1,8 @@
 import fcntl
 import json
 
+import pytest
+
 from hooks.lifecycle.model import Holder, Root
 from hooks.lifecycle.run import sweep
 from scripts import gc_cli
@@ -87,3 +89,19 @@ def test_unused_root_kinds_do_not_break_the_sweep(tmp_path):
     root = Root("missing", str(tmp_path / "absent"), "scratch", 7, 1)
     report = sweep([root], snap(), tmp_path / "state")
     assert report["findings"] == []
+
+
+def test_make_room_evicts_through_the_cli_and_skips_the_sweep(repo, monkeypatch, capsys):
+    from hooks.lifecycle import evict
+
+    done = repo.worktree("done")
+    monkeypatch.setattr(gc_cli, "take_snapshot", lambda: snap())
+    monkeypatch.setattr(evict, "free_gb", lambda _path: 1000)
+    monkeypatch.setattr(gc_cli, "sweep", lambda **_kwargs: pytest.fail("make-room ran the sweep"))
+    monkeypatch.setattr(gc_cli.herdr_gc, "run", lambda *_args: pytest.fail("make-room ran the herdr cleanup"))
+    argv = ["gc", "--make-room", str(repo.primary), "--root", str(repo.trees)]
+    assert gc_cli.main([*argv, "--min-free-gb", "0", "--max-per-repo", "1"]) == 0
+    assert capsys.readouterr().out == f"wt: evicted {done}: removed\n"
+    assert not done.exists()
+    assert gc_cli.main([*argv, "--min-free-gb", "0", "--max-per-repo", "1"]) == 0
+    assert capsys.readouterr().out == ""
