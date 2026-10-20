@@ -92,7 +92,9 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
-        if role in registry.UI_ROLES and not any(hive["ui"] == "yes" and registry.live(hive, now) for hive in hives):
+        if (role in registry.UI_ROLES or lane == "master") and not any(
+            hive["ui"] == "yes" and registry.live(hive, now) for hive in hives
+        ):
             return self._record_wait(lane, task, placement.Wait(placement.NO_UI_HIVE))
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
