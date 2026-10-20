@@ -30,7 +30,7 @@ python3 - <<'PY'
 import os, re, shlex, sys
 from pathlib import Path
 
-keep = re.compile(r'^(AH_|AGENTIHOOKS_|HIVE_|SWARM_|BRAIN_|LANGFUSE_|MCP_|OPENBAO_|REDIS_|SSL_CERT_FILE)')
+keep = re.compile(r'^(AH_|AGENTIHOOKS_|HIVE_|SWARM_|SSL_CERT_FILE)')
 kept = {k: v for k, v in sorted(os.environ.items()) if keep.match(k) and '\n' not in v}
 for k in [k for k, v in kept.items() if "'" in v]:
     print(f'worker-hive: {k} holds a single quote, which python-dotenv cannot read back; left out', file=sys.stderr)
@@ -41,6 +41,7 @@ target.write_text('\n'.join(lines) + '\n')
 target.chmod(0o600)
 PY
 if [[ -n "${HIVE_SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
+  sshd="${HIVE_SSHD:-/usr/sbin/sshd}"
   ssh_state="$AGENTIHOOKS_HOME/ssh"
   mkdir -p "$ssh_state"
   if [[ -n "${HIVE_SSH_HOST_KEY_FILE:-}" ]]; then
@@ -48,6 +49,7 @@ if [[ -n "${HIVE_SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
   elif [[ ! -f "$ssh_state/host_key" ]]; then
     ssh-keygen -q -t ed25519 -N '' -f "$ssh_state/host_key"
   fi
+  # StrictModes off: the keys come from a read-only Secret mount the worker cannot write.
   cat > "$ssh_state/sshd_config" <<EOF
 Port ${HIVE_SSH_PORT:-2222}
 ListenAddress 0.0.0.0
@@ -70,8 +72,8 @@ PermitUserEnvironment no
 SetEnv PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin AGENTIHOOKS_HOME=$AGENTIHOOKS_HOME
 LogLevel VERBOSE
 EOF
-  /usr/sbin/sshd -t -f "$ssh_state/sshd_config"
-  /usr/sbin/sshd -D -e -f "$ssh_state/sshd_config" &
+  "$sshd" -t -f "$ssh_state/sshd_config"
+  "$sshd" -D -e -f "$ssh_state/sshd_config" &
   sshd_pid=$!
   sleep 1
   kill -0 "$sshd_pid"
