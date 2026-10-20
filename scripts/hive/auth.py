@@ -20,10 +20,11 @@ PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
-# Outside the member's own keys, what its engineers write for swarm done, ready, park and status.
+# Only keys a traced worker command writes; an entry with no writer widens every member's login.
 WORKER_KEYS = (
     "swarm:*:agents",
     "swarm:*:executions",
+    "swarm:*:identity-conflicts",
     "swarm:*:desired-routes",
     "swarm:*:state-since",
     "swarm:*:claim:*",
