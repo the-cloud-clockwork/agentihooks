@@ -840,6 +840,56 @@ instead. For an intentional re-export, write `import name as name` or list the
 name in `__all__`; ruff accepts both without a suppression. Old suppressed
 lines outside the diff still pass, because they are not changed lines.
 
+#### Touched functions
+
+The size and complexity stage grades a function only when its syntax tree
+differs from the same named function at the merge base. The comparison
+ignores line and column positions, so reformatting, rewrapping or reindenting
+a function, moving it within the file, or editing comments inside it leaves it
+untouched and ungraded, however far over a limit it already is. A change to
+its statements, arguments, decorators, default values or docstring touches
+it, as does a change to a function nested inside it. Every function in a new
+file, and a function new to a file, is touched. File length is graded for
+every changed file.
+
+Function names are qualified by their enclosing classes and functions
+(`Reconciler.apply`, `outer.inner`); a repeated name in one file gets a
+counter (`handler#2`).
+
+#### Shrink only allowlist
+
+The fallback reads `tests/SIZE_ALLOWLIST.json` from the merge base, never from
+the worktree, so an entry added or raised on a branch has no effect on that
+branch's push. A repository without the file has no allowlist. The file uses
+the `scripts.size_limits` format: function entries are keyed
+`<path>::<qualified name>`, file entries by path.
+
+```json
+{
+  "scripts/reconcile.py::reconcile_unit": {"C901": 25, "PLR0912": 25},
+  "scripts/reconcile.py::Reconciler.apply": {"PLR0913": 9, "function-lines": 340},
+  "scripts/reconcile.py": {"file-lines": 3400}
+}
+```
+
+`C901`, `PLR0912` and `PLR0913` grade the rule of that name, `function-lines`
+the function length and `file-lines` the file length. A listed unit's cap is
+the smaller of its listed value and its merge base value when the unit is
+already over its limit at the base, and the listed value otherwise. An
+allowlisted offender that is over its limit at the base can therefore stay
+the same size or shrink, never grow, and raising its entry gives it no extra
+room. Over its cap it fails with `grew from <cap> to <head>`.
+
+Measured in [pull request 4082](https://github.com/the-cloud-clockwork/agentihooks/pull/4082)
+on litellm-state `origin/dev` 53949d4, `scripts/reconcile.py`, a file with ten
+existing complexity offenders, among them `reconcile_unit` at `C901` 25:
+
+| Change | Result |
+|---|---|
+| A format only rewrite of 175 lines, including `reconcile_unit` | Passes: no function's logic changed |
+| A new 8 argument function carrying `# noqa: PLR0913` | Fails: `proof_wide PLR0913 ... (8 > 7)`; the suppression is ignored |
+| One extra branch planted in `reconcile_unit` | Fails: `C901` and `PLR0912` grew from 25 to 26 |
+
 #### Reports and failures
 
 A failed gate stops the publication. The error names the fallback and the
@@ -853,7 +903,7 @@ finding is one report line:
 | `path:row: would reformat a changed line` | `ruff format` would rewrite that changed line; `row` is the first such line. Run `ruff format path` and review the diff. |
 | `path: name RULE message` | A touched function over a complexity limit. |
 | `path: name exceeds 300 lines` or `path: file exceeds 3000 lines` | A touched function or changed file over its size limit. |
-| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base grew. |
+| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base, or listed in the allowlist, grew above its base value or cap `N`. |
 | `ruff check exited N` or `ruff format exited N` | Ruff could not run, usually an invalid ruff configuration in the repository. When ruff writes its own error, the publication error shows that text instead of this line. |
 
 On a pass the gate records the passing head, which `publish` requires before
