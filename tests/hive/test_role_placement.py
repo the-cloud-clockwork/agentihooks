@@ -263,6 +263,64 @@ def test_master_fill_spawns_a_refused_seat_two_master_on_the_workstation_herdr_s
     assert actions[0].endswith("in seat master-2@sw")
 
 
+def test_only_the_counted_master_seats_route_to_hive_placement(setup):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
+    router = hive_controller(setup).runtime.router
+    assert [router.placed_backend("master", {"id": seat}) for seat in ("master-0", "master-3", "master-4")] == [
+        "local",
+        "hive",
+        "local",
+    ]
+
+
+def test_the_workstation_probe_asks_the_herdr_server_named_by_the_environment(monkeypatch):
+    import os
+
+    from scripts import herdr_host
+    from scripts.swarm import controller
+
+    seen = []
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: seen.append(environ) or True)
+    assert controller._workstation_herdr() is True
+    assert seen == [dict(os.environ)]
+
+
+@pytest.mark.parametrize(
+    ("task", "placed"),
+    [({"id": "d"}, "original runtime"), ({"id": "d", "hive": "workstation"}, "hive runtime")],
+    ids=["unpinned", "pinned"],
+)
+def test_a_non_hive_lane_spawns_through_the_original_runtime_unless_pinned_to_a_hive(setup, task, placed):
+    from unittest.mock import Mock
+
+    fenced = hive_controller(setup)
+    fenced.runtime.hive_launch.select = Mock(return_value=Choice("workstation"))
+    original = Mock()
+    original.router.placed_backend.return_value = "kubernetes"
+    original.router.enabled_backend.return_value = "kubernetes"
+    original.spawn.return_value = "original runtime"
+    fenced.runtime.original_runtime = original
+    fenced.runtime.spawn = Mock(return_value="hive runtime")
+    assert fenced.placement_refusal("dispatch", task) == ""
+    assert fenced.spawn(setup.config, "dispatch", "dispatch name", task) == placed
+
+
+def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(setup):
+    from scripts.swarm import controller
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+    from tests.swarm.test_tick import FakeRuntime
+
+    herdr = FakeRuntime()
+    routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, controller.LOCAL)
+    fenced.spawn(setup.config, "dispatch", "dispatch name", {"id": "d"})
+    assert herdr.spawned == [("dispatch", "dispatch name", "d")]
+
+
 def host(hive_id: str, ui: str, **fields) -> dict:
     return hive(hive_id, **{"ui": ui, "roles": ["eng"] if ui == "no" else ALL_ROLES, "max_agents": 4, **fields})
 
