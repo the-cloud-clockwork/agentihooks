@@ -39,7 +39,9 @@ def test_the_server_ends_an_idle_writer_lock_holder_and_the_waiting_writer_commi
     thread = threading.Thread(target=write, daemon=True)
     thread.start()
     try:
-        assert written.wait(PATIENCE), failed or f"the second writer still waited after {PATIENCE} s behind an idle holder"
+        assert written.wait(PATIENCE), (
+            failed or f"the second writer still waited after {PATIENCE} s behind an idle holder"
+        )
         assert idle_holders() == 0
     finally:
         holder.close()
