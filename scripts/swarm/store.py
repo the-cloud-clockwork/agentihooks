@@ -433,6 +433,8 @@ class RedisStore:
                             reason = "handed off"
                         pipe.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
                     for agent in executions:
+                        if agent.state in ("ended", "finished"):
+                            continue
                         pipe.hset(
                             self.key(slug, "executions"),
                             agent.execution_id,

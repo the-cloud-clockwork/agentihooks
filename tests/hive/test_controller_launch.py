@@ -349,14 +349,12 @@ def test_expired_order_of_a_retired_claimant_is_ended_and_replaced(setup):
     setup.store.execution_registry.update("fixture", replace(agent, state="working"))
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.store.drop_agent("fixture", request.name)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
     other = request_for(setup)
     setup.launcher.wait = Mock(return_value="pending")
     assert setup.launcher.spawn(other) == "pending"
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
-    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
-        "reason": "hive launch order abandoned",
-        "generation": order.generation,
-    }
+    assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
     replacement = setup.launcher.orders_for("task")
     assert replacement.execution_id != order.execution_id
     assert setup.store.execution_registry.get("fixture", replacement.execution_id).name == other.name

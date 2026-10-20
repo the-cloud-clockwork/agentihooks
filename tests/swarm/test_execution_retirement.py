@@ -51,14 +51,15 @@ def test_drop_ends_execution_in_the_transaction_that_removes_its_agent(store):
 
 
 @pytest.mark.parametrize(
-    ("state", "handoff", "reason"),
+    ("state", "handoff", "reason", "terminal"),
     [
-        ("working", "", "retired"),
-        ("finished", "", "finished"),
-        ("working", "continuation", "handed off"),
+        ("working", "", "retired", "ended"),
+        ("finished", "", "finished", "finished"),
+        ("ended", "", "retired", "ended"),
+        ("working", "continuation", "handed off", "ended"),
     ],
 )
-def test_drop_preserves_history_and_clears_all_agent_indexes(store, state, handoff, reason):
+def test_drop_preserves_history_and_clears_all_agent_indexes(store, state, handoff, reason, terminal):
     agent = started(store)
     store.put_agent("fixture", replace(agent, state=state))
     previous = json.loads(store.redis.hget(store.key("fixture", "agents"), agent.name))
@@ -69,7 +70,7 @@ def test_drop_preserves_history_and_clears_all_agent_indexes(store, state, hando
         patch("scripts.swarm.store.time.time", return_value=1.234),
     ):
         store.drop_agent("fixture", agent.name)
-    assert store.execution("fixture", agent.execution_id).state == "ended"
+    assert store.execution("fixture", agent.execution_id).state == terminal
     assert [json.loads(raw) for raw in store.redis.lrange(store.key("fixture", "history"), 0, -1)] == [
         {**previous, "ended_at": 1234, "reason": reason}
     ]
