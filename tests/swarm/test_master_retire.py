@@ -154,6 +154,30 @@ def test_a_launch_check_failure_asks_a_reported_master_for_a_handoff_first(swarm
     assert runtime.killed == [master.name]
 
 
+def test_a_failed_launch_retires_a_master_whose_ask_item_is_gone(swarm, monkeypatch):
+    from hooks.context import profile_chain
+
+    monkeypatch.setattr(profile_chain, "read_state", lambda: {})
+    store, runtime, ledger, master = swarm
+    launch_check.begin(store, "sw", master, 100)
+    tick("sw", store, ledger, runtime, 100 + launch_check.DEADLINE_MS)
+    (ask,) = asks(store, master.name)
+    store.redis.delete(*store.redis.keys(f"*{ask.id}*"))
+    actions = tick("sw", store, ledger, runtime, 100 + launch_check.DEADLINE_MS + WAIT)
+    assert any(a.startswith(f"retired {master.name} after its launch check failed") for a in actions), actions
+    assert runtime.killed == [master.name]
+    assert master_retire.reason(store, "sw", master.name) == ""
+
+
+def test_forget_counts_a_missing_ask_item_as_already_forgotten(swarm):
+    store, _, _, master = swarm
+    record = {"at": 200, "reason": "test", "item": "gone", "world": "hive-a"}
+    store.redis.hset(store.key("sw", "master-retire-requests"), master.name, json.dumps(record))
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert master_retire.reason(store, "sw", master.name) == ""
+    assert master_retire.forget(store, "sw", master.name) is False
+
+
 def test_an_idle_master_that_hands_off_is_retired_and_not_respawned(swarm):
     store, runtime, ledger, master = swarm
     hours = 6 * 60 * 60 * 1000
