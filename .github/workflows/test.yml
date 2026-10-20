@@ -978,7 +978,6 @@ jobs:
             python -m tests.queue_shards --root . --collection "$collection" --version "$version" --reused "$reused" --output queue-plan.txt
             cp .test_durations durations.sha256 "$destination/"
           done
-          # Python 3.11 runs in the dev push run after merge, so the queue sizes runners for 3.12 alone.
           sed -i 's/^queue_311=.*/queue_311=/' queue-plan.txt
           python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
           cp queue-input/3.11/.test_durations .test_durations
