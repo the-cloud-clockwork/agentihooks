@@ -184,9 +184,7 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
 
 
 def gap_agents(record: dict, limits: Limits) -> list[str]:
-    return sorted(
-        {_agent(t) for t in record["traces"] if any(m > limits.turn_gap_minutes for _, _, m in _gaps(t))}
-    )
+    return sorted({_agent(t) for t in record["traces"] if any(m > limits.turn_gap_minutes for _, _, m in _gaps(t))})
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
