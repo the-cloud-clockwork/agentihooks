@@ -1,3 +1,4 @@
+import time
 from datetime import datetime, timezone
 
 import pytest
@@ -156,6 +157,39 @@ def test_waits_group_by_the_sorted_distinct_label_set():
 def test_an_old_subject_floors_the_longest_wait_to_whole_seconds():
     goal = ci_measure.target("ci-runner-wait/24-1-117")
     assert ci_measure.value(goal, run(24, [job(-1000, -499.5)]), NOW) == (500, None)
+
+
+def test_a_job_that_started_at_once_waited_zero():
+    assert ci_measure.waits(run(25, [job(-100, -100)]), "ci-runner-wait", NOW) == {("anton-oss",): 0}
+
+
+ACTIVE = {**run(26, [job(-1000, -990, name="Gate — Required"), job(-700, None)]), "status": "in_progress"}
+
+
+def test_run_values_count_unfinished_work_up_to_now():
+    assert ci_measure.value(ci_measure.target("ci-tier-wall-time/26-1"), ACTIVE, NOW) == (1000, "pull request")
+    queued = ci_measure.target('ci-queue-age-unconfirmed/26-1-["anton-oss"]')
+    assert ci_measure.value(queued, ACTIVE, NOW) == (700, "anton-oss")
+    assert ci_measure.samples("ci-tier-wall-time", [ACTIVE], NOW) == {"pull request": [1000000]}
+
+
+def test_measure_reads_the_run_value_at_now(monkeypatch):
+    monkeypatch.setattr(ci_measure.ci_speed_read, "attempt", lambda *args: ACTIVE)
+    monkeypatch.setattr(ci_measure.ci_speed_read, "read", lambda *args, **kwargs: {"complete": True, "runs": []})
+    finding = 'ci-queue-age-unconfirmed/26-1-["anton-oss"]'
+    assert next(ci_measure.measure(finding, ci_measure.target(finding), (NOW - HOUR_MS, NOW), NOW)) == f"{finding} 700"
+
+
+def test_window_times_print_in_utc_whatever_the_local_zone(monkeypatch):
+    monkeypatch.setenv("TZ", "Asia/Kolkata")
+    time.tzset()
+    try:
+        assert ci_measure.line("ci-runner-wait", "a", [], (NOW - HOUR_MS, NOW)).startswith(
+            "ci-runner-wait a, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z"
+        )
+    finally:
+        monkeypatch.undo()
+        time.tzset()
 
 
 def test_class_counts_compare_milliseconds_with_the_detector_threshold_and_take_the_low_median():
