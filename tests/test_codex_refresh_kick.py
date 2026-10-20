@@ -136,10 +136,11 @@ def test_a_failure_is_logged_with_its_error_and_a_quiet_node_logs_nothing(tmp_pa
 
 
 @pytest.mark.parametrize("outlives", [False, True], ids=["completed", "timeout"])
-def test_the_refresh_is_waited_on_then_its_group_is_killed_and_it_is_reaped(tmp_path, monkeypatch, outlives):
+@pytest.mark.parametrize("group_gone", [False, True], ids=["live-group", "exited-group"])
+def test_the_refresh_is_waited_on_then_its_group_is_killed_and_it_is_reaped(tmp_path, monkeypatch, outlives, group_gone):
     process = Mock(pid=4242)
     process.wait.side_effect = [subprocess.TimeoutExpired("agentihooks", 1.0) if outlives else 0, -signal.SIGKILL]
-    killpg = Mock()
+    killpg = Mock(side_effect=ProcessLookupError if group_gone else None)
     monkeypatch.setattr(kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
     monkeypatch.setattr(kick.subprocess, "Popen", lambda argv, **kwargs: process)
     monkeypatch.setattr(kick.os, "killpg", killpg)
