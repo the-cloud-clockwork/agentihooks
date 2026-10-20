@@ -147,6 +147,87 @@ never beat, or whose record is gone, never moves its master. Set the grace with
 
 On the move, the tick writes a recovery handoff that names its unknowns, bumps the master seat generation, fences
 the old execution and starts the successor on the hive master placement picks, or unpinned when none qualifies.
+The steps are in [Master failover and master move](#master-failover-and-master-move).
+
+## Master failover and master move
+
+The master seat changes hive in two ways: the minute tick moves it off a hive that went quiet, and the operator
+moves it to a hive he names. Both end the same way: the successor starts through hive launch in the same master
+seat, pinned to the chosen hive.
+
+### Automatic failover
+
+Each tick checks the live master record. It moves the master only when all of these hold:
+
+- The master's hive has beaten at least once and its record still exists.
+- Its last heartbeat is older than `master-move-grace` seconds.
+- The runtime does not see the master's session live.
+
+Then, in one tick:
+
+1. It stores a recovery handoff for the master seat. The handoff says the master should continue on the swarm,
+   names the hive and how many seconds ago it stopped beating, and marks Done and Stopped at as `unknown`, because
+   the old master left no document. Its Read first list names the master inbox.
+2. It records the transfer with the reason `hive-lost`.
+3. It bumps the master seat generation and fences the old execution on the quiet hive.
+4. It asks master placement for a target among the live hives and records the pending move with that hive.
+5. It marks the old master record finished and logs `moved master <name> off lost hive <hive>` in the tick output.
+
+The next master start reads the recovery handoff, pins the successor to the recorded hive and clears the pending
+move once the successor is placed. When no live hive qualifies, the move records no target and the successor
+starts unpinned on the normal master path.
+
+Tune the grace per swarm:
+
+```bash
+agentihooks swarm rig-grade-swarm set master-move-grace=600
+```
+
+A shorter grace replaces a lost master sooner; a hive that pauses longer than the grace, such as a laptop asleep,
+then loses its master. The default is 300 seconds.
+
+### Operator master move
+
+```bash
+agentihooks swarm rig-grade-swarm master move --to vm
+```
+
+The command checks the move before it writes anything, and refuses with these errors:
+
+| Error | Cause |
+|---|---|
+| `no live master to move` | The swarm has no live master record. |
+| `the master already runs on hive vm` | The target is the master's current hive. |
+| `hive vm is not live` | The hive has no record, or its last heartbeat is over ninety seconds old. |
+| `the master cannot move to hive vm: <reason>` | [Master placement](#master-placement) would not give the master that hive; the reason is the placement wait reason. |
+
+On success it sends one durable inbox order from `operator` to the master seat and prints the pending move as
+JSON, with `from`, `to`, `master`, `item` (the order's inbox id) and `state` set to `ordered`. The order tells the
+master to finish its current step, write a Handoff v2 carrying its pending decisions, held messages, claimed task
+needs, audit plan and operator overrides, run `agentihooks swarm <id> handoff <doc> --reason operator` and stop.
+After that handoff, the tick starts the successor on the named hive and closes the order as done.
+
+A second `master move` replaces the first: it cancels the earlier order in the inbox with "the master move was
+replaced" and records the new target.
+
+The successor is pinned only when its transfer follows the master the move named. A master that leaves without a
+handoff, or a different master that takes the seat first, starts on normal placement and the pin is not applied.
+
+The ledger page offers the same order: each live hive row in the Swarm tab's Hives panel carries a **move master**
+button. It is disabled while another swarm control from the page is running, on a hive that is not live and on the
+hive the master already runs on.
+
+### Troubleshooting
+
+- **The master's hive is down and the master did not move.** Check the hive's heartbeat with
+  `agentihooks hive list`. A hive that never beat, or whose record was removed, never moves its master, and the move
+  waits the full grace plus up to one tick. While the runtime still reports the master's session live, the tick
+  leaves it alone.
+- **The successor started on another hive than the one ordered.** The pin applies only to the successor of the
+  master the order named. If that master left without the handoff the order asks for, its successor uses normal
+  placement. Run `master move` again for the new master.
+- **The old hive came back and its master is still running.** A returning hive terminates each fenced execution
+  before its first heartbeat and takes no launch orders while one still runs; see [Fencing](#fencing).
 
 ## Fencing
 
