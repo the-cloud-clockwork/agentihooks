@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from redis import Redis
     from redis.client import Pipeline
 
-ROLES = ("master", "qa", "frontend", "eng", "ci", "plan")
+ROLES = ("master", "qa", "frontend", "eng", "ci", "plan", "dispatch")
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")

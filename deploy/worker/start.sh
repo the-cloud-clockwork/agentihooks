@@ -28,5 +28,5 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
 fi
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
-  "roles=${HIVE_ROLES:-eng,ci,plan}" "max-agents=${HIVE_MAX_AGENTS:-1}"
+  "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"
 exec agentihooks hive run

@@ -384,6 +384,20 @@ def test_a_distributed_controller_leaves_the_seat_to_the_workstation_hive():
     assert inner.spawned == [] and seats(store) == []
 
 
+def test_placement_reads_the_seat_as_the_task_it_refuses():
+    asked = []
+
+    class Refusing(FakeRuntime):
+        def placement_refusal(self, lane, task):
+            asked.append((lane, task))
+            return "no headless hive for dispatch has room"
+
+    store, runtime = swarm(), Refusing()
+    assert run(store, runtime, doc(priority())) == ["no headless hive for dispatch has room"]
+    assert asked == [(dispatch_seat.LANE, {"id": dispatch_seat.SEAT})]
+    assert runtime.spawned == [] and seats(store) == []
+
+
 def test_a_full_host_holds_the_seat_spawn():
     from tests.swarm.test_host_gate import MEMORY, _decide
 

@@ -168,6 +168,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
     monkeypatch.setattr("os.sched_getaffinity", lambda pid: set(range(6)) if pid == 0 else set())
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: None)
     selection = tmp_path / "lines.json"
     selection.write_text(
         json.dumps(
@@ -967,12 +968,25 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
 
 
 @pytest.mark.parametrize(
-    ("ci", "requested", "expected"),
-    [(None, 1, 1), (None, 2, 2), (None, 20, 2), ("", 20, 2), ("true", 1, 1), ("true", 2, 2), ("true", 20, 20)],
+    ("ci", "requested", "quota", "expected"),
+    [
+        (None, 1, None, 1),
+        (None, 2, None, 2),
+        (None, 20, None, 2),
+        ("", 20, None, 2),
+        ("true", 1, None, 1),
+        ("true", 2, None, 2),
+        ("true", 20, None, 20),
+        ("true", 16, 3.0, 3),
+        ("true", 16, 2.5, 2),
+        ("true", 2, 3.0, 2),
+        ("true", 16, 0.5, 1),
+    ],
 )
-def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, expected, capsys):
+def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, quota, expected, capsys):
     from scripts.ci_mutation.selection import run_selected
 
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: quota)
     if ci is None:
         monkeypatch.delenv("CI", raising=False)
     else:
