@@ -75,6 +75,20 @@ def test_a_reserved_login_is_judged_on_its_own_quota(tmp_path, login):
     assert not runtime._login_spent()
 
 
+def test_the_login_account_is_the_slug_of_the_master_login_email(tmp_path, monkeypatch):
+    import json
+
+    monkeypatch.setattr(master_claude_login, "home", lambda: tmp_path)
+    assert master_claude_login.login_account() == ""
+    config = tmp_path / master_claude_login.CONFIG
+    config.write_text(json.dumps({"oauthAccount": None}))
+    assert master_claude_login.login_account() == ""
+    config.write_text(json.dumps({"oauthAccount": {"emailAddress": ""}}))
+    assert master_claude_login.login_account() == ""
+    config.write_text(json.dumps({"oauthAccount": {"emailAddress": "nestor.colt@gmail.com"}}))
+    assert master_claude_login.login_account() == "nestor_coltatgmail_com"
+
+
 @pytest.mark.parametrize(
     ("login_week_left", "route"), [(2.0, ["--route", "roomy"]), (50.0, ["--route", master_claude_login.ROUTE])]
 )
