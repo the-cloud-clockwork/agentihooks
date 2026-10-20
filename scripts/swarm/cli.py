@@ -267,6 +267,7 @@ def _stopped_tick(store, slug, ledger, runtime, held):
     if timing.call(ledger.binned, slug):
         return controls + _bin_stop(store, slug, ledger, runtime), {}
     doc = timing.call(ledger.state, slug)
+    store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
     return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
 
