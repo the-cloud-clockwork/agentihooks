@@ -27,11 +27,11 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
   unset code
 fi
 python3 - <<'PY'
-import os, re
+import os, re, shlex
 from pathlib import Path
 
 keep = re.compile(r'^(AH_|AGENTIHOOKS_|HIVE_|SWARM_|BRAIN_|LANGFUSE_|MCP_|OPENBAO_|REDIS_|SSL_CERT_FILE)')
-lines = [f'{k}={v}' for k, v in sorted(os.environ.items()) if keep.match(k) and '\n' not in v]
+lines = [f'{k}={shlex.quote(v)}' for k, v in sorted(os.environ.items()) if keep.match(k) and '\n' not in v]
 target = Path(os.environ['AGENTIHOOKS_HOME']) / 'hive-container.env'
 target.write_text('\n'.join(lines) + '\n')
 target.chmod(0o600)
@@ -58,15 +58,20 @@ UsePAM no
 StrictModes no
 PermitRootLogin no
 X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+PermitTunnel no
+PermitUserEnvironment no
 SetEnv PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin AGENTIHOOKS_HOME=$AGENTIHOOKS_HOME
 LogLevel VERBOSE
 EOF
+  /usr/sbin/sshd -t -f "$ssh_state/sshd_config"
   /usr/sbin/sshd -D -e -f "$ssh_state/sshd_config" &
 fi
 bundle=()
 [[ -d "$HIVE_REPO_ROOT/agentihooks-bundle" ]] && bundle=(--bundle "$HIVE_REPO_ROOT/agentihooks-bundle")
-agentihooks init "${bundle[@]}" --profile "${HIVE_PROFILE:-engineer}" \
-  || echo "worker-hive: agentihooks init failed; shells run without the profile" >&2
+agentihooks init "${bundle[@]}" --profile "${HIVE_PROFILE:-engineer}"
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
   "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"

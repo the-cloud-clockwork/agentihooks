@@ -206,11 +206,8 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
-  # The agentihooks profile the hive installs at start, as on the workstation.
   profile: engineer
-  # sshd on the hive for herdr machine add from the operator's machine. The operator public keys and the
-  # stable host key are the authorized_keys and host_key entries of credentialSecret; publish the port
-  # with a LoadBalancer outside this chart.
+  # Operator keys and the stable host key come from credentialSecret; publish the port outside this chart.
   ssh:
     enabled: false
     port: 2222
