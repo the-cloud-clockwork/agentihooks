@@ -1,10 +1,13 @@
+import importlib
 import io
 import json
+import sys
 import urllib.error
 from types import SimpleNamespace
 
 import pytest
 
+from scripts import swarm
 from scripts.gates import Who
 from scripts.swarm import lease, ledger_client, ledger_cutover
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -131,14 +134,9 @@ def test_a_ready_successor_authenticates_once_and_records_its_receipt(store, wor
 
 
 def test_a_client_patched_while_the_module_first_imports_is_not_kept(store, worker, monkeypatch):
-    import importlib
-    import sys
-
     class Stale:
         def __init__(self, base, headers):
             raise AssertionError(f"kept the client patched at import for {base}")
-
-    from scripts import swarm
 
     monkeypatch.delitem(sys.modules, ledger_cutover.__name__)
     monkeypatch.setattr(swarm, "ledger_cutover", ledger_cutover)
