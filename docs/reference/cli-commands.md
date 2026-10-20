@@ -626,21 +626,57 @@ Field types are not checked. These shapes raise out of the reader, which stops `
 
 ## `agentihooks refresh-rules`
 
-Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.
+Re-render every installed profile home from the bundle checkout and push the new rules into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.
 
 ```bash
 agentihooks refresh-rules [--profile <name>] [--dry-run] [--clear]
 ```
+
+The command does the same forced render `agentihooks init` does, but it runs inside an agent session, where `init` refuses. A manifesto or rule merged into the bundle reaches every rendered profile home, and every running session of those profiles, with no operator step.
 
 ### How it works
 
 1. Reads the installed rules: `~/.claude/CLAUDE.md` and every `~/.claude/rules/*.md`. In a rendered profile home (`CLAUDE_CONFIG_DIR`) it re-renders the profile first; that home has no `rules/` folder, its `CLAUDE.md` carries persona and rules together.
 2. Takes a snapshot of currently-alive session IDs from the broadcast registry.
 3. Writes `~/.agentihooks/force_refresh/rules-<profile>.json` containing the payload + pending session list.
-4. On each targeted session's next `UserPromptSubmit`, the hook injects the payload and removes the session from pending.
-5. When pending drains → marker deleted. Otherwise marker auto-GCs after 24h.
+4. Re-renders every other installed profile home for each harness, `claude`, `codex` and `copilot`, from the bundle as the checkout holds it now, and prints `[OK] Re-rendered the <key> profile home` for each. It skips only the Claude home of the profile refreshed in step 1.
+5. Writes a refresh marker for every re-rendered Claude home, `rules-<key>.json` with that home's new rules, and prints `[OK] Refresh marker written for profile '<key>' (<n> sessions).`
+6. On each targeted session's next `UserPromptSubmit`, the hook checks that the session runs from the profile home the marker names, injects the rules of that profile's current home and removes the session from pending. A session of another profile is removed from pending with nothing injected.
+7. When pending drains → marker deleted. Otherwise marker auto-GCs after 24h.
 
 Sessions started AFTER the push never see the marker — they get fresh rules at `SessionStart`, so re-injection would be redundant.
+
+### Profile homes and older renders
+
+A rendered Claude home lives at `~/.agentihooks/profiles/.homes/<key>/<render>/claude`, and `~/.agentihooks/profiles/.homes/<key>/current` points at the newest render. Every re-render moves `current`; a session started before it keeps running from its older render folder. When that session consumes the marker, the hook reads the rules from `current`, so it receives the merged doctrine, not the rules it started with.
+
+Codex and Copilot homes are re-rendered but get no marker: their sessions load the new rules at their next start.
+
+### Bundle doctrine after a merge
+
+The render reads the bundle checkout as it stands, so the merged commit must be in the checkout first:
+
+```bash
+# Bring the merged manifesto or rule into the linked bundle checkout
+git -C <bundle checkout> pull --ff-only origin dev
+
+# Re-render every profile home and notify every running session
+agentihooks refresh-rules
+```
+
+In a Doctor swarm the `refresh-rules` intervention runs the same command, so a merged rule fix reaches the watched swarm's rendered homes and running agents without the operator:
+
+```bash
+agentihooks doctor <slug> intervene refresh-rules
+```
+
+It logs `The Doctor refreshed the installed rules for every running session.` on both ledgers.
+
+### Limits and troubleshooting
+
+- `--dry-run` re-renders nothing and writes no marker.
+- A profile whose render fails keeps its previous home, and the command prints `[--] Profile home <key> kept as it was: <reason>`. Fix the reason and run the command again.
+- A session running from a legacy home, a real directory outside `.homes`, receives the refresh only when the command runs from that same home.
 
 ### Flags
 
