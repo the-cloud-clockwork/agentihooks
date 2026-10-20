@@ -284,3 +284,34 @@ def test_lifecycle_sweep_reports_codex_homes_with_its_snapshot_scope_and_action(
     report = run.sweep([], snapshot, tmp_path, scope="/run", act=True)
     cleanup.assert_called_once_with(snapshot, tmp_path, "/run", True)
     assert report["codex_homes"] == [{"path": "/run/user/1/cx/a", "action": "removed"}]
+
+
+def test_a_symlinked_root_is_not_swept(layout, tmp_path):
+    environ, legacy, _, state, proc = layout
+    elsewhere = tmp_path / "elsewhere"
+    target = plant(elsewhere, "a1")
+    legacy.rmdir()
+    legacy.symlink_to(elsewhere)
+    assert codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ) == []
+    assert target.exists()
+
+
+def test_an_entry_that_is_not_a_home_does_not_stop_later_homes(layout):
+    environ, legacy, _, state, proc = layout
+    (legacy / "a0").write_text("x")
+    orphan = plant(legacy, "b1")
+    result = codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ)
+    assert [item["path"] for item in result] == [str(orphan)]
+    assert not orphan.exists()
+
+
+def test_a_home_exactly_at_the_settle_window_is_removed(layout):
+    environ, legacy, _, state, proc = layout
+    settled = plant(legacy, "a1")
+    stamp = int(time.time()) - codex_homes.SETTLE_S
+    for item in [settled, *settled.rglob("*")]:
+        os.utime(item, (stamp, stamp), follow_symlinks=False)
+    snap = Snapshot("boot-1", 99999.0, float(stamp + codex_homes.SETTLE_S), {}, (), {})
+    result = codex_homes.sweep_codex_homes(snap, state, act=True, proc=proc, environ=environ)
+    assert [item["path"] for item in result] == [str(settled)]
+    assert not settled.exists()
