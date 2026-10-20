@@ -68,6 +68,7 @@ MASTER_ITEM = (
     "promotion alert: {url}"
 )
 CLOSABLE = ("open", "blocked")
+WORKING = ("claimed", "pr")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
 REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
 
@@ -240,9 +241,18 @@ def _green(slug, ledger, doc, last):
 
 def _recover(slug, redis, ledger, doc, last, repo):
     actions = _green(slug, ledger, doc, last)
+    _release(redis, slug, doc)
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        actions.extend(_green(previous, ledger, ledger.state(previous), last))
+        state = ledger.state(previous)
+        actions.extend(_green(previous, ledger, state, last))
+        _release(redis, previous, state)
     return actions
+
+
+def _release(redis, slug, doc):
+    working = {t["id"] for t in _promotion_tasks(doc) if t.get("state") in WORKING}
+    if gone := [task_id for task_id in redis.hkeys(key(slug, "jobs")) if task_id not in working]:
+        redis.hdel(key(slug, "jobs"), *gone)
 
 
 def _refresh(
