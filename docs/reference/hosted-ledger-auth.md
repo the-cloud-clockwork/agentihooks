@@ -131,7 +131,7 @@ A workstation swarm, its agents and the ledger hooks reach a hosted ledger by en
 | `LEDGER_CA_PEM` | The PEM of the CA that signed the ledger's certificate. Set, it is the only CA an https ledger request trusts. |
 | `LEDGER_CA_FILE` | Without `LEDGER_CA_PEM`, a CA file trusted beside the system roots. Defaults to `ledger-ca.pem` in the agentihooks home, which `agentihooks init` writes from OpenBao `k8s/agentihooks-swarm-ledger-ca`, field `ca.crt`, when `OPENBAO_URL` and `OPENBAO_TOKEN` are set. |
 
-Every reader of `ledger_link.remote` treats `SWARM_URL` as a non-local deployment, so a process with it set never accepts page-derived agent tokens. A herdr pane gets its token from the launcher, which exports it after sourcing the operator's env files and unsets `SWARM_SECRET`.
+Every reader of `ledger_link.remote` treats `SWARM_URL`, and `LEDGER_URL` with no `AGENTIHOOKS_DEPLOYMENT`, as a non-local deployment (the full order is in [Client mode resolution](deployment-modes.md#client-mode-resolution)), so a process with it set never accepts page-derived agent tokens. A herdr pane gets its token from the launcher, which exports it after sourcing the operator's env files and unsets `SWARM_SECRET`.
 
 The tick's own service writes still need `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, checked against the hosted ledger's Redis.
 

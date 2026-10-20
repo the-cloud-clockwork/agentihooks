@@ -2728,6 +2728,58 @@ prevent duplicate inbox items. Ledger replay is limited to its retained history 
 older than that history cannot be reconstructed by replay. The ledger records a notice naming the lost
 revision range for the operator; the watcher and tick also report trimmed history gaps.
 
+#### Queued ledger writes
+
+Ledger talk uses the same outbox when the local ledger server does not answer: answers, relays, new list
+items and comments with an author and no attachments queue as `ledger` records in `inbox-outbox.jsonl`. Any
+other ledger write is refused while ledger records wait, with
+`ledger talk queued while the server was down still waits in <outbox>; retry once it lands`. A ledger linked
+to a remote server never queues here.
+
+Every `agentihooks ledger` call replays the waiting ledger records before its own write; the swarm tick and
+each inbox connection replay them too. Each record is judged by what the ledger server answers:
+
+| Server answer on replay | Result |
+|---|---|
+| Applied | The record leaves the outbox. |
+| No connection | The ledger lane stops; this record and every later ledger record wait for the next replay. Inbox records are not held by it. |
+| 5xx or 429 | The whole ledger lane waits, up to the busy age, then the record is set aside. |
+| 409 revision conflict, no expected revision in its ops | Only later records that write the same resources wait, up to the busy age. |
+| 409 revision conflict, ops carry `expected_revision`, all append only | Sent once more without the expected revision, so the server applies it at the current revision. A second conflict counts as busy for those resources. |
+| 409 revision conflict, ops carry `expected_revision`, any other op | Set aside at once: the revision it expected has moved and can never apply. |
+| Any other refusal, or a resource that cannot be read from the record | Set aside at once with the reason. |
+
+Append only ops are `add`, `add_item`, `relay` and `answer`. A write that reached the client before the server
+went down can carry the `expected_revision` the client read then, so a queued comment on a thread that has
+since moved meets this case on the first replay after the thread moves.
+
+A record's resources are the threads, lists or items its ops write: the thread of a comment, the list of
+a new item, the task or phase of a task or phase op, `members` for joins and acknowledgements. A record
+held by a conflict adds its resources to the held set, so a later record that shares any of them also
+waits, and the order of writes to each resource holds. Records for other items, and every inbox record,
+keep replaying behind it.
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| `AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S` | 3600 seconds | Set aside a ledger record still busy or in conflict this long after it was queued. |
+
+A set aside record goes to `inbox-outbox.skipped.jsonl` with its reason, and the replay prints it:
+
+```text
+agentihooks msg: queued message <id> was refused on replay (the ledger server answered 409 revision conflict
+on <path> since this write was queued, so its expected revision can never apply); kept in <skipped outbox>
+```
+
+A record set aside after the busy age carries `<server answer> for over <busy age> seconds
+(AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S)`. A set aside write was not applied: read its op in the skipped
+file and write it again against the current ledger.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Comments on one thread wait while other ledger writes land | A record for that thread is in revision conflict without an expected revision | Wait for the busy age, or resolve the conflict on the thread; other writes are not held. |
+| A ledger write other than talk is refused while talk waits | Queued ledger records wait: the server is down, answers 5xx or 429, or a record is held by a revision conflict | Bring the ledger server back; `agentihooks swarm <id> status` shows the queued count. |
+| A queued comment never appeared and the set aside count rose | Its revision moved while it waited, or the server refused it | Read the reason in the skipped file and write the comment again. |
+
 ### Outage holds and recovery
 
 The tick records Redis, ledger and provider outages locally under the swarm home, so the evidence remains
