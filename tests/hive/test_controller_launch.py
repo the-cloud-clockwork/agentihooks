@@ -179,7 +179,9 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.router.placement.backend == "hive"
     assert fenced.has_capacity(setup.config)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    assert fenced.placement_refusal("master", {}) == ""
+    assert fenced.placement_refusal("master", {}) == (
+        "no live hive can run the master with interactive, subscription or api authentication"
+    )
     setup.herdr.spawn.assert_not_called()
 
 
