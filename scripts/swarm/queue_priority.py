@@ -82,6 +82,8 @@ def blocker(raw: dict, head: str) -> str:
         return "it became a draft"
     if raw["headRefOid"] != head:
         return "its head moved"
+    if raw.get("mergeable") == "CONFLICTING":
+        return "it has merge conflicts with dev"
     return ""
 
 
@@ -163,6 +165,7 @@ def reorder(
             fyi=True,
         )
     if result["errors"]:
+        requeue(store, slug, tasks)
         raise SwarmError("; ".join(result["errors"]))
     store.redis.hdel(store.key(slug, PENDING), url)
     return result
