@@ -182,6 +182,48 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
         assert len(texts) == 1
 
 
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize(
+    "change,expected",
+    [
+        ({}, False),
+        ({"evidence_identity": ("1",), "measure": 899}, False),
+        ({"evidence_identity": ("1", "2", "3")}, True),
+        ({"evidence_identity": ("1", "2 attempt 2")}, True),
+        ({"measure": 901}, True),
+        ({"subject": "200-pull_request"}, True),
+        ({"kind": "ci runner wait"}, True),
+        ({"elapsed": 60000}, True),
+    ],
+)
+def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change, expected, legacy):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.swarm.health.findings import Finding
+
+    original = Finding(
+        "ci tier wall time",
+        "100-merge_group",
+        "queue tier slow",
+        ("2 runs, queue, worst 900 seconds, median 900 seconds, runs 1, 2",),
+        "wall time",
+        900,
+        evidence_identity=("1", "2"),
+    )
+    loop.record(store, DOCTOR, [original], AFTER, 60000)
+    judgments = loop.verdicts(store, DOCTOR)
+    judgments.judge(original.id, "established", "investigated", "reader", AFTER)
+    if legacy:
+        prior = json.loads(store.redis.hget(judgments.key, original.id))
+        del prior["evidence_identity"], prior["verdict"]["evidence_identity"]
+        store.redis.hset(judgments.key, original.id, json.dumps(prior))
+    elapsed = change.get("elapsed", 59999)
+    current = replace(original, subject="200-merge_group")
+    current = replace(current, **{key: value for key, value in change.items() if key != "elapsed"})
+    found = ci_speed.unjudged([current], store.redis.hgetall(judgments.key), AFTER + elapsed, 60000)
+    assert found == ([current] if expected else [])
+
+
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, down=True)
     runs(monkeypatch, [waiting(n, "2026-10-19T15:51:00Z") for n in range(1, 3)])

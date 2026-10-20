@@ -174,7 +174,9 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
                 1,
             )
         )
-    record(store, doctor, found, now_ms, limits(os.environ).cooldown_minutes * MINUTE_MS)
+    cooldown_ms = limits(os.environ).cooldown_minutes * MINUTE_MS
+    found = ci_speed.unjudged(found, store.redis.hgetall(verdicts(store, doctor).key), now_ms, cooldown_ms)
+    record(store, doctor, found, now_ms, cooldown_ms)
     report["retracted"] = len(retract(store, doctor, watched, gone, now_ms))
     report["unverified"] = snapshot.get("unverified", 0)
     mail = InboxStore(store.redis)
