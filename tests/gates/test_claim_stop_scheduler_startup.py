@@ -1,6 +1,7 @@
 import fcntl
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -19,6 +20,7 @@ def supervisor_starts_during_readiness_probe(tmp_path, monkeypatch):
     processes = []
     popen = subprocess.Popen
     flock = fcntl.flock
+    exists = Path.exists
 
     def delayed_supervisor(argv, **kwargs):
         if argv[-2:] == ["scripts.scheduler.service", "supervise"]:
@@ -27,8 +29,9 @@ def supervisor_starts_during_readiness_probe(tmp_path, monkeypatch):
                 "-c",
                 "import pathlib, runpy, sys, time; "
                 f"gate = pathlib.Path({str(gate)!r}); "
-                "deadline = time.monotonic() + 1; "
+                "deadline = time.monotonic() + 10; "
                 "exec('while not gate.exists() and time.monotonic() < deadline: time.sleep(0.01)'); "
+                "assert gate.exists(), 'readiness probe never released supervisor'; "
                 "sys.argv = ['scripts.scheduler.service', 'supervise']; "
                 "runpy.run_module('scripts.scheduler.service', run_name='__main__')",
             ]
@@ -44,6 +47,12 @@ def supervisor_starts_during_readiness_probe(tmp_path, monkeypatch):
             processes[0].wait(timeout=10)
         return result
 
+    def observe_lock(path):
+        if path.name == "supervisor.lock":
+            gate.touch()
+        return exists(path)
+
+    monkeypatch.setattr(Path, "exists", observe_lock)
     monkeypatch.setattr(process_service.subprocess, "Popen", delayed_supervisor)
     monkeypatch.setattr(fcntl, "flock", held_probe)
 

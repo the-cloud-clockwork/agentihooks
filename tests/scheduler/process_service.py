@@ -1,3 +1,4 @@
+import fcntl
 import json
 import subprocess
 import sys
@@ -31,12 +32,15 @@ def start_scheduler(environ):
             stderr=output,
         )
     deadline = time.monotonic() + 10
-    lock = directory / "supervisor.lock"
-    while time.monotonic() < deadline:
-        assert process.poll() is None, log.read_text()
-        if lock.exists() and lock.read_text() == str(process.pid):
-            return process, entries
-        time.sleep(0.01)
+    with (directory / "supervisor.lock").open("a+") as handle:
+        while time.monotonic() < deadline:
+            assert process.poll() is None, log.read_text()
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return process, entries
+            fcntl.flock(handle, fcntl.LOCK_UN)
+            time.sleep(0.01)
     process.terminate()
     process.wait(timeout=10)
     raise AssertionError(log.read_text())
