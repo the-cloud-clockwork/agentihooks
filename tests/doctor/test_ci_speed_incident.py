@@ -1,12 +1,14 @@
 import io
 import json
+import time
 import urllib.request
 from datetime import datetime
 
 import pytest
 
-from scripts.doctor import ci_speed_read, cli
+from scripts.doctor import ci_speed, ci_speed_read, cli, loop
 from scripts.inbox.store import InboxStore
+from scripts.swarm.ledger_events import iso_ms
 from tests.doctor.test_ci_speed_timer import DOCTOR, WATCHED, snapshot, store  # noqa: F401
 
 pytestmark = pytest.mark.unit
@@ -192,3 +194,114 @@ def test_a_resolved_incident_listed_again_holds_without_a_second_notice(store, m
     assert any("held during GitHub incident" in action for action in actions)
     for texts in items(store).values():
         assert len(texts) == 1
+
+
+@pytest.fixture
+def eastern(monkeypatch):
+    monkeypatch.setenv("TZ", "EST5")
+    time.tzset()
+    yield
+    monkeypatch.undo()
+    time.tzset()
+
+
+def notice(incident, began):
+    return (
+        f"Doctor CI speed findings on the swarm {WATCHED} are held: GitHub reports an unresolved incident "
+        f"affecting Actions, {incident['name']}, since {began}. {incident['shortlink']} "
+        "Runs are still read and counted; findings resume when it resolves, and runs with jobs created "
+        "during it are labelled."
+    )
+
+
+def test_each_new_incident_gets_its_own_notice_in_utc_and_the_pass_names_every_hold(store, monkeypatch, eastern):  # noqa: F811
+    second = {
+        **INCIDENT,
+        "id": "second",
+        "name": "Actions Job Delays",
+        "started_at": "2026-10-19T16:05:00Z",
+        "shortlink": "https://stspg.io/second",
+    }
+    status(monkeypatch, INCIDENT)
+    runs(monkeypatch, [])
+    loop.speed(store, DOCTOR, WATCHED, DURING)
+    status(monkeypatch, INCIDENT, second)
+    [action] = loop.speed(store, DOCTOR, WATCHED, DURING + 60000)
+    assert action.endswith(
+        f"; findings held during GitHub incident {INCIDENT['name']}; findings held during GitHub incident Actions Job Delays"
+    )
+    for texts in items(store).values():
+        assert sorted(texts) == sorted(
+            [notice(INCIDENT, "19 October 15:49 UTC"), notice(second, "19 October 16:05 UTC")]
+        )
+
+
+def test_an_unread_status_page_keeps_an_open_incident_window_without_holding(store, monkeypatch):  # noqa: F811
+    status(monkeypatch, INCIDENT)
+    runs(monkeypatch, [])
+    loop.speed(store, DOCTOR, WATCHED, DURING)
+    status(monkeypatch, down=True)
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:05:00Z")])
+    loop.speed(store, DOCTOR, WATCHED, DURING + 60000)
+    [finding] = details(store)
+    assert finding["evidence"][1] == f"1 of these runs had jobs created during the GitHub incident {INCIDENT['name']}"
+
+
+def test_runs_created_after_an_incident_resolves_are_not_labelled(store, monkeypatch):  # noqa: F811
+    status(monkeypatch, INCIDENT)
+    runs(monkeypatch, [])
+    loop.speed(store, DOCTOR, WATCHED, DURING)
+    status(monkeypatch)
+    loop.speed(store, DOCTOR, WATCHED, DURING + 60000)
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:12:00Z")])
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    [finding] = details(store)
+    assert len(finding["evidence"]) == 2
+    assert not any("during the GitHub incident" in line for line in finding["evidence"])
+
+
+def test_a_crossing_cleared_in_the_next_window_retracts_the_previous_window_group(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:50:00Z")])
+    loop.speed(store, DOCTOR, WATCHED, AFTER - 60000)
+    [finding] = details(store)
+    started = waiting(1, "2026-10-19T16:50:00Z")
+    started["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:50:30Z", runner_name="r")
+    runs(monkeypatch, [started])
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    assert details(store) == []
+    for texts in items(store).values():
+        assert any(text.startswith("Retracted") and f"- {finding['id']}" in text for text in texts)
+
+
+def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents():
+    start, end = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:10:00Z")
+    now, window = iso_ms("2026-10-19T16:20:00Z"), iso_ms("2026-10-19T16:20:00Z")
+    incidents = [(start, end, "Actions delays"), (end, end + 60000, "Webhooks delays")]
+    retry = {**waiting(1, "2026-10-19T16:10:00Z", labels=()), "run_attempt": 2}
+    wall = {
+        "id": 4,
+        "event": "merge_group",
+        "status": "in_progress",
+        "path": ".github/workflows/test.yml",
+        "jobs": [
+            {
+                **waiting(4, "2026-10-19T16:00:00Z")["jobs"][0],
+                "status": "in_progress",
+                "started_at": "2026-10-19T16:01:00Z",
+                "runner_name": "r",
+            }
+        ],
+    }
+    groups = ci_speed.group({}, [retry, wall], start, now, window, incidents)
+    assert sorted(groups) == [f"ci-queue-age-unconfirmed/{window}-[]", f"ci-tier-wall-time/{window}-merge_group"]
+    queued, tier = sorted(ci_speed.grouped(groups), key=lambda finding: finding.kind)
+    assert queued.summary == "unassigned jobs read as queued up to 10.00 minutes in 1 run"
+    assert queued.evidence[:2] == (
+        "1 run, unassigned, worst 600 seconds, median 600 seconds, runs 1 attempt 2",
+        "1 of these runs had jobs created during the GitHub incident Actions delays; Webhooks delays",
+    )
+    assert queued.threshold == "unconfirmed queue age over 5 minutes"
+    assert tier.summary == "queue tier took up to 20.00 minutes in 1 run"
+    assert tier.evidence[1] == "1 of these runs had jobs created during the GitHub incident Actions delays"
+    assert tier.threshold == "tier wall time over 15 minutes"
