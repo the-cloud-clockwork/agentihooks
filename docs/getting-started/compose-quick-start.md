@@ -47,7 +47,7 @@ One run does the following, in order:
 | `--timeout SECONDS` | How long to wait for every service to be healthy; default 300 |
 | `--no-start` | Check Docker and Compose, write the stack files, `.env` and `client.env`, then stop. No name is needed and no service, swarm or ledger starts |
 
-In the shared ledger folder only a master seat or the operator may create a swarm, and a ledger with fewer than three phases or tasks needs `--operator-asked`. The single automatic phase counts as one, so the example passes it. These refusals come after the stack is up.
+In the shared ledger folder only a master seat or the operator may create a swarm, and a ledger with fewer than three phases or tasks needs `--operator-asked`. The single automatic phase counts as one, so the example passes it. The quote needs at least three words; run by an agent session it must match words the operator typed to that agent, and run by the operator in a plain shell any three words pass. These refusals come after the stack is up.
 
 ### Output
 
@@ -67,7 +67,7 @@ Swarm my-swarm is paused; start it only when you want it: agentihooks swarm my-s
 
 A JSON line describing the new swarm prints before the `Ledger page:` line. The ports in the addresses are the ones written to `.env`.
 
-The stack block prints as soon as the services are healthy, before the swarm is created. When creation is then refused, the run ends with a red `Swarm not created:` line and exits 1; the stack stays up and the next run reuses it.
+The stack block prints once the services are healthy and the ledger page answers, before the swarm is created. When creation is then refused, the run ends with a red `Swarm not created:` line and exits 1; the stack stays up and the next run reuses it.
 
 `swarm init` never starts a swarm. The swarm stays paused, and no agent launches, until you run `agentihooks swarm <name> start`.
 

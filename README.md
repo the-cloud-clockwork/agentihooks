@@ -206,9 +206,9 @@ needed.
 
 **As a swarm.** Run `agentihooks swarm init <name>` to start the stack and
 create a paused swarm on a repository, then start it. The master takes your
-requests in its pane or on the ledger page chat, and the tick staffs the tasks. You steer it with
-`agentihooks swarm <id> start|pause|stop` and `set` for the lane caps, or the
-same controls on the Swarm tab.
+requests in its pane or on the ledger page chat, and the tick staffs the
+tasks. You steer it with `agentihooks swarm <id> start|pause|stop` and `set`
+for the lane caps, or the same controls on the Swarm tab.
 
 ## Where it runs
 
