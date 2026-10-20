@@ -59,9 +59,9 @@ agentihooks swarm my-swarm set api-url=https://swarm.example.internal
   `pending_url`, `active_url` and `staged_at`.
 - `set api-url` to the staged address activates it. The controller lease first moves to the hosted ledger; then one
   local Redis transaction clears the workstation's controller ownership, writes `api_url`, clears the staged address
-  and drops the readiness receipts. When the transaction is refused because the cohort changed, the moved lease is
-  released again. From then on every swarm command, tick and wait for this swarm routes to the hosted ledger. Other
-  swarms on the workstation stay local.
+  and drops the readiness receipts. When the transaction is refused with `the ledger activation changed before
+  commit`, the moved lease is released again. From then on every swarm command, tick and wait for this swarm routes
+  to the hosted ledger. Other swarms on the workstation stay local.
 
 Activation refuses, and changes nothing, with:
 
