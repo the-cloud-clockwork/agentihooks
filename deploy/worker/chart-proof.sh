@@ -24,7 +24,11 @@ assert container['image'] == 'ghcr.io/the-cloud-clockwork/agentihooks-hive-worke
 assert pod['volumes'][0]['secret']['secretName'] == 'member'
 assert pod['volumes'][0]['secret']['items'] == [{'key': 'credential', 'path': 'credential'}]
 assert container['volumeMounts'][0]['readOnly'] is True
-print('worker replicas, identity, capacity and mounted credentials: passed')
+assert container['resources']['requests']['memory'] == '2100Mi', container['resources']
+assert container['resources']['limits']['memory'] == '6144Mi', container['resources']
+pinned = [key for key in ('nodeSelector', 'affinity', 'nodeName', 'hostNetwork') if key in pod]
+assert not pinned, f'the worker hive pod is pinned by {pinned}'
+print('worker replicas, identity, capacity, memory per agent, no node pin and mounted credentials: passed')
 PY
 if helm template proof "$chart" --set workers.replicas=1 > "$out/missing.out" 2> "$out/missing.err"; then
   echo 'workers accepted without join material' >&2
