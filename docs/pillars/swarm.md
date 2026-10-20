@@ -2008,27 +2008,27 @@ agentihooks swarm <id> status --json \
 
 ### Agents panel cells that overflow
 
-From a page width of 1024 pixels, the Agents panel lays its columns out at fixed
-shares of the table width: agent, lane, profile, overlays, model, transport,
-task, state, then execution and terminal on remote swarms, then age. Every cell
-keeps to one line inside its column. A cell whose text does not fit ends in an
-ellipsis, and hovering it shows the cell's full text after the ledger page's one
-second tooltip delay. The actions cell at the row's end is the one exception: it
-holds buttons, not text, and keeps their own hover text.
+A cell in the Agents panel whose text does not fit its column ends in an
+ellipsis, and hovering it shows the cell's full text after the ledger page's
+one second tooltip delay. The actions cell at the row's end holds buttons, not
+text, and keeps their own hover text.
 
-- **Ellipsis.** Each cell clips its content and ends in an ellipsis. The
-  transport and promoted state spans run inline, so their labels end in the
-  cell's ellipsis instead of being cut off. A detail line under a label, such as
-  a Remote Control detail or an execution's location, ends in its own ellipsis.
-  An agent name ellipsizes inside a narrowed agent column.
-- **Hover text.** The page builds one hover text per cell from everything the
-  cell shows, its words joined by spaces. The transport and promoted state spans
-  contribute their own summaries instead of their labels: `push · no native
-  terminal`, and `working · promoted`. That text goes on the cell and on every
-  element inside it that carries hover text, so the same full text opens
-  wherever the pointer lands in the cell.
+From a page width of 1024 pixels the table lays out at fixed shares: agent,
+lane, profile, overlays, model, transport, task and state each take a set
+percentage, and age, plus execution and terminal on remote swarms, share the
+rest. Dragging a header edge, or focusing its grip and pressing the arrow keys,
+saves column widths that fix the layout at any page width; Reset layout clears
+them. Below 1024 pixels with no saved widths, columns size to their content,
+nothing clips, and the panel scrolls sideways.
 
-The cells, the text they show and the hover text they carry:
+- **Ellipsis.** A cell's text stays on one line. Transport and promoted state
+  labels run inline, so they end in the cell's ellipsis. A detail line under a
+  label, such as a Remote Control detail or an execution's location, sits on
+  its own line and ends in its own ellipsis. An agent name ellipsizes inside a
+  narrowed agent column.
+- **Hover text.** One hover text covers the whole cell, wherever the pointer
+  lands: everything the cell shows, joined by spaces, with transport and
+  promoted state given as their summaries.
 
 | Column | Cell shows | Hover text |
 |---|---|---|
@@ -2039,29 +2039,18 @@ The cells, the text they show and the hover text they carry:
 | terminal | the terminal state and its detail, `behind heartbeat` when the execution's terminal lags | the same words on one line |
 | any other column | its value | its value |
 
-Columns can be narrowed by dragging a header edge, or by focusing its grip and
-pressing the arrow keys; the ellipsis and hover text follow the new width, and
-Reset layout restores the default shares. Below 1024 pixels the table sizes its
-columns to their content: cells keep their full text on one line, nothing
-clips, and the panel scrolls sideways.
-
-The ledger design record states the rule for every ledger table: a cell that
-does not fit ends in an ellipsis and shows its full text on hover. The design
-system test `test_every_overflowing_agent_cell_ellipsizes_and_exposes_its_full_text`
-fills a remote swarm's agents with long profiles, overlays, a promoted state,
-Remote Control detail, an execution pool and a stale terminal, narrows every
-column at 1920 by 1080, and checks that each text cell clips with an ellipsis,
-that one hover text covers the whole cell and contains every word the cell
-shows, and that the hover tooltip over an execution cell opens with that text.
+The design record requires this of every ledger table, and the design system
+test enforces it for every agent cell on a remote swarm at 1920 by 1080.
 
 #### Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| A cell's text is cut off with no ellipsis | A label inside the cell renders as a block or inline flex box, which clips without an ellipsis | Keep labels inside agent cells inline; a detail line takes the `sw-sub` class, which ellipsizes on its own line |
-| Hovering one part of a cell shows only that part's text | A new cell element sets its own hover text after the row is built | Build the cell inside the agent row renderer, which writes the cell's hover text onto every element in it |
-| A tooltip appears without the one second delay | The element uses a native `title` the browser times itself | Give it hover text through the ledger tooltip module; it moves a `title` to the accessible name on hover |
-| Below 1024 pixels a cell shows its full text and the panel scrolls sideways | The fixed column shares and clipping apply from 1024 pixels | Expected; widen the page to see the fixed layout |
+| A cell's text is cut off with no ellipsis | A label inside the cell renders as a block or flex box | Ledger page bug: keep labels in agent cells inline, and give a detail line its own ellipsis |
+| Hovering part of a cell shows only that part's text | The element was added after the agent row renderer wrote the cell's hover text | Ledger page bug: build the cell inside the agent row renderer |
+| A tooltip opens without the one second delay | The element uses a native browser tooltip | Ledger page bug: give it hover text through the ledger tooltip module |
+| Below 1024 pixels a cell still ends in an ellipsis | Saved column widths fix the layout at every width | Reset layout clears the saved widths |
+| Below 1024 pixels the panel scrolls sideways | No saved widths: columns size to their content | Expected; widen the page or narrow a column |
 
 ### Delivered then confirmed
 
