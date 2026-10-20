@@ -509,3 +509,50 @@ class TestRunsOnEveryTarget:
 
     def test_template_files_still_readable(self):
         assert decide({"tool_name": "Bash", "tool_input": {"command": "cat .env.example"}}) is None
+
+
+PROC_ENVIRON_READS = [
+    "tr '\\0' '\\n' < /proc/12345/environ | grep ^AGENTIHOOKS_SWARM",
+    "cat /proc/self/environ",
+    "cat /proc/$PID/environ",
+    "strings /proc/1/environ",
+    "grep -a REDIS /proc/1/environ",
+    "xargs -0 -n1 -a /proc/1/environ echo",
+    "ls /proc/*/environ | xargs cat",
+    "python3 -c \"print(open('/proc/1/environ').read())\"",
+    "python3 -c \"import os; print(open(os.path.join('/proc', '1', 'environ')).read())\"",
+    "cd /proc/1 && cat environ",
+    "while read -d '' l; do echo $l; done < /proc/thread-self/environ",
+    "python3 <<'EOF'\nprint(open(f'/proc/{1}/environ').read())\nEOF",
+]
+
+PROC_ALLOWED = [
+    "cat /proc/meminfo",
+    "python3 -c \"import os; print(os.environ.get('HOME'))\"",
+    'test -n "${REDIS_URL:-}" && echo set || echo unset',
+    "ls /proc/1/status",
+]
+
+
+class TestProcEnvironReads:
+    """Observed: tr on an agent's environ under proc printed the swarm Redis password."""
+
+    @pytest.mark.parametrize("command", PROC_ENVIRON_READS)
+    def test_read_is_refused_with_the_leak_free_alternative(self, command):
+        verdict = decide(_bash(command))
+        assert verdict is not None
+        assert "process environment file" in verdict
+        assert 'test -n "${VAR:-}"' in verdict
+        assert ENV_NAMES_SAFE in verdict
+
+    @pytest.mark.parametrize("command", PROC_ALLOWED)
+    def test_neighbouring_commands_still_pass(self, command):
+        assert decide(_bash(command)) is None
+
+    def test_read_tool_on_proc_environ_is_refused(self):
+        verdict = decide({"tool_name": "Read", "tool_input": {"file_path": "/proc/1/environ"}})
+        assert verdict is not None
+        assert ENV_NAMES_SAFE in verdict
+
+    def test_read_tool_on_an_environ_file_elsewhere_passes(self):
+        assert decide({"tool_name": "Read", "tool_input": {"file_path": "docs/environ"}}) is None
