@@ -92,16 +92,22 @@ def pinned(state: TreeState, lease: Lease | None, snap: Snapshot) -> bool:
 
 
 def stale_after() -> float:
-    return float(os.environ.get("WT_STALE_DAYS", "7")) * DAY
+    try:
+        days = float(os.environ.get("WT_STALE_DAYS", "7"))
+    except ValueError:
+        days = 7.0
+    return (days if days > 0 else 7.0) * DAY
+
+
+def scratch_repository(state: TreeState, root: Root) -> bool:
+    return root.kind == "scratch" and Path(state.primary).is_relative_to(root.path)
 
 
 def _throwaway(lease: Lease | None) -> bool:
     return bool(lease) and lease.kind == "ephemeral"
 
 
-def _idle_verdict(
-    state: TreeState, lease: Lease | None, idle: float, scratch_repo: bool = False
-) -> tuple[str, str, bool]:
+def _idle_verdict(state: TreeState, lease: Lease | None, idle: float) -> tuple[str, str, bool]:
     if _throwaway(lease):
         if idle >= CLEAN_IDLE:
             return "remove", "throwaway checkout, owner gone", False
@@ -111,8 +117,6 @@ def _idle_verdict(
             return "remove", "clean and on a remote, owner left", True
         return ("remove", "clean and on a remote", False) if idle >= CLEAN_IDLE else ("keep", "clean, recent", False)
     if idle >= DIRTY_IDLE:
-        if scratch_repo:
-            return "remove", "unique work in a scratch repository, owner gone", False
         return "snapshot", "unique work, owner gone: push to wip/ then remove", False
     return "keep", "unique work, recent", False
 
@@ -124,12 +128,16 @@ def classify(path: Path, root: Root, snap: Snapshot) -> Finding:
     lease = read_lease(path, "worktree")
     idle = snap.now - state.last_touch
     held = _held(state, lease, snap)
-    scratch_repo = root.kind == "scratch" and Path(state.primary).is_relative_to(root.path)
-    action, reason, immediate = ("keep", held, False) if held else _idle_verdict(state, lease, idle, scratch_repo)
+    action, reason, immediate = ("keep", held, False) if held else _idle_verdict(state, lease, idle)
     if action == "keep" and idle >= stale_after() and not pinned(state, lease, snap):
-        rescue = state.dirty or state.unpushed
-        action = "snapshot" if rescue and not scratch_repo and not _throwaway(lease) else "remove"
+        rescue = (state.dirty or state.unpushed) and not _throwaway(lease)
+        action = "snapshot" if rescue else "remove"
         reason = f"untouched over {stale_after() / DAY:g} days though {reason}"
     elif state.busy and held == f"git {state.busy} in progress":
         action = "skip"
-    return Finding(str(path), root.id, "worktree", action, reason, state.last_touch, immediate=immediate)
+    disposable = action == "snapshot" and scratch_repository(state, root)
+    if disposable:
+        reason += "; scratch repository: removed if the push fails"
+    return Finding(
+        str(path), root.id, "worktree", action, reason, state.last_touch, immediate=immediate, disposable=disposable
+    )

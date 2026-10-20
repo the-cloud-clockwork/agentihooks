@@ -102,6 +102,21 @@ def test_failed_push_keeps_the_worktree(repo, tmp_path):
     assert (dirty / "work.txt").exists()
 
 
+def test_scratch_repository_push_failure_removes_the_worktree(repo, tmp_path):
+    scratch = Root("scratchpad", str(tmp_path), "scratch")
+    fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
+    (fixture / "work.txt").write_text("unsaved\n")
+    age(fixture, 25 * HOUR)
+    repo.origin.rename(repo.origin.with_name("moved.git"))
+    home = tmp_path / "state"
+    sweep([scratch], snap(uptime=10_000), home, act=True, fresh=lambda: snap(uptime=10_000))
+    report = sweep([scratch], snap(uptime=14_000), home, act=True, fresh=lambda: snap(uptime=14_000))
+    outcome = outcomes(report)["fixture"]
+    assert outcome.startswith("push failed in a scratch repository (git push: ")
+    assert outcome.endswith("); removed")
+    assert not fixture.exists()
+
+
 def test_enforce_rechecks_safety_right_before_acting(repo, tmp_path):
     clean = repo.worktree("clean")
     age(clean, 3 * HOUR)

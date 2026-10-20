@@ -40,3 +40,4 @@ class Finding:
     due: bool = False
     outcome: str = ""
     immediate: bool = False
+    disposable: bool = False

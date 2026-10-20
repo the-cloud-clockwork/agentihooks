@@ -2,7 +2,7 @@ from pathlib import Path
 
 from hooks.lifecycle.evict import free_gb, make_room
 from hooks.lifecycle.lease import add_holder
-from hooks.lifecycle.model import Holder
+from hooks.lifecycle.model import Finding, Holder, Root
 
 from .conftest import age, git, process, snap
 
@@ -102,6 +102,39 @@ def test_failed_push_keeps_the_worktree_and_moves_on(repo, tmp_path):
     assert lines[0].startswith(f"kept {stuck}: git push: ")
     assert lines[1:] == [f"evicted {clean}: removed"]
     assert stuck.exists() and not clean.exists()
+
+
+def test_scratch_repository_work_is_evicted_when_its_push_fails(repo, tmp_path):
+    fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
+    (fixture / "notes.txt").write_text("unsaved\n")
+    git(repo.primary, "remote", "set-url", "--push", "origin", str(tmp_path / "missing.git"))
+    scratch = Root("scratchpad", str(tmp_path), "scratch")
+    [line] = make_room(repo.primary, scratch, 0, 1, tmp_path / "home", snap(), plenty)
+    assert line.startswith(f"evicted {fixture}: push failed in a scratch repository (git push: ")
+    assert line.endswith("); removed")
+    assert not fixture.exists()
+
+
+def test_candidates_carry_the_eviction_finding_oldest_first(repo, tmp_path):
+    from hooks.lifecycle.evict import _candidates
+
+    clean = repo.worktree("clean")
+    work = repo.worktree("work")
+    (work / "notes.txt").write_text("unsaved\n")
+    age(work, 5 * HOUR)
+    age(clean, HOUR)
+    found = _candidates(repo.root(), snap())
+    assert [entry[3] for entry in found] == [
+        Finding(str(work), "worktrees", "worktree", "snapshot", "evicted"),
+        Finding(str(clean), "worktrees", "worktree", "remove", "evicted"),
+    ]
+    assert [entry[2] for entry in found] == [repo.primary.resolve(), repo.primary.resolve()]
+
+
+def test_free_space_exactly_at_the_floor_evicts_nothing(repo, tmp_path):
+    kept = repo.worktree("kept")
+    assert make_room(repo.primary, repo.root(), 50, 60, tmp_path / "home", snap(), lambda _path: 50) == []
+    assert kept.exists()
 
 
 def test_free_gb_takes_the_smaller_filesystem_and_skips_missing_ones(tmp_path, monkeypatch):

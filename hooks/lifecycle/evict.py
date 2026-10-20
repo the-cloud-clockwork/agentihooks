@@ -9,7 +9,7 @@ from hooks.lifecycle.lease import read_lease
 from hooks.lifecycle.liveness import Snapshot
 from hooks.lifecycle.locks import removing
 from hooks.lifecycle.model import Finding, Root
-from hooks.lifecycle.worktrees import _held, _throwaway, discover, registered
+from hooks.lifecycle.worktrees import _held, _throwaway, discover, registered, scratch_repository
 
 GB = 1 << 30
 EXTRA_FILESYSTEMS = ("/mnt/c",)
@@ -22,7 +22,7 @@ def free_gb(path: Path) -> int:
     return min(shutil.disk_usage(target).free for target in targets) // GB
 
 
-def _candidates(root: Root, snap: Snapshot) -> list[tuple[float, Path, Path, str]]:
+def _candidates(root: Root, snap: Snapshot) -> list[tuple[float, Path, Path, Finding]]:
     found = []
     for path, _root in discover([root]):
         state = inspect(path, snap.now)
@@ -31,9 +31,12 @@ def _candidates(root: Root, snap: Snapshot) -> list[tuple[float, Path, Path, str
         lease = read_lease(path, "worktree")
         if _held(state, lease, snap, grace=False):
             continue
-        rescue = (state.dirty or state.unpushed) and not _throwaway(lease)
-        found.append((state.last_touch, path, Path(state.primary).resolve(), "snapshot" if rescue else "remove"))
-    return sorted(found)
+        rescue = bool(state.dirty or state.unpushed) and not _throwaway(lease)
+        action = "snapshot" if rescue else "remove"
+        disposable = rescue and scratch_repository(state, root)
+        item = Finding(str(path), root.id, "worktree", action, "evicted", disposable=disposable)
+        found.append((state.last_touch, path, Path(state.primary).resolve(), item))
+    return sorted(found, key=lambda entry: entry[0])
 
 
 def make_room(
@@ -47,7 +50,7 @@ def make_room(
 ) -> list[str]:
     free, repo = free or free_gb, repo.resolve()
     journal, lines = Journal(home / "gc-journal.json"), []
-    for _touch, path, primary, action in _candidates(root, snap):
+    for _touch, path, primary, item in _candidates(root, snap):
         short = free(Path(root.path)) < floor_gb
         if not short and len(registered(repo)) - 1 < cap:
             break
@@ -55,7 +58,7 @@ def make_room(
             continue
         with removing(home, str(path)):
             try:
-                outcome = apply(Finding(str(path), root.id, "worktree", action, "evicted"), journal)
+                outcome = apply(item, journal)
             except (ActionError, OSError, subprocess.TimeoutExpired) as error:
                 lines.append(f"kept {path}: {error}")
                 continue

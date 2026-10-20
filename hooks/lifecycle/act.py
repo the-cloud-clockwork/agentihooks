@@ -152,7 +152,12 @@ def apply(item: Finding, journal: Journal) -> str:
     if item.category == "worktree":
         note = ""
         if item.action == "snapshot":
-            note = f"pushed {snapshot(path)}; "
+            try:
+                note = f"pushed {snapshot(path)}; "
+            except ActionError as error:
+                if not item.disposable:
+                    raise
+                note = f"push failed in a scratch repository ({error}); "
         journal.begin(item.path, "worktree")
         remove_worktree(path)
         journal.end(item.path)
