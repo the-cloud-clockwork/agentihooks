@@ -188,13 +188,14 @@ export async function loadClosed(name) {
   if (!closed) return;
   refreshing[name] = (refreshing[name] || 0) + 1;
   const resp = await readClosed(name, closed.kept + (pulled[name] || 0));
-  if (!resp.ok) return;
-  const { data } = await resp.json();
-  const have = new Set((older[name] || []).map((i) => i.id));
-  const fresh = withDefaults({ [name]: data })[name].filter((i) => !have.has(i.id));
-  older[name] = [...(older[name] || []), ...fresh];
-  pulled[name] = fresh.length ? older[name].length : closed.hidden;
-  mergeOlder(doc);
+  if (resp.ok) {
+    const { data } = await resp.json();
+    const have = new Set((older[name] || []).map((i) => i.id));
+    const fresh = withDefaults({ [name]: data })[name].filter((i) => !have.has(i.id));
+    older[name] = [...(older[name] || []), ...fresh];
+    pulled[name] = fresh.length ? older[name].length : closed.hidden;
+    mergeOlder(doc);
+  }
   if (unsettled.has(name)) refreshClosed(name).catch(() => null);
 }
 
