@@ -181,12 +181,20 @@ class Runtime(Protocol):
 
 def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
+    actions = []
+    if config.state == "stopped":
+        doc = timing.call(ledger.state, slug)
+        rows = {t["id"]: t for t in doc["tasks"]}
+        retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
+        if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
+            return timing.call(_close_space, slug, config, store, runtime) + _bin_closed(slug, store, ledger, doc)
+        config = store.update(slug, state="paused")
+        actions.append("the operator wrote on the ledger, paused to start the master")
     store.redis.delete(store.key(slug, SPAWN_HOLD))
-    actions = skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
+    actions += skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
     actions += skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
-    if config.state != "stopped" or _woken(slug, config, store, ledger):
-        actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
-        actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
+    actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
+    actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
     doc = freeze.watched(slug, store, ledger, timing.call(ledger.state, slug))
     rows = {t["id"]: t for t in doc["tasks"]}
     timing.call(
@@ -207,16 +215,6 @@ def tick(slug, store, ledger, runtime, now_ms):
     if config.state not in {"stopped", "stopping"}:
         actions += skip_refused(master_wake.run, slug, store, runtime, doc, now_ms)
     actions += skip_refused(lifetime.retire_idle_master, slug, store, ledger, runtime, rows, now_ms)
-    if config.state == "stopped":
-        retired = store.redis.get(store.key(slug, "master-retired-tasks")) is not None
-        if not _woken(slug, config, store, ledger) and (not retired or lifetime.sleeping(slug, store, rows)):
-            return (
-                actions
-                + timing.call(_close_space, slug, config, store, runtime)
-                + _bin_closed(slug, store, ledger, doc)
-            )
-        config = store.update(slug, state="paused")
-        actions.append("the operator wrote on the ledger, paused to start the master")
     sleeping = lifetime.sleeping(slug, store, rows)
     if not sleeping and config.state == "drained" and any(_claimable(slug, store, rows, doc, lane) for lane in LANES):
         config = store.update(slug, state="running")

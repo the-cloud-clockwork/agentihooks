@@ -258,6 +258,17 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     doc = {}
     try:
         timing.keep()
+        if store.config(slug).state == "stopped":
+            ledger = controller.FencedLedger(store, slug, held, ledger)
+            runtime = controller.FencedRuntime(
+                store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
+            )
+            controls = timing.call(command_runner.consume, store, slug)
+            if timing.call(ledger.binned, slug):
+                stop_now(store, slug, runtime, ledger)
+                return controls
+            doc = timing.call(ledger.state, slug)
+            return controls + timing.call(tick, slug, store, ledger, runtime, now_ms())
         timing.call(relay.relay, store.redis)
         timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
         outage.providers(store, slug, runtime, now_ms())
