@@ -202,6 +202,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "tests/reused_coverage.py",
         "tests/shard_budget.py",
         "tests/shard_check.py",
+        "tests/shard_summary.py",
         "scripts/ci_select.py",
         "tests/__init__.py",
         "tests/browser_coverage.py",

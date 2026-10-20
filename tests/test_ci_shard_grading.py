@@ -71,6 +71,9 @@ def test_shard_grading_keeps_head_data_separate_from_base_modules():
     commands = [step["run"] for step in steps if step.get("run", "").startswith("python -m tests.shard_")]
     assert commands == [
         "python -m tests.shard_check shard-durations/*/durations.json --collected collected-data/collected.json $REUSED",
+        'python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \\\n'
+        '  --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl'
+        ' | tee -a "$GITHUB_STEP_SUMMARY"\n',
         "python -m tests.shard_check shard-durations/*/durations.json",
         "python -m tests.shard_budget $REPORT shard-durations/*/durations.json",
     ]

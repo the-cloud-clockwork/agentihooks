@@ -846,7 +846,9 @@ def test_old_controller_cannot_record_an_acknowledgement_after_lease_takeover(se
     assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
 
 
-@pytest.mark.parametrize("lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("eng", "frontend")])
+@pytest.mark.parametrize(
+    "lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("eng", "frontend"), ("dispatch", "dispatcher")]
+)
 def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lane, profile):
     from scripts.hive.orders import Consumer
     from scripts.swarm.controller import FencedRuntime
@@ -857,7 +859,7 @@ def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lan
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
-    write_hive(setup, ui="yes", roles=["eng", "ci", "frontend"])
+    write_hive(setup, ui="yes", roles=["eng", "ci", "frontend", "dispatch"])
     request = request_for(setup, lane=lane)
     request.task["profile_decision"] = setup.herdr._profile_decision.return_value.record()
     local = LocalHerdrRuntime(setup.herdr)
