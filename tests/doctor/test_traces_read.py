@@ -663,3 +663,43 @@ def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(t
     data = traces_read.record("s", [], WORKING[:1], 10**9, project, home=tmp_path)
     assert data["reader"]["failures"] == []
     assert data["active"][0]["read"] is True
+
+
+def test_wait_reads_stop_at_their_budget_and_name_the_agents_left_unread():
+    now = [0.0]
+    read = []
+
+    def history(name):
+        read.append(name)
+        now[0] += 4
+        return [{"at": 1, "until": 2, "who": name}]
+
+    budget = traces_read.Budget(wait_seconds=8)
+    found, unread = traces_read.waits(history, ["a", "b", "c", "d"], 0.0, budget, clock=lambda: now[0])
+    assert read == ["a", "b"]
+    assert found == {"a": [{"at": 1, "until": 2, "who": "a"}], "b": [{"at": 1, "until": 2, "who": "b"}]}
+    assert unread == ["c", "d"]
+
+
+def test_wait_reads_inside_budget_read_every_agent():
+    found, unread = traces_read.waits(lambda name: [name], ["a", "b"], 0.0, traces_read.Budget(), clock=lambda: 0.0)
+    assert (found, unread) == ({"a": ["a"], "b": ["b"]}, [])
+    assert (traces_read.Budget().wait_seconds, traces_read.Budget().step_seconds) == (15.0, 55.0)
+
+
+@pytest.mark.parametrize(
+    "history_end, expected", [(0.0, ["a", "b"]), (50.0, ["a", "b"]), (51.0, ["a"]), (55.0, []), (60.0, [])]
+)
+def test_wait_reads_share_the_step_deadline_with_the_trace_reads_before_them(history_end, expected):
+    now = [history_end]
+    read = []
+
+    def history(name):
+        read.append(name)
+        now[0] += 4.5
+        return []
+
+    budget = traces_read.Budget(wait_seconds=8)
+    found, unread = traces_read.waits(history, ["a", "b", "c"], 0.0, budget, clock=lambda: now[0])
+    assert read == expected
+    assert unread == ["a", "b", "c"][len(expected) :]

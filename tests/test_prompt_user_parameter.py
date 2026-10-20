@@ -195,7 +195,7 @@ def test_the_master_rule_says_when_to_use_the_skill():
     rule = (ROLES / "master" / ".claude" / "rules" / "master-role.md").read_text()
     line = next(line for line in rule.splitlines() if "prompt-user-parameter" in line)
 
-    assert '"open pane"' in line and "Priorities" in line and "Never open a herdr pane" in line
+    assert "Priorities" in line and "When he asks for it" in line and "open pane" not in line
     for command in _commands(line):
         tool, argv = _argv(command)
         assert PARSERS[tool](argv).values == ["x", "x"]

@@ -1,6 +1,7 @@
 import json
 from statistics import median
 
+from scripts.doctor.words import plural
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import iso_ms
 
@@ -17,6 +18,12 @@ SUMMARIES = {
 THRESHOLDS = {
     "ci runner wait": "runner queue wait over 5 minutes",
     "ci queue age unconfirmed": "unconfirmed queue age over 15 minutes",
+    "ci tier wall time": "tier wall time over 15 minutes",
+}
+GROUPED = {
+    "ci runner wait": "{text} runners waited up to {minutes} minutes in {count}",
+    "ci queue age unconfirmed": "{text} jobs read as queued up to {minutes} minutes in {count}",
+    "ci tier wall time": "{text} tier took up to {minutes} minutes in {count}",
 }
 
 
@@ -122,4 +129,81 @@ def findings(records: list[dict], since_ms: int, now_ms: int) -> list[Finding]:
     for run in records:
         found.extend(_wait(run, run["jobs"], since_ms, now_ms))
         found.extend(_wall(run, now_ms))
+    return found
+
+
+def _during(run, incidents):
+    created = [iso_ms(job["created_at"]) for job in run["jobs"]]
+    return sorted({name for start, end, name in incidents if any(start <= stamp <= end for stamp in created)})
+
+
+def _member(groups, finding, scope, text, window_ms, run, during):
+    subject = f"{window_ms}-{scope}"
+    group = groups.setdefault(
+        f"{finding.kind.replace(' ', '-')}/{subject}",
+        {"kind": finding.kind, "subject": subject, "text": text, "window": window_ms, "members": {}},
+    )
+    attempt = run.get("run_attempt", 1)
+    group["members"][finding.id] = {
+        "order": [run["id"], attempt],
+        "run": str(run["id"]) if attempt == 1 else f"{run['id']} attempt {attempt}",
+        "measure": finding.measure,
+        "evidence": finding.evidence[0],
+        "during": during,
+    }
+
+
+def group(
+    groups: dict, records: list[dict], since_ms: int, now_ms: int, window_ms: int, incidents: list[tuple]
+) -> dict:
+    """Adds each run's crossings to one group per class and label set or tier in the pass window."""
+    for run in records:
+        during = _during(run, incidents)
+        for finding in _wait(run, run["jobs"], since_ms, now_ms):
+            scope = finding.subject.split("-", 2)[2]
+            _member(groups, finding, scope, ", ".join(json.loads(scope)) or "unassigned", window_ms, run, during)
+        for finding in _wall(run, now_ms):
+            _member(groups, finding, run["event"], TIERS[run["event"]], window_ms, run, during)
+    return groups
+
+
+def prune(groups: dict, gone: list[str]) -> list[str]:
+    """Drops superseded run crossings; returns the groups left with none."""
+    emptied = []
+    for identity, entry in list(groups.items()):
+        for finding_id in gone:
+            entry["members"].pop(finding_id, None)
+        if not entry["members"]:
+            del groups[identity]
+            emptied.append(identity)
+    return emptied
+
+
+def grouped(groups: dict) -> list[Finding]:
+    found = []
+    for entry in groups.values():
+        members = sorted(entry["members"].values(), key=lambda member: member["order"])
+        measures = [member["measure"] for member in members]
+        evidence = [
+            f"{plural(len(members), 'run')}, {entry['text']}, worst {max(measures)} seconds, "
+            f"median {median(measures)} seconds, runs {', '.join(member['run'] for member in members)}"
+        ]
+        during = [member for member in members if member["during"]]
+        if during:
+            names = sorted({name for member in during for name in member["during"]})
+            evidence.append(
+                f"{len(during)} of these runs had jobs created during the GitHub incident {'; '.join(names)}"
+            )
+        found.append(
+            Finding(
+                entry["kind"],
+                entry["subject"],
+                GROUPED[entry["kind"]].format(
+                    text=entry["text"], minutes=f"{max(measures) / 60:.2f}", count=plural(len(members), "run")
+                ),
+                (*evidence, *(member["evidence"] for member in members)),
+                THRESHOLDS[entry["kind"]],
+                max(measures),
+            )
+        )
     return found

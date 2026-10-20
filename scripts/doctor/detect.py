@@ -3,6 +3,7 @@
 import contextvars
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from functools import cache
@@ -50,12 +51,16 @@ def _inbox(store, mail, slug, now_ms, env, items):
 
 
 def _traces(store, tasks, slug, now_ms, env):
+    started = time.monotonic()
+    limits = traces.Limits.from_env(env)
     record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env))
-    record["waits"] = {
-        name: idle.wait_history(store.redis, slug, name)
-        for name in {traces._agent(trace) for trace in record["traces"]}
-    }
-    return traces.findings(record, traces.Limits.from_env(env))
+    record["waits"], record["waits_unread"] = traces_read.waits(
+        lambda name: idle.wait_history(store.redis, slug, name),
+        traces.gap_agents(record, limits),
+        started,
+        traces_read.Budget(),
+    )
+    return traces.findings(record, limits)
 
 
 def _overruns(store, slug):

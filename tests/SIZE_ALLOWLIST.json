@@ -21,8 +21,8 @@
   "PLR0913": 8
  },
  "hooks/context/kubectl_mutation_guard.py::check_kubectl_mutation_command": {
-  "C901": 20,
-  "PLR0912": 19
+  "C901": 17,
+  "PLR0912": 16
  },
  "hooks/context/quota_policy.py::decide": {
   "PLR0913": 12

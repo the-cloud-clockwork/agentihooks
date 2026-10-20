@@ -56,7 +56,9 @@ class _TLSHandler(BaseHTTPRequestHandler):
                 pass
 
 
-def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> type[BaseHTTPRequestHandler]:
+def _handler(
+    redis: "Redis", redis_url: str, context: ssl.SSLContext | None, ledger_ca: str | None = None
+) -> type[BaseHTTPRequestHandler]:
     class Join(_TLSHandler):
         timeout = REQUEST_TIMEOUT_S
         tls = context
@@ -72,7 +74,8 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
             from redis.exceptions import TimeoutError as Stalled
 
             try:
-                return self._answer(200, getattr(auth, operation)(redis, value, redis_url))
+                grant = getattr(auth, operation)(redis, value, redis_url)
+                return self._answer(200, {**grant, "ledger_ca": ledger_ca} if ledger_ca else grant)
             except auth.HiveError as exc:
                 if not isinstance(exc.__cause__, (Stalled, Unreachable)):
                     return self._answer(403, {"error": str(exc)})
@@ -169,7 +172,12 @@ def is_loopback(host: str | None) -> bool:
 
 
 def make_server(
-    redis: "Redis", redis_url: str, host: str, port: int, tls: tuple[str, str] | None = None
+    redis: "Redis",
+    redis_url: str,
+    host: str,
+    port: int,
+    tls: tuple[str, str] | None = None,
+    ledger_ca: str | None = None,
 ) -> ThreadingHTTPServer:
     if tls is None and not is_loopback(host):
         raise auth.HiveError("a join endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
@@ -180,7 +188,7 @@ def make_server(
             context.load_cert_chain(*tls)
         except (OSError, ssl.SSLError) as exc:
             raise auth.HiveError(f"the TLS certificate or key cannot be loaded ({exc})") from exc
-    return JoinServer((host, port), _handler(bounded(redis), redis_url, context))
+    return JoinServer((host, port), _handler(bounded(redis), redis_url, context, ledger_ca))
 
 
 def bounded(redis: "Redis") -> "Redis":
