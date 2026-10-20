@@ -177,8 +177,8 @@ The agent then starts with `hive_opening` exactly as carried. The hive does not 
 On every fifteen second heartbeat, each hive writes the work folder lines of the executions it hosts to
 `<root>:hive:<hive id>:workspaces`, expiring after 45 seconds. Each entry holds `latest_progress` and
 `latest_proof`: the last three non-blank lines of `progress.md` and `proof.md`, read from the last 4,096 bytes of
-each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution, the live one or else the one started last, is a
-worker on that hive. Masters are left out.
+each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution,
+the live one or else the one started last, is a worker on that hive. Masters are left out.
 
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
