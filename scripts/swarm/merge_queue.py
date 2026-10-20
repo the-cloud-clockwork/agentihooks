@@ -159,10 +159,21 @@ def waiting_ahead(url: str, target: str, run) -> list[dict]:
         variables["after"] = page["pageInfo"]["endCursor"]
 
 
-def prioritize(url: str, run=subprocess.run, journal=None, ahead=()) -> dict:
+class Untracked:
+    def add(self, pull: dict) -> None:
+        pass
+
+    def discard(self, url: str) -> None:
+        pass
+
+
+def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=None) -> dict:
+    displaced = displaced or Untracked()
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
         raise SwarmError("queue priority requires an open pull request into dev")
+    if raw.get("isDraft"):
+        raise SwarmError("queue priority requires a ready pull request")
     if raw["repository"]["mergeQueue"] is None:
         raise SwarmError("queue priority requires a dev merge queue")
     staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
@@ -179,6 +190,7 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=()) -> dict:
                 if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
                     removed.append(pull)
                     steps.append(["dequeue", pull["url"]])
+                    displaced.add(pull)
                     graphql(DEQUEUE, {"id": pull["id"]}, run)
             current = graphql(STATE, {"url": url}, run)["resource"]
             if current["mergeQueueEntry"] is None:
@@ -195,6 +207,7 @@ def prioritize(url: str, run=subprocess.run, journal=None, ahead=()) -> dict:
                     steps.append(["restore", pull["url"]])
                     graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
                     restored.append(pull["url"])
+                displaced.discard(pull["url"])
             except SwarmError as exc:
                 errors.append(f"could not restore {pull['url']}: {exc}")
         return {"url": url, "displaced": restored, "errors": errors}
