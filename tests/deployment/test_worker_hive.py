@@ -11,7 +11,7 @@ START = ROOT / "deploy/worker/start.sh"
 TOKEN = "fixture-github-token-value"
 
 
-def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bundle=None):
+def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -70,7 +70,7 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         "PATH": f"{tools}:{os.environ['PATH']}",
         "HOME": str(tmp_path / "home"),
         "GITHUB_PERSONAL_ACCESS_TOKEN": TOKEN,
-        "HIVE_BUNDLE_URL": str(repo) if bundle is True else bundle or "",
+        "HIVE_BUNDLE_URL": str(repo) if bundle else bundle_url,
         "HIVE_BUNDLE_REF": "dev",
         "AGENTIHOOKS_HOME": str(home),
         "SWARM_HIVE_ID": "worker-pod",
@@ -240,7 +240,7 @@ def test_failed_deps_ensure_still_runs_the_hive(tmp_path):
 
 
 def test_a_failed_bundle_clone_is_logged_and_the_hive_runs_on_the_package_roles(tmp_path):
-    result, commands, _, repo = startup(tmp_path, bundle=str(tmp_path / "missing-bundle"))
+    result, commands, _, repo = startup(tmp_path, bundle_url=str(tmp_path / "missing-bundle"))
     assert result.returncode == 0, result.stderr
     assert "worker-hive: bundle clone failed; init runs on the package roles alone\n" in result.stderr
     assert not (repo.parent / "agentihooks-bundle").exists()
