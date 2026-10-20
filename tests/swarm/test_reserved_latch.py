@@ -80,6 +80,17 @@ def test_a_redeclared_master_account_releases_the_old_closure(world):
     ]
 
 
+def test_clearing_the_master_declaration_releases_the_closure(world):
+    _, rows, masters = world
+    rows.append(_row())
+    capacity.accounts({}, NOW, refresh=False)
+    masters.clear()
+
+    assert [(row.state, row.cap, row.reserved) for row in capacity.accounts({}, NOW + 60, refresh=False)] == [
+        ("OPEN", 6, "")
+    ]
+
+
 def test_the_closure_never_reaches_another_harness_or_an_api_row(world):
     _, rows, masters = world
     rows.append(_row())
