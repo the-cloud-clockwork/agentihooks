@@ -1,6 +1,7 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from typing import Protocol
 from hooks.context import profile_chain
 from scripts.swarm import live_binding, profile_choice, prompt
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2 import broadcast_bridge, worker_home
 from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -112,6 +114,11 @@ def quota_predecessor(task: dict) -> tuple[str, str] | None:
     return saved["harness"], saved["account"]
 
 
+def hosted_ledger() -> dict[str, str]:
+    url = os.environ.get(ledger_link.HOSTED_ENV, "").strip().rstrip("/")
+    return {ledger_link.HOSTED_ENV: url} if url else {}
+
+
 def kept(agent: AgentRecord, reason: str) -> AgentRecord:
     return agent
 
@@ -172,7 +179,7 @@ class DistributedLaunch:
             "generation": admitted.generation,
             "account": terms.account,
             "profile": admitted.profile,
-            "endpoints": {broadcast_bridge.API_URL: terms.api_url},
+            "endpoints": {broadcast_bridge.API_URL: terms.api_url, **hosted_ledger()},
         }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
         if outcome.status in NOT_LAUNCHED:

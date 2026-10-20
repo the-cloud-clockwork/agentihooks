@@ -25,6 +25,10 @@ CREDENTIAL_HEADERS = (
     "X-Ledger-Migration",
 )
 TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV, CA_FILE_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM", "LEDGER_CA_FILE"
+HOSTED_ENV = "AGENTIHOOKS_HOSTED_LEDGER_URL"
+HOSTED_CREDENTIALS = ("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
+HOSTED_PROBE_S = 2
+_answers: dict[str, bool] = {}
 
 
 class Cleartext(SystemExit):
@@ -32,7 +36,7 @@ class Cleartext(SystemExit):
 
 
 def base(environ=os.environ, slug="") -> str:
-    if selected := ledger_route.url(slug):
+    if selected := ledger_route.url(slug) or hosted(environ):
         return selected
     if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
@@ -41,6 +45,15 @@ def base(environ=os.environ, slug="") -> str:
         return url.rstrip("/")
     host, port = address(environ)
     return f"{scheme(environ)}://{host}:{port}"
+
+
+def hosted(environ=os.environ) -> str:
+    url = environ.get(HOSTED_ENV, "").strip().rstrip("/")
+    if not url or not any(environ.get(name) for name in HOSTED_CREDENTIALS):
+        return ""
+    if url not in _answers:
+        _answers[url] = serving(HOSTED_PROBE_S, url, environ) is not None
+    return url if _answers[url] else ""
 
 
 def scheme(environ=os.environ) -> str:
@@ -117,6 +130,7 @@ def remote(environ=os.environ, slug="") -> bool:
     mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
     return bool(
         ledger_route.url(slug)
+        or hosted(environ)
         or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
     ) or (bool(environ.get("LEDGER_URL")) if mode is None else mode != "local")
 
@@ -175,9 +189,9 @@ def folder(environ=os.environ) -> Path:
     return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 
 
-def serving(timeout: float = 1, url: str | None = None) -> str | None:
+def serving(timeout: float = 1, url: str | None = None, environ=os.environ) -> str | None:
     try:
-        with urlopen(urllib.request.Request(f"{url or base()}/healthz"), timeout) as resp:
+        with urlopen(urllib.request.Request(f"{url or base()}/healthz"), timeout, environ) as resp:
             body = json.loads(resp.read())
     except http.client.RemoteDisconnected:
         return None
