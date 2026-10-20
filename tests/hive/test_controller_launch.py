@@ -179,7 +179,7 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.router.placement.backend == "hive"
     assert fenced.has_capacity(setup.config)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    assert fenced.placement_refusal("master", {}) == ""
+    assert fenced.placement_refusal("master", {}).startswith("the workstation hive spawns master work: ")
     setup.herdr.spawn.assert_not_called()
 
 
@@ -221,7 +221,8 @@ def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setu
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.placement_refusal("master", pinned) == ""
-    assert fenced.placement_refusal("master", {"id": "master", "hive": "gone"}) == NO_UI_HIVE
+    gone = fenced.placement_refusal("master", {"id": "master", "hive": "gone"})
+    assert gone == f"the workstation hive spawns master work: {NO_UI_HIVE}"
     fenced.runtime.spawn = Mock(return_value="placed on the hive")
     fenced.runtime.original_runtime = Mock()
     assert fenced.spawn(setup.config, "master", "name", pinned) == "placed on the hive"

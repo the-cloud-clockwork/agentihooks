@@ -46,20 +46,18 @@ def test_successor_replaces_saved_fallback_auth_with_the_best_login(setup):
     assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
 
 
-@pytest.mark.parametrize("ui", ["yes", "no"])
-def test_master_admission_records_fallback_auth_and_headless_evidence(setup, ui):
+def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     from scripts.swarm.tick import MASTER
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
     task = master(setup)
-    write_hive(setup, roles=["master"], ui=ui)
     name = setup.store.next_name(setup.config.slug, MASTER)
     task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
     request = SpawnRequest(setup.config, MASTER, name, task)
     selected = setup.launcher.select(setup.config, MASTER, task)
     admitted = setup.launcher.admit(request, selected)
     assert admitted.desired_route_kind == "interactive"
-    assert admitted.profile_decision["master_placement"] == {"hive": "remote", "headless": ui == "no"}
+    assert admitted.profile_decision["master_placement"] == {"hive": "remote", "headless": False}
     stored = setup.store.execution_occupants(setup.config.slug)["master@fixture"]
     assert stored.desired_route_kind == "interactive"
     assert stored.profile_decision["master_placement"] == admitted.profile_decision["master_placement"]
@@ -96,7 +94,9 @@ def test_master_order_preserves_placement_health_through_the_consumer(setup, rou
     if route == "interactive":
         write_hive(setup, roles=["master"], ui="yes", interactive={"claude": "account"})
     elif route == "api":
-        write_hive(setup, roles=["master"], ui="no", slots=[{"harness": "claude", "account": "account", "kind": "api"}])
+        write_hive(
+            setup, roles=["master"], ui="yes", slots=[{"harness": "claude", "account": "account", "kind": "api"}]
+        )
     name = setup.store.next_name(setup.config.slug, "master")
     task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
     runtime = Mock()
@@ -119,7 +119,7 @@ def test_master_order_preserves_placement_health_through_the_consumer(setup, rou
     assert outcome.ok
     assert outcome.value.route_kind == route
     assert outcome.value.desired_route_kind == "interactive"
-    assert outcome.value.profile_decision["master_placement"] == {"hive": "remote", "headless": route == "api"}
+    assert outcome.value.profile_decision["master_placement"] == {"hive": "remote", "headless": False}
     assert outcome.value.execution.profile_decision == outcome.value.profile_decision
     assert outcome.value.execution.desired_route_kind == "interactive"
 
