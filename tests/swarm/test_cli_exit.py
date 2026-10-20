@@ -9,6 +9,7 @@ from tests.swarm.test_cli import env, run  # noqa: F401
 
 @pytest.mark.parametrize("case", ["obsolete_wait", "blocked_dependency"])
 def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, monkeypatch, capsys, case):  # noqa: F811
+    from scripts.swarm import difficulty
     from scripts.swarm.tick import tick
 
     store, ledger, runtime = env
@@ -25,6 +26,7 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     else:
         ledger.rows["t1"]["depends_on"] = ["t2"]
         ledger.rows["t2"].update(state="blocked")
+    difficulty.size_pass("sw", ledger, ledger.state("sw"))
     before = copy.deepcopy(ledger.rows)
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", name)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
