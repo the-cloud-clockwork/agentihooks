@@ -343,7 +343,7 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set master-agent=claude\|codex` | Master affinity, the master lane's `agent`. The ledger page's Capacity dropdown writes the same field through Apply. When the value differs from the live master's harness, one durable inbox order reaches the master seat: hand off with Handoff v2 and stop. The tick ends the old process before it starts the successor in the same seat on the chosen harness, with the original profile and the frontier model of that harness. An unchanged value orders nothing. A failed successor launch shows on `swarm status` and the page, keeps the handoff and the seat inbox, and retries each tick. Templates, snapshots and restore carry the value. |
 | `agentihooks swarm <id> set effort-min=E effort-max=E` | The effort range every lane agent starts inside, default `medium` to `xhigh`. The classifier's pick, a lane or template effort, a resume and the `init-agent` launch of a swarm lane are each clamped into it; Claude levels are `low`, `medium`, `high`, `xhigh` and `max`, and Codex levels map by rank, so Codex runs `max` as `xhigh`. Setting a lane effort outside the range is refused with the range named. The swarm panel caps row edits both ends. |
 | `agentihooks swarm <id> set <gate>-gate=deny\|log only\|skip` | Operator or master only, for every gate: `identity`, `watch`, `subagents`, `reruns`, `intent`, `build`, `claim-stop`, `push-stop`, `one-push`, `claims`, `trace-plan`, `talk`, `stall`, `lane-split`, `nightwatch`. The mode lives in the swarm config; the ledger page's Gates controls beside Capacity write the same field, and `swarm status` reports every gate's current mode as `gate_modes`. Inside a swarm the ledger server, the tick, `swarm trace-plan` and the gate entry point read only the config, so an agent's `AGENTIHOOKS_GATE_<NAME>` is ignored there; it picks the mode only outside a swarm or when the swarm config cannot be read. `deny` refuses the call and logs the denial, `log only` lets the call through and logs the would-be denial, `skip` does not run the check; for `trace-plan`, `deny` refuses no call: it logs each failed plan and the second distinct one blocks the task, and `skip` still runs the trace and saves its verdict, with no failure row and no block. The old names `enforce`, `observe` and `off` remain aliases. Quote a mode containing spaces, for example `"watch-gate=log only"`. |
-| `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. |
+| `agentihooks swarm <id> set stall-gate=deny\|log only\|skip` | Operator or master only. New swarm enforcements that stop, reopen or block agents start in `log only` mode, with their own switch in the swarm config. Check their logged actions against reality before selecting `deny` to enforce. The stall watchdog defaults to `log only`: it records each would-be task reopen and live agent stop in the swarm gate log, preserving the agent, claim and task state. `deny` enables those mutations; `skip` suppresses them without logging attempts. Watchdog alerts and escalation remain active in every mode. `swarm status` reports `stall` with the other gate modes. Cases, limits, the release wait and troubleshooting: [Stall watchdog](#stall-watchdog). |
 | `agentihooks swarm <id> set nightwatch-gate=deny\|log only\|skip` | Operator or master only. The night watch runs every tick after placement and needs no master: it holds the front door master seat, the spawn path and the dev merge queue against a limit. A running swarm, not asleep, whose front door seat holds no live working master for ten minutes raises an `empty master seat` finding; ready work with no agent launched for thirty minutes raises a `held spawn` finding naming the hold, `sleep`, `host room`, `cap`, `quota` or `no named hold`, with its evidence; no merge into dev for an hour while the queue holds entries, or the last three merge group runs failing in a row, raises a `merge stall` or `merge failures` finding. A stopped swarm skips the tick, so the watch rests with it. The seat and merge checks rest while the swarm is not running or sleeps; the spawn check keeps watching a sleeping swarm and names `sleep` as the hold, because a sleeping swarm spawns nothing for ready work. A pass more than five minutes after the last one closes its alerts and starts every episode over, and a merge observation that fails leaves the merge episode and its alert as they were. The findings show in every mode. It defaults to `log only`, recording each would-be action in the swarm gate log; `deny` acts: it respawns the front door master at most three times an hour, ten minutes apart, counted the same way in `log only`, past the host hold and a spent startup retry, and raises one ledger alert per episode, source `seat`, `spawn` or `merge`, closed when the condition clears; an episode logged before the switch to `deny` raises its alert on the next pass, and a second merge finding in the same episode replaces the merge alert; a merge alert also emails the operator at `AGENTIHOOKS_OPERATOR_EMAIL`, else the swarm repository's git user email, through the SMTP settings. `skip` runs the checks for their findings only, with no gate log row, action or alert. |
 | `agentihooks swarm <id> set lane-split-gate=deny\|log only\|skip` | Operator or master only. The lane split moves one seat between the eng and ci lanes after the bottleneck report names the same stage three ticks running, and the `seat_wait` remedy moves one from ci to eng. It defaults to `log only`, recording each would-be move in the swarm gate log; `deny` lets it move seats, `skip` holds every move without logging. In every mode it holds a move into a lane with no ready task, and it never moves caps the operator or the master set with `max-eng-agents` or `max-ci-agents`, through `swarm set`, the ledger page or `create` flags; those caps stay where they set them for the swarm's life, and a swarm stored before the pin existed counts as set. A tick hold names its reason in the tick's held line; a remedy hold names it in the task proposal to the master. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
@@ -1623,6 +1623,101 @@ A verdict suppresses the finding under the existing cooldown rules; it does
 not update the activity clock. See the `verdict` command above for recurrence
 behavior and [Outage holds and recovery](#outage-holds-and-recovery) for provider
 or Redis outages, which have their own hold and resume behavior.
+
+### Stall watchdog
+
+Each tick, after the ready merge pass, the stall watchdog checks every task in `claimed` or `pr` state that has a
+pull request, and every lane. A case past its limit sends an alert; with the `stall` gate on `deny` a pull request
+case also reopens the task for the next engineer with its handoff and branch.
+
+| Case | When it counts | Default limit | Setting |
+|---|---|---|---|
+| green and not queued | Checks resolved and passing, not queued, not a draft, and the task not awaiting a ready merge | 10 minutes | `AGENTIHOOKS_STALL_GREEN_MINUTES` |
+| red with no push | Checks resolved and failing, not queued, not a draft, latest run not cancelled | 15 minutes | `AGENTIHOOKS_STALL_RED_MINUTES` |
+| owner not live | No case above, and the claimant has no live session | 10 minutes | `AGENTIHOOKS_STALL_OWNER_MINUTES` |
+| unmergeable or dropped from the queue | Conflicting, or seen in the merge queue and no longer queued, while the owner is not working on it and it is not a draft | 5 minutes | `AGENTIHOOKS_STALL_UNMERGEABLE_MINUTES` |
+| ready and unclaimed while its lane is full | Ready tasks wait while every configured seat of the lane is taken, accounts show free seats and scaling is not manual; alert only, closed once the lane frees or the task is claimed | 15 minutes | `AGENTIHOOKS_STALL_UNCLAIMED_MINUTES` |
+
+A setting takes a positive whole number of minutes; any other value keeps the default. Time inside an open
+[outage](#outage-holds-and-recovery) does not count.
+
+#### When the clock starts
+
+The green, red and unmergeable cases count from the latest of these moments:
+
+- the first tick that saw the case (for red, the last push or the moment the checks turned red),
+- the last push to the pull request,
+- the start of the owner's current session on the task,
+- the moment the tick last ended the owner's wait.
+
+The last moment gives a woken owner the full limit. The tick ends a wait on checks, merge or intent in the same
+pass that runs the watchdog, so without it the pass that ended an owner's wait on checks could also reopen the
+task as green for ten minutes before the owner had a turn to queue it. Only a wait the tick ends records this
+moment, kept for 24 hours; a wait the owner declares or ends itself leaves it unchanged. The owner not live case
+counts from the first tick that saw it and ignores these moments.
+
+#### What holds the watchdog
+
+The watchdog skips a task, for every case, while:
+
+- the task names an `after_release` tag and its repository has no newer release (see below),
+- any task it depends on is not done,
+- its ready record, or its owner's declared wait, names a dependency that is not yet met.
+
+A wait on the task's own pull request holds nothing: a green pull request still counts while its owner waits on its
+checks, and the owner queues it once they pass.
+
+#### Holding a finished pull request for the next release
+
+A green pull request kept unqueued on purpose, for example to ship with the next release, needs a release wait;
+otherwise the watchdog reads it as green and not queued. Set the release it waits after on the task:
+
+```bash
+agentihooks ledger --slug <slug> task set <task> after_release=v2.17.1
+```
+
+The value is a tag such as `v2.17.1` or `2.17.1`; any other value is refused. While the task is not done, the
+watchdog skips it and no lane claims it, until `git ls-remote --tags --refs origin` in the swarm repository lists a
+release tag with a higher version. Tags that are not three dotted numbers, with or without a leading `v`, are
+ignored. Clear the wait with an empty value:
+
+```bash
+agentihooks ledger --slug <slug> task set <task> after_release=
+```
+
+A tag lookup that fails, exits non zero or runs past 30 seconds lists no tags, so every waiting task stays held.
+So that a held task never stays held silently, each tick that finds a task with `after_release` set, no open
+alert from source `release` and a failed lookup raises one ledger alert to the master:
+
+```text
+The release tag lookup for /home/me/dev/project failed: git ls-remote exited 128. Tasks t834 stay held for a newer release until it works.
+```
+
+No second release alert is raised while one stays open. Close it once the lookup works again, for example after
+restoring the repository's `origin` remote or network access.
+
+#### Alerts and escalation
+
+Every case past its limit sends an inbox item from `swarm` to the master seat that owns the task, naming the task, case, minutes, pull request, owner and action. A new alert on the same task closes the
+earlier one as superseded; an alert-only case is not repeated while its earlier item is open. An alert still open
+two limits after it was sent goes to the operator's Priorities and to ntfy at `AGENTIHOOKS_STALL_NTFY_URL`
+(default the Anton alerts topic), with `NTFY_USER` and `NTFY_PASS` for basic authentication. The open alerts show
+as `stall` health findings in `swarm status`.
+
+With the `stall` gate on `log only`, the default, a pull request case past its limit records the would-be reopen
+and agent stop in the swarm gate log and sends the alert only. On `deny` it stops the live owner, reopens the task
+to `open` with no claimant, and comments on the task. A task whose fresh ledger row has moved to another state or
+claimant, a green or owner case whose task now awaits a ready merge, and an owner held by an outage are left
+alone. See the `set stall-gate` command for the modes.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A green pull request held for the next release is reopened | No `after_release` on the task | `task set <task> after_release=<current release>` |
+| A task with `after_release` never resumes after the release | The new tag is not newer, or is not three dotted numbers | Check `git ls-remote --tags --refs origin` in the swarm repository against the task's tag |
+| A `release` alert names held tasks | The tag lookup fails | Fix the repository's `origin` remote or network, then close the alert |
+| The green limit seems to restart | A push, a new owner session or the tick ending the owner's wait restarted the clock | Queue the pull request once its checks pass |
 
 ### Ledger event pass
 
