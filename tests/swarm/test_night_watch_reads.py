@@ -14,7 +14,7 @@ pytestmark = pytest.mark.unit
 @pytest.mark.parametrize(
     ("target", "expected"),
     [
-        ("tasks/held", "the freeze on Task Held work holds it"),
+        ("tasks/held", "the freeze on task Held work holds it"),
         ("lane:eng", "the freeze on the eng lane holds it"),
         ("kind:code", "the freeze on code tasks holds it"),
     ],
