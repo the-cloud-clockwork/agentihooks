@@ -145,11 +145,13 @@ class HiveLaunch:
         found = _first_choice(
             candidates, lambda name: placement.choose(role, "claude", name, route_kind, config.repo, hives, now)
         )
-        if isinstance(found, placement.Wait):
-            return self._record_wait(lane, task, found)
-        row, choice = found
-        fallback = f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
-        return self._record_wait(lane, task, Selection(decision, choice.hive, row, route_kind, fallback=fallback))
+        if not isinstance(found, placement.Wait):
+            row, choice = found
+            fallback = (
+                f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
+            )
+            found = Selection(decision, choice.hive, row, route_kind, fallback=fallback)
+        return self._record_wait(lane, task, found)
 
     def _master_selection(self, config, decision, hives, now, rows):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}
