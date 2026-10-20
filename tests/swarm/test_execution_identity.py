@@ -121,7 +121,7 @@ def test_restart_replay_snapshot_and_rollback(store, agent, repeat):
         k: v for k, v in asdict(agent).items() if k in preceding_fields
     }
     restored.drop_agent("fixture", third.name)
-    assert restored.executions("fixture", agent.seat) == [first, second, third]
+    assert restored.executions("fixture", agent.seat) == [first, second, replace(third, state="ended")]
 
 
 def test_legacy_local_records_remain_readable(store, agent):

@@ -64,11 +64,11 @@ def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
     assert rules["merge_queue"]["parameters"] == {
         "check_response_timeout_minutes": 45,
         "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": 3,
-        "max_entries_to_merge": 3,
+        "max_entries_to_build": 1,
+        "max_entries_to_merge": 5,
         "merge_method": "SQUASH",
         "min_entries_to_merge": 1,
-        "min_entries_to_merge_wait_minutes": 0,
+        "min_entries_to_merge_wait_minutes": 1,
     }
     assert rules["pull_request"]["parameters"]["allowed_merge_methods"] == ["squash"]
     assert workflow[True]["merge_group"] == {"types": ["checks_requested"]}

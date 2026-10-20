@@ -183,6 +183,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     store.redis.delete(store.key(slug, SPAWN_HOLD))
     actions = skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
+    actions += skip_refused(store.execution_registry.reconcile, slug, runtime)
     if config.state != "stopped" or _woken(slug, config, store, ledger):
         actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
         actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
