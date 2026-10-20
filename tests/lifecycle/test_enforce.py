@@ -112,8 +112,25 @@ def test_scratch_repository_push_failure_removes_the_worktree(repo, tmp_path):
     sweep([scratch], snap(uptime=10_000), home, act=True, fresh=lambda: snap(uptime=10_000))
     report = sweep([scratch], snap(uptime=14_000), home, act=True, fresh=lambda: snap(uptime=14_000))
     outcome = outcomes(report)["fixture"]
-    assert outcome.startswith("push failed in a scratch repository (git push: ")
+    [ref] = git(repo.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads/wip").split()
+    assert ref.startswith("wip/primary/fixture-")
+    assert outcome.startswith(f"kept {ref} locally, push failed (git push: ")
     assert outcome.endswith("); removed")
+    assert git(repo.primary, "show", f"{ref}:work.txt") == "unsaved"
+    assert not fixture.exists()
+
+
+def test_scratch_repository_snapshot_is_pushed_when_origin_answers(repo, tmp_path):
+    scratch = Root("scratchpad", str(tmp_path), "scratch")
+    fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
+    (fixture / "work.txt").write_text("unsaved\n")
+    age(fixture, 25 * HOUR)
+    home = tmp_path / "state"
+    sweep([scratch], snap(uptime=10_000), home, act=True, fresh=lambda: snap(uptime=10_000))
+    report = sweep([scratch], snap(uptime=14_000), home, act=True, fresh=lambda: snap(uptime=14_000))
+    [ref] = remote_refs(repo).split()
+    assert outcomes(report)["fixture"] == f"pushed {ref.removeprefix('refs/heads/')}; removed"
+    assert git(repo.origin, "show", f"{ref}:work.txt") == "unsaved"
     assert not fixture.exists()
 
 

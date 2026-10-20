@@ -113,8 +113,10 @@ def test_scratch_repository_work_is_evicted_when_its_push_fails(repo, tmp_path):
     git(repo.primary, "remote", "set-url", "--push", "origin", str(tmp_path / "missing.git"))
     scratch = Root("scratchpad", str(tmp_path), "scratch")
     [line] = make_room(repo.primary, scratch, 0, 1, tmp_path / "home", snap(), plenty)
-    assert line.startswith(f"evicted {fixture}: push failed in a scratch repository (git push: ")
+    [ref] = git(repo.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads/wip").split()
+    assert line.startswith(f"evicted {fixture}: kept {ref} locally, push failed (git push: ")
     assert line.endswith("); removed")
+    assert git(repo.primary, "show", f"{ref}:notes.txt") == "unsaved"
     assert not fixture.exists()
 
 

@@ -59,14 +59,26 @@ def _snapshot_commit(path: Path, admin: Path, skipped: list[str]) -> str:
     return _run(path, "commit-tree", tree, "-p", "HEAD", "-m", "\n".join(lines), env=env)
 
 
-def snapshot(path: Path) -> str:
+def snapshot(path: Path, local: bool = False) -> str:
     admin = admin_dir(path)
     if admin is None:
         raise ActionError("not a linked worktree")
     commit = _snapshot_commit(path, admin, _oversized(path))
     ref = f"wip/{admin.parent.parent.parent.name}/{path.name}-{time.strftime('%Y%m%d%H%M%S')}"
-    _run(path, "push", "--no-follow-tags", "origin", f"{commit}:refs/heads/{ref}", timeout=600)
+    if local:
+        _run(path, "update-ref", f"refs/heads/{ref}", commit)
+    else:
+        _run(path, "push", "--no-follow-tags", "origin", f"{commit}:refs/heads/{ref}", timeout=600)
     return ref
+
+
+def _scratch_snapshot(path: Path) -> str:
+    ref = snapshot(path, local=True)
+    try:
+        _run(path, "push", "--no-follow-tags", "origin", f"refs/heads/{ref}:refs/heads/{ref}", timeout=600)
+    except (ActionError, subprocess.TimeoutExpired) as error:
+        return f"kept {ref} locally, push failed ({error}); "
+    return f"pushed {ref}; "
 
 
 def _drop_branch(primary: Path, branch: str) -> None:
@@ -152,12 +164,7 @@ def apply(item: Finding, journal: Journal) -> str:
     if item.category == "worktree":
         note = ""
         if item.action == "snapshot":
-            try:
-                note = f"pushed {snapshot(path)}; "
-            except (ActionError, subprocess.TimeoutExpired) as error:
-                if not item.disposable:
-                    raise
-                note = f"push failed in a scratch repository ({error}); "
+            note = _scratch_snapshot(path) if item.disposable else f"pushed {snapshot(path)}; "
         journal.begin(item.path, "worktree")
         remove_worktree(path)
         journal.end(item.path)
