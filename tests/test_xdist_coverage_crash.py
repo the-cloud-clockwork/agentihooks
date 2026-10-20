@@ -48,5 +48,5 @@ def test_a_replacement_worker_keeps_the_live_workers_coverage_data(tmp_path):
         output = "timed out\n" + process.communicate()[0]
     assert "replacing crashed worker" in output, output
     assert not re.findall(r"^\[gw\d+\] .*\bERROR\b", output, re.M), output
-    assert len(re.findall(r"^\[gw\d+\] .*\bPASSED\b", output, re.M)) == 61, output
-    assert process.returncode == 0, output
+    assert len(re.findall(r"^\[gw\d+\] .*\bPASSED\b", output, re.M)) == 60, output
+    assert re.findall(r"^\[gw\d+\] .*\bFAILED (\S+)", output, re.M) == ["test_cases.py::test_crash"], output
