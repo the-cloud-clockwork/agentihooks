@@ -84,7 +84,7 @@ def test_install_links_both_files_and_writes_both_units_into_an_empty_home(tmp_p
     for name in UNITS:
         assert (_units(tmp_path) / name).read_text() == (sync.REPO / name).read_text()
     assert sync.drift(tmp_path) == []
-    assert messages == [f"[OK] Host guard installed in {tmp_path} from {sync.REPO}"]
+    assert messages == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}"
     assert calls == []
 
 
@@ -104,6 +104,50 @@ def test_install_reloads_and_enables_the_timer_only_in_the_live_home(tmp_path, m
     monkeypatch.setattr(sync, "_live", lambda home: home == tmp_path)
     sync.install(tmp_path)
     assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
+
+
+def test_install_reports_a_timer_systemd_would_not_enable(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(sync, "_live", lambda home: True)
+    monkeypatch.setattr(sync, "_systemctl", lambda *args: calls.append(args) or args[0] == "daemon-reload")
+    message = sync.install(tmp_path)
+    assert (
+        message
+        == f"[!!] Host guard files installed in {tmp_path}; systemctl --user could not enable guard-daemon.timer"
+    )
+    assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
+    assert sync.drift(tmp_path) == []
+    monkeypatch.setattr(sync.Path, "home", lambda: tmp_path)
+    assert sync.main(["install"]) == 1
+
+
+def test_systemctl_runs_the_user_manager_and_reads_its_exit(monkeypatch):
+    seen = []
+
+    def run(command, capture_output, timeout):
+        seen.append((command, capture_output, timeout))
+        return sync.subprocess.CompletedProcess(command, 0 if command[2] == "daemon-reload" else 3)
+
+    monkeypatch.setattr(sync.subprocess, "run", run)
+    assert sync._systemctl("daemon-reload") is True
+    assert sync._systemctl("enable", "--now", "guard-daemon.timer") is False
+    assert seen == [
+        (["systemctl", "--user", "daemon-reload"], True, 20),
+        (["systemctl", "--user", "enable", "--now", "guard-daemon.timer"], True, 20),
+    ]
+
+
+def test_systemctl_reads_a_missing_or_hung_manager_as_failure(monkeypatch):
+    def missing(*args, **kwargs):
+        raise FileNotFoundError("systemctl")
+
+    def hung(*args, **kwargs):
+        raise sync.subprocess.TimeoutExpired("systemctl", 20)
+
+    monkeypatch.setattr(sync.subprocess, "run", missing)
+    assert sync._systemctl("daemon-reload") is False
+    monkeypatch.setattr(sync.subprocess, "run", hung)
+    assert sync._systemctl("daemon-reload") is False
 
 
 def test_the_live_home_is_the_account_home(tmp_path, monkeypatch):
@@ -142,3 +186,14 @@ def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, m
     assert capsys.readouterr().out == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}\n"
     assert sync.main(["check"]) == 0
     assert capsys.readouterr().out == f"[OK] Host guard in sync with {sync.REPO}\n"
+
+
+def test_the_agentihooks_command_dispatches_host_guard(tmp_path, monkeypatch, capsys):
+    from scripts import install as cli
+
+    monkeypatch.setattr(sync.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(cli.sys, "argv", ["agentihooks", "host-guard", "check"])
+    with pytest.raises(SystemExit) as raised:
+        cli.main()
+    assert raised.value.code == 1
+    assert f"{tmp_path / 'guard-daemon.sh'} is missing" in capsys.readouterr().out
