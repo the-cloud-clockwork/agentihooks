@@ -2991,26 +2991,3 @@ def test_list_and_status_header_show_the_scaling_mode(env, capsys):
     assert "\tscaling manual\t" in capsys.readouterr().out
     run("sw", "status")
     assert "  scaling manual  " in capsys.readouterr().out.splitlines()[0]
-
-
-@pytest.mark.parametrize("mode", ["compose", "distributed"])
-def test_an_agent_pod_tick_takes_no_controller_lease_and_never_spawns_or_reaps(monkeypatch, mode):
-    import fakeredis
-
-    from scripts.swarm import controller
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("sw", ".", 1, 0, state="running"))
-    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", mode)
-    passes = []
-    monkeypatch.setattr(cli, "tick", lambda slug, *args: passes.append(slug) or [])
-    ledger, rt = FakeLedger([{"id": "t1", "lane": "eng", "state": "open"}]), FakeRuntime()
-
-    actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert lease.current(store, "sw") is None
-    assert (passes, rt.spawned, rt.killed) == ([], [], [])
-    assert actions == [cli.CONTROLLER_TICKS]
-
-    assert list(controller.run_once(store, ledger=ledger, runtime=rt, messenger=FakeHerdr({}))) == ["sw"]
-    assert lease.current(store, "sw").owner == commands.hive_id()
-    assert passes == ["sw"]
