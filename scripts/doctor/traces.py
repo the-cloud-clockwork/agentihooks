@@ -145,12 +145,16 @@ def _wait_covers(waits, start, end):
     return False
 
 
-def _uncovered_gaps(trace, waits, limit):
+def _long_gaps(trace, limit):
     turns = _turns(trace)
+    return [(a, b) for a, b in zip(turns, turns[1:]) if (b["start"] - a["end"]) // MINUTE_MS > limit]
+
+
+def _uncovered_gaps(trace, waits, limit):
     return [
         (a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS, a["end"], b["start"])
-        for a, b in zip(turns, turns[1:])
-        if (b["start"] - a["end"]) // MINUTE_MS > limit and not _wait_covers(waits, a["end"], b["start"])
+        for a, b in _long_gaps(trace, limit)
+        if not _wait_covers(waits, a["end"], b["start"])
     ]
 
 
@@ -187,10 +191,8 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
 def gap_agents(record: dict, limits: Limits) -> list[str]:
     newest = {}
     for trace in record["traces"]:
-        turns = _turns(trace)
-        for a, b in zip(turns, turns[1:]):
-            if (b["start"] - a["end"]) // MINUTE_MS > limits.turn_gap_minutes:
-                newest[_agent(trace)] = max(newest.get(_agent(trace), 0), b["start"])
+        for _, b in _long_gaps(trace, limits.turn_gap_minutes):
+            newest[_agent(trace)] = max(newest.get(_agent(trace), 0), b["start"])
     return sorted(newest, key=lambda name: (-newest[name], name))
 
 
