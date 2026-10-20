@@ -140,6 +140,7 @@ def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
             return selected.reason if isinstance(selected, placement.Wait) else ""
 
     runtime = LiveHives()
-    actions = tick(live.config.slug, live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
+    live.store.create(replace(live.config, slug="sw"))
+    actions = tick("sw", live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
     assert "task t1 waits: no headless hive for eng has room" in actions
     assert runtime.spawned == []
