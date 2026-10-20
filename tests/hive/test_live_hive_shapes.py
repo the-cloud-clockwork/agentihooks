@@ -125,3 +125,22 @@ def test_a_checkout_without_an_origin_matches_only_by_its_path(live, tmp_path):
     assert live.launcher.select(config, "eng", {"id": "task", "hive": ANTON}) == placement.Wait(
         f"no hive for eng lists the repo {bare}"
     )
+
+
+def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
+    from scripts.hive import registry
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeRuntime, tasks
+
+    live.store.redis.set(f"{registry.key(ANTON)}:sessions", '{"eng": 1}')
+    live.store.redis.set(f"{registry.key('root')}:sessions", '{"eng": 16}')
+
+    class LiveHives(FakeRuntime):
+        def placement_refusal(self, lane, task):
+            selected = live.launcher.select(live.config, lane, task) if task.get("id") else None
+            return selected.reason if isinstance(selected, placement.Wait) else ""
+
+    runtime = LiveHives()
+    actions = tick(live.config.slug, live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
+    assert "task t1 waits: no headless hive for eng has room" in actions
+    assert runtime.spawned == []
