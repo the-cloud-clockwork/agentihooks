@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ -n "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
-  exec python3 -m scripts.github_app_cli exec /usr/bin/gh "$@"
+if [[ -n "${HIVE_GITHUB_AUTH_MODE:-}" || -s "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/github-token" ]]; then
+  exec /opt/venv/bin/python3 -m scripts.github_app_cli exec /usr/bin/gh "$@"
 fi
 exec /usr/bin/gh "$@"

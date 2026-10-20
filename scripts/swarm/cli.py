@@ -366,6 +366,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                     lambda lane: ready_in_order(slug, store, rows, doc, lane),
                     now_ms(),
                     released=release_wait.checker(config.repo),
+                    reread=ledger_events.view,
                 ),
                 doc,
             )

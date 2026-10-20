@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -345,3 +346,91 @@ def test_agentihooks_serena_switch_preserves_shared_enforcement(trees, monkeypat
     else:
         assert result.returncode == 1
         assert "activate_project" in result.stderr
+
+
+@pytest.fixture
+def launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@323133-2196")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    checkout = tmp_path / "agentihooks"
+    (checkout / ".git").mkdir(parents=True)
+    return checkout
+
+
+def _repo_worktree(base, repo, name):
+    root = base / repo / name
+    (root / "pkg").mkdir(parents=True)
+    (root / ".git").write_text(f"gitdir: /src/{repo}/.git/worktrees/{name}\n")
+    (root / "pkg" / "mod.py").write_text("x = 1\n")
+    return root
+
+
+@pytest.mark.parametrize(
+    ("repo", "name"),
+    [
+        ("antoncore", "engineer-323133-2196"),
+        ("antoncore", "engineer-323133-2196-2"),
+        ("antoncore/_tmp", "engineer-323133-2196-tmp-1"),
+    ],
+)
+def test_deleting_python_in_the_sessions_own_worktree_of_another_repo_is_allowed(tmp_path, launch, repo, name):
+    own = _repo_worktree(tmp_path / "worktrees", repo, name)
+    check(_tool("Bash", launch, command=f"git -C {own} rm pkg/mod.py"))
+    check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
+    patch_name, tool_input = _patch(f"*** Delete File: {own / 'pkg' / 'mod.py'}")
+    check({"tool_name": patch_name, "tool_input": tool_input, "cwd": str(launch)})
+
+
+def test_a_symlinked_worktree_root_still_matches(tmp_path, launch, monkeypatch):
+    own = _repo_worktree(tmp_path / "worktrees", "antoncore", "engineer-323133-2196")
+    (tmp_path / "link").symlink_to(tmp_path / "worktrees")
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "link"))
+    check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
+
+
+def test_the_worktree_root_defaults_to_dev_worktrees_in_home(launch, monkeypatch):
+    monkeypatch.delenv("WORKTREE_ROOT")
+    own = _repo_worktree(Path.home() / "dev" / "worktrees", "antoncore", "engineer-323133-2196")
+    check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
+
+
+def test_edits_in_the_sessions_own_worktree_of_another_repo_follow_the_worktree_rule(tmp_path, launch):
+    own = _repo_worktree(tmp_path / "worktrees", "antoncore", "engineer-323133-2196")
+    (own / "README.md").write_text("doc\n")
+    check(_tool("Edit", launch, file_path=str(own / "README.md")))
+    target = own / "pkg" / "mod.py"
+    assert _block_text(_tool("Edit", launch, file_path=str(target))) == (
+        f"BLOCKED: {target} is Python in the worktree {own}, which is edited through Serena "
+        "(Development Manifesto §7).\n"
+        f"Call mcp__serena__activate_project with {own}, then edit with replace_symbol_body, "
+        "insert_after_symbol / insert_before_symbol, rename_symbol or replace_content. "
+        "A new .py file may be created with Write; a whole file in this worktree is deleted with git rm or rm."
+    )
+
+
+@pytest.mark.parametrize(
+    ("base", "name"),
+    [
+        ("worktrees", "engineer-323133-2195"),
+        ("worktrees", "engineer-323133-2196-tmp-1"),
+        ("elsewhere", "engineer-323133-2196"),
+    ],
+)
+def test_deleting_python_in_a_foreign_worktree_of_another_repo_is_blocked(tmp_path, launch, base, name):
+    other = _repo_worktree(tmp_path / base, "antoncore", name)
+    target = other / "pkg" / "mod.py"
+    assert _block_text(_tool("Bash", launch, command=f"git rm {target}")) == (
+        f"BLOCKED: {target} is Python in another checkout, {other}. "
+        "A session deletes Python files only inside its own checkout."
+    )
+
+
+def test_a_session_without_an_agent_name_owns_no_other_worktree(tmp_path, launch, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    own = _repo_worktree(tmp_path / "worktrees", "antoncore", "engineer-323133-2196")
+    target = own / "pkg" / "mod.py"
+    assert _block_text(_tool("Bash", launch, command=f"rm {target}")) == (
+        f"BLOCKED: {target} is Python in another checkout, {own}. "
+        "A session deletes Python files only inside its own checkout."
+    )

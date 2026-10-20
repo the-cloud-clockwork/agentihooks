@@ -22,7 +22,7 @@ def test_generated_hive_launcher_passes_fresh_credentials_to_its_native_child(tm
         "Path(os.environ['RECEIPT_PATH']).write_text(json.dumps({"
         "'gh': os.environ.get('GH_TOKEN') == 'fixture',"
         "'github': os.environ.get('GITHUB_TOKEN') == 'fixture',"
-        "'helper': any(value == '!python3 -m scripts.github_app_cli credential' for key, value in os.environ.items() if key.startswith('GIT_CONFIG_VALUE_'))}))\n"
+        "'helper': any(value.startswith('!/') and value.endswith(' -m scripts.github_app_cli credential') for key, value in os.environ.items() if key.startswith('GIT_CONFIG_VALUE_'))}))\n"
     )
     monkeypatch.setattr(init_agent, "_agent_command", lambda *args: ([sys.executable, str(child)], ""))
     root = Path(__file__).resolve().parents[2]

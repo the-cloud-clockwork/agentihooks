@@ -83,8 +83,13 @@ def _by_origin(hives: list[dict], repo: str) -> list[dict]:
     ]
 
 
-def _matched_origin(hives: list[dict], hive: str) -> str:
-    return next(found.get(orders.ORIGIN, "") for found in hives if found["id"] == hive)
+def _matched_origin(hives: list[dict], hive: str, repo: str) -> str | placement.Wait:
+    from scripts.hive.daemon import origin
+
+    found = next((found for found in hives if found["id"] == hive), None)
+    if found is None:
+        return placement.Wait(f"hive {hive} is not in the hive listing for {origin(Path(repo)) or repo}")
+    return found.get(orders.ORIGIN, "")
 
 
 def _first_choice(
@@ -158,8 +163,11 @@ class HiveLaunch:
             fallback = (
                 f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
             )
-            found = Selection(
-                decision, choice.hive, row, route_kind, fallback=fallback, origin=_matched_origin(hives, choice.hive)
+            matched = _matched_origin(hives, choice.hive, config.repo)
+            found = (
+                matched
+                if isinstance(matched, placement.Wait)
+                else Selection(decision, choice.hive, row, route_kind, fallback=fallback, origin=matched)
             )
         return self._record_wait(lane, task, found)
 
@@ -176,14 +184,10 @@ class HiveLaunch:
         else:
             row = accounts[_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
-        return Selection(
-            decision,
-            selected.hive,
-            account,
-            selected.route_kind,
-            selected,
-            origin=_matched_origin(hives, selected.hive),
-        )
+        matched = _matched_origin(hives, selected.hive, config.repo)
+        if isinstance(matched, placement.Wait):
+            return matched
+        return Selection(decision, selected.hive, account, selected.route_kind, selected, origin=matched)
 
     def orders_for(self, task: str) -> LaunchOrder | None:
         raw = self.store.redis.hget(self.store.key(self.slug, ORDERS), task)
