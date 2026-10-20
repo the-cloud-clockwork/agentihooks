@@ -198,3 +198,16 @@ def test_the_agentihooks_command_dispatches_host_guard(tmp_path, monkeypatch):
             cli.main()
         assert raised.value.code == 3
     assert seen == [("check", tmp_path), ("install", tmp_path)]
+
+
+@pytest.mark.parametrize(("enabled", "schedule"), [(True, "installed"), (False, "removed")])
+def test_init_reconciles_the_host_guard_beside_the_lifecycle_sweep(tmp_path, monkeypatch, enabled, schedule):
+    from hooks.lifecycle import timer
+
+    seen = []
+    monkeypatch.setattr(timer.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(timer, "install_timer", lambda python, root: seen.append((python, root)) or "installed")
+    monkeypatch.setattr(timer, "remove_timer", lambda: "removed")
+    monkeypatch.setattr(sync, "reconcile", lambda home: f"guard {home}")
+    assert timer.reconcile_units("/venv/bin/python", "/opt/agentihooks", enabled) == f"{schedule}\n  guard {tmp_path}"
+    assert seen == ([("/venv/bin/python", "/opt/agentihooks")] if enabled else [])

@@ -3001,14 +3001,10 @@ def _install_global_inner(args: argparse.Namespace) -> None:
         _remove_systemd_user_unit()
 
     from hooks.lifecycle.guard import enabled as _gc_enabled
-    from hooks.lifecycle.timer import install_timer, remove_timer
+    from hooks.lifecycle.timer import reconcile_units
 
     _gc_python, _gc_root = str(_resolve_hooks_python()), str(AGENTIHOOKS_ROOT)
-    _cprint("  " + (install_timer(_gc_python, _gc_root) if _gc_enabled() else remove_timer()))
-
-    from scripts.host_guard.sync import reconcile as reconcile_host_guard
-
-    _cprint("  " + reconcile_host_guard(Path.home()))
+    _cprint("  " + reconcile_units(_gc_python, _gc_root, _gc_enabled()))
 
     # MCP layers, target-native. A layer that ships the target's own MCP file
     # (copilot: mcp-config.overrides.json, codex: mcp.overrides.toml) is used
