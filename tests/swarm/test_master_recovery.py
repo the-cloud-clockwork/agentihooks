@@ -114,6 +114,7 @@ def test_recovery_never_gives_a_live_master_another_masters_execution(store):  #
     assert f"adopted live master {live}" in actions
     [master] = masters(store)
     assert (master.name, master.execution_id, master.started_at) == (live, "", STARTUP_GRACE_MS + 2)
+    assert (master.task, master.seat) == (MASTER, "master@sw")
     kept = store.execution("sw", admitted.execution_id)
     assert (kept.name, kept.started_at) == (dead, 5)
 
