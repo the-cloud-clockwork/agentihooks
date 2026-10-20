@@ -42,10 +42,10 @@ def test_master_falls_back_to_a_ui_slot_before_a_preferred_headless_hive(kind):
     )
 
 
-def test_master_uses_headless_when_ui_hives_cannot_run_it():
-    hives = [hive("ui", repos=[]), hive("headless", ui="no", roles=[])]
-    assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.MasterPlacement(
-        "headless", "token", "subscription", True
+def test_a_headless_hive_refuses_a_master_when_ui_hives_cannot_run_it():
+    hives = [hive("ui", repos=[]), hive("headless", ui="no", interactive={"claude": "login"})]
+    assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.Wait(
+        "no live hive can run the master with interactive, subscription or api authentication"
     )
 
 

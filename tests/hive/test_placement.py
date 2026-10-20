@@ -47,7 +47,7 @@ CASES = {
     "all live plan": ("plan", fleet(), "subscription", REPO, "pods"),
     "pc off master": ("master", fleet("pc"), "subscription", REPO, "vm"),
     "pc off qa": ("qa", fleet("pc"), "subscription", REPO, "vm"),
-    "both off master": ("master", fleet("pc", "vm"), "subscription", REPO, "pods"),
+    "both off master": ("master", fleet("pc", "vm"), "subscription", REPO, NO_UI),
     "both off qa": ("qa", fleet("pc", "vm"), "subscription", REPO, NO_UI),
     "both off frontend": ("frontend", fleet("pc", "vm"), "subscription", REPO, NO_UI),
     "both off eng": ("eng", fleet("pc", "vm"), "subscription", REPO, "pods"),
@@ -126,9 +126,9 @@ def test_the_order(hives, expected):
     assert place("eng", "claude", "acct", "subscription", REPO, hives, NOW) == expected
 
 
-def test_the_master_fallback_ranks_by_room_without_counting_against_it():
-    hives = [eng("a", agents=4), eng("b", agents=5), hive("vm", roles=["qa"], heartbeat_at=0)]
-    assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == "a"
+def test_a_headless_hive_never_takes_a_master():
+    hives = [eng("a", roles=["master", "eng"]), eng("b"), hive("vm", roles=["qa"], heartbeat_at=0)]
+    assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == NO_UI
     assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == NO_UI
 
 
