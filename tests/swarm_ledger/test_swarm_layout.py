@@ -426,7 +426,7 @@ def test_agents_table_lists_the_master_first_with_overlays_and_stats_carry_the_t
     payload["agents"][1]["overlays"] = ["qitp-tuner", "trader", "reviewer"]
     page = open_page(payload)
     assert page.table("swarm-agents") == [
-        ["master-1", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
+        ["master-1\nluna", "—", "—", "—", "opus high", "—", "—", "LIVE", "2h 0m", "message\nterminate"],
         [
             "eng-58",
             "eng",
@@ -569,7 +569,7 @@ def test_agents_table_shows_each_agents_execution_identity_beside_its_terminal(o
     ]
     rows = page.table("swarm-agents")
     assert [row[:2] + row[7:10] for row in rows] == [
-        ["master-1", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
+        ["master-1\nluna", "—", "LIVE", "WORKING seen 1m ago\nlocal · gen 1", "—"],
         ["eng-58", "eng", "IDLE", "INPUT WAIT not seen\nlocal · gen 3", "—"],
         [
             "eng-60",
@@ -787,7 +787,7 @@ def test_full_length_agent_names_stay_on_one_line_and_fit_the_desktop_column(ope
         })""",
     )
     assert lines and all(count == 1 for _text, count in lines if "\n" not in _text), lines
-    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004", "engineer@323133-0072"]
+    assert [row[0] for row in page.table("swarm-agents")] == ["master@323133-0004\nluna", "engineer@323133-0072"]
     titles = page.tab.eval_on_selector_all("#swarm-agents td:first-child .sw-id", "ids => ids.map(e => e.title)")
     assert titles == ["master@323133-0004", "engineer@323133-0072"]
 
