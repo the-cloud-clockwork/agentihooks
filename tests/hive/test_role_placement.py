@@ -6,6 +6,7 @@ from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, REPO, hive
 
 ALL_ROLES = ["master", "qa", "frontend", "eng", "ci", "plan", "dispatch"]
+OFF_HIVE_LANE = "unhived"
 
 
 def two_hosts(setup, anton_agents=0):
@@ -223,9 +224,27 @@ def test_only_master_work_moves_to_the_workstation_herdr_server(setup, monkeypat
     two_hosts(setup)
     fenced = hive_controller(setup)
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
-    assert fenced.placement_refusal("doctor", {"id": "doctor"}) == "the workstation hive spawns doctor work"
-    with pytest.raises(controller.SwarmError, match="the workstation hive spawns doctor work"):
-        fenced.spawn(setup.config, "doctor", "doctor name", {"id": "doctor"})
+    assert (
+        fenced.placement_refusal(OFF_HIVE_LANE, {"id": OFF_HIVE_LANE})
+        == f"the workstation hive spawns {OFF_HIVE_LANE} work"
+    )
+    with pytest.raises(controller.SwarmError, match=f"the workstation hive spawns {OFF_HIVE_LANE} work"):
+        fenced.spawn(setup.config, OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", {"id": OFF_HIVE_LANE})
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_refused_hive_lane_stays_refused_when_the_workstation_herdr_answers(setup, monkeypatch):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision("qa", "task", "qa")
+    fenced = hive_controller(setup)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    task = {"id": "task", "hive": "anton"}
+    assert fenced.placement_refusal("eng", task) == NO_UI_HIVE
+    with pytest.raises(controller.SwarmError, match=NO_UI_HIVE):
+        fenced.spawn(setup.config, "eng", "eng name", task)
     setup.herdr.spawn.assert_not_called()
 
 
@@ -303,8 +322,8 @@ def test_a_non_hive_lane_spawns_through_the_original_runtime_unless_pinned_to_a_
     original.spawn.return_value = "original runtime"
     fenced.runtime.original_runtime = original
     fenced.runtime.spawn = Mock(return_value="hive runtime")
-    assert fenced.placement_refusal("doctor", task) == ""
-    assert fenced.spawn(setup.config, "doctor", "doctor name", task) == placed
+    assert fenced.placement_refusal(OFF_HIVE_LANE, task) == ""
+    assert fenced.spawn(setup.config, OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", task) == placed
 
 
 def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(setup):
@@ -317,8 +336,8 @@ def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(set
     herdr = FakeRuntime()
     routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, controller.LOCAL)
-    fenced.spawn(setup.config, "doctor", "doctor name", {"id": "d"})
-    assert herdr.spawned == [("doctor", "doctor name", "d")]
+    fenced.spawn(setup.config, OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", {"id": "d"})
+    assert herdr.spawned == [(OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", "d")]
 
 
 def host(hive_id: str, ui: str, **fields) -> dict:
