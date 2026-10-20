@@ -124,6 +124,9 @@ def main(argv: list[str] | None = None) -> None:
             merged = median_durations(local_samples(Path(tmp)))
     candidates[".test_durations"] = merged
     for durations in candidates.values():
+        fallback = statistics.median(durations.values())
+        for node in collected:
+            durations.setdefault(node, fallback)
         validate_coverage(durations, collected)
     for name, durations in candidates.items():
         (_ROOT / name).write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
