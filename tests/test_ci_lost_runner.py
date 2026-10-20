@@ -385,7 +385,7 @@ def test_recovery_errors_keep_the_collected_timestamps(monkeypatch, no_sleep, fa
     assert record["action"] == "error"
     assert record["run"] == 7
     assert record["attempt"] == 1
-    assert failed_action if failed_action != "read" else RUNS in record["reason"]
+    assert (failed_action if failed_action != "read" else RUNS) in record["reason"]
     assert datetime.fromisoformat(record["detected_at"]) <= datetime.fromisoformat(record["cancel_requested_at"])
     assert (record["force_cancel_requested_at"] is not None) == (failed_action == "force-cancel")
     assert (record["completed_observed_at"] is not None) == (failed_action == "rerun-failed-jobs")
