@@ -1525,9 +1525,10 @@ ps -o pid,lstart,cmd -p <pid from the record>
 `tests/swarm/test_cli.py` pins this behavior. `test_a_binned_swarm_reopened_by_a_tick_that_died_holding_the_lock_spawns_its_master_at_the_next_tick`
 bins a swarm, checks the binned tick left no lock, reopens it through a tick that dies holding the lock, and
 asserts that the next tick spawns the master and leaves no lock. Three more tests assert no lock is left after
-the ledger gone return, an exception partway through and a failed ledger health probe. They were added by pull
-request [4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098), whose red run removed the dead
-holder check and reproduced the observed `another tick is running` loop.
+the ledger gone return, an exception partway through and a failed ledger health probe. They were added by
+[pull request 4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098), whose red run removed the dead
+holder check and reproduced the observed `another tick is running` loop
+([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39042891977)).
 
 ### Tick heartbeat and stale watcher
 
