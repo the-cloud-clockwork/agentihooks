@@ -162,6 +162,23 @@ def test_a_later_command_reuses_a_fresh_probe_answer_instead_of_waiting_on_a_sil
     assert ledger_link.base(environ) == WORKSTATION
 
 
+def test_a_later_command_reuses_a_fresh_answer_that_the_hosted_ledger_answered(answering, monkeypatch):
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
+    assert ledger_link.base(environ) == answering
+    monkeypatch.setattr(hosted_probe, "_answers", {})
+    monkeypatch.setattr(ledger_link, "serving", lambda *args: pytest.fail("probed again inside the cache window"))
+
+    assert ledger_link.base(environ) == answering
+
+
+def test_the_probe_waits_only_the_probe_window(monkeypatch):
+    seen = []
+    monkeypatch.setattr(ledger_link, "serving", lambda timeout, url: seen.append((timeout, url)) or "")
+
+    assert hosted_probe.answered("https://hosted.example", {})
+    assert seen == [(hosted_probe.PROBE_S, "https://hosted.example")]
+
+
 def test_a_stale_probe_answer_is_checked_again(answering, tmp_path, monkeypatch):
     environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
     stale = {"url": answering, "at": 0, "answers": False}
