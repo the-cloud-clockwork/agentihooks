@@ -37,7 +37,6 @@ def refresh(environ: Mapping[str, str], now: float | None = None) -> bool:
 def start(
     environ: Mapping[str, str], worker: threading.Thread | None, now: float | None = None
 ) -> threading.Thread | None:
-    """Refresh stale readings on a background thread so a slow probe never delays the heartbeat."""
     if worker is not None and worker.is_alive():
         return worker
     now = time.time() if now is None else now

@@ -137,7 +137,6 @@ def test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start(monkey
     probe = Mock(side_effect=lambda missing, *args: [_result(c.account) for c in missing])
     monkeypatch.setattr(balancer, "probe_credentials", probe)
     monkeypatch.setattr(quota_refresh.time, "time", lambda: NOW)
-    monkeypatch.setattr(daemon.time, "time", lambda: NOW)
     assert not (tmp_path / "claude-router-cache.json").exists()
     assert daemon._subscriptions(environ, {"claude": {}, "codex": {}}, NOW)[0][0]["cap"] == 0
 
