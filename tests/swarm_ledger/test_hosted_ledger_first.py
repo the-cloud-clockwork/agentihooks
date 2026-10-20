@@ -3,6 +3,7 @@ import io
 import json
 import socket
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -15,6 +16,7 @@ pytestmark = pytest.mark.unit
 
 TOKEN = {"AGENTIHOOKS_LEDGER_AGENT_TOKEN": "agent-token"}
 HIVE = {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}
+PROBE_FILE = hosted_probe.probe_file
 
 
 @pytest.fixture(autouse=True)
@@ -183,6 +185,46 @@ def test_the_probe_waits_only_the_probe_window(monkeypatch):
 
     assert hosted_probe.answered("https://hosted.example", {})
     assert seen == [("https://hosted.example/healthz", hosted_probe.PROBE_S)]
+
+
+def test_the_probe_answer_lives_in_the_agentihooks_home(monkeypatch, tmp_path):
+    monkeypatch.setenv("HOME", str(tmp_path))
+
+    assert PROBE_FILE({"AGENTIHOOKS_HOME": "/srv/hooks"}) == Path("/srv/hooks/hosted-ledger-probe.json")
+    assert PROBE_FILE({}) == tmp_path / ".agentihooks" / "hosted-ledger-probe.json"
+
+
+def test_a_probe_answer_exactly_one_window_old_is_checked_again(answering, tmp_path, monkeypatch):
+    monkeypatch.setattr(hosted_probe.time, "time", lambda: 1000.0)
+    stale = {"url": answering, "at": 1000.0 - hosted_probe.PROBE_TTL_S, "answers": False}
+    (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(stale))
+
+    assert hosted_probe.answered(answering, {})
+
+
+def test_a_probe_answer_written_this_instant_is_reused(silent, tmp_path, monkeypatch):
+    monkeypatch.setattr(hosted_probe.time, "time", lambda: 1000.0)
+    fresh = {"url": silent, "at": 1000.0, "answers": True}
+    (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(fresh))
+
+    assert hosted_probe.answered(silent, {})
+
+
+def test_a_session_keeps_its_probe_answer_in_its_own_agentihooks_home(answering, tmp_path, monkeypatch):
+    monkeypatch.setattr(hosted_probe, "probe_file", PROBE_FILE)
+    home = tmp_path / "hooks-home"
+    home.mkdir()
+    environ = workstation(**TOKEN, AGENTIHOOKS_HOME=str(home), **{hosted_probe.HOSTED_ENV: answering})
+
+    assert ledger_link.base(environ) == answering
+    assert json.loads((home / "hosted-ledger-probe.json").read_text())["url"] == answering
+
+
+def test_the_hosted_address_drops_only_spaces_and_trailing_slashes():
+    assert (
+        hosted_probe.address({hosted_probe.HOSTED_ENV: " https://hosted.example/BOX/ "}) == "https://hosted.example/BOX"
+    )
+    assert hosted_probe.address({}) == ""
 
 
 @pytest.mark.parametrize(

@@ -40,13 +40,17 @@ def healthy(url: str) -> bool:
         return False
 
 
-def answered(url: str, environ=os.environ) -> bool:
-    path, now = probe_file(environ), time.time()
+def cached_answer(path: Path) -> dict:
     try:
         cached = json.loads(path.read_text())
     except (OSError, ValueError):
-        cached = {}
-    cached = cached if isinstance(cached, dict) else {}
+        return {}
+    return cached if isinstance(cached, dict) else {}
+
+
+def answered(url: str, environ=os.environ) -> bool:
+    path, now = probe_file(environ), time.time()
+    cached = cached_answer(path)
     at = cached.get("at")
     if cached.get("url") == url and isinstance(at, int | float) and 0 <= now - at < PROBE_TTL_S:
         return bool(cached.get("answers"))
