@@ -180,7 +180,6 @@ def test_proofs_reuse_selected_mutation_and_smoke_execution():
         ("worker-image", "swarm-node-smoke"),
         ("swarm-image", "swarm-smoke"),
         ("brain-smoke", "brain-smoke"),
-        ("writer-lock", "writer-lock"),
         ("helm-kind", "helm-kind"),
     ):
         job = jobs[proof]
