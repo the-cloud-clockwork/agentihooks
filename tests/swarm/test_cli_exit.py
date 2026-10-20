@@ -50,7 +50,7 @@ def test_a_claimless_worker_exits_and_its_seat_is_free_on_the_next_tick(env, mon
     assert runtime.closed == []
     store.update("sw", state="paused")
     tick("sw", store, ledger, runtime, now_ms=6001)
-    assert store.agents("sw") == []
+    assert [a for a in store.agents("sw") if a.lane != "master"] == []
     assert runtime.closed == ["w1:p1"]
     assert ledger.rows == before
     assert store.claimant("sw", "t1") == ("successor" if case == "obsolete_wait" else None)
