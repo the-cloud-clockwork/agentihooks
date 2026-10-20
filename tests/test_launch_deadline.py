@@ -1,3 +1,5 @@
+import pytest
+
 from scripts import init_agent
 from scripts.profiles import binding
 from scripts.swarm import runtime
@@ -62,3 +64,66 @@ def test_a_codex_launch_with_both_ready_waits_at_their_limit_fails_inside_the_sp
         "Codex ready 120s, Codex ready for the opening prompt 120s, profile canary 30s: "
         "the codex agent reported no canary within 30s\n"
     )
+
+
+def _clock(monkeypatch):
+    now = [0.0]
+    monkeypatch.setattr(init_agent.time, "monotonic", lambda: now[0])
+    return now
+
+
+def _spend(now, seconds, result=True):
+    def waiter(granted):
+        now[0] += seconds
+        return (granted, result)
+
+    return waiter
+
+
+def test_a_wait_after_the_deadline_is_spent_gets_no_time_and_keeps_the_first_wait_cut(monkeypatch):
+    now = _clock(monkeypatch)
+    deadline = init_agent.LaunchDeadline(100.0)
+    assert deadline.run("first", 60.0, _spend(now, 60.0)) == (60.0, True)
+    assert deadline.cut == ""
+    assert deadline.run("second", 60.0, _spend(now, 50.0)) == (40.0, True)
+    assert deadline.run("third", 60.0, _spend(now, 0.0)) == (0.0, True)
+    assert deadline.cut == "second"
+    assert deadline.spent == {"first": 60.0, "second": 50.0, "third": 0.0}
+
+
+def test_a_wait_failing_inside_its_own_limit_raises_its_own_error(monkeypatch):
+    _clock(monkeypatch)
+    deadline = init_agent.LaunchDeadline(100.0)
+
+    def fail(granted):
+        raise ValueError(f"failed after {granted:g}s")
+
+    with pytest.raises(ValueError, match="^failed after 30s$"):
+        deadline.run("canary", 30.0, fail)
+    assert deadline.spent == {"canary": 0.0}
+
+
+def test_a_wait_repeated_by_name_adds_up_its_time(monkeypatch):
+    now = _clock(monkeypatch)
+    deadline = init_agent.LaunchDeadline(10.0)
+    deadline.run("ready", 4.0, _spend(now, 4.0))
+
+    def fail(granted):
+        now[0] += granted
+        raise ValueError("late")
+
+    with pytest.raises(ValueError, match="^the 10s launch deadline ran out in the ready wait after ready 10s: late$"):
+        deadline.run("ready", 8.0, fail)
+
+
+def test_a_launch_without_a_deadline_never_cuts_a_wait(monkeypatch):
+    _clock(monkeypatch)
+    launch = init_agent.Launch(5.0)
+    assert launch.deadline.run("ready", 120.0, lambda granted: granted) == 120.0
+    assert launch.since == 5.0
+    assert launch.deadline.cut == ""
+
+
+def test_the_launch_deadline_leaves_the_session_rename_inside_the_spawn_timeout():
+    assert init_agent.LAUNCH_DEADLINE_S == 270.0
+    assert init_agent.LAUNCH_DEADLINE_S + init_agent.herdr_host.RENAME_CONFIRM_S < runtime.SPAWN_TIMEOUT_S
