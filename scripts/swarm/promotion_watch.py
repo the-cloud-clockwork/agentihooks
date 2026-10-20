@@ -27,7 +27,7 @@ if TYPE_CHECKING:
     from scripts.swarm.ledger_client import LedgerClient
     from scripts.swarm.store import RedisStore, SwarmConfig
 
-JOBS_JQ = ".jobs[] | {name, conclusion, check_run_url, steps} | @json"
+JOBS_JQ = ".jobs[] | {id, name, conclusion, check_run_url, steps} | @json"
 ANNOTATIONS_JQ = ".[] | {annotation_level, message} | @json"
 FAILED = ("failure", "timed_out")
 SUPERSEDED_STEP = "Check dev still points at this commit"
@@ -148,7 +148,68 @@ def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple
     return [(OUTAGE, why), *[cause for cause in causes if cause not in gone and cause not in starved]]
 
 
+def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
+    if job["name"].split(" (")[0] != SHARD_JOB or not job.get("id"):
+        return set()
+    if not any(s["name"] == TEST_STEP and s.get("conclusion") in FAILED for s in job.get("steps") or []):
+        return set()
+    log = run(
+        ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job['id']}/logs"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+        timeout=60,
+    ).stdout
+    return set(re.findall(r"\b(?:FAILED|ERROR) (tests/.+?)(?: - |(?:\s*$))", log, re.MULTILINE))
+
+
+def test_causes(
+    causes: list[tuple[str, str]], named: dict[str, dict], repo: str, run: Callable
+) -> list[tuple[str, str]]:
+    groups: dict[str, list[str]] = {}
+    remaining = []
+    for job, why in causes:
+        tests = failing_tests(repo, named[job], run) if job in named else set()
+        if not tests or any(
+            s["name"] != TEST_STEP and s.get("conclusion") in FAILED for s in named[job].get("steps") or []
+        ):
+            remaining.append((job, why))
+        for test in sorted(tests):
+            groups.setdefault(test, []).append(job)
+    jobs = [job for jobs in groups.values() for job in jobs]
+    consequences = [(job, why) for job, why in remaining if coverage_consequence(job, why, jobs)]
+    grouped = []
+    for test, jobs in groups.items():
+        identity = f"unit test {test}"
+        detail = f"{identity}: failed in {', '.join(jobs)}"
+        if consequences:
+            detail += "; consequences: " + "; ".join(why for _, why in consequences)
+        grouped.append((identity, detail))
+    return [*grouped, *[cause for cause in remaining if cause not in consequences]]
+
+
+def coverage_consequence(job: str, why: str, jobs: list[str]) -> bool:
+    if job.split(" (")[0] != "sonar":
+        return False
+    missing = set(re.findall(r"Missing coverage for shard (\d+)", why))
+    shards = {match[1] for name in jobs if (match := re.fullmatch(r"unit \(3\.12, (\d+)\)", name))}
+    allowed = {"Wait for the coverage merge", "Hold the Delivery L2 conditions"}
+    details = why.removeprefix(f"{job}: ").split("; ")
+    return (
+        bool(missing)
+        and missing <= shards
+        and all(
+            part in allowed
+            or re.fullmatch(r"(?:Missing coverage for shard \d+|Process completed with exit code \d+\.)", part)
+            for part in details
+        )
+    )
+
+
 def normal(job: str, why: str) -> str:
+    if job.startswith("unit test "):
+        return job
     return job + NUMBER.sub("#", HASH.sub("#", why.removeprefix(job)))
 
 
@@ -285,6 +346,7 @@ def _refresh(
         stale = bool(failed) and all(superseded(config.repo, j, run) for j in found if j["name"] in failed)
         named = {j["name"]: j for j in found}
         causes = [] if stale else outages([(job, cause(config.repo, named[job], run)) for job in failed], named)
+        causes = test_causes(causes, named, config.repo, run)
     except dev_red.READ_ERRORS as exc:
         error = getattr(exc, "stderr", None) or str(exc)
         print(f"promotion watch skipped, reading dev push runs failed: {error}", file=sys.stderr)

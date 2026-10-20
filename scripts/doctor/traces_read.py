@@ -19,11 +19,13 @@ from pathlib import Path
 
 import httpx
 
+from hooks.config import langfuse_route
 from hooks.observability.signals import safe_name
 from scripts.doctor import registry
 from scripts.swarm.runtime import SWARM_HOME
 
 DEFAULT_HOST = "https://langfuse.homeofanton.com"
+INGRESS = httpx.URL(langfuse_route({})[0]).host
 PAGE = 100
 OBSERVATION_PAGE = 50
 WORKED = {"claimed", "pr", "done"}
@@ -46,15 +48,27 @@ class Budget:
 def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) -> Callable[[str, dict], dict]:
     host = (environ.get("LANGFUSE_HOST") or DEFAULT_HOST).rstrip("/")
     auth = (environ.get("LANGFUSE_PUBLIC_KEY", ""), environ.get("LANGFUSE_SECRET_KEY", ""))
+    send = _through_ingress if host == DEFAULT_HOST else httpx.get
 
     def get(path: str, params: dict) -> dict:
         if not all(auth):
             raise RuntimeError("LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY are not set")
-        response = httpx.get(f"{host}/api/public/{path}", params=params, auth=auth, timeout=timeout)
+        response = send(f"{host}/api/public/{path}", params=params, auth=auth, timeout=timeout)
         response.raise_for_status()
         return response.json()
 
     return get
+
+
+def _through_ingress(url: str, **options) -> httpx.Response:
+    public = httpx.URL(url)
+    with httpx.Client() as session:
+        return session.get(
+            public.copy_with(host=INGRESS),
+            headers={"Host": public.host},
+            extensions={"sni_hostname": public.host},
+            **options,
+        )
 
 
 def _pages(get, path, params, cap, deadline, clock):

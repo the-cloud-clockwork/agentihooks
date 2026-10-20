@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from scripts.inbox.store import InboxStore
-from scripts.swarm.store import MASTER, AgentRecord
+from scripts.swarm.store import MASTER, AgentRecord, SwarmError
 from scripts.swarm.tick import STARTUP_GRACE_MS, Placed, tick
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks  # noqa: F401
 
@@ -79,6 +79,44 @@ def test_recovery_uses_the_live_seat_occupant_without_a_registered_name(store, n
     tick("sw", store, tasks(), runtime, STARTUP_GRACE_MS + 2)
     assert runtime.masters == []
     assert [a.name for a in masters(store)] == [name]
+
+
+def test_recovery_rebinds_a_live_master_whose_execution_lost_its_agent_record(store):  # noqa: F811
+    live = store.next_name("sw", MASTER)
+    admitted = store.start_execution("sw", AgentRecord(live, MASTER, MASTER, started_at=5, seat="master@sw"))
+    store.redis.hdel(store.key("sw", "agents"), live)
+    store.seats.occupy("master@sw", live, 1)
+    runtime = RecoveryRuntime()
+    runtime.live.add(live)
+
+    actions = tick("sw", store, tasks(), runtime, STARTUP_GRACE_MS + 2)
+
+    assert f"adopted live master {live}" in actions
+    [master] = masters(store)
+    assert (master.execution_id, master.generation, master.started_at) == (admitted.execution_id, 1, 5)
+    assert (master.pane_id, master.harness, master.state) == ("hand:p1", "codex", "working")
+    assert store.execution_identity_conflicts_total("sw") == 0
+    with pytest.raises(SwarmError, match="changed execution identity"):
+        store.put_agent("sw", replace(master, started_at=6))
+
+
+def test_recovery_never_gives_a_live_master_another_masters_execution(store):  # noqa: F811
+    dead = store.next_name("sw", MASTER)
+    live = store.next_name("sw", MASTER)
+    admitted = store.start_execution("sw", AgentRecord(dead, MASTER, MASTER, started_at=5, seat="master@sw"))
+    store.redis.hdel(store.key("sw", "agents"), dead)
+    store.seats.occupy("master@sw", live, 1)
+    runtime = RecoveryRuntime()
+    runtime.live.add(live)
+
+    actions = tick("sw", store, tasks(), runtime, STARTUP_GRACE_MS + 2)
+
+    assert f"adopted live master {live}" in actions
+    [master] = masters(store)
+    assert (master.name, master.execution_id, master.started_at) == (live, "", STARTUP_GRACE_MS + 2)
+    assert (master.task, master.seat) == (MASTER, "master@sw")
+    kept = store.execution("sw", admitted.execution_id)
+    assert (kept.name, kept.started_at) == (dead, 5)
 
 
 def test_stale_pane_on_a_dead_record_is_not_closed_during_recovery(store):  # noqa: F811
