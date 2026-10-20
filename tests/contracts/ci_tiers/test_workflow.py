@@ -15,7 +15,11 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"}
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"} | (
+    {"test-summary"}
+    if "test-summary" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    else set()
+)
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
@@ -37,6 +41,7 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "brain-smoke",
     "writer-lock",
     "ledger-load",
+    "hierarchy-cpu",
     "kind-due",
     "helm-kind",
     "stage-budget",

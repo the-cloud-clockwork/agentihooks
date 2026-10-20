@@ -152,6 +152,117 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
         assert len(texts) == 1
 
 
+def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    records = []
+    for identity in (1, 2):
+        run = waiting(identity, "2026-10-19T16:40:00Z")
+        run.update(event="merge_group", status="completed", conclusion="success")
+        run["jobs"][0].update(
+            started_at="2026-10-19T16:59:00Z",
+            completed_at="2026-10-19T17:00:00Z",
+            status="completed",
+            runner_name="runner",
+        )
+        records.append(run)
+    monkeypatch.setattr(
+        ci_speed_read,
+        "read",
+        lambda *args, **kwargs: snapshot(records, complete=False, error="pagination pending"),
+    )
+    store.redis.set(store.key(DOCTOR, "ci-speed"), json.dumps({"last": AFTER - 60000}))
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    judgments = loop.verdicts(store, DOCTOR)
+    for finding in details(store):
+        if finding["kind"] in ("ci runner wait", "ci tier wall time"):
+            judgments.judge(finding["id"], "established", "already investigated", "reader", AFTER)
+    assert all(len(texts) == 1 for texts in items(store).values())
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 600000)
+    for texts in items(store).values():
+        assert len(texts) == 1
+
+
+@pytest.mark.parametrize("kind,scope", [("ci tier wall time", "merge_group"), ("ci runner wait", '["fleet/queue"]')])
+@pytest.mark.parametrize("legacy", [False, True])
+@pytest.mark.parametrize(
+    "change,expected",
+    [
+        ({}, False),
+        ({"evidence_identity": ("1", 899), "measure": 899}, False),
+        ({"evidence_identity": ("1", "2", "3", 900)}, True),
+        ({"evidence_identity": ("1", "2 attempt 2", 900)}, True),
+        ({"measure": 901}, True),
+        ({"subject": "200-pull_request"}, True),
+        ({"kind": "ci queue age unconfirmed"}, True),
+        ({"elapsed": 60000}, True),
+    ],
+)
+def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change, expected, legacy, kind, scope):  # noqa: F811
+    from dataclasses import replace
+
+    from scripts.swarm.health.findings import Finding
+
+    original = Finding(
+        kind,
+        f"100-{scope}",
+        "queue tier slow",
+        ("2 runs, pool, runs legacy, worst 900 seconds, median 900 seconds, runs 1, 2",)
+        if legacy
+        else ("human readable wording changed",),
+        "wall time",
+        900,
+        evidence_identity=("1", "2", 900),
+    )
+    loop.record(store, DOCTOR, [original], AFTER, 60000)
+    judgments = loop.verdicts(store, DOCTOR)
+    judgments.judge(original.id, "established", "investigated", "reader", AFTER)
+    if legacy:
+        prior = json.loads(store.redis.hget(judgments.key, original.id))
+        del prior["evidence_identity"], prior["verdict"]["evidence_identity"]
+        store.redis.hset(judgments.key, original.id, json.dumps(prior))
+    elapsed = change.get("elapsed", 59999)
+    current = replace(original, subject=f"200-{scope}")
+    current = replace(current, **{key: value for key, value in change.items() if key != "elapsed"})
+    found = ci_speed.unjudged([current], store.redis.hgetall(judgments.key), AFTER + elapsed, 60000)
+    assert found == ([current] if expected else [])
+
+
+@pytest.mark.parametrize("change", ["new run", "worse wait"])
+def test_judged_group_delivers_new_evidence_once_within_the_same_window(store, monkeypatch, change):  # noqa: F811
+    status(monkeypatch)
+    run = waiting(1, "2026-10-19T16:40:00Z")
+    run["jobs"][0].update(
+        started_at="2026-10-19T16:59:00Z",
+        completed_at="2026-10-19T17:00:00Z",
+        status="completed",
+        runner_name="runner",
+    )
+    records = [run]
+    monkeypatch.setattr(
+        ci_speed_read,
+        "read",
+        lambda *args, **kwargs: snapshot(records, complete=False, error="pagination pending"),
+    )
+    store.redis.set(store.key(DOCTOR, "ci-speed"), json.dumps({"last": AFTER - 60000}))
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    [finding] = [entry for entry in details(store) if entry["kind"] == "ci runner wait"]
+    loop.verdicts(store, DOCTOR).judge(finding["id"], "established", "investigated", "reader", AFTER)
+    if change == "new run":
+        records.append({**run, "id": 2})
+    else:
+        run["jobs"][0]["created_at"] = "2026-10-19T16:39:59Z"
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 60000)
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 120000)
+    for texts in items(store).values():
+        assert len(texts) == 2
+        assert "ci-runner-wait/" in texts[1]
+    records.append({**run, "id": 3})
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 180000)
+    for texts in items(store).values():
+        assert len(texts) == 3
+        assert "runs 1, 2, 3" in texts[2] if change == "new run" else "runs 1, 3" in texts[2]
+
+
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, down=True)
     runs(monkeypatch, [waiting(n, "2026-10-19T15:51:00Z") for n in range(1, 3)])

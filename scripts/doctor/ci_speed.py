@@ -11,7 +11,7 @@ COUNTED = {"success", "failure"}
 SHORT_WAIT_MS = 300000
 WALL_MS = 900000
 UNCONFIRMED_WAIT_MS = SHORT_WAIT_MS + 600000
-JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at", "runner_name")
+JOB_FIELDS = ("id", "name", "status", "conclusion", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
     "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
     "ci queue age unconfirmed": "{text} jobs read as queued up to {minutes} minutes with no confirmed start, {count} jobs",
@@ -130,11 +130,42 @@ def _wall(run, now_ms):
     ]
 
 
+def skipped(run: dict) -> list[Finding]:
+    if run["event"] != "merge_group":
+        return []
+    delayed = []
+    for job in run["jobs"]:
+        if job.get("conclusion") != "skipped" or not job.get("started_at") or not job.get("completed_at"):
+            continue
+        lag = iso_ms(job["started_at"]) - iso_ms(job["completed_at"])
+        if lag > SHORT_WAIT_MS:
+            delayed.append((lag, job))
+    if not delayed:
+        return []
+    lag, job = max(delayed, key=lambda entry: entry[0])
+    seconds = lag // 1000
+    attempt = run.get("run_attempt", 1)
+    return [
+        Finding(
+            "ci skipped record lag",
+            f"{run['id']}-{attempt}",
+            f"{job['name']} skipped record appeared {seconds / 60:.2f} minutes after its skip decision",
+            (
+                f"run {run['id']} attempt {attempt}, job {job['name']}, started_at {job['started_at']}, "
+                f"skip decision completed_at {job['completed_at']}, lag {seconds} seconds",
+            ),
+            "skipped record lag over 5 minutes",
+            seconds,
+        )
+    ]
+
+
 def findings(records: list[dict], since_ms: int, now_ms: int) -> list[Finding]:
     found = []
     for run in records:
         found.extend(_wait(run, run["jobs"], since_ms, now_ms))
         found.extend(_wall(run, now_ms))
+        found.extend(skipped(run))
     return found
 
 
@@ -210,6 +241,36 @@ def grouped(groups: dict) -> list[Finding]:
                 (*evidence, *(member["evidence"] for member in members)),
                 THRESHOLDS[entry["kind"]],
                 max(measures),
+                evidence_identity=(*[member["run"] for member in members], max(measures)),
             )
         )
     return found
+
+
+def _covered(finding, identity, verdict):
+    kind, _, subject = identity.partition("/")
+    if kind != finding.kind.replace(" ", "-") or subject.partition("-")[2] != finding.subject.partition("-")[2]:
+        return False
+    identity = verdict.get("evidence_identity")
+    members = identity[:-1] if identity is not None else verdict["evidence"][0].rpartition(", runs ")[2].split(", ")
+    return finding.measure <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
+
+
+def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
+    judgments = {identity: json.loads(raw)["verdict"] for identity, raw in records.items()}
+    recent = {
+        identity: verdict for identity, verdict in judgments.items() if verdict and now_ms < verdict["at"] + cooldown_ms
+    }
+    return [
+        finding
+        for finding in found
+        if finding.evidence_identity is None
+        or not any(_covered(finding, identity, verdict) for identity, verdict in recent.items())
+    ]
+
+
+def notice_key(finding: Finding, records: dict) -> str:
+    prior = records.get(finding.id)
+    if finding.evidence_identity is None or prior is None or not json.loads(prior)["verdict"]:
+        return finding.id
+    return json.dumps([finding.id, finding.evidence_identity, finding.measure])

@@ -193,7 +193,7 @@ def test_jobs_of_finished_runs_carry_over_so_a_window_beyond_the_call_budget_com
     assert saved()["known"][str(jobs[0])] == {
         "status": "completed",
         "run_attempt": 1,
-        "jobs": [{**job(0, created=-30, identity=jobs[0]), "runner_name": None}],
+        "jobs": [{**job(0, created=-30, identity=jobs[0]), "runner_name": None, "conclusion": None}],
     }
     down.append(True)
     cli.timer(store, DOCTOR, NOW + 60000, False)
