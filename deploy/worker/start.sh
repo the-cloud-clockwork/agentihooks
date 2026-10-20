@@ -2,12 +2,17 @@
 set -euo pipefail
 
 if [[ -z "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
-  HIVE_GITHUB_AUTH_MODE=token
-  [[ -z "${GITHUB_APP_PRIVATE_KEY:-}" ]] || HIVE_GITHUB_AUTH_MODE=app
+  if [[ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]]; then
+    HIVE_GITHUB_AUTH_MODE=app
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    HIVE_GITHUB_AUTH_MODE=token
+  fi
 fi
-export HIVE_GITHUB_AUTH_MODE
-if [[ "${AGENTIHOOKS_GITHUB_AUTH_READY:-}" != 1 ]]; then
-  exec python3 -m scripts.github_app_cli exec bash "$0" "$@"
+if [[ -n "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
+  export HIVE_GITHUB_AUTH_MODE
+  if [[ "${AGENTIHOOKS_GITHUB_AUTH_READY:-}" != 1 ]]; then
+    exec python3 -m scripts.github_app_cli exec bash "$0" "$@"
+  fi
 fi
 umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
