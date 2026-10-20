@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -179,7 +180,8 @@ def test_the_pre_tool_hook_logs_a_failed_lookup_and_adds_nothing(worker, monkeyp
 def _post(capsys, payload):
     hook_manager.on_post_tool_use({"session_id": "s1", "cwd": "/", **payload})
     flush("PostToolUse")
-    return capsys.readouterr().out
+    out = capsys.readouterr().out
+    return json.loads(out).get("hookSpecificOutput", {}).get("additionalContext", "") if out.strip() else ""
 
 
 def test_the_post_tool_hook_carries_the_nudge_where_the_pre_tool_event_cannot(worker, monkeypatch, capsys):
