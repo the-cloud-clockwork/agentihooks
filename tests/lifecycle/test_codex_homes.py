@@ -95,6 +95,25 @@ def test_a_recent_write_deep_in_an_old_home_keeps_it(layout):
     assert busy.exists()
 
 
+def test_a_home_gone_before_its_walk_is_not_reported(layout, monkeypatch):
+    environ, legacy, _, state, proc = layout
+    plant(legacy, "a1")
+    monkeypatch.setattr(codex_homes, "walk_stats", lambda directory: (0.0, 0))
+    removed = []
+    monkeypatch.setattr(codex_homes, "remove_home", removed.append)
+    assert codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ) == []
+    assert removed == []
+
+
+def test_a_failed_log_write_keeps_the_removal_and_the_sweep(layout):
+    environ, legacy, _, _, proc = layout
+    gone = plant(legacy, "a1")
+    result = codex_homes.sweep_codex_homes(later(), legacy / "missing", act=True, proc=proc, environ=environ)
+    assert [(item["path"], item["action"]) for item in result] == [(str(gone), "removed")]
+    assert "No such file" in result[0]["log_error"]
+    assert not gone.exists()
+
+
 def test_a_malformed_config_is_reported_and_the_sweep_goes_on(layout):
     environ, legacy, _, state, proc = layout
     broken = plant(legacy, "a1")
