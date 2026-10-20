@@ -981,15 +981,17 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
     assert result.returncode != 0, result.stdout + result.stderr
 
 
-def _mutation_gate(event, inline, stats, mutation):
+def _mutation_gate(form, event, inline, stats, mutation):
     from scripts import ci_reuse
 
     needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar")}
     needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
+    if form.get("queue_tier") and not form.get("consolidated"):
+        needs["durations"] = {"result": "success"}
     needs["mutation-plan"] = {"result": "success"}
     needs["mutation-stats"] = {"result": stats}
     needs["mutation"] = {"result": mutation}
-    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form))
     env = dict(
         os.environ,
         NEEDS=json.dumps(needs),
@@ -1002,6 +1004,10 @@ def _mutation_gate(event, inline, stats, mutation):
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
+@pytest.mark.parametrize(
+    "form",
+    [{}, {"selected": True}, {"queue_tier": True}, {"promotion": True}, {"queue_tier": True, "consolidated": True}],
+)
 @pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch"])
 @pytest.mark.parametrize(
     ("inline", "stats", "mutation", "passes"),
@@ -1012,18 +1018,24 @@ def _mutation_gate(event, inline, stats, mutation):
         (None, "success", "skipped", False),
         ("true", "failure", "skipped", False),
         ("true", "skipped", "skipped", False),
+        ("true", "success", "failure", False),
+        ("true", "success", "cancelled", False),
     ],
 )
-def test_the_inline_mutation_form_skips_the_shard_job_only_for_an_inline_plan(event, inline, stats, mutation, passes):
-    result = _mutation_gate(event, inline, stats, mutation)
+def test_the_inline_mutation_form_skips_the_shard_job_only_for_an_inline_plan(
+    form, event, inline, stats, mutation, passes
+):
+    result = _mutation_gate(form, event, inline, stats, mutation)
     assert (result.returncode == 0) == passes, result.stdout + result.stderr
 
 
-def test_the_inline_mutation_form_reads_the_plan_output_and_leaves_other_forms_unchanged():
+def test_the_inline_mutation_form_derives_inline_from_a_one_part_one_shard_plan():
     from scripts import ci_reuse
 
     [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
-    assert step["env"]["INLINE"] == "${{ needs.mutation-plan.outputs.inline }}"
+    assert step["env"]["INLINE"] == (
+        "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}"
+    )
     [plain] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
     assert "INLINE" not in plain["env"]
     assert "$inline" not in plain["run"]

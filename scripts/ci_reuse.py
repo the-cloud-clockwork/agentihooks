@@ -147,7 +147,10 @@ def inline_mutation(steps: list[dict]) -> list[dict]:
         .replace(*INLINE_REQUIRED)
         .replace(*INLINE_SKIP)
     )
-    env = {**aggregation["env"], "INLINE": "${{ needs.mutation-plan.outputs.inline }}"}
+    env = {
+        **aggregation["env"],
+        "INLINE": "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}",
+    }
     return [{**aggregation, "env": env, "run": run}, *rest]
 
 
