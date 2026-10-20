@@ -40,8 +40,8 @@ def install(environ=os.environ, opener: Callable | None = None) -> str:
 
 
 def served(environ=os.environ) -> str | None:
-    pem = environ.get(ledger_link.CA_ENV, "").strip()
-    if not pem:
+    pem = environ.get(ledger_link.CA_ENV, "")
+    if not pem.strip():
         found = ledger_link.ca_file(environ)
         pem = found.read_text() if found.is_file() else ""
     return pem if certificate(pem) else None
