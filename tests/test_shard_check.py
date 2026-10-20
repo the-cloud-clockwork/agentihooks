@@ -123,7 +123,9 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     )
     versions = jobs["unit"]["strategy"]["matrix"]["python-version"]
     assert job["strategy"]["matrix"]["python-version"] == (
-        "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.12\"]' || '" + json.dumps(versions, separators=(",", ":")) + "') }}"
+        "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.12\"]' || '"
+        + json.dumps(versions, separators=(",", ":"))
+        + "') }}"
     )
     assert "shard-check" in jobs["gate-required"]["needs"]
     steps = job["steps"]
