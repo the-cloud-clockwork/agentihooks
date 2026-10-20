@@ -2,6 +2,7 @@ from pathlib import Path
 
 from hooks.lifecycle.evict import free_gb, make_room
 from hooks.lifecycle.lease import add_holder
+from hooks.lifecycle.locks import lock_file
 from hooks.lifecycle.model import Finding, Holder, Root
 
 from .conftest import age, git, process, snap
@@ -25,6 +26,8 @@ def test_full_cap_evicts_the_oldest_safe_worktree_first(repo, tmp_path):
     lines = make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(), plenty)
     assert lines == [f"evicted {old}: removed"]
     assert not old.exists() and new.exists()
+    assert (tmp_path / "home" / "gc-journal.json").read_text() == "{}"
+    assert lock_file(tmp_path / "home", str(old)).exists()
     assert make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(), plenty) == []
 
 
@@ -114,7 +117,7 @@ def test_scratch_repository_work_is_evicted_when_its_push_fails(repo, tmp_path):
     scratch = Root("scratchpad", str(tmp_path), "scratch")
     [line] = make_room(repo.primary, scratch, 0, 1, tmp_path / "home", snap(), plenty)
     [ref] = git(repo.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads/wip").split()
-    assert line.startswith(f"evicted {fixture}: kept {ref} locally, push failed (git push: ")
+    assert line.startswith(f"evicted {fixture}: kept a local wip/ branch, push failed (git push: ")
     assert line.endswith("); removed")
     assert git(repo.primary, "show", f"{ref}:notes.txt") == "unsaved"
     assert not fixture.exists()
@@ -144,6 +147,7 @@ def test_candidates_carry_the_eviction_finding_oldest_first(repo, tmp_path):
 
 def test_free_space_exactly_at_the_floor_evicts_nothing(repo, tmp_path):
     kept = repo.worktree("kept")
+    age(kept, HOUR)
     assert make_room(repo.primary, repo.root(), 50, 60, tmp_path / "home", snap(), lambda _path: 50) == []
     assert kept.exists()
 
@@ -175,3 +179,24 @@ def test_a_worktree_younger_than_a_minute_is_never_evicted(repo, tmp_path):
     assert make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty) == [
         f"evicted {young}: removed"
     ]
+
+
+def test_a_minute_old_worktree_is_old_enough_to_evict(repo, tmp_path):
+    from hooks.lifecycle.evict import FRESH, _candidates
+    from hooks.lifecycle.liveness import Snapshot
+
+    edge = repo.worktree("edge")
+    age(edge, HOUR)
+    [(touched, *_rest)] = _candidates(repo.root(), snap())
+    at_edge = Snapshot("boot-1", 99999.0, touched + FRESH, {}, (), {})
+    assert [entry[1] for entry in _candidates(repo.root(), at_edge)] == [edge]
+
+
+def test_a_held_worktree_does_not_stop_the_search(repo, tmp_path):
+    held = repo.worktree("aaa-held")
+    free = repo.worktree("zzz-free")
+    age(held, 5 * HOUR)
+    age(free, HOUR)
+    lines = make_room(repo.primary, repo.root(), 0, 2, tmp_path / "home", snap(cwds=(str(held),)), plenty)
+    assert lines == [f"evicted {free}: removed"]
+    assert held.exists()

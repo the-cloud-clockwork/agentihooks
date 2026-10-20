@@ -30,14 +30,14 @@ def _candidates(root: Root, snap: Snapshot) -> list[tuple[float, Path, Path, Fin
         if state is None or snap.now - state.last_touch < FRESH:
             continue
         lease = read_lease(path, "worktree")
-        if _held(state, lease, snap, grace=False):
+        if _held(state, lease, snap, False):
             continue
         rescue = needs_rescue(state, lease)
         disposable = rescue and scratch_repository(state, root)
         action = "snapshot" if rescue else "remove"
         item = Finding(str(path), root.id, "worktree", action, "evicted", disposable=disposable)
         found.append((state.last_touch, path, Path(state.primary).resolve(), item))
-    return sorted(found, key=lambda entry: entry[0])
+    return sorted(found)
 
 
 def make_room(

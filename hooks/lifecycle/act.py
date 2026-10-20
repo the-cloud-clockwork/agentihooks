@@ -59,26 +59,25 @@ def _snapshot_commit(path: Path, admin: Path, skipped: list[str]) -> str:
     return _run(path, "commit-tree", tree, "-p", "HEAD", "-m", "\n".join(lines), env=env)
 
 
-def snapshot(path: Path, local: bool = False) -> str:
+def snapshot(path: Path, keep_local: bool = False) -> str:
     admin = admin_dir(path)
     if admin is None:
         raise ActionError("not a linked worktree")
     commit = _snapshot_commit(path, admin, _oversized(path))
     ref = f"wip/{admin.parent.parent.parent.name}/{path.name}-{time.strftime('%Y%m%d%H%M%S')}"
-    if local:
+    if keep_local:
         _run(path, "update-ref", f"refs/heads/{ref}", commit)
-    else:
-        _run(path, "push", "--no-follow-tags", "origin", f"{commit}:refs/heads/{ref}", timeout=600)
+    _run(path, "push", "--no-follow-tags", "origin", f"{commit}:refs/heads/{ref}", timeout=600)
     return ref
 
 
 def _scratch_snapshot(path: Path) -> str:
-    ref = snapshot(path, local=True)
     try:
-        _run(path, "push", "--no-follow-tags", "origin", f"refs/heads/{ref}:refs/heads/{ref}", timeout=600)
-    except (ActionError, subprocess.TimeoutExpired) as error:
-        return f"kept {ref} locally, push failed ({error}); "
-    return f"pushed {ref}; "
+        return f"pushed {snapshot(path, keep_local=True)}; "
+    except ActionError as error:
+        if not str(error).startswith("git push:"):
+            raise
+        return f"kept a local wip/ branch, push failed ({error}); "
 
 
 def _drop_branch(primary: Path, branch: str) -> None:

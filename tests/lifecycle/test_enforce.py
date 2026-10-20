@@ -114,7 +114,7 @@ def test_scratch_repository_push_failure_removes_the_worktree(repo, tmp_path):
     outcome = outcomes(report)["fixture"]
     [ref] = git(repo.primary, "for-each-ref", "--format=%(refname:short)", "refs/heads/wip").split()
     assert ref.startswith("wip/primary/fixture-")
-    assert outcome.startswith(f"kept {ref} locally, push failed (git push: ")
+    assert outcome.startswith("kept a local wip/ branch, push failed (git push: ")
     assert outcome.endswith("); removed")
     assert git(repo.primary, "show", f"{ref}:work.txt") == "unsaved"
     assert not fixture.exists()

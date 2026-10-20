@@ -93,7 +93,7 @@ def pinned(state: TreeState, lease: Lease | None, snap: Snapshot) -> bool:
 
 def stale_after() -> float:
     try:
-        days = float(os.environ.get("WT_STALE_DAYS", "7"))
+        days = float(os.environ.get("WT_STALE_DAYS") or 7)
     except ValueError:
         days = 7.0
     return (days if days > 0 else 7.0) * DAY
