@@ -100,7 +100,6 @@ def test_the_anton_hive_takes_an_engineer_for_a_swarm_repo_given_as_a_local_chec
 
 
 def test_a_full_anton_hive_sends_the_engineer_to_the_workstation_with_the_reason(live):
-
     live.store.redis.set(f"{registry.key(ANTON)}:sessions", '{"eng": 1}')
     selected = live.launcher.select(live.config, "eng", {"id": "task"})
     assert (selected.hive, selected.account.name) == ("root", ROOT_ACCOUNTS[0])
