@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
+import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import install
 import pytest
@@ -233,8 +238,41 @@ def test_launch_runs_the_preflight_before_taking_the_route_lock():
 def test_session_start_kick_spawns_only_when_stale(tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(deps_kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
-    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: spawned.append(argv))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or Mock())
     assert deps_kick.kick(home=tmp_path) is True
     (tmp_path / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     assert deps_kick.kick(home=Path(tmp_path)) is False
     assert spawned == [["/usr/bin/agentihooks", "deps", "ensure", "--quiet"]]
+
+
+def test_session_start_kick_reaps_a_slow_check_before_returning(tmp_path, monkeypatch):
+    exe = tmp_path / "agentihooks"
+    exe.write_text("#!/bin/sh\nsleep 30 &\nwait\n")
+    exe.chmod(0o755)
+    started = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: str(exe))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda *a, **kw: started.append(popen(*a, **kw)) or started[-1])
+    began = time.monotonic()
+    try:
+        assert deps_kick.kick(home=tmp_path) is True
+        elapsed = time.monotonic() - began
+        group_alive = subprocess.run(["pgrep", "-g", str(started[0].pid)], capture_output=True).returncode == 0
+    finally:
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(started[0].pid, signal.SIGKILL)
+        started[0].wait()
+    assert elapsed < 5
+    assert not group_alive, "the dependency check's process group outlived the session start kick"
+
+
+def test_session_start_kick_waits_for_a_fast_check(tmp_path, monkeypatch):
+    exe = tmp_path / "agentihooks"
+    exe.write_text("#!/bin/sh\nsleep 0.2\nexit 3\n")
+    exe.chmod(0o755)
+    started = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: str(exe))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda *a, **kw: started.append(popen(*a, **kw)) or started[-1])
+    assert deps_kick.kick(home=tmp_path) is True
+    assert started[0].returncode == 3
