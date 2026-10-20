@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, registry, server
+from scripts.swarm_ledger import ledger_ca
 
 LOCK_FILE = "hive.lock"
 
@@ -47,6 +48,7 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
         )
     grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh")
     auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
+    ledger_ca.place(registry.home(environ), grant.get("ledger_ca"), environ)
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
     return grant["id"]
 
@@ -98,7 +100,9 @@ def _serve(args: argparse.Namespace) -> int:
     if bool(args.tls_cert) != bool(args.tls_key):
         raise auth.HiveError("--tls-cert and --tls-key go together")
     tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
-    httpd = server.make_server(redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls)
+    httpd = server.make_server(
+        redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls, ledger_ca=ledger_ca.served()
+    )
     scheme = "https" if tls else "http"
     print(f"hive join endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.JOIN_PATH}", flush=True)
     httpd.serve_forever()
@@ -201,7 +205,11 @@ def main(argv: list[str]) -> int:
         elif args.command == "join":
             grant = _join(args.url, args.code)
             path = auth.write_env(registry.home(), args.url, grant)
-            print(f"joined the hive as {grant['id']}; credentials are in {path}")
+            ca = ledger_ca.place(registry.home(), grant.get("ledger_ca"))
+            print(
+                f"joined the hive as {grant['id']}; credentials are in {path}"
+                + (f"; the ledger CA is in {ca}" if ca else "")
+            )
         elif args.command == "refresh":
             with refresh_lock(os.environ):
                 member_id = refresh_env(os.environ)

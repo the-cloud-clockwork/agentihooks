@@ -31,6 +31,10 @@ agentihooks hive install          # user service that runs agentihooks hive run
 
 - `hive join` writes `~/.agentihooks/hive.env` (mode 0600) with the hive id, the swarm URL, a ledger credential
   and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
+- When the join service trusts a ledger CA (`LEDGER_CA_PEM`, else `ledger-ca.pem` in its home), `hive join` and
+  `hive refresh` write it to the file ledger clients trust: `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in
+  the hive home. A grant without one leaves that file as it is. The Helm hive join service reads the CA from the
+  ledger TLS secret.
 - The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
   The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
   and `--tls-key`, and refuses to serve on a non-loopback address without them. The join endpoint's request,
