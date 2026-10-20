@@ -787,7 +787,8 @@ def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, pr
     steps[-1]["shell"] = shell
     head["jobs"]["gate-required"]["steps"] = steps
     assert len(_grade({"test.yml": head}, base={"test.yml": base})) == problems
-    assert ci_reuse.gate_steps(**form, summary=True, pipefail=True)[-1]["shell"] == "bash"
+    assert ci_reuse.pipefail_summary(ci_reuse.gate_steps(**form, summary=True))[-1]["shell"] == "bash"
+    assert ci_reuse.pipefail_summary(steps)[:-1] == ci_reuse.gate_steps(**form, summary=True)[:-1]
     assert "shell" not in ci_reuse.gate_steps(**form, summary=True)[-1]
 
 

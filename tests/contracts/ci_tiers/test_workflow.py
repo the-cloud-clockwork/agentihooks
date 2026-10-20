@@ -128,10 +128,13 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        ci_reuse.inline_mutation(
-            ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+        finish(
+            ci_reuse.inline_mutation(
+                ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+            )
         )
         for summary in (False, True)
+        for finish in (list, ci_reuse.pipefail_summary)
     ]
 
 
