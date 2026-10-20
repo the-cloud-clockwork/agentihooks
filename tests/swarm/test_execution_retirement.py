@@ -204,8 +204,8 @@ def test_orphan_ending_does_not_touch_a_replaced_execution_or_restored_agent(sto
     replacement = store.start_execution(
         "fixture", AgentRecord(first.name, "eng", "task", seat=first.seat), first.execution_id
     )
-    assert store.execution_registry.end_orphan("fixture", first) is False
-    assert store.execution_registry.end_orphan("fixture", replacement) is False
+    assert store.execution_registry.end_orphan("fixture", first, 0) is False
+    assert store.execution_registry.end_orphan("fixture", replacement, 0) is False
     assert store.execution("fixture", first.execution_id) == first
     assert store.execution("fixture", replacement.execution_id) == replacement
 
@@ -222,7 +222,7 @@ def test_orphan_ending_refuses_a_projection_restored_during_the_transaction(stor
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
-        assert store.execution_registry.end_orphan("fixture", agent) is False
+        assert store.execution_registry.end_orphan("fixture", agent, 0) is False
     assert store.execution("fixture", agent.execution_id) == agent
     assert store.agents("fixture") == [agent]
 
@@ -247,13 +247,13 @@ def test_orphan_ending_preserves_terminal_executions_and_absent_replacements(sto
         "fixture", AgentRecord(first.name, "eng", "task", seat=first.seat), first.execution_id
     )
     store.redis.hdel(store.key("fixture", "agents"), first.name)
-    assert store.execution_registry.end_orphan("fixture", first) is False
+    assert store.execution_registry.end_orphan("fixture", first, 0) is False
     assert store.execution("fixture", first.execution_id) == first
     assert store.execution("fixture", replacement.execution_id) == replacement
     terminal = replace(replacement, state="finished")
     store.put_agent("fixture", terminal)
     store.redis.hdel(store.key("fixture", "agents"), first.name)
-    assert store.execution_registry.end_orphan("fixture", terminal) is False
+    assert store.execution_registry.end_orphan("fixture", terminal, 0) is False
     assert store.execution("fixture", terminal.execution_id) == terminal
 
 
@@ -294,7 +294,7 @@ def test_orphan_ending_keeps_a_concurrent_execution_update(store):
         return execute(pipe, *args, **kwargs)
 
     with patch.object(pipe_type, "execute", commit):
-        assert store.execution_registry.end_orphan("fixture", agent) is False
+        assert store.execution_registry.end_orphan("fixture", agent, 0) is False
     assert store.execution("fixture", agent.execution_id) == changed
     assert store.agents("fixture") == []
 
@@ -383,7 +383,8 @@ def test_reconciliation_ends_a_starting_orphan_only_when_absent_dead_and_past_st
     assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
 
 
-def test_orphan_ending_ends_a_starting_execution(store):
+@pytest.mark.parametrize(("offset", "ended"), [(0, True), (-1, False)])
+def test_orphan_ending_ends_a_starting_execution_only_past_its_startup_window(store, offset, ended):
     orphan = starting_master(store, "fixture")
-    assert store.execution_registry.end_orphan("fixture", orphan) is True
-    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
+    assert store.execution_registry.end_orphan("fixture", orphan, 1 + DEADLINE_MS + offset) is ended
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")

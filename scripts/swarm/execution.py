@@ -12,7 +12,6 @@ IMMUTABLE = ("execution_id", "generation", "name", "lane", "task", "seat", "star
 WRITE_ATTEMPTS = 5
 EXECUTION_FIELDS = ("execution_id", "generation", "runtime_backend", "runtime_target")
 PROJECTION_OMITTED = (*EXECUTION_FIELDS, "hive", "transport", "remote_control", "desired_route_kind")
-ORPHAN_STATES = ("working", "starting")
 
 
 if TYPE_CHECKING:
@@ -282,11 +281,11 @@ class ExecutionRegistry:
         for agent in self.occupants(slug).values():
             if not _orphan_state(agent, now_ms) or agent.name in recorded or agent.name in live:
                 continue
-            if _process_gone(self.redis, agent, runtime) and self.end_orphan(slug, agent):
+            if _process_gone(self.redis, agent, runtime) and self.end_orphan(slug, agent, now_ms):
                 actions.append(f"ended orphan execution {agent.execution_id} for {agent.name}")
         return actions
 
-    def end_orphan(self, slug: str, agent: AgentRecord) -> bool:
+    def end_orphan(self, slug: str, agent: AgentRecord, now_ms: int) -> bool:
         from redis.exceptions import WatchError
 
         key = self.store.key(slug, "executions")
@@ -296,7 +295,7 @@ class ExecutionRegistry:
                 current = self.occupants(slug).get(agent.seat)
                 if (
                     current != agent
-                    or agent.state not in ORPHAN_STATES
+                    or not _orphan_state(agent, now_ms)
                     or pipe.hexists(self.store.key(slug, "agents"), agent.name)
                 ):
                     return False
