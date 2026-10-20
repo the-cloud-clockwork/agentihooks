@@ -1520,9 +1520,10 @@ files nothing new.
 
 The owner records a task's cause in its held causes before it writes the task to the ledger. When the ledger refuses
 the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the ledger refused its write: <reason>` to
-its journal. The run is not marked handled, and the held cause is dropped on the next pass because no live task
-carries it. The next pass by the owner, or by a new owner after a handover, files the same `promo-<run id>-<n>` task
-once.
+its standard error: the user journal (`journalctl --user -t agentihooks-swarm`), or `swarm-tick.log` in the runtime
+directory for a scheduled tick. The run is not marked handled, and the held cause is dropped on the next pass because
+no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same `promo-<run
+id>-<n>` task once.
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
@@ -1536,6 +1537,7 @@ path instead:
 ```bash
 REPO=~/dev/tcc-ecosystem/agentihooks
 COMMON=$(realpath "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)")
+# COMMON=$(realpath "$REPO")   # when $REPO is not a git repository or git is missing
 ID=$(printf %s "$COMMON" | sha256sum | cut -d' ' -f1)
 P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
 redis-cli HGETALL "$P:swarm:promotion-owner:$ID"
@@ -1550,7 +1552,7 @@ redis-cli TTL "$P:swarm:promotion-owner:$ID:lock"   # -2 when no pass holds the 
 | `seen` | The newest dev push run any owner has handled |
 
 An owner that is a Doctor while its watched swarm also runs took intake while the watched swarm was not running, and
-keeps it until it stops running itself. Its ledger holds the repository's promotion fixer tasks meanwhile.
+keeps it until it leaves the running state. Its ledger holds the repository's promotion fixer tasks meanwhile.
 
 Read the causes a swarm holds, keyed by task id, and the newest run it handled:
 
@@ -1578,7 +1580,7 @@ intake ownership, or by a swarm on a different repository identity.
 | A Doctor files promotion tasks | Its watched swarm was not running when an owner was last elected, and the Doctor keeps intake while it runs | Expected. The watched swarm takes intake back only after the Doctor stops running |
 | A new owner did not refile an open repair | The cause is held by a task that is not done in a former owner's ledger | Expected. Work the task in that ledger; a green run closes it there |
 | Two swarms on one repository both file | Their checkouts resolve to different git common directories, for example two separate clones | Compare `git rev-parse --git-common-dir` for both `repo` settings; point both swarms at the same clone or its worktrees |
-| No promotion task for a red run | The lock was held, the run was superseded before Sonar, or its causes are held by tasks that are not done | Check the lock `TTL`, the tick journal for `superseded before Sonar analysis`, and `promotion:jobs` for every swarm in the history |
+| No promotion task for a red run | The lock was held, the run was superseded before Sonar, or its causes are held by tasks that are not done | Check the lock `TTL`, whether the run's failed jobs failed only at `Check dev still points at this commit`, and `promotion:jobs` for every swarm in the history |
 | The same task id appears after a ledger outage | The first write was refused and the pass was retried | Expected: the retry files the task once, and later passes skip the id because the ledger already holds it |
 
 Delivered in [pull request 3937](https://github.com/the-cloud-clockwork/agentihooks/pull/3937), with
