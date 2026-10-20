@@ -1144,3 +1144,24 @@ def test_setup_errors_and_test_failures_keep_distinct_causes_across_shard_moves(
     assert len(ledger.added) == 2
     assert "tests/test_api.py::test_body" in ledger.added[0][1]["description"]
     assert "tests/test_api.py::test_setup" in ledger.added[1][1]["description"]
+
+
+def test_an_independent_failed_step_beside_a_failing_test_keeps_its_own_fixer(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 2)], missing=False)
+
+    def run(argv, **kwargs):
+        result = recorded(argv, **kwargs)
+        if "/jobs?" in argv[2]:
+            jobs = [json.loads(line) for line in result.stdout.splitlines()]
+            jobs[0]["steps"] = [*jobs[0]["steps"], {"name": "Upload durations", "conclusion": "failure"}]
+            result.stdout = "\n".join(json.dumps(job) for job in jobs)
+        return result
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 2
+    assert (
+        "tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api"
+        in ledger.added[0][1]["description"]
+    )
+    assert "Upload durations" in ledger.added[1][1]["description"]

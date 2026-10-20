@@ -171,7 +171,9 @@ def test_causes(
     remaining = []
     for job, why in causes:
         tests = failing_tests(repo, named[job], run) if job in named else set()
-        if not tests:
+        if not tests or any(
+            s["name"] != TEST_STEP and s.get("conclusion") in FAILED for s in named[job].get("steps") or []
+        ):
             remaining.append((job, why))
         for test in sorted(tests):
             groups.setdefault(test, []).append(job)
