@@ -161,7 +161,7 @@ def failing_tests(repo: str, job: dict, run: Callable) -> set[str]:
         check=True,
         timeout=60,
     ).stdout
-    return set(re.findall(r"\b(?:FAILED|ERROR) (tests/.+?)(?: - |\s*$)", log, re.MULTILINE))
+    return set(re.findall(r"\b(?:FAILED|ERROR) (tests/.+?)(?: - |(?:\s*$))", log, re.MULTILINE))
 
 
 def test_causes(
