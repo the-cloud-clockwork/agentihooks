@@ -324,6 +324,22 @@ agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-ag
 - Engineer, CI, planner and dispatcher work runs on the pods. For the PC to take the dispatcher when every pod is
   full, its roles must list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
 
+## Comparing hive configuration
+
+Every hive runs agents with the workstation's configuration. Each beat keeps the hive's configuration published,
+named without values or host paths: account token names, agentihooks env setting names, the linked bundle and
+profiles, installed Claude rules and skills, managed MCP servers, satisfied bundle dependencies and repo identities.
+The snapshot lives fifteen minutes and is rebuilt once under a minute is left, so dependency checks run rarely.
+
+```bash
+agentihooks hive compare               # this machine's hive is the base
+agentihooks hive compare --base root
+```
+
+The first line is the base with a count per section; every other live hive follows as `equal`, `differs` with one
+`<section> missing|extra <name>` line per difference, or `no configuration published`. The command exits 1 when
+any hive differs or published nothing.
+
 ## Placement
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that take the role,
@@ -349,6 +365,13 @@ When no live hive takes the role:
 - The master has its own chain, below.
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
+
+### Account caps on every hive
+
+Quota belongs to the account, so every hive reports the same cap for it. A subscription slot whose own reading is
+missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
+that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
+api slots keep their own.
 
 ### Master placement
 
@@ -683,6 +706,10 @@ The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (de
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
 below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
 network, so it schedules on any node.
+
+A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
+CI work as Pods while its master, planners and dispatcher stay on the workstation; see
+[Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
 
 ## Ledger Hives panel
 

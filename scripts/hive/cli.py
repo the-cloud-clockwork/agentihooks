@@ -130,6 +130,8 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
     sub.add_parser("install", help="Write and enable the hive user service")
+    compare = sub.add_parser("compare", help="List each live hive's configuration against a base hive's")
+    compare.add_argument("--base", help="The base hive id; defaults to this machine's hive")
     return parser
 
 
@@ -161,6 +163,36 @@ def _daemon(command: str) -> int:
     return 1 if result is False else 0
 
 
+def _compare(base_id: str | None) -> int:
+    from scripts.hive import config
+    from scripts.swarm import commands
+
+    redis, now = redis_client(), now_ms()
+    base_id = base_id or commands.hive_id()
+    found = {
+        record["id"]: config.read(redis, record["id"]) for record in registry.hives(redis) if registry.live(record, now)
+    }
+    base = found.pop(base_id, None)
+    if base is None:
+        raise auth.HiveError(f"live hive {base_id} published no configuration")
+    print(f"{base_id}\tbase\t{config.summary(base)}")
+    differing = [hive_id for hive_id, other in sorted(found.items()) if _report(hive_id, base, other)]
+    return 1 if differing else 0
+
+
+def _report(hive_id: str, base: dict, other: dict | None) -> bool:
+    from scripts.hive import config
+
+    if other is None:
+        print(f"{hive_id}\tno configuration published")
+        return True
+    lines = config.differences(base, other)
+    print(f"{hive_id}\t{'differs' if lines else 'equal'}\t{config.summary(other)}")
+    for line in lines:
+        print(f"  {line}")
+    return bool(lines)
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -181,6 +213,8 @@ def main(argv: list[str]) -> int:
             print(f"revoked {args.id}")
         elif args.command in ("run", "install"):
             return _daemon(args.command)
+        elif args.command == "compare":
+            return _compare(args.base)
         elif args.command == "controller":
             path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client()))
             print(f"issued a controller credential; it is in {path}")

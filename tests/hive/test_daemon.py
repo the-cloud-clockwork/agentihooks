@@ -843,3 +843,95 @@ def test_checkout_maps_an_identity_to_the_first_local_checkout_with_that_origin(
     assert daemon.local_checkout("github.com/org/other") == str(tmp_path / "c")
     assert daemon.local_checkout("github.com/org/missing") == "github.com/org/missing"
     assert daemon.local_checkout(str(tmp_path / "b-copy")) == str(tmp_path / "b-copy")
+
+
+def _reading(at):
+    return {"five_hour": {"used": 10, "resets_at": 900}, "seven_day": {"used": 20, "resets_at": 990}, "observed_at": at}
+
+
+def _publish(redis, monkeypatch, hive_id, slots, quota, beat_at):
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {"slots": slots, "interactive": {}, "repos": [], "sessions": {}, "quota": quota},
+    )
+    monkeypatch.setattr(daemon.time, "time", lambda: beat_at)
+    daemon.beat(redis, hive_id)
+
+
+def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(redis, monkeypatch):
+    def slot(account, cap, kind="subscription", harness="claude"):
+        return {"harness": harness, "account": account, "kind": kind, "cap": cap}
+
+    monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: None)
+    shared = ["one", "own", "same", "login"]
+    _publish(
+        redis,
+        monkeypatch,
+        "workstation",
+        [slot(name, 6) for name in shared] + [slot("two", 4, harness="codex"), slot("blank", 3)],
+        {f"claude:{name}": _reading(500) for name in shared}
+        | {"codex:two": _reading(500), "claude:blank": _reading(None)},
+        1000,
+    )
+    _publish(redis, monkeypatch, "older", [slot("one", 2)], {"claude:one": _reading(400)}, 1000)
+    _publish(redis, monkeypatch, "edge", [slot("one", 7)], {"claude:one": _reading(600)}, 1000)
+    _publish(redis, monkeypatch, "stale", [slot("one", 1)], {"claude:one": _reading(900)}, 1000)
+    redis.hset(registry.key("edge"), "heartbeat_at", str(1_000_000 - registry.LIVE_MS))
+    redis.hset(registry.key("stale"), "heartbeat_at", str(1_000_000 - registry.LIVE_MS - 1))
+    local = [
+        slot("one", 0),
+        slot("two", 0, harness="codex"),
+        slot("own", 3),
+        slot("same", 5),
+        slot("login", 0, kind="interactive"),
+        slot("alone", 0),
+        slot("blank", 0),
+    ]
+    quota = {
+        "claude:one": _reading(None),
+        "codex:two": _reading(None),
+        "claude:own": _reading(600),
+        "claude:same": _reading(500),
+        "claude:login": _reading(None),
+        "claude:alone": _reading(None),
+        "claude:blank": _reading(None),
+    }
+    _publish(redis, monkeypatch, "pod", local, quota, 1000)
+    caps = {(item["harness"], item["account"]): item["cap"] for item in registry.show(redis, "pod")["slots"]}
+    assert caps == {
+        ("claude", "one"): 7,
+        ("codex", "two"): 4,
+        ("claude", "own"): 3,
+        ("claude", "same"): 5,
+        ("claude", "login"): 0,
+        ("claude", "alone"): 0,
+        ("claude", "blank"): 0,
+    }
+    published = json.loads(redis.get(f"{registry.key('pod')}:quota"))
+    assert published["claude:one"] == _reading(600)
+    assert published["codex:two"] == _reading(500)
+    assert published["claude:own"] == _reading(600)
+    assert published["claude:alone"] == _reading(None)
+
+
+def test_beat_publishes_the_configuration_with_the_repo_identities(redis, monkeypatch):
+    calls = []
+    monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: calls.append((local_id, repos)))
+    _publish(redis, monkeypatch, "pod", [], {}, 1000)
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {"slots": [], "interactive": {}, "repos": ["/x/a", "h/o/a"], "sessions": {}, "quota": {}},
+    )
+    daemon.beat(redis, "pod")
+    assert calls == [("pod", []), ("pod", ["/x/a", "h/o/a"])]
+
+
+def test_publish_config_hands_the_hive_id_and_repos_to_the_config_snapshot(redis, monkeypatch):
+    from scripts.hive import config
+
+    calls = []
+    monkeypatch.setattr(config, "publish", lambda *args: calls.append(args))
+    daemon.publish_config(redis, "pod", ["h/o/a"])
+    assert calls == [(redis, "pod", ["h/o/a"])]

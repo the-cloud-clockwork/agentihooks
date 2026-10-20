@@ -39,6 +39,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     processes = account_sessions.local_processes()
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
+    adopt_caps(redis, report)
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
@@ -63,6 +64,35 @@ def beat(redis: "Redis", local_id: str) -> None:
     consumer.sync_workspaces(TTL_SECONDS)
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    publish_config(redis, local_id, report["repos"])
+
+
+def adopt_caps(redis: "Redis", report: dict) -> None:
+    """A subscription slot takes the cap of a newer reading another live hive published, since quota is per account."""
+    now = int(time.time() * 1000)
+    for hive in registry.hives(redis):
+        if not registry.live(hive, now):
+            continue
+        quotas = json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}")
+        caps = {f"{slot['harness']}:{slot['account']}": slot["cap"] for slot in hive["slots"] if "cap" in slot}
+        for slot in report["slots"]:
+            name = f"{slot['harness']}:{slot['account']}"
+            reading = quotas.get(name)
+            if slot["kind"] == "subscription" and name in caps and _newer(reading, report["quota"][name]):
+                slot["cap"] = caps[name]
+                report["quota"][name] = reading
+
+
+def _newer(reading: dict | None, mine: dict) -> bool:
+    if reading is None or reading["observed_at"] is None:
+        return False
+    return mine["observed_at"] is None or reading["observed_at"] > mine["observed_at"]
+
+
+def publish_config(redis: "Redis", local_id: str, repos: list[str]) -> None:
+    from scripts.hive import config
+
+    config.publish(redis, local_id, repos)
 
 
 def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
