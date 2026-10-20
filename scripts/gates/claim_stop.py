@@ -63,6 +63,20 @@ def between_halves(task, pull):
     )
 
 
+def named(live, url):
+    """The pull request or run a live checks wait names in place of the task's own pull request, or ''."""
+    on = (live or {}).get("on") or {}
+    target = on.get("target") or ""
+    return target if on.get("kind") == "checks" and target != url else ""
+
+
+def named_ruling(pull):
+    """Only failed checks on the named pull request are owed; the tick ends the wait on everything else."""
+    if pull is not None and pull.state == "OPEN" and pull.resolved and pull.red and not pull.gate_passed:
+        return "red"
+    return ""
+
+
 def parked_by(store, who, task):
     if not task.get("parked_on"):
         return False
@@ -126,15 +140,9 @@ class ClaimStop:
             return Decision()
         if parked_by(store, who, task) or ready.awaiting(task):
             return Decision()
-        url = task.get("pr_url")
         held = idle.wait(store.redis, who.swarm, who.name)
         live = held if held and held["until"] > now else None
-        pull = self.github()(url) if url else None
-        if between_halves(task, pull):
-            ledger.update_task(who.swarm, task["id"], {"pr_url": "", "state": "claimed"}, if_state=("pr",))
-            task, pull = {**task, "pr_url": ""}, None
-        dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
-        owed, checks = ruling(task, pull, live, dependency)
+        task, pull, owed, checks = self.grade(ledger, who, task, live, rows)
         held_on = (live or {}).get("on", {})
         run_wait = held_on.get("kind") == "checks" and waits.mutation_wait.RUN_URL.fullmatch(held_on["target"])
         if checks and held_on.get("kind") not in KEPT and not run_wait:
@@ -152,6 +160,22 @@ class ClaimStop:
         )
         log.append(state.slug, log.Row.of(self.name, "blocked", who, call.tool, reason), state.home)
         return Decision()
+
+    def grade(self, ledger, who, task, live, rows):
+        """The task as graded, its pull request, the work owed and the pull request whose pending checks become the wait."""
+        from scripts.swarm import waits
+
+        target = named(live, task.get("pr_url"))
+        if target:
+            pull = None if waits.mutation_wait.RUN_URL.fullmatch(target) else self.github()(target)
+            return {**task, "pr_url": target}, pull, named_ruling(pull), ""
+        url = task.get("pr_url")
+        pull = self.github()(url) if url else None
+        if between_halves(task, pull):
+            ledger.update_task(who.swarm, task["id"], {"pr_url": "", "state": "claimed"}, if_state=("pr",))
+            task, pull = {**task, "pr_url": ""}, None
+        dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
+        return task, pull, *ruling(task, pull, live, dependency)
 
     def connect(self):
         if self._connect:

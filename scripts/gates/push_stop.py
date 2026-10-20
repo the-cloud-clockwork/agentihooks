@@ -1,6 +1,6 @@
 """The Stop gate that keeps a swarm worker's work on origin: it pushes the task branch itself, then refuses the stop over
 uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push,
-unless a checked wait on another task not yet done holds it."""
+unless a checked wait on another task not yet done, or on the merge of a pull request still open, holds it."""
 
 import os
 import re
@@ -182,8 +182,9 @@ class PushStop:
     name = "push-stop"
     default_mode = "enforce"
 
-    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None):
+    def __init__(self, connect=None, ledger=None, root=None, now=None, clock=None, github=None):
         self._connect, self._ledger, self._root, self._now, self._clock = connect, ledger, root, now, clock
+        self._github = github
         # The hook process builds its gates right after its imports; the reserve covers the startup before this.
         self.started = self.clock()
 
@@ -222,13 +223,20 @@ class PushStop:
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
     def waiting(self, store, who, doc, task):
-        """Whether a live checked wait on another unfinished task holds the stop, so a refused push never deadlocks."""
+        """Whether a live checked wait holds the stop, so a refused push never deadlocks: one on another unfinished
+        task, or one on the merge of a pull request still open, which a push would drop from the queue."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)
-        if not (doc and held and held["until"] > self.now() and (held.get("on") or {}).get("kind") == "task"):
+        on = (held or {}).get("on") or {}
+        if not (held and held["until"] > self.now()):
             return False
-        return waits.dependency(held["on"], task, {row.get("id"): row for row in doc["tasks"]}, None)
+        if on.get("kind") == "merge":
+            pull = self.github()(on["target"])
+            return pull is not None and pull.state == "OPEN"
+        if not (doc and on.get("kind") == "task"):
+            return False
+        return waits.dependency(on, task, {row.get("id"): row for row in doc["tasks"]}, None)
 
     def unrecorded(self, store, doc, who):
         from scripts.gates.progress import Progress
@@ -282,6 +290,13 @@ class PushStop:
         from scripts.swarm.ledger_client import LedgerClient
 
         return LedgerClient()
+
+    def github(self):
+        if self._github:
+            return self._github
+        from scripts.swarm.ledger_events import view
+
+        return view
 
     def now(self):
         if self._now:
