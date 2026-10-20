@@ -11,6 +11,7 @@ def record(held, start=60_000, end=12_540_000):
         "waits": {"engineer": held},
         "traces": [
             {
+                "name": "engineer",
                 "session_id": "session",
                 "tags": ["agent:engineer"],
                 "observations": [
