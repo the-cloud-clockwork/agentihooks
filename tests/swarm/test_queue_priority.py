@@ -830,6 +830,54 @@ def test_priority_notifies_the_claimant_of_an_entry_a_conflict_keeps_out(priorit
     assert p.queue.mutations == [("dequeue", 3), ("dequeue", 2), ("queue", 9), ("queue", 3)]
 
 
+def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(priority, monkeypatch):
+    p = priority
+    refusal = "gh: Pull request not in mergeable state"
+    run, refused = p.queue.run, [True]
+
+    def unknown(command, **kwargs):
+        if refused[0] and "enqueuePullRequest" in " ".join(command) and "id=P2" in command:
+            return subprocess.CompletedProcess(command, 1, "", refusal)
+        done = run(command, **kwargs)
+        response = json.loads(done.stdout)
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
+        if raw and raw.get("id") == "P2":
+            raw["mergeable"] = "UNKNOWN"
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    monkeypatch.setattr(p.queue, "run", unknown)
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    sent = []
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
+    )
+    with pytest.raises(SwarmError):
+        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+    notice = (
+        "swarm",
+        "ci@owner",
+        f"Your pull request {URL[:-1]}2 left the merge queue in a priority and could not be queued again: "
+        f"{refusal}. The swarm retries it on every refresh until it is back or stays out for a reason.",
+        {"fyi": True},
+    )
+    assert sent == [notice]
+    assert [(pull["url"], pull["notified"]) for pull in queue_priority.Displaced(p.store, "sw").pulls()] == [
+        (URL[:-1] + "2", True)
+    ]
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"could not requeue {URL[:-1]}2 after an interrupted priority: {refusal}"
+    ]
+    assert sent == [notice]
+    refused[0] = False
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"requeued {URL[:-1]}2 left out of the merge queue by an interrupted priority"
+    ]
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P9", "P3", "P2"]
+    assert queue_priority.Displaced(p.store, "sw").pulls() == []
+
+
 @pytest.mark.parametrize(
     "raw, reason",
     [
