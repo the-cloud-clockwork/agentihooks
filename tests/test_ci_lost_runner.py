@@ -353,10 +353,42 @@ def test_a_cancel_refused_because_the_run_completed_is_left_alone(monkeypatch, n
     }
 
 
-def test_a_cancel_refused_on_an_open_run_is_raised(monkeypatch, no_sleep):
+def test_a_cancel_refused_on_an_open_run_keeps_its_timestamps(monkeypatch, no_sleep):
     refused_cancel(monkeypatch, RUN)
-    with pytest.raises(subprocess.CalledProcessError):
-        ci_lost_runner.watch("o/r", RUN, WORKFLOW, GRACE)
+    record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)
+    assert record["action"] == "error"
+    assert record["run"] == 7
+    assert record["attempt"] == 1
+    assert "cancel" in record["reason"]
+    assert datetime.fromisoformat(record["detected_at"]) <= datetime.fromisoformat(record["cancel_requested_at"])
+    assert record["force_cancel_requested_at"] is None
+    assert record["completed_observed_at"] is None
+
+
+@pytest.mark.parametrize("failed_action", ["force-cancel", "rerun-failed-jobs", "read"])
+def test_recovery_errors_keep_the_collected_timestamps(monkeypatch, no_sleep, failed_action):
+    monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
+    states = [json.dumps(RUN), json.dumps(RUN), json.dumps(RUN)]
+    if failed_action == "rerun-failed-jobs":
+        states[1] = json.dumps({**RUN, "status": "completed"})
+    api = Api({JOBS: lines(*stalled_run()), RUNS: states, RUNNER_LIST: ""})
+
+    def failing(*args):
+        if args == ("-X", "POST", f"{RUNS}/{failed_action}") or (
+            failed_action == "read" and args == (RUNS,) and api.posts()
+        ):
+            raise subprocess.CalledProcessError(1, ["gh", "api", *args])
+        return api(*args)
+
+    monkeypatch.setattr(ci_lost_runner, "_api", failing)
+    record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)
+    assert record["action"] == "error"
+    assert record["run"] == 7
+    assert record["attempt"] == 1
+    assert failed_action if failed_action != "read" else RUNS in record["reason"]
+    assert datetime.fromisoformat(record["detected_at"]) <= datetime.fromisoformat(record["cancel_requested_at"])
+    assert (record["force_cancel_requested_at"] is not None) == (failed_action == "force-cancel")
+    assert (record["completed_observed_at"] is not None) == (failed_action == "rerun-failed-jobs")
 
 
 def test_a_run_still_working_is_left_alone(monkeypatch, no_sleep):

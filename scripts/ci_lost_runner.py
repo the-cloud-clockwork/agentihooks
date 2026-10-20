@@ -181,20 +181,22 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source
         "completed_observed_at": None,
     }
     try:
-        ended = stop(repo, run["id"], recovery)
-    except subprocess.CalledProcessError:
-        ended = run_state(repo, run["id"])
+        try:
+            ended = stop(repo, run["id"], recovery)
+        except subprocess.CalledProcessError:
+            ended = run_state(repo, run["id"])
+            if ended["status"] != "completed":
+                raise
+            recovery["completed_observed_at"] = datetime.now(UTC).isoformat()
+            if ended["conclusion"] != "cancelled":
+                return recovery | {"action": "none", "reason": "the run completed meanwhile"}
         if ended["status"] != "completed":
-            raise
-        recovery["completed_observed_at"] = datetime.now(UTC).isoformat()
-        if ended["conclusion"] != "cancelled":
-            return recovery | {"action": "none", "reason": "the run completed meanwhile"}
-    if ended["status"] != "completed":
-        return recovery | {"action": "cancel", "reason": f"{reason}; the run did not end after force cancel"}
-    if action == "cancel":
+            return recovery | {"action": "cancel", "reason": f"{reason}; the run did not end after force cancel"}
+        if action == "rerun":
+            _api("-X", "POST", f"repos/{repo}/actions/runs/{run['id']}/rerun-failed-jobs")
         return recovery
-    _api("-X", "POST", f"repos/{repo}/actions/runs/{run['id']}/rerun-failed-jobs")
-    return recovery
+    except subprocess.SubprocessError as error:
+        return recovery | {"action": "error", "reason": str(error)}
 
 
 def guarded(step, repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
