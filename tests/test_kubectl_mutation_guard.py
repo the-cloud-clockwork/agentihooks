@@ -282,6 +282,9 @@ def test_allowlisted_segment_does_not_hide_a_later_mutation(monkeypatch, cmd):
 def test_violation_message_carries_the_rule_description():
     msg = check_kubectl_mutation_command("kubectl exec mypod -- vim /etc/config")
     assert "  Reason:      kubectl exec ... -- vi/vim/nano/emacs (interactive file edit inside the pod)\n" in msg
+    msg = check_kubectl_mutation_command("kubectl exec mypod -- sh -c 'echo x > /etc/config'")
+    assert "  Rule:        exec-shell-c:redirect-to-fs-path\n" in msg
+    assert "  Reason:      kubectl exec ... -- sh/bash -c with mutation pattern (redirect-to-fs-path)\n" in msg
 
 
 @pytest.mark.parametrize(
