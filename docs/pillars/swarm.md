@@ -1522,8 +1522,8 @@ The owner records a task's cause in its held causes before it writes the task to
 the write, the tick prints `scripts.swarm.promotion_watch.refresh skipped, the ledger refused its write: <reason>` to
 its standard error: the user journal (`journalctl --user -t agentihooks-swarm`), or `swarm-tick.log` in the runtime
 directory for a scheduled tick. The run is not marked handled, and the held cause is dropped on the next pass because
-no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same `promo-<run
-id>-<n>` task once.
+no live task carries it. The next pass by the owner, or by a new owner after a handover, files the same
+`promo-<run id>-<n>` task once.
 
 A run whose failed jobs all failed only at the `Check dev still points at this commit` step, with the annotation that
 `dev` advanced before Sonar analysis, is still reported as superseded and files nothing. Failed jobs that lost their
@@ -1531,13 +1531,13 @@ runner still share one runner outage task.
 
 ### Checking the owner
 
-Find the identity of a git checkout and read its record. For a path that is not a repository, hash its resolved
-path instead:
+Find the identity of a checkout and read its record. Like the code, the commands fall back to the resolved path when
+the checkout is not a git repository or `git` is missing:
 
 ```bash
 REPO=~/dev/tcc-ecosystem/agentihooks
-COMMON=$(realpath "$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir)")
-# COMMON=$(realpath "$REPO")   # when $REPO is not a git repository or git is missing
+COMMON=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || echo "$REPO")
+COMMON=$(realpath "$COMMON")
 ID=$(printf %s "$COMMON" | sha256sum | cut -d' ' -f1)
 P=${AGENTIHOOKS_SWARM_KEY_PREFIX:-agentihooks}
 redis-cli HGETALL "$P:swarm:promotion-owner:$ID"
