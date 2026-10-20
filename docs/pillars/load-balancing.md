@@ -343,6 +343,9 @@ sessions instead:
    5-hour left, week left, both reset times and the time the snapshot was
    written. A snapshot missing one window reads that window as unknown.
 
+Only swarm capacity reads these snapshots; `agentihooks balance` does not, and
+lists a tokenless master account with unknown windows.
+
 A snapshot written by an interactive master session:
 
 ```json
@@ -381,8 +384,9 @@ rollout logs already supply its quota.
 
 ### Reserved rows in `agentihooks balance`
 
-`agentihooks balance` closes the same Claude and Codex rows the swarm quota
-view closes, through one shared rule. A row closes when all of these hold:
+`agentihooks balance` applies the rule the swarm quota view applies to Claude
+and Codex rows, so a row with the same reading closes in both. A row closes
+when all of these hold:
 
 - its harness and account match the declared master account of that harness;
 - it is not an api row;
@@ -390,8 +394,8 @@ view closes, through one shared rule. A row closes when all of these hold:
 - the week used reaches the ceiling for the live master count.
 
 A closed row shows state `CLOSED`, cap `0` and `(reserved)` after the account
-name and its `MASTER <tier>` mark. One line per closed row under the table names the harness, the account
-and the reason:
+name and its `MASTER <tier>` mark. One line per closed row under the table
+names the harness, the account and the reason:
 
 ```text
 $ agentihooks balance
@@ -410,8 +414,11 @@ appears. Rows from `agentihooks quota --json` carry a `reserved` key; only
 
 If a reserved account still shows as open:
 
-- The week left is `-`: there is no fresh reading. For an interactive Claude
-  master, check that a live master session holds exactly one non empty
+- The week left is `-`: there is no fresh reading, so no reservation can close
+  the row. `balance` reads only probed and cached token readings, so a
+  tokenless interactive Claude master always shows `-` there and stays open;
+  its reservation is visible in the swarm quota view. For that view, check
+  that a live master session holds exactly one non empty
   `AH_ROUTE_INTERACTIVE_<slug>` and that its snapshot is younger than
   `QUOTA_USAGE_STALE_SEC`.
 - The account name differs from the declaration: check
