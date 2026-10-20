@@ -77,5 +77,6 @@
   "test.yml/test-count": "standard",
   "test.yml/unit": "standard",
   "test.yml/unit-selected": "standard",
+  "test.yml/writer-lock": "standard",
   "worker-resources.yml/measure": "batch"
 }

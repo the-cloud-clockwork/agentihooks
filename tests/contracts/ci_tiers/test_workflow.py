@@ -35,6 +35,7 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "swarm-image",
     "worker-image",
     "brain-smoke",
+    "writer-lock",
     "ledger-load",
     "kind-due",
     "helm-kind",
