@@ -12,6 +12,7 @@ let statsSent = null;
 export let doc;
 export let meta = {};
 let rev = -1;
+let seenRev = -1;
 export let ops = [];
 export let checks = {};
 let inflight = false;
@@ -122,6 +123,8 @@ function keepDropped(previous, next) {
     older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
     pulled[name] = older[name].length;
   }
+  for (const name of touchedPaged(seenRev)) refreshClosed(name);
+  seenRev = meta.rev;
 }
 
 function mergeOlder(d) {
@@ -129,6 +132,51 @@ function mergeOlder(d) {
     const known = new Set(d[name].map((i) => i.id));
     d[name] = [...rows.filter((i) => !known.has(i.id)).reverse(), ...d[name]];
   }
+}
+
+export function pagedOut(name, id) {
+  return hiddenDone(doc, name).has(id) && !(doc[name] || []).some((i) => i.id === id);
+}
+
+export async function pageIn(name, id) {
+  while (pagedOut(name, id) && closedLeft(name)) {
+    const before = pulled[name] || 0;
+    await loadClosed(name);
+    if ((pulled[name] || 0) === before) return;
+  }
+}
+
+const refreshing = {};
+
+async function refreshClosed(name) {
+  const closed = (meta.closed || {})[name];
+  const want = (older[name] || []).length;
+  const turn = (refreshing[name] = (refreshing[name] || 0) + 1);
+  const rows = [];
+  while (closed && rows.length < want) {
+    const resp = await readClosed(name, closed.kept + rows.length);
+    if (!resp.ok) return;
+    const { data } = await resp.json();
+    if (!data.length) break;
+    rows.push(...withDefaults({ [name]: data })[name]);
+  }
+  if (turn !== refreshing[name]) return;
+  const stale = new Set(older[name].map((i) => i.id));
+  older[name] = rows.slice(0, want);
+  pulled[name] = older[name].length;
+  doc[name] = doc[name].filter((i) => !stale.has(i.id));
+  mergeOlder(doc);
+  render();
+}
+
+function touchedPaged(since) {
+  const names = new Set();
+  for (const e of meta.events || []) {
+    if (e.rev <= since || typeof e.target !== "string") continue;
+    const [name, id] = e.target.split("/");
+    if ((older[name] || []).some((i) => i.id === id)) names.add(name);
+  }
+  return names;
 }
 
 export async function loadClosed(name) {

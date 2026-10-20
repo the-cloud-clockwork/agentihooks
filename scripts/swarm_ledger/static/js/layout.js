@@ -5,6 +5,7 @@ import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
 import { revealTarget } from "./outline.js";
 import { renderSwarm, swarm } from "./swarm.js";
+import { pageIn, pagedOut } from "./sync.js";
 
 const tabScroll = {};
 
@@ -30,7 +31,12 @@ export function openHash() {
   const target = id && revealTarget(id);
   if (target) {
     requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
-  } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+    return;
+  }
+  selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+  const [kind, list, ...rest] = id.split("-");
+  if (kind === "item" && pagedOut(list, rest.join("-")))
+    pageIn(list, rest.join("-")).then(() => { const paged = revealTarget(id); if (paged) paged.scrollIntoView({ block: "start" }); });
 }
 
 export function wireTabs() {
