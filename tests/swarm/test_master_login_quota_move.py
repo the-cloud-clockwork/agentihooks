@@ -35,6 +35,7 @@ def login(monkeypatch):
 
 def _spawn(tmp_path, login_week_left, reason=""):
     runtime, config, seen = _login_runtime(tmp_path, _accounts(login_week_left))
+    runtime.choose = lambda *_: ("claude", "requested")
     config.lanes = {"master": {"agent": "claude"}}
     envelope = {"launch": LAUNCH, **({"reason": reason} if reason else {})}
     task = {"id": "master", "title": "proof", "handoff": "Continue the master task.", "handoff_envelope": envelope}

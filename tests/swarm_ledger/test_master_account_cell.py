@@ -17,5 +17,8 @@ def test_only_the_master_row_carries_its_account():
     ]
 
 
-def test_the_master_task_cell_names_its_account():
-    assert 'a.account ? label(`account ${a.account}`) : "—"' in page_source()
+def test_the_master_name_cell_names_its_account():
+    assert (
+        'a.account ? h("span", {}, idCell(a.name), h("span", { class: "sw-sub", title: `account ${a.account}`, '
+        "text: a.account })) : idCell(a.name)" in page_source()
+    )
