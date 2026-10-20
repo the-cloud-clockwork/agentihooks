@@ -63,7 +63,7 @@ def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     assert stored.profile_decision["master_placement"] == admitted.profile_decision["master_placement"]
 
 
-def admit_after_starting_orphan(setup, offset):
+def admit_after_starting_orphan(setup, offset, live=False):
     from types import SimpleNamespace
 
     from scripts.swarm.master_start import DEADLINE_MS
@@ -73,7 +73,7 @@ def admit_after_starting_orphan(setup, offset):
 
     task = master(setup)
     orphan = starting_master(setup.store, setup.config.slug)
-    runtime = SimpleNamespace(live_names=set, reported=lambda agent: False)
+    runtime = SimpleNamespace(live_names=lambda: {orphan.name} if live else set(), reported=lambda agent: False)
     setup.store.execution_registry.reconcile(setup.config.slug, runtime, 1 + DEADLINE_MS + offset)
     task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
     request = SpawnRequest(setup.config, MASTER, setup.store.next_name(setup.config.slug, MASTER), task)
@@ -87,10 +87,11 @@ def test_master_admission_replaces_a_starting_orphan_past_its_startup_window(set
     assert setup.store.execution_occupants(setup.config.slug)[orphan.seat] == admitted
 
 
-def test_master_admission_is_refused_while_a_starting_orphan_is_inside_its_startup_window(setup):
+@pytest.mark.parametrize(("offset", "live"), [(-1, False), (0, True)])
+def test_master_admission_is_refused_while_a_starting_orphan_is_in_its_window_or_live(setup, offset, live):
     from scripts.swarm.store import SwarmError
 
-    orphan, admit = admit_after_starting_orphan(setup, -1)
+    orphan, admit = admit_after_starting_orphan(setup, offset, live)
     with pytest.raises(SwarmError, match="replacement does not match the current execution"):
         admit()
     assert setup.store.execution_occupants(setup.config.slug)[orphan.seat] == orphan

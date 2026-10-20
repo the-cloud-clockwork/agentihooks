@@ -383,6 +383,23 @@ def test_reconciliation_ends_a_starting_orphan_only_when_absent_dead_and_past_st
     assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
 
 
+def test_reconciliation_ends_a_starting_engineer_orphan_past_the_startup_window(store):
+    from types import SimpleNamespace
+
+    orphan = store.start_execution(
+        "fixture",
+        AgentRecord(
+            store.next_name("fixture", "eng"), "eng", "task", seat="eng-1@fixture", started_at=1, state="starting"
+        ),
+    )
+    store.redis.hdel(store.key("fixture", "agents"), orphan.name)
+    runtime = SimpleNamespace(live_names=set, reported=lambda current: False)
+    assert store.execution_registry.reconcile("fixture", runtime, 1 + DEADLINE_MS) == [
+        f"ended orphan execution {orphan.execution_id} for {orphan.name}"
+    ]
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
+
+
 @pytest.mark.parametrize(("offset", "ended"), [(0, True), (-1, False)])
 def test_orphan_ending_ends_a_starting_execution_only_past_its_startup_window(store, offset, ended):
     orphan = starting_master(store, "fixture")
