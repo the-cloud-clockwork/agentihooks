@@ -7,10 +7,10 @@ import requests
 
 from scripts.swarm_v2.workspaces import identity
 
-REFUSED = "GitHub App cannot supply installation credentials"
+REFUSED = "GitHub App cannot supply scoped contents write credentials"
 
 
-class GitAuthRefused(Exception):
+class GitAuthRefused(ValueError):
     pass
 
 
@@ -47,7 +47,5 @@ class GitHubAppAuth:
             if data["permissions"].get("contents") != "write" or repositories != {expected}:
                 raise GitAuthRefused(REFUSED)
         expiry = datetime.fromisoformat(data["expires_at"]).timestamp()
-        if not data["token"] or expiry <= now + 300:
-            raise GitAuthRefused(REFUSED)
         self.cached = (data["token"], expiry)
         return self.cached[0]
