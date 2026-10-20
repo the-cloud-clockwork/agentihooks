@@ -430,6 +430,28 @@ def test_a_task_claimed_before_the_close_lands_is_not_reported_closed(store):
     assert ledger.comments == []
 
 
+def test_a_green_run_releases_the_cause_of_a_fixer_the_ledger_kept_blocked(store):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", []))
+    ledger.tasks[0]["state"] = "blocked"
+    ledger.update_task = lambda slug, task_id, fields, by="swarm", if_state=(): {"id": task_id, "state": "blocked"}
+    refresh(store, ledger, gh([GREEN]), NOW * 2)
+    assert filed(store) == {}
+    refresh(store, ledger, smoke_run("Build the image", [], 902), NOW * 3)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0", "promo-902-0"]
+
+
+@pytest.mark.parametrize("state", ["claimed", "pr"])
+def test_a_fixer_someone_works_through_a_green_run_still_holds_its_job(store, state):
+    ledger = Ledger()
+    refresh(store, ledger, smoke_run("Build the image", []))
+    ledger.tasks[0]["state"] = state
+    refresh(store, ledger, gh([GREEN]), NOW * 2)
+    assert filed(store) == {"promo-900-0": "swarm-image / smoke: Build the image"}
+    refresh(store, ledger, smoke_run("Build the image", [], 902), NOW * 3)
+    assert [fields["task"] for _, fields, _ in ledger.added] == ["promo-900-0"]
+
+
 def test_a_failed_read_skips_the_pass_and_leaves_the_run_unhandled(store, capsys):
     def broken(argv, **kwargs):
         raise subprocess.CalledProcessError(1, argv, stderr="gh: rate limited")
