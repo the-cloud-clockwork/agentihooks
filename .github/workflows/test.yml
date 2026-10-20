@@ -1029,8 +1029,18 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ["3.12"]
-        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
         include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}
+        # The queue plan's include adds back every leg above its floor of twelve that the queue split asks for.
+        exclude:
+          - {python-version: &queue-floor "${{ github.event_name == 'merge_group' && '3.12' || '' }}", shard: 13}
+          - {python-version: *queue-floor, shard: 14}
+          - {python-version: *queue-floor, shard: 15}
+          - {python-version: *queue-floor, shard: 16}
+          - {python-version: *queue-floor, shard: 17}
+          - {python-version: *queue-floor, shard: 18}
+          - {python-version: *queue-floor, shard: 19}
+          - {python-version: *queue-floor, shard: 20}
     steps:
       # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
       - name: Check out the graded commit
@@ -1164,7 +1174,7 @@ jobs:
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini --cov-context=test -p tests.browser_coverage -p tests.dep_inputs', github.workspace) || '-p no:pytest_cov' }}
           DEP_INPUTS_DIR: ${{ matrix.python-version == '3.12' && format('{0}/dep-inputs', github.workspace) || '' }}
           PLAYWRIGHT_BROWSERS_PATH: ${{ matrix.python-version == '3.12' && format('{0}/.playwright', github.workspace) || '' }}
-          SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 12 || 12 }}
+          SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 20 || 20 }}
           QUEUE_SHARDS: ${{ matrix.total }}
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
@@ -1220,6 +1230,7 @@ jobs:
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1366,6 +1377,7 @@ jobs:
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1533,7 +1545,7 @@ jobs:
         id: merge
         if: needs.select.outputs.scope != 'none'
         env:
-          SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}
+          SHARDS: ${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}
           SCOPE: ${{ needs.select.outputs.scope }}
         run: |
           (
@@ -2161,7 +2173,7 @@ jobs:
             exit 1
           fi
           cd "$RUNNER_TEMP/base"
-          python -m tests.coverage_ratchet --base "$base" --head "$GITHUB_WORKSPACE" --shards 12 \
+          python -m tests.coverage_ratchet --base "$base" --head "$GITHUB_WORKSPACE" --shards 20 \
             --head-shards "$GITHUB_WORKSPACE/head-coverage" --out "$GITHUB_WORKSPACE/coverage-ratchet" \
             --base-baseline "$HOME/coverage-baseline/baseline.json"
 
@@ -2351,6 +2363,7 @@ jobs:
 
       - name: Summarize this run's tests
         if: ${{ always() }}
+        shell: bash
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
 
   refresh-durations:
@@ -2508,7 +2521,7 @@ jobs:
 
       - name: Compute the coverage baseline
         run: |
-          python -m tests.coverage_baseline --shards 12 \
+          python -m tests.coverage_baseline --shards 20 \
             --head-shards baseline-coverage \
             --out "$HOME/coverage-baseline/baseline.json" \
             --previous "$HOME/coverage-baseline/baseline.json"

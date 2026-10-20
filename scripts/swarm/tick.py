@@ -436,7 +436,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             facts.get(agent.name, {}),
             doc,
             launch_check.bundled(agent.profile),
-            launch_check.declared(agent.profile, agent.overlays),
+            launch_check.expected(agent),
         )
         if found and now_ms - launch_check.session_started_at(agent) < launch_check.DEADLINE_MS:
             continue
@@ -1203,7 +1203,9 @@ def _recover_master(slug, config, store, runtime, now_ms):
     if not candidates:
         return []
     name = occupant if occupant in candidates else candidates[0]
-    record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, seat=seat)
+    record = store.execution_occupants(slug).get(seat)
+    if not record or record.name != name:
+        record = AgentRecord(name, MASTER, MASTER, started_at=now_ms, seat=seat)
     store.put_agent(slug, placed_record(record, runtime.recover(name)))
     for agent in agents:
         if agent.name not in live and agent.state != "finished":

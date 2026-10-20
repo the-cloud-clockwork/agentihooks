@@ -9,9 +9,9 @@ from pathlib import Path
 from scripts.ci_budget.jobs import read_jobs
 from tests import dep_manifest
 
-UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 13))
+UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
 # Full scope runs carry these into their own coverage for the tests they reuse.
-COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 13))
+COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
 CANDIDATES = 10
 
 

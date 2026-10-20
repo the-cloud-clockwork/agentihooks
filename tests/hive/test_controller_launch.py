@@ -77,8 +77,9 @@ def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
     setup.herdr.choose.assert_not_called()
 
 
-def test_publishes_fenced_order_after_host_admission(setup):
+def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
     from scripts.hive.orders import Ack, Consumer, Orders
+    from scripts.swarm import launch_check
     from scripts.swarm.store import AgentRecord
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -108,6 +109,7 @@ def test_publishes_fenced_order_after_host_admission(setup):
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
     consumer = Consumer(store.redis, "remote", runtime)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [f"{profile}-host"])
 
     def consume(_):
         assert consumer.poll() == 1
@@ -129,7 +131,10 @@ def test_publishes_fenced_order_after_host_admission(setup):
             "pane_id": "pane",
             "model": "selected-model",
             "effort": "high",
-            "profile_decision": {"validation": {"pid": 12}},
+            "profile_decision": {"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
+            "launched_at": 0,
+            "launch_timings": {},
+            "overlays": [],
         },
     )
     assert order.hive == "remote"
@@ -151,7 +156,7 @@ def test_publishes_fenced_order_after_host_admission(setup):
         model="selected-model",
         effort="high",
         profile="engineer",
-        profile_decision={"validation": {"pid": 12}},
+        profile_decision={"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
         execution=outcome.value.execution,
     )
 
@@ -362,6 +367,25 @@ def test_expired_order_of_a_retired_claimant_is_ended_and_replaced(setup):
     assert setup.store.execution_registry.get("fixture", replacement.execution_id).name == other.name
 
 
+def test_expired_order_of_a_departed_claimant_left_working_is_abandoned(setup):
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="working"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.store.redis.hdel(setup.store.key("fixture", "agents"), request.name)
+    other = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(other) == "pending"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
+        "reason": "hive launch order abandoned",
+        "generation": order.generation,
+    }
+    replacement = setup.launcher.orders_for("task")
+    assert replacement.execution_id != order.execution_id
+
+
 def test_an_order_is_abandoned_from_its_expiry_instant_only_without_its_claimant(setup, monkeypatch):
     from scripts.hive import launch
 
@@ -467,8 +491,10 @@ def write_hive(setup, **changes):
 
 
 def live_order(setup, route="subscription"):
+    from unittest.mock import patch
+
     from scripts.hive.orders import Consumer, carried
-    from scripts.swarm import lease
+    from scripts.swarm import launch_check, lease
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
@@ -493,12 +519,16 @@ def live_order(setup, route="subscription"):
             effort="high",
             profile="engineer",
             profile_decision={"validation": {"pid": 12}},
+            launched_at=1234,
+            overlays=["tuner"],
+            launch_timings={"harness_at": 1300},
         ),
     )
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
     consumer = Consumer(setup.store.redis, "remote", runtime)
-    ack = consumer.apply(order)
+    with patch.object(launch_check, "declared", lambda profile, worn=(): list(worn)):
+        ack = consumer.apply(order)
     assert ack.status == "live"
     setup.launcher.orders.finish("remote", "0-0", order, ack)
     return request, order, ack
@@ -523,11 +553,15 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
             model="selected-model",
             effort="high",
             profile="engineer",
-            profile_decision={"validation": {"pid": 12}},
+            profile_decision={"validation": {"pid": 12}, "host_overlays": ["tuner"]},
             route_kind=route,
             execution=live,
+            launched_at=1234,
+            overlays=["tuner"],
+            launch_timings={"harness_at": 1300},
         ),
     )
+    assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
 
 
 @pytest.mark.parametrize(

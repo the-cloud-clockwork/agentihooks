@@ -203,7 +203,7 @@ def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
     from scripts.swarm_v2.api.executions import DEFAULT_LEASE_MS
 
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    original = ResourceClient.request
     stamp = store.redis.time()
 
     def expire_claim(client, slug, path, *args, **kwargs):
@@ -211,7 +211,7 @@ def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
             store.redis.time = lambda: (stamp[0] + DEFAULT_LEASE_MS // 1000 + 1, stamp[1])
         return original(client, slug, path, *args, **kwargs)
 
-    with patch.object(_hl().ResourceClient, "request", expire_claim):
+    with patch.object(ResourceClient, "request", expire_claim):
         status, refusal = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == 409
@@ -224,7 +224,7 @@ def test_an_expired_claim_is_refused_by_the_hosted_apply(deployed, store):
 )
 def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, fields, expected_status):
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    original = ResourceClient.request
 
     def edit_task(client, slug, path, *args, **kwargs):
         if path == "operations":
@@ -233,7 +233,7 @@ def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, 
             repository.apply_ops(SLUG, ops=[operation])
         return original(client, slug, path, *args, **kwargs)
 
-    with patch.object(_hl().ResourceClient, "request", edit_task):
+    with patch.object(ResourceClient, "request", edit_task):
         status, response = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == expected_status
@@ -245,7 +245,7 @@ def test_hosted_worker_writes_pin_the_spec_and_count_conflicts(deployed, store, 
 
 def test_hosted_receipts_survive_claim_loss_after_the_server_answers(deployed, store):
     _, read = _read(deployed)
-    original = _hl().ResourceClient.request
+    original = ResourceClient.request
 
     def lose_after_reply(client, slug, path, *args, **kwargs):
         reply = original(client, slug, path, *args, **kwargs)
@@ -253,7 +253,7 @@ def test_hosted_receipts_survive_claim_loss_after_the_server_answers(deployed, s
             store.redis.delete(store.key(SLUG, "task-authority", "t1"))
         return reply
 
-    with patch.object(_hl().ResourceClient, "request", lose_after_reply):
+    with patch.object(ResourceClient, "request", lose_after_reply):
         status, ack = _patch(deployed, read["revision"], {"state": "pr"})
 
     assert status == 200
