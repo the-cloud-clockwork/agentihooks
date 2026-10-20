@@ -21,3 +21,7 @@ See [worker execution lease through a controller rollout](swarm.md#worker-execut
 See [one push per pull request](swarm.md#one-push-per-pull-request) for when a worker may open a pull request, when a push is refused while checks run, gate modes and troubleshooting.
 
 See [plan tracing for promotion fixer tasks](swarm.md#plan-tracing-for-promotion-fixer-tasks) for usage, gate modes and the limits on run numbers in ledger prose.
+
+See [hives](hives.md) for joining machines, roles, placement, launches on a hive, failover and fencing, and [deployment modes](../reference/deployment-modes.md) for where the controller, ledger and Redis run.
+
+See [join service limits](hives.md#join-service-limits) for the join endpoint request, handler and Redis time limits, the 503 it answers when Redis does not reply, and what a client does after it.

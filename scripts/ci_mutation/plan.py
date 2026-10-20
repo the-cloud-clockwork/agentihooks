@@ -8,6 +8,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
@@ -18,6 +19,11 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+
+
+def shard_workers() -> int:
+    quota = os.environ.get("MUTATION_SHARD_CPU_QUOTA")
+    return quota_workers(WORKERS, float(quota) if quota else None)
 
 
 def estimate(
@@ -178,7 +184,7 @@ def narrow(
 
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (WORKERS * target))))
+    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
 
 
 def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
@@ -186,7 +192,7 @@ def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
     buckets = [
         bucket
         for index in range(parts)
-        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), WORKERS)
+        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), shard_workers())
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 

@@ -30,6 +30,9 @@ class Displaced:
     def discard(self, url: str) -> None:
         self.redis.hdel(self.key, url)
 
+    def mark(self, pull: dict) -> None:
+        self.redis.hset(self.key, pull["url"], json.dumps({**pull, "notified": True}))
+
     def pulls(self) -> list[dict]:
         found = [json.loads(raw) for raw in self.redis.hgetall(self.key).values()]
         return sorted(found, key=lambda pull: -pull["order"])
@@ -82,6 +85,8 @@ def blocker(raw: dict, head: str) -> str:
         return "it became a draft"
     if raw["headRefOid"] != head:
         return "its head moved"
+    if raw.get("mergeable") == "CONFLICTING":
+        return "it has merge conflicts with dev"
     return ""
 
 
@@ -96,6 +101,25 @@ def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason:
             fyi=True,
         )
     return f"left {url} out of the merge queue after an interrupted priority: {reason}"
+
+
+def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: dict, reason: str) -> None:
+    claimants = [task["claimed_by"] for task in owners(tasks, [pull["url"]])]
+    if pull.get("notified") or not claimants:
+        return
+    try:
+        for claimant in claimants:
+            InboxStore(store.redis).send(
+                "swarm",
+                claimant,
+                f"Your pull request {pull['url']} left the merge queue in a priority and could not be queued "
+                f"again: {reason}. The swarm retries it at the end of the queue on every refresh until it is back "
+                "or stays out for a reason.",
+                fyi=True,
+            )
+    except InboxError:
+        return
+    displaced.mark(pull)
 
 
 def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:
@@ -119,6 +143,7 @@ def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> lis
             if ledger is not None:
                 ledger.raise_alert(slug, f"merge-priority-requeue:{url}", f"Could not requeue {url}: {exc}")
             actions.append(f"could not requeue {url} after an interrupted priority: {exc}")
+            retrying(store, tasks, displaced, pull, str(exc))
     return actions
 
 
@@ -163,6 +188,7 @@ def reorder(
             fyi=True,
         )
     if result["errors"]:
+        requeue(store, slug, tasks)
         raise SwarmError("; ".join(result["errors"]))
     store.redis.hdel(store.key(slug, PENDING), url)
     return result

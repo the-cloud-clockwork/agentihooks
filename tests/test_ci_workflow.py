@@ -797,7 +797,7 @@ def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
     assert download["with"] == {"pattern": "durations-3.*", "path": "~/durations-samples/${{ github.run_id }}"}
     assert (
         refresh["run"]
-        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations\n'
+        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }\n'
     )
     assert "env" not in refresh
     assert save["uses"].startswith("actions/cache/save@")
@@ -862,6 +862,13 @@ def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypa
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     with pytest.raises(SystemExit, match="run 12 kept no durations"):
         refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+
+
+def test_refresh_durations_names_missing_shards_from_the_push_unit_matrix():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    assert matrix["python-version"] == list(refresh_durations.VERSIONS)
+    assert matrix["shard"] == list(range(1, refresh_durations.SHARDS + 1))
 
 
 def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):
@@ -964,6 +971,32 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
     _, upload = _unit_step_index(lambda step: step.get("name") == "Upload durations")
     assert upload["if"] == "${{ !cancelled() && hashFiles('durations.json') != '' }}"
     assert "elapsed.json" in upload["with"]["path"].split()
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    (tmp_path / "pytest.py").write_text(
+        f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
+    )
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_ADDOPTS": "", "FILES": "tests/test_a.py", "GITHUB_JOB": "unit-selected"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == status, result.stdout + result.stderr
+    elapsed = json.loads((tmp_path / "elapsed.json").read_text())
+    assert elapsed["job"] == "unit-selected"
+    assert elapsed["seconds"] >= 0
+
+
+def test_selected_legs_upload_elapsed_time_beside_their_durations():
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    upload = next(step for step in steps if step.get("name") == "Upload selected test durations")
+    assert upload["with"]["path"].split() == ["durations.json", "elapsed.json"]
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
@@ -1196,6 +1229,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert step["env"] == {
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "MUTATION_SHARD_CPU_QUOTA": "3",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]

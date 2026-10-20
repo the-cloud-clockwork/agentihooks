@@ -1383,7 +1383,11 @@ jobs:
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: |
           read -ra files <<< "$FILES"
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          start=$SECONDS
+          status=0
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
+          echo "{\"seconds\":$((SECONDS - start)),\"job\":\"$GITHUB_JOB\"}" > elapsed.json
+          exit "$status"
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1412,7 +1416,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.leg }}
-          path: durations.json
+          path: |
+            durations.json
+            elapsed.json
           retention-days: 14
           overwrite: true
 
@@ -1496,6 +1502,7 @@ jobs:
 
       - name: Summarize reused, ran and flaky tests
         if: ${{ !cancelled() && github.event.pull_request.base.ref != 'main' }}
+        shell: bash
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
@@ -2398,7 +2405,7 @@ jobs:
       - name: Refresh measured durations
         run: |
           python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5
-          test -s .test_durations
+          test -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }
 
       - name: Publish merged durations
         uses: actions/upload-artifact@v4
@@ -2618,6 +2625,7 @@ jobs:
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.

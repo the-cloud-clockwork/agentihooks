@@ -126,7 +126,7 @@ for _ in range(60):
     time.sleep(1)
 assert record and registry.live(record, int(time.time() * 1000)), 'pod did not register a live hive'
 assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
-assert record['roles'] == ['eng', 'ci', 'plan'] and record['max_agents'] == 1
+assert record['roles'] == ['eng', 'ci', 'plan', 'dispatch'] and record['max_agents'] == 1
 print('pod registered a live worker hive with configured roles and capacity')
 orders = Orders(redis)
 order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')

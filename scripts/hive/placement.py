@@ -34,6 +34,10 @@ class Choice:
     fallback: str = ""
 
 
+def hosts(role: str, hive: dict) -> bool:
+    return role in hive["roles"] and (role not in UI_ROLES or hive["ui"] == YES)
+
+
 def _room(hive: dict) -> int:
     return hive["max_agents"] - hive["agents"]
 
@@ -81,16 +85,11 @@ def choose(
     candidates = [hive for hive in alive if role in hive["roles"]]
     ui_live = any(hive["ui"] == YES for hive in alive)
     if not candidates:
-        if role == MASTER and alive and not ui_live:
-            candidates = alive
-        elif role in UI_ROLES and not ui_live:
-            return Wait(NO_UI_HIVE)
-        else:
-            return Wait(f"no live hive takes {role}")
+        return Wait(NO_UI_HIVE if role in UI_ROLES and not ui_live else f"no live hive takes {role}")
     ui = [hive for hive in candidates if hive["ui"] == YES]
     headless = [hive for hive in candidates if hive["ui"] != YES]
     if role in UI_ROLES:
-        pool = ui or (headless if role == MASTER else [])
+        pool = [hive for hive in candidates if hosts(role, hive)]
         return _pick(role, harness, slot, route_kind, repo, pool) if pool else Wait(NO_UI_HIVE)
     if not ui:
         return _pick(role, harness, slot, route_kind, repo, headless)
@@ -99,7 +98,7 @@ def choose(
         if headless
         else Wait(f"no live {HEADLESS} takes {role}")
     )
-    if isinstance(picked, Choice) or any(_room(hive) > 0 for hive in headless):
+    if isinstance(picked, Choice):
         return picked
     fallback = _pick(role, harness, slot, route_kind, repo, ui)
     return Choice(fallback.hive, picked.reason) if isinstance(fallback, Choice) else picked
@@ -113,25 +112,22 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
 def place_master(harness: str, login: str, repo: str, hives: list[dict], now: int) -> MasterPlacement | Wait:
     candidates = []
     for hive in hives:
-        if not live(hive, now) or repo not in hive["repos"]:
-            continue
-        headless = hive["ui"] != YES
-        if not headless and MASTER not in hive["roles"]:
+        if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
             continue
         native = hive["interactive"].get(harness)
-        if not headless and native and login in ("", native):
+        if native and login in ("", native):
             candidates.append(
-                ((False, False), _order(MASTER)(hive), native, MasterPlacement(hive["id"], native, INTERACTIVE, False))
+                (False, _order(MASTER)(hive), native, MasterPlacement(hive["id"], native, INTERACTIVE, False))
             )
         for slot in hive["slots"]:
             if slot["harness"] != harness or slot["kind"] not in ("subscription", "api"):
                 continue
             candidates.append(
                 (
-                    (headless, True),
+                    True,
                     _order(MASTER)(hive),
                     slot["account"],
-                    MasterPlacement(hive["id"], slot["account"], slot["kind"], headless),
+                    MasterPlacement(hive["id"], slot["account"], slot["kind"], False),
                 )
             )
     if not candidates:
