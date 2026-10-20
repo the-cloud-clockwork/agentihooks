@@ -1,5 +1,5 @@
 import json
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -16,7 +16,8 @@ def redis(monkeypatch):
     connection = fakeredis.FakeRedis(decode_responses=True)
     pop = connection.blpop
 
-    def bounded_pop(key):
+    def bounded_pop(key, timeout):
+        assert timeout == process_timer.RECHECK_S
         result = pop(key, timeout=0.2)
         if result is None:
             raise TimeoutError("scheduler delivered no wake")
@@ -47,6 +48,18 @@ def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
     assert not redis.exists(timer.key)
     process_timer.service.ensure_running.assert_called_once_with()
     close.assert_not_called()
+
+
+def test_a_wait_with_no_wake_by_its_recheck_starts_the_scheduler_again(monkeypatch):
+    ensure = Mock()
+    monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
+    timer = process_timer.Timer.__new__(process_timer.Timer)
+    timer.key = "wake"
+    timer.redis = Mock()
+    timer.redis.blpop.side_effect = [None, None, ("wake", "1")]
+    timer.wait()
+    assert timer.redis.blpop.call_args_list == [call("wake", timeout=process_timer.RECHECK_S)] * 3
+    assert ensure.call_args_list == [call(), call()]
 
 
 def test_interruption_cancels_the_timer_and_cleans_the_wake(redis, monkeypatch):
@@ -111,8 +124,8 @@ async def test_async_wait_cancels_its_timer_and_unblocks_its_worker(redis, monke
     original = process_timer.Timer
     pop = redis.blpop
 
-    def bounded_pop(key):
-        result = pop(key)
+    def bounded_pop(key, timeout):
+        result = pop(key, timeout=timeout)
         popped.append(result)
         return result
 
