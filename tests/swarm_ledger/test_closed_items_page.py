@@ -250,6 +250,7 @@ def test_an_address_naming_a_hidden_done_task_pages_until_it_shows(ledger):
     page, reads, _ = ledger
     page.evaluate("location.hash = '#item-tasks-t2'")
     in_view(page, "#tasks-done #item-tasks-t2")
+    assert page.locator("#item-tasks-t2").evaluate("el => el.classList.contains('flash')")
     assert [query["offset"] for _, query in reads] == ["10", "20"]
 
 
