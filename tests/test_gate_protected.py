@@ -812,6 +812,27 @@ def test_a_head_changing_the_summary_steps_is_red(change):
     ]
 
 
+@pytest.mark.parametrize("separate", [False, True])
+def test_the_reviewed_summary_may_run_outside_required_grading(separate):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=not separate)
+    config = {}
+    if separate:
+        head["jobs"]["test-summary"] = {
+            "needs": ["unit", "unit-selected"],
+            "if": "${{ always() }}",
+            "runs-on": "ubuntu-latest",
+            "timeout-minutes": 5,
+            "steps": yaml.safe_load(_REVIEWED_SUMMARY),
+        }
+        head["jobs"]["unit-selected"] = {"if": "${{ false }}"}
+        config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    assert _grade({"test.yml": head}, base={"test.yml": base}, head_config=config) == []
+
+
 @pytest.mark.parametrize("promotion", [False, True])
 @pytest.mark.parametrize("weakened", [False, True])
 @pytest.mark.parametrize("watcher_loss", [False, True])

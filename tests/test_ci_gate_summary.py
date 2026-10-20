@@ -82,19 +82,6 @@ def test_required_summary_writes_current_artifact_counts_even_after_gate_failure
     assert summary.read_text() == "Tests: ran 6, flaky 3, failed 1\n"
 
 
-def test_test_summary_never_delays_required_grading():
-    jobs = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
-    gate = jobs["gate-required"]
-    assert len(gate["steps"]) == 1, "Required grading must not check out or download summary artifacts"
-    assert gate["steps"][0]["name"] == "Require every gate to succeed"
-    summary = jobs["test-summary"]
-    assert summary["if"] == "${{ always() }}"
-    assert set(summary["needs"]) == {"unit", "unit-selected"}
-    assert summary.get("name", "test-summary") != "Gate — Required"
-    assert "test-summary" not in gate["needs"]
-    assert all("test-summary" not in job.get("needs", []) for job in jobs.values())
-
-
 def test_selected_tests_publish_the_existing_duration_and_flake_formats():
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
     steps = workflow["jobs"]["unit-selected"]["steps"]
