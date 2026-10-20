@@ -114,6 +114,25 @@ def test_a_schedule_for_another_home_is_drift(tmp_path, scheduler, calls):
     ]
 
 
+def test_installing_one_home_keeps_the_schedule_of_another(tmp_path, scheduler, calls):
+    other = tmp_path / "other"
+    other.mkdir()
+    sync.install(other, enable=True)
+    sync.install(tmp_path, enable=True)
+    sync.install(tmp_path, enable=True)
+    assert sorted(json.loads(record["payload"])["script"] for record in _records(scheduler)) == sorted(
+        [str(other / "guard-daemon.sh"), str(tmp_path / "guard-daemon.sh")]
+    )
+    assert sync.drift(other) == []
+    assert sync.drift(tmp_path) == []
+
+
+def test_reconcile_reports_an_unreachable_scheduler_and_changes_nothing(tmp_path, unreachable, calls):
+    (tmp_path / "guard-config.json").write_text("{}")
+    assert sync.reconcile(tmp_path) == "[!!] Host guard not reconciled: the agentihooks scheduler is unreachable"
+    assert not (tmp_path / "guard-config.json").is_symlink()
+
+
 def test_an_unreachable_scheduler_is_reported_as_unchecked(tmp_path, unreachable):
     for name in LINKS:
         (tmp_path / name).symlink_to(sync.REPO / name)

@@ -71,7 +71,7 @@ def drift(home: Path) -> list[str]:
     scripts = _scripts()
     if scripts is None:
         found.append("the agentihooks scheduler is unreachable, so the guard schedule was not checked")
-    elif scripts != [str(home / LINKS[0])]:
+    elif str(home / LINKS[0]) not in scripts:
         found.append(f"{home / LINKS[0]} is not scheduled every {EVERY}s on the agentihooks scheduler")
     return found
 
@@ -99,9 +99,11 @@ def _schedule(home: Path) -> str:
 
     try:
         scheduler = _scheduler()
+        payload = json.dumps({"script": str(home / LINKS[0])})
         for entry in _entries(scheduler):
-            entry.cancel()
-        entry = scheduler.interval(owner=OWNER, payload=json.dumps({"script": str(home / LINKS[0])}), every=EVERY)
+            if entry.record["payload"] == payload:
+                entry.cancel()
+        entry = scheduler.interval(owner=OWNER, payload=payload, every=EVERY)
         entry.timeout.connect(tick)
         entry.start()
     except RedisError:
@@ -127,7 +129,10 @@ def reconcile(home: Path) -> str:
         return "[--] Host guard not installed; agentihooks host-guard install adds it"
     if not drift(home):
         return f"[OK] Host guard in sync with {REPO}"
-    return install(home, enable=bool(_scripts()))
+    scripts = _scripts()
+    if scripts is None:
+        return "[!!] Host guard not reconciled: the agentihooks scheduler is unreachable"
+    return install(home, enable=str(home / LINKS[0]) in scripts)
 
 
 def tick(event: dict, delivery_id: str, redis: "Redis") -> None:
