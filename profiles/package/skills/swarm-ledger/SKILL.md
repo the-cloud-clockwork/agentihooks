@@ -1,14 +1,14 @@
 ---
 name: swarm-ledger
 description: >
-  Turn a plan file (plus any documents written for the work) into one interactive
-  HTML ledger the operator keeps open in a browser: title, overview, sources, phase
+  Turn a plan file (plus any documents written for the work) into one ledger page
+  the operator keeps open in a browser: title, overview, sources, phase
   checkboxes, open questions with answer boxes, operator notes, follow-ups, and a
-  comments dropdown under every item. Saves to localStorage and
-  ~/development-ledger/<slug>.json through a local server. Every agent working that
+  comments dropdown under every item. A local server stores it as one record in
+  ~/development-ledger/ledgers.sqlite3. Every agent working that
   plan follows the ledger: operator writes reach it through the inbox in a swarm
-  or a ledger watch outside one, it acts on the operator's checks, answers and notes, and records phase states and follow-ups in
-  the HTML as work lands. Use when the user says "swarm ledger", "make a ledger for
+  or a ledger watch outside one, it acts on the operator's checks, answers and notes, and records phase states and follow-ups on
+  the ledger as work lands. Use when the user says "swarm ledger", "make a ledger for
   this plan", "ledger this plan", or when you work a plan that already has a ledger.
 argument-hint: "<plan-file> [other development documents ...]"
 ---
