@@ -115,6 +115,64 @@ The master is placed in three tiers, each tried in `prefer` order:
 Every tier also needs the hive to be live and to list the repo. With no candidate the master waits with "no live
 hive can run the master with interactive, subscription or api authentication".
 
+### Who writes placement
+
+A member's Redis user reads agent records and placement but never writes them. Only the controller and the ledger
+server write placement; join, refresh and revoke keep the hive index.
+
+| Keys under the swarm root | Member Redis user | Written by |
+|---|---|---|
+| Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read only | The controller and the ledger server. |
+| Claims, seats, names and placement waits | read only | The controller and the ledger server. |
+| Launch slot rows `launch-slot:*` | read only | The controller, which reserves, acknowledges and refreshes them. |
+| Hive index `hives` | read only | `hive join` and `hive refresh` add the member; `hive revoke` and a failed join remove it. |
+| The member's own hive record and every key below it | read and write | The member's `hive run` beat and the agents it runs. |
+
+The ledger issues an agent token to a member only for an agent whose record names that member as its hive. A member
+that could write agent records could set that field on another hive's seat and take tokens for it; with agent
+records read only, a member holds tokens only for the agents the controller placed on it.
+
+What a member process does differently:
+
+- **Beat.** `hive run` writes the hive record, sessions, quota and execution report under its own hive key. It adds
+  itself to the hive index and refreshes launch slots only when it is not a member. A non-member host, such as the
+  swarm host itself, still does both.
+- **Hive id.** A process uses `AGENTIHOOKS_HIVE_ID` as its hive id while its Redis URL is
+  `AGENTIHOOKS_HIVE_REDIS_URL`, so its heartbeat lands under the member's own keys and matches the id the ledger
+  checks. Otherwise the hive id is `SWARM_HIVE_ID`, then the seeded hive id, then the host name.
+- **Launch orders.** When Redis refuses a write while the order consumer applies a launch order, the consumer writes
+  `failed` with the reason `refused` to the member's own acknowledgement hash and drops the order. The `hive run`
+  service keeps running and takes the next order.
+
+Check a member's scope from the member, with the credentials `hive join` wrote:
+
+```bash
+. ~/.agentihooks/hive.env
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HGETALL agentihooks:swarm:<slug>:agents          # allowed
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:agents forged '{}'  # (error) NOPERM ...
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SADD agentihooks:hives forged                      # (error) NOPERM ...
+```
+
+`scripts/packaging/hive-join-smoke.sh` runs the same check on Redis 7 after a join. The member's writes to agent
+records, executions, another member's keys, the hive index and a launch slot row are refused. Its beat, an agent
+heartbeat and an inbox send succeed, and the member stays in the hive index. `scripts/packaging/compose-hive-smoke.sh`
+also checks that a member stays indexed after a Redis restart and a refresh.
+
+Limitations:
+
+- Code on a member host that writes agent records is refused until it routes through the controller or the ledger:
+  the order consumer's runtime binding, remote take master, done, handoff, claim release and seat exits. A
+  distributed launch onto a member fails as `refused` until then.
+- Redis ACLs scope by key pattern, never by seat or agent name. A member that can write its own agents' keys can
+  also write keys it names for another agent below its own hive key. Token issuance reads only the agent record's
+  hive, which no member can write.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A launch order on a member acknowledges `failed` with `refused` | The launch wrote a key outside the member's keys, such as an agent record. | Expected for member launches that bind the agent record on the member; see the limitations above. |
+| A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
+| A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
+
 ## Headless fallback
 
 When every UI hive is gone, the master still runs: tier three starts it on a headless hive through the same hive
