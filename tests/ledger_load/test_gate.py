@@ -390,4 +390,3 @@ def test_a_reader_stops_at_the_deadline_without_sleeping_toward_a_read_it_will_n
     ledger_load.reader(Api(), ledger_load.single_items(0), 0.0, 2.5, results)
     assert (len(results["item_reads"]), results["errors"]) == (3, [])
     assert clock.now <= 2.5
-
