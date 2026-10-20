@@ -83,9 +83,10 @@ def test_only_skipped_records_with_both_timestamps_are_compared(skipped_run, cha
     assert crossings(skipped_run) == []
 
 
-def test_multiple_late_skips_raise_one_finding_for_the_worst_lag(skipped_run):
+@pytest.mark.parametrize("completed", ["2026-10-19T16:10:03Z", "2026-10-19T16:09:03Z"])
+def test_multiple_late_skips_raise_one_finding_for_the_worst_lag(skipped_run, completed):
     other = copy.deepcopy(skipped_run["jobs"][1])
-    other.update(id=118171810780, name="sonar", completed_at="2026-10-19T16:10:03Z")
+    other.update(id=118171810780, name="sonar", completed_at=completed)
     skipped_run["jobs"].append(other)
     [finding] = crossings(skipped_run)
     assert finding.measure == 420
