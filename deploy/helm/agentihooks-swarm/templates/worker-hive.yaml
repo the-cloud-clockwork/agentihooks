@@ -34,6 +34,10 @@ metadata:
     app.kubernetes.io/component: worker-hive
 spec:
   replicas: {{ $workers.replicas }}
+  {{- if not (hasKey $workers.homeVolume "emptyDir") }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "swarm.selector" (dict "root" . "component" "worker-hive") | nindent 6 }}
@@ -44,6 +48,18 @@ spec:
         app.kubernetes.io/component: worker-hive
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
+      {{- with $workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $workers.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
@@ -75,6 +91,8 @@ spec:
               value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MAX_AGENTS
               value: {{ $workers.maxAgents | quote }}
+            - name: WT_MIN_FREE_GB
+              value: {{ $workers.worktreeMinFreeGb | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE
@@ -133,7 +151,7 @@ spec:
                 path: ssh/host_key
               {{- end }}
         - name: home
-          emptyDir: {}
+          {{- toYaml (required "workers.homeVolume needs a volume source" $workers.homeVolume) | nindent 10 }}
         - name: tmp
           emptyDir: {}
         {{- if $workers.caSecret.name }}

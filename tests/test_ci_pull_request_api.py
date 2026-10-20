@@ -181,6 +181,7 @@ def test_no_script_a_step_runs_calls_the_api():
         "scripts/swarm_ledger/artifact_sanity.py",
         "scripts/swarm_ledger/ledger_server.py",
         "tests/chart_github_auth.py",
+        "tests/chart_hive_home.py",
         "tests/chart_hive_join.py",
         "tests/chart_network.py",
         "tests/chart_redis.py",
