@@ -1,5 +1,9 @@
+import contextlib
 import os
+import signal
+import subprocess
 import time
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -12,7 +16,8 @@ FLAG = {"AGENTIHOOKS_AICODE_TOKEN_REFRESH": "true"}
 def spawned(monkeypatch):
     calls = []
     monkeypatch.setattr(kick.shutil, "which", lambda name: f"/usr/bin/{name}")
-    monkeypatch.setattr(kick.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)))
+    monkeypatch.setattr(kick.subprocess, "Popen", lambda argv, **kwargs: calls.append((argv, kwargs)) or Mock(pid=4242))
+    monkeypatch.setattr(kick.os, "killpg", lambda pid, sig: None)
     return calls
 
 
@@ -128,3 +133,54 @@ def test_a_failure_is_logged_with_its_error_and_a_quiet_node_logs_nothing(tmp_pa
     assert logged == []
     assert kick.kick(tmp_path, FLAG) is False
     assert logged == [("codex refresh kick failed", {"error": "no fork"})]
+
+
+@pytest.mark.parametrize("outlives", [False, True], ids=["completed", "timeout"])
+def test_the_refresh_is_waited_on_then_its_group_is_killed_and_it_is_reaped(tmp_path, monkeypatch, outlives):
+    process = Mock(pid=4242)
+    process.wait.side_effect = [subprocess.TimeoutExpired("agentihooks", 1.0) if outlives else 0, -signal.SIGKILL]
+    killpg = Mock()
+    monkeypatch.setattr(kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    monkeypatch.setattr(kick.subprocess, "Popen", lambda argv, **kwargs: process)
+    monkeypatch.setattr(kick.os, "killpg", killpg)
+    assert kick.kick(tmp_path, FLAG) is True
+    assert process.wait.call_args_list == [call(timeout=1.0), call()]
+    killpg.assert_called_once_with(4242, signal.SIGKILL)
+
+
+@pytest.mark.wall_clock
+@pytest.mark.parametrize(
+    "script, expected",
+    [("sleep 0.1\nexit 3\n", 3), ("sleep 30 &\nwait\n", -signal.SIGKILL), ("sleep 30 &\nexit 0\n", 0)],
+    ids=["fast", "slow", "leaves-a-child"],
+)
+def test_the_refresh_process_group_finishes_before_the_kick_returns(tmp_path, monkeypatch, script, expected):
+    exe = tmp_path / "agentihooks"
+    exe.write_text(f"#!/bin/sh\n{script}")
+    exe.chmod(0o755)
+    started = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(kick.shutil, "which", lambda name: str(exe))
+    monkeypatch.setattr(kick.subprocess, "Popen", lambda *a, **kw: started.append(popen(*a, **kw)) or started[-1])
+    began = time.monotonic()
+    try:
+        assert kick.kick(tmp_path, FLAG) is True
+        elapsed = time.monotonic() - began
+        returncode = started[0].returncode
+        deadline = time.monotonic() + 2
+        while True:
+            rows = subprocess.check_output(["ps", "-eo", "pid=,pgid=,stat="], text=True).splitlines()
+            survivors = [
+                row for row in rows if int(row.split()[1]) == started[0].pid and not row.split()[2].startswith("Z")
+            ]
+            if not survivors or time.monotonic() >= deadline:
+                break
+            time.sleep(0.05)
+    finally:
+        if started:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(started[0].pid, signal.SIGKILL)
+            started[0].wait()
+    assert elapsed < 5
+    assert returncode == expected
+    assert survivors == [], "the refresh process group outlived the session start kick"
