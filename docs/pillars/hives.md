@@ -170,8 +170,8 @@ the member's own keys.
 
 ## Settings
 
-Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's Hives panel, which writes through
-`PATCH /api/v1/hives/<id>` and needs the operator.
+Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
+[Hives panel](#ledger-hives-panel), which writes through `PATCH /api/v1/hives/<id>` and needs the operator.
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
@@ -326,8 +326,89 @@ so a lost master hive is replaced between five and six minutes after its last be
 never beat, or whose record is gone, never moves its master. Set the grace with
 `agentihooks swarm <id> set master-move-grace=SECONDS`.
 
-On the move, the tick writes a recovery handoff that names its unknowns, bumps the master seat generation, fences
-the old execution and starts the successor on the hive master placement picks, or unpinned when none qualifies.
+The steps of the move are in [Automatic failover](#automatic-failover).
+
+## Master failover and master move
+
+The master seat changes hive in two ways: the minute tick moves it off a hive that went quiet, and the operator
+moves it to a hive he names. In both, the successor starts through hive launch in the same master seat. The
+operator move pins it to the named hive; the automatic move pins it when a live hive qualifies.
+
+### Automatic failover
+
+Each tick checks the live master record. It moves the master only when all of these hold:
+
+- The master's hive has beaten at least once and its record still exists.
+- Its last heartbeat is older than `master-move-grace` seconds.
+- The runtime does not see the master's session live.
+
+A stopped swarm is checked only when an operator message is waiting for its master.
+
+Then, in one tick:
+
+1. It stores a recovery handoff for the master seat. The handoff says the master should continue on the swarm,
+   names the hive and how many seconds ago it stopped beating, and marks Done and Stopped at as `unknown`, because
+   the old master left no document. Its Read first list names the master inbox.
+2. It records the transfer with the reason `hive-lost`.
+3. It bumps the master seat generation and fences the old execution on the quiet hive.
+4. It asks master placement for a target among the live hives and records the pending move with that hive.
+5. It marks the old master record finished and logs `moved master <name> off lost hive <hive>` in the tick output.
+
+The next master start reads the recovery handoff, pins the successor to the recorded hive and clears the pending
+move once the successor is placed. When no live hive qualifies, the move records no target and the successor
+starts unpinned on the normal master path.
+
+Tune the grace per swarm:
+
+```bash
+agentihooks swarm rig-grade-swarm set master-move-grace=600
+```
+
+A hive that pauses longer than the grace, such as a laptop asleep, loses its master; a shorter grace replaces a
+lost master sooner. The default is 300 seconds.
+
+### Operator master move
+
+```bash
+agentihooks swarm rig-grade-swarm master move --to vm
+```
+
+The command checks the move before it writes anything, and refuses with these errors:
+
+| Error | Cause |
+|---|---|
+| `no live master to move` | The swarm has no live master record. |
+| `the master already runs on hive vm` | The target is the master's current hive. |
+| `hive vm is not live` | The hive has no record, or its last heartbeat is over ninety seconds old. |
+| `the master cannot move to hive vm: <reason>` | [Master placement](#master-placement) would not give the master that hive; the reason is the placement wait reason. |
+
+On success it sends one durable inbox order from `operator` to the master seat and prints the pending move as
+JSON, with `from`, `to`, `master`, `item` (the order's inbox id) and `state` set to `ordered`. The order tells the
+master to finish its current step, write a Handoff v2 carrying its pending decisions, held messages, claimed task
+needs, audit plan and operator overrides, run `agentihooks swarm <id> handoff <doc> --reason operator` and stop.
+After that handoff, the tick starts the successor on the named hive and closes the order as done.
+
+A second `master move` replaces the first: it cancels the earlier order in the inbox with "the master move was
+replaced" and records the new target.
+
+The successor is pinned only when its transfer follows the master the move named. A master that leaves without a
+handoff, or a different master that takes the seat first, starts on normal placement and the pin is not applied.
+
+The ledger page offers the same order: each live hive row in the Swarm tab's Hives panel carries a **move master**
+button. It is disabled while another swarm control from the page is running, on a hive that is not live and on the
+hive the master already runs on.
+
+### Troubleshooting
+
+- **The master's hive is down and the master did not move.** Check the hive's heartbeat with
+  `agentihooks hive list`. A hive that never beat, or whose record was removed, never moves its master, and the move
+  waits the full grace plus up to one tick. While the runtime still reports the master's session live, the tick
+  leaves it alone.
+- **The successor started on another hive than the one ordered.** The pin applies only to the successor of the
+  master the order named. If that master left without the handoff the order asks for, its successor uses normal
+  placement. Run `master move` again for the new master.
+- **The old hive came back and its master is still running.** A returning hive terminates each fenced execution
+  before its first heartbeat and takes no launch orders while one still runs; see [Fencing](#fencing).
 
 ## Fencing
 
@@ -357,6 +438,164 @@ home. Credentials come from ExternalSecrets by name. The hive id is the one mint
 replicas that mount the same credential would report the same hive id and agent limit; the chart refuses
 `workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
 credential is installed.
+
+## Ledger Hives panel
+
+The Swarm tab of the ledger page shows a Hives panel after Quota. It reads the hive settings API, edits hive settings
+in place and moves the master to another hive.
+
+### Panel
+
+| Column | Shows |
+|---|---|
+| hive | The hive's name; hovering shows its id. |
+| state | `live` while the last heartbeat is under ninety seconds old, else `quiet`. |
+| ui, ephemeral | `yes` or `no`, editable. |
+| roles | Comma list, editable. |
+| prefer | Comma list of `role:rank`, editable. |
+| max agents | Whole number, editable. |
+| agents | Working agents against max agents, such as `1/3`. |
+| slots | One line per slot: harness, account and the sessions the hive reports on it. |
+| master | The live master running on the hive, from any swarm, or `—`. |
+| (no header) | The move master button, which moves this ledger's master to the hive. |
+
+The agents figure is the placement load: worker sessions the hive reports, without its interactive master
+sessions, plus this runtime's launching, working or suspect non-master agents on the hive that the hive has not
+reported yet. Placement compares the same figure with max agents.
+
+- The header count reads `<live> live · <n> hives`, or `—` when the read failed.
+- The Quota header count ends with each hive's `<name> <agents>/<max agents>`, such as
+  `2 accounts · probed 40s ago · laptop 1/3 · pod-a 0/4`.
+- The panel reads `GET /api/v1/hives` at most every fifteen seconds while the Swarm tab is open. An empty table reads
+  `Reading hives…` before the first answer, `No hives registered.` when the registry is empty, and
+  `Could not read hives.` when the read failed.
+- Swarm tab redraws skip the table while one of its fields holds focus; each fresh read still redraws it.
+- The panel folds and keeps its folded state, its height and its column widths across reloads, like the other Swarm
+  tab panels.
+
+### Editing a hive
+
+Change a field and leave it, or pick a new `yes` or `no`: the page sends that one field as
+`PATCH /api/v1/hives/<id>` with the ledger's credential and its slug. The note line shows the write pending, then
+done, or the server's error message, such as `role qa needs a UI, and this hive has ui=no`. The row then shows the
+hive as the server stored it.
+
+The page converts what was typed before it sends it:
+
+| Field | Typed | Sent |
+|---|---|---|
+| roles | `eng, ci` | `["eng", "ci"]` |
+| prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
+| max agents | `4` | `4`; anything other than digits is sent as text and refused |
+
+Only the operator can edit. An agent's credential gets
+`403 Hive settings need the operator`.
+
+### Move master
+
+The button sends the swarm control `master_move` with the hive id. The server runs
+`agentihooks swarm <slug> master move --to <hive>`, so the move behaves as described in
+[Headless fallback](#headless-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
+successor starts on that hive.
+
+The button is off when:
+
+- the Swarm tab has no swarm status yet, or another swarm control is still pending;
+- the hive is quiet;
+- this ledger's master already runs on that hive.
+
+The command can still refuse a hive the button allows, such as one placement would not give the master; the
+control then answers `502 request_refused` and the note line shows the server's answer.
+
+```bash
+curl -X PUT "http://127.0.0.1:8765/api/v1/ledgers/$SLUG/swarm/controls" \
+  -H "Content-Type: application/json" -H "X-Ledger-Token: $LEDGER_TOKEN" \
+  -d '{"action": "master_move", "hive": "workstation"}'
+```
+
+A hive id must start with a letter or digit and hold only letters, digits, dots, dashes or underscores, at most 63
+characters; any other answers `400 request_refused` with `A master move needs a hive id`. A control from an agent's
+credential answers `403 forbidden` with `swarm controls need the operator`.
+
+### Hive settings API
+
+| Method and path | Who | Answer |
+|---|---|---|
+| `GET /api/v1/hives` | no ledger credential needed | Every registered hive. |
+| `GET /api/v1/hives/<id>` | no ledger credential needed | One hive. |
+| `PATCH /api/v1/hives/<id>` | the operator | The hive after the change. |
+
+Every answer is `{"data": ..., "revision": "<sha256 of data>"}`. A hive carries its stored record (`id`, `name`,
+`ui`, `ephemeral`, `roles`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
+`heartbeat_at`, `version`) and three computed fields:
+
+- `live`: `true` while the heartbeat is under ninety seconds old.
+- `agents`: the placement load described under [Panel](#panel).
+- `master`: `{"slug", "name"}` of the live master on the hive, or `null`.
+
+Each slot also gains `agents`, the sessions the hive reports for that harness and account.
+
+```bash
+curl -s http://127.0.0.1:8765/api/v1/hives/pod-a
+```
+
+```json
+{
+  "data": {
+    "id": "pod-a", "name": "pod-a", "ui": "no", "ephemeral": "yes",
+    "roles": ["eng", "ci"], "prefer": {}, "max_agents": 4, "agents": 1,
+    "live": true, "master": null,
+    "slots": [{"harness": "claude", "account": "work", "kind": "subscription", "cap": 2, "provider": "", "agents": 1}],
+    "...": "..."
+  },
+  "revision": "9f2c..."
+}
+```
+
+The PATCH body takes one or more of these fields and nothing else:
+
+| Field | Type |
+|---|---|
+| `name` | string, 1 to 200 characters |
+| `ui`, `ephemeral` | `"yes"` or `"no"` |
+| `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
+| `prefer` | object of role to whole number rank |
+| `max_agents` | integer, 1 or more |
+
+The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
+UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The
+credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in `X-Ledger-Slug`.
+
+```bash
+curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
+  -H "Content-Type: application/json" \
+  -H "X-Ledger-Slug: $SLUG" -H "X-Ledger-Token: $LEDGER_TOKEN" \
+  -d '{"roles": ["eng", "ci", "plan"], "max_agents": 4}'
+```
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `schema_invalid` | The body has no field, an unknown field or a wrong type (`Request does not match the resource schema`), or the hive registry refuses the value and names why. |
+| 403 | `forbidden` | `Missing or wrong ledger credential`: no `X-Ledger-Slug`, an unknown ledger or a wrong token. `Hive settings need the operator`: the credential is an agent's. |
+| 404 | `resource_missing` | `No such hive`. A PATCH never creates a hive; register one with `agentihooks hive join`. |
+| 405 | `method_not_allowed` | Anything but GET on the list, or GET and PATCH on one hive. |
+| 503 | `storage_error` | Redis is unreachable or a hive record is unreadable. |
+
+### Limitations
+
+- Masters do not count in the agents figure, matching max agents.
+- Settings the hive reports itself (`harnesses`, `slots`, `interactive`, `repos`, `heartbeat_at`, `version`)
+  cannot be changed through the API.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Could not read hives.` | The server answered an error, usually 503 with Redis down. | `curl` the list to read the error, then restore Redis. |
+| An edit shows `Hive settings need the operator` | The page was opened with an agent's credential. | Open the ledger with the operator's credential. |
+| An edit shows `prefer names qa, a role this hive does not take` | `prefer` named a role missing from `roles`. | Add the role first, then the rank. |
+| move master stays off | The hive is quiet, the master is already there, or a control is pending. | Wait for the hive's heartbeat or the pending control. |
+| A hive stays `quiet` | `hive run` is not publishing. | `systemctl --user status agentihooks-hive` on that machine. |
 
 ## Related pages
 

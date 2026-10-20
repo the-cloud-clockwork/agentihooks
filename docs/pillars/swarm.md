@@ -351,8 +351,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set lane-split-gate=deny\|log only\|skip` | Operator or master only. The lane split moves one seat between the eng and ci lanes after the bottleneck report names the same stage three ticks running, and the `seat_wait` remedy moves one from ci to eng. It defaults to `log only`, recording each would-be move in the swarm gate log; `deny` lets it move seats, `skip` holds every move without logging. In every mode it holds a move into a lane with no ready task, and it never moves caps the operator or the master set with `max-eng-agents` or `max-ci-agents`, through `swarm set`, the ledger page or `create` flags; those caps stay where they set them for the swarm's life, and a swarm stored before the pin existed counts as set. A tick hold names its reason in the tick's held line; a remedy hold names it in the task proposal to the master. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
-| `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. |
-| `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. |
+| `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
+| `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
@@ -1774,6 +1774,52 @@ A tick prints each action as `<id>: <action>` on stdout and ends normally; a ren
 | A live tick or rename holds the lock in this epoch | `another tick is running` | `swarm <id>: another tick or rename is running` |
 | A killed tick or rename of this hive left the lock on this machine | takes it at once | takes it at once |
 | A holder on another machine, or a bare token, holds it in this epoch | `another tick is running` until the key expires | `swarm <id>: another tick or rename is running` until the key expires |
+
+#### Release on every return
+
+A tick pass releases the lock in its `finally` on every return: the ledger in the bin (`the ledger is in the bin,
+stopped`), a ledger that is gone, a failed ledger health probe (`Ledger health probe failed`), an exception
+partway through, and a normal end. A tick pass stopped at its 450 second deadline, or by `SIGTERM` from the
+service, releases every lock it holds before it exits and prints `the swarm tick stopped <why>; released <n> held
+tick locks`. Only a process killed outright, such as by `SIGKILL` or a service start timeout, leaves its lock
+behind, and the next minute tick replaces that lock through the dead holder check.
+
+#### Reopening a swarm from the bin
+
+`agentihooks swarm <id> reopen` sets the swarm running and runs one tick itself. When that tick dies holding the
+lock, the next minute tick on the same host takes the lock over and spawns the master; the swarm does not wait out
+the ten minute expiry. A Doctor start that reopens a closed Doctor ledger goes through the same reopen path.
+
+```bash
+agentihooks swarm <id> reopen
+journalctl --user -t agentihooks-swarm --since "-3 min"
+agentihooks swarm <id> status
+```
+
+The journal shows the next tick's actions with the master spawn, and `status` lists the master online.
+
+#### Troubleshooting a held tick lock
+
+When every tick of one swarm returns `another tick is running` in a few milliseconds, read the lock record:
+
+```bash
+redis-cli GET agentihooks:swarm:<id>:tick-lock
+redis-cli PTTL agentihooks:swarm:<id>:tick-lock
+ps -o pid,lstart,cmd -p <pid from the record>
+```
+
+- A live process under that id, with the record's start time, is a real tick still running: wait for it.
+- A record with no `host`, `pid` and `start` fields, or a `host` other than this machine's, is never replaced
+  early. Update the installed agentihooks to current `dev` so later ticks write holder records; the held lock
+  frees itself when its `PTTL` reaches zero.
+
+`tests/swarm/test_cli.py` pins this behavior. `test_a_binned_swarm_reopened_by_a_tick_that_died_holding_the_lock_spawns_its_master_at_the_next_tick`
+bins a swarm, checks the binned tick left no lock, reopens it through a tick that dies holding the lock, and
+asserts that the next tick spawns the master and leaves no lock. Three more tests assert no lock is left after
+a tick returns because its ledger is gone, fails partway through, or fails its ledger health probe. They were added by
+[pull request 4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098). Its red proof ran on a plant
+branch that removed the dead holder check and reproduced the observed `another tick is running` loop
+([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39042891977)).
 
 ### Tick heartbeat and stale watcher
 
