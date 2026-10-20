@@ -27,13 +27,13 @@ RAW = "execute_command"
 @dataclass
 class Unit:
     module: str
-    body: list
     owner: str = ""
     names: set = field(default_factory=set)
     dotted: set = field(default_factory=set)
     reads: set = field(default_factory=set)
     own: set = field(default_factory=set)
     typed: set = field(default_factory=set)
+    nodes: list = field(default_factory=list)
 
 
 @cache
@@ -130,12 +130,12 @@ class Program:
         self.clients, self.subscribers = self._receivers()
 
     def _add(self, key: str, module: str, body: list, owner: str = "") -> None:
-        unit = self.units[key] = Unit(module, body, owner)
+        unit = self.units[key] = Unit(module, owner, nodes=list(_walk(body)))
         bound = {}
-        for node in _walk(body):
+        for node in unit.nodes:
             if (found := _assigned(node)) and isinstance(found[1].func, ast.Name):
                 bound[found[0]] = found[1].func.id
-        for node in _walk(body):
+        for node in unit.nodes:
             if isinstance(node, ast.Name):
                 unit.names.add(node.id)
             elif isinstance(node, ast.Attribute):
@@ -199,7 +199,7 @@ class Program:
 
     def _nested(self, unit: Unit) -> dict:
         scope: dict = {}
-        for node in _walk(unit.body):
+        for node in unit.nodes:
             if isinstance(node, (ast.Import, ast.ImportFrom)):
                 _bind(unit.module, self.modules[unit.module][1], node, scope, self.modules)
         return scope
@@ -246,7 +246,7 @@ class Program:
 
     def _issued(self, unit: Unit) -> set[str]:
         sent: set[str] = set()
-        for node in _walk(unit.body):
+        for node in unit.nodes:
             if isinstance(node, ast.Constant) and isinstance(node.value, str):
                 sent |= lua(node.value)
             if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
@@ -272,7 +272,7 @@ class Program:
         common = _stdlib() | self.defined | {RAW}
         clients, subscribers = set(), set()
         for unit in self.units.values():
-            for node in _walk(unit.body):
+            for node in unit.nodes:
                 if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
                     name, receiver = node.func.attr, _tail(node.func.value)
                     if receiver and name not in common and name in methods(redis.Redis) and wire(redis.Redis, name):

@@ -1,5 +1,7 @@
 import json
 import os
+import subprocess
+import sys
 
 import pytest
 import redis
@@ -192,7 +194,10 @@ def program(tree):
 
 @pytest.fixture(scope="module")
 def published():
-    return redis_commands.consumer_map("distributed")["consumers"]
+    # Built in a subprocess: under the coverage tracer the repository map runs near the hung test dump bound.
+    command = [sys.executable, "-m", "scripts.swarm.redis_commands"]
+    out = subprocess.run(command, cwd=redis_commands.ROOT, stdout=subprocess.PIPE, text=True, check=True).stdout
+    return json.loads(out)["consumers"]
 
 
 def test_a_redis_py_method_maps_to_the_command_it_sends():
