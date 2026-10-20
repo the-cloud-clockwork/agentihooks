@@ -224,9 +224,27 @@ def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
         "EnvironmentFile": "-%h/.agentihooks/.env",
         "ExecStart": '"/installed/bin/agentihooks" swarm waits',
         "TimeoutStartSec": "120",
+        "KillMode": "process",
     }
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.timer"] in calls
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls
+
+
+def test_a_wait_service_without_kill_mode_process_is_rewritten_and_reloaded(tmp_path, monkeypatch):
+    monkeypatch.setattr(timer, "reconcile", real_reconcile)
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(argv)
+        return subprocess.CompletedProcess(argv, 0)
+
+    assert timer.ensure("/installed/bin/agentihooks", tmp_path, run=run)
+    service = tmp_path / "agentihooks-swarm-waits.service"
+    service.write_text(service.read_text().replace("KillMode=process\n", ""))
+    calls.clear()
+    assert timer.reconcile("/installed/bin/agentihooks", tmp_path, run=run)
+    assert service.read_text().endswith("TimeoutStartSec=120\nKillMode=process\n")
+    assert calls[0] == ["systemctl", "--user", "daemon-reload"]
 
 
 def _systemctl(calls, failing=()):
