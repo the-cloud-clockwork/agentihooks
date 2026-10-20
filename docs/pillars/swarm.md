@@ -668,7 +668,7 @@ worktree branch, `branch_repo` its `origin` URL with any password removed (and
 the user too for an `http` or `https` URL), and `repository_branches` maps each
 repository's primary checkout to its branch. For a task in several
 repositories, `repository_branches` carries every pushed one, while `branch`
-and `branch_repo` name the last repository checked. The fields are written
+and `branch_repo` name the last repository pushed. The fields are written
 before the task turns `blocked`, so the next engineer's prepare finds the
 pushed branch. A task whose recorded branch is `dev`, `main`, `master` or `v1`
 refuses with `publication requires a task branch outside the protected
