@@ -345,3 +345,54 @@ def test_agentihooks_serena_switch_preserves_shared_enforcement(trees, monkeypat
     else:
         assert result.returncode == 1
         assert "activate_project" in result.stderr
+
+
+@pytest.fixture
+def launch(tmp_path, monkeypatch):
+    monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "worktrees"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@323133-2196")
+    monkeypatch.delenv("CLAUDE_CODE_SESSION_ID", raising=False)
+    checkout = tmp_path / "agentihooks"
+    (checkout / ".git").mkdir(parents=True)
+    return checkout
+
+
+def _repo_worktree(base, repo, name):
+    root = base / repo / name
+    (root / "pkg").mkdir(parents=True)
+    (root / ".git").write_text(f"gitdir: /src/{repo}/.git/worktrees/{name}\n")
+    (root / "pkg" / "mod.py").write_text("x = 1\n")
+    return root
+
+
+@pytest.mark.parametrize("name", ["engineer-323133-2196", "engineer-323133-2196-2"])
+def test_deleting_python_in_the_sessions_own_worktree_of_another_repo_is_allowed(tmp_path, launch, name):
+    own = _repo_worktree(tmp_path / "worktrees", "antoncore", name)
+    check(_tool("Bash", launch, command=f"git -C {own} rm pkg/mod.py"))
+    check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
+    patch_name, tool_input = _patch(f"*** Delete File: {own / 'pkg' / 'mod.py'}")
+    check({"tool_name": patch_name, "tool_input": tool_input, "cwd": str(launch)})
+
+
+@pytest.mark.parametrize(
+    ("base", "name"),
+    [
+        ("worktrees", "engineer-323133-2195"),
+        ("worktrees", "engineer-323133-2196-tmp-1"),
+        ("elsewhere", "engineer-323133-2196"),
+    ],
+)
+def test_deleting_python_in_a_foreign_worktree_of_another_repo_is_blocked(tmp_path, launch, base, name):
+    other = _repo_worktree(tmp_path / base, "antoncore", name)
+    target = other / "pkg" / "mod.py"
+    assert _block_text(_tool("Bash", launch, command=f"git rm {target}")) == (
+        f"BLOCKED: {target} is Python in another checkout, {other}. "
+        "A session deletes Python files only inside its own checkout."
+    )
+
+
+def test_a_session_without_an_agent_name_owns_no_other_worktree(tmp_path, launch, monkeypatch):
+    monkeypatch.delenv("AGENTIHOOKS_AGENT_NAME")
+    own = _repo_worktree(tmp_path / "worktrees", "antoncore", "engineer-323133-2196")
+    with pytest.raises(BlockAction, match="another checkout"):
+        check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
