@@ -1462,6 +1462,73 @@ every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
 
+### Tick lock
+
+Every tick pass of a swarm takes the swarm's tick lock right after the controller lease and before any work. The
+lock is one Redis key, `<prefix>:swarm:<id>:tick-lock`, where the prefix is `AGENTIHOOKS_SWARM_KEY_PREFIX`
+(default `agentihooks`). It holds a JSON record and expires after ten minutes; the pass extends it before every
+step, so a long pass keeps it.
+
+| Field | Meaning |
+|---|---|
+| `epoch` | The controller lease epoch the pass ticks under. |
+| `token` | A random value; only the pass that wrote it releases the lock. |
+| `host` | The machine boot id and the pass's process namespace. |
+| `pid`, `start` | The tick process id and its start time from `/proc`. |
+
+A pass that finds the lock taken returns `another tick is running` and does nothing else, unless one of these holds:
+
+- the record carries a lower epoch, so a newer controller takes over;
+- the holder record names this host and its process is gone: the process id no longer exists, is a zombie, or now
+  belongs to a process with another start time.
+
+In either case the pass replaces the lock and ticks at once. A record from another host, or one with no holder
+fields, is never judged dead: it blocks the swarm until it expires. Ticks run by an install that predates holder
+records write such locks.
+
+The pass releases the lock in its `finally` on every return: the ledger in the bin (`the ledger is in the bin,
+stopped`), a ledger that is gone, a failed ledger health probe (`Ledger health probe failed`), an exception
+partway through, and a normal end. A tick pass stopped at its 450 second deadline, or by `SIGTERM` from the
+service, releases every lock it holds before it exits and prints `the swarm tick stopped <why>; released <n> held
+tick locks`. Only a process killed outright, such as by `SIGKILL` or a service start timeout, leaves its lock
+behind, and the next minute tick replaces that lock through the dead holder check.
+
+#### Reopening a swarm from the bin
+
+`agentihooks swarm <id> reopen` sets the swarm running and runs one tick itself. When that tick dies holding the
+lock, the next minute tick on the same host takes the lock over and spawns the master; the swarm does not wait out
+the ten minute expiry. A Doctor start that reopens a closed Doctor ledger goes through the same reopen path.
+
+```bash
+agentihooks swarm <id> reopen
+journalctl --user -t agentihooks-swarm --since "-3 min"
+agentihooks swarm <id> status
+```
+
+The journal shows the next tick's actions with the master spawn, and `status` lists the master online.
+
+#### Troubleshooting a held tick lock
+
+When every tick of one swarm returns `another tick is running` in a few milliseconds, read the lock record:
+
+```bash
+redis-cli GET agentihooks:swarm:<id>:tick-lock
+redis-cli PTTL agentihooks:swarm:<id>:tick-lock
+ps -o pid,lstart,cmd -p <pid from the record>
+```
+
+- A live process under that id, with the record's start time, is a real tick still running: wait for it.
+- A record with no `host`, `pid` and `start` fields, or a `host` other than this machine's, is never replaced
+  early. Update the installed agentihooks to current `dev` so later ticks write holder records; the held lock
+  frees itself when its `PTTL` reaches zero.
+
+`tests/swarm/test_cli.py` pins this behavior. `test_a_binned_swarm_reopened_by_a_tick_that_died_holding_the_lock_spawns_its_master_at_the_next_tick`
+bins a swarm, checks the binned tick left no lock, reopens it through a tick that dies holding the lock, and
+asserts that the next tick spawns the master and leaves no lock. Three more tests assert no lock is left after
+the ledger gone return, an exception partway through and a failed ledger health probe. They were added by pull
+request [4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098), whose red run removed the dead
+holder check and reproduced the observed `another tick is running` loop.
+
 ### Tick heartbeat and stale watcher
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
