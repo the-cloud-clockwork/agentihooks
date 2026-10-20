@@ -1116,3 +1116,31 @@ def test_different_tests_together_explain_all_missing_sonar_shards(store):
     refresh(store, ledger, run)
     assert len(ledger.added) == 2
     assert all("sonar" in fields["description"] for _, fields, _ in ledger.added)
+
+
+def test_setup_errors_and_test_failures_keep_distinct_causes_across_shard_moves(store):
+    ledger = Ledger()
+
+    def recorded(run_id, shard):
+        original = recorded_test_failure(
+            run_id,
+            [("3.12", shard)],
+            tests=("tests/test_api.py::test_setup", "tests/test_api.py::test_body"),
+            missing=False,
+        )
+
+        def run(argv, **kwargs):
+            result = original(argv, **kwargs)
+            if argv[2].endswith("/logs"):
+                result.stdout = result.stdout.replace(
+                    "FAILED tests/test_api.py::test_setup", "ERROR tests/test_api.py::test_setup"
+                )
+            return result
+
+        return run
+
+    refresh(store, ledger, recorded(900, 1))
+    refresh(store, ledger, recorded(901, 2), NOW * 2)
+    assert len(ledger.added) == 2
+    assert "tests/test_api.py::test_body" in ledger.added[0][1]["description"]
+    assert "tests/test_api.py::test_setup" in ledger.added[1][1]["description"]
