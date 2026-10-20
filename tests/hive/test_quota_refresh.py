@@ -59,7 +59,7 @@ def test_a_reading_is_due_before_it_goes_stale(cached, age, expected):
 
 
 def test_the_newest_reading_of_an_account_counts(cached):
-    cached.return_value = [(NOW - 10_000, _result("one")), (NOW, _result("one")), (NOW, _result("two"))]
+    cached.return_value = [(NOW, _result("one")), (NOW - 10_000, _result("one")), (NOW, _result("two"))]
     assert quota_refresh.due(ENVIRON, NOW) is False
 
 
@@ -127,8 +127,10 @@ def test_start_keeps_a_running_refresh(monkeypatch):
 
 @pytest.mark.parametrize("worker", [None, Mock(is_alive=Mock(return_value=False))])
 def test_start_leaves_fresh_readings_alone(monkeypatch, worker):
-    monkeypatch.setattr(quota_refresh, "due", lambda environ, now: False)
+    due = Mock(return_value=False)
+    monkeypatch.setattr(quota_refresh, "due", due)
     assert quota_refresh.start(ENVIRON, worker, 0, NOW) == (worker, 0)
+    due.assert_called_once_with(ENVIRON, NOW)
 
 
 def test_start_waits_out_the_retry_window_after_an_attempt(monkeypatch):

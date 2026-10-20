@@ -93,7 +93,9 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     monkeypatch.setattr(
         daemon.quota_refresh,
         "start",
-        lambda environ, worker, attempted_at: events.append(("start", worker, attempted_at)) or (None, attempted_at),
+        lambda environ, worker, attempted_at: (
+            events.append(("start", environ, worker, attempted_at)) or ("worker", attempted_at + 1)
+        ),
     )
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 0)
@@ -101,12 +103,22 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
 
     def sleep(seconds):
         events.append(seconds)
-        raise KeyboardInterrupt
+        if events.count(15) == 2:
+            raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connection)
-    assert events == ["refresh", ("start", None, 50), (connection, "local"), 15]
+    environ = daemon.os.environ
+    assert events == [
+        "refresh",
+        ("start", environ, None, 50),
+        (connection, "local"),
+        15,
+        ("start", environ, "worker", 51),
+        (connection, "local"),
+        15,
+    ]
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
