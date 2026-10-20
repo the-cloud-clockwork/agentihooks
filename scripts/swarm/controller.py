@@ -104,7 +104,9 @@ class FencedRuntime:
             from scripts.hive.placement import Wait
 
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
-            return selected.reason if isinstance(selected, Wait) else ""
+            if not isinstance(selected, Wait):
+                return ""
+            return f"{WORKSTATION.format(lane=lane)}: {selected.reason}" if lane == "master" else selected.reason
         wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)

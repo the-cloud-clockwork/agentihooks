@@ -114,6 +114,30 @@ def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
     assert fenced.runtime.hive_launch.select(setup.config, "plan", {"id": "task"}).hive == "anton"
 
 
+MASTER_WAIT = "no live hive can run the master with interactive, subscription or api authentication"
+
+
+@pytest.mark.parametrize("lacks", [{"repos": []}, {"slots": []}], ids=["repo", "slot"])
+def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_never_headless(setup, lacks):
+    from scripts.hive.placement import Wait
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    two_hosts(setup)
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, **lacks)
+    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    assert setup.launcher.select(setup.config, "master", {"id": "master"}) == Wait(MASTER_WAIT)
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    refused = fenced.placement_refusal("master", {"id": "master"})
+    assert refused == f"the workstation hive spawns master work: {MASTER_WAIT}"
+    with pytest.raises(controller.SwarmError, match="the workstation hive spawns master work"):
+        fenced.spawn(setup.config, "master", "master name", {"id": "master"})
+
+
 def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_only_when_none_has_room(setup):
     from scripts.hive import registry
     from scripts.swarm import controller

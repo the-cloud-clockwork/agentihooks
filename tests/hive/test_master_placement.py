@@ -42,8 +42,9 @@ def test_master_falls_back_to_a_ui_slot_before_a_preferred_headless_hive(kind):
     )
 
 
-def test_a_headless_hive_refuses_a_master_when_ui_hives_cannot_run_it():
-    hives = [hive("ui", repos=[]), hive("headless", ui="no", interactive={"claude": "login"})]
+@pytest.mark.parametrize("roles", [[], ["master"]])
+def test_master_never_uses_a_headless_hive_when_ui_hives_cannot_run_it(roles):
+    hives = [hive("ui", repos=[]), hive("headless", ui="no", roles=roles)]
     assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.Wait(
         "no live hive can run the master with interactive, subscription or api authentication"
     )

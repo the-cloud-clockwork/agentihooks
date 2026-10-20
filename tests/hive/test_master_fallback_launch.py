@@ -46,7 +46,7 @@ def test_successor_replaces_saved_fallback_auth_with_the_best_login(setup):
     assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
 
 
-def test_master_admission_records_fallback_auth_and_placement_evidence(setup):
+def test_master_admission_records_fallback_auth_and_ui_placement(setup):
     from scripts.swarm.tick import MASTER
     from scripts.swarm_v2.runtime.base import SpawnRequest
 
@@ -239,11 +239,3 @@ def test_master_on_a_hive_reserves_against_the_cap_that_hive_reports(setup, slot
         slots=[{"harness": "claude", "account": "user_atmail_com", "kind": "subscription", **slot}],
     )
     assert setup.launcher.select(setup.config, "master", task).account.cap == cap
-
-
-def test_a_headless_hive_refuses_a_master(setup):
-    from scripts.hive import placement
-
-    task = master(setup)
-    write_hive(setup, roles=["master"], ui="no")
-    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(placement.NO_UI_HIVE)

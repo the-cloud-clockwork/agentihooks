@@ -34,6 +34,10 @@ class Choice:
     fallback: str = ""
 
 
+def hosts(role: str, hive: dict) -> bool:
+    return role in hive["roles"] and (role not in UI_ROLES or hive["ui"] == YES)
+
+
 def _room(hive: dict) -> int:
     return hive["max_agents"] - hive["agents"]
 
@@ -81,13 +85,12 @@ def choose(
     candidates = [hive for hive in alive if role in hive["roles"]]
     ui_live = any(hive["ui"] == YES for hive in alive)
     if not candidates:
-        if role in UI_ROLES and not ui_live:
-            return Wait(NO_UI_HIVE)
-        return Wait(f"no live hive takes {role}")
+        return Wait(NO_UI_HIVE if role in UI_ROLES and not ui_live else f"no live hive takes {role}")
     ui = [hive for hive in candidates if hive["ui"] == YES]
     headless = [hive for hive in candidates if hive["ui"] != YES]
     if role in UI_ROLES:
-        return _pick(role, harness, slot, route_kind, repo, ui) if ui else Wait(NO_UI_HIVE)
+        pool = [hive for hive in candidates if hosts(role, hive)]
+        return _pick(role, harness, slot, route_kind, repo, pool) if pool else Wait(NO_UI_HIVE)
     if not ui:
         return _pick(role, harness, slot, route_kind, repo, headless)
     picked = (
@@ -109,7 +112,7 @@ def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives:
 def place_master(harness: str, login: str, repo: str, hives: list[dict], now: int) -> MasterPlacement | Wait:
     candidates = []
     for hive in hives:
-        if not live(hive, now) or repo not in hive["repos"] or hive["ui"] != YES or MASTER not in hive["roles"]:
+        if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
             continue
         native = hive["interactive"].get(harness)
         if native and login in ("", native):
