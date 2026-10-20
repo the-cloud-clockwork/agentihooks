@@ -2,8 +2,6 @@ import json
 import threading
 from types import SimpleNamespace
 
-import pytest
-
 from scripts.swarm_ledger.events.publishing import Publishing
 
 
