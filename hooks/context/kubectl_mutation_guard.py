@@ -19,16 +19,24 @@ scale, drain, cordon, taint, debug, annotate, label, create, apply -f, delete)
 because those are part of operational troubleshooting and the operator wants
 them available without ceremony.
 
-This is a HARD FLOOR. The hook does not honor bypass mode, hotfix signals, or
-release-gate signals. To change a running system's behavior, change code.
+Bypass mode (operator said ``disable controls``) unlocks this guard for
+troubleshooting, per CI Manifesto §2 — the HARD FLOOR itself (direct
+push/commit/tag/reset on main, secrets in files) is a different, narrower
+set enforced elsewhere and is unaffected by this toggle.
+
+KUBECTL_MUTATION_GUARD_EXEC_ALLOW lists comma-separated `namespace/pod-glob`
+entries (matched with fnmatch) whose `kubectl exec` / `kubectl cp` target
+pod is let through without bypass mode.
 
 References:
-- agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md §3.5
+- agentihooks-bundle/manifestos/ANTON-CORE-CI-MANIFESTO.md §2
 - agentihooks-bundle/profiles/*/.claude/rules/code-is-source.md
 """
 
 from __future__ import annotations
 
+import fnmatch
+import os
 import re
 import shlex
 from typing import Optional
@@ -302,12 +310,10 @@ def _violation(rule: str, description: str) -> str:
         "BLOCKED by kubectl_mutation_guard: live-system state mutation forbidden.\n"
         f"  Rule:        {rule}\n"
         f"  Reason:      {description}\n"
-        "  Doctrine:    CI Manifesto §3.5 + rules/code-is-source.md\n"
+        "  Doctrine:    CI Manifesto §2 + rules/code-is-source.md\n"
         "  Action:      change the source code, commit, push to dev, let CI deploy.\n"
-        "  Note:        this rule is HARD FLOOR — bypass mode, hotfix signals,\n"
-        "               and release-gate signals do NOT unlock it. To disable\n"
-        "               the hook itself for a session, set\n"
-        "               KUBECTL_MUTATION_GUARD_ENABLED=false (logged)."
+        "  Unlock:      set KUBECTL_MUTATION_GUARD_EXEC_ALLOW=ns/pod-glob or\n"
+        "               disable controls."
     )
     return msg
 
@@ -357,6 +363,86 @@ def _strip_quoted_strings(cmd: str) -> str:
     return cleaned
 
 
+_OTEL_KUBECTL_MUTATION = "agentihooks.guardrail.kubectl_mutation_detected"
+
+
+def _exec_allowlist_entries() -> list[str]:
+    """Parse KUBECTL_MUTATION_GUARD_EXEC_ALLOW: comma-separated `namespace/pod-glob` entries."""
+    raw = os.environ.get("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "")
+    return [entry.strip() for entry in raw.split(",") if entry.strip() and "/" in entry.strip()]
+
+
+def _target_allowlisted(namespace: Optional[str], pod: Optional[str]) -> bool:
+    """True when `namespace/pod` matches an entry in KUBECTL_MUTATION_GUARD_EXEC_ALLOW."""
+    if not pod:
+        return False
+    candidate = f"{namespace or ''}/{pod}"
+    return any(fnmatch.fnmatch(candidate, entry) for entry in _exec_allowlist_entries())
+
+
+def _parse_kubectl_target(args: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract (namespace, pod) from the flags+target text before `--` in a kubectl exec command."""
+    try:
+        tokens = shlex.split(args.strip())
+    except ValueError:
+        return None, None
+    namespace: Optional[str] = None
+    pod: Optional[str] = None
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("-n", "--namespace"):
+            if i + 1 < len(tokens):
+                namespace = tokens[i + 1]
+            i += 2
+            continue
+        if tok.startswith("--namespace="):
+            namespace = tok.split("=", 1)[1]
+        elif tok.startswith("-n=") and len(tok) > 3:
+            namespace = tok.split("=", 1)[1]
+        elif tok in ("-c", "--container"):
+            i += 2
+            continue
+        elif not tok.startswith("-") and pod is None:
+            pod = tok.rsplit("/", 1)[-1]
+        i += 1
+    return namespace, pod
+
+
+def _cp_dest_target(cmd_args: str) -> tuple[Optional[str], Optional[str]]:
+    """Extract (namespace, pod) of the destination side of a `kubectl cp` INTO a pod."""
+    try:
+        tokens = shlex.split(cmd_args.strip())
+    except ValueError:
+        return None, None
+    positional = [t for t in tokens if not t.startswith("-")]
+    if len(positional) < 2:
+        return None, None
+    dst = positional[1]
+    if ":" not in dst:
+        return None, None
+    remote, _, _ = dst.partition(":")
+    if not remote or remote.startswith("/") or remote.startswith("."):
+        return None, None
+    if "/" in remote:
+        namespace, pod = remote.split("/", 1)
+        return namespace, pod
+    return None, remote
+
+
+def _violation_or_allow(rule: str, description: str, namespace: Optional[str], pod: Optional[str]) -> Optional[str]:
+    """Return the violation message, unless the target pod is allowlisted (then log and allow)."""
+    if _target_allowlisted(namespace, pod):
+        from hooks.observability import otel
+
+        otel.emit_event(
+            _OTEL_KUBECTL_MUTATION,
+            {"rule": rule, "namespace": namespace or "", "pod": pod or "", "action": "allow", "allowlisted": True},
+        )
+        return None
+    return _violation(rule, description)
+
+
 def check_kubectl_mutation_command(command: str) -> Optional[str]:
     """Return a rejection message if `command` is a forbidden mutation.
 
@@ -388,25 +474,31 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
     # introspect)
     for match in _KUBECTL_EXEC_RE.finditer(command):
         after_dash = match.group(2)
+        namespace, pod = _parse_kubectl_target(match.group(1))
         for pattern, rule, description in _EXEC_MUTATION_PATTERNS:
             if pattern.search(after_dash):
                 if rule == "exec-shell-c":
                     for inner_pat, inner_rule in _INNER_SHELL_PATTERNS:
                         if inner_pat.search(after_dash):
-                            return _violation(
+                            return _violation_or_allow(
                                 f"exec-shell-c:{inner_rule}",
                                 f"kubectl exec ... -- sh/bash -c with mutation pattern ({inner_rule})",
+                                namespace,
+                                pod,
                             )
                     continue
-                return _violation(rule, description or f"kubectl exec mutation ({rule})")
+                return _violation_or_allow(rule, description or f"kubectl exec mutation ({rule})", namespace, pod)
 
     # 3. kubectl cp direction (run on stripped — positional paths don't
     # carry quotes legitimately, and stripping suppresses text mentions)
     for match in _KUBECTL_CP_RE.finditer(stripped):
         if _check_kubectl_cp_into_pod(match.group(1)):
-            return _violation(
+            namespace, pod = _cp_dest_target(match.group(1))
+            return _violation_or_allow(
                 "kubectl-cp-into-pod",
                 "kubectl cp <local> <pod>:<path> (copy INTO a pod — push the file via the image build)",
+                namespace,
+                pod,
             )
 
     # 4. SSH with remote write patterns (run on ORIGINAL — the SSH remote
@@ -447,18 +539,28 @@ def check_kubectl_mutation(payload: dict) -> None:
 
     When bypass mode is active (operator said ``disable controls``), the
     guard steps aside — the operator is explicitly authorizing live
-    troubleshooting / experimentation.
+    troubleshooting / experimentation — and logs the pass-through instead
+    of staying silent.
     """
     from hooks.hook_manager import BlockAction
 
     session_id = payload.get("session_id", "")
+    bypass = False
     try:
         from hooks.context.controls_toggle import is_controls_disabled
 
-        if is_controls_disabled(session_id):
-            return
+        bypass = is_controls_disabled(session_id)
     except Exception:
-        pass
+        bypass = False
+
+    if bypass:
+        try:
+            from hooks.observability import otel
+
+            otel.emit_event(_OTEL_KUBECTL_MUTATION, {"session.id": session_id, "action": "allow", "bypass": True})
+        except Exception:
+            pass
+        return
 
     tool_input = payload.get("tool_input", {}) or {}
     command = tool_input.get("command", "") or ""

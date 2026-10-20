@@ -215,3 +215,35 @@ def test_check_kubectl_mutation_payload_allows_safe_command():
 
     payload = {"tool_input": {"command": "kubectl get pods"}}
     check_kubectl_mutation(payload)  # No exception expected
+
+
+def test_check_kubectl_mutation_payload_allows_on_bypass(monkeypatch):
+    """Bypass mode (controls disabled) lets a mutating exec through."""
+    from hooks.context import controls_toggle
+    from hooks.context.kubectl_mutation_guard import check_kubectl_mutation
+
+    monkeypatch.setattr(controls_toggle, "is_controls_disabled", lambda *_a, **_kw: True)
+
+    payload = {"tool_input": {"command": "kubectl exec mypod -- sh -c 'echo x > /etc/config'"}}
+    check_kubectl_mutation(payload)  # No exception expected
+
+
+def test_allowlisted_pod_lets_mutating_exec_through(monkeypatch):
+    """A pod matching KUBECTL_MUTATION_GUARD_EXEC_ALLOW is let through."""
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "agentihooks-swarm/agentihooks-swarm-worker-hive-*")
+    cmd = "kubectl exec -n agentihooks-swarm agentihooks-swarm-worker-hive-3 -- tee /etc/config.yaml"
+    assert check_kubectl_mutation_command(cmd) is None
+
+
+def test_non_allowlisted_pod_still_blocked(monkeypatch):
+    """A pod NOT matching KUBECTL_MUTATION_GUARD_EXEC_ALLOW stays blocked."""
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "agentihooks-swarm/agentihooks-swarm-worker-hive-*")
+    cmd = "kubectl exec -n other-namespace other-pod -- tee /etc/config.yaml"
+    assert check_kubectl_mutation_command(cmd) is not None
+
+
+def test_malformed_allowlist_entry_blocks_nothing_extra(monkeypatch):
+    """A malformed entry (no namespace/pod-glob shape) neither allows unrelated pods nor crashes."""
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "garbage-no-slash, , *")
+    cmd = "kubectl exec -n agentihooks-swarm agentihooks-swarm-worker-hive-3 -- tee /etc/config.yaml"
+    assert check_kubectl_mutation_command(cmd) is not None
