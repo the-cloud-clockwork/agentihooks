@@ -22,10 +22,57 @@ Agent hosts separately need Claude Code or Codex, authenticated accounts or API 
 ## Start the services
 
 ```bash
-agentihooks swarm init
+agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo
 ```
 
-Initialization copies the packaged Compose files into `$AGENTIHOOKS_HOME/swarm-stack` (default `~/.agentihooks/swarm-stack`). On first use it writes a random Redis password, selects free ports and sets the image tag to `release`. It waits for healthy services and a responsive ledger page, then prints the ledger URL and client setup command. Rerunning preserves the password, ports and data.
+`swarm init` takes the swarm name first. The name is one or two lowercase words joined by a dash and ending in `swarm`, such as `my-swarm` or `rig-grade-swarm`; it names both the swarm and its ledger. A missing or invalid name is refused before Docker is touched, with the rule and two suggestions built from the plan title.
+
+One run does the following, in order:
+
+1. Checks that `docker` is on the `PATH`, that the daemon answers `docker info` and that `docker compose version` works.
+2. Copies the Compose files packaged with AgentiHooks into `$AGENTIHOOKS_HOME/swarm-stack` (default `~/.agentihooks/swarm-stack`).
+3. On first use writes `.env` there, readable only by you: a random Redis password, a free ledger port (8765 when free), a free Redis port (6379 when free) and `SWARM_IMAGE_TAG=release`. It also writes `client.env`, the settings a shell needs to reach the stack.
+4. Runs `docker compose up --detach --wait` for `redis`, `swarm` (the ledger server) and `controller`. The first run pulls the released images.
+5. Waits until all three services are healthy, up to `--timeout` seconds (default 300), then checks that the ledger's `/healthz` route answers and its home page is served.
+6. Creates the swarm and its ledger inside the stack, paused. Without `--content`, the ledger holds one automatic phase titled after the `--plan` file, or after the name when there is no plan. Without `--repo`, the swarm works the current directory.
+
+| Option | Use |
+|---|---|
+| `--plan FILE` | The accepted plan; its first `# ` heading titles the ledger and seeds name suggestions |
+| `--content FILE` | Ledger content JSON as `ledger new` takes it, instead of the single automatic phase |
+| `--repo DIR` | The repository the swarm works; default the current directory |
+| `--template NAME` | The swarm template for caps, models and lanes |
+| `--operator-asked WORDS` | The operator's words, required in the shared ledger folder when the content has fewer than three phases or tasks |
+| `--timeout SECONDS` | How long to wait for every service to be healthy; default 300 |
+| `--no-start` | Check Docker and Compose, write the stack files, `.env` and `client.env`, then stop. No name is needed and no service, swarm or ledger starts |
+
+In the shared ledger folder only a master seat or the operator may create a swarm.
+
+### Output
+
+On a terminal the ready line is green, the ledger address cyan and a failure red. When output is piped, or `NO_COLOR` is set to any value, the same text prints without colour. A successful first run prints:
+
+```text
+Starting the swarm stack; the first run pulls its images.
+Swarm stack ready: redis, swarm and controller are healthy.
+Next steps:
+  1. Open the ledger: http://127.0.0.1:8765/
+  2. Point this shell at the stack: set -a; . /home/me/.agentihooks/swarm-stack/client.env; set +a
+  3. Start the swarm only when you want it: agentihooks swarm my-swarm start
+Running agentihooks swarm init again is safe: it keeps the password, the ports and the data.
+Ledger page: http://127.0.0.1:8765/my-swarm (open it to follow and steer the work)
+Swarm my-swarm is paused; start it only when you want it: agentihooks swarm my-swarm start
+```
+
+A JSON line describing the new swarm prints before the `Ledger page:` line. The ports in the addresses are the ones written to `.env`.
+
+`swarm init` never starts a swarm. The swarm stays paused, and no agent launches, until you run `agentihooks swarm <name> start`.
+
+### Running it again
+
+A second run is safe. It keeps `.env`, so the Redis password, both ports and the data volumes stay the same, and `client.env` keeps pointing at the same addresses. Compose leaves healthy services running. For a swarm that already exists the run prints its ledger page and changes nothing. A name already held by a swarm working another repository, or by a ledger that is not a swarm's, is refused with the rule and suggestions.
+
+`SWARM_COMPOSE_PROJECT` in `.env` names the Compose project (default `agentihooks-swarm`). A second stack home under another `AGENTIHOOKS_HOME`, with its own project name, never touches the first.
 
 ## Connect a client
 
@@ -96,7 +143,27 @@ docker compose logs --tail 50 swarm controller redis
 docker compose down
 ```
 
-Initialization reports missing Docker, daemon or Compose dependencies and unhealthy services with a suggested fix. `down` keeps named volumes; avoid `--volumes` when retaining ledger and Redis data. Keep service ports on loopback for local use; remote host admission and TLS require separate setup.
+A failed run exits 1 and names the dependency that failed, its fix and, for a service, the command that shows its logs. When a service fails, the last ten lines Docker Compose printed come first:
+
+```text
+docker compose said:
+  Error response from daemon: ... bind: address already in use
+Swarm stack not ready: redis is created.
+  Fix: read its logs; if port 6379 is in use, set SWARM_REDIS_PORT in /home/me/.agentihooks/swarm-stack/.env to a free port, and keep the password in /home/me/.agentihooks/swarm-stack/.env as it was at the first start, then run agentihooks swarm init again.
+  Logs: docker compose --project-name agentihooks-swarm logs redis
+```
+
+| Message after `Swarm stack not ready:` | Fix |
+|---|---|
+| `Docker is not installed` | Install Docker Engine with the Compose plugin |
+| `the Docker daemon is not reachable` | Start Docker, or add your user to the `docker` group |
+| `the Docker Compose plugin is missing` | Install Docker Compose v2, the `docker compose` plugin |
+| `redis is <state>` | Read its logs; if the Redis port is in use, set `SWARM_REDIS_PORT` in `.env` to a free port and keep the original password |
+| `swarm is <state>` | Read its logs; the ledger server needs Redis healthy, and if the ledger port is in use, set `SWARM_PORT` in `.env` to a free port. With adoption recorded, stop the legacy ledger container by its id first |
+| `controller is <state>` | Read its logs; fix Redis and the ledger server first, since the controller starts after both are healthy |
+| `the ledger page does not answer` | Read the ledger logs; the message names the route that did not answer or did not serve the ledger home page |
+
+`<state>` is the service's health or container state, such as `unhealthy`, `exited` or `created`; `not created` when Compose never made it and `in an unknown state` when `docker compose ps` itself failed. Every fix ends by running `agentihooks swarm init` again. A refused swarm name or creation prints `Swarm not created:` with the reason instead. The logs and `down` commands work from any directory because they name the Compose project. `down` keeps named volumes; avoid `--volumes` when retaining ledger and Redis data. Keep service ports on loopback for local use; remote host admission and TLS require separate setup.
 
 ## Share one database across hosts
 
