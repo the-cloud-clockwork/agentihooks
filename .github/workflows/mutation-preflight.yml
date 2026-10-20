@@ -290,6 +290,7 @@ jobs:
         if: strategy.job-total == 1
         env:
           BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
 
       - name: Upload the measured mutation plan
