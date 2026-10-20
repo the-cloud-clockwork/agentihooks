@@ -105,7 +105,7 @@ def _task_costs(record):
 
 def _finished(record, task):
     traced = [t for t in record["traces"] if f"task:{task}" in t["tags"]]
-    return max((o.get("end", 0) for t in traced for o in _turns(t)), default=0)
+    return max(o.get("end", 0) for t in traced for o in _turns(t))
 
 
 def task_cost(record: dict, limits: Limits) -> list[Finding]:

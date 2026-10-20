@@ -57,3 +57,15 @@ def test_a_task_finishes_at_the_latest_end_of_its_turns():
 def test_a_task_finished_at_the_same_time_counts_in_the_median():
     record = {"merged": ["a", "heavy"], "traces": [_task("a", 400, (40, 50)), _task("heavy", 5000, (45, 50))]}
     assert [f.subject for f in traces.task_cost(record, traces.Limits())] == ["heavy"]
+
+
+def test_a_turn_without_an_end_counts_as_finished_before_every_ended_turn():
+    unended = {
+        "tags": ["task:heavy"],
+        "observations": [
+            {"type": "GENERATION", "turn": None, "tokens": 5000},
+            {"type": "SPAN", "turn": 1, "start": 0},
+        ],
+    }
+    record = {"merged": ["a", "heavy"], "traces": [_task("a", 400, (0, 1)), unended]}
+    assert traces.task_cost(record, traces.Limits()) == []
