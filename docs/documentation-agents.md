@@ -119,11 +119,12 @@ session with an empty `AGENTIHOOKS_SWARM_TASK` still classifies its changes and
 queues a task with no dependency.
 
 Change evidence is the diff from an evidence base to the head: the source task's
-`branch` when the task records one that resolves, otherwise the checkout's HEAD. The checkout
-is the session's worktree, or the primary repository checkout when that
-worktree no longer exists. The evidence base starts at the merge base of the
-SessionStart baseline and the head, then moves past `origin/dev` commits that
-reached the checkout by a pull or fast forward. The first matching row applies:
+`branch` when the task records one that resolves, otherwise the checkout's HEAD.
+The checkout is the session's worktree, or the primary repository checkout when
+that worktree no longer exists. The evidence base starts at the merge base of
+the SessionStart baseline and the head, then moves past `origin/dev` commits
+that reached the checkout by a pull or fast forward. The first matching row
+applies:
 
 | Condition at SessionEnd | Evidence base |
 | --- | --- |
@@ -131,7 +132,7 @@ reached the checkout by a pull or fast forward. The first matching row applies:
 | The merge base of `origin/dev` and head is the baseline or one of its ancestors | SessionStart baseline |
 | `origin/dev` commits after the baseline were pulled or fast forwarded in, and none has a `commit` entry in the checkout's HEAD reflog | Merge base of `origin/dev` and head |
 | `origin/dev` commits after the baseline include one with a `commit` entry in the checkout's HEAD reflog | SessionStart baseline |
-| Neither the baseline nor the merge base of `origin/dev` and head contains the other, for example after merging newer `origin/dev` into a branch | Merge base of `origin/dev` and head |
+| Neither the baseline nor the merge base of `origin/dev` and head is an ancestor of the other, for example after merging newer `origin/dev` into a branch | Merge base of `origin/dev` and head |
 
 A reflog entry counts when its subject starts with `commit`, which covers
 `commit`, `commit (amend)` and `commit (merge)`. The reflog decides only the
