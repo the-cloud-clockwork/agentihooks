@@ -380,10 +380,11 @@ def test_the_login_probe_runs_as_the_native_interactive_account(tmp_path):
     assert probes and probes[0].get(f"{envs.INTERACTIVE_PREFIX}native") == "1"
 
 
-def test_a_valid_login_skips_the_quota_transfer_of_a_master_handoff(tmp_path):
+def test_a_quota_handoff_moves_a_master_off_a_valid_login(tmp_path):
     from scripts.swarm.capacity import Account
 
-    runtime, config, seen = _login_runtime(tmp_path, [Account("claude", "token", "CLOSED", 0, 1, 1, 0)])
+    accounts = [Account("claude", "token", "CLOSED", 0, 1, 1, 0), Account("claude", "spare", "OPEN", 0, 90, 80, 6)]
+    runtime, config, seen = _login_runtime(tmp_path, accounts)
     config.lanes = {"master": {"agent": "claude"}}
     task = {
         "id": "master",
@@ -395,8 +396,8 @@ def test_a_valid_login_skips_the_quota_transfer_of_a_master_handoff(tmp_path):
         },
     }
     placed = runtime.spawn(config, "master", "agent", task)
-    assert placed.route_kind == "interactive"
-    assert seen[0][seen[0].index("--") + 1 :][:2] == ["--route", "interactive"]
+    assert placed.route_kind == "subscription"
+    assert seen[0][seen[0].index("--") + 1 :][:2] == ["--route", "spare"]
 
 
 def test_a_resumed_master_keeps_its_desired_route(tmp_path):

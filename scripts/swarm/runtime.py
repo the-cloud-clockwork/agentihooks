@@ -544,7 +544,9 @@ class HerdrRuntime:
             return self._saved_choice(saved, profile, quota_transfer, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
-    def _route_kind(self, lane, harness, task, slug):
+    def _route_kind(self, lane, harness, task, slug, quota_transfer=False):
+        if lane == MASTER and (quota_transfer or self._login_spent()):
+            return "subscription"
         if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
             return "interactive"
         explicit = task.get("route_kind")
@@ -555,6 +557,17 @@ class HerdrRuntime:
         except native_login.LoginError:
             return "subscription"
         return "interactive"
+
+    def _login_spent(self):
+        from hooks.config import QUOTA_HANDOFF_5H_PCT, QUOTA_HANDOFF_WEEK_PCT
+        from scripts.swarm import capacity, quota_handoff
+
+        login = master_claude_login.login_account()
+        hard = quota_handoff.Thresholds(QUOTA_HANDOFF_WEEK_PCT, QUOTA_HANDOFF_5H_PCT)
+        return any(
+            row.harness == "claude" and row.name == login and quota_handoff.trigger(row, hard)
+            for row in capacity.unreserved(getattr(self, "_quota_accounts", []))
+        )
 
     def spawn(self, config, lane, name, task):
         chosen, environ = config.lanes.get(lane, {}), dict(os.environ)
@@ -567,8 +580,9 @@ class HerdrRuntime:
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
-        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
+        harness = want or requested or saved.get("harness", "")
+        route_kind = self._route_kind(lane, harness, task, config.slug, quota_transfer)
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
             if saved and quota_transfer and route_kind != "interactive"
@@ -637,8 +651,9 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
-        route_kind = "interactive" if login else route_kind
+        login = (
+            master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent) and route_kind == "interactive"
+        )
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if route_kind == "interactive"
@@ -720,6 +735,7 @@ class HerdrRuntime:
         )
         front = front_door.holds(config.slug, agent.seat)
         login = master_claude_login.enabled(config.slug, agent.seat, agent.lane, agent.harness)
+        login = login and agent.route_kind == "interactive"
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
             if agent.route_kind == "interactive"
