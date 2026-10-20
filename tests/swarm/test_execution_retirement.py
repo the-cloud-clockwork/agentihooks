@@ -123,3 +123,22 @@ def test_dropping_a_missing_legacy_agent_does_not_end_someone_elses_execution(st
     assert store.execution("fixture", agent.execution_id) == agent
     assert store.agents("fixture") == [agent]
     assert store.redis.lrange(store.key("fixture", "history"), 0, -1) == []
+
+
+@pytest.mark.parametrize("live", [False, True])
+def test_tick_ends_a_working_orphan_only_when_its_process_is_gone(store, live):
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
+    agent = store.start_execution(
+        "sw", AgentRecord(store.next_name("sw", "eng"), "eng", "task", seat="eng-1@sw", started_at=1)
+    )
+    store.redis.hdel(store.key("sw", "agents"), agent.name)
+    runtime = FakeRuntime()
+    if live:
+        runtime.live.add(agent.name)
+    tick("sw", store, FakeLedger([]), runtime, 100000)
+    assert store.execution("sw", agent.execution_id) == replace(agent, state="working" if live else "ended")
+    assert agent.name not in {a.name for a in store.agents("sw")}
+    assert agent.name not in runtime.killed
