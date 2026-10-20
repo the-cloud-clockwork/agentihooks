@@ -1866,7 +1866,7 @@ detector; its red Proofs run reproduced a stripped identity master whose directi
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
 blocked. The prompt walks it through a fixed order: open an issue where the repo has issues, create a worktree, red test then green,
-pull request into `dev`, merge on green, then `done`. An agent that cannot finish pushes a draft pull request
+pull request into `dev`, queue on green checks with `agentihooks swarm <slug> merge queue <url>`, then `done`. An agent that cannot finish pushes a draft pull request
 and calls `block`. A finished agent is retired on the next tick and its pane closed.
 
 That order is for a task of kind `code` (the default) or `ci`. A task's kind (`ledger task add --kind`)
@@ -2000,6 +2000,8 @@ For example, from the worktree of a split task's second half, both of these merg
 gh pr merge --squash
 gh pr merge engineer-example-2 --squash --repo the-cloud-clockwork/agentihooks
 ```
+
+On a base with a merge queue the prod lockdown guard then refuses both, since the installed gh merges past the queue; `agentihooks swarm <id> merge queue <url>` is graded the same way and queues.
 
 The lookup runs only for a task whose intent record carries a split; a merge of an unsplit task reads nothing from GitHub at this step. Name the pull request URL in the merge to skip the lookup. `swarm done --pr <url>` and `ready` are not matched to a half: they read the task's latest verdict, and `done` verifies separately that every recorded half merged.
 
