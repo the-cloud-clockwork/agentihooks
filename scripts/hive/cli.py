@@ -162,7 +162,7 @@ def _registry(args: argparse.Namespace) -> None:
 def _daemon(command: str) -> int:
     from scripts.hive import daemon
 
-    actions = {"run": lambda: daemon.run(redis_client()), "install": daemon.install}
+    actions = {"run": lambda: daemon.run(redis_client), "install": daemon.install}
     result = actions[command]()
     return 1 if result is False else 0
 
