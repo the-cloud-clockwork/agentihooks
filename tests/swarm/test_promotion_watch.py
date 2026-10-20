@@ -980,6 +980,8 @@ def recorded_test_failure(
     tests=("tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api",),
     missing=True,
     messages=None,
+    steps=None,
+    sonar="sonar",
 ):
     found = [
         {
@@ -993,15 +995,20 @@ def recorded_test_failure(
     if missing:
         found.append(
             {
-                "name": "sonar",
+                "name": sonar,
                 "conclusion": "failure",
                 "check_run_url": "https://api.github.com/check-runs/sonar",
-                "steps": [{"name": "Wait for the coverage merge", "conclusion": "failure"}],
+                "steps": steps
+                if steps is not None
+                else [{"name": "Wait for the coverage merge", "conclusion": "failure"}],
             }
         )
 
     def run(argv, **kwargs):
         if argv[2].endswith("/logs"):
+            job_id = argv[2].split("/jobs/")[1].split("/")[0]
+            assert argv == ["gh", "api", f"repos/{{owner}}/{{repo}}/actions/jobs/{job_id}/logs"]
+            assert kwargs == {"cwd": "/repo", "capture_output": True, "text": True, "check": True, "timeout": 60}
             output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
             return subprocess.CompletedProcess(argv, 0, output, "")
         if "/annotations" in argv[2]:
@@ -1028,6 +1035,10 @@ def test_the_same_failing_test_in_two_recorded_runs_files_one_fixer_across_shard
     assert "sonar" in description
     assert "unit (3.11, 3)" in description
     assert "unit (3.12, 10)" in description
+    assert (
+        "failed in unit (3.11, 3), unit (3.12, 10); consequences: sonar: Wait for the coverage merge; Missing coverage for shard 10."
+        in description
+    )
     assert len(ledger.raised) == 1
     assert len(master_items(store)) == 1
 
@@ -1165,3 +1176,104 @@ def test_an_independent_failed_step_beside_a_failing_test_keeps_its_own_fixer(st
         in ledger.added[0][1]["description"]
     )
     assert "Upload durations" in ledger.added[1][1]["description"]
+
+
+def test_a_held_test_cause_ignores_changed_shard_count_and_missing_coverage_consequences(store):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.11", 1), ("3.12", 2)]))
+    refresh(store, ledger, recorded_test_failure(901, [("3.12", 5)], missing=False), NOW * 2)
+    assert len(ledger.added) == 1
+
+
+@pytest.mark.parametrize("sonar", ["sonar", "sonar (3.12)"])
+def test_both_failed_sonar_coverage_steps_fold_with_exit_annotations(store, sonar):
+    ledger = Ledger()
+    steps = [
+        {"name": "Set up job", "conclusion": "success"},
+        {"name": "Wait for the coverage merge", "conclusion": "failure"},
+        {"name": "Hold the Delivery L2 conditions", "conclusion": "failure"},
+    ]
+    messages = ["Process completed with exit code 2.", "Missing coverage for shard 2"]
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], messages=messages, steps=steps, sonar=sonar))
+    assert len(ledger.added) == 1
+    assert (
+        f"; consequences: {sonar}: Wait for the coverage merge; Hold the Delivery L2 conditions; Process completed with exit code 2.; Missing coverage for shard 2."
+        in ledger.added[0][1]["description"]
+    )
+
+
+@pytest.mark.parametrize(
+    "sonar,steps",
+    [
+        ("sonar", [{"name": "Upload coverage", "conclusion": "failure"}]),
+        ("sonar report", [{"name": "Wait for the coverage merge", "conclusion": "failure"}]),
+    ],
+)
+def test_missing_coverage_does_not_hide_a_different_sonar_step_or_job(store, sonar, steps):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], steps=steps, sonar=sonar))
+    assert len(ledger.added) == 2
+
+
+@pytest.mark.parametrize(
+    "name,steps",
+    [
+        ("unit smoke (3.12, 1)", FAILED_TESTS),
+        (
+            "unit (3.12, 1)",
+            [{"name": "Run tests", "conclusion": "success"}, {"name": "Upload durations", "conclusion": "failure"}],
+        ),
+    ],
+)
+def test_only_an_actual_failed_unit_test_step_reads_pytest_failure_logs(store, name, steps):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 1)], missing=False)
+
+    def run(argv, **kwargs):
+        assert not argv[2].endswith("/logs")
+        result = recorded(argv, **kwargs)
+        if "/jobs?" in argv[2]:
+            job = json.loads(result.stdout)
+            job.update(name=name, steps=steps)
+            result.stdout = json.dumps(job)
+        return result
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 1
+    assert f"failed in the job {name}" in ledger.added[0][1]["description"]
+
+
+def test_unit_progress_lines_without_a_summary_still_name_the_failed_test(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 1)], missing=False)
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            return subprocess.CompletedProcess(
+                argv, 0, "[gw0] FAILED tests/test_api.py::test_rule\nworker exited\n", ""
+            )
+        return recorded(argv, **kwargs)
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 1
+    assert "unit test tests/test_api.py::test_rule" in ledger.added[0][1]["description"]
+
+
+def test_multiple_matching_coverage_consumers_are_named_as_consequences(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 1)])
+
+    def run(argv, **kwargs):
+        result = recorded(argv, **kwargs)
+        if "/jobs?" in argv[2]:
+            jobs = [json.loads(line) for line in result.stdout.splitlines()]
+            jobs.append({**jobs[-1], "name": "sonar (3.12)"})
+            result.stdout = "\n".join(json.dumps(job) for job in jobs)
+        return result
+
+    refresh(store, ledger, run)
+    assert len(ledger.added) == 1
+    assert (
+        "; consequences: sonar: Wait for the coverage merge; Missing coverage for shard 1; sonar (3.12): Wait for the coverage merge; Missing coverage for shard 1."
+        in ledger.added[0][1]["description"]
+    )
