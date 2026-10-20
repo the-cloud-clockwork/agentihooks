@@ -81,8 +81,9 @@ def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
     except (OSError, subprocess.TimeoutExpired):
         return dict(NO_DEV)
     selector, _, subject = found.stdout.strip().partition("\t")
-    stamp = selector.rpartition("@{")[2].removesuffix("}")
-    if found.returncode or not stamp.isdigit():
+    _, brace, stamp = selector.rpartition("@{")
+    stamp = stamp.removesuffix("}")
+    if found.returncode or not brace or not stamp.isdigit():
         return dict(NO_DEV)
     return {"newest": subject, "merged_minutes": int(((now or time.time()) - int(stamp)) / 60)}
 
