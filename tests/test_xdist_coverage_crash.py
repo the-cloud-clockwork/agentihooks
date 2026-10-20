@@ -113,10 +113,12 @@ def test_a_run_whose_last_test_crashes_its_worker_ends(tmp_path, reruns, ledger)
         time.sleep(2)
         os.killpg(process.pid, signal.SIGKILL)
         output = f"timed out\n{processes.stdout}\n" + process.communicate()[0]
+    assert not output.startswith("timed out"), output
     assert "replacing crashed worker" in output, output
     assert "node down: Not properly terminated" in output, output
     assert not re.findall(r"^\[gw\d+\] .*\bERROR\b", output, re.M), output
     assert len(set(re.findall(r"^\[gw\d+\] .*\bPASSED (test_cases.py::test_ok\[\d+\])", output, re.M))) == 60, output
     data = coverage.CoverageData(str(project / ".coverage"))
     data.read()
-    assert len(data.measured_contexts()) > 60, output
+    contexts = {context.split("|")[0] for context in data.measured_contexts()}
+    assert {f"test_cases.py::test_ok[{n}]" for n in range(60)} <= contexts, sorted(contexts)
