@@ -150,6 +150,12 @@ def test_waits_split_started_jobs_from_jobs_that_never_started():
 def test_waits_group_by_the_sorted_distinct_label_set():
     mixed = run(23, [job(-900, -500, ("b", "a", "b")), job(-900, -700, ("a", "b"))])
     assert ci_measure.waits(mixed, "ci-runner-wait", NOW) == {("a", "b"): 400000}
+    assert ci_measure.samples("ci-runner-wait", [mixed], NOW) == {"a, b": [400000]}
+
+
+def test_an_old_subject_floors_the_longest_wait_to_whole_seconds():
+    goal = ci_measure.target("ci-runner-wait/24-1-117")
+    assert ci_measure.value(goal, run(24, [job(-1000, -499.5)]), NOW) == (500, None)
 
 
 def test_class_counts_compare_milliseconds_with_the_detector_threshold_and_take_the_low_median():

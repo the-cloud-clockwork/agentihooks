@@ -378,6 +378,21 @@ def test_one_run_attempt_allows_sixty_seconds_by_default(monkeypatch):
     assert [kwargs["timeout"] for _, kwargs in calls] == [0.5]
 
 
+def test_one_run_attempt_reads_a_short_job_list_twice_without_settling():
+    from scripts.doctor import ci_speed_read
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args[2])
+        body = {"total_count": 5, "jobs": [{"id": 1}]} if "/jobs" in args[2] else {"id": 1}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    with pytest.raises(RuntimeError, match="pagination ended before the full count"):
+        ci_speed_read.attempt(42, 1, run=run)
+    assert len(calls) == 3
+
+
 def test_the_default_request_budget_stops_after_sixty_calls():
     from scripts.doctor import ci_speed_read
 
