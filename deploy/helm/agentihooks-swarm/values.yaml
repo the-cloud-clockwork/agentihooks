@@ -206,7 +206,6 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
-  profile: engineer
   # Operator keys and the stable host key come from credentialSecret; publish the port outside this chart.
   ssh:
     enabled: false
