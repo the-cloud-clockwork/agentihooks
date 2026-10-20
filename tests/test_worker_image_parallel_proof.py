@@ -312,7 +312,7 @@ def test_a_late_codex_exit_prints_its_probe_and_latency(tmp_path, proof):
 
 
 @pytest.mark.parametrize("proof,command", [("startup", 'wait "$scan_pid"'), ("profiles", "scan.sh")])
-def test_a_failed_foreground_worker_step_names_its_command(tmp_path, proof, command):
+def test_a_failed_worker_step_names_its_command(tmp_path, proof, command):
     result, calls, state, output = run_proof(tmp_path, "scan", proof)
     assert result.returncode == 17, result.stderr
     message = next(line for line in result.stderr.splitlines() if line.startswith("worker proof failed at line"))
