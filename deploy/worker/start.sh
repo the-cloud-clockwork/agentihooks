@@ -27,11 +27,15 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
   unset code
 fi
 python3 - <<'PY'
-import os, re, shlex
+import os, re, shlex, sys
 from pathlib import Path
 
 keep = re.compile(r'^(AH_|AGENTIHOOKS_|HIVE_|SWARM_|BRAIN_|LANGFUSE_|MCP_|OPENBAO_|REDIS_|SSL_CERT_FILE)')
-lines = [f'{k}={shlex.quote(v)}' for k, v in sorted(os.environ.items()) if keep.match(k) and '\n' not in v]
+kept = {k: v for k, v in sorted(os.environ.items()) if keep.match(k) and '\n' not in v}
+for k in [k for k, v in kept.items() if "'" in v]:
+    print(f'worker-hive: {k} holds a single quote, which python-dotenv cannot read back; left out', file=sys.stderr)
+    del kept[k]
+lines = [f'{k}={shlex.quote(v)}' for k, v in kept.items()]
 target = Path(os.environ['AGENTIHOOKS_HOME']) / 'hive-container.env'
 target.write_text('\n'.join(lines) + '\n')
 target.chmod(0o600)
@@ -68,6 +72,9 @@ LogLevel VERBOSE
 EOF
   /usr/sbin/sshd -t -f "$ssh_state/sshd_config"
   /usr/sbin/sshd -D -e -f "$ssh_state/sshd_config" &
+  sshd_pid=$!
+  sleep 1
+  kill -0 "$sshd_pid"
 fi
 bundle=()
 [[ -d "$HIVE_REPO_ROOT/agentihooks-bundle" ]] && bundle=(--bundle "$HIVE_REPO_ROOT/agentihooks-bundle")

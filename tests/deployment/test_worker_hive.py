@@ -66,6 +66,7 @@ def startup(tmp_path, *, joined=False, refused=False, init_fails=False):
         "REFUSE_JOIN": "yes" if refused else "no",
         "REFUSE_INIT": "yes" if init_fails else "no",
         "AH_CC_TOKEN_fixture": "fixture $token (value)",
+        "AH_CC_TOKEN_quoted": "it's quoted",
     }
     result = subprocess.run(["bash", str(START)], env=env, capture_output=True, text=True)
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
@@ -93,6 +94,8 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
         check=True,
     )
     assert sourced.stdout == "fixture $token (value)"
+    assert "AH_CC_TOKEN_quoted" not in container_env.read_text()
+    assert "AH_CC_TOKEN_quoted holds a single quote" in result.stderr
 
 
 def test_failed_profile_init_never_runs_the_worker(tmp_path):
