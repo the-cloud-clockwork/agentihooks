@@ -5,7 +5,6 @@ from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, REPO, hive
 
-ALL_ROLES = ["master", "qa", "frontend", "eng", "ci", "plan", "dispatch"]
 OFF_HIVE_LANE = "unhived"
 
 
@@ -14,8 +13,8 @@ def two_hosts(setup, anton_agents=0):
 
     setup.store.redis.delete(registry.key("remote"))
     setup.store.redis.srem(registry.INDEX, "remote")
-    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10)
-    write_hive(setup, id="anton", ui="no", roles=["eng", "ci", "plan", "dispatch"], max_agents=2)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=10)
+    write_hive(setup, id="anton", ui="no", excluded=["master", "qa", "frontend"], max_agents=2)
     setup.store.redis.set(f"{registry.key('anton')}:sessions", f'{{"eng": {anton_agents}}}')
 
 
@@ -72,7 +71,7 @@ def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that
         setup,
         id="workstation",
         ui="yes",
-        roles=ALL_ROLES,
+        excluded=[],
         max_agents=10,
         slots=[
             {"harness": "claude", "account": "first", "kind": "subscription"},
@@ -82,7 +81,7 @@ def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that
         setup,
         id="anton",
         ui="no",
-        roles=["eng", "ci", "plan"],
+        excluded=["master", "qa", "frontend", "dispatch"],
         max_agents=2,
         slots=[
             {"harness": "claude", "account": "second", "kind": "subscription"},
@@ -119,7 +118,7 @@ MASTER_WAIT = "no live hive can run the master with interactive, subscription or
 
 
 @pytest.mark.parametrize("lacks", [{"repos": []}, {"slots": []}], ids=["repo", "slot"])
-def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_never_headless(setup, lacks):
+def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headless_hives_exclude_it(setup, lacks):
     from scripts.hive.placement import Wait
     from scripts.swarm import controller
     from scripts.swarm.profile_choice import ProfileDecision
@@ -127,8 +126,8 @@ def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_never_headl
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     two_hosts(setup)
-    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, **lacks)
-    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=10, **lacks)
+    write_hive(setup, id="anton", ui="no", excluded=["master"], max_agents=2)
     setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
     assert setup.launcher.select(setup.config, "master", {"id": "master"}) == Wait(MASTER_WAIT)
     routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
@@ -187,8 +186,8 @@ def test_every_master_seat_is_placed_by_the_ui_host_rule(setup, monkeypatch, sea
     assert fenced.placement_refusal("master", {"id": seat}) == ""
     assert fenced.runtime.router.placed_backend("master", {"id": seat}) == "hive"
     assert fenced.runtime.hive_launch.select(setup.config, "master", {"id": seat}).hive == "workstation"
-    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, repos=[])
-    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=10, repos=[])
+    write_hive(setup, id="anton", ui="no", excluded=["master"], max_agents=2)
     assert fenced.placement_refusal("master", {"id": seat}) == f"the workstation hive spawns master work: {MASTER_WAIT}"
 
 
@@ -200,7 +199,7 @@ def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypa
     from scripts.swarm.profile_choice import ProfileDecision
 
     two_hosts(setup)
-    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, repos=[])
+    write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=10, repos=[])
     setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
     fenced = hive_controller(setup)
     fenced.runtime.hive_launch.spawn = Mock()
@@ -244,8 +243,8 @@ def test_a_refused_hive_lane_stays_refused_when_the_workstation_herdr_answers(se
     fenced = hive_controller(setup)
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
     task = {"id": "task", "hive": "anton"}
-    assert fenced.placement_refusal("eng", task) == NO_UI_HIVE
-    with pytest.raises(controller.SwarmError, match=NO_UI_HIVE):
+    assert fenced.placement_refusal("eng", task) == "no live hive takes qa"
+    with pytest.raises(controller.SwarmError, match="no live hive takes qa"):
         fenced.spawn(setup.config, "eng", "eng name", task)
     setup.herdr.spawn.assert_not_called()
 
@@ -343,7 +342,8 @@ def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(set
 
 
 def host(hive_id: str, ui: str, **fields) -> dict:
-    return hive(hive_id, **{"ui": ui, "roles": ["eng"] if ui == "no" else ALL_ROLES, "max_agents": 4, **fields})
+    excluded = ["master", "qa", "frontend"] if ui == "no" else []
+    return hive(hive_id, **{"ui": ui, "excluded": excluded, "max_agents": 4, **fields})
 
 
 FALLBACKS = {
@@ -413,9 +413,11 @@ def test_a_fleet_without_a_ui_hive_keeps_the_plain_reason():
     )
 
 
-def test_ui_roles_take_only_ui_hives_even_when_a_headless_hive_lists_them():
-    hives = [host("ws", "yes", agents=3), host("anton", "no", roles=ALL_ROLES)]
+def test_ui_roles_prefer_ui_hives_and_fall_back_to_a_headless_hive_that_allows_them():
+    hives = [host("ws", "yes", agents=3), host("anton", "no", excluded=[])]
     for role in ("qa", "frontend", "master"):
         assert choose(role, "claude", "acct", "subscription", REPO, hives, NOW) == Choice("ws")
-    beside_a_master_pc = [host("pc", "yes", roles=["master"]), hives[1]]
-    assert choose("qa", "claude", "acct", "subscription", REPO, beside_a_master_pc, NOW) == Wait(NO_UI_HIVE)
+    beside_a_master_pc = [host("pc", "yes", excluded=["qa", "frontend", "eng", "ci", "plan", "dispatch"]), hives[1]]
+    assert choose("qa", "claude", "acct", "subscription", REPO, beside_a_master_pc, NOW) == Choice(
+        "anton", "no live UI hive takes qa"
+    )

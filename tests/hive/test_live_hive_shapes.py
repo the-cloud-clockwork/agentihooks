@@ -26,7 +26,6 @@ def root(**fields) -> dict:
     return hive(
         "root",
         **{
-            "roles": ["master", "eng", "ci", "plan", "dispatch"],
             "max_agents": 16,
             "slots": [
                 {"harness": "claude", "account": name, "kind": "subscription", "cap": 6} for name in ROOT_ACCOUNTS
@@ -44,7 +43,7 @@ def anton(**fields) -> dict:
         **{
             "ui": "no",
             "ephemeral": "yes",
-            "roles": ["eng"],
+            "excluded": ["master"],
             "max_agents": 1,
             "slots": [{"harness": "claude", "account": ANTON_ACCOUNT, "kind": "subscription", "cap": 0}],
             "interactive": {"claude": "", "codex": ""},

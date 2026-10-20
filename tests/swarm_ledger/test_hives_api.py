@@ -30,7 +30,7 @@ def store(monkeypatch):
         record = registry._default(hive_id)
         record.update(
             ui=ui,
-            roles=["master", "eng"] if ui == "yes" else ["eng"],
+            excluded=[] if ui == "yes" else ["master"],
             max_agents=4,
             heartbeat_at=beat,
             slots=[{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6}],
@@ -110,11 +110,11 @@ def test_a_read_lists_every_hive_with_liveness_slots_agents_and_its_master(store
 
     reply = dispatch(request("GET", token=None, slug=None), store)
     desk, pod = reply["data"]
-    assert (desk["id"], desk["live"], desk["ui"], desk["roles"], desk["max_agents"]) == (
+    assert (desk["id"], desk["live"], desk["ui"], desk["excluded"], desk["max_agents"]) == (
         "desk",
         True,
         "yes",
-        ["master", "eng"],
+        [],
         4,
     )
     assert desk["slots"] == [{"harness": "claude", "account": "luna", "kind": "subscription", "cap": 6, "agents": 2}]
@@ -146,12 +146,12 @@ def test_a_finished_master_or_one_without_a_hive_is_not_shown(store):
 def test_the_operator_writes_settings_through_the_hive_registry(store):
     from scripts.hive import registry
 
-    body = {"name": "Desk", "roles": ["master", "eng", "ci"], "prefer": {"eng": 2, "ci": 1}, "max_agents": 6}
+    body = {"name": "Desk", "excluded": ["qa"], "prefer": {"eng": 2, "ci": 1}, "max_agents": 6}
     reply = dispatch(request("PATCH", "/api/v1/hives/desk", body), store)
     stored = registry.show(store.redis, "desk")
-    assert (stored["name"], stored["roles"], stored["prefer"], stored["max_agents"]) == (
+    assert (stored["name"], stored["excluded"], stored["prefer"], stored["max_agents"]) == (
         "Desk",
-        ["master", "eng", "ci"],
+        ["qa"],
         {"eng": 2, "ci": 1},
         6,
     )
@@ -169,8 +169,8 @@ def test_flags_reach_the_registry_as_yes_or_no(store):
 def test_settings_become_registry_pairs():
     from scripts.swarm_ledger.api import hives
 
-    assert hives.pairs({"roles": ["eng", "ci"], "prefer": {"eng": 1}, "max_agents": 3, "ui": "no"}) == [
-        "roles=eng,ci",
+    assert hives.pairs({"excluded": ["eng", "ci"], "prefer": {"eng": 1}, "max_agents": 3, "ui": "no"}) == [
+        "excluded=eng,ci",
         "prefer=eng:1",
         "max-agents=3",
         "ui=no",
@@ -180,9 +180,9 @@ def test_settings_become_registry_pairs():
 @pytest.mark.parametrize(
     ("body", "message"),
     [
-        ({"roles": ["qa"]}, "role qa needs a UI, and this hive has ui=no"),
+        ({"prefer": {"master": 1}}, "prefer names master, a role this hive excludes"),
         ({"max_agents": 0}, "max-agents must be a positive whole number, not '0'"),
-        ({"prefer": {"ci": 1}}, "prefer names ci, a role this hive does not take"),
+        ({"excluded": ["bad name"]}, "excluded takes lane roles or profiles, not 'bad name'"),
     ],
 )
 def test_the_registry_refuses_settings_it_does_not_accept(store, body, message):
@@ -193,7 +193,9 @@ def test_the_registry_refuses_settings_it_does_not_accept(store, body, message):
     assert registry.show(store.redis, "pod") == before
 
 
-@pytest.mark.parametrize("body", [{}, {"color": "red"}, {"ui": "maybe"}, {"roles": ["boss"]}, {"max_agents": "3"}])
+@pytest.mark.parametrize(
+    "body", [{}, {"color": "red"}, {"ui": "maybe"}, {"roles": ["eng"]}, {"excluded": [""]}, {"max_agents": "3"}]
+)
 def test_the_schema_refuses_bodies_outside_the_settings(store, body):
     expected = (400, "schema_invalid", "Request does not match the resource schema")
     assert refusal(request("PATCH", "/api/v1/hives/pod", body), store) == expected

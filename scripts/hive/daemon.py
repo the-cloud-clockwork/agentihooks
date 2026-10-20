@@ -46,9 +46,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     key = registry.key(local_id)
     # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
+    legacy = redis.hexists(key, registry.LEGACY)
     with redis.pipeline() as pipe:
-        for field, value in registry._default(local_id).items():
-            pipe.hsetnx(key, field, registry._encode(field, value))
+        registry.seed(pipe, local_id, legacy)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["heartbeat_at"] = str(int(time.time() * 1000))
         pipe.hset(key, mapping=fields)

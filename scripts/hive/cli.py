@@ -147,8 +147,8 @@ def _list() -> None:
     now = now_ms()
     for record in registry.hives(redis_client()):
         state = "live" if registry.live(record, now) else "stale"
-        roles = ",".join(record["roles"])
-        print(f"{record['id']}\t{state}\tui={record['ui']}\troles={roles}\tmax-agents={record['max_agents']}")
+        excluded = ",".join(record["excluded"]) or "none"
+        print(f"{record['id']}\t{state}\tui={record['ui']}\tmax-agents={record['max_agents']}\texcluded={excluded}")
 
 
 def _registry(args: argparse.Namespace) -> None:

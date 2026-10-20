@@ -16,27 +16,30 @@ if TYPE_CHECKING:
     from redis import Redis
     from redis.client import Pipeline
 
-ROLES = ("master", "qa", "frontend", "eng", "ci", "plan", "dispatch")
 UI_ROLES = ("master", "qa", "frontend")
 LIVE_MS = 90_000
 HIVE_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,62}")
-JSON_FIELDS = {"roles": list, "prefer": dict, "harnesses": list, "slots": list, "interactive": dict, "repos": list}
+EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
+JSON_FIELDS = {"excluded": list, "prefer": dict, "harnesses": list, "slots": list, "interactive": dict, "repos": list}
 INT_FIELDS = ("max_agents", "heartbeat_at")
+LEGACY = "roles"
+UNSET = ("max_agents", "excluded")
 
 
 def key(hive_id: str) -> str:
     return f"{ROOT}:hive:{hive_id}"
 
 
-def _default(hive_id: str) -> dict:
+def _default(hive_id: str, ui: str = "no") -> dict:
+    headless = ui != "yes"
     return {
         "id": hive_id,
         "name": hive_id,
-        "ui": "no",
+        "ui": ui,
         "ephemeral": "no",
-        "roles": [],
+        "excluded": ["master"] if headless else [],
         "prefer": {},
-        "max_agents": 1,
+        "max_agents": 20 if headless else 10,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -64,12 +67,12 @@ def _count(setting: str, value: str) -> int:
     return int(value)
 
 
-def _roles(setting: str, value: str) -> list[str]:
-    roles = list(dict.fromkeys(role for role in value.split(",") if role))
-    for role in roles:
-        if role not in ROLES:
-            raise HiveError(f"unknown role {role}; roles are {', '.join(ROLES)}")
-    return roles
+def _excluded(setting: str, value: str) -> list[str]:
+    names = list(dict.fromkeys(name.strip() for name in value.split(",") if name.strip()))
+    for name in names:
+        if not EXCLUDED_NAME.fullmatch(name):
+            raise HiveError(f"{setting} takes lane roles or profiles, not {name!r}")
+    return names
 
 
 def _prefer(setting: str, value: str) -> dict[str, int]:
@@ -86,7 +89,7 @@ SETTINGS = {
     "name": ("name", _name),
     "ui": ("ui", _flag),
     "ephemeral": ("ephemeral", _flag),
-    "roles": ("roles", _roles),
+    "excluded": ("excluded", _excluded),
     "prefer": ("prefer", _prefer),
     "max-agents": ("max_agents", _count),
 }
@@ -104,12 +107,9 @@ def parse(pairs: list[str]) -> dict:
 
 
 def _check(record: dict) -> None:
-    for role in record["roles"]:
-        if role in UI_ROLES and record["ui"] == "no":
-            raise HiveError(f"role {role} needs a UI, and this hive has ui=no")
     for role in record["prefer"]:
-        if role not in record["roles"]:
-            raise HiveError(f"prefer names {role}, a role this hive does not take")
+        if role in record["excluded"]:
+            raise HiveError(f"prefer names {role}, a role this hive excludes")
 
 
 def _encode(field: str, value: object) -> str:
@@ -128,11 +128,30 @@ def _decode(hive_id: str, field: str, value: str) -> object:
         raise HiveError(f"hive {hive_id} holds an unreadable {field}: {value!r}") from exc
 
 
-def show(redis: "Redis", hive_id: str) -> dict | None:
+def _stored(redis: "Redis", hive_id: str) -> dict | None:
     stored = redis.hgetall(key(hive_id))
     if not stored:
         return None
-    return {**_default(hive_id), **{field: _decode(hive_id, field, value) for field, value in stored.items()}}
+    if LEGACY in stored:
+        stored = {field: value for field, value in stored.items() if field not in (LEGACY, *UNSET)}
+    return {field: _decode(hive_id, field, value) for field, value in stored.items()}
+
+
+def _settle(hive_id: str, record: dict) -> dict:
+    return {**_default(hive_id, record.get("ui", "no")), **record}
+
+
+def show(redis: "Redis", hive_id: str) -> dict | None:
+    stored = _stored(redis, hive_id)
+    return None if stored is None else _settle(hive_id, stored)
+
+
+def seed(pipe: "Pipeline", hive_id: str, legacy: bool) -> None:
+    if legacy:
+        pipe.hdel(key(hive_id), LEGACY, *UNSET)
+    for field, value in _default(hive_id).items():
+        if field not in UNSET:
+            pipe.hsetnx(key(hive_id), field, _encode(field, value))
 
 
 def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
@@ -143,11 +162,11 @@ def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
     fields = parse(pairs)
 
     def write(pipe: "Pipeline") -> dict:
-        record = {**(show(pipe, hive_id) or _default(hive_id)), **fields}
+        legacy = pipe.hexists(key(hive_id), LEGACY)
+        record = _settle(hive_id, {**(_stored(pipe, hive_id) or {}), **fields})
         _check(record)
         pipe.multi()
-        for field, value in _default(hive_id).items():
-            pipe.hsetnx(key(hive_id), field, _encode(field, value))
+        seed(pipe, hive_id, legacy)
         pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
         if hive_id != scope.member():
             pipe.sadd(INDEX, hive_id)

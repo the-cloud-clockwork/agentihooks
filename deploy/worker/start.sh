@@ -134,5 +134,5 @@ agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
-  "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"
+  "excluded=${HIVE_EXCLUDED-master}" "max-agents=${HIVE_MAX_AGENTS:-20}"
 exec agentihooks hive run
