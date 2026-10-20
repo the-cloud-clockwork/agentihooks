@@ -424,7 +424,7 @@ class RedisStore:
                 try:
                     pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
-                    executions = [a for a in self.execution_registry.records(slug, pipe) if a.name == name]
+                    executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
                     pipe.multi()
                     if previous:
                         row = json.loads(previous)
