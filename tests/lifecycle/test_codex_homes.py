@@ -178,6 +178,19 @@ def test_a_young_home_does_not_stop_the_sweep_of_older_ones(layout):
     assert not old.exists()
 
 
+def test_the_socket_probe_is_bounded_and_a_timeout_reads_as_not_listening(monkeypatch):
+    probe = Mock()
+    probe.__enter__ = Mock(return_value=probe)
+    probe.__exit__ = Mock(return_value=False)
+    probe.connect.side_effect = TimeoutError("timed out")
+    opened = Mock(return_value=probe)
+    monkeypatch.setattr(codex_homes.socket, "socket", opened)
+    assert codex_homes.listening(Path("/run/user/7/cx/a1/s")) is False
+    opened.assert_called_once_with(socket.AF_UNIX)
+    probe.settimeout.assert_called_once_with(1)
+    probe.connect.assert_called_once_with("/run/user/7/cx/a1/s")
+
+
 def test_a_listening_server_socket_marks_its_home_owned(layout):
     environ, _, _, state, proc = layout
     with tempfile.TemporaryDirectory(dir="/tmp") as short:
