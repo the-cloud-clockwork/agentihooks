@@ -241,13 +241,14 @@ Three settings decide the master count. The tick reads them in this order:
 |---|---|
 | `master-per=N\|hive` | Overrides the step: one seat per N working agents rounded up, or one per hive. |
 | `masters-step=N` (N of 1 or more) | One master plus the working agents divided by N, rounded down. |
-| `masters-step=0` and `master-per=off` | No scaling: the count stays the manual `masters=N` and the tick only fills empty seats. |
+| `masters-step=0` | With `master-per=off`, no scaling: the count stays the manual `masters=N` and the tick only fills empty seats. |
+| `master-per=off` | The default. Hands sizing back to `masters-step`. |
 
 `swarm create` stores `masters-step=12`. A swarm created before the setting existed loads `0`, so it keeps its manual
 count until the step is set. A stopping or stopped swarm never scales; the tick only fills its seats.
 
 ```bash
-# Read the step; the first status line ends with "masters step 12  scaling ..."
+# Read the step; the first status line includes "masters step 12"
 agentihooks swarm my-swarm status
 
 # One extra master per 8 working agents instead of per 12
@@ -267,8 +268,8 @@ so a rise launches its seat in the same command. On the ledger page the Capacity
 the engineer, CI and planner caps, with `−` and `+` buttons and a number field. Apply writes it through the same
 setting and accepts 0 to 50.
 
-Working agents are the swarm's agents outside the master lane that have not finished, whatever their lane. With
-the default step:
+Working agents are the swarm's agents outside the master lane that have not finished: engineer, CI and planner
+agents, and any other lane a template adds. With the default step:
 
 | Working agents | Wanted masters | Seats |
 |---|---|---|
@@ -282,9 +283,10 @@ With the default step, a swarm grows from 11 to 12 working agents. The next tick
 launches `master-2@<id>` and prints `master seats 1 to 2 for 12 working agents`. On the masters channel, every master
 reads `Master seats are now 2 for 12 working agents. Phase owners: ...`, naming the phases each seat owns.
 
-The swarm then falls back to 11 agents. The count stays at two while the cool off runs. A rise during the cool off,
-such as 10 agents back to 11, restarts it, and a return to 12 or more ends it. After ten minutes at a lower wanted
-count:
+The swarm then falls back to 11 agents. The count stays at two while the cool off runs. A wanted count at or above
+the seat count, here a return to 12 agents, ends the cool off. With three seats, a rise in the wanted count that stays
+below the seat count, such as 11 agents back to 12 (wanted one to two), restarts it. After ten minutes at a lower
+wanted count:
 
 1. The tick sends each extra backend master an inbox item from `swarm`: write a Handoff v2 for the lead master, run
    `agentihooks swarm <id> handoff <doc>` and stop. The tick prints
@@ -294,20 +296,22 @@ count:
    is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
 3. The seat count falls, phase owners rebalance and the masters channel announces the new owners.
 
-An extra seat above every occupied seat retires at once when the cool off ends, and the tick prints
+An extra backend seat with no live master in it or in any seat above it retires at once when the cool off ends,
+and the tick prints
 `closed empty master seat <seat>`. If the swarm grows again before a retiring master leaves, its retire request is
 withdrawn with the note `the swarm grew again, so seat <seat> stays`.
 
-Each retirement time and each new seat count are kept on the swarm's master seat record and written to the
-`master_scaling` metrics table as `master_retire_seconds` and `master_seat_count`.
+The seat count lives on the swarm's master seat record and each retirement time in a list beside it, the seconds
+from the retire request to the retirement. Both are written to the `master_scaling` metrics table as
+`master_seat_count` and `master_retire_seconds`.
 
-#### Troubleshooting
+#### Master scaling troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
 | A swarm with 30 agents keeps one master. | Its step is `0`: it was created before the setting, or a later `set masters=N` reset it. Run `set masters-step=12`. |
 | The count did not fall when agents finished. | The cool off has not run ten minutes at the lower count, or a rise restarted it. A count falls only past seats whose master has left; a master asked to hand off keeps its seat until it runs `swarm <id> handoff`. |
-| `master-2@<id>` still answers after the step changed. | A `master-per` rule overrides the step. Run `set master-per=off`. |
+| `master-2@<id>` still answers after the step changed. | The cool off has not run ten minutes, the asked master has not handed off yet, the swarm is stopping or stopped and so never shrinks, or a `master-per` rule overrides the step (run `set master-per=off`). |
 | The front door seat never retires. | That is by design: scaling only retires backend seats, highest number first. |
 
 ### Master inbox pool
