@@ -103,6 +103,7 @@ SECRETISH_NAME = re.compile(
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
 PROC_FILE = re.compile(r"/proc/[^/\s]+/\S+")
+CD_PROC = re.compile(r"\b(?:cd|pushd)\s+/+proc\b")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
 # --- bash lexing --------------------------------------------------------------
@@ -470,7 +471,7 @@ def env_dump_verdict(command):
 
 def proc_environ_verdict(command, cwd=""):
     flat = QUOTING.sub("", command)
-    in_proc = bool(PROC_DIR.match(cwd))
+    in_proc = bool(PROC_DIR.match(cwd) or CD_PROC.search(flat))
     if not (in_proc or PROC_DIR.search(flat)):
         return None
     leaves = [path.rsplit("/", 1)[-1] for path in PROC_FILE.findall(flat)]

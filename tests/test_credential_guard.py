@@ -534,6 +534,9 @@ PROC_ENVIRON_READS = [
     "a=envi; b=ron; cat /proc/1/$a$b",
     "cat /proc/1/$(printf envi)ron",
     "cat /proc/1/`printf envi`ron",
+    "cd /proc/1 && cat e*",
+    "cd /proc/1; cat *",
+    "pushd /proc/self && cat env*",
 ]
 
 PROC_ALLOWED = [
