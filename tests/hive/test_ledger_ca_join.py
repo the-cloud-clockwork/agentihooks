@@ -77,6 +77,18 @@ def test_join_writes_the_granted_ledger_ca_into_the_hive_home(tmp_path, monkeypa
     )
 
 
+def test_join_writes_the_ledger_ca_to_the_file_ledger_clients_are_told_to_trust(tmp_path, monkeypatch, capsys, pem):
+    _granted(monkeypatch, tmp_path, ledger_ca=pem)
+    monkeypatch.setenv("LEDGER_CA_FILE", str(tmp_path / "trusted" / "ca.pem"))
+
+    assert cli.main(["join", "https://hive.example", "the-code"]) == 0
+
+    assert (tmp_path / "trusted" / "ca.pem").read_text() == pem
+    assert not (tmp_path / "ledger-ca.pem").exists()
+    assert sorted(path.name for path in (tmp_path / "trusted").iterdir()) == ["ca.pem"]
+    assert capsys.readouterr().out.endswith(f"; the ledger CA is in {tmp_path / 'trusted' / 'ca.pem'}\n")
+
+
 @pytest.mark.parametrize("extra", [{}, {"ledger_ca": ""}, {"ledger_ca": "not a certificate"}, {"ledger_ca": 7}])
 def test_join_without_a_valid_ledger_ca_writes_none(tmp_path, monkeypatch, capsys, extra):
     _granted(monkeypatch, tmp_path, **extra)

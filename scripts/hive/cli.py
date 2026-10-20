@@ -48,7 +48,7 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
         )
     grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh")
     auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
-    ledger_ca.place(registry.home(environ), grant.get("ledger_ca"))
+    ledger_ca.place(registry.home(environ), grant.get("ledger_ca"), environ)
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
     return grant["id"]
 
