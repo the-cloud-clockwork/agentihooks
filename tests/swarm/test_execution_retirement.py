@@ -230,8 +230,9 @@ def test_a_remote_process_reported_after_the_live_snapshot_is_preserved(store):
     agent = started(store)
     store.redis.hdel(store.key("fixture", "agents"), agent.name)
     runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
-    with patch("scripts.hive.reports.host", return_value="remote"), patch(
-        "scripts.hive.reports.Reports.read", return_value={"names": [agent.name]}
+    with (
+        patch("scripts.hive.reports.host", return_value="remote"),
+        patch("scripts.hive.reports.Reports.read", return_value={"names": [agent.name]}),
     ):
         assert store.execution_registry.reconcile("fixture", runtime) == []
     assert store.execution("fixture", agent.execution_id) == agent
