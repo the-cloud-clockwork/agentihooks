@@ -556,7 +556,7 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
     monkeypatch.setattr(scope.subprocess, "run", run)
     assert scope.graded_green("abc") is expected
     api = ["gh", "api", "-X", "GET"]
-    shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
+    shards = scope.SHARDS
     listed = [
         *api,
         "repos/{owner}/{repo}/actions/workflows/test.yml/runs",
