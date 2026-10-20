@@ -217,7 +217,7 @@ def require_epoch(store: RedisStore, slug: str, epoch: int) -> None:
 
 
 @contextmanager
-def fencing(epoch: int) -> Iterator[None]:
+def fencing(epoch: int | None) -> Iterator[None]:
     token = EPOCH.set(epoch)
     try:
         yield
