@@ -155,7 +155,10 @@ def _uncovered_gaps(trace, waits, limit):
 
 def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
     found = []
+    unread = set(record.get("waits_unread", ()))
     for trace in record["traces"]:
+        if _agent(trace) in unread:
+            continue
         waits = record.get("waits", {}).get(_agent(trace), [])
         long = _uncovered_gaps(trace, waits, limits.turn_gap_minutes)
         if not long:
@@ -178,6 +181,33 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
             )
         )
     return found
+
+
+def gap_agents(record: dict, limits: Limits) -> list[str]:
+    return sorted(
+        {_agent(t) for t in record["traces"] if any(m > limits.turn_gap_minutes for _, _, m in _gaps(t))}
+    )
+
+
+def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
+    unread = record.get("waits_unread") or []
+    if not unread:
+        return []
+    return [
+        Finding(
+            "wait history partial",
+            record["slug"],
+            f"wait history of {len(unread)} agents with turn gaps over {limits.turn_gap_minutes} minutes "
+            "not read in budget",
+            (
+                "unread: " + ", ".join(unread[:5]),
+                "turn gap findings skip agents whose wait history was not read",
+                "each Doctor scan reads the wait history again within its budget",
+            ),
+            "every agent with a turn gap over the limit has its wait history read",
+            len(unread),
+        )
+    ]
 
 
 def untraced(record: dict, limits: Limits) -> list[Finding]:
@@ -440,6 +470,7 @@ def findings(record: dict, limits: Limits) -> list[Finding]:
         *tool_errors(record, limits),
         *task_cost(record, limits),
         *turn_gaps(record, limits),
+        *wait_coverage(record, limits),
         *untraced(record, limits),
         *active(record, limits),
         *reader(record, limits),

@@ -35,6 +35,7 @@ CACHE_DIR = "doctor-traces"
 class Budget:
     active_seconds: float = 15.0
     history_seconds: float = 45.0
+    wait_seconds: float = 15.0
     request_seconds: float = 7.0
     trace_pages: int = 20
     observation_pages: int = 20
@@ -188,6 +189,22 @@ def history(
         "unreadable": [f"trace {key} unreadable: {e['failed']}" for key, e in entries.items() if e.get("failed")],
     }
     return found, coverage, failures
+
+
+def waits(
+    read: Callable[[str], list[dict]],
+    names: list[str],
+    seconds: float,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[dict[str, list[dict]], list[str]]:
+    """Each named agent's wait history until the budget is spent; the agents left unread come back apart."""
+    deadline = clock() + seconds
+    found = {}
+    for name in names:
+        if clock() >= deadline:
+            break
+        found[name] = read(name)
+    return found, names[len(found) :]
 
 
 def sessions(tasks: list[dict], agents: list[dict]) -> list[dict]:
