@@ -251,6 +251,18 @@ def test_a_second_tick_does_not_overspawn(store):
     assert len(runtime.spawned) == 2
 
 
+class RefusingRuntime(FakeRuntime):
+    def placement_refusal(self, lane, task):
+        return "no headless hive for eng lists the repo /repo" if task.get("id") == "t1" else ""
+
+
+def test_a_placement_wait_is_logged_in_the_tick_output(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), RefusingRuntime()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert "task t1 waits: no headless hive for eng lists the repo /repo" in actions
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
+
+
 @pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])
 @pytest.mark.parametrize("pr_url, expected", [("", "claimed"), ("https://github.com/o/r/pull/1", "pr")])
 def test_a_live_owner_recovers_its_missing_lease_without_a_duplicate_launch(store, lost_ledger, pr_url, expected):

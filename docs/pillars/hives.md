@@ -51,6 +51,31 @@ agentihooks hive install          # user service that runs agentihooks hive run
 A Kubernetes worker pod joins the same way from its entrypoint; see
 [Worker hives in Kubernetes](#worker-hives-in-kubernetes).
 
+## Repos and checkouts
+
+Each heartbeat reports the repos the hive can work in. `hive run` scans one folder, `HIVE_REPO_ROOT`, default
+`~/dev`: every direct child that is a git checkout, and every checkout one level below a child that is not one.
+Worktrees count; their origin is read from the shared git directory.
+
+For every checkout the hive reports two names, so a task matches whichever form its swarm uses:
+
+- the absolute path, such as `/home/me/dev/agentihooks`;
+- the origin identity, the `origin` remote as lowercase `host/owner/name`, such as
+  `github.com/the-cloud-clockwork/agentihooks`. A checkout with no `origin` remote reports only its path.
+
+```bash
+# Workers keep their clones under /srv/repos instead of ~/dev
+HIVE_REPO_ROOT=/srv/repos agentihooks hive run
+
+# The repos the swarm sees for one hive
+agentihooks hive show lab-vm        # the "repos" list
+```
+
+Placement drops a hive whose list lacks the task's repo, with "no hive for `<role>` lists the repo `<repo>`"
+("no headless hive for ..." when only headless hives were tried).
+When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
+the first by path when it holds several. A repo given as a path launches in that path.
+
 ## Join service limits
 
 `agentihooks hive serve` answers `POST /hive/join` (a one time code for credentials) and `POST /hive/refresh` (a
@@ -335,6 +360,14 @@ that lists the repo. It is placed in two tiers, each tried in `prefer` order:
 
 A headless hive never runs the master, whatever its roles.
 
+A hive names a subscription slot by its `AH_CC_TOKEN_<slug>` slug; a hosted controller names the same account by
+its Secret key. The two may differ only in `_` against `-`, and master placement treats them as one account. A
+master on a hive is held to the session cap that hive reports for the account, not the hosted controller's cloud
+worker cap. The hive computes that cap from its own quota reading of the account, with the bands in
+[Claude account load balancing](load-balancing.md), and reports 0 while it has no fresh reading. When the
+reservations on the account already reach the cap, the launch is not started and reports "account reservation is
+full".
+
 ### Who writes placement
 
 A member's Redis user reads agent records and placement but never writes them. Only the controller and the ledger
@@ -599,6 +632,27 @@ Fencing stops a superseded agent or controller from acting after its replacement
 - **Ledger source.** Moving a workstation ledger into the hosted service with `--freeze` fences the source: its
   SQLite database refuses writes with "ledger moved to hosted service" and media writes answer 409.
 
+## Launches on a hive
+
+The controller hands a hive a launch order; the hive's own Redis user receives it, launches the agent and writes
+the acknowledgement the controller reads. What the order's payload carries and what the hive writes from it are in
+[Prompt and workspace transport](#prompt-and-workspace-transport).
+
+### Refusal causes
+
+A launch the hive cannot complete is acknowledged `failed` with a cause, and the controller records the launch as
+failed with "hive launch failed: `<cause>`".
+
+| Cause | Meaning |
+|---|---|
+| `identity` | The order does not match the admitted execution: generation, lane, task, harness, profile, account slot, route, target hive or state differ, the seat holds a newer execution, or the started agent reported a different harness, profile or account. |
+| `prompt` | The payload is missing, is not the order's task, or carries no opening prompt or a digest that does not match it. |
+| `stale_epoch` | The order's controller epoch is older than the current controller lease when the hive takes it. |
+| `refused` | The controller epoch moved on between the order check and the launch or right after it, or the launch raised a swarm error. |
+| `expired` | The order expired before the hive took it, or the agent started after the expiry; the hive stops such an agent. |
+| `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
+| `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
+
 ## Hive placement for one swarm on a local machine
 
 A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
@@ -787,6 +841,14 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 | An edit shows `prefer names qa, a role this hive does not take` | `prefer` named a role missing from `roles`. | Add the role first, then the rank. |
 | move master stays off | The hive is quiet, the master is already there, or a control is pending. | Wait for the hive's heartbeat or the pending control. |
 | A hive stays `quiet` | `hive run` is not publishing. | `systemctl --user status agentihooks-hive` on that machine. |
+
+## Troubleshooting
+
+| Symptom | Check | Fix |
+|---|---|---|
+| A launch waits with "no hive for `<role>` lists the repo `<repo>`" | `agentihooks hive show <id>`, the `repos` list | Clone the repo under `HIVE_REPO_ROOT` with an `origin` remote matching the swarm's repo name, or point `HIVE_REPO_ROOT` at the clones. |
+| A launch waits with "no live hive takes" a role | `agentihooks hive list`: `stale` hives, roles | Restart `agentihooks hive run` (`agentihooks hive install` keeps it running), or add the role with `agentihooks hive set`. |
+| A master launch on a hive reports "account reservation is full" | `agentihooks hive show <id>`: the slot's `cap` for the account | A `cap` of 0 means the hive has no fresh quota reading for the account; otherwise end a session on that account or wait for its five hour window to recover. |
 
 ## Related pages
 
