@@ -187,11 +187,9 @@ def test_the_probe_waits_only_the_probe_window(monkeypatch):
     assert seen == [("https://hosted.example/healthz", hosted_probe.PROBE_S)]
 
 
-def test_the_probe_answer_lives_in_the_agentihooks_home(monkeypatch, tmp_path):
-    monkeypatch.setenv("HOME", str(tmp_path))
-
+def test_the_probe_answer_lives_in_the_agentihooks_home():
     assert PROBE_FILE({"AGENTIHOOKS_HOME": "/srv/hooks"}) == Path("/srv/hooks/hosted-ledger-probe.json")
-    assert PROBE_FILE({}) == tmp_path / ".agentihooks" / "hosted-ledger-probe.json"
+    assert PROBE_FILE({}) == Path.home() / ".agentihooks" / "hosted-ledger-probe.json"
 
 
 def test_a_probe_answer_exactly_one_window_old_is_checked_again(answering, tmp_path, monkeypatch):
