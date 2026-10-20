@@ -1,5 +1,6 @@
 import os
 import re
+import signal
 import subprocess
 import sys
 import textwrap
@@ -59,14 +60,17 @@ def test_one_crashed_worker_costs_one_test(tmp_path, variant):
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_", "PYTEST_"))}
     env["PYTHONPATH"] = os.pathsep.join([str(tmp_path / "site"), str(ROOT)])
     env["PROBE_AUDIT_LOG"] = str(log)
-    result = subprocess.run(
-        [sys.executable, "-m", "pytest", *args, "test_cases.py"],
-        cwd=project,
-        env=env,
-        capture_output=True,
-        text=True,
-        timeout=300,
+    command = [sys.executable, "-m", "pytest", *args, "-o", "faulthandler_timeout=40", "test_cases.py"]
+    process = subprocess.Popen(
+        command, cwd=project, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
     )
+    try:
+        out, err = process.communicate(timeout=120)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        out, err = process.communicate()
+        err = "TIMED OUT\n" + err
+    result = subprocess.CompletedProcess(command, process.returncode, out, err)
     errors = len(re.findall(r"^\[gw\d+\] .*\bERROR\b", result.stdout, re.M))
     files = sorted(path.name for path in project.glob(".coverage*"))
     report = textwrap.dedent(f"""
