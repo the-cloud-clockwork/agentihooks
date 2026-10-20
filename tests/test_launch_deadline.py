@@ -83,6 +83,7 @@ def _spend(now, seconds, result=True):
 def test_a_wait_after_the_deadline_is_spent_gets_no_time_and_keeps_the_first_wait_cut(monkeypatch):
     now = _clock(monkeypatch)
     deadline = init_agent.LaunchDeadline(100.0)
+    assert deadline.cut == ""
     assert deadline.run("first", 60.0, _spend(now, 60.0)) == (60.0, True)
     assert deadline.cut == ""
     assert deadline.run("second", 60.0, _spend(now, 50.0)) == (40.0, True)
@@ -107,6 +108,8 @@ def test_a_wait_repeated_by_name_adds_up_its_time(monkeypatch):
     now = _clock(monkeypatch)
     deadline = init_agent.LaunchDeadline(10.0)
     deadline.run("ready", 4.0, _spend(now, 4.0))
+    deadline.run("ready", 3.0, _spend(now, 3.0))
+    assert deadline.spent == {"ready": 7.0}
 
     def fail(granted):
         now[0] += granted
