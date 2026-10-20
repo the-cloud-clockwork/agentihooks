@@ -1397,6 +1397,8 @@ def test_a_watcher_dequeue_writes_its_identity_into_the_queue_journal(env, monke
 
 def test_a_transient_unmergeable_head_is_requeued_unchanged_after_a_timer_restart(merging):
     assert dequeued_transient(merging) == [f"dequeued {URL} for task t1: {ready.TRANSIENT}"]
+    assert merging.ledger.comments == [("t1", ready.DEQUEUED.format(url=URL), "swarm")]
+    assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": ready.RECOVER, "head": HEAD}
     assert merging.rows["t1"]["state"] == "pr" and merging.rows["t1"]["claimed_by"] == AGENT
     assert merging.store.claimant("sw", "t1") == AGENT
     merging.pulls[URL] = GREEN
@@ -1409,7 +1411,8 @@ def test_a_transient_unmergeable_head_is_requeued_unchanged_after_a_timer_restar
     assert merging.queued == [("queue", URL), ("dequeue", URL), ("queue", URL)]
     assert ready.record(merging.store, "sw", "t1")["on"] == {"kind": "merge", "target": URL}
     assert merging.rows["t1"]["state"] == "pr" and merging.rows["t1"]["claimed_by"] == AGENT
-    assert any(text == ready.RECOVERED.format(url=URL) for _, text, _ in merging.ledger.comments)
+    assert ready.record(merging.store, "sw", "t1")["queued_at"] == NOW + 60_000 + ready.BACKOFF_MS
+    assert merging.ledger.comments[-1] == ("t1", ready.RECOVERED.format(url=URL), "swarm")
     assert merging.ledger.alerts == []
 
 
@@ -1427,7 +1430,7 @@ def test_a_transient_unmergeable_head_waits_with_a_bounded_backoff_then_reopens(
     assert merging.run(now)[0] == f"task t1 reopened, {URL} {ready.STUCK}"
     assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
     assert merging.queued == [("queue", URL), ("dequeue", URL)]
-    assert [source for source, _ in merging.ledger.alerts] == [ready.ALERT_SOURCE]
+    assert merging.ledger.alerts == [(ready.ALERT_SOURCE, ready.GAVE_UP.format(url=URL, task="t1"))]
 
 
 def test_a_failed_requeue_raises_a_ledger_alert(merging):
@@ -1461,6 +1464,24 @@ def test_a_new_head_after_a_transient_dequeue_reopens_the_task(merging):
     merging.pulls[URL] = PullRequest("OPEN", None, 1, False, True, head="b" * 40)
     due = ready.record(merging.store, "sw", "t1")["retry_at"]
     assert merging.run(due)[0] == f"task t1 reopened, {URL} {ready.MOVED}"
+    assert merging.queued == [("queue", URL), ("dequeue", URL)]
+
+
+@pytest.mark.parametrize(
+    "fresh, cause",
+    [
+        (PullRequest("OPEN", None, 1, True, True, head=HEAD, failed=("unit",)), "has red checks"),
+        (
+            PullRequest("OPEN", None, 1, False, True, head=HEAD, mergeable="CONFLICTING", merge_problem="conflicts"),
+            "conflicts",
+        ),
+    ],
+)
+def test_a_fresh_read_at_the_retry_that_shows_a_repair_need_reopens_the_task(merging, fresh, cause):
+    dequeued_transient(merging)
+    due = ready.record(merging.store, "sw", "t1")["retry_at"]
+    assert watcher(merging, {URL: GREEN}.get, {URL: fresh}.get, due)[0] == f"task t1 reopened, {URL} {cause}"
+    assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
     assert merging.queued == [("queue", URL), ("dequeue", URL)]
 
 

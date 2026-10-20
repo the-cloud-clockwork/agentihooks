@@ -232,7 +232,7 @@ def _advance(run, rows, row, found):
     if pull.merge_problem:
         return _unmergeable(run, row, found, pull)
     if held["kind"] == RECOVER:
-        return _recover(run, row, found, pull)
+        return _recover(run, row, found)
     if held["kind"] == "checks":
         if pull.mergeable == "CONFLICTING":
             return _reopen(run, row, found, CONFLICT)
@@ -368,7 +368,7 @@ def _unmergeable(run, row, found, pull):
         if tries >= QUEUE_TRIES:
             run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=url, task=task_id))
             return _reopen(run, row, found, STUCK)
-        found["on"] = {"kind": RECOVER, "target": url, "head": fresh.head or found["head"]}
+        found["on"] = {"kind": RECOVER, "head": fresh.head}
         found["retry_at"], found["recoveries"] = run.now_ms + BACKOFF_MS * 2**tries, tries
         save(run.store, run.slug, task_id, found)
         run.ledger.comment(run.slug, task_id, DEQUEUED.format(url=url), by="swarm")
@@ -376,26 +376,19 @@ def _unmergeable(run, row, found, pull):
     return _reopen(run, row, found, fresh.merge_problem)
 
 
-def _recover(run, row, found, pull):
-    task_id, url, head = row["id"], found["url"], found["on"]["head"]
-    if pull.head != head:
-        return _reopen(run, row, found, MOVED)
+def _recover(run, row, found):
+    task_id, url = row["id"], found["url"]
     if run.now_ms < found["retry_at"]:
         return []
     fresh = run.reread(url)
     if fresh is None:
         return []
-    if fresh.head != head:
+    if fresh.head != found["on"]["head"]:
         return _reopen(run, row, found, MOVED)
-    if fresh.mergeable == "CONFLICTING" or fresh.red:
-        steps = ", ".join(fresh.failed)
-        return _reopen(
-            run, row, found, fresh.merge_problem or (f"has red checks: {steps}" if steps else "has red checks")
-        )
-    if fresh.queued:
-        found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
-        save(run.store, run.slug, task_id, found)
-        return []
+    if fresh.mergeable == "CONFLICTING":
+        return _reopen(run, row, found, fresh.merge_problem)
+    if fresh.red:
+        return _reopen(run, row, found, "has red checks")
     if fresh.merge_problem or not fresh.resolved:
         return _retry(run, row, found, f"{url} for task {task_id} is not yet mergeable and green; it retries later")
     try:
@@ -404,14 +397,14 @@ def _recover(run, row, found, pull):
         run.ledger.raise_alert(run.slug, ALERT_SOURCE, REQUEUE_FAILED.format(url=url, task=task_id, why=exc))
         return _retry(run, row, found, f"could not requeue {url} for task {task_id}: {exc}")
     found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
-    found["recoveries"] = found.get("recoveries", 0) + 1
+    found["recoveries"] += 1
     save(run.store, run.slug, task_id, found)
     run.ledger.comment(run.slug, task_id, RECOVERED.format(url=url), by="swarm")
     return [f"queued {url} for task {task_id}"]
 
 
 def _retry(run, row, found, action):
-    tries = found.get("recoveries", 0) + 1
+    tries = found["recoveries"] + 1
     if tries >= QUEUE_TRIES:
         run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=found["url"], task=row["id"]))
         return _reopen(run, row, found, STUCK)
