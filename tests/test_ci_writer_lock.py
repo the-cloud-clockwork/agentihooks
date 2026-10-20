@@ -23,7 +23,7 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     assert lookup["with"]["job"] == "writer-lock"
     scenario = jobs["scenario"]
     assert scenario["needs"] == ["inputs"]
-    assert scenario["if"] == "needs.inputs.outputs.hit != 'true'"
+    assert scenario["if"] == "github.event_name == 'workflow_dispatch' || needs.inputs.outputs.hit != 'true'"
     assert scenario["services"]["postgres"]["image"] == "public.ecr.aws/docker/library/postgres:16"
     steps = scenario["steps"]
     assert "tests/swarm_ledger/test_postgres_writer_lock.py" in steps[-2]["run"]
@@ -36,7 +36,8 @@ def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
 def test_writer_lock_key_covers_the_scenario_repository_and_install_inputs():
     entry = json.loads((ROOT / ".github/input-keys.json").read_text())["writer-lock"]
     assert {
-        "scripts/swarm_ledger",
+        "scripts",
+        "profiles",
         "hooks",
         "tests/conftest.py",
         "tests/swarm_ledger",

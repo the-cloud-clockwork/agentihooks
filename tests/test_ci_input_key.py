@@ -232,7 +232,7 @@ def test_a_keyed_job_runs_its_heavy_steps_only_on_a_miss_and_saves_only_after_th
         assert keyed["outputs"]["key"] == "${{ steps.key.outputs.key }}"
         [scenario] = [definition for definition in jobs.values() if definition.get("needs") == [name]]
         assert "services" not in keyed
-        assert scenario["if"] == f"needs.{name}.outputs.hit != 'true'"
+        assert scenario["if"] == f"github.event_name == 'workflow_dispatch' || needs.{name}.outputs.hit != 'true'"
         [save] = [step for step in scenario["steps"] if step.get("uses") == _SAVE]
         assert scenario["steps"][-1] is save
         assert save["if"] == "github.event_name == 'push' || github.event_name == 'workflow_dispatch'"

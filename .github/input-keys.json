@@ -1,6 +1,6 @@
 {
   "writer-lock": {
-    "paths": ["hooks", "scripts/swarm_ledger", "tests/__init__.py", "tests/conftest.py", "tests/swarm_ledger", "pyproject.toml", ".github/test-excludes.txt", ".github/workflows/writer-lock.yml"],
+    "paths": ["hooks", "scripts", "profiles", "tests/__init__.py", "tests/conftest.py", "tests/swarm_ledger", "pyproject.toml", ".github/test-excludes.txt", ".github/workflows/writer-lock.yml"],
     "tools": ["python 3.12", "uv 0.12.23", "postgres 16"]
   },
   "brain-smoke": {
