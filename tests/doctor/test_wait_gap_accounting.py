@@ -62,6 +62,7 @@ def test_recorded_wait_covers_the_incident_despite_the_wake_margin(kind):
     [
         ([{"at": 120_000, "until": 12_480_000}], None),
         ([{"at": 1_860_000, "until": 3_660_000}], 178),
+        ([{"at": 2_460_000, "until": 3_660_000}, {"at": 6_060_000, "until": 12_540_000}], 80),
         ([{"at": 0, "until": 1}], 208),
         ([{"at": 12_540_000, "until": 13_000_000}], 208),
         ([{"at": 60_000, "until": 12_540_000}, {"at": 120_000, "until": 180_000}], None),

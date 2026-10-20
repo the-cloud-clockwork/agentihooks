@@ -36,6 +36,7 @@ def test_uncovered_gap_names_its_bounds_and_wait_result(waits, minutes):
     [finding] = traces.turn_gaps(record(waits), traces.Limits())
     assert finding.measure == minutes
     assert finding.summary == "1 gaps between turns with over 30 minutes outside declared waits"
+    assert finding.threshold == "over 30 minutes between turns outside declared waits"
     assert f"turn 1 to turn 2: {minutes} minutes outside declared waits; gap 60000 to 3660000" in finding.evidence
 
 
