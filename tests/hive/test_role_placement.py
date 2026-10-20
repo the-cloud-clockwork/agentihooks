@@ -223,9 +223,9 @@ def test_only_master_work_moves_to_the_workstation_herdr_server(setup, monkeypat
     two_hosts(setup)
     fenced = hive_controller(setup)
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
-    assert fenced.placement_refusal("dispatch", {"id": "dispatch"}) == "the workstation hive spawns dispatch work"
-    with pytest.raises(controller.SwarmError, match="the workstation hive spawns dispatch work"):
-        fenced.spawn(setup.config, "dispatch", "dispatch name", {"id": "dispatch"})
+    assert fenced.placement_refusal("doctor", {"id": "doctor"}) == "the workstation hive spawns doctor work"
+    with pytest.raises(controller.SwarmError, match="the workstation hive spawns doctor work"):
+        fenced.spawn(setup.config, "doctor", "doctor name", {"id": "doctor"})
     setup.herdr.spawn.assert_not_called()
 
 
@@ -303,8 +303,8 @@ def test_a_non_hive_lane_spawns_through_the_original_runtime_unless_pinned_to_a_
     original.spawn.return_value = "original runtime"
     fenced.runtime.original_runtime = original
     fenced.runtime.spawn = Mock(return_value="hive runtime")
-    assert fenced.placement_refusal("dispatch", task) == ""
-    assert fenced.spawn(setup.config, "dispatch", "dispatch name", task) == placed
+    assert fenced.placement_refusal("doctor", task) == ""
+    assert fenced.spawn(setup.config, "doctor", "doctor name", task) == placed
 
 
 def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(setup):
