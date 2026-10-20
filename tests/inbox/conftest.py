@@ -11,6 +11,8 @@ def mcp_sdk():
     import mcp.server.stdio  # noqa: F401
     import mcp.shared.message  # noqa: F401
 
+    import tests.inbox.test_channel_server  # noqa: F401
+
     yield
 
 

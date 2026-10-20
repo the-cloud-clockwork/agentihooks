@@ -70,4 +70,4 @@ def test_the_channel_reconnect_alarm_is_armed_only_after_the_sdk_is_loaded():
 
 def test_a_slow_cold_fakeredis_import_is_not_charged_to_the_reconnect_alarm():
     report, output = _probe(PLANTED_DELAY="6")
-    assert report["code"] == 0, output
+    assert report == {"code": 0, "armed": [{"stdio": True, "message": True, "fakeredis": True}]}, output
