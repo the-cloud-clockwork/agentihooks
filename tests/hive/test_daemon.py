@@ -110,9 +110,12 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 0)
     monkeypatch.setattr(daemon.time, "time", lambda: 50)
 
+    waits = []
+
     def sleep(seconds):
         events.append(seconds)
-        if events.count(15) == 2:
+        waits.append(seconds)
+        if len(waits) == 2:
             raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
