@@ -40,6 +40,7 @@ def test_planted_fault_an_item_left_open_past_its_window_is_raised():
     planted["history"] = planted["history"][:1]
     sent = planted["created_at"]
     assert inbox.past_window(items, sent + WINDOW - 1, WINDOW) == []
+    assert [f.subject for f in inbox.past_window(items, sent + WINDOW, WINDOW)] == [planted["id"]]
     [found] = inbox.past_window(items, sent + 3 * WINDOW, WINDOW)
     assert found.id == f"inbox-past-window/{planted['id']}"
     assert found.measure == 15
