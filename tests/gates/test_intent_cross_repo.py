@@ -262,6 +262,7 @@ def test_named_pulls_skip_links_inside_the_generated_parent_intent_section():
     inside = f"{intent.START}\n## Parent intent\n\nSee {THERE} and o/kernel#3.\n{intent.END}"
     named = intent.named_pulls(task(), f"Binding https://github.com/o/bridge/pull/7.\n\n{inside}")
     assert named == ["https://github.com/o/bridge/pull/7"]
+    assert intent.named_pulls(task(), f"Binding o/bridge{inside}#7.") == ["https://github.com/o/bridge/pull/7"]
     assert intent.named_pulls(task(description=f"Gate {THERE}."), inside) == [THERE]
 
 
