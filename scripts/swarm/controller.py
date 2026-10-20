@@ -91,7 +91,7 @@ class FencedRuntime:
         return "" if _to_workstation(lane, refused) else refused
 
     def _refusal(self, lane: str, task: dict) -> str:
-        task = {"id": "master", **task} if lane == "master" else task
+        task = _master_task(lane, task)
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
@@ -127,7 +127,7 @@ class FencedRuntime:
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
-        task = {"id": "master", **task} if lane == "master" else task
+        task = _master_task(lane, task)
         refused = self._refusal(lane, task)
         workstation = _to_workstation(lane, refused)
         if refused and not workstation:
@@ -152,8 +152,12 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
 
 
 def _to_workstation(lane: str, refused: str) -> bool:
-    left = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
-    return lane == "master" and left and _workstation_herdr()
+    fallback_refusal = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
+    return lane == "master" and fallback_refusal and _workstation_herdr()
+
+
+def _master_task(lane: str, task: dict) -> dict:
+    return {"id": "master", **task} if lane == "master" else task
 
 
 def _workstation_herdr() -> bool:
