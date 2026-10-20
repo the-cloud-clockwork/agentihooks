@@ -75,6 +75,14 @@ def test_dry_run_reports_orphans_and_leaves_them(layout):
     assert not (state / codex_homes.LOG).exists()
 
 
+def test_a_missing_legacy_root_still_sweeps_the_current_root(layout):
+    environ, legacy, current, state, proc = layout
+    legacy.rmdir()
+    kept = plant(current, "14812a3b04ea431c")
+    result = codex_homes.sweep_codex_homes(later(), state, proc=proc, environ=environ)
+    assert [item["path"] for item in result] == [str(kept)]
+
+
 def test_a_home_younger_than_the_settle_window_is_left_alone(layout):
     environ, legacy, _, state, proc = layout
     young = plant(legacy, "69aede3172ac4d86")
