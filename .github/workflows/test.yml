@@ -2404,7 +2404,7 @@ jobs:
       - name: Refresh measured durations
         run: |
           python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5
-          test -s .test_durations
+          test -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }
 
       - name: Publish merged durations
         uses: actions/upload-artifact@v4
