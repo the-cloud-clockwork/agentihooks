@@ -77,7 +77,8 @@ run only when the operator's own prompt this turn, typed
 in your terminal, says `open pane` (or `open a pane`, `open the pane`); a
 PreToolUse guard denies them otherwise; the quota handoff directive's own
 `init-agent --handoff` with its handoff document passes only while the quota
-policy has that handoff due. A step only the operator can do goes to
+policy has that handoff due, and never in a swarm session, which hands off
+through its seat with `swarm <slug> handoff DOC --reason quota`. A step only the operator can do goes to
 Priorities in a swarm or ledger session, or is written in your own terminal as
 a command for him to run. Reading, listing and closing panes stay allowed.
 
