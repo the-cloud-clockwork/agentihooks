@@ -797,7 +797,7 @@ def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
     assert download["with"] == {"pattern": "durations-3.*", "path": "~/durations-samples/${{ github.run_id }}"}
     assert (
         refresh["run"]
-        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations\n'
+        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }\n'
     )
     assert "env" not in refresh
     assert save["uses"].startswith("actions/cache/save@")
@@ -862,6 +862,13 @@ def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypa
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     with pytest.raises(SystemExit, match="run 12 kept no durations"):
         refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+
+
+def test_refresh_durations_names_missing_shards_from_the_push_unit_matrix():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    assert matrix["python-version"] == list(refresh_durations.VERSIONS)
+    assert matrix["shard"] == list(range(1, refresh_durations.SHARDS + 1))
 
 
 def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):

@@ -206,6 +206,7 @@ SLUG_RE = re.compile(r"^[a-z][a-z0-9-]{0,47}$")
 ONLY_MASTER_CANON = "only the master or the operator makes a learned note canon"
 ONLY_MASTER_RETIRE = "only the master or the operator retires a learned note"
 PARKED_NEXT = "stop now; the task waits on its branch"
+CONTROLLER_TICKS = "the controller tick spawns and reaps agents"
 READ_ONLY_PARKED_NEXT = "stop now; the task waits on its dependencies and the next engineer continues it"
 CLOSE_ASK = (
     "The operator pressed Close on the ledger page. Write one short paragraph in plain words on where the work "
@@ -234,6 +235,9 @@ def _publish_tick_status(store, slug, doc):
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
+    deployment = os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL)
+    if deployment != controller.LOCAL and not scheduled:
+        return [CONTROLLER_TICKS]
     tick_stop.check()
     ledger = ledger or LedgerClient()
     outbox.flush(InboxStore(store.redis))
