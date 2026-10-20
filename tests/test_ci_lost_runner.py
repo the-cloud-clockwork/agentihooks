@@ -353,6 +353,34 @@ def test_a_cancel_refused_because_the_run_completed_is_left_alone(monkeypatch, n
     }
 
 
+@pytest.mark.parametrize("conclusion,action", [("cancelled", "rerun"), ("success", "none")])
+def test_a_cancel_error_records_completion_seen_on_the_followup_read(monkeypatch, no_sleep, conclusion, action):
+    class Clock(datetime):
+        @classmethod
+        def now(cls, tz):
+            assert tz is UTC
+            return datetime.now(tz)
+
+    monkeypatch.setattr(ci_lost_runner, "datetime", Clock)
+    refused_cancel(monkeypatch, {**RUN, "status": "completed", "conclusion": conclusion})
+    record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)
+    assert record["action"] == action
+    assert set(record) == {
+        "run",
+        "attempt",
+        "action",
+        "reason",
+        "detected_at",
+        "cancel_requested_at",
+        "force_cancel_requested_at",
+        "completed_observed_at",
+    }
+    assert record["force_cancel_requested_at"] is None
+    completed = datetime.fromisoformat(record["completed_observed_at"])
+    assert completed.utcoffset() == timedelta(0)
+    assert datetime.fromisoformat(record["cancel_requested_at"]) <= completed
+
+
 def test_a_cancel_refused_on_an_open_run_keeps_its_timestamps(monkeypatch, no_sleep):
     refused_cancel(monkeypatch, RUN)
     record = ci_lost_runner.guarded(ci_lost_runner.watch, "o/r", RUN, WORKFLOW, GRACE)

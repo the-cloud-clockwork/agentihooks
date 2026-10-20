@@ -176,7 +176,6 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source
         return report(run, "none", "the run was rerun meanwhile")
     recovery = report(run, action, f"{reason}; {why}") | {
         "detected_at": detected_at,
-        "cancel_requested_at": None,
         "force_cancel_requested_at": None,
         "completed_observed_at": None,
     }
