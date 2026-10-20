@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from redis.client import Pipeline
 
     from scripts.swarm.store import AgentRecord, RedisStore
+    from scripts.swarm.tick import Runtime
 
 
 ADMIT = """
@@ -273,6 +274,42 @@ class ExecutionRegistry:
                 except WatchError:
                     continue
         raise SwarmError("execution history kept changing; pane was not committed")
+
+    def reconcile(self, slug: str, runtime: Runtime) -> list[str]:
+        from scripts.hive import reports
+
+        recorded = {agent.name for agent in self.agents(slug)}
+        live, actions = runtime.live_names(), []
+        for agent in self.occupants(slug).values():
+            if agent.state != "working" or agent.name in recorded or agent.name in live:
+                continue
+            if runtime.reported(agent):
+                continue
+            remote = reports.host(agent)
+            if remote and reports.Reports(self.redis).read(remote) is None:
+                continue
+            if agent.runtime_backend != "local" and runtime.observe(agent).state != "dead":
+                continue
+            if self.end_orphan(slug, agent):
+                actions.append(f"ended orphan execution {agent.execution_id} for {agent.name}")
+        return actions
+
+    def end_orphan(self, slug: str, agent: AgentRecord) -> bool:
+        from redis.exceptions import WatchError
+
+        key = self.store.key(slug, "executions")
+        with self.redis.pipeline() as pipe:
+            try:
+                pipe.watch(key, self.store.key(slug, "agents"))
+                current = self.occupants(slug, pipe).get(agent.seat)
+                if current != agent or agent.state != "working" or pipe.hexists(self.store.key(slug, "agents"), agent.name):
+                    return False
+                pipe.multi()
+                pipe.hset(key, agent.execution_id, json.dumps(asdict(replace(agent, state="ended"))))
+                pipe.execute()
+                return True
+            except WatchError:
+                return False
 
     def write(self, pipe: Pipeline, slug: str, agent: AgentRecord, previous: AgentRecord | None = None) -> None:
         from scripts.swarm.tick import agent_status
