@@ -92,8 +92,8 @@ client = redis_client()
 member = env["AGENTIHOOKS_HIVE_ID"]
 assert client.acl_whoami() == f"hive-{member}"
 for command in (
-    ("HSET", f"{ROOT}:swarm:proof:agents", "eng-1", '{"hive": "forged"}'),
-    ("HSET", f"{ROOT}:swarm:proof:executions", "forged", "{}"),
+    ("HSET", f"{ROOT}:swarm:proof:config", "max_eng", "99"),
+    ("HSET", f"{ROOT}:swarm:proof:tasks", "forged", "{}"),
     ("HSET", f"{ROOT}:hive:other-member", "heartbeat_at", "1"),
     ("HSET", f"{ROOT}:hive:other-member:inbox:item:forged", "state", "done"),
     ("SET", f"{ROOT}:hive:other-member:swarm:proof:wait:other-agent", "{}"),
@@ -117,6 +117,9 @@ for command in (
         print(f"{command[0]}: refused ({refused})")
     else:
         raise SystemExit(f"{command[0]} was allowed for a hive member")
+client.hset(f"{ROOT}:swarm:proof:executions", "member-granted", "{}")
+client.hdel(f"{ROOT}:swarm:proof:executions", "member-granted")
+print("HSET swarm executions: allowed for a hive member")
 os.environ.update(AGENTIHOOKS_HIVE_ID=member, AGENTIHOOKS_HIVE_REDIS_URL=env["AGENTIHOOKS_HIVE_REDIS_URL"])
 assert daemon.hive_id() == member
 
