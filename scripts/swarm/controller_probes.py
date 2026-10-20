@@ -7,7 +7,13 @@ from scripts.swarm.store import RedisStore
 
 PORT_ENV = "AGENTIHOOKS_CONTROL_API_PORT"
 SWARM_ENV = "AGENTIHOOKS_CONTROL_SWARM"
+HOST_SWARMS_ENV = "AGENTIHOOKS_CONTROL_HOST_SWARMS"
 LIVE_TIMEOUT = 3
+
+
+def ticked(slugs: list[str], host_swarms: str) -> list[str]:
+    left = set(host_swarms.split(","))
+    return [slug for slug in slugs if slug not in left]
 
 
 def live(
@@ -16,7 +22,8 @@ def live(
     fetch: Callable = urllib.request.urlopen,
     owner: str | None = None,
 ) -> int:
-    stale = [slug for slug in store.slugs() if not lease.current(store, slug)]
+    held = ticked(store.slugs(), environ.get(HOST_SWARMS_ENV, ""))
+    stale = [slug for slug in held if not lease.current(store, slug)]
     if stale:
         print(f"controller: no live controller lease for {stale}")
         return 1
