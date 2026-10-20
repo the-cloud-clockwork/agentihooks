@@ -199,8 +199,8 @@ class PushStop:
         task = next((t for t in doc["tasks"] if t.get("id") == who.task), None) if doc else {}
         if task is None or ledger_kinds.kind(task) == "plan":
             return Decision()
-        store, owed, failed = self.connect(), False, []
-        for tree in trees(self.root(), who.name):
+        store, owed, failed, found = self.connect(), False, [], trees(self.root(), who.name)
+        for tree in found:
             if tree.unpushed and (refused := self.held(tree)):
                 failed.append(refused)
             elif tree.unpushed and push(tree, branch := target(tree, task), self.left() + RESERVE_S - FLOOR_S):
@@ -210,7 +210,7 @@ class PushStop:
         if not owed:
             self.settle(store, who)
             return Decision()
-        if self.waiting(store, who, doc, task):
+        if self.waiting(store, who, doc, task, any(tree.dirty for tree in found)):
             return Decision()
         self.notify(store, who)
         return Decision.deny(" ".join([TEMPLATE, *failed]))
@@ -222,16 +222,17 @@ class PushStop:
     def on_origin(self, tree):
         return count(tree.path, "HEAD", "--not", "--remotes=origin") == 0
 
-    def waiting(self, store, who, doc, task):
+    def waiting(self, store, who, doc, task, dirty):
         """Whether a live checked wait holds the stop, so a refused push never deadlocks: one on another unfinished
-        task, or one on the merge of a pull request still open, which a push would drop from the queue."""
+        task, or one on the merge of a pull request still open, which a push would drop from the queue, while every
+        change is committed."""
         from scripts.swarm import idle, waits
 
         held = idle.wait(store.redis, who.swarm, who.name)
         on = (held or {}).get("on") or {}
         if not (held and held["until"] > self.now()):
             return False
-        if on.get("kind") == "merge":
+        if on.get("kind") == "merge" and not dirty:
             pull = self.github()(on["target"])
             return pull is not None and pull.state == "OPEN"
         if not (doc and on.get("kind") == "task"):

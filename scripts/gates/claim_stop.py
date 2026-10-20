@@ -64,14 +64,12 @@ def between_halves(task, pull):
 
 
 def named(live, url):
-    """The pull request or run a live checks wait names in place of the task's own pull request, or ''."""
     on = (live or {}).get("on") or {}
     target = on.get("target") or ""
     return target if on.get("kind") == "checks" and target != url else ""
 
 
 def named_ruling(pull):
-    """Only failed checks on the named pull request are owed; the tick ends the wait on everything else."""
     if pull is not None and pull.state == "OPEN" and pull.resolved and pull.red and not pull.gate_passed:
         return "red"
     return ""
@@ -162,18 +160,17 @@ class ClaimStop:
         return Decision()
 
     def grade(self, ledger, who, task, live, rows):
-        """The task as graded, its pull request, the work owed and the pull request whose pending checks become the wait."""
         from scripts.swarm import waits
 
-        target = named(live, task.get("pr_url"))
-        if target:
-            pull = None if waits.mutation_wait.RUN_URL.fullmatch(target) else self.github()(target)
-            return {**task, "pr_url": target}, pull, named_ruling(pull), ""
         url = task.get("pr_url")
         pull = self.github()(url) if url else None
         if between_halves(task, pull):
             ledger.update_task(who.swarm, task["id"], {"pr_url": "", "state": "claimed"}, if_state=("pr",))
             task, pull = {**task, "pr_url": ""}, None
+        target = named(live, task.get("pr_url"))
+        if target and not (pull is not None and pull.state == "MERGED"):
+            pull = None if waits.mutation_wait.RUN_URL.fullmatch(target) else self.github()(target)
+            return {**task, "pr_url": target}, pull, named_ruling(pull), ""
         dependency = waits.dependency((live or {}).get("on", {}), task, rows, self.github())
         return task, pull, *ruling(task, pull, live, dependency)
 

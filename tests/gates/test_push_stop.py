@@ -1029,3 +1029,13 @@ def test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop(ri
     rig.gate._github = lambda url: PullRequest(state, None, 1, False, True) if state else None
     wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
     assert rig.stop().reason == TEMPLATE
+
+
+def test_a_merge_wait_never_holds_uncommitted_changes(rig):
+    from scripts.swarm.ledger_events import PullRequest
+
+    with_task(rig, "claimed")
+    (rig.tree / "new").write_text("new\n")
+    rig.gate._github = lambda url: PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE

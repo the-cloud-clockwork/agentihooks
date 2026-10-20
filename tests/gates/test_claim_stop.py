@@ -622,3 +622,12 @@ def test_a_checks_wait_on_the_task_pull_request_keeps_grading_it(rig):
     on = {"kind": "checks", "target": URL}
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {URL}", rig.clock[0], on=on)
     assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")
+
+
+def test_a_merged_task_pull_request_still_owes_done_while_a_checks_wait_names_another(rig):
+    other = URL + "1"
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL], rig.pulls[other] = MERGED, PENDING
+    on = {"kind": "checks", "target": other}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {other}", rig.clock[0], on=on)
+    assert rig.stop().reason.startswith(f"your pull request {URL} merged: close the task now")
