@@ -1654,11 +1654,11 @@ The green, red and unmergeable cases count from the latest of these moments:
 A green or unmergeable mark lives only from one pass to the next: a pass that does not see the case, or skips the
 task because something holds it, drops the mark, and the next sighting starts a fresh clock.
 
-The last moment gives a woken owner the full limit. The tick ends the owner's waits, such as a wait on checks,
-merge or intent, in the same pass that runs the watchdog, so without it the pass that ended an owner's wait on checks could also reopen the
-task as green for ten minutes before the owner had a turn to queue it. Only a wait the tick ends records this
-moment, kept for 24 hours; a wait the owner declares or ends itself leaves it unchanged. The owner not live case
-counts from the first tick of an unbroken run that saw it and ignores these moments.
+The last moment gives a woken owner the full limit. The tick ends the owner's waits, such as a wait on checks, merge
+or intent, in the same pass that runs the watchdog, so without it the pass that ended an owner's wait on checks
+could also reopen the task as green for ten minutes before the owner had a turn to queue it. Only a wait the tick
+ends records this moment, kept for 24 hours; a wait the owner declares or ends itself leaves it unchanged. The owner
+not live case counts from the first tick of an unbroken run that saw it and ignores these moments.
 
 #### What holds the watchdog
 
@@ -1690,8 +1690,8 @@ agentihooks ledger --slug <slug> task set <task> after_release=
 ```
 
 A tag lookup that fails, exits non zero or runs past 30 seconds lists no tags, so every waiting task stays held.
-So that a held task never stays held silently, each tick of a swarm that is not stopped that finds a task with `after_release` set, no open
-alert from source `release` and a failed lookup raises one ledger alert to the master:
+So that a held task never stays held silently, a running tick raises one ledger alert to the master when it finds
+a task with `after_release` set, no open alert from source `release` and a failed lookup:
 
 ```text
 The release tag lookup for /home/me/dev/project failed: git ls-remote exited 128. Tasks t834 stay held for a newer release until it works.
@@ -1702,18 +1702,19 @@ restoring the repository's `origin` remote or network access.
 
 #### Alerts and escalation
 
-Every case past its limit sends an inbox item from `swarm` to the master seat that owns the task, naming the task, case, minutes, pull request, owner and action. A new alert on the same task closes the
-earlier one as superseded; an alert-only case is not repeated while its earlier item is open. An alert still open
-two limits after it was sent goes to the operator's Priorities and to ntfy at `AGENTIHOOKS_STALL_NTFY_URL`
-(default the Anton alerts topic), with `NTFY_USER` and `NTFY_PASS` for basic authentication. The open alerts show
-as `stall` health findings in `swarm status`.
+Every case past its limit sends an inbox item from `swarm` to the master seat that owns the task, naming the task,
+case, minutes, pull request, owner and action. A new alert on the same task closes the earlier one as superseded; an
+alert-only case is not repeated while its earlier item is open. An alert still open two limits after it was sent
+goes to the operator's Priorities and to ntfy at `AGENTIHOOKS_STALL_NTFY_URL` (default the Anton alerts topic), with
+`NTFY_USER` and `NTFY_PASS` for basic authentication. The open alerts show as `stall` health findings in
+`swarm status`.
 
 With the `stall` gate on `log only`, the default, a pull request case past its limit records the would-be reopen,
 and the would-be stop when the owner is live, in the swarm gate log and sends the alert only; that alert's action
-reads `alert only; the lane split owns the cause`, the same text the unclaimed case uses. On `deny` it stops the live owner, reopens the task
-to `open` with no claimant, and comments on the task. A task whose fresh ledger row has moved to another state or
-claimant, a green or owner case whose task now awaits a ready merge, and an owner held by an outage are left
-alone. See the `set stall-gate` command for the modes.
+reads `alert only; the lane split owns the cause`, the same text the unclaimed case uses. On `deny` it stops the
+live owner, reopens the task to `open` with no claimant, and comments on the task. A task whose fresh ledger row has
+moved to another state or claimant, a green or owner case whose task now awaits a ready merge, and an owner held by
+an outage are left alone. See the `set stall-gate` command for the modes.
 
 #### Troubleshooting
 
