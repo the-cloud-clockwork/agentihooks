@@ -12,6 +12,7 @@ YES = "yes"
 NO_UI_HIVE = "no UI hive live"
 HIVE = "hive"
 HEADLESS = "headless hive"
+UI_HIVE = "UI hive"
 UNRANKED = math.inf
 
 
@@ -34,8 +35,8 @@ class Choice:
     fallback: str = ""
 
 
-def hosts(role: str, hive: dict) -> bool:
-    return role in hive["roles"] and (role not in UI_ROLES or hive["ui"] == YES)
+def hosts(role: str, hive: dict, aliases: tuple[str, ...] = ()) -> bool:
+    return not {role, *aliases} & set(hive["excluded"])
 
 
 def _room(hive: dict) -> int:
@@ -81,26 +82,21 @@ def _pick(
 def choose(
     role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
 ) -> Choice | Wait:
-    alive = [hive for hive in hives if live(hive, now)]
-    candidates = [hive for hive in alive if role in hive["roles"]]
-    ui_live = any(hive["ui"] == YES for hive in alive)
+    candidates = [hive for hive in hives if live(hive, now) and hosts(role, hive)]
     if not candidates:
-        return Wait(NO_UI_HIVE if role in UI_ROLES and not ui_live else f"no live hive takes {role}")
-    ui = [hive for hive in candidates if hive["ui"] == YES]
-    headless = [hive for hive in candidates if hive["ui"] != YES]
-    if role in UI_ROLES:
-        pool = [hive for hive in candidates if hosts(role, hive)]
-        return _pick(role, harness, slot, route_kind, repo, pool) if pool else Wait(NO_UI_HIVE)
-    if not ui:
-        return _pick(role, harness, slot, route_kind, repo, headless)
+        return Wait(f"no live hive takes {role}")
+    ui_first = role in UI_ROLES
+    first = [hive for hive in candidates if (hive["ui"] == YES) == ui_first]
+    rest = [hive for hive in candidates if (hive["ui"] == YES) != ui_first]
+    if not rest:
+        return _pick(role, harness, slot, route_kind, repo, first)
+    kind = UI_HIVE if ui_first else HEADLESS
     picked = (
-        _pick(role, harness, slot, route_kind, repo, headless, HEADLESS)
-        if headless
-        else Wait(f"no live {HEADLESS} takes {role}")
+        _pick(role, harness, slot, route_kind, repo, first, kind) if first else Wait(f"no live {kind} takes {role}")
     )
     if isinstance(picked, Choice):
         return picked
-    fallback = _pick(role, harness, slot, route_kind, repo, ui)
+    fallback = _pick(role, harness, slot, route_kind, repo, rest)
     return Choice(fallback.hive, picked.reason) if isinstance(fallback, Choice) else picked
 
 
@@ -114,16 +110,24 @@ def place_master(harness: str, login: str, repo: str, hives: list[dict], now: in
     for hive in hives:
         if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
             continue
+        headless = hive["ui"] != YES
         native = hive["interactive"].get(harness)
         if native and login in ("", native):
             candidates.append(
-                (False, _order(MASTER)(hive), native, MasterPlacement(hive["id"], native, INTERACTIVE, False))
+                (
+                    headless,
+                    False,
+                    _order(MASTER)(hive),
+                    native,
+                    MasterPlacement(hive["id"], native, INTERACTIVE, False),
+                )
             )
         for slot in hive["slots"]:
             if slot["harness"] != harness or slot["kind"] not in ("subscription", "api"):
                 continue
             candidates.append(
                 (
+                    headless,
                     True,
                     _order(MASTER)(hive),
                     slot["account"],
@@ -132,4 +136,4 @@ def place_master(harness: str, login: str, repo: str, hives: list[dict], now: in
             )
     if not candidates:
         return Wait("no live hive can run the master with interactive, subscription or api authentication")
-    return min(candidates, key=lambda candidate: candidate[:3])[3]
+    return min(candidates, key=lambda candidate: candidate[:4])[4]

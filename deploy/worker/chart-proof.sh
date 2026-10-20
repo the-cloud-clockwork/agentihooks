@@ -19,7 +19,7 @@ container = pod['containers'][0]
 env = {v['name']: v for v in container['env']}
 assert env['SWARM_HIVE_ID']['valueFrom']['fieldRef']['fieldPath'] == 'metadata.name'
 assert env['HIVE_MAX_AGENTS']['value'] == '3'
-assert env['HIVE_ROLES']['value'] == 'eng,ci,plan,dispatch'
+assert env['HIVE_EXCLUDED']['value'] == 'master'
 assert container['image'] == 'ghcr.io/the-cloud-clockwork/agentihooks-hive-worker:dev'
 assert pod['volumes'][0]['secret']['secretName'] == 'member'
 assert pod['volumes'][0]['secret']['items'] == [{'key': 'credential', 'path': 'credential'}]

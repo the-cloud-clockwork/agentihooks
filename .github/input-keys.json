@@ -1,7 +1,7 @@
 {
   "brain-smoke": {
     "paths": ["hooks", "scripts", "profiles", "pyproject.toml", ".github/workflows/brain-smoke.yml"],
-    "tools": ["python 3.11", "uv 0.12.23", "opentelemetry-collector-contrib 0.96.0"]
+    "tools": ["python 3.12", "uv 0.12.23", "opentelemetry-collector-contrib 0.96.0"]
   },
   "ledger-load": {
     "paths": ["hooks", "scripts", "profiles", "pyproject.toml", "tests/__init__.py", "tests/ledger_load", ".github/workflows/ledger-load.yml"],

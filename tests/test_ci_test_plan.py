@@ -90,7 +90,7 @@ def test_the_api_reads_through_gh_and_fails_on_an_error(monkeypatch):
 
 def test_the_newest_dev_run_whose_unit_shards_passed_and_kept_a_manifest_is_the_record(monkeypatch):
     runs = [_run(4, event="merge_group"), _run(3), _run(2), _run(1)]
-    _github(monkeypatch, runs, manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.11, 4)")})
+    _github(monkeypatch, runs, manifests={2: _manifest(2), 1: _manifest(1)}, failed={(2, "unit (3.12, 4)")})
     run, manifest = ci_test_plan.find_record(REPOSITORY, LATER)
     assert run["id"] == 1
     assert manifest["commit"] == f"{1:040d}"

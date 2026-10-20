@@ -110,7 +110,7 @@ print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker"
 printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
 unset member_env
 helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
-  --set workers.replicas=1 --set workers.image.repository=local/agentihooks-hive-worker \
+  --set workers.replicas=1 --set workers.maxAgents=1 --set workers.image.repository=local/agentihooks-hive-worker \
   --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
@@ -131,8 +131,8 @@ for _ in range(60):
     time.sleep(1)
 assert record and registry.live(record, int(time.time() * 1000)), 'pod did not register a live hive'
 assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
-assert record['roles'] == ['eng', 'ci', 'plan', 'dispatch'] and record['max_agents'] == 1
-print('pod registered a live worker hive with configured roles and capacity')
+assert record['excluded'] == ['master'] and record['max_agents'] == 1 and 'roles' not in record
+print('pod registered a live worker hive with its excluded list and capacity')
 orders = Orders(redis)
 order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')
 orders.command(hive, order)

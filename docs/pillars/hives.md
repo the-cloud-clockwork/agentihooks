@@ -9,7 +9,7 @@ permalink: /docs/pillars/hives/
 {: .no_toc }
 
 A hive is one machine that runs swarm agents: a workstation, a VM or a Kubernetes pod. Each hive joins the swarm
-once, beats every fifteen seconds, and takes the roles its settings allow.
+once, beats every fifteen seconds, and takes every agent type its `excluded` setting allows.
 
 1. TOC
 {:toc}
@@ -62,7 +62,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
-- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, roles and max agents.
+- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents and excluded (`none` when
+  empty).
   `agentihooks hive show <id>` prints the full record as JSON.
 
 A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver its credential; see
@@ -308,27 +309,29 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `name` | text | the hive id | Display name. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
-| `roles` | comma list of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` | none | Work the hive takes. |
+| `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more | `1` | Working agents the hive runs at once. Masters do not count against it. |
+| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
 
-`master`, `qa` and `frontend` are UI roles: a hive with `ui=no` refuses them, and `prefer` refuses a role the hive
-does not take.
+Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
+role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
+`max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
+stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
 
-### Roles and prefer: the operator's layout
+### Excluded and prefer: the operator's layout
 
 The operator runs a PC, a VM and a set of pods:
 
 ```bash
-agentihooks hive set pc  ui=yes roles=master prefer=master:1
-agentihooks hive set vm  ui=yes roles=master,qa,frontend prefer=master:2,qa:1,frontend:1
-agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1
+agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan prefer=master:1
+agentihooks hive set vm  ui=yes excluded=eng,ci,plan prefer=master:2,qa:1,frontend:1
+agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 ```
 
-- The master runs on the PC while it is live, and on the VM when the PC is gone.
-- QA and frontend work runs on the VM, the only hive that takes them.
-- Engineer, CI, planner and dispatcher work runs on the pods. For the PC to take the dispatcher when every pod is
-  full, its roles must list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
+- The master runs on the PC while it is live, and on the VM when the PC is gone; the pods exclude it by default.
+- QA and frontend work runs on the VM, then on a pod when the VM is gone.
+- Engineer, CI, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
+  longer excludes that role.
 
 ## Comparing hive configuration
 
@@ -348,7 +351,8 @@ any hive differs or published nothing.
 
 ## Placement
 
-Every launch places its agent on one hive. For a worker role, placement keeps the live hives that take the role,
+Every launch places its agent on one hive. For a worker role, placement keeps the live hives that do not exclude
+its lane, role or profile,
 then drops, in order, those with no room under `max-agents`, those that do not advertise the account slot the
 router picked, those that do not list the task's repo, and, for an interactive login, those that do not hold that
 login. Each step that empties the list names its reason, and the launch waits with it.
@@ -356,18 +360,18 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
-`eng`, `ci`, `plan` and `dispatch` run on headless hives. When a UI hive also takes one of them, placement tries
-the headless hives first and takes the UI hive only when no headless hive taking the role has room or none is live.
+`eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
+Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
+room or none is live.
 A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
 agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. UI roles, the master included, take only UI hives. The engineer, cicd, planner
+hive records the pin as its reason. The engineer, cicd, planner
 and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
 its UI role.
 
 When no live hive takes the role:
 
-- `qa` and `frontend` wait with "no UI hive live".
-- Any other role waits with "no live hive takes" the role.
+- Every role waits with "no live hive takes" the role.
 - The master has its own chain, below.
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
@@ -382,13 +386,12 @@ api slots keep their own.
 ### Master placement
 
 Every master seat, the lead and seats two and up, follows the same host rule as role placement: it runs only on a
-live UI hive with the `master` role that lists the repo. A seat that owns a Kubernetes hive is placed by this rule
-too, never on a worker pod. It is placed in two tiers, each tried in `prefer` order:
+live hive that does not exclude `master` and lists the repo. UI hives come before headless ones, so a worker pod,
+which excludes `master` by default, runs a master only when its `excluded` list drops it. Within each kind it is
+placed in two tiers, each tried in `prefer` order:
 
-1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
-2. A UI hive with the `master` role and a subscription or api slot for that harness.
-
-A headless hive never runs the master, whatever its roles.
+1. A hive that holds the native interactive login for the master's harness.
+2. A hive with a subscription or api slot for that harness.
 
 A hive names a subscription slot by its `AH_CC_TOKEN_<slug>` slug; a hosted controller names the same account by
 its Secret key. The two may differ only in `_` against `-`, and master placement treats them as one account. A
@@ -690,8 +693,7 @@ A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks
 makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
 with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
 stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
-(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes roles=master,eng,ci,plan,dispatch
-max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
 tick. On a machine in any other mode the setting changes nothing.
 
 ## Worker hives in Kubernetes
@@ -706,7 +708,8 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    and waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
    `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
-5. Sets itself `ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=<workers.maxAgents>`.
+5. Sets itself `ui=no ephemeral=yes excluded=<workers.excluded> max-agents=<workers.maxAgents>`, by default
+   `excluded=master max-agents=20`.
 6. Runs `agentihooks hive run`.
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
@@ -755,7 +758,7 @@ in place and moves the master to another hive.
 | hive | The hive's name; hovering shows its id. |
 | state | `live` while the last heartbeat is under ninety seconds old, else `quiet`. |
 | ui, ephemeral | `yes` or `no`, editable. |
-| roles | Comma list, editable. |
+| excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | Whole number, editable. |
 | agents | Working agents against max agents, such as `1/3`. |
@@ -788,7 +791,7 @@ The page converts what was typed before it sends it:
 
 | Field | Typed | Sent |
 |---|---|---|
-| roles | `eng, ci` | `["eng", "ci"]` |
+| excluded | `master, qa` | `["master", "qa"]` |
 | prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
 | max agents | `4` | `4`; anything other than digits is sent as text and refused |
 
@@ -830,7 +833,7 @@ credential answers `403 forbidden` with `swarm controls need the operator`.
 | `PATCH /api/v1/hives/<id>` | the operator | The hive after the change. |
 
 Every answer is `{"data": ..., "revision": "<sha256 of data>"}`. A hive carries its stored record (`id`, `name`,
-`ui`, `ephemeral`, `roles`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
+`ui`, `ephemeral`, `excluded`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
 `heartbeat_at`, `version`) and three computed fields:
 
 - `live`: `true` while the heartbeat is under ninety seconds old.

@@ -2873,7 +2873,7 @@ writers above or `task set`.
 - **A task shows `VERIFY` with no engineer.** The post merge measurement window has not matured or has no maturity
   time; set `contract.after_at` or clear the field with `task set ID awaiting=`.
 - **No label appears.** Check the task's `state`: a `done` task never shows one. Otherwise set the field with
-  `task set`, never by editing the ledger file.
+  `task set`, never by writing the ledger database.
 
 ## Redis
 

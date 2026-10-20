@@ -188,8 +188,8 @@ controller:
 
 workers:
   replicas: 0
-  maxAgents: 1
-  roles: [eng, ci, plan, dispatch]
+  maxAgents: 20
+  excluded: [master]
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev

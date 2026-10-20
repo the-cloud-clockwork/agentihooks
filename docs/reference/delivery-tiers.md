@@ -33,12 +33,11 @@ How a green promotion run merges `dev` into `main` and creates the release is in
 |---|---|---|---|
 | `lint` | runs | skipped | skipped |
 | `semgrep` | runs | skipped | skipped |
-| `test-count` (3.11 and 3.12) | runs | runs | skipped |
-| `unit` and `shard-check` (3.11) | runs | skipped | runs |
+| `test-count` (3.12) | runs | runs | skipped |
 | `unit` and `shard-check` (3.12) | runs | runs | runs |
 | `sonar` | runs | skipped | runs |
 
-The merge group runs the unit shards on Python 3.12 only; the dev push run tests 3.11 after merge, so a 3.11 only failure reds promotion, never the queue. `sonar` stays on the push: the promotion tier runs the integration scan. The skip removed about 284 runner seconds from each dev push: `lint` 64 s, `semgrep` 42 s and `test-count` 88 s and 90 s for its two Python legs, as measured over the ten dev pushes before the change and recorded in pull request 3517. Delivered by pull request [3517](https://github.com/the-cloud-clockwork/agentihooks/pull/3517), after [3486](https://github.com/the-cloud-clockwork/agentihooks/pull/3486) taught the protected gate check (`gate-protected.yml`, `scripts.gate_protected`) to accept the `promotion` form of the gate step. The check runs the base branch's own `scripts.gate_protected`, whose `_aggregator_problems` accepts a head's `Gate — Required` steps only when they equal one of twelve renderings of `scripts.ci_reuse.gate_steps`: the keyword sets none, `selected`, `queue_tier`, `queue_tier` with `promotion`, `queue_tier` with `consolidated`, and all three of `queue_tier`, `promotion` and `consolidated`, each with `summary` false and true. `dev` now carries the form rendered with `queue_tier=True, promotion=True, consolidated=True, summary=True`. `tests/contracts/ci_tiers/test_workflow.py` pins the push job set.
+Every job runs Python 3.12 only. `sonar` stays on the push: the promotion tier runs the integration scan. The skip removed about 284 runner seconds from each dev push: `lint` 64 s, `semgrep` 42 s and `test-count` 88 s and 90 s for its two Python legs, as measured over the ten dev pushes before the change and recorded in pull request 3517. Delivered by pull request [3517](https://github.com/the-cloud-clockwork/agentihooks/pull/3517), after [3486](https://github.com/the-cloud-clockwork/agentihooks/pull/3486) taught the protected gate check (`gate-protected.yml`, `scripts.gate_protected`) to accept the `promotion` form of the gate step. The check runs the base branch's own `scripts.gate_protected`, whose `_aggregator_problems` accepts a head's `Gate — Required` steps only when they equal one of twelve renderings of `scripts.ci_reuse.gate_steps`: the keyword sets none, `selected`, `queue_tier`, `queue_tier` with `promotion`, `queue_tier` with `consolidated`, and all three of `queue_tier`, `promotion` and `consolidated`, each with `summary` false and true. `dev` now carries the form rendered with `queue_tier=True, promotion=True, consolidated=True, summary=True`. `tests/contracts/ci_tiers/test_workflow.py` pins the push job set.
 
 Check which of these jobs the newest dev push run ran:
 
@@ -147,7 +146,7 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 The step prints one JSON line with the decision and writes `requeue`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
 
 ```json
-{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.11, 4); first failed checks removal of this head"}
+{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.12, 4); first failed checks removal of this head"}
 ```
 
 ### Enforcement

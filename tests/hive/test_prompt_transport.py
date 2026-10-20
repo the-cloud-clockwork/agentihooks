@@ -354,7 +354,6 @@ def test_the_controller_carries_the_opening_by_redis_key(setup, homes):
 
     hive = registry._default("host")
     hive.update(
-        roles=["eng"],
         slots=[{"harness": "claude", "account": "account", "kind": "subscription"}],
         repos=[setup.config.repo],
         heartbeat_at=orders.lease.now_ms(setup.store),

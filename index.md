@@ -21,7 +21,7 @@ A harness for Claude Code and Codex — built on four pillars that make your age
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
 
 ---

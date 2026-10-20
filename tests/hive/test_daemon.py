@@ -368,9 +368,9 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "name": "machine",
         "ui": "no",
         "ephemeral": "no",
-        "roles": [],
+        "excluded": ["master"],
         "prefer": {},
-        "max_agents": 1,
+        "max_agents": 20,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
@@ -379,6 +379,19 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "version": "",
     }
     assert redis.smembers(registry.INDEX) == {"machine"}
+
+
+def test_a_beat_moves_a_legacy_roles_record_and_seeds_its_own_key(redis, monkeypatch):
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}},
+    )
+    redis.hset(registry.key("machine"), mapping={"ui": "no", "roles": '["eng"]', "max_agents": "1"})
+    daemon.beat(redis, "machine")
+    stored = redis.hgetall(registry.key("machine"))
+    assert "roles" not in stored and "max_agents" not in stored
+    assert (stored["name"], stored["ephemeral"]) == ("machine", "no")
 
 
 def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
