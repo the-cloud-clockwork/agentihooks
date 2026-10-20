@@ -3,7 +3,14 @@
 These JSON files are update payloads for the existing repository rulesets,
 using the [GitHub REST API](https://docs.github.com/en/rest/repos/rules#update-a-repository-ruleset).
 They contain writable settings only. Both rulesets enforce deletion and force
-push protection, linear history and pull requests without bypass actors.
+push protection, linear history and pull requests. `main-prod-lockdown` has no
+bypass actors. `dev-no-delete` lists two in `pull_request` mode, the repository
+admin role (`RepositoryRole` 5) and the agenticore GitHub App (`Integration`,
+its app id from the OpenBao `k8s/agenticore` field `GITHUB_APP_ID`), because
+GitHub honours a merge queue jump only for a bypass actor of the ruleset that
+holds the `merge_queue` rule. Pull request mode still lets those actors bypass
+linear history on a pull request merge, so `dev-history.json` repeats deletion,
+force push and linear history on dev with no bypass actors.
 Dev requires the exact `Gate — Required` check from the Tests workflow and
 allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
@@ -23,7 +30,8 @@ the Queue retry workflow; see
 Main keeps its existing branch match and rules; only its bypass list changes.
 
 The antoncore `Organization secrets and dev rulesets` workflow applies
-`dev-no-delete.json` from this repository's dev and reads it back on every
+`dev-history.json`, creating it when absent, then `dev-no-delete.json` from
+this repository's dev and reads both back on every
 antoncore dev push or dispatch, so a change here goes live on the next
 antoncore dev push or a dispatch of that workflow. The reconcile requires the
 required check to name its source, `integration_id` 15368 for GitHub Actions.
@@ -54,7 +62,8 @@ the swarm's pull requests, so owner review waits on an approval nobody else
 can give. Turning it on is a separate operator decision.
 The dev response must include `pull_request`, `required_linear_history`,
 `merge_queue` and `required_status_checks` requiring `Gate — Required` with
-`strict_required_status_checks_policy` false; both bypass lists must be empty.
+`strict_required_status_checks_policy` false; the dev bypass list holds the
+two actors above and the main bypass list is empty.
 The first pull request merged through the queue must show a Tests run on the
 `merge_group` event whose `Gate — Required` passed. A controlled direct push attempt must be rejected by GitHub's pull
 request rule. An unchanged ref or a dry run does not exercise that rule.
