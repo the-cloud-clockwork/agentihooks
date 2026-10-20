@@ -1,6 +1,7 @@
 """Doctor measure for CI speed findings: the run attempt's own value and its class over a stated window."""
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from statistics import median_low
@@ -10,7 +11,8 @@ from scripts.swarm.ledger_events import iso_ms
 from scripts.swarm.store import SwarmError
 
 WALL = "ci-tier-wall-time"
-KINDS = (WALL, "ci-runner-wait", "ci-queue-age-unconfirmed")
+RUNNER_WAIT = "ci-runner-wait"
+KINDS = (WALL, RUNNER_WAIT, "ci-queue-age-unconfirmed")
 WINDOW_BUDGET = (2000, 600)
 
 
@@ -40,12 +42,16 @@ def _scope(labels):
     return ", ".join(labels) or "unassigned"
 
 
-def waits(run: dict, now_ms: int) -> dict[tuple, int]:
+def waits(run: dict, kind: str, now_ms: int) -> dict[tuple, int]:
     longest = {}
     for job in run["jobs"]:
-        began = iso_ms(job["started_at"]) if ci_speed.started(job) else now_ms
+        began = ci_speed.started(job)
+        if began != (kind == RUNNER_WAIT):
+            continue
+        end = job["started_at"] if began else job.get("completed_at")
         labels = tuple(sorted(set(job["labels"])))
-        longest[labels] = max(longest.get(labels, 0), (began - iso_ms(job["created_at"])) // 1000)
+        seconds = ((iso_ms(end) if end else now_ms) - iso_ms(job["created_at"])) // 1000
+        longest[labels] = max(longest.get(labels, 0), seconds)
     return longest
 
 
@@ -57,7 +63,7 @@ def samples(kind: str, runs: list[dict], now_ms: int) -> dict[str, list[int]]:
             if elapsed is not None:
                 found.setdefault(ci_speed.TIERS[run["event"]], []).append(elapsed // 1000)
             continue
-        for labels, seconds in waits(run, now_ms).items():
+        for labels, seconds in waits(run, kind, now_ms).items():
             found.setdefault(_scope(labels), []).append(seconds)
     return found
 
@@ -68,7 +74,7 @@ def value(goal: Target, run: dict, now_ms: int) -> tuple[int, str | None]:
         if elapsed is None:
             raise SwarmError(f"run {goal.run} attempt {goal.attempt} has no tier wall time")
         return elapsed // 1000, ci_speed.TIERS[run["event"]]
-    found = waits(run, now_ms)
+    found = waits(run, goal.kind, now_ms)
     if goal.labels is None and found:
         return max(found.values()), None
     if goal.labels not in found:
@@ -89,18 +95,18 @@ def line(kind: str, scope: str, values: list[int], window: tuple[int, int]) -> s
     return f"{text}, median {median_low(values)} seconds, worst {max(values)} seconds" if values else text
 
 
-def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) -> list[str]:
-    lines, scope = [], None
+def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) -> Iterator[str]:
+    scope = None
     if goal.run is not None:
         try:
             run = ci_speed_read.attempt(goal.run, goal.attempt)
         except ci_speed_read.FAILURES as exc:
             raise SwarmError(f"run {goal.run} attempt {goal.attempt} unreadable: {type(exc).__name__}: {exc}") from exc
         seconds, scope = value(goal, run, now_ms)
-        lines.append(f"{finding} {seconds}")
+        yield f"{finding} {seconds}"
     snapshot = ci_speed_read.read(*window, active=False, budget=WINDOW_BUDGET)
     if not snapshot["complete"]:
         raise SwarmError(snapshot["error"])
     found = samples(goal.kind, snapshot["runs"], now_ms)
-    scopes = [scope] if scope is not None else sorted(found)
-    return lines + [line(goal.kind, name, found.get(name, []), window) for name in scopes]
+    for name in [scope] if scope is not None else sorted(found) or ["all"]:
+        yield line(goal.kind, name, found.get(name, []), window)

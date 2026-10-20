@@ -274,7 +274,8 @@ def cmd_measure(store, args):
         return
     ci = ci_measure.target(args.finding)
     if ci:
-        print("\n".join(ci_measure.measure(args.finding, ci, window or (now - HOUR_MS, now), now)))
+        for line in ci_measure.measure(args.finding, ci, window or (now - HOUR_MS, now), now):
+            print(line, flush=True)
         return
     if args.finding.startswith("failed-spawn/"):
         bounds = {"since": _at(window[0]), "until": _at(window[1])} if window else {}

@@ -140,9 +140,11 @@ def test_an_old_subject_without_labels_takes_the_longest_wait_of_the_run():
     assert ci_measure.value(goal, WAITED, NOW) == (440, None)
 
 
-def test_an_unfinished_wait_counts_up_to_now():
-    queued = run(21, [job(-700, None), job(-900, -800)])
-    assert ci_measure.waits(queued, NOW) == {("anton-oss",): 700}
+def test_waits_split_started_jobs_from_jobs_that_never_started():
+    queued = run(21, [job(-700, None), job(-900, -500), job(-2000, None, completed=-1000)])
+    assert ci_measure.waits(queued, "ci-runner-wait", NOW) == {("anton-oss",): 400}
+    assert ci_measure.waits(queued, "ci-queue-age-unconfirmed", NOW) == {("anton-oss",): 1000}
+    assert ci_measure.waits(queued, "ci-queue-age-unconfirmed", NOW + 3600000) == {("anton-oss",): 4300}
 
 
 @pytest.mark.parametrize(
@@ -177,7 +179,7 @@ def test_an_unreadable_run_is_refused(monkeypatch):
 
     monkeypatch.setattr(ci_measure.ci_speed_read, "attempt", attempt)
     with pytest.raises(SwarmError, match="run 10 attempt 1 unreadable: RuntimeError: Actions API request"):
-        ci_measure.measure("ci-tier-wall-time/10-1", ci_measure.Target(ci_measure.WALL, 10), (0, NOW), NOW)
+        list(ci_measure.measure("ci-tier-wall-time/10-1", ci_measure.Target(ci_measure.WALL, 10), (0, NOW), NOW))
 
 
 def test_an_incomplete_window_read_is_refused_with_its_error(monkeypatch):
@@ -189,8 +191,26 @@ def test_an_incomplete_window_read_is_refused_with_its_error(monkeypatch):
 
     monkeypatch.setattr(ci_measure.ci_speed_read, "read", read)
     with pytest.raises(SwarmError, match="Actions API read failed: boom"):
-        ci_measure.measure("ci-tier-wall-time", ci_measure.Target(ci_measure.WALL), (1, NOW), NOW)
+        list(ci_measure.measure("ci-tier-wall-time", ci_measure.Target(ci_measure.WALL), (1, NOW), NOW))
     assert seen == [(1, NOW, {"active": False, "budget": (2000, 600)})]
+
+
+def test_the_run_value_prints_before_a_failed_window_read(actions, monkeypatch, capsys):
+    capsys.readouterr()
+    monkeypatch.setattr(
+        "scripts.doctor.ci_speed_read.read", lambda *args, **kwargs: {"complete": False, "error": "budget"}
+    )
+    assert doctor.main([WATCHED, "measure", "ci-tier-wall-time/10-1"]) == 1
+    output = capsys.readouterr()
+    assert output.out == "ci-tier-wall-time/10-1 952\n"
+    assert output.err == "doctor: budget\n"
+
+
+def test_a_class_with_no_runs_still_prints_its_window(monkeypatch):
+    monkeypatch.setattr(ci_measure.ci_speed_read, "read", lambda *args, **kwargs: {"complete": True, "runs": []})
+    assert list(
+        ci_measure.measure("ci-runner-wait", ci_measure.Target("ci-runner-wait"), (NOW - HOUR_MS, NOW), NOW)
+    ) == ["ci-runner-wait all, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: 0 of 0 runs over 300 seconds"]
 
 
 def test_the_class_reads_active_jobs_up_to_now_not_the_window_end(monkeypatch):
@@ -199,7 +219,8 @@ def test_the_class_reads_active_jobs_up_to_now_not_the_window_end(monkeypatch):
         "read",
         lambda *args, **kwargs: {"complete": True, "runs": [run(40, [job(-HOUR_MS // 1000 - 400, None)])]},
     )
-    assert ci_measure.measure("ci-runner-wait", ci_measure.Target("ci-runner-wait"), (0, NOW - HOUR_MS), NOW) == [
-        "ci-runner-wait anton-oss, window 1970-01-01T00:00:00Z to 2026-10-17T21:00:00Z: "
+    goal = ci_measure.Target("ci-queue-age-unconfirmed")
+    assert list(ci_measure.measure("ci-queue-age-unconfirmed", goal, (0, NOW - HOUR_MS), NOW)) == [
+        "ci-queue-age-unconfirmed anton-oss, window 1970-01-01T00:00:00Z to 2026-10-17T21:00:00Z: "
         "1 of 1 runs over 300 seconds, median 4000 seconds, worst 4000 seconds"
     ]
