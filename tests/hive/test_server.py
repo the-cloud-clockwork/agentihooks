@@ -37,7 +37,7 @@ def _post(port, path, body):
 
 
 def _raises(error):
-    def operation(*_):
+    def operation(*_, **__):
         raise error
 
     return operation
@@ -56,9 +56,9 @@ def test_a_redis_that_does_not_answer_gets_a_fixed_503(port, kind, wrap, monkeyp
     from redis import exceptions
 
     error = getattr(exceptions, kind)("Timeout reading from socket")
-    monkeypatch.setattr(auth, "exchange", _raises(_wrapped(error) if wrap else error))
+    monkeypatch.setattr(auth, "refresh", _raises(_wrapped(error) if wrap else error))
 
-    assert _post(port, server.JOIN_PATH, {"code": "any"}) == (503, {"error": server.REDIS_STALLED})
+    assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (503, {"error": server.REDIS_STALLED})
 
 
 def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
@@ -70,27 +70,27 @@ def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
     )
 
 
-def test_any_redis_error_on_the_invite_delete_is_a_refusal(admin, port, monkeypatch):
+def test_any_redis_error_on_the_credential_lookup_is_a_refusal(admin, port, monkeypatch):
     from redis.exceptions import RedisError
 
-    monkeypatch.setattr(admin, "getdel", _raises(RedisError("unknown reply from the server")))
+    monkeypatch.setattr(admin, "transaction", _raises(RedisError("unknown reply from the server")))
 
-    assert _post(port, server.JOIN_PATH, {"code": "any"}) == (
+    assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (
         403,
-        {"error": "Redis refused the invite (unknown reply from the server)"},
+        {"error": "Redis refused the refreshed member (unknown reply from the server)"},
     )
 
 
 @pytest.mark.parametrize("kind", ["TimeoutError", "ConnectionError"])
-def test_a_stalled_invite_delete_stays_a_503(admin, port, kind, monkeypatch):
+def test_a_stalled_credential_lookup_stays_a_503(admin, port, kind, monkeypatch):
     from redis import exceptions
 
-    monkeypatch.setattr(admin, "getdel", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
+    monkeypatch.setattr(admin, "transaction", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
 
-    assert _post(port, server.JOIN_PATH, {"code": "any"}) == (503, {"error": server.REDIS_STALLED})
+    assert _post(port, server.REFRESH_PATH, {"ledger_credential": "any"}) == (503, {"error": server.REDIS_STALLED})
 
 
-def test_the_join_service_redis_client_drops_connections_made_before_its_bound(admin):
+def test_the_hive_endpoint_redis_client_drops_connections_made_before_its_bound(admin):
     from redis.backoff import NoBackoff
     from redis.retry import Retry
 

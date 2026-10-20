@@ -191,7 +191,7 @@ def launch_token(slug, name):
     if not credential:
         raise unauthenticated(
             "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
-            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive add"
         )
     client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:

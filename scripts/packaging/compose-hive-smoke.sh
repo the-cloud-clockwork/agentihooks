@@ -75,17 +75,24 @@ docker run -d --name "$run-member" --network "${run}_default" -v "$tls/ca.pem:/t
   -e AGENTIHOOKS_DEPLOYMENT=compose -e SSL_CERT_FILE=/tls/ca.pem -e LEDGER_URL=http://swarm:8765 \
   -e AGENTIHOOKS_SWARM="$slug" \
   ghcr.io/the-cloud-clockwork/agentihooks-swarm:dev sleep infinity >/dev/null
-code="$(docker compose exec -T hive agentihooks hive invite member)"
-joined="$(docker exec "$run-member" agentihooks hive join https://hive:8770 "$code")"
-printf 'member container: %s\n' "${joined%%;*}"
+grant="$(docker compose exec -T -e SWARM_MEMBER_REDIS_URL="$SWARM_MEMBER_REDIS_URL" hive python -c '
+import os
+from scripts.hive import auth
+from scripts.swarm.store import redis_client
+g = auth.mint(redis_client(), "member", os.environ["SWARM_MEMBER_REDIS_URL"])
+print(g["id"])
+print(auth.env_text("https://hive:8770", g), end="")
+')"
+member_id="$(head -n1 <<< "$grant")"
+tail -n +2 <<< "$grant" | docker exec -i "$run-member" sh -c 'home="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"; umask 077; mkdir -p "$home"; cat > "$home/hive.env"'
+unset grant
+printf 'member container: minted member %s\n' "$member_id"
 docker exec "$run-member" python -c '
 from scripts.swarm.store import redis_client
 client = redis_client()
 assert client.acl_whoami().startswith("hive-"), client.acl_whoami()
 print(f"member Redis user over TLS: {client.acl_whoami()}")
 '
-member_id="${joined#joined the hive as }"
-member_id="${member_id%%;*}"
 member_agent="$(docker compose exec -T -e SLUG="$slug" -e MEMBER_ID="$member_id" swarm python -c '
 import os, time
 from scripts.inbox import exits

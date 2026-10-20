@@ -107,7 +107,7 @@ A rerun after another promotion moved `main` is refused with `Graded revision is
 | GitHub refuses the merge | The job fails before tagging. |
 | The promoted tree differs | The job fails before tagging; `main` has already advanced to the merged commit and the snapshot branch is kept for inspection. A rerun of that revision is refused, because `main` already names it. |
 
-A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it.
+A red promotion produces one fixer task per failing check under the [delivery tiers rule](delivery-tiers.md#rules); the fix lands through an ordinary pull request into `dev`, and the next green push run promotes it. When several swarms watch the repository, one of them owns that intake; see [promotion fixer intake](../pillars/swarm.md#promotion-fixer-intake).
 
 ## Manual releases
 

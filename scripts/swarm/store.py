@@ -416,19 +416,39 @@ class RedisStore:
         return self.execution_registry.agents(slug)
 
     def drop_agent(self, slug, name, at=None):
+        from redis.exceptions import WatchError
+
         ended = int(time.time() * 1000) if at is None else at
-        previous = self.redis.hget(self.key(slug, "agents"), name)
-        if previous:
-            row = json.loads(previous)
-            reason = "finished" if row["state"] == "finished" else "retired"
-            if self.handoff(slug, row["task"]):
-                reason = "handed off"
-            self.redis.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
-        self.redis.hdel(self.key(slug, "agents"), name)
-        self.redis.hdel(self.key(slug, "desired-routes"), name)
-        self.redis.hdel(self.key(slug, "state-since"), name)
-        self.redis.hdel(self.key(slug, "retire-failures"), name)
-        self.names.retire(name, ended)
+        for _ in range(5):
+            with self.redis.pipeline() as pipe:
+                try:
+                    pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
+                    previous = pipe.hget(self.key(slug, "agents"), name)
+                    executions = [a for a in self.execution_registry.occupants(slug).values() if a.name == name]
+                    pipe.multi()
+                    if previous:
+                        row = json.loads(previous)
+                        reason = "finished" if row["state"] == "finished" else "retired"
+                        if self.handoff(slug, row["task"]):
+                            reason = "handed off"
+                        pipe.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
+                    for agent in executions:
+                        if agent.state != "finished":
+                            pipe.hset(
+                                self.key(slug, "executions"),
+                                agent.execution_id,
+                                json.dumps(asdict(replace(agent, state="ended"))),
+                            )
+                    pipe.hdel(self.key(slug, "agents"), name)
+                    pipe.hdel(self.key(slug, "desired-routes"), name)
+                    pipe.hdel(self.key(slug, "state-since"), name)
+                    pipe.hdel(self.key(slug, "retire-failures"), name)
+                    pipe.execute()
+                    self.names.retire(name, ended)
+                    return
+                except WatchError:
+                    continue
+        raise SwarmError("agent registry kept changing; retirement was not committed")
 
     def count_spawn(self, slug, harness):
         self.redis.hincrby(self.key(slug, "spawns"), harness or "unknown", 1)

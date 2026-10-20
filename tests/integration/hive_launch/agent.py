@@ -45,7 +45,6 @@ def worker() -> None:
     store = connect()
     hive = registry._default(HIVE)
     hive.update(
-        roles=["eng", "ci"],
         max_agents=2,
         slots=[{"harness": "claude", "account": "scratch-account", "kind": "subscription"}],
         repos=["scratch-repo"],

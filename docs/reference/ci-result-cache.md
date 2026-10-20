@@ -229,7 +229,7 @@ Pull request runs and the coverage combine are not in this slice. `select` alrea
 
 Known limits. Each is detected only after the merge, by the next dev push, which runs every test; a red dev push does not hold the queue:
 
-- The manifest is measured on 3.12, and its plan also deselects the same tests on 3.11.
+- The manifest is measured on 3.12, the only Python the suite runs.
 - A test that reads a Python source as text, or lists a directory, depends only on what it executed or opened.
 - A test that passed the record run only on a retry is still reused.
 - A dispatch plans from its own head, since gate plant dispatches need admission by a trusted actor.
@@ -379,7 +379,7 @@ gh run view "$RUN" --log | grep -E "Python 3\.1[12]: ran [0-9]+, reused"
 
 ### Known limits
 
-- Everything listed under slice 5's known limits applies: the manifest is measured on 3.12 and its plan also deselects on 3.11, and the next dev push, which runs every test, is the backstop for any hidden input.
+- Everything listed under slice 5's known limits applies: the manifest is measured on 3.12, and the next dev push, which runs every test, is the backstop for any hidden input.
 - Reused coverage is the dev record's measurement moved by a line diff. A changed line that the diff matches to an unchanged one elsewhere can carry an arc onto it; the next dev push measures the real figure.
 - Only `*.py` files are remapped, and the diff runs with `--no-renames`: a renamed file counts as deleted, so the reused tests' arcs on it are dropped and that coverage is missing until the next dev push.
 - A page capture with no test is kept whenever any test is reused, so it can carry coverage from tests that ran on the dev record but run again here.

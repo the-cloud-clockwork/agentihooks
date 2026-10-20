@@ -10,6 +10,7 @@ import requests
 from scripts.github_app import REFUSED, GitAuthRefused, GitHubAppAuth
 
 _AUTH: GitHubAppAuth | None = None
+RENEW_SECONDS = 1800
 
 
 def token_file() -> Path:
@@ -55,6 +56,22 @@ def environment() -> dict[str, str]:
         env[f"GIT_CONFIG_VALUE_{index + offset}"] = value
     env["GIT_CONFIG_COUNT"] = str(index + 2)
     return env
+
+
+def renew(last: float, now: float) -> float:
+    if os.environ.get("HIVE_GITHUB_AUTH_MODE") != "app" or "GITHUB_APP_PRIVATE_KEY" not in os.environ:
+        return last
+    if now - last < RENEW_SECONDS:
+        return last
+    path = token_file()
+    staged = path.with_name(f"{path.name}.next")
+    try:
+        staged.write_text(f"{token()}\n")
+        staged.chmod(0o600)
+        staged.replace(path)
+    except (OSError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
+        return last
+    return now
 
 
 def main(argv: list[str] | None = None) -> int:

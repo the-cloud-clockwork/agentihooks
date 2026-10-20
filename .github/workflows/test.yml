@@ -33,7 +33,7 @@ permissions:
 
 jobs:
   promote:
-    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar]
+    needs: [gate-required, refresh-durations, coverage-baseline, flake-budget, sonar, hierarchy-cpu]
     if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' && needs.gate-required.result == 'success' && !contains(needs.*.result, 'failure') && !contains(needs.*.result, 'cancelled') && needs.sonar.outputs.analysis != '' }}
     uses: ./.github/workflows/promote.yml
     secrets:
@@ -225,6 +225,10 @@ jobs:
     uses: ./.github/workflows/ledger-load.yml
     with:
       base: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before || inputs.base }}
+
+  hierarchy-cpu:
+    if: ${{ !cancelled() && github.event_name == 'push' && github.ref == 'refs/heads/dev' }}
+    uses: ./.github/workflows/hierarchy-cpu.yml
 
   kind-due:
     if: ${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}
@@ -629,7 +633,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -781,7 +785,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ${{ fromJSON(github.event_name == 'merge_group' && '["3.11"]' || '["3.11","3.12"]') }}
+        python-version: ["3.12"]
     env:
       UNIT_SOURCE: ${{ needs.select.outputs.source }}
       UV_CONSTRAINT: ${{ github.workspace }}/.github/test-constraints.txt
@@ -790,7 +794,6 @@ jobs:
       reused: ${{ steps.plan.outputs.reused }}
       run: ${{ steps.plan.outputs.run }}
       commit: ${{ steps.plan.outputs.commit }}
-      queue_311: ${{ steps.queue-size.outputs.queue_311 }}
       queue_312: ${{ steps.queue-size.outputs.queue_312 }}
     steps:
       - uses: actions/checkout@v4
@@ -849,13 +852,6 @@ jobs:
         uses: ./.github/actions/retry-download
         with:
           name: early-collected-${{ matrix.python-version }}
-
-      - name: Download the Python 3.12 queue collection
-        if: github.event_name == 'merge_group'
-        uses: ./.github/actions/retry-download
-        with:
-          name: early-collected-3.12
-          path: queue-input/3.12
 
       - name: Download the queued run's dev durations
         if: needs.select.outputs.source == '' && needs.select.outputs.queued == 'true'
@@ -929,30 +925,15 @@ jobs:
           retention-days: 7
           overwrite: true
 
-      - name: Upload the Python 3.12 queue test plan
-        if: github.event_name == 'merge_group' && steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: reused-tests-3.12
-          path: reused-tests.json
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
       # The grader's manifest code picks what is skipped; the head supplies only the plan and its collection.
       - name: Deselect the reused tests
         if: steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
         env:
           PYTHON_PATH: ${{ steps.python.outputs.python-path }}
-          QUEUE_BOTH_VERSIONS: ${{ github.event_name == 'merge_group' }}
         run: |
           cd "$RUNNER_TEMP/planner"
           "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
             --collected "$GITHUB_WORKSPACE/collected.json" --out "$GITHUB_WORKSPACE/reused.json"
-          if [[ "${QUEUE_BOTH_VERSIONS:-false}" == true ]]; then
-            "$PYTHON_PATH" -m tests.dep_manifest deselect --plan "$GITHUB_WORKSPACE/reused-tests.json" \
-              --collected "$GITHUB_WORKSPACE/queue-input/3.12/collected.json" --out "$GITHUB_WORKSPACE/queue-input/3.12/reused.json"
-          fi
 
       - name: Size queue shards from conservative durations
         id: queue-size
@@ -960,27 +941,17 @@ jobs:
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
         run: |
-          for suffix in '' -3.11 -3.12; do
+          for suffix in '' "-$PYTHON_VERSION"; do
             measured="$HOME/dev-durations/.test_durations-slowest$suffix"
             [[ ! -f "$measured" ]] || cp "$measured" "$HOME/dev-durations/.test_durations$suffix"
           done
           : > queue-plan.txt
-          for version in 3.11 3.12; do
-            collection=collected.json
-            reused=reused.json
-            if [[ "$version" == 3.12 ]]; then
-              collection=queue-input/3.12/collected.json
-              reused=queue-input/3.12/reused.json
-            fi
-            destination="queue-input/$version"
-            mkdir -p "$destination"
-            python -m tests.dev_durations "$version" ~/dev-durations --hash durations.sha256 --collection "$collection" --collected "$collection"
-            python -m tests.queue_shards --root . --collection "$collection" --version "$version" --reused "$reused" --output queue-plan.txt
-            cp .test_durations durations.sha256 "$destination/"
-          done
+          destination="queue-input/$PYTHON_VERSION"
+          mkdir -p "$destination"
+          python -m tests.dev_durations "$PYTHON_VERSION" ~/dev-durations --hash durations.sha256 --collection collected.json --collected collected.json
+          python -m tests.queue_shards --root . --collection collected.json --version "$PYTHON_VERSION" --reused reused.json --output queue-plan.txt
+          cp .test_durations durations.sha256 "$destination/"
           python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
-          cp queue-input/3.11/.test_durations .test_durations
-          cp queue-input/3.11/durations.sha256 durations.sha256
           cat queue-plan.txt >> "$GITHUB_OUTPUT"
 
       - name: Upload the deselected tests
@@ -989,16 +960,6 @@ jobs:
         with:
           name: reused-${{ matrix.python-version }}
           path: reused.json
-          if-no-files-found: error
-          retention-days: 7
-          overwrite: true
-
-      - name: Upload the Python 3.12 queue deselected tests
-        if: github.event_name == 'merge_group' && steps.plan.outputs.reused != '' && steps.plan.outputs.reused != '0'
-        uses: actions/upload-artifact@v4
-        with:
-          name: reused-3.12
-          path: queue-input/3.12/reused.json
           if-no-files-found: error
           retention-days: 7
           overwrite: true
@@ -1040,28 +1001,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Upload the Python 3.12 queue durations
-        if: github.event_name == 'merge_group'
-        uses: ./.github/actions/retry-upload
-        with:
-          name: split-3.12
-          path: |
-            queue-input/3.12/.test_durations
-            queue-input/3.12/durations.sha256
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 7
-
-      - name: Upload the Python 3.12 queue collection
-        if: github.event_name == 'merge_group'
-        uses: actions/upload-artifact@v4
-        with:
-          name: collected-3.12
-          path: queue-input/3.12/collected.json
-          if-no-files-found: error
-          retention-days: 14
-          overwrite: true
-
       - name: Upload collected tests
         if: github.event.pull_request.base.ref != 'main'
         uses: actions/upload-artifact@v4
@@ -1089,16 +1028,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}
-        exclude:
-          - {python-version: &queue-python-311 "${{ github.event_name == 'merge_group' && '3.11' || '' }}", shard: 7}
-          - {python-version: *queue-python-311, shard: 8}
-          - {python-version: *queue-python-311, shard: 9}
-          - {python-version: *queue-python-311, shard: 10}
-          - {python-version: *queue-python-311, shard: 11}
-          - {python-version: *queue-python-311, shard: 12}
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}
     steps:
       # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
       - name: Check out the graded commit
@@ -1288,6 +1220,7 @@ jobs:
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1340,7 +1273,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]
         leg: ${{ fromJSON(needs.select.outputs.legs) }}
     steps:
       - uses: actions/checkout@v4
@@ -1434,6 +1367,7 @@ jobs:
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1484,7 +1418,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.12"]
     steps:
       - uses: actions/checkout@v4
         with:
@@ -2425,6 +2359,7 @@ jobs:
 
       - name: Summarize this run's tests
         if: ${{ always() }}
+        shell: bash
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
 
   refresh-durations:

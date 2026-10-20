@@ -79,8 +79,7 @@ def test_unit_shards_measure_no_coverage():
     include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
     assert include in (
         [],
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
-        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}",
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}",
     )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})
@@ -282,11 +281,10 @@ def test_unit_matrix_runs_one_shard_per_split():
     workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
     matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
     excluded = {(entry["python-version"], entry["shard"]) for entry in matrix.get("exclude", [])}
-    counts = {"3.11": plain_shards, "3.12": coverage_shards}
-    for version in matrix["python-version"]:
-        assert [shard for shard in matrix["shard"] if (version, shard) not in excluded] == list(
-            range(1, counts[version] + 1)
-        )
+    assert matrix["python-version"] == ["3.12"]
+    assert [shard for shard in matrix["shard"] if ("3.12", shard) not in excluded] == list(
+        range(1, coverage_shards + 1)
+    )
     assert coverage_shards >= plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
     assert 'combine.sh --downloaded "$SHARDS" ' in merge["run"]
@@ -504,9 +502,8 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     collect = jobs["test-count"]
     assert collect["needs"] == jobs["select"]["needs"]
     assert "needs.select" not in collect["if"]
-    assert collect["strategy"]["matrix"] == {"python-version": ["3.11", "3.12"]}
-    joint = "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.11\"]' || '[\"3.11\",\"3.12\"]') }}"
-    assert jobs["split"]["strategy"]["matrix"] in (collect["strategy"]["matrix"], {"python-version": joint})
+    assert collect["strategy"]["matrix"] == {"python-version": ["3.12"]}
+    assert jobs["split"]["strategy"]["matrix"] == collect["strategy"]["matrix"]
     command = next(
         step["run"] for step in collect["steps"] if step.get("name") == "Hold the base revision's test count"
     )
@@ -805,10 +802,9 @@ def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
 
 
 def _sample(folder: Path, run: str, seconds: float) -> None:
-    for version in ("3.11", "3.12"):
-        path = folder / run / f"durations-{version}-1"
-        path.mkdir(parents=True)
-        (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
+    path = folder / run / "durations-3.12-1"
+    path.mkdir(parents=True)
+    (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
 
 
 def test_samples_refresh_keeps_the_newest_runs_and_never_calls_github(tmp_path, monkeypatch):
@@ -873,19 +869,18 @@ def test_refresh_durations_names_missing_shards_from_the_push_unit_matrix():
 
 def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
-    for version in ("3.11", "3.12"):
-        for run, shard, durations in [
-            ("11", 1, {"t.py::a@g": 1.0}),
-            ("11", 2, {"t.py::b@g": 4.0, "t.py::gone@g": 5.0}),
-            ("12", 1, {"t.py::a@g": 3.0}),
-        ]:
-            path = samples / run / f"durations-{version}-{shard}"
-            path.mkdir(parents=True)
-            (path / "durations.json").write_text(json.dumps(durations))
+    for run, shard, durations in [
+        ("11", 1, {"t.py::a@g": 1.0}),
+        ("11", 2, {"t.py::b@g": 4.0, "t.py::gone@g": 5.0}),
+        ("12", 1, {"t.py::a@g": 3.0}),
+    ]:
+        path = samples / run / f"durations-3.12-{shard}"
+        path.mkdir(parents=True)
+        (path / "durations.json").write_text(json.dumps(durations))
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a", "t.py::b"])
     refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
-    for name in (".test_durations", ".test_durations-3.11", ".test_durations-3.12"):
+    for name in (".test_durations", ".test_durations-3.12"):
         assert json.loads((tmp_path / name).read_text()) == {"t.py::a": 2.0, "t.py::b": 4.0}
 
 
@@ -1014,8 +1009,8 @@ def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
 
 def test_ci_samples_are_one_per_shard_file_without_the_xdist_group_suffix(tmp_path):
     shards = {
-        "durations-3.11-1": {"t.py::a@group": 1.0},
-        "durations-3.12-1": {"t.py::a@group": 3.0, "t.py::b[x@y]": 2.0},
+        "durations-3.12-1": {"t.py::a@group": 1.0},
+        "durations-3.12-2": {"t.py::a@group": 3.0, "t.py::b[x@y]": 2.0},
     }
     for name, durations in shards.items():
         (tmp_path / "7" / name).mkdir(parents=True)
@@ -1064,10 +1059,9 @@ def test_ci_refresh_lists_same_repository_runs_newest_first():
 def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, monkeypatch):
     def download(run_ids, folder):
         for run, seconds in zip(run_ids, (1.0, 5.0, 2.0)):
-            for version in ("3.11", "3.12"):
-                path = folder / run / f"durations-{version}-1"
-                path.mkdir(parents=True)
-                (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
+            path = folder / run / "durations-3.12-1"
+            path.mkdir(parents=True)
+            (path / "durations.json").write_text(json.dumps({"t.py::a@g": seconds}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
@@ -1080,17 +1074,15 @@ def test_ci_refresh_stores_the_median_of_the_downloaded_shard_files(tmp_path, mo
 def test_ci_refresh_can_use_the_exact_run_that_passed_the_dev_tree(tmp_path, monkeypatch):
     def download(run_ids, folder):
         assert run_ids == ["42"]
-        for version, seconds in [("3.11", 1.0), ("3.12", 3.0)]:
-            path = folder / "42" / f"durations-{version}-1"
-            path.mkdir(parents=True)
-            (path / "durations.json").write_text(json.dumps({"t.py::a": seconds}))
+        path = folder / "42" / "durations-3.12-1"
+        path.mkdir(parents=True)
+        (path / "durations.json").write_text(json.dumps({"t.py::a": 3.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42"])
-    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0}
-    assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"t.py::a": 1.0}
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0}
     assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 3.0}
 
 
@@ -1104,19 +1096,17 @@ def test_ci_refresh_takes_the_median_over_recent_runs_for_the_tests_of_the_passe
     def download(run_ids, folder):
         assert run_ids == ["42", "41", "40"]
         for run in run_ids:
-            for version, scale in (("3.11", 1), ("3.12", 10)):
-                path = folder / run / f"durations-{version}-1"
-                path.mkdir(parents=True)
-                (path / "durations.json").write_text(json.dumps({k: v * scale for k, v in measured[run].items()}))
+            path = folder / run / "durations-3.12-1"
+            path.mkdir(parents=True)
+            (path / "durations.json").write_text(json.dumps(measured[run]))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     monkeypatch.setattr(refresh_durations, "ci_run_ids", lambda limit: ["42", "41", "40", "39"][:limit])
     monkeypatch.setattr(refresh_durations, "ci_download", download)
     refresh_durations.main(["--ci-run", "42", "--ci", "3"])
-    assert json.loads((tmp_path / ".test_durations-3.11").read_text()) == {"t.py::a": 2.0, "t.py::new": 4.0}
-    assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 20.0, "t.py::new": 40.0}
-    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 9.5, "t.py::new": 22.0}
+    assert json.loads((tmp_path / ".test_durations-3.12").read_text()) == {"t.py::a": 2.0, "t.py::new": 4.0}
+    assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 2.0, "t.py::new": 4.0}
 
 
 def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeypatch):
@@ -1125,9 +1115,8 @@ def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeyp
     def download(run_ids, folder):
         downloads.extend(run_ids)
         for run in run_ids:
-            for version in ("3.11", "3.12"):
-                (folder / run / f"durations-{version}-1").mkdir(parents=True)
-                (folder / run / f"durations-{version}-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
+            (folder / run / "durations-3.12-1").mkdir(parents=True)
+            (folder / run / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
@@ -1139,8 +1128,8 @@ def test_ci_refresh_counts_the_passed_run_within_its_run_limit(tmp_path, monkeyp
 
 def test_ci_refresh_refuses_a_passed_run_that_kept_no_durations(tmp_path, monkeypatch):
     def download(run_ids, folder):
-        (folder / "41" / "durations-3.11-1").mkdir(parents=True)
-        (folder / "41" / "durations-3.11-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
+        (folder / "41" / "durations-3.12-1").mkdir(parents=True)
+        (folder / "41" / "durations-3.12-1" / "durations.json").write_text(json.dumps({"t.py::a": 1.0}))
 
     monkeypatch.setattr(refresh_durations, "_ROOT", tmp_path)
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])

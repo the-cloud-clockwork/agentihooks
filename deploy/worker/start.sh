@@ -24,11 +24,6 @@ if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then
   token_file="$AGENTIHOOKS_HOME/github-token"
   python3 -m scripts.github_app_cli token > "$token_file.next"
   mv "$token_file.next" "$token_file"
-  (
-    while sleep 1800; do
-      python3 -m scripts.github_app_cli token > "$token_file.next" && mv "$token_file.next" "$token_file"
-    done
-  ) </dev/null >/dev/null 2>&1 &
 fi
 python3 - <<'PY'
 import json, os, re, subprocess
@@ -49,13 +44,6 @@ if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
     || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
 fi
 
-if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
-  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
-elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
-  code="$(< "${HIVE_JOIN_CODE_FILE:?a mounted join code or member credential is required}")"
-  agentihooks hive join "${HIVE_JOIN_URL:?the hive join URL is required}" "$code"
-  unset code
-fi
 python3 - <<'PY'
 import os, re, shlex, sys
 from pathlib import Path
@@ -109,6 +97,19 @@ EOF
   sleep 1
   kill -0 "$sshd_pid"
 fi
+if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
+  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
+elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
+  wait_s="${HIVE_DELIVERY_WAIT_S:-900}"
+  deadline=$(( $(date +%s) + wait_s ))
+  until [[ -f "$AGENTIHOOKS_HOME/hive.env" ]]; do
+    if (( $(date +%s) >= deadline )); then
+      echo "worker-hive: no member credential was delivered within ${wait_s}s; run agentihooks hive add from the UI hive" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+fi
 bundle=()
 [[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
 if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
@@ -119,9 +120,25 @@ if (( ! ${#bundle[@]} )); then
   agentihooks bundle unlink
   agentihooks init
 fi
+# init writes the hosted ledger CA; agents read only this file, never the multi-line LEDGER_CA_PEM.
+if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
+  python3 - <<'PY'
+import os, ssl
+from pathlib import Path
+
+from scripts.swarm_ledger import ledger_ca
+
+roots = ssl.get_default_verify_paths().cafile
+if not roots:
+    raise SystemExit('worker-hive: no system CA file to keep beside LEDGER_CA_PEM')
+system = Path(roots).read_text()
+if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' + os.environ['LEDGER_CA_PEM'].strip() + '\n') is None:
+    raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
+PY
+fi
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
-  "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"
+  "excluded=${HIVE_EXCLUDED-master}" "max-agents=${HIVE_MAX_AGENTS:-20}"
 exec agentihooks hive run

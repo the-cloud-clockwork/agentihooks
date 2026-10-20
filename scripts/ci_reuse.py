@@ -158,6 +158,10 @@ def summary_steps() -> list[dict]:
     return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
 
 
+def pipefail_summary(steps: list[dict]) -> list[dict]:
+    return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
+
+
 def reuse_job() -> dict:
     return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
 

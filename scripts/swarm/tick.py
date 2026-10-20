@@ -183,6 +183,7 @@ def tick(slug, store, ledger, runtime, now_ms):
     config = store.ensure_code(slug)
     store.redis.delete(store.key(slug, SPAWN_HOLD))
     actions = skip_refused(pane_evidence.sweep, slug, store, runtime, now_ms)
+    actions += skip_refused(store.execution_registry.reconcile, slug, runtime, now_ms)
     if config.state != "stopped" or _woken(slug, config, store, ledger):
         actions += skip_refused(master_move.fail_over, slug, config, store, runtime, now_ms)
         actions += skip_refused(_recover_master, slug, config, store, runtime, now_ms)
@@ -435,7 +436,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             facts.get(agent.name, {}),
             doc,
             launch_check.bundled(agent.profile),
-            launch_check.declared(agent.profile, agent.overlays),
+            launch_check.expected(agent),
         )
         if found and now_ms - launch_check.session_started_at(agent) < launch_check.DEADLINE_MS:
             continue
@@ -1113,7 +1114,7 @@ def _claim_cap(slug, store, ledger, rows, task):
     if lives < claim_cap.CAP or mode == "off":
         return ""
     last = (store.handoff_envelope(slug, task["id"]) or {}).get("reason") or "none"
-    failure = store.launch_failure(slug, task["id"]) or "none"
+    failure = claim_cap.launch_failure(lives, store.launches(slug), task["id"])
     reason = claim_cap.refusal(lives, last, failure, slug, task["id"])
     kind = "observe" if mode == "observe" else "deny"
     gate_log.append(slug, gate_log.Row.of(claim_cap.GATE.name, kind, Who(name="swarm", task=task["id"]), reason=reason))

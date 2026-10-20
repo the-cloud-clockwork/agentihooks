@@ -94,8 +94,9 @@ swarm, and do not implement the plan in this session.
 
 ## Swarms and ledgers
 
-A swarm runs Claude and Codex agents over the tasks of a swarm ledger
-(`~/development-ledger/<slug>.json`, page http://127.0.0.1:8765/<slug>).
+A swarm runs Claude and Codex agents over the tasks of a swarm ledger, one
+record in `~/development-ledger/ledgers.sqlite3` read and written only through
+`agentihooks ledger` and the ledger server (page http://127.0.0.1:8765/<slug>).
 
 | Trigger | Action |
 |---|---|

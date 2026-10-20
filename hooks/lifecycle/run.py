@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Callable
 
 from hooks.lifecycle.act import ActionError, Journal, apply, finish_pending
+from hooks.lifecycle.codex_homes import sweep_codex_homes
 from hooks.lifecycle.config import load_roots
 from hooks.lifecycle.files import classify_files, classify_traces
 from hooks.lifecycle.lease import read_lease
@@ -118,6 +119,7 @@ def sweep(
             findings = enforce(findings, roots, home, fresh)
         report = summarize(findings, snap)
         report["ledger_servers"] = sweep_servers(snap.table, home, scope, act)
+        report["codex_homes"] = sweep_codex_homes(snap, home, scope, act)
         checkouts = [path for path in checkouts if not scope or _within(str(path), scope)]
         report["git_maintenance"] = maintain(checkouts, act)
         (home / "gc-last.json").write_text(json.dumps(report), encoding="utf-8")

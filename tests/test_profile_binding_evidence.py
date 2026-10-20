@@ -148,7 +148,9 @@ def test_wait_observes_failure_and_times_out_on_pending_request(mounted):
         binding.wait(report, 1)
     binding.request(report, "engineer", "claude")
     assert json.loads(report.read_text()) == {"profile": "engineer", "harness": "claude", "state": "pending"}
-    with pytest.raises(ValueError, match="^mounted profile canary did not validate before timeout$"):
+    with pytest.raises(
+        ValueError, match="^mounted profile canary did not validate before timeout: the claude agent reported"
+    ):
         binding.wait(report, 0)
 
 
@@ -389,7 +391,7 @@ def test_wait_checks_the_deadline_and_observes_a_later_canary(mounted, monkeypat
     _, report, *_ = mounted
     clock = iter([0, 0])
     monkeypatch.setattr(binding.time, "monotonic", lambda: next(clock))
-    binding._report(report, {"state": "validated", "validation": {"canary": "after deadline"}})
+    binding._report(report, {"harness": "claude", "state": "validated", "validation": {"canary": "after deadline"}})
     with pytest.raises(ValueError, match="before timeout"):
         binding.wait(report, 0)
     binding.request(report, "engineer", "claude")

@@ -188,17 +188,13 @@ controller:
 
 workers:
   replicas: 0
-  maxAgents: 1
-  roles: [eng, ci, plan, dispatch]
+  maxAgents: 20
+  excluded: [master]
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev
     pullPolicy: Always
   repositories: []
-  joinUrl: ""
-  joinCodeSecret:
-    name: ""
-    key: ""
   credentialSecret:
     name: ""
     key: ""
@@ -217,9 +213,6 @@ workers:
   ssh:
     enabled: false
     port: 2222
-  persistence:
-    size: 1Gi
-    storageClassName: ""
   # Memory in MiB per agent, multiplied by maxAgents into the pod's memory request and limit.
   memoryPerAgentMi:
     request: 700
@@ -230,6 +223,15 @@ workers:
       ephemeral-storage: 1Gi
     limits:
       ephemeral-storage: 10Gi
+  # Volume source of /home/worker, which holds the repo clones, worktrees and scratchpad; any kind other
+  # than emptyDir (a hostPath or persistentVolumeClaim) rolls out by Recreate so two hives never share it.
+  homeVolume:
+    emptyDir: {}
+  # Free GB wt.sh new requires on the home volume, passed to agents as WT_MIN_FREE_GB.
+  worktreeMinFreeGb: 50
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
 
 worker:
   enabled: false

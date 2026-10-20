@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, session_bands
+from scripts import codex_router, github_app_cli, session_bands
 from scripts.hive import quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
@@ -46,9 +46,9 @@ def beat(redis: "Redis", local_id: str) -> None:
     key = registry.key(local_id)
     # The member Redis user cannot write the hive index or launch slots; join, revoke and the controller maintain them.
     member = local_id == os.environ.get("AGENTIHOOKS_HIVE_ID")
+    registry.migrate(redis, local_id)
     with redis.pipeline() as pipe:
-        for field, value in registry._default(local_id).items():
-            pipe.hsetnx(key, field, registry._encode(field, value))
+        registry.seed(pipe, local_id)
         fields = {name: json.dumps(report[name]) for name in ("slots", "interactive", "repos")}
         fields["heartbeat_at"] = str(int(time.time() * 1000))
         pipe.hset(key, mapping=fields)
@@ -120,6 +120,7 @@ def run(connect: Callable[[], "Redis"]) -> None:
     local_id = hive_id()
     quota_refresh.refresh(os.environ)
     worker, attempted_at = None, time.time()
+    renewed = time.time()
     failures = 0
     while True:
         try:
@@ -127,6 +128,7 @@ def run(connect: Callable[[], "Redis"]) -> None:
             while True:
                 started = time.monotonic()
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
+                renewed = github_app_cli.renew(renewed, time.time())
                 beat(redis, local_id)
                 scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
                 failures = 0
