@@ -51,10 +51,10 @@ def ci_samples(folder: Path, version: str = "*", run: str = "*") -> list[dict[st
     samples = []
     for path in sorted(folder.glob(f"{run}/durations-{version}-*/durations.json")):
         try:
-            durations = json.loads(path.read_text())
-        except ValueError as error:
+            durations = json.loads(path.read_text()).items()
+        except (ValueError, AttributeError) as error:
             raise ValueError(f"malformed sample file {path}: {error}") from error
-        samples.append({re.sub(r"@[^\[\]]*$", "", nodeid): seconds for nodeid, seconds in durations.items()})
+        samples.append({re.sub(r"@[^\[\]]*$", "", nodeid): seconds for nodeid, seconds in durations})
     return samples
 
 
@@ -140,16 +140,21 @@ def missing_shards(folder: Path, run: str) -> list[str]:
 def cli(argv: list[str] | None = None) -> None:
     args = sys.argv[1:] if argv is None else argv
     try:
+        parsed = parser().parse_args(args)
+    except SystemExit as error:
+        if error.code:
+            print(f"::error::refresh durations: invalid arguments {' '.join(args)}")
+        raise
+    try:
         main(args)
     except SystemExit as error:
-        if not isinstance(error.code, str):
+        if not error.code:
             raise
-        cause = error.code
+        cause = str(error.code)
     except Exception as error:
-        cause = str(error) or type(error).__name__
+        cause = str(error).strip() or type(error).__name__
     else:
         return
-    parsed = parser().parse_args(args)
     if (
         parsed.samples
         and parsed.ci_run

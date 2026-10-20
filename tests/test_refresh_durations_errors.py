@@ -83,11 +83,11 @@ def test_every_failure_prints_one_named_line(monkeypatch, capsys, error, line):
     assert capsys.readouterr().out == f"::error::refresh durations: {line}\n"
 
 
-def test_a_usage_exit_and_a_success_keep_their_own_outcome(monkeypatch, capsys):
+def test_a_success_returns_and_a_usage_exit_keeps_its_code_with_a_named_line(monkeypatch, capsys):
     monkeypatch.setattr(refresh_durations, "main", lambda argv: None)
     assert refresh_durations.cli(["--ci-run", "3"]) is None
-    monkeypatch.setattr(refresh_durations, "main", lambda argv: refresh_durations.parser().parse_args(argv))
+    assert capsys.readouterr().out == ""
     with pytest.raises(SystemExit) as stopped:
         refresh_durations.cli(["--unknown"])
     assert stopped.value.code == 2
-    assert "::error::" not in capsys.readouterr().out
+    assert capsys.readouterr().out == "::error::refresh durations: invalid arguments --unknown\n"
