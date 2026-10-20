@@ -73,14 +73,15 @@ def server(
 def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
     try:
         found = subprocess.run(
-            ["git", "-C", str(repo), "log", "-1", "--format=%ct%x09%s", "origin/dev"],
+            ["git", "-C", str(repo), "log", "-g", "-1", "--date=unix", "--format=%gd%x09%s", "refs/remotes/origin/dev"],
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired):
         return dict(NO_DEV)
-    stamp, _, subject = found.stdout.strip().partition("\t")
+    selector, _, subject = found.stdout.strip().partition("\t")
+    stamp = selector.rpartition("@{")[2].removesuffix("}")
     if found.returncode or not stamp.isdigit():
         return dict(NO_DEV)
     return {"newest": subject, "merged_minutes": int(((now or time.time()) - int(stamp)) / 60)}

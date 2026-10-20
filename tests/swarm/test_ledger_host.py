@@ -120,8 +120,10 @@ class Git:
     [
         Git(error=FileNotFoundError("git")),
         Git(error=subprocess.TimeoutExpired("git", 5)),
-        Git("1000000000\tA subject", code=128),
-        Git("not a stamp\tA subject"),
+        Git("origin/dev@{1000000000}\tA subject", code=128),
+        Git("origin/dev@{not a stamp}\tA subject"),
+        Git("1000000000\tA subject"),
+        Git(""),
     ],
 )
 def test_newest_on_dev_is_unknown_when_git_cannot_say(monkeypatch, git):
@@ -131,11 +133,21 @@ def test_newest_on_dev_is_unknown_when_git_cannot_say(monkeypatch, git):
 
 
 def test_newest_on_dev_reads_the_dev_tip_with_a_timeout_and_keeps_tabs_in_the_subject(monkeypatch):
-    git = Git("1000000000\tKeep\ttabs\n")
+    git = Git("origin/dev@{1000000000}\tKeep\ttabs\n")
     monkeypatch.setattr(ledger_host.subprocess, "run", git)
     assert ledger_host.newest_on_dev(Path("/repo"), 1_000_000_659) == {"newest": "Keep\ttabs", "merged_minutes": 10}
     [(argv, kwargs)] = git.calls
-    assert argv == ["git", "-C", "/repo", "log", "-1", "--format=%ct%x09%s", "origin/dev"]
+    assert argv == [
+        "git",
+        "-C",
+        "/repo",
+        "log",
+        "-g",
+        "-1",
+        "--date=unix",
+        "--format=%gd%x09%s",
+        "refs/remotes/origin/dev",
+    ]
     assert kwargs == {"capture_output": True, "text": True, "timeout": ledger_host.GIT_TIMEOUT_S}
     assert ledger_host.GIT_TIMEOUT_S == 5
 
