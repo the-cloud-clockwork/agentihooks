@@ -139,7 +139,7 @@ class FencedRuntime:
         chosen = overflow(waited.role, waited, _local_agents(self.store, task["id"]), local_max)
         if not isinstance(chosen, Choice):
             return chosen.reason
-        placement_waits.observe(self.store, self.slug, lane, task["id"], "", lease.now_ms(self.store))
+        self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
         return OVERFLOW.format(lane=lane)
 
     def has_capacity(self, config) -> bool:

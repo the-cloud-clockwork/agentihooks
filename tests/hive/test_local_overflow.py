@@ -165,6 +165,18 @@ def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):
     assert fenced._refusal("eng", {"id": "task"}) == "the local machine takes eng work"
 
 
+@pytest.mark.parametrize(("profile", "refused"), [("engineer", ""), ("qa", "Codex hive placement is not enabled")])
+def test_a_codex_worker_no_hive_can_launch_runs_locally_unless_its_role_needs_a_ui_host(
+    setup, monkeypatch, profile, refused
+):
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    fenced = hybrid(setup, monkeypatch)
+    setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
+    task = {"id": "task", "launch_assignment": {"harness": "codex"}}
+    assert fenced.placement_refusal("eng", task) == refused
+
+
 def test_a_task_pinned_to_a_hive_never_moves_to_the_local_machine(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
