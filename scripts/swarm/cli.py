@@ -229,6 +229,21 @@ def _publish_tick_status(store, slug, doc):
             raise
 
 
+def _inactive_tick(store, slug, ledger, runtime):
+    if timing.call(ledger.binned, slug):
+        store.redis.set(store.key(slug, "ledger-binned"), 1)
+        _, left = stop_now(store, slug, runtime, ledger)
+        return [
+            f"the ledger is in the bin, still retiring {', '.join(left)}"
+            if left
+            else "the ledger is in the bin, stopped"
+        ], {}
+    if store.config(slug).state == "stopped":
+        doc = timing.call(ledger.state, slug)
+        return timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
+    return None, {}
+
+
 @timing.instrument_tick
 @outage.guard_tick
 @ledger_route.service
@@ -258,17 +273,14 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     doc = {}
     try:
         timing.keep()
-        if store.config(slug).state == "stopped":
-            ledger = controller.FencedLedger(store, slug, held, ledger)
-            runtime = controller.FencedRuntime(
-                store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
-            )
-            controls = timing.call(command_runner.consume, store, slug)
-            if timing.call(ledger.binned, slug):
-                stop_now(store, slug, runtime, ledger)
-                return controls
-            doc = timing.call(ledger.state, slug)
-            return controls + timing.call(tick, slug, store, ledger, runtime, now_ms())
+        ledger = controller.FencedLedger(store, slug, held, ledger)
+        runtime = controller.FencedRuntime(
+            store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
+        )
+        controls = timing.call(command_runner.consume, store, slug)
+        inactive, doc = _inactive_tick(store, slug, ledger, runtime)
+        if inactive is not None:
+            return controls + inactive
         timing.call(relay.relay, store.redis)
         timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
         outage.providers(store, slug, runtime, now_ms())
@@ -276,14 +288,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
         ):
             return ["Ledger health probe failed"]
-        ledger = controller.FencedLedger(store, slug, held, ledger)
-        runtime = controller.FencedRuntime(
-            store,
-            slug,
-            held,
-            runtime or routed(herdr=HerdrRuntime()),
-            controller.deployment_for(store.config(slug), os.environ),
-        )
         from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
         pressured = skip_refused(incidents.host_pressure, store, slug)
@@ -291,15 +295,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
-            controls = timing.call(command_runner.consume, store, slug)
-            if timing.call(ledger.binned, slug):
-                store.redis.set(store.key(slug, "ledger-binned"), 1)
-                _, left = stop_now(store, slug, runtime or routed(herdr=HerdrRuntime()), ledger)
-                return [
-                    f"the ledger is in the bin, still retiring {', '.join(left)}"
-                    if left
-                    else "the ledger is in the bin, stopped"
-                ]
             inbox = InboxStore(store.redis)
             try:
                 doc = timing.call(ledger.state, slug)

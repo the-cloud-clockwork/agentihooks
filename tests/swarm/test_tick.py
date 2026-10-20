@@ -1575,16 +1575,24 @@ def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
     assert seen == ([] if state == "stopped" else ["panes", "executions", "outages", "verify"])
 
 
-def test_stopped_swarm_skips_outer_tick_work_but_consumes_control_commands(store, monkeypatch):
+@pytest.mark.parametrize("wake", [False, True])
+def test_stopped_swarm_skips_outer_tick_work_but_consumes_control_commands(store, monkeypatch, wake):
+    from scripts.inbox.store import InboxStore
     from scripts.swarm import cli, command_runner
 
     store.update("sw", state="stopped")
+    if wake:
+        InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
     consumed = []
     monkeypatch.setattr(command_runner, "consume", lambda *args: consumed.append(args) or ["controls checked"])
     monkeypatch.setattr(cli.outage, "providers", lambda *args: pytest.fail("stopped swarm probed providers"))
-    assert cli.run_tick(store, "sw", tasks(("t1", "eng")), FakeRuntime()) == ["controls checked"]
+    runtime = FakeRuntime()
+    actions = cli.run_tick(store, "sw", tasks(("t1", "eng")), runtime)
+    assert actions[:1] == ["controls checked"]
     assert consumed == [(store, "sw")]
-    assert store.config("sw").state == "stopped"
+    assert store.config("sw").state == ("paused" if wake else "stopped")
+    assert len(runtime.masters) == int(wake)
+    assert runtime.spawned == []
 
 
 def test_a_dead_master_is_respawned(store):
