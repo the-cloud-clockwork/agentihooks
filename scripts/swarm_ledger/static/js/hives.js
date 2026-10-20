@@ -52,7 +52,7 @@ function moveButton(hive) {
 
 function hiveRow(hive) {
   const values = [h("span", { class: "sw-id", title: hive.id, text: hive.name || hive.id }), label(hive.live ? "live" : "quiet", hive.live ? "live" : "stalled"),
-    flag(hive, "ui"), flag(hive, "ephemeral"), text(hive, "roles", (hive.roles || []).join(",")), text(hive, "prefer", preferText(hive.prefer)),
+    flag(hive, "ui"), flag(hive, "ephemeral"), text(hive, "excluded", (hive.excluded || []).join(",")), text(hive, "prefer", preferText(hive.prefer)),
     text(hive, "max_agents", String(hive.max_agents), true), `${hive.agents}/${hive.max_agents}`, slots(hive),
     hive.master ? h("span", { class: "sw-id", title: hive.master.name, text: hive.master.name }) : "—", moveButton(hive)];
   return h("tr", { id: `hive-${hive.id}` }, ...values.map((v) => (v.nodeType ? h("td", {}, v) : h("td", { text: v }))));
@@ -69,7 +69,7 @@ export function renderHives(force) {
 
 function value(input) {
   const raw = input.value.trim(), field = input.dataset.hiveField;
-  if (field === "roles") return raw.split(",").map((role) => role.trim()).filter(Boolean);
+  if (field === "excluded") return raw.split(",").map((name) => name.trim()).filter(Boolean);
   if (field === "prefer") return Object.fromEntries(raw.split(",").filter(Boolean).map((pair) => pair.split(":")).map(([role, rank]) => [role.trim(), Number(rank)]));
   if (field === "max_agents") return /^\d+$/.test(raw) ? Number(raw) : raw;
   return raw;

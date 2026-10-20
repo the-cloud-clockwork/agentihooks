@@ -110,7 +110,7 @@ RUN = [
     "bundle unlink",
     "init",
     "deps ensure",
-    "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1",
+    "hive set worker-member ui=no ephemeral=yes excluded=master max-agents=20",
     "hive run",
 ]
 

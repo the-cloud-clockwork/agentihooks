@@ -17,7 +17,7 @@ def hive(hive_id, live, **fields):
         "live": live,
         "ui": "yes",
         "ephemeral": "no",
-        "roles": ["master", "eng"],
+        "excluded": [],
         "prefer": {"eng": 1},
         "max_agents": 4,
         "agents": 1,
@@ -30,7 +30,7 @@ def hive(hive_id, live, **fields):
 
 HIVES = [
     hive("desk", True, master={"slug": "rig", "name": "master@rig-1"}, agents=2),
-    hive("pod", True, ui="no", roles=["eng", "ci"], prefer={}, max_agents=2, agents=0),
+    hive("pod", True, ui="no", excluded=["master", "qa"], prefer={}, max_agents=2, agents=0),
     hive("lab", False, ephemeral="yes", agents=0),
 ]
 
@@ -109,7 +109,7 @@ def save(page, hive_id, field, value, shown):
     )
 
 
-def test_each_hive_shows_liveness_tags_roles_prefer_max_agents_slots_and_master(hives_page):
+def test_each_hive_shows_liveness_tags_excluded_prefer_max_agents_slots_and_master(hives_page):
     page = hives_page()
     rows = page.table("swarm-hives")
     assert [row[0] for row in rows] == ["desk", "pod", "lab"]
@@ -120,7 +120,7 @@ def test_each_hive_shows_liveness_tags_roles_prefer_max_agents_slots_and_master(
     assert fields(page, "pod") == [
         ["ui", "no"],
         ["ephemeral", "no"],
-        ["roles", "eng,ci"],
+        ["excluded", "master,qa"],
         ["prefer", ""],
         ["max_agents", "2"],
     ]
@@ -157,26 +157,26 @@ def test_editing_max_agents_writes_it_as_the_operator(hives_page):
     assert page.text("#quota-count").lower().endswith("desk 2/4 · pod 0/5 · lab 0/4")
 
 
-def test_roles_prefer_and_flags_are_sent_in_their_api_shape(hives_page):
+def test_excluded_prefer_and_flags_are_sent_in_their_api_shape(hives_page):
     page = hives_page()
-    save(page, "pod", "roles", "eng, ci,plan", "eng,ci,plan")
+    save(page, "pod", "excluded", "master, qa,frontend", "master,qa,frontend")
     save(page, "pod", "prefer", "eng:2, plan:1", "eng:2,plan:1")
     save(page, "lab", "ephemeral", "no", "no")
     assert [(hive_id, body) for hive_id, body, _, _ in page.patches] == [
-        ("pod", {"roles": ["eng", "ci", "plan"]}),
+        ("pod", {"excluded": ["master", "qa", "frontend"]}),
         ("pod", {"prefer": {"eng": 2, "plan": 1}}),
         ("lab", {"ephemeral": "no"}),
     ]
 
 
 def test_a_refused_write_names_the_reason_and_keeps_the_stored_value(hives_page):
-    page = hives_page(refusal="role qa needs a UI, and this hive has ui=no")
-    roles = page.tab.locator('#hive-pod [data-hive-field="roles"]')
-    roles.fill("qa")
-    roles.press("Enter")
-    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('needs a UI')")
+    page = hives_page(refusal="excluded takes lane roles or profiles, not 'a b'")
+    excluded = page.tab.locator('#hive-pod [data-hive-field="excluded"]')
+    excluded.fill("a b")
+    excluded.press("Enter")
+    page.tab.wait_for_function("() => document.querySelector('#swarm-note').textContent.includes('lane roles')")
     assert page.text("#swarm-note").startswith("Could not set hive")
-    assert dict(fields(page, "pod"))["roles"] == "eng,ci"
+    assert dict(fields(page, "pod"))["excluded"] == "master,qa"
 
 
 @pytest.mark.parametrize(("refusal", "reason"), [("abort", "ledger server unreachable"), (500, "server answered 500")])
@@ -190,14 +190,14 @@ def test_a_failed_write_without_a_reason_names_what_went_wrong(hives_page, refus
     assert dict(fields(page, "pod"))["max_agents"] == "2"
 
 
-def test_a_hive_without_a_name_roles_prefer_or_slots_shows_its_id_and_empty_settings(browser):
+def test_a_hive_without_a_name_excluded_prefer_or_slots_shows_its_id_and_empty_settings(browser):
     page = HivesPage(browser, status(), 1920)
     page.hives = [{"id": "bare", "live": True, "ui": "no", "ephemeral": "yes", "max_agents": 3, "agents": 0}]
     page.tab.reload()
     try:
         page.tab.locator("#swarm-hives tr#hive-bare").wait_for(timeout=3000)
         assert page.table("swarm-hives")[0][0] == "bare"
-        assert fields(page, "bare")[2:4] == [["roles", ""], ["prefer", ""]]
+        assert fields(page, "bare")[2:4] == [["excluded", ""], ["prefer", ""]]
         assert page.text("#quota-count").lower().endswith("bare 0/3")
         assert page.errors == []
     finally:

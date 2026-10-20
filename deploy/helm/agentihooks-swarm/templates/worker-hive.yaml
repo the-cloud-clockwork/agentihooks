@@ -71,8 +71,8 @@ spec:
                   fieldPath: metadata.name
             - name: AGENTIHOOKS_DEPLOYMENT
               value: {{ .Values.deployment | quote }}
-            - name: HIVE_ROLES
-              value: {{ join "," $workers.roles | quote }}
+            - name: HIVE_EXCLUDED
+              value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MAX_AGENTS
               value: {{ $workers.maxAgents | quote }}
             - name: HIVE_REPOSITORIES

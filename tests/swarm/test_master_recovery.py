@@ -158,7 +158,7 @@ QUIET = {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {
 def _hive(store, hive, beat):  # noqa: F811
     from scripts.hive import registry
 
-    registry.update(store.redis, hive, ["ui=yes", "roles=master"])
+    registry.update(store.redis, hive, ["ui=yes"])
     slots = [{"harness": "claude", "account": "one", "kind": "subscription"}]
     store.redis.hset(
         registry.key(hive),
@@ -393,7 +393,7 @@ def test_master_move_refuses_a_hive_that_cannot_take_the_master(store, to, reaso
 
     _hive(store, "home", NOW)
     _hive(store, "dead", NOW - 100_000)
-    registry.update(store.redis, "bare", ["ui=yes", "roles=master"])
+    registry.update(store.redis, "bare", ["ui=yes"])
     store.redis.hset(registry.key("bare"), "heartbeat_at", NOW)
     _hive_master(store, "home")
 

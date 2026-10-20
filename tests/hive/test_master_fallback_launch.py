@@ -10,7 +10,7 @@ def master(setup):
     from scripts.swarm.profile_choice import ProfileDecision
 
     setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
-    write_hive(setup, roles=["master"], ui="yes")
+    write_hive(setup, excluded=[], ui="yes")
     return {"id": "master"}
 
 
@@ -20,7 +20,7 @@ def test_master_selects_an_interactive_hive_without_controller_credentials(setup
 
     task = master(setup)
     setup.herdr._quota_accounts = []
-    write_hive(setup, id="login", roles=["master"], ui="yes", interactive={"claude": "native"}, slots=[])
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
     selected = setup.launcher.select(setup.config, "master", task)
     assert isinstance(selected, Selection)
     assert selected.account == Account("claude", "native", "room", 0, None, None, 1, kind="interactive")
@@ -41,7 +41,7 @@ def test_successor_replaces_saved_fallback_auth_with_the_best_login(setup):
     assert "route_kind" not in task
     assert "hive" not in task
     assert setup.launcher.select(setup.config, "master", task).route_kind == "subscription"
-    write_hive(setup, id="login", roles=["master"], ui="yes", interactive={"claude": "native"}, slots=[])
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
     selected = setup.launcher.select(setup.config, "master", task)
     assert (selected.hive, selected.account.name, selected.route_kind) == ("login", "native", "interactive")
 
@@ -92,11 +92,9 @@ def test_master_order_preserves_placement_health_through_the_consumer(setup, rou
 
     task = master(setup)
     if route == "interactive":
-        write_hive(setup, roles=["master"], ui="yes", interactive={"claude": "account"})
+        write_hive(setup, excluded=[], ui="yes", interactive={"claude": "account"})
     elif route == "api":
-        write_hive(
-            setup, roles=["master"], ui="yes", slots=[{"harness": "claude", "account": "account", "kind": "api"}]
-        )
+        write_hive(setup, excluded=[], ui="yes", slots=[{"harness": "claude", "account": "account", "kind": "api"}])
     name = setup.store.next_name(setup.config.slug, "master")
     task.update(seat="master@fixture", controller_epoch=setup.held.epoch)
     runtime = Mock()
@@ -137,7 +135,7 @@ def test_a_master_fallback_order_hands_its_route_to_the_runtime_unchanged(setup,
 
     task = master(setup)
     monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", True)
-    write_hive(setup, roles=["master"], ui="yes", interactive={"claude": "account"})
+    write_hive(setup, excluded=[], ui="yes", interactive={"claude": "account"})
     name = setup.store.next_name(setup.config.slug, lane)
     task.update(seat=f"{lane}@fixture", controller_epoch=setup.held.epoch, route_kind=route)
     request = SpawnRequest(setup.store.config(setup.config.slug), lane, name, task)
@@ -178,7 +176,7 @@ def test_a_master_fallback_order_hands_its_route_to_the_runtime_unchanged(setup,
 @pytest.mark.parametrize("route", ["subscription", "api"])
 def test_an_explicit_master_route_keeps_its_account_when_a_native_login_is_available(setup, route):
     task = master(setup)
-    write_hive(setup, id="login", roles=["master"], ui="yes", interactive={"claude": "native"}, slots=[])
+    write_hive(setup, id="login", excluded=[], ui="yes", interactive={"claude": "native"}, slots=[])
     selected = setup.launcher.select(setup.config, "master", {**task, "route_kind": route})
     assert (selected.hive, selected.account.name, selected.route_kind) == ("remote", "account", route)
     assert selected.master_placement is None
@@ -217,7 +215,7 @@ def test_master_matches_a_dashed_controller_key_to_the_hive_slot_it_names(setup)
     setup.herdr._quota_accounts = [Account("claude", "user-atmail-com", "OPEN", 0, 80, 80, 6)]
     write_hive(
         setup,
-        roles=["master"],
+        excluded=[],
         ui="yes",
         slots=[{"harness": "claude", "account": "user_atmail_com", "kind": "subscription", "cap": 6}],
     )
@@ -234,7 +232,7 @@ def test_master_on_a_hive_reserves_against_the_cap_that_hive_reports(setup, slot
     setup.herdr._quota_accounts = [Account("claude", "user-atmail-com", "OPEN", 0, None, None, 1)]
     write_hive(
         setup,
-        roles=["master"],
+        excluded=[],
         ui="yes",
         slots=[{"harness": "claude", "account": "user_atmail_com", "kind": "subscription", **slot}],
     )
