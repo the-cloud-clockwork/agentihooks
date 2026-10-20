@@ -494,6 +494,14 @@ def _ci_speed_offline(request, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _github_status_offline(request, monkeypatch):
+    from scripts.doctor import github_status
+
+    if not getattr(request.module, "GITHUB_STATUS_READ", False):
+        monkeypatch.setattr(github_status, "_fetch", lambda url: b'{"incidents": []}')
+
+
+@pytest.fixture(autouse=True)
 def _task_sizing_offline(monkeypatch):
     from hooks.classifier import ClassifierUnavailable
     from scripts.swarm import difficulty

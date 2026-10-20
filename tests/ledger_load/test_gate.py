@@ -352,3 +352,41 @@ def test_every_client_reads_one_single_resource_a_second_that_the_ledger_holds()
     assert ledger_load.READS_PER_SECOND == 1.0
     assert items[1] == ["tasks/t100", "phases/p1", "followups/f-1"]
     assert all(set(paths) <= held for paths in items)
+
+
+class Clock:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+class Api:
+    def mutate(self, slug, ops):
+        return {}
+
+    def request(self, slug, path):
+        return {}
+
+
+def test_a_client_stops_at_the_deadline_without_sleeping_toward_a_write_it_will_not_send(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(ledger_load, "time", clock)
+    results = {"writes": [], "reads": [], "errors": []}
+    deadline = 2.5 * ledger_load.write_every()
+    ledger_load.client(Api(), "ci@ab0000-0000", "tasks/t0", 0.0, deadline, results)
+    assert (len(results["writes"]), len(results["reads"]), results["errors"]) == (3, 3, [])
+    assert clock.now <= deadline
+
+
+def test_a_reader_stops_at_the_deadline_without_sleeping_toward_a_read_it_will_not_send(monkeypatch):
+    clock = Clock()
+    monkeypatch.setattr(ledger_load, "time", clock)
+    results = {"item_reads": [], "errors": []}
+    ledger_load.reader(Api(), ledger_load.single_items(0), 0.0, 2.5, results)
+    assert (len(results["item_reads"]), results["errors"]) == (3, [])
+    assert clock.now <= 2.5

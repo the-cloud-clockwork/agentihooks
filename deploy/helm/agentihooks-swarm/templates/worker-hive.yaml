@@ -17,6 +17,9 @@
 {{- if and $workers.ssh.enabled (not $credential.name) }}
 {{- fail "workers.ssh needs credentialSecret: the hive sshd keys ride in the member credential Secret" }}
 {{- end }}
+{{- if and $workers.ssh.enabled (lt (int $workers.ssh.port) 1024) }}
+{{- fail "workers.ssh.port must be 1024 or higher: sshd runs as the unprivileged worker" }}
+{{- end }}
 {{- $perAgent := $workers.memoryPerAgentMi }}
 {{- if or (lt (int $perAgent.request) 1) (lt (int $perAgent.limit) (int $perAgent.request)) }}
 {{- fail "workers.memoryPerAgentMi needs a positive request and a limit no lower than it" }}
