@@ -10,16 +10,15 @@ ROOT = Path(__file__).resolve().parents[1]
 CASES = """
 import os, time, pytest
 
-@pytest.mark.parametrize("n", range(40))
-def test_ok(n):
-    time.sleep(0.15)
-
 def test_crash(tmp_path_factory):
     flag = tmp_path_factory.getbasetemp().parent.parent / "crashed"
-    time.sleep(1)
     if not flag.exists():
         flag.write_text("1")
         os._exit(1)
+
+@pytest.mark.parametrize("n", range(60))
+def test_ok(n):
+    time.sleep(0.3)
 """
 
 
@@ -49,5 +48,5 @@ def test_a_replacement_worker_keeps_the_live_workers_coverage_data(tmp_path):
         output = "timed out\n" + process.communicate()[0]
     assert "replacing crashed worker" in output, output
     assert not re.findall(r"^\[gw\d+\] .*\bERROR\b", output, re.M), output
-    assert len(re.findall(r"^\[gw\d+\] .*\bPASSED\b", output, re.M)) == 41, output
+    assert len(re.findall(r"^\[gw\d+\] .*\bPASSED\b", output, re.M)) == 61, output
     assert process.returncode == 0, output
