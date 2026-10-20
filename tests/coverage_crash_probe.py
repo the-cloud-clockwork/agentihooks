@@ -78,5 +78,5 @@ def test_one_crashed_worker_costs_one_test(tmp_path, variant):
         --- audit
         {log.read_text()[-12000:] if log.exists() else "none"}
     """)
-    print(report)
-    assert errors <= 1, report
+    passed = len(re.findall(r"^\[gw\d+\] .*\bPASSED\b", result.stdout, re.M))
+    assert errors <= 1 and passed >= 40 and False, f"passed={passed} {report}"
