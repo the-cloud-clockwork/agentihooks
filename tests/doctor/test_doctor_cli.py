@@ -678,7 +678,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "journal bounds are only supported for failed-spawn findings and master-launch-missed",
+            "journal bounds are only supported for failed-spawn and CI speed findings and master-launch-missed",
         ),
     ],
 )

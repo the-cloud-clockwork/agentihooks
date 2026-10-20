@@ -2,8 +2,10 @@ from datetime import datetime, timezone
 
 import pytest
 
+from scripts.doctor import ci_measure
 from scripts.doctor import cli as doctor
 from scripts.swarm import cli as swarm_cli
+from scripts.swarm.store import SwarmError
 from tests.doctor.test_doctor_cli import WATCHED, env  # noqa: F401
 
 pytestmark = pytest.mark.unit
@@ -111,3 +113,93 @@ def test_bare_class_prints_every_scope_over_the_stated_window(actions, capsys):
         "1 of 1 runs over 900 seconds, median 2000 seconds, worst 2000 seconds",
     ]
     assert actions == [(NOW - 3 * HOUR_MS, NOW - HOUR_MS)]
+
+
+@pytest.mark.parametrize(
+    "finding, expected",
+    [
+        ("health/f1", None),
+        ("ci-tier-wall-time", ci_measure.Target("ci-tier-wall-time")),
+        ("ci-tier-wall-time/10-2", ci_measure.Target("ci-tier-wall-time", 10, 2)),
+        ('ci-runner-wait/20-1-["a-b", "c"]', ci_measure.Target("ci-runner-wait", 20, 1, ("a-b", "c"))),
+        ("ci-queue-age-unconfirmed/20-3-117", ci_measure.Target("ci-queue-age-unconfirmed", 20, 3)),
+    ],
+)
+def test_targets_parse_run_attempt_and_labels(finding, expected):
+    assert ci_measure.target(finding) == expected
+
+
+@pytest.mark.parametrize("finding", ["ci-tier-wall-time/x-1", "ci-tier-wall-time/10", 'ci-runner-wait/1-1-["a"'])
+def test_a_subject_without_a_run_attempt_is_refused(finding):
+    with pytest.raises(SwarmError, match="names no run attempt"):
+        ci_measure.target(finding)
+
+
+def test_an_old_subject_without_labels_takes_the_longest_wait_of_the_run():
+    goal = ci_measure.target("ci-runner-wait/20-1-117")
+    assert ci_measure.value(goal, WAITED, NOW) == (440, None)
+
+
+def test_an_unfinished_wait_counts_up_to_now():
+    queued = run(21, [job(-700, None), job(-900, -800)])
+    assert ci_measure.waits(queued, NOW) == {("anton-oss",): 700}
+
+
+@pytest.mark.parametrize(
+    "finding, record, error",
+    [
+        ("ci-tier-wall-time/20-1", WAITED, "run 20 attempt 1 has no tier wall time"),
+        ('ci-runner-wait/20-1-["x"]', WAITED, 'run 20 attempt 1 has no job on runner labels \\["x"\\]'),
+        ("ci-runner-wait/22-1-1", run(22, []), "run 22 attempt 1 has no job on runner labels null"),
+    ],
+)
+def test_a_run_without_the_finding_value_is_refused_never_zero(finding, record, error):
+    with pytest.raises(SwarmError, match=error):
+        ci_measure.value(ci_measure.target(finding), record, NOW)
+
+
+def test_a_scope_with_no_runs_in_the_window_prints_only_its_counts():
+    assert ci_measure.line("ci-runner-wait", "anton-batch", [], (NOW - HOUR_MS, NOW)) == (
+        "ci-runner-wait anton-batch, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: 0 of 0 runs over 300 seconds"
+    )
+
+
+def test_unassigned_jobs_are_named_and_unrated_runs_are_skipped():
+    other = {**wall(30, 1000), "event": "push"}
+    empty = run(31, [job(-400, -50, ())])
+    assert ci_measure.samples("ci-tier-wall-time", [other, empty], NOW) == {}
+    assert ci_measure.samples("ci-runner-wait", [empty], NOW) == {"unassigned": [350]}
+
+
+def test_an_unreadable_run_is_refused(monkeypatch):
+    def attempt(*args):
+        raise RuntimeError("Actions API request or time budget exhausted")
+
+    monkeypatch.setattr(ci_measure.ci_speed_read, "attempt", attempt)
+    with pytest.raises(SwarmError, match="run 10 attempt 1 unreadable: RuntimeError: Actions API request"):
+        ci_measure.measure("ci-tier-wall-time/10-1", ci_measure.Target(ci_measure.WALL, 10), (0, NOW), NOW)
+
+
+def test_an_incomplete_window_read_is_refused_with_its_error(monkeypatch):
+    seen = []
+
+    def read(since, until, **kwargs):
+        seen.append((since, until, kwargs))
+        return {"complete": False, "error": "Actions API read failed: boom", "runs": []}
+
+    monkeypatch.setattr(ci_measure.ci_speed_read, "read", read)
+    with pytest.raises(SwarmError, match="Actions API read failed: boom"):
+        ci_measure.measure("ci-tier-wall-time", ci_measure.Target(ci_measure.WALL), (1, NOW), NOW)
+    assert seen == [(1, NOW, {"active": False, "budget": (2000, 600)})]
+
+
+def test_the_class_reads_active_jobs_up_to_now_not_the_window_end(monkeypatch):
+    monkeypatch.setattr(
+        ci_measure.ci_speed_read,
+        "read",
+        lambda *args, **kwargs: {"complete": True, "runs": [run(40, [job(-HOUR_MS // 1000 - 400, None)])]},
+    )
+    assert ci_measure.measure("ci-runner-wait", ci_measure.Target("ci-runner-wait"), (0, NOW - HOUR_MS), NOW) == [
+        "ci-runner-wait anton-oss, window 1970-01-01T00:00:00Z to 2026-10-17T21:00:00Z: "
+        "1 of 1 runs over 300 seconds, median 4000 seconds, worst 4000 seconds"
+    ]

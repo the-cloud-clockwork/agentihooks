@@ -332,6 +332,28 @@ def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, ela
         assert result["error"] == "Actions API read failed: RuntimeError: Actions API request or time budget exhausted"
 
 
+def test_one_run_attempt_reads_that_attempt_and_every_job_page():
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api(jobs=[{"id": n} for n in range(150)])
+    record = ci_speed_read.attempt(42, 2, run=run)
+    assert record == {"id": 2, "status": "completed", "event": "push", "jobs": [{"id": n} for n in range(150)]}
+    root = "repos/the-cloud-clockwork/agentihooks/actions/runs/42/attempts/2"
+    assert [args[2] for args, _ in calls] == [
+        root,
+        f"{root}/jobs?per_page=100&page=1",
+        f"{root}/jobs?per_page=100&page=2",
+    ]
+
+
+def test_one_run_attempt_raises_when_the_api_fails():
+    from scripts.doctor import ci_speed_read
+
+    run, _ = api(fail=True)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_speed_read.attempt(42, 1, run=run)
+
+
 def test_the_default_request_budget_stops_after_sixty_calls():
     from scripts.doctor import ci_speed_read
 
