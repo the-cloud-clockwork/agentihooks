@@ -1,7 +1,8 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
-raises a ledger alert; the failed jobs that lost their runner share one runner outage task instead. The next green run
-closes those tasks and the alert. A run whose only failure is the Sonar job finding dev already moved past its commit
-is reported as superseded and files nothing.
+raises a ledger alert; the failed jobs that lost their runner, and the failed jobs that read the output of a unit shard
+that lost its runner, share one runner outage task instead. The next green run closes those tasks and the alert. A run
+whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
+nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
 """
@@ -42,6 +43,16 @@ OUTAGE_SIGNS = (
 )
 SETUP_STEP = "Set up job"
 TEST_STEP = "Run tests"
+SHARD_JOB = "unit"
+SHARD_CONSUMERS = (
+    "sonar",
+    "shard-check",
+    "refresh-durations",
+    "coverage-ratchet",
+    "coverage-baseline",
+    "flake-budget",
+    "stage-budget",
+)
 REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
@@ -57,6 +68,7 @@ MASTER_ITEM = (
     "promotion alert: {url}"
 )
 CLOSABLE = ("open", "blocked")
+WORKING = ("claimed", "pr")
 CLEARED = "A later dev push run of Tests passed, so the swarm closed this promotion task."
 REPLACED = "Dev push run {run_id} of Tests failed on a new cause, so the swarm raised a new promotion alert."
 
@@ -117,11 +129,15 @@ def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple
     gone = [(job, why) for job, why in causes if runner_lost(named[job], why)]
     if not gone:
         return causes
+    shards_lost = any(job.split(" (")[0] == SHARD_JOB for job, _ in gone)
+    starved = [c for c in causes if shards_lost and c not in gone and c[0].split(" (")[0] in SHARD_CONSUMERS]
     signs = [sign for sign in OUTAGE_SIGNS if any(sign in why for _, why in gone)]
     because = "; ".join(signs) or f"{SETUP_STEP} failed or {TEST_STEP} never ran"
     names = ", ".join(job for job, _ in gone)
     why = f"{OUTAGE}: the jobs {names} lost their runner infrastructure ({because})"
-    return [(OUTAGE, why), *[cause for cause in causes if cause not in gone]]
+    if starved:
+        why += f"; the jobs {', '.join(job for job, _ in starved)} failed for want of their unit shard output"
+    return [(OUTAGE, why), *[cause for cause in causes if cause not in gone and cause not in starved]]
 
 
 def normal(job: str, why: str) -> str:
@@ -225,9 +241,18 @@ def _green(slug, ledger, doc, last):
 
 def _recover(slug, redis, ledger, doc, last, repo):
     actions = _green(slug, ledger, doc, last)
+    _release(redis, slug, doc)
     for previous in promotion_owner.history(repo, redis) - {slug}:
-        actions.extend(_green(previous, ledger, ledger.state(previous), last))
+        state = ledger.state(previous)
+        actions.extend(_green(previous, ledger, state, last))
+        _release(redis, previous, state)
     return actions
+
+
+def _release(redis, slug, doc):
+    working = {t["id"] for t in _promotion_tasks(doc) if t.get("state") in WORKING}
+    if gone := [task_id for task_id in redis.hkeys(key(slug, "jobs")) if task_id not in working]:
+        redis.hdel(key(slug, "jobs"), *gone)
 
 
 def _refresh(

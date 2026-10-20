@@ -33,6 +33,7 @@ class SchemaLedger(LedgerClient):
     def __init__(self, slugs):
         super().__init__()
         self.docs = {slug: new_ledger.build_doc({"title": "Promotion owner proof"}, "swarm") for slug in slugs}
+        self.meta = {}
         self.lock = threading.RLock()
         self.operations = []
         self.refuse = False
@@ -48,7 +49,9 @@ class SchemaLedger(LedgerClient):
                 )
                 if self.refuse:
                     raise LedgerRefused("persistence refused")
-                ctx = ledger_core.Context({"rev": 0, "stamps": {}, "members": {}}, NOW, slug)
+                ctx = ledger_core.Context(
+                    self.meta.setdefault(slug, {"rev": 0, "stamps": {}, "members": {}}), NOW, slug
+                )
                 for op in checked:
                     assert ledger_core.apply_op(doc, op, ctx)
                 assert not ctx.refused
@@ -157,6 +160,21 @@ def test_handover_reconciles_prior_repairs_on_green_and_allows_the_next_real_fai
     observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS)
     assert ledger.docs[WATCHED]["tasks"][0]["state"] == "done"
     assert all(alert["state"] == "done" for alert in ledger.docs[WATCHED]["alerts"])
+    monkeypatch.setitem(RED, "id", 902)
+    monkeypatch.setitem(RED, "conclusion", "failure")
+    observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS * 2)
+    assert [task["id"] for task in ledger.docs[DOCTOR]["tasks"]] == ["promo-902-0"]
+
+
+def test_a_green_run_releases_a_fixer_the_master_kept_blocked_so_the_next_red_files_again(linked, monkeypatch):
+    store, ledger = linked
+    observe(store, ledger, WATCHED)
+    ledger.update_task(WATCHED, "promo-900-0", {"state": "blocked"}, by="master@323133-0181")
+    store.update(WATCHED, state="stopped")
+    monkeypatch.setitem(RED, "id", 901)
+    monkeypatch.setitem(RED, "conclusion", "success")
+    observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS)
+    assert ledger.docs[WATCHED]["tasks"][0]["state"] == "blocked"
     monkeypatch.setitem(RED, "id", 902)
     monkeypatch.setitem(RED, "conclusion", "failure")
     observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS * 2)
