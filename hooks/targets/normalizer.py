@@ -380,7 +380,7 @@ _EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
 _ROLLOUT_TAIL_BYTES = 1 << 20
 
 
-def _exec_calls(program: str) -> list[dict[str, Any]]:
+def exec_calls(program: str) -> list[dict[str, Any]]:
     decoder = json.JSONDecoder()
     calls = []
     for start in _EXEC_CALL.finditer(program):
@@ -405,7 +405,7 @@ def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:
         except (ValueError, KeyError, TypeError):
             continue
         if isinstance(item, dict) and item.get("type") == "custom_tool_call" and item.get("name") == "exec":
-            return _exec_calls(str(item.get("input")))
+            return exec_calls(str(item.get("input")))
     return []
 
 

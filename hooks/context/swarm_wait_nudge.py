@@ -4,6 +4,7 @@ from collections.abc import Mapping
 
 WORKERS = frozenset({"eng", "ci"})
 WAIT_TOOLS = frozenset({"Bash", "Monitor"})
+NATIVE_WAITS = frozenset({"sleep", "wait"})
 SHELL_WAIT_RE = re.compile(
     r"(?:^|[;&|({\n])\s*(?:(?:do|then|else|nohup|timeout\s+\S+)\s+)*(?:sleep\s+\S|(?:until|while)\s[^;\n]*[;\n]\s*do\b"
     r"|gh\s+run\s+watch\b|gh\s+pr\s+checks\b[^;&|\n]*--watch)"
@@ -11,7 +12,20 @@ SHELL_WAIT_RE = re.compile(
 
 
 def is_wait(tool_name: str | None, tool_input: dict) -> bool:
-    return tool_name in WAIT_TOOLS and bool(SHELL_WAIT_RE.search(str(tool_input.get("command"))))
+    if tool_name in NATIVE_WAITS:
+        return True
+    if tool_name == "write_stdin":
+        return not tool_input.get("chars")
+    if tool_name not in WAIT_TOOLS:
+        return False
+    command = str(tool_input.get("command"))
+    return any(SHELL_WAIT_RE.search(text) for text in (command, *_nested_commands(command)))
+
+
+def _nested_commands(program: str) -> list[str]:
+    from hooks.targets.normalizer import exec_calls
+
+    return [call["cmd"] for call in exec_calls(program) if "cmd" in call]
 
 
 def declared_wait(slug: str, name: str) -> dict | None:
