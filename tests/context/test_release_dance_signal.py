@@ -230,13 +230,22 @@ def test_merge_into_a_merge_queue_branch_is_refused(session, monkeypatch):
     monkeypatch.setattr(subprocess, "run", run)
     with pytest.raises(BlockAction) as blocked:
         check("gh pr merge 123 --squash", session)
-    assert str(blocked.value).startswith(
-        "BLOCKED [gh pr merge into a merge queue branch]: 'dev' merges only through its merge queue"
+    assert str(blocked.value) == (
+        "BLOCKED [gh pr merge into a merge queue branch]: 'dev' merges only through its merge queue, "
+        "and gh pr merge lands it directly. Queue it with `agentihooks swarm <slug> merge queue "
+        "https://github.com/owner/repo/pull/123`, or outside a swarm with the GitHub enqueuePullRequest mutation."
     )
-    assert "agentihooks swarm <slug> merge queue https://github.com/owner/repo/pull/123" in str(blocked.value)
-    assert seen[1][:3] == ["gh", "api", "graphql"]
-    assert "url=https://github.com/owner/repo/pull/123" in seen[1]
-    assert "branch=dev" in seen[1]
+    assert seen[1] == [
+        "gh",
+        "api",
+        "graphql",
+        "-f",
+        f"query={prod_lockdown._MERGE_QUEUE}",
+        "-f",
+        "url=https://github.com/owner/repo/pull/123",
+        "-f",
+        "branch=dev",
+    ]
 
 
 def test_operator_bypass_lets_a_merge_skip_the_queue(session, monkeypatch):
