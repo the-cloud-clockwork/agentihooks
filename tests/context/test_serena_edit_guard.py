@@ -3,6 +3,7 @@
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
@@ -388,10 +389,9 @@ def test_a_symlinked_worktree_root_still_matches(tmp_path, launch, monkeypatch):
     check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
 
 
-def test_the_worktree_root_defaults_to_dev_worktrees_in_home(tmp_path, launch, monkeypatch):
+def test_the_worktree_root_defaults_to_dev_worktrees_in_home(launch, monkeypatch):
     monkeypatch.delenv("WORKTREE_ROOT")
-    monkeypatch.setenv("HOME", str(tmp_path))
-    own = _repo_worktree(tmp_path / "dev" / "worktrees", "antoncore", "engineer-323133-2196")
+    own = _repo_worktree(Path.home() / "dev" / "worktrees", "antoncore", "engineer-323133-2196")
     check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
 
 
