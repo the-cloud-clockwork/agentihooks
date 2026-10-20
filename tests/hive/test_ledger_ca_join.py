@@ -12,7 +12,7 @@ import pytest
 from scripts.hive import auth, cli, server
 from scripts.swarm_ledger import ledger, ledger_ca
 from tests.swarm_ledger import test_ledger_tls
-from tests.swarm_ledger.test_ledger_authority import SLUG
+from tests.swarm_ledger.test_ledger_authority import SLUG, core
 
 cert, tls_ledger = test_ledger_tls.cert, test_ledger_tls.tls_ledger
 
@@ -165,6 +165,6 @@ def test_a_master_from_a_freshly_joined_hive_passes_its_ledger_join(
         httpd.shutdown()
         httpd.server_close()
 
-    state = ledger.send(master, "join", role="member")
+    ledger.send(master, "join", role="member")
 
-    assert "master@hive-proof" in state["_meta"]["members"]
+    assert "master@hive-proof" in core.sync(SLUG)[0]["_meta"]["members"]
