@@ -22,11 +22,12 @@ def snapshot(environ: Mapping[str, str], home: Path, state: Path, repos: list[st
 
     installed = _installed(state / "state.json")
     bundle = installed.get("bundle", {}).get("path")
+    identity = origin(Path(bundle)) if bundle else ""
     claude = home / ".claude"
     return {
         "accounts": sorted(name for name, value in environ.items() if name.startswith(TOKEN_PREFIXES) and value),
         "settings": _settings(state),
-        "bundle": [identity for identity in [origin(Path(bundle)) if bundle else ""] if identity],
+        "bundle": [identity] if identity else [],
         "profiles": sorted(profile["name"] for profile in installed.get("linked_profiles", [])),
         "rules": _names(claude / "rules"),
         "skills": _names(claude / "skills"),
@@ -58,9 +59,11 @@ def _deps() -> list[str]:
     from scripts import deps_preflight
 
     path = deps_preflight.manifest_path()
-    if path is None:
+    try:
+        declared = deps_preflight.parse(json.loads(path.read_text())) if path else []
+    except (OSError, ValueError):
         return []
-    return sorted(dep.id for dep in deps_preflight.parse(json.loads(path.read_text())) if deps_preflight.satisfied(dep))
+    return sorted(dep.id for dep in declared if deps_preflight.satisfied(dep))
 
 
 def differences(base: dict, other: dict) -> list[str]:

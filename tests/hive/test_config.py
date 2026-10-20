@@ -88,6 +88,17 @@ def test_an_uninstalled_machine_reports_empty_sections(tmp_path, monkeypatch):
     assert config.snapshot({}, tmp_path, tmp_path / "state", []) == {section: [] for section in config.SECTIONS}
 
 
+@pytest.mark.parametrize("manifest", ["{not json", '{"deps": [{"id": "x", "kind": "bogus", "check": ["x"]}]}'])
+def test_an_unreadable_dependency_manifest_reports_no_dependencies(tmp_path, monkeypatch, manifest):
+    from scripts import deps_preflight
+    from scripts.hive import config
+
+    path = tmp_path / "deps.json"
+    path.write_text(manifest)
+    monkeypatch.setattr(deps_preflight, "manifest_path", lambda: path)
+    assert config.snapshot({}, tmp_path, tmp_path / "state", [])["deps"] == []
+
+
 def test_differences_name_every_missing_and_extra_entry_per_section():
     from scripts.hive import config
 
