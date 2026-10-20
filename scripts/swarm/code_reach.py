@@ -27,7 +27,6 @@ RAW = "execute_command"
 @dataclass
 class Unit:
     module: str
-    body: list
     owner: str = ""
     names: set = field(default_factory=set)
     dotted: set = field(default_factory=set)
@@ -131,7 +130,7 @@ class Program:
         self.clients, self.subscribers = self._receivers()
 
     def _add(self, key: str, module: str, body: list, owner: str = "") -> None:
-        unit = self.units[key] = Unit(module, body, owner, nodes=list(_walk(body)))
+        unit = self.units[key] = Unit(module, owner, nodes=list(_walk(body)))
         bound = {}
         for node in unit.nodes:
             if (found := _assigned(node)) and isinstance(found[1].func, ast.Name):
