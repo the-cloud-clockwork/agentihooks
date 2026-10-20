@@ -846,8 +846,9 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
         redis,
         monkeypatch,
         "workstation",
-        [slot(name, 6) for name in shared] + [slot("two", 4, harness="codex")],
-        {f"claude:{name}": _reading(500) for name in shared} | {"codex:two": _reading(500)},
+        [slot(name, 6) for name in shared] + [slot("two", 4, harness="codex"), slot("blank", 3)],
+        {f"claude:{name}": _reading(500) for name in shared}
+        | {"codex:two": _reading(500), "claude:blank": _reading(None)},
         1000,
     )
     _publish(redis, monkeypatch, "older", [slot("one", 2)], {"claude:one": _reading(400)}, 1000)
@@ -862,6 +863,7 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
         slot("same", 5),
         slot("login", 0, kind="interactive"),
         slot("alone", 0),
+        slot("blank", 0),
     ]
     quota = {
         "claude:one": _reading(None),
@@ -870,6 +872,7 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
         "claude:same": _reading(500),
         "claude:login": _reading(None),
         "claude:alone": _reading(None),
+        "claude:blank": _reading(None),
     }
     _publish(redis, monkeypatch, "pod", local, quota, 1000)
     caps = {(item["harness"], item["account"]): item["cap"] for item in registry.show(redis, "pod")["slots"]}
@@ -880,6 +883,7 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
         ("claude", "same"): 5,
         ("claude", "login"): 0,
         ("claude", "alone"): 0,
+        ("claude", "blank"): 0,
     }
     published = json.loads(redis.get(f"{registry.key('pod')}:quota"))
     assert published["claude:one"] == _reading(600)
