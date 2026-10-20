@@ -44,7 +44,7 @@ class RefillingLoadGroupScheduling(LoadGroupScheduling):
 
 
 def pytest_xdist_make_scheduler(config, log):
-    # xdist's own scope scheduler requeues every unit a crashed worker completed and hands its
+    # xdist's own load group scheduler requeues every unit a crashed worker completed and hands its
     # replacement an empty one, so a run whose last test crashes its worker never ends.
     if config.getvalue("dist") == "loadgroup":
         return RefillingLoadGroupScheduling(config, log)
