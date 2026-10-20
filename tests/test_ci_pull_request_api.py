@@ -499,7 +499,12 @@ def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
     count = len(shards)
     assert shards == list(range(1, count + 1))
     run = next(step for step in jobs["unit"]["steps"] if step.get("name") == "Run tests")
-    assert run["env"]["SHARD"] == f"${{{{ matrix.shard }}}}/{count}"
+    assert (
+        run["env"]["SHARD"]
+        == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
+    )
+    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    assert [entry["shard"] for entry in floor] == shards[12:]
     assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
     assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}
     assert {f"coverage-3.12-{shard}" for shard in shards} <= ci_dev_reuse.artifact_names()
