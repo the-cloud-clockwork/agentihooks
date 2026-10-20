@@ -105,6 +105,40 @@ prompt. It does not create a new conversation. The same command retains the
 existing worker-terminal path for Kubernetes executions; see
 [Swarm](../pillars/swarm.md).
 
+The printed `pane` becomes the agent's recorded pane. After the viewer opens,
+the reopen writes that pane id to the agent's execution record, so the `Pane`
+column of `agentihooks swarm <id> status` and a later retire name the pane
+the most recent reopen opened, instead of the launch pane or an earlier
+viewer:
+
+```bash
+$ agentihooks swarm <id> terminal <execution-id>
+{"agent": "<agent-name>", "thread": "<thread-id>", "pane": "<new-pane-id>"}
+$ agentihooks swarm <id> status
+Agent         ...  Pane           ...
+<agent-name>  ...  <new-pane-id>  ...
+```
+
+The pane write changes only the pane field. It rereads the stored execution
+inside a Redis watch, so a tick that updates the same execution at the same
+moment keeps its change. The write makes up to five attempts when a
+concurrent update conflicts, then refuses with
+`execution history kept changing; pane was not committed`. It leaves the
+agent's state-since time untouched, so a reopen never resets how long the agent
+has been in its current state. An execution identity with no stored record is
+refused with
+`unknown execution identity; display labels cannot identify attempts`. The new
+viewer is also recorded as a viewer of the execution, as every reopened viewer
+is. A viewer that fails to open writes no pane, and the record keeps its
+earlier pane.
+
+The delivery evidence is
+[the reopen pane write](https://github.com/the-cloud-clockwork/agentihooks/pull/3963),
+covered by `test_reopening_a_managed_viewer_records_its_new_pane_on_the_execution`,
+`test_reopen_refused_by_the_viewer_records_no_pane`,
+`test_a_pane_write_keeps_every_other_field_and_updates_the_projection` and
+`test_a_pane_write_for_an_unknown_execution_is_refused`.
+
 For attachment diagnostics, the launcher helper can wait for the recorded thread:
 
 ```bash
@@ -247,12 +281,24 @@ execution continues through its supervised server`. Use terminal reopening for
 a live execution. Renaming a managed agent renames its herdr pane and registry
 identity without typing a session-name command into the viewer.
 
+Retiring a managed execution closes the agent's recorded pane, which after a
+reopen is the latest reopened viewer, without checking which terminal herdr
+now shows in it. Every other recorded viewer pane is closed only while herdr
+still lists it on the terminal it was opened with; a viewer recorded without a
+terminal id, or whose pane id herdr has since reused for another terminal, is
+left open. The launch pane is never a recorded viewer, so once a reopen
+replaces it on the record, retirement no longer closes it.
+`test_managed_retirement_closes_every_recorded_viewer_and_removes_the_runtime_home`
+covers the viewer closing.
+
 The live qualification also recorded these viewer limits:
 
 - Initial launch can leave its `/rename` command in the composer while the
   server starts work; the recorded thread remains the attachment identity.
-- Retiring the execution can leave a reopened viewer showing
-  `Reconnecting to server…`. Close that viewer pane separately.
+- Retiring the execution left a reopened viewer showing
+  `Reconnecting to server…` during the qualification. A viewer pane that
+  retirement leaves open, as described above, can show the same; close it
+  separately.
 - A Codex update prompt can interrupt attachment. Dismiss or complete it in
   the viewer before checking the conversation history.
 
@@ -264,6 +310,9 @@ The live qualification also recorded these viewer limits:
 | Attach reports `failed` or `exited` | The recorded app-server ended; there is no live thread to attach through that transport. Inspect execution status before attempting recovery. |
 | Attach times out without a connected thread | Startup has not produced a connected thread within the timeout. Check the managed server's launch result and serve log; increasing the timeout alone does not repair a failed launch. |
 | Reopen reports no connected thread | The immediate reopen command requires an already connected thread. Use the waiting attach helper during startup. |
+| Status or retire names a pane that no longer exists after a reopen | A revision before the reopen pane write left the launch pane on the agent record. Update to a revision that contains it; the next reopen records the new pane. |
+| Reopen fails with `execution history kept changing; pane was not committed` | The viewer is open and recorded as a viewer; the agent record keeps its earlier pane. Close that viewer, then run the reopen again. See [Open and reopen a viewer](#open-and-reopen-a-viewer). |
+| Reopen fails with `unknown execution identity; display labels cannot identify attempts` | The agent is listed, but its execution identity has no stored record. Check `agentihooks swarm <id> status` for the agent's current execution. |
 | Agent runs no attachable app-server | The recorded harness or transport lacks native terminal attachment. Use its normal terminal path. |
 | Closing a viewer leaves the agent working | Expected: the viewer does not own execution lifetime or inbox delivery. |
 

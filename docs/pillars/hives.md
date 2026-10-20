@@ -137,6 +137,7 @@ off and its successor starts on the named hive.
 | Minute tick | 60 seconds (`AGENTIHOOKS_CONTROLLER_TICK_SECONDS`) | Each tick checks the master's hive. |
 | `master-move-grace` | 300 seconds | How long the master's hive may go without a heartbeat before the tick moves the master. |
 | Controller lease | three ticks, 180 seconds by default | Another controller takes over at a higher epoch once it lapses. |
+| Worker execution lease | 240 seconds | A Swarm v2 Pod worker keeps its task through a controller handover; see [worker execution lease through a controller rollout](swarm.md#worker-execution-lease-through-a-controller-rollout). |
 | Launch slot reservation | 300 seconds | A started launch order not acknowledged by then is recorded as ambiguous. |
 
 The master moves when its hive's heartbeat is older than the grace and the runtime does not see the master live,

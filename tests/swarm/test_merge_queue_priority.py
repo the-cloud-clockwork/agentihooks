@@ -153,7 +153,7 @@ def test_master_priority_notifies_displaced_owners(monkeypatch, capsys, errors, 
 
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=ledger_tasks))
 
-    def prioritize(url, journal):
+    def prioritize(url, journal, **kwargs):
         assert url == URL
         assert isinstance(journal, queue_record.Journal) and journal.url == URL
         return {"url": url, "displaced": [URL[:-1] + str(n) for n in (2, 3, 5, 6)], "errors": errors}
@@ -328,7 +328,11 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     monkeypatch.setattr(cli, "LedgerClient", lambda: SimpleNamespace(tasks=lambda slug: []))
     queue = FakeQueue()
     prioritize = merge_queue.prioritize
-    monkeypatch.setattr(merge_queue, "prioritize", lambda url, journal: prioritize(url, run=queue.run, journal=journal))
+    monkeypatch.setattr(
+        merge_queue,
+        "prioritize",
+        lambda url, journal, **kwargs: prioritize(url, run=queue.run, journal=journal, **kwargs),
+    )
     groups = [{"position": 1, "head": "group-head", "pull": URL[:-1] + "1"}]
     records = []
     monkeypatch.setattr(queue_record.Journal, "groups", lambda self: groups)
@@ -350,3 +354,67 @@ def test_master_priority_defers_without_cancelling_running_head(monkeypatch, cap
     assert len(pending) == 1
     assert json.loads(pending[URL])["run_id"] == 42
     assert records[0][0][0] == "priority-deferred"
+
+
+class Displaced:
+    def __init__(self, queue):
+        self.queue, self.pulls = queue, {}
+
+    def add(self, pull):
+        assert any(e["pullRequest"]["id"] == pull["id"] for e in self.queue.entries)
+        self.pulls[pull["url"]] = pull
+
+    def discard(self, url):
+        self.pulls.pop(url, None)
+
+
+class Killed(BaseException):
+    pass
+
+
+def test_priority_records_each_entry_before_it_leaves_the_queue():
+    queue = FakeQueue()
+    displaced = Displaced(queue)
+
+    def run(command, **kwargs):
+        if "enqueuePullRequest" in " ".join(command) and "id=P9" in command:
+            raise Killed
+        return queue.run(command, **kwargs)
+
+    with pytest.raises(Killed):
+        merge_queue.prioritize(URL, run=run, displaced=displaced)
+    assert sorted(displaced.pulls) == [URL[:-1] + "2", URL[:-1] + "3"]
+    assert [e["pullRequest"]["id"] for e in queue.entries] == ["P1"]
+
+
+@pytest.mark.parametrize("refused, kept", [("", []), ("P2", [URL[:-1] + "2"])])
+def test_priority_clears_each_entry_once_it_is_back(refused, kept):
+    queue = FakeQueue()
+    displaced = Displaced(queue)
+
+    def run(command, **kwargs):
+        if refused and "enqueuePullRequest" in " ".join(command) and f"id={refused}" in command:
+            return subprocess.CompletedProcess(command, 1, "", "restore refused")
+        return queue.run(command, **kwargs)
+
+    merge_queue.prioritize(URL, run=run, displaced=displaced)
+    assert sorted(displaced.pulls) == kept
+
+
+def test_priority_refuses_a_draft_before_any_entry_leaves():
+    from scripts.swarm.store import SwarmError
+
+    queue = FakeQueue()
+
+    def run(command, **kwargs):
+        done = queue.run(command, **kwargs)
+        response = json.loads(done.stdout)
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
+        if raw and raw.get("id") == "P9":
+            raw["isDraft"] = True
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    with pytest.raises(SwarmError) as error:
+        merge_queue.prioritize(URL, run=run)
+    assert str(error.value) == "queue priority requires a ready pull request"
+    assert queue.mutations == []
