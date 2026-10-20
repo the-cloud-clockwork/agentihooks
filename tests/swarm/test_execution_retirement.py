@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm.execution import ExecutionRegistry
+from scripts.swarm.master_start import DEADLINE_MS
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
 
@@ -329,3 +330,63 @@ def test_a_recorded_seat_does_not_hide_a_later_dead_orphan(store):
     assert store.execution("fixture", recorded.execution_id) == recorded
     assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
     assert store.agents("fixture") == [recorded]
+
+
+def starting_master(store, slug):
+    orphan = store.start_execution(
+        slug,
+        AgentRecord(
+            store.next_name(slug, "master"), "master", "master", seat=f"master@{slug}", started_at=1, state="starting"
+        ),
+    )
+    store.redis.hdel(store.key(slug, "agents"), orphan.name)
+    return orphan
+
+
+@pytest.mark.parametrize(("offset", "live", "ended"), [(0, False, True), (-1, False, False), (0, True, False)])
+def test_tick_ends_a_starting_master_orphan_only_past_its_startup_window(store, offset, live, ended):
+    from scripts.swarm.tick import tick
+    from tests.swarm.test_tick import FakeLedger, FakeRuntime
+
+    store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
+    orphan = starting_master(store, "sw")
+    runtime = FakeRuntime()
+    if live:
+        runtime.live.add(orphan.name)
+    tick("sw", store, FakeLedger([]), runtime, 1 + DEADLINE_MS + offset)
+    assert store.execution("sw", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
+    assert orphan.name not in runtime.killed
+
+
+@pytest.mark.parametrize(
+    ("offset", "projected", "named", "reported", "ended"),
+    [
+        (0, False, False, False, True),
+        (1, False, False, False, True),
+        (-1, False, False, False, False),
+        (0, True, False, False, False),
+        (0, False, True, False, False),
+        (0, False, False, True, False),
+    ],
+)
+def test_reconciliation_ends_a_starting_orphan_only_when_absent_dead_and_past_startup(
+    store, offset, projected, named, reported, ended
+):
+    from types import SimpleNamespace
+
+    orphan = starting_master(store, "fixture")
+    if projected:
+        store.put_agent("fixture", orphan)
+    runtime = SimpleNamespace(
+        live_names=lambda: {orphan.name} if named else set(),
+        reported=lambda current: reported,
+    )
+    actions = store.execution_registry.reconcile("fixture", runtime, 1 + DEADLINE_MS + offset)
+    assert actions == ([f"ended orphan execution {orphan.execution_id} for {orphan.name}"] if ended else [])
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
+
+
+def test_orphan_ending_ends_a_starting_execution(store):
+    orphan = starting_master(store, "fixture")
+    assert store.execution_registry.end_orphan("fixture", orphan) is True
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
