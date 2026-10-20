@@ -1535,6 +1535,91 @@ with lease.kept(store, slug, held):
 The next pass acquires a new lease with a higher epoch when no other controller holds it, so one stale pass loses
 only the rest of that pass's work.
 
+### Worker execution lease through a controller rollout
+
+A Swarm v2 Pod worker holds its task only while it keeps its execution lease. The controller's executions API grants
+the lease at admission and extends it on every heartbeat; once the lease lapses, the controller refuses every write
+scoped to that execution. The heartbeat and the launch grant renewal are authenticated by the worker's launch grant,
+which expires as well, so the worker renews both.
+
+A controller rollout on Anton restarts the controller (a Recreate rollout onto the new release image), and its
+endpoints answer 503 until a controller is serving again. The worker lease is sized to outlast that handover, so a
+running worker keeps its task through a release:
+
+| Clock | Value | Role in a rollout |
+|---|---|---|
+| Execution lease | 240 seconds (`DEFAULT_LEASE_MS` in `scripts.swarm_v2.api.executions`) | The controller lease of three ticks (180 seconds) plus one tick (60 seconds) for the successor controller to serve. |
+| Heartbeat | every 15 seconds | Each acknowledged heartbeat moves the lease deadline 240 seconds past the acknowledgement. |
+| Retry after a failed call | 2 seconds | A 503, an unreachable controller or a malformed answer is retried, never counted as a refusal. |
+| Launch grant renewal | every 60 seconds (`CREDENTIAL_SECONDS` in `scripts.swarm_v2.worker.lease_renewal`) | When an outage starts, the last renewed grant still has at least 240 seconds of its lifetime left, the whole lease. |
+| Launch grant lifetime | 300 seconds | Set when the controller issues the grant; at most 900. |
+
+During the outage the worker retries the grant renewal every two seconds and sends no heartbeat until a renewal
+succeeds. When the successor controller answers, the renewal returns a new grant, the next heartbeat is
+acknowledged and the deadline moves forward again. A worker therefore survives any controller outage that ends
+before 240 seconds have passed since its last acknowledged heartbeat. Before this change the lease was 60 seconds and
+the grant was renewed every 120 seconds, so the lease lapsed during the roughly one minute of 503 answers and every
+worker on Anton exited with each release.
+
+A controller that stays gone still costs the worker its task. The worker checks its own deadline every second and,
+240 seconds after its last acknowledged heartbeat, gives the lease up with `lease_expired`, without another call.
+A refusal ends the lease at once: a 400, 401, 403, 404 or 409 answer to a heartbeat or a renewal loses it with
+`heartbeat_refused_<status>` or `credential_refused_<status>`, for example a grant that expired before a renewal got
+through. A heartbeat answer that names another execution or task generation loses it with `generation_changed`.
+
+What a lost lease does depends on where the worker is:
+
+- **During start.** The worker renews from registration through preparation. A lease lost there stops the launch
+  with `admission lease lost: <reason>`.
+- **Under the supervisor.** The supervisor stops the agent with `lease_lost`, drains it and exits with status 70.
+
+#### Configuration
+
+Neither value is a flag or an environment setting. The executions API takes a `lease_ms` argument, a positive
+number of milliseconds, but the control service builds it with the default. Change the lease or the grant renewal
+interval in code through a reviewed pull request, and keep two relations the test suite pins:
+
+- The lease equals the controller lease plus one tick at the default tick: `lease.ttl_ms() + lease.tick_ms()`, which
+  is 240000 with `AGENTIHOOKS_CONTROLLER_TICK_SECONDS` unset.
+- The grant lifetime minus the renewal interval equals the lease: 300 minus 60 is 240 seconds.
+
+The lease does not follow `AGENTIHOOKS_CONTROLLER_TICK_SECONDS`. A controller run with a longer tick has a longer
+controller lease, and its handover can outlast the 240 second worker lease.
+
+#### Logs and troubleshooting
+
+The renewal thread writes one JSON line per event to the worker's standard output, each carrying the
+`execution_id` and `task_generation`:
+
+```json
+{"lease": "renewal_failed", "call": "credential", "status": 503, "retry_seconds": 2.0, "execution_id": "...", "task_generation": 3}
+{"lease": "credential_renewed", "expires_at": "...", "execution_id": "...", "task_generation": 3}
+{"lease": "renewed", "renewal_sequence": 1792449287637, "lease_deadline_ms": 1792449527637, "execution_id": "...", "task_generation": 3}
+{"lease": "lost", "reason": "lease_expired", "execution_id": "...", "task_generation": 3}
+```
+
+Read a worker's lease events across a rollout:
+
+```bash
+kubectl logs <worker-pod> -n <namespace> | grep '"lease"'
+kubectl logs <worker-pod> -n <namespace> | grep '"lease": "lost"'
+```
+
+| Symptom | Check |
+|---|---|
+| A run of `renewal_failed` lines with status 503, then `credential_renewed` | Expected during a rollout: the worker kept its lease. |
+| `lost` with `lease_expired` | The controller was unavailable for 240 seconds after the last `renewed` line. Check the controller rollout and its lease takeover. |
+| `lost` with `credential_refused_401` | The grant expired before a renewal succeeded. Check that the renewal interval and grant lifetime still keep the relation above. |
+| `lost` with `generation_changed` | The task moved to another attempt; the controller no longer recognises this execution as current. |
+| The supervisor exits 70 | Its summary line names the reason; `lease_lost` means the renewal thread gave the lease up. |
+
+The delivered regression tests cover a worker that keeps its lease through a 225 second renewal outage, longer than
+the old 60 second lease, and a worker whose controller stays gone, which loses its lease exactly 240 seconds after
+its last acknowledgement. [Pull request #4248](https://github.com/the-cloud-clockwork/agentihooks/pull/4248)
+records a [red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39065609729) on the tests alone
+and a [green run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39067755131) with the change. The
+pull request does not record a live controller rollout on Anton.
+
 ### Staged and prerequisite pull requests
 
 A task that lands in stages, or registers a prerequisite pull request before its own, declares the scope each such pull request delivers when it records it:
