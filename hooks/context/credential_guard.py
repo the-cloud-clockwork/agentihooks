@@ -76,6 +76,8 @@ def sensitive_kind(token):
         return KIND_CREDENTIAL
     if base == "credentials" and ".aws" in token:
         return KIND_CREDENTIAL
+    if base == "environ" and token.startswith("/proc/"):
+        return KIND_ENVIRONMENT
     return None
 
 
@@ -461,6 +463,16 @@ def env_dump_verdict(command):
     )
 
 
+PROC_DIR = re.compile(r"/proc\b")
+BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
+
+
+def proc_environ_verdict(command):
+    if PROC_DIR.search(command) and BARE_ENVIRON.search(command):
+        return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
+    return None
+
+
 def echo_secret_verdict(command):
     if not re.search(r"\b(echo|printf)\b", command):
         return None
@@ -812,6 +824,9 @@ def decide_bash(tool_input, ctx=None):
     command = tool_input.get("command") or ""
     if not command:
         return ALLOW
+    reason = proc_environ_verdict(command)
+    if reason:
+        return Verdict(block=reason)
     ctx = ctx or Context()
     command, heredocs = mask_heredocs(command)
     parts = split_outside_quotes(SEGMENT_DELIM, command)
