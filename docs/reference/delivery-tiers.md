@@ -146,7 +146,7 @@ GitHub runs `workflow_run` workflows from the default branch, `main`. A change t
 The step prints one JSON line with the decision and writes `requeue`, `pull`, and, on a requeue, the pull request `node` id and `head` commit to the step outputs:
 
 ```json
-{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.11, 4); first failed checks removal of this head"}
+{"run": 1234567890, "pull": 4321, "requeue": true, "reason": "runner lost on unit (3.12, 4); first failed checks removal of this head"}
 ```
 
 ### Enforcement

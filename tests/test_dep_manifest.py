@@ -491,7 +491,8 @@ def test_the_manifest_code_needs_only_yaml_beyond_the_standard_library():
             for name in names:
                 parts = name.split(".")
                 if parts[0] not in {"scripts", "tests", "hooks"}:
-                    if parts[0] not in sys.stdlib_module_names:
+                    # Mutation runs read mutmut's trampoline import in the mutated copy.
+                    if parts[0] not in sys.stdlib_module_names and parts[0] != "mutmut":
                         third_party[kind].add(parts[0])
                     continue
                 for depth in range(1, len(parts) + 1):

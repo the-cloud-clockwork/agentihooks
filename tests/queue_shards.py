@@ -94,12 +94,7 @@ def _combine(argv: list[str]) -> None:
         if not (args.from_output and args.root and args.inputs):
             raise SystemExit(f"{len(plan)} queue jobs exceed the pool of {MAX_SHARDS}")
         plan = _capped(plan, args.root, args.inputs)
-        args.from_output.write_text(
-            "".join(
-                f"queue_{version.replace('.', '')}={json.dumps([leg for leg in plan if leg['python-version'] == version])[1:-1]}\n"
-                for version in ("3.12",)
-            )
-        )
+        args.from_output.write_text(f"queue_312={json.dumps(plan)[1:-1]}\n")
     peak = max(leg["predicted_seconds"] for leg in plan)
     if capped and peak >= STEP_SECONDS:
         print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS}s of the step timeout")
