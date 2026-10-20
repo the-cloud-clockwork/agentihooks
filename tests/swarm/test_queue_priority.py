@@ -1,4 +1,5 @@
 import json
+import os
 import subprocess
 from types import SimpleNamespace
 
@@ -696,27 +697,19 @@ def test_settled_entries_need_no_requeue(raw, settled):
 
 
 @pytest.mark.parametrize(
-    "holder, failure, stale",
+    "holder, stale",
     [
-        ("a:b:123:x", ProcessLookupError, True),
-        ("a:b:123:x", PermissionError, False),
-        ("a:b:123:x", None, False),
-        ("c:123:x", ProcessLookupError, False),
-        ("a:b:pid:x", ProcessLookupError, False),
-        ("x", ProcessLookupError, False),
+        ("a:b:{gone}:x", True),
+        ("a:b:{live}:x", False),
+        ("c:{gone}:x", False),
+        ("a:b:pid:x", False),
+        ("x", False),
     ],
 )
-def test_a_holder_is_stale_only_when_its_process_on_this_hive_is_gone(monkeypatch, holder, failure, stale):
-    probes = []
-
-    def kill(pid, signal):
-        probes.append((pid, signal))
-        if failure:
-            raise failure
-
-    monkeypatch.setattr(queue_priority.os, "kill", kill)
-    assert queue_priority.stale(holder, "a:b") is stale
-    assert probes == ([(123, 0)] if holder.startswith("a:b:1") else [])
+def test_a_holder_is_stale_only_when_its_process_on_this_hive_is_gone(holder, stale):
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    assert queue_priority.stale(holder.format(gone=gone.pid, live=os.getpid()), "a:b") is stale
 
 
 def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypatch):
@@ -736,13 +729,9 @@ def test_refresh_restores_entries_a_killed_priority_took_out(priority, monkeypat
     monkeypatch.setattr(p.queue, "run", run)
     active = p.store.key("sw", queue_priority.ACTIVE)
     busy = "another merge queue priority is running; try again when it ends"
-    hive, live, gone = commands.hive_id(), 41, 42
-
-    def probe(pid, signal):
-        if pid == gone:
-            raise ProcessLookupError
-
-    monkeypatch.setattr(queue_priority.os, "kill", probe)
+    hive, live, gone = commands.hive_id(), os.getpid(), subprocess.Popen(["true"])
+    gone.wait()
+    gone = gone.pid
     checked = []
     monkeypatch.setattr(queue_priority.staged_compatibility, "require", lambda *args: checked.append(args[2]))
     for holder in (f"{hive}:{live}:other", f"elsewhere:{gone}:other"):

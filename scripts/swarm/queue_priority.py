@@ -4,6 +4,7 @@ import subprocess
 import uuid
 from collections.abc import Collection
 from contextlib import contextmanager
+from pathlib import Path
 
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import merge_queue, queue_record, ready, staged_compatibility
@@ -40,15 +41,7 @@ class Busy(SwarmError):
 
 def stale(holder: str, hive: str) -> bool:
     parts = holder.rsplit(":", 2)
-    if len(parts) != 3 or parts[0] != hive or not parts[1].isdigit():
-        return False
-    try:
-        os.kill(int(parts[1]), 0)  # NOSONAR: signal 0 probes the pid and delivers nothing
-    except ProcessLookupError:
-        return True
-    except PermissionError:
-        return False
-    return False
+    return len(parts) == 3 and parts[0] == hive and parts[1].isdigit() and not Path(f"/proc/{parts[1]}").exists()
 
 
 @contextmanager
