@@ -7,18 +7,45 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 
 
+BYPASS_ACTORS = {
+    "dev-no-delete": [
+        {"actor_id": 5, "actor_type": "RepositoryRole", "bypass_mode": "pull_request"},
+        {"actor_id": 2988497, "actor_type": "Integration", "bypass_mode": "pull_request"},
+    ],
+    "main-prod-lockdown": [],
+}
+
+
 @pytest.mark.parametrize("name", ["dev-no-delete", "main-prod-lockdown"])
-def test_rulesets_enforce_branch_protection_without_bypass(name):
+def test_rulesets_enforce_branch_protection(name):
     ruleset = json.loads((ROOT / ".github" / "rulesets" / f"{name}.json").read_text())
 
     assert ruleset["name"] == name
     assert ruleset["target"] == "branch"
     assert ruleset["enforcement"] == "active"
-    assert ruleset["bypass_actors"] == []
+    assert ruleset["bypass_actors"] == BYPASS_ACTORS[name]
     rules = {rule["type"]: rule for rule in ruleset["rules"]}
     assert {"deletion", "non_fast_forward", "required_linear_history", "pull_request"} <= rules.keys()
     assert rules["pull_request"]["parameters"]["required_approving_review_count"] == 0
     assert rules["pull_request"]["parameters"]["require_code_owner_review"] is False
+
+
+def test_dev_history_keeps_deletion_force_push_linear_history_and_gate_unbypassable():
+    history = json.loads((ROOT / ".github" / "rulesets" / "dev-history.json").read_text())
+    queue = json.loads((ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
+
+    assert history["name"] == "dev-history"
+    assert history["target"] == "branch"
+    assert history["enforcement"] == "active"
+    assert history["conditions"] == queue["conditions"]
+    assert history["bypass_actors"] == []
+    gate = next(rule for rule in queue["rules"] if rule["type"] == "required_status_checks")
+    assert history["rules"] == [
+        {"type": "deletion"},
+        {"type": "non_fast_forward"},
+        {"type": "required_linear_history"},
+        gate,
+    ]
 
 
 def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():

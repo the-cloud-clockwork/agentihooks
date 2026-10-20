@@ -35,6 +35,7 @@ BUDGETS = {
     "ledger-load": 240,
     "hierarchy-cpu": 15 * 60,
     "brain-smoke": 90,
+    "writer-lock": 180,
     "kind-due": 60,
     "helm-kind": 480,
     "gate-required": 60,

@@ -696,10 +696,32 @@ tick. On a machine in any other mode the setting changes nothing.
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:
 
-1. Clones the repos in `workers.repositories` under its repo root.
-2. Installs a mounted credential as `hive.env`, or joins with a mounted one time code.
-3. Sets itself `ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=<workers.maxAgents>`.
-4. Runs `agentihooks hive run`.
+1. Points git at `GITHUB_PERSONAL_ACCESS_TOKEN` for github.com through a credential helper that reads the variable
+   when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
+2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
+   `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
+3. Installs a mounted credential as `hive.env`, or joins with a mounted one time code.
+4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
+5. Sets itself `ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=<workers.maxAgents>`.
+6. Runs `agentihooks hive run`.
+
+The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
+origin from the workstation, read from the `origin` remote and current branch of the linked bundle, else of
+`AGENTIHOOKS_BUNDLE_PATH`:
+
+```bash
+agentihooks hive bundle-origin                 # into secret/k8s/agentihooks-swarm-workstation-hive-settings
+agentihooks hive bundle-origin --path <record> # another record under the secret mount
+```
+
+It needs `OPENBAO_URL` and `OPENBAO_TOKEN`, keeps the record's other keys, and writes an empty origin when no bundle
+is linked. A linked bundle with no `origin` remote naming a host and repository is refused. An empty `HIVE_BUNDLE_URL`
+clones nothing, unlinks any bundle a persistent home kept, and init runs on the package roles alone. A failed clone
+logs `worker-hive: bundle clone failed` and the pod still serves without the bundle, which `agentihooks hive compare`
+shows as a difference. A failed init with the bundle logs `worker-hive: agentihooks init with the bundle failed` and
+init runs again on the package roles alone, with the bundle unlinked; a failed init on the package roles stops the
+pod. A failed `deps ensure` logs its reason and each launch retries it. The image carries node, npm, uv and gh; npm
+global installs and uv tools land in `~/.local` under the worker home.
 
 Give exactly one of `workers.joinCodeSecret` or `workers.credentialSecret`. A join code runs with a persistent
 home. Credentials come from ExternalSecrets by name. The hive id is the one minted when the code was exchanged, so

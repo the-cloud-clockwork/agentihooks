@@ -323,6 +323,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "worker-image",
         "swarm-image",
         "brain-smoke",
+        "writer-lock",
         "ledger-load",
         "hierarchy-cpu",
     }

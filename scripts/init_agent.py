@@ -446,6 +446,8 @@ def _write_launcher(
     exit_command = shlex.join([sys.executable, "-m", "scripts.session_exit", str(exit_record)])
     exit_identity = shlex.join([spec.agent, identity])
     command_text = shlex.join(command)
+    if environ.get("HIVE_GITHUB_AUTH_MODE"):
+        command_text = f"{shlex.join([sys.executable, '-m', 'scripts.github_app_cli', 'exec'])} {command_text}"
     inputs = [*([str(prompt_file)] if prompt_file is not None else []), str(_route_report(launcher))]
     if app_server:
         command_text = _viewer_lines(command_text, launcher, name, environ, inputs)

@@ -194,7 +194,16 @@ def test_a_dev_run_without_a_baseline_still_restores_its_durations(lookup):
 
 @pytest.mark.parametrize(
     "name",
-    ["worker-image", "swarm-image", "brain-smoke", "ledger-load", "kind-due", "coverage-ratchet", "stage-budget"],
+    [
+        "worker-image",
+        "swarm-image",
+        "brain-smoke",
+        "writer-lock",
+        "ledger-load",
+        "kind-due",
+        "coverage-ratchet",
+        "stage-budget",
+    ],
 )
 def test_queue_excludes_promotion_jobs(name):
     from tests.contracts.ci_tiers.test_workflow import jobs_for
