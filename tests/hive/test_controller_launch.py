@@ -465,8 +465,10 @@ def write_hive(setup, **changes):
 
 
 def live_order(setup, route="subscription"):
+    from unittest.mock import patch
+
     from scripts.hive.orders import Consumer, carried
-    from scripts.swarm import lease
+    from scripts.swarm import launch_check, lease
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
@@ -491,12 +493,16 @@ def live_order(setup, route="subscription"):
             effort="high",
             profile="engineer",
             profile_decision={"validation": {"pid": 12}},
+            launched_at=1234,
+            overlays=["tuner"],
+            launch_timings={"harness_at": 1300},
         ),
     )
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
     consumer = Consumer(setup.store.redis, "remote", runtime)
-    ack = consumer.apply(order)
+    with patch.object(launch_check, "declared", lambda profile, worn=(): list(worn)):
+        ack = consumer.apply(order)
     assert ack.status == "live"
     setup.launcher.orders.finish("remote", "0-0", order, ack)
     return request, order, ack
@@ -521,11 +527,15 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
             model="selected-model",
             effort="high",
             profile="engineer",
-            profile_decision={"validation": {"pid": 12}},
+            profile_decision={"validation": {"pid": 12}, "host_overlays": ["tuner"]},
             route_kind=route,
             execution=live,
+            launched_at=1234,
+            overlays=["tuner"],
+            launch_timings={"harness_at": 1300},
         ),
     )
+    assert (live.launched_at, live.overlays, live.launch_timings) == (1234, ["tuner"], {"harness_at": 1300})
 
 
 @pytest.mark.parametrize(
