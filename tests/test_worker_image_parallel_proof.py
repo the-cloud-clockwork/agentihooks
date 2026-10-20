@@ -303,6 +303,23 @@ def test_a_failed_profile_evidence_names_its_step(tmp_path, proof):
     assert "worker profile evidence failed with exit 19" in result.stderr
 
 
+@pytest.mark.parametrize("proof", ["all", "profiles"])
+def test_a_late_codex_exit_prints_its_probe_and_latency(tmp_path, proof):
+    result, calls, state, output = run_proof(tmp_path, "profile-late", proof)
+    assert result.returncode == 1, result.stderr
+    assert "worker profile probe positive failed with exit 1" in result.stderr
+    assert "Codex registration to container exit took" in result.stderr
+
+
+@pytest.mark.parametrize("proof,command", [("startup", 'wait "$scan_pid"'), ("profiles", "scan.sh")])
+def test_a_failed_foreground_worker_step_names_its_command(tmp_path, proof, command):
+    result, calls, state, output = run_proof(tmp_path, "scan", proof)
+    assert result.returncode == 17, result.stderr
+    message = next(line for line in result.stderr.splitlines() if line.startswith("worker proof failed at line"))
+    assert command in message
+    assert message.endswith("(exit 17)")
+
+
 @pytest.mark.parametrize(
     "change", ["none", "inventory", "rollback", "profiles", "revision", "status", "missing", "profile"]
 )
