@@ -1,8 +1,9 @@
 import json
 
+import httpx
 import pytest
 
-from scripts.doctor import traces_read
+from scripts.doctor import traces, traces_read
 
 
 def _at(raiser, line=1):
@@ -481,8 +482,6 @@ def test_each_request_is_capped_under_half_the_active_read_budget(monkeypatch):
 
 
 def _routes(monkeypatch, internal):
-    import httpx
-
     sent, client = [], httpx.Client
 
     def handler(request):
@@ -499,8 +498,6 @@ def _routes(monkeypatch, internal):
 
 @pytest.mark.parametrize("host", [None, "https://langfuse.homeofanton.com/"])
 def test_reads_reach_langfuse_through_the_internal_ingress_while_the_public_tunnel_answers_502(monkeypatch, host):
-    import httpx
-
     sent = _routes(monkeypatch, lambda request: httpx.Response(200, json={"data": []}))
     env = {"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"} | ({"LANGFUSE_HOST": host} if host else {})
     assert traces_read.client(env)("traces", {"page": 1}) == {"data": []}
@@ -514,10 +511,6 @@ def test_reads_reach_langfuse_through_the_internal_ingress_while_the_public_tunn
 
 @pytest.mark.parametrize("failure", ["backend 503", "internal timeout"])
 def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(monkeypatch, tmp_path, failure):
-    import httpx
-
-    from scripts.doctor import traces
-
     def internal(request):
         if failure == "internal timeout":
             raise httpx.ReadTimeout("timed out", request=request)
