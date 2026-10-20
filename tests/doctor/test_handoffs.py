@@ -74,5 +74,9 @@ def test_a_handoff_without_seat_or_sender_is_reported_apart_naming_its_task():
 
 
 def test_a_handoff_with_only_its_seat_or_only_its_sender_stays_a_missing_recap():
-    found = handoffs.missing_recap([_bare(seat="eng-1@x"), _bare(**{"from": "engineer@x-1"})])
-    assert [f.id for f in found] == ["missing-recap/eng-1@x", "missing-recap/engineer@x-1"]
+    found = handoffs.missing_recap([_bare(), _bare(seat="eng-1@x"), _bare(**{"from": "engineer@x-1"})])
+    assert [f.id for f in found] == [
+        "unattributed-handoff/doc-79030d0c5613b0f2",
+        "missing-recap/eng-1@x",
+        "missing-recap/engineer@x-1",
+    ]
