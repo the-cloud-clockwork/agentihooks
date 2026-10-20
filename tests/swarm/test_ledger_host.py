@@ -77,7 +77,9 @@ def test_cpu_over_a_pass_requires_the_same_process_and_measured_elapsed_time():
         assert ledger_host.cpu_over_pass(before, {**after, field: after[field] + 1}, 8) is None
 
 
-def test_the_newest_commit_on_dev_names_its_subject_and_age(tmp_path):
+def test_the_newest_commit_on_dev_names_its_subject_and_age(monkeypatch, tmp_path):
+    monkeypatch.setattr(ledger_host, "merged_at", lambda repo, sha: None)
+
     def git(*args, **env):
         subprocess.run(["git", "-C", str(tmp_path), *args], check=True, capture_output=True, env=env or None)
 
@@ -151,13 +153,42 @@ def test_newest_on_dev_is_unknown_when_git_cannot_say(monkeypatch, git):
 
 
 def test_newest_on_dev_reads_the_dev_tip_with_a_timeout_and_keeps_tabs_in_the_subject(monkeypatch):
-    git = Git("1000000000\tKeep\ttabs\n")
+    git = Git("abc123\t1000000000\tKeep\ttabs\n")
     monkeypatch.setattr(ledger_host.subprocess, "run", git)
+    monkeypatch.setattr(ledger_host, "merged_at", lambda repo, sha: None)
     assert ledger_host.newest_on_dev(Path("/repo"), 1_000_000_659) == {"newest": "Keep\ttabs", "merged_minutes": 10}
     [(argv, kwargs)] = git.calls
-    assert argv == ["git", "-C", "/repo", "log", "-1", "--format=%ct%x09%s", "origin/dev"]
+    assert argv == ["git", "-C", "/repo", "log", "-1", "--format=%H%x09%ct%x09%s", "origin/dev"]
     assert kwargs == {"capture_output": True, "text": True, "timeout": ledger_host.GIT_TIMEOUT_S}
     assert ledger_host.GIT_TIMEOUT_S == 5
+
+
+def test_newest_on_dev_asks_github_for_the_merge_of_the_dev_tip(monkeypatch):
+    asked = []
+    monkeypatch.setattr(ledger_host.subprocess, "run", Git("abc123\t1000000000\tMerged\n"))
+    monkeypatch.setattr(ledger_host, "merged_at", lambda repo, sha: asked.append((repo, sha)) or 1_000_000_300.0)
+    assert ledger_host.newest_on_dev(Path("/repo"), 1_000_000_659) == {"newest": "Merged", "merged_minutes": 5}
+    assert asked == [(Path("/repo"), "abc123")]
+
+
+@pytest.mark.parametrize(
+    ("gh", "expected"),
+    [
+        (Git("2026-10-19T21:20:03Z\n"), 1_792_444_803.0),
+        (Git("2026-10-19T21:20:03Z\n", code=1), None),
+        (Git("\n"), None),
+        (Git(error=FileNotFoundError("gh")), None),
+        (Git(error=subprocess.TimeoutExpired("gh", 10)), None),
+    ],
+)
+def test_merged_at_reads_the_pull_request_merge_time_of_a_commit(monkeypatch, gh, expected):
+    monkeypatch.setattr(ledger_host.subprocess, "run", gh)
+    assert ledger_host.merged_at(Path("/repo"), "abc123") == expected
+    [(argv, kwargs)] = gh.calls
+    assert argv == ["gh", "api", "repos/{owner}/{repo}/commits/abc123/pulls", "--jq", ledger_host.MERGED_JQ]
+    assert kwargs == {"cwd": Path("/repo"), "capture_output": True, "text": True, "timeout": ledger_host.GH_TIMEOUT_S}
+    assert ledger_host.GH_TIMEOUT_S == 10
+    assert ledger_host.MERGED_JQ == 'map(.merged_at | values) | first // ""'
 
 
 def test_facts_join_the_server_named_in_the_ledger_folder_and_dev(monkeypatch, tmp_path):
