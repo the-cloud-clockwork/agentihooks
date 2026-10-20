@@ -448,7 +448,7 @@ See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every proces
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | on | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | `on` | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
 | `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for its intent verdicts before unanswered items go round robin |
 
 ---

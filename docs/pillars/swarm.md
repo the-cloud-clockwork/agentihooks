@@ -340,15 +340,21 @@ What one item costs:
 |---|---|
 | First lines only | The question carries the item's first line, cut to 120 characters, and the master's recent first lines. The rest of the item never leaves the inbox. |
 | One verdict per master | Each question asks for one probability, never a choice list or a score. |
-| API models only | The question goes to the classifier API models in `AGENTIHOOKS_CLASSIFIER_MODELS` order, trying the next model when one fails. The Haiku and Luna command line fallbacks are not used, so no agent session is started for a verdict. |
-| Cache by item | A verdict is stored per item, master and exact recent list for one hour. A later pass asks again only when that master's recent items changed. A verdict that lands after the deadline is still stored for the next pass. |
+| API models only | The question goes to the classifier API models in `AGENTIHOOKS_CLASSIFIER_MODELS` order. A timeout, server error or rate limit moves to the next model; a refused key marks the API down for `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` (default 120 seconds), during which every verdict goes round robin, and a rejected request ends that question. The Haiku and Luna command line fallbacks are not used, so no agent session is started for a verdict. |
+| Cache by item | Verdicts are stored in one hash per item, one field per master and exact recent list. A later pass asks again only when that master's recent items changed. The hash expires one hour after the last pass that asked a question for the item. A verdict that lands after the deadline is still stored for the next pass. |
 
-With 15 recent lines of 120 characters, one question is estimated at no more than 700 tokens, so an item costs at
-most about 700 tokens per live master that has recent items, once per change of that master's recent list.
+The token estimate is the JSON request length divided by four. With 15 recent lines of 120 plain ASCII characters,
+one question is estimated at no more than 700 tokens, so such an item costs about 700 tokens per live master that has
+recent items, once per change of that master's recent list. Quotes and non-ASCII characters are escaped in JSON and
+raise the estimate, up to several times for text that is mostly non-ASCII.
 
 Any classifier error, any question unanswered at the deadline, and any verdict under 0.7 leaves the item to round
 robin in the same pass. A slow classifier delays the pass by at most the timeout and never keeps an item in the pool.
 With the flag off no question is asked and no recent items are recorded; delivery is plain round robin.
+
+A new item enters the pool only while two or more masters are live, but a redelivery pass classifies the items
+already waiting there whatever the live count. With one live master those questions change nothing, since that master
+takes every item, yet they still appear in the decision log and the `tokens` counters.
 
 Inspect grouping in Redis (prefix `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`) and in the classifier decision
 log, where every question is recorded under purpose `master-inbox-intent`:
@@ -365,7 +371,7 @@ tokens sent for the item over every pass.
 
 | Symptom | Check |
 |---|---|
-| Related items still spread across masters | `classifier stats` shows calls and their sources. Calls with no source mean no model answered: check `AGENTIHOOKS_CLASSIFIER_URL`, the key and the down marker described in the classifier reference. No calls at all means grouping is off in the sending process, fewer than two masters are live, or no master has recent items yet. |
+| Related items still spread across masters | `classifier stats` shows calls and their sources. Calls with no source mean no model answered: check `AGENTIHOOKS_CLASSIFIER_URL`, the key and the down marker described in the classifier reference. No calls at all means grouping is off in the sending process, the pool is empty, or no live master has recent items yet. |
 | Items placed correctly but slowly | Every send into the pool waits up to `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`. Lower it; late verdicts still fill the cache for the next pass. |
 | A master receives unrelated items | Verdicts below 0.7 cannot route; read the item's `intent` hash for the verdicts each master got. A matched master never takes an item it just let lapse. |
 
