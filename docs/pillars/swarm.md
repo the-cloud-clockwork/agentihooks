@@ -2288,7 +2288,7 @@ a master hold or repeated parks alone are not evidence of repeated proof work.
 The master or operator records a verdict using the finding ID returned by status:
 
 ```bash
-agentihooks swarm <slug> verdict 'proof loop/<task>' false-positive \
+agentihooks swarm <slug> verdict 'proof-loop/<task>' false-positive \
   --note 'The retained launch history shows only parked continuations'
 ```
 
