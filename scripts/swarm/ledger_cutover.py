@@ -6,7 +6,7 @@ from scripts.gates import Who
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_route
-from scripts.swarm_ledger.api.client import ResourceClient
+from scripts.swarm_ledger.api import client
 from scripts.swarm_v2 import masters
 
 READY = "ledger-ready"
@@ -39,7 +39,7 @@ def acknowledge(store: RedisStore, slug: str, who: Who, environ: Mapping[str, st
     if store.redis.hget(store.key(slug, READY), who.name) == stamp:
         return True
     try:
-        ResourceClient(config.pending_api_url, {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}).request(
+        client.ResourceClient(config.pending_api_url, {"X-Ledger-Token": token, "X-Ledger-Agent": who.name}).request(
             slug, "metadata"
         )
     except OSError:
