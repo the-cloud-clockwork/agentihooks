@@ -28,7 +28,7 @@ def test_a_replacement_worker_keeps_the_live_workers_coverage_data(tmp_path):
     (project / "test_cases.py").write_text(CASES)
     (tmp_path / "base" / "b").mkdir(parents=True)
     command = [sys.executable, "-m", "pytest", "test_cases.py", "-n", "3", "--dist", "loadgroup", "-v"]
-    command += ["-p", "no:cacheprovider", "-p", "tests.browser_coverage", "--reruns", "2"]
+    command += ["-p", "no:cacheprovider", "-p", "tests.browser_coverage"]
     command += ["--cov=.", "--cov-report=", "--cov-context=test", f"--basetemp={tmp_path / 'base' / 'b' / 'b'}"]
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_", "PYTEST_"))}
     env["PYTHONPATH"] = str(ROOT)

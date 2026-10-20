@@ -130,7 +130,7 @@ def pytest_runtest_protocol(item, nextitem):
 @pytest.hookimpl(wrapper=True)
 def pytest_load_initial_conftests(early_config, parser, args):
     # xdist starts each worker with the controller's -n, so pytest-cov starts a controller there that erases every
-    # .coverage.* file; a worker that replaces a crashed one would delete the live workers' data.
+    # .coverage.* file as it starts; a worker that replaces a crashed one would delete the live workers' data.
     if os.environ.get("PYTEST_XDIST_WORKER"):
         early_config.known_args_namespace.cov_append = True
     return (yield)
