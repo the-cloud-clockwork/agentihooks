@@ -71,13 +71,13 @@ def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
 
 
 def test_any_redis_error_on_the_invite_delete_is_a_refusal(admin, port, monkeypatch):
-    from redis.exceptions import ResponseError
+    from redis.exceptions import RedisError
 
-    monkeypatch.setattr(admin, "getdel", _raises(ResponseError("NOPERM no permissions to run the 'getdel' command")))
+    monkeypatch.setattr(admin, "getdel", _raises(RedisError("unknown reply from the server")))
 
     assert _post(port, server.JOIN_PATH, {"code": "any"}) == (
         403,
-        {"error": "Redis refused the invite (NOPERM no permissions to run the 'getdel' command)"},
+        {"error": "Redis refused the invite (unknown reply from the server)"},
     )
 
 
