@@ -37,7 +37,7 @@ Joining machines, roles, placement, failover timing and fencing are on the [Hive
 A workstation swarm can run its engineer and CI work on a Kubernetes cluster while its master, planners and
 dispatcher stay on the workstation. The swarm first moves to the hosted ledger, which hands its controller lease to
 the cluster's controller; the chart's controller then serves that swarm and launches only its `eng` and `ci` lanes
-as worker Pods. The Anton deployment runs `rig-grade-swarm` this way.
+as worker Pods. The Anton deployment runs `rig-grade-swarm` this way; the values and names below are Anton's.
 
 ### Move the swarm to the hosted ledger
 
@@ -45,19 +45,21 @@ Run these from the workstation that holds the swarm's controller lease, in a pla
 session whose environment names both a swarm and an agent.
 
 ```bash
-agentihooks swarm rig-grade-swarm set api-url-pending=https://swarm.homeofanton.com
-agentihooks swarm rig-grade-swarm ledger-ready        # JSON; "ready": true once every successor is staged
-agentihooks swarm rig-grade-swarm pause
-agentihooks swarm rig-grade-swarm set api-url=https://swarm.homeofanton.com
+agentihooks swarm my-swarm set api-url-pending=https://swarm.example.internal
+agentihooks swarm my-swarm ledger-ready        # JSON; "ready": true once every successor is staged
+agentihooks swarm my-swarm pause
+agentihooks swarm my-swarm set api-url=https://swarm.example.internal
 ```
 
 - `api-url-pending` stages the destination and records when it was staged. The active ledger address stays as it
   was, so the swarm keeps writing its current ledger.
-- `ledger-ready` verifies the caller's staged credential against the hosted metadata API and prints the readiness
-  record: `ready`, `missing` (live agents without a current readiness receipt for the staged address),
+- Each live agent verifies its staged credential against the hosted metadata API and writes a readiness receipt.
+  `ledger-ready` prints the readiness record built from those receipts: `ready`, `missing` (live agents without a
+  current receipt for the staged address),
   `missing_masters` (configured master seats with no live master), `pending_url`, `active_url` and `staged_at`.
-- `set api-url` to the staged address activates it: in one Redis transaction it transfers the controller lease to
-  the hosted ledger, clears the workstation's controller ownership, writes `api_url` and clears the staged address.
+- `set api-url` to the staged address activates it. The controller lease first moves to the hosted ledger; then one
+  local Redis transaction clears the workstation's controller ownership, writes `api_url`, clears the staged address
+  and drops the readiness receipts. When that transaction fails, the moved lease is released again.
   From then on every swarm command, tick and wait for this swarm routes to the hosted ledger. Other swarms on the
   workstation stay local.
 
@@ -105,7 +107,8 @@ controller:
 - `controller.api.swarm` becomes `AGENTIHOOKS_CONTROL_SWARM`. The controller serves the control API for that swarm
   only; until the swarm exists in the shared Redis it logs
   `controller: serves the control API for <swarm>, which does not exist yet; waits for it`.
-- With a hosted ledger (`SWARM_URL` set, or any mode other than `local`), the controller needs
+- When the ledger is remote (`SWARM_URL`, an `AGENTIHOOKS_DEPLOYMENT` other than `local`, or `LEDGER_URL` with no
+  mode set), the controller needs
   `AGENTIHOOKS_CONTROLLER_CREDENTIAL` and refuses to start without it.
 - `controller.workers.apiUrl` turns the Kubernetes runtime on. At start the controller logs
   `controller: built the Kubernetes runtime for <swarm>: workers in <namespace> run <image>:<tag> with profile <profile>`.
@@ -117,12 +120,14 @@ The routed runtime places each launch by lane and profile:
 
 | Work | Where it runs |
 |---|---|
-| `eng` and `ci` lanes | A worker Pod on the cluster, at most `controller.workers.cap` at once (`cap: 1` runs one). |
-| A task whose profile decision is `frontend`, on any lane | The workstation. |
-| Master seats, planners (`plan`) and the dispatcher (`dispatch`) | The workstation. |
+| `eng` and `ci` lanes | A worker Pod on the cluster. |
+| A task whose profile is `frontend`, on any lane | The workstation. |
+| Master seats owned by the controller's own hive | A worker Pod on the cluster. |
+| Master seats owned by the workstation, planners (`plan`) and the dispatcher (`dispatch`) | The workstation. |
 
-The swarm's own caps (`max-eng-agents`, `max-ci-agents`) still apply; the launch cap is a second ceiling for the
-cluster. With hive placement on, worker hive Pods take `eng`, `ci`, `plan` and `dispatch` as described on the
+`controller.workers.cap` is the launch cap per approved account: each account the worker route offers takes at most
+that many live workers. With one approved account and `cap: 1`, as on Anton, one worker runs at a time. The swarm's
+own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take `eng`, `ci`, `plan` and `dispatch` as described on the
 [Hives](../pillars/hives.md#placement) page instead.
 
 ### Verify
@@ -133,6 +138,7 @@ kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller | grep 'co
 kubectl -n agentihooks-swarm-workers get pods -l swarm.agentihooks.io/controller-owner
 ```
 
+- Worker Pods carry the `swarm.agentihooks.io/controller-owner` label naming the controller that launched them.
 - `swarm status` lists the cluster engineer next to the workstation agents, with its claimed task.
 - The controller log carries the served swarm and the Kubernetes runtime line above, and no secret values.
 - The hosted ledger shows the engineer's ledger writes on its task.
