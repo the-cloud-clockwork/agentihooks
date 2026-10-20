@@ -302,8 +302,8 @@ tick prints
 `closed empty master seat <seat>`. If the swarm grows again before a retiring master leaves, its retire request is
 withdrawn with the note `the swarm grew again, so seat <seat> stays`.
 
-The seat count lives on the swarm's master seat record and each retirement time in a list beside it, the seconds
-from the retire request to the retirement. Both are written to the `master_scaling` metrics table as
+The swarm's master seat record keeps the seat count, and a `retire-seconds` list beside it keeps each retirement
+time, in seconds from the retire request to the retirement. Both are written to the `master_scaling` metrics table as
 `master_seat_count` and `master_retire_seconds`.
 
 #### Master scaling troubleshooting
