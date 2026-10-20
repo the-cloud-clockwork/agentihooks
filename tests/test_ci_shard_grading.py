@@ -32,7 +32,7 @@ def test_shard_grader_never_restores_an_environment_written_by_head_tests():
     steps = _jobs()["shard-check"]["steps"]
     assert not any(step.get("uses", "").startswith("actions/cache") for step in steps)
     install = next(step for step in steps if step.get("name") == "Install grader dependencies")
-    assert install["run"] == 'python -m pip install "pytest>=8.0" "pyyaml>=6.0"'
+    assert install["run"] == 'python -m pip install "pytest>=8.0"'
     assert not any(step.get("name") == "Use the test environment" for step in steps)
 
 

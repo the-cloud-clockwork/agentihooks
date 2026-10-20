@@ -1,16 +1,16 @@
 import argparse
 import json
+import re
 from pathlib import Path
-
-import yaml
 
 WORKFLOW = Path(__file__).resolve().parents[1] / ".github/workflows/test.yml"
 STEPS = {"unit": "Run tests", "unit-selected": "Run the selected tests"}
 
 
 def step_seconds(job: str) -> int:
-    steps = yaml.safe_load(WORKFLOW.read_text())["jobs"][job]["steps"]
-    return next(step for step in steps if step.get("name") == STEPS[job])["timeout-minutes"] * 60
+    block = WORKFLOW.read_text().split(f"\n  {job}:\n", 1)[1]
+    step = block.split(f"- name: {STEPS[job]}\n", 1)[1]
+    return int(re.search(r"^ +timeout-minutes: (\d+)$", step, re.MULTILINE)[1]) * 60
 
 
 def _seconds(durations: Path) -> tuple[float, str]:
@@ -36,13 +36,14 @@ def main(argv: list[str] | None = None) -> int:
     measured = {path: _seconds(path) for path in args.durations}
     seconds = {path: value for path, (value, _) in measured.items()}
     ranked = sorted(seconds, key=lambda shard: -seconds[shard])
-    limits = {job: step_seconds(job) if args.budget is None else args.budget for _, job in measured.values()}
-    budgets = {path: limits[job] for path, (_, job) in measured.items()}
-    job = measured[ranked[0]][1]
+    budgets = {path: step_seconds(job) if args.budget is None else args.budget for path, (_, job) in measured.items()}
+    slowest = ranked[0]
     limit = "a budget of"
     if args.budget is None:
-        limit = f"the {limits[job] // 60} minute {STEPS[job]} deadline of"
-    print(f"{len(seconds)} shards, slowest {seconds[ranked[0]]:.1f} s of test time against {limit} {limits[job]:g} s")
+        limit = f"the {budgets[slowest] // 60} minute {STEPS[measured[slowest][1]]} deadline of"
+    print(
+        f"{len(seconds)} shards, slowest {seconds[slowest]:.1f} s of test time against {limit} {budgets[slowest]:g} s"
+    )
     over = [shard for shard in ranked if seconds[shard] > budgets[shard]]
     for shard in ranked:
         print(f"{shard.parent.name} {seconds[shard]:.1f} s{' over budget' if shard in over else ''}")

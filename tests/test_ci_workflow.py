@@ -968,8 +968,6 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
 
 @pytest.mark.parametrize("status", [0, 3])
 def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
-    import json
-
     steps = _workflow()["jobs"]["unit-selected"]["steps"]
     step = next(item for item in steps if item.get("name") == "Run the selected tests")
     (tmp_path / "pytest.py").write_text(

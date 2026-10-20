@@ -1452,7 +1452,7 @@ jobs:
 
       - name: Install grader dependencies
         if: github.event.pull_request.base.ref != 'main'
-        run: python -m pip install "pytest>=8.0" "pyyaml>=6.0"
+        run: python -m pip install "pytest>=8.0"
 
       - name: Set up legacy grader installer
         if: github.event.pull_request.base.ref == 'main'
