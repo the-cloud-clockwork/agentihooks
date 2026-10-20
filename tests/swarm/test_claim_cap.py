@@ -172,6 +172,14 @@ def test_cap_report_dates_only_failures_within_the_counted_claims(store, failure
         "sw", AgentRecord("failed", "eng", "t1", started_at=failure_at), "failed", "no space left on device"
     )
     store.note_launch_failure("sw", "t1", "no space left on device")
+    for name, task, at, state in (
+        ("older_failure", "t1", failure_at - 1, "failed"),
+        ("other_task", "t2", 1_792_440_100_000, "failed"),
+        ("other_life", "t2", 1_792_440_101_000, "started"),
+        ("waiting", "t1", 1_792_440_102_000, "waiting"),
+        ("pending", "t1", 1_792_440_103_000, "pending"),
+    ):
+        store.record_launch("sw", AgentRecord(name, "eng", task, started_at=at), state, "different error")
     original = store.launches("sw")
     actions = tick("sw", store, ledger, runtime, now_ms=1_792_440_004_000)
     report = ledger.comments[0][2]
