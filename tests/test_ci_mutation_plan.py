@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -546,6 +547,32 @@ def test_a_shard_grades_its_whole_mutants_and_hands_split_units_to_the_merge(tmp
 )
 def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(seconds, mutants, expected):
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
+
+
+@pytest.mark.parametrize(("quota", "workers"), [("3", 3), ("4", 4)])
+def test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts(tmp_path, monkeypatch, quota, workers):
+    from scripts.ci_mutation.measured import plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", quota)
+    assert plan.shard_count(workers * 240 * 4, 500, 240, 10) == 4
+    tests = _timed_tests(tmp_path, {name: 10 for name in "abcdefghijkl"})
+    assert plan.slowest_bucket(tmp_path, tests, 1) == pytest.approx(120 / workers, abs=0.1)
+    assert plan_shards({"scripts.sample.x__mutmut_1": 1.0})["workers"] == workers
+
+
+@pytest.mark.parametrize("workflow", ["test.yml", "mutation-preflight.yml"])
+def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota(workflow):
+    import yaml
+
+    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows" / workflow).read_text())["jobs"]
+    steps = [
+        step
+        for job in jobs.values()
+        for step in job.get("steps", [])
+        if any(f"scripts.ci_mutation.{name} " in step.get("run", "") for name in ("plan", "measured"))
+    ]
+    assert steps
+    assert all(step.get("env", {}).get("MUTATION_SHARD_CPU_QUOTA") == "3" for step in steps)
 
 
 def _timed_tests(tmp_path, seconds, marks=None):
