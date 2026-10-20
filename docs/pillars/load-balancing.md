@@ -317,6 +317,12 @@ still use that account. A second master lowers the ceiling to 60%, so the same
 it at 50% used. When the count drops, the next reservation reading uses the
 corresponding ceiling; with no live master the reservation disappears.
 
+A master placed on a token route sees the declared account with its original
+session cap and quota state. With one live master, the declared account at 72%
+of the week used with five hour room left, and every other account spent, a
+worker is refused, while a new or handed off master on fallback auth is placed
+on the declared account.
+
 The account report includes the reason, for example
 `reserved for 2 live masters: workers stop at 60% of the week`. Use
 `agentihooks balance` and `agentihooks quota` to inspect the declaration and
