@@ -324,6 +324,7 @@ def test_every_merge_queue_job_but_the_watcher_is_graded():
         "swarm-image",
         "brain-smoke",
         "ledger-load",
+        "hierarchy-cpu",
     }
     if (_ROOT / ".github/workflows/count-record.yml").exists():
         expected.remove("count-record")

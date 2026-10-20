@@ -22,6 +22,7 @@ DIRECT = {
     "ci-templates.yml": ("CI templates", "ci-templates"),
     "helm-kind.yml": ("Helm chart in kind", "helm-kind"),
     "ledger-load.yml": ("Ledger server load", "ledger-load"),
+    "hierarchy-cpu.yml": ("Hierarchy CPU proof", "hierarchy-cpu"),
     "swarm-smoke.yml": ("Swarm container smoke", "swarm-smoke"),
     "swarm-node-smoke.yml": ("Swarm worker image smoke", "swarm-node-smoke"),
     "brain-smoke.yml": ("brain-smoke", "brain-smoke"),
@@ -29,7 +30,6 @@ DIRECT = {
     "startup-stages.yml": ("Startup stages", "startup-stages"),
 }
 LANE_USERS = {
-    "hierarchy-cpu.yml",
     "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
