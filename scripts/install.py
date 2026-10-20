@@ -6270,10 +6270,6 @@ def main() -> None:
         from scripts.serena_router_daemon import main as serena_main
 
         raise SystemExit(serena_main(_argv[1:]))
-    if _argv and _argv[0] == "host-guard":
-        from scripts.host_guard.sync import main as host_guard_main
-
-        raise SystemExit(host_guard_main(_argv[1:]))
     if _argv and _argv[0] == "ledger":
         from scripts.swarm_ledger import run as ledger_run
 
@@ -6328,7 +6324,7 @@ def main() -> None:
         from scripts.profiles.scaffold import main as scaffold_main
 
         raise SystemExit(scaffold_main(_argv))
-    if _argv and _argv[0] in ("gc", "lease", "scratch", "name"):
+    if _argv and _argv[0] in ("gc", "lease", "scratch", "name", "host-guard"):
         from scripts.gc_cli import main as gc_main
 
         raise SystemExit(gc_main(_argv))
@@ -6466,7 +6462,6 @@ def main() -> None:
     sub.add_parser("quota", help="One table for every Claude and Codex account")
     sub.add_parser("skill", help="Run skill evaluations with quota routed Claude authentication: eval -- <command>")
     sub.add_parser("serena", help="Run the Serena router: start|stop|restart|status|release <path>")
-    sub.add_parser("host-guard", help="Link the host process guard to this checkout, or report drift: install|check")
     sub.add_parser("ledger", help="Swarm ledger: agent CLI, or new|serve|watch|chat <args>")
     sub.add_parser(
         "swarm",

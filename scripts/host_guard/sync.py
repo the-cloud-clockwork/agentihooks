@@ -1,4 +1,3 @@
-import argparse
 import os
 import pwd
 import subprocess
@@ -69,13 +68,8 @@ def reconcile(home: Path) -> str:
     return install(home)
 
 
-def main(argv: list[str]) -> int:
-    parser = argparse.ArgumentParser(
-        prog="agentihooks host-guard", description="Install the host process guard from the repository or check it"
-    )
-    parser.add_argument("action", choices=("install", "check"))
-    home = Path.home()
-    if parser.parse_args(argv).action == "install":
+def run(action: str, home: Path) -> int:
+    if action == "install":
         message = install(home)
         print(message)
         return 0 if message.startswith("[OK]") else 1

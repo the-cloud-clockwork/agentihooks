@@ -117,8 +117,7 @@ def test_install_reports_a_timer_systemd_would_not_enable(tmp_path, monkeypatch)
     )
     assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
     assert sync.drift(tmp_path) == []
-    monkeypatch.setattr(sync.Path, "home", lambda: tmp_path)
-    assert sync.main(["install"]) == 1
+    assert sync.run("install", tmp_path) == 1
 
 
 def test_systemctl_runs_the_user_manager_and_reads_its_exit(monkeypatch):
@@ -176,24 +175,26 @@ def test_reconcile_reports_a_guard_already_in_sync(tmp_path, calls):
     assert calls == []
 
 
-def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, monkeypatch, capsys, calls):
-    monkeypatch.setattr(sync.Path, "home", lambda: tmp_path)
+def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, capsys, calls):
     (tmp_path / "guard-config.json").write_text("{}")
-    assert sync.main(["check"]) == 1
+    assert sync.run("check", tmp_path) == 1
     out = capsys.readouterr().out
     assert f"{tmp_path / 'guard-config.json'} is not a link to {sync.REPO / 'guard-config.json'}" in out
-    assert sync.main(["install"]) == 0
+    assert sync.run("install", tmp_path) == 0
     assert capsys.readouterr().out == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}\n"
-    assert sync.main(["check"]) == 0
+    assert sync.run("check", tmp_path) == 0
     assert capsys.readouterr().out == f"[OK] Host guard in sync with {sync.REPO}\n"
 
 
-def test_the_agentihooks_command_dispatches_host_guard(tmp_path, monkeypatch, capsys):
+def test_the_agentihooks_command_dispatches_host_guard(tmp_path, monkeypatch):
     from scripts import install as cli
 
+    seen = []
     monkeypatch.setattr(sync.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(cli.sys, "argv", ["agentihooks", "host-guard", "check"])
-    with pytest.raises(SystemExit) as raised:
-        cli.main()
-    assert raised.value.code == 1
-    assert f"{tmp_path / 'guard-daemon.sh'} is missing" in capsys.readouterr().out
+    monkeypatch.setattr(sync, "run", lambda action, home: seen.append((action, home)) or 3)
+    for action in ("check", "install"):
+        monkeypatch.setattr(cli.sys, "argv", ["agentihooks", "host-guard", action])
+        with pytest.raises(SystemExit) as raised:
+            cli.main()
+        assert raised.value.code == 3
+    assert seen == [("check", tmp_path), ("install", tmp_path)]
