@@ -301,10 +301,10 @@ agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-ag
 
 ## Comparing hive configuration
 
-Every hive runs agents with the workstation's configuration. Each beat publishes, at most every fifteen minutes,
-the hive's configuration named without values or host paths: account token names, agentihooks env setting names,
-the linked bundle and profiles, installed Claude rules and skills, managed MCP servers, satisfied bundle
-dependencies and repo identities.
+Every hive runs agents with the workstation's configuration. Each beat keeps the hive's configuration published,
+named without values or host paths: account token names, agentihooks env setting names, the linked bundle and
+profiles, installed Claude rules and skills, managed MCP servers, satisfied bundle dependencies and repo identities.
+The snapshot lives fifteen minutes and is rebuilt once under a minute is left, so dependency checks run rarely.
 
 ```bash
 agentihooks hive compare               # this machine's hive is the base

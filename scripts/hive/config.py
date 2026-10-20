@@ -15,6 +15,7 @@ TOKEN_PREFIXES = ("AH_CC_TOKEN_", "AH_CX_TOKEN_")
 HIVE_ENV = "hive.env"
 SECTIONS = ("accounts", "settings", "bundle", "profiles", "rules", "skills", "mcp", "deps", "repos")
 TTL_SECONDS = 900
+REFRESH_SECONDS = 60
 
 
 def snapshot(environ: Mapping[str, str], home: Path, state: Path, repos: list[str]) -> dict[str, list[str]]:
@@ -61,7 +62,7 @@ def _deps() -> list[str]:
     path = deps_preflight.manifest_path()
     try:
         declared = deps_preflight.parse(json.loads(path.read_text())) if path else []
-    except (OSError, ValueError):
+    except (OSError, ValueError, KeyError, TypeError, AttributeError):
         return []
     return sorted(dep.id for dep in declared if deps_preflight.satisfied(dep))
 
@@ -84,8 +85,8 @@ def _key(hive_id: str) -> str:
 
 
 def publish(redis: "Redis", local_id: str, repos: list[str]) -> None:
-    """Dependency checks run commands, so a hive refreshes its snapshot only once the last one expires."""
-    if redis.exists(_key(local_id)):
+    """Dependency checks run commands, so a hive refreshes its snapshot only shortly before the last one expires."""
+    if redis.ttl(_key(local_id)) > REFRESH_SECONDS:
         return
     found = snapshot(os.environ, Path.home(), registry.home(), repos)
     redis.set(_key(local_id), json.dumps(found), ex=TTL_SECONDS)

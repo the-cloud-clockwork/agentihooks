@@ -40,7 +40,6 @@ def beat(redis: "Redis", local_id: str) -> None:
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
     adopt_caps(redis, report)
-    publish_config(redis, local_id, report["repos"])
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
@@ -65,6 +64,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     consumer.sync_workspaces(TTL_SECONDS)
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    publish_config(redis, local_id, report["repos"])
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:

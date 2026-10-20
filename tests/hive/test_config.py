@@ -88,7 +88,16 @@ def test_an_uninstalled_machine_reports_empty_sections(tmp_path, monkeypatch):
     assert config.snapshot({}, tmp_path, tmp_path / "state", []) == {section: [] for section in config.SECTIONS}
 
 
-@pytest.mark.parametrize("manifest", ["{not json", '{"deps": [{"id": "x", "kind": "bogus", "check": ["x"]}]}'])
+@pytest.mark.parametrize(
+    "manifest",
+    [
+        "{not json",
+        '{"deps": [{"id": "x", "kind": "bogus", "check": ["x"]}]}',
+        '{"deps": [{"kind": "system"}]}',
+        '{"deps": 7}',
+        "[]",
+    ],
+)
 def test_an_unreadable_dependency_manifest_reports_no_dependencies(tmp_path, monkeypatch, manifest):
     from scripts import deps_preflight
     from scripts.hive import config
@@ -119,9 +128,12 @@ def test_publish_writes_the_snapshot_once_until_it_expires(redis, machine, monke
     key = f"{registry.key('pod')}:config"
     assert config.read(redis, "pod")["accounts"] == ["AH_CC_TOKEN_one", "AH_CX_TOKEN_two"]
     assert config.TTL_SECONDS - 5 < redis.ttl(key) <= config.TTL_SECONDS
-    redis.set(key, json.dumps({"accounts": ["kept"]}), ex=60)
+    redis.set(key, json.dumps({"accounts": ["kept"]}), ex=config.REFRESH_SECONDS + 5)
     config.publish(redis, "pod", [])
     assert config.read(redis, "pod") == {"accounts": ["kept"]}
+    redis.expire(key, config.REFRESH_SECONDS)
+    config.publish(redis, "pod", [])
+    assert config.read(redis, "pod")["accounts"] == ["AH_CC_TOKEN_one", "AH_CX_TOKEN_two"]
     assert config.read(redis, "absent") is None
 
 

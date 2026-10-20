@@ -246,6 +246,4 @@ def test_a_headless_hive_refuses_a_master(setup):
 
     task = master(setup)
     write_hive(setup, roles=["master"], ui="no")
-    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(
-        "no live hive can run the master with interactive, subscription or api authentication"
-    )
+    assert setup.launcher.select(setup.config, "master", task) == placement.Wait(placement.NO_UI_HIVE)
