@@ -126,6 +126,16 @@ def freeze_text(tab, selector):
     return tab.locator(f"{selector} .freeze").first.text_content()
 
 
+def slow_background_paint(tab):
+    tab.evaluate(
+        """() => {
+          const post = scheduler.postTask.bind(scheduler);
+          scheduler.postTask = (task, options) =>
+            new Promise((done) => setTimeout(done, 300)).then(() => post(task, options));
+        }"""
+    )
+
+
 def test_every_plan_phase_slice_and_task_row_carries_a_freeze_button(page):
     tab, _ = page
     for selector in ("#item-plans-hier", "#item-phases-p1", "#item-slices-hier\\.hy-page", "#item-tasks-t1"):
@@ -175,6 +185,7 @@ def test_a_frozen_plan_dims_and_disables_everything_under_it_while_comments_stay
 @pytest.mark.parametrize("page", [[freeze("plans/v2")]], indirect=True)
 def test_unfreeze_sends_the_clear_and_restores_the_rows(page):
     tab, sent = page
+    slow_background_paint(tab)
     tab.click("#item-plans-v2 > details.plan-fold > summary .freeze")
     assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "plans/v2"}]
     tab.wait_for_function("() => !document.querySelector('#item-phases-p2').classList.contains('frozen')")
