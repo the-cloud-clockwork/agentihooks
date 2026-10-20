@@ -48,7 +48,7 @@ def _installed(path: Path) -> dict:
 def _settings(state: Path) -> list[str]:
     from hooks.context.credential_guard import dotenv_keys
 
-    files = [state / ".env", *sorted(state.glob("*.env"))] if state.is_dir() else []
+    files = sorted(state.glob("*.env")) if state.is_dir() else []
     return sorted({key for path in files if path.name != HIVE_ENV for key in dotenv_keys(path)})
 
 
@@ -70,7 +70,7 @@ def _deps() -> list[str]:
 def differences(base: dict, other: dict) -> list[str]:
     lines = []
     for section in SECTIONS:
-        mine, theirs = set(base.get(section, [])), set(other.get(section, []))
+        mine, theirs = set(base[section]), set(other[section])
         lines += [f"{section} missing {name}" for name in sorted(mine - theirs)]
         lines += [f"{section} extra {name}" for name in sorted(theirs - mine)]
     return lines

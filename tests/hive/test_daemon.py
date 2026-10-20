@@ -851,7 +851,10 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
         1000,
     )
     _publish(redis, monkeypatch, "older", [slot("one", 2)], {"claude:one": _reading(400)}, 1000)
-    _publish(redis, monkeypatch, "stale", [slot("one", 1)], {"claude:one": _reading(900)}, 800)
+    _publish(redis, monkeypatch, "edge", [slot("one", 7)], {"claude:one": _reading(600)}, 1000)
+    _publish(redis, monkeypatch, "stale", [slot("one", 1)], {"claude:one": _reading(900)}, 1000)
+    redis.hset(registry.key("edge"), "heartbeat_at", str(1_000_000 - registry.LIVE_MS))
+    redis.hset(registry.key("stale"), "heartbeat_at", str(1_000_000 - registry.LIVE_MS - 1))
     local = [
         slot("one", 0),
         slot("two", 0, harness="codex"),
@@ -871,7 +874,7 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
     _publish(redis, monkeypatch, "pod", local, quota, 1000)
     caps = {(item["harness"], item["account"]): item["cap"] for item in registry.show(redis, "pod")["slots"]}
     assert caps == {
-        ("claude", "one"): 6,
+        ("claude", "one"): 7,
         ("codex", "two"): 4,
         ("claude", "own"): 3,
         ("claude", "same"): 5,
@@ -879,7 +882,8 @@ def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(r
         ("claude", "alone"): 0,
     }
     published = json.loads(redis.get(f"{registry.key('pod')}:quota"))
-    assert published["claude:one"] == published["codex:two"] == _reading(500)
+    assert published["claude:one"] == _reading(600)
+    assert published["codex:two"] == _reading(500)
     assert published["claude:own"] == _reading(600)
     assert published["claude:alone"] == _reading(None)
 
@@ -895,3 +899,12 @@ def test_beat_publishes_the_configuration_with_the_repo_identities(redis, monkey
     )
     daemon.beat(redis, "pod")
     assert calls == [("pod", []), ("pod", ["/x/a", "h/o/a"])]
+
+
+def test_publish_config_hands_the_hive_id_and_repos_to_the_config_snapshot(redis, monkeypatch):
+    from scripts.hive import config
+
+    calls = []
+    monkeypatch.setattr(config, "publish", lambda *args: calls.append(args))
+    daemon.publish_config(redis, "pod", ["h/o/a"])
+    assert calls == [(redis, "pod", ["h/o/a"])]

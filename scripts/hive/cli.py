@@ -176,18 +176,21 @@ def _compare(base_id: str | None) -> int:
     if base is None:
         raise auth.HiveError(f"live hive {base_id} published no configuration")
     print(f"{base_id}\tbase\t{config.summary(base)}")
-    differs = False
-    for hive_id, other in sorted(found.items()):
-        if other is None:
-            print(f"{hive_id}\tno configuration published")
-            differs = True
-            continue
-        lines = config.differences(base, other)
-        print(f"{hive_id}\t{'differs' if lines else 'equal'}\t{config.summary(other)}")
-        for line in lines:
-            print(f"  {line}")
-        differs = differs or bool(lines)
-    return 1 if differs else 0
+    differing = [hive_id for hive_id, other in sorted(found.items()) if _report(hive_id, base, other)]
+    return 1 if differing else 0
+
+
+def _report(hive_id: str, base: dict, other: dict | None) -> bool:
+    from scripts.hive import config
+
+    if other is None:
+        print(f"{hive_id}\tno configuration published")
+        return True
+    lines = config.differences(base, other)
+    print(f"{hive_id}\t{'differs' if lines else 'equal'}\t{config.summary(other)}")
+    for line in lines:
+        print(f"  {line}")
+    return bool(lines)
 
 
 def main(argv: list[str]) -> int:

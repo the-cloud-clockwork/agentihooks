@@ -117,23 +117,33 @@ def test_differences_name_every_missing_and_extra_entry_per_section():
     assert config.differences(base, base) == []
 
 
-def test_publish_writes_the_snapshot_once_until_it_expires(redis, machine, monkeypatch):
+def test_publish_writes_the_snapshot_once_until_it_expires(redis, tmp_path, monkeypatch):
+    import os
+
     from scripts.hive import config, registry
 
-    environ, home, state = machine
-    monkeypatch.setattr(config.os, "environ", environ)
-    monkeypatch.setattr(config.Path, "home", lambda: home)
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(state))
+    calls = []
+
+    def snapshot(environ, home, state, repos):
+        calls.append((environ, home, state, repos))
+        return {"accounts": [f"call-{len(calls)}"]}
+
+    monkeypatch.setattr(config, "snapshot", snapshot)
+    monkeypatch.setattr(config.Path, "home", lambda: tmp_path / "home")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "state"))
     config.publish(redis, "pod", ["github.com/owner/agentihooks"])
     key = f"{registry.key('pod')}:config"
-    assert config.read(redis, "pod")["accounts"] == ["AH_CC_TOKEN_one", "AH_CX_TOKEN_two"]
+    assert calls == [(os.environ, tmp_path / "home", tmp_path / "state", ["github.com/owner/agentihooks"])]
+    assert calls[0][0] is os.environ
+    assert config.read(redis, "pod") == {"accounts": ["call-1"]}
     assert config.TTL_SECONDS - 5 < redis.ttl(key) <= config.TTL_SECONDS
-    redis.set(key, json.dumps({"accounts": ["kept"]}), ex=config.REFRESH_SECONDS + 5)
+    redis.expire(key, config.REFRESH_SECONDS + 5)
     config.publish(redis, "pod", [])
-    assert config.read(redis, "pod") == {"accounts": ["kept"]}
+    assert config.read(redis, "pod") == {"accounts": ["call-1"]}
     redis.expire(key, config.REFRESH_SECONDS)
     config.publish(redis, "pod", [])
-    assert config.read(redis, "pod")["accounts"] == ["AH_CC_TOKEN_one", "AH_CX_TOKEN_two"]
+    assert config.read(redis, "pod") == {"accounts": ["call-2"]}
+    assert redis.ttl(f"{registry.key('other')}:config") == -2
     assert config.read(redis, "absent") is None
 
 
@@ -187,6 +197,39 @@ def test_compare_passes_when_every_live_hive_matches_the_local_base(redis, monke
     live(redis, "pod", full(accounts=["a"]))
     assert cli.main(["compare"]) == 0
     assert capsys.readouterr().out.splitlines()[1].startswith("pod\tequal\t")
+
+
+@pytest.mark.parametrize(("other", "code"), [(None, 1), (full(accounts=["b"]), 1), (full(accounts=["a"]), 0)])
+def test_compare_exits_one_for_a_single_silent_or_differing_hive(redis, monkeypatch, other, code):
+    from scripts.hive import cli
+
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    live(redis, "root", full(accounts=["a"]))
+    live(redis, "pod", other)
+    assert cli.main(["compare", "--base", "root"]) == code
+
+
+def test_compare_refuses_a_base_that_is_not_live(redis, monkeypatch, capsys):
+    from scripts.hive import cli
+
+    monkeypatch.setattr(cli, "redis_client", lambda: redis)
+    live(redis, "pod", full())
+    assert cli.main(["compare", "--base", "absent"]) == 1
+    assert "hive compare refused: live hive absent published no configuration" in capsys.readouterr().err
+
+
+def test_compare_help_names_the_command_and_its_base():
+    import argparse
+
+    from scripts.hive import cli
+
+    parser = cli._parser()
+    sub = next(action for action in parser._actions if isinstance(action, argparse._SubParsersAction))
+    assert {choice.dest: choice.help for choice in sub._choices_actions}["compare"] == (
+        "List each live hive's configuration against a base hive's"
+    )
+    base = next(action for action in sub.choices["compare"]._actions if action.dest == "base")
+    assert base.help == "The base hive id; defaults to this machine's hive"
 
 
 def test_compare_refuses_a_base_without_a_published_configuration(redis, monkeypatch, capsys):
