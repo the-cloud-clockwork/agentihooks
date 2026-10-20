@@ -179,15 +179,16 @@ def test_reconciliation_requires_an_absent_agent_and_a_dead_process(store, case)
     )
     if not projected:
         store.redis.hdel(store.key("fixture", "agents"), agent.name)
+    from scripts.hive import reports
+
+    if available:
+        store.redis.set(reports.key("remote"), json.dumps({"names": []}))
     runtime = SimpleNamespace(
         live_names=lambda: {agent.name} if named else set(),
-        reported=lambda _: reported,
-        observe=lambda _: SimpleNamespace(state=observed),
+        reported=lambda current: reported if current == agent else True,
+        observe=lambda current: SimpleNamespace(state=observed if current == agent else "unknown"),
     )
-    with (
-        patch("scripts.hive.reports.host", return_value="remote" if remote else ""),
-        patch("scripts.hive.reports.Reports.read", return_value={"names": []} if available else None),
-    ):
+    with patch("scripts.hive.reports.host", return_value="remote" if remote else ""):
         actions = store.execution_registry.reconcile("fixture", runtime)
     expected = [f"ended orphan execution {agent.execution_id} for {agent.name}"] if ended else []
     assert actions == expected
@@ -230,11 +231,11 @@ def test_a_remote_process_reported_after_the_live_snapshot_is_preserved(store):
 
     agent = started(store)
     store.redis.hdel(store.key("fixture", "agents"), agent.name)
+    from scripts.hive import reports
+
+    store.redis.set(reports.key("remote"), json.dumps({"names": [agent.name]}))
     runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
-    with (
-        patch("scripts.hive.reports.host", return_value="remote"),
-        patch("scripts.hive.reports.Reports.read", return_value={"names": [agent.name]}),
-    ):
+    with patch("scripts.hive.reports.host", return_value="remote"):
         assert store.execution_registry.reconcile("fixture", runtime) == []
     assert store.execution("fixture", agent.execution_id) == agent
 
@@ -253,3 +254,78 @@ def test_orphan_ending_preserves_terminal_executions_and_absent_replacements(sto
     store.redis.hdel(store.key("fixture", "agents"), first.name)
     assert store.execution_registry.end_orphan("fixture", terminal) is False
     assert store.execution("fixture", terminal.execution_id) == terminal
+
+
+def test_drop_retries_when_its_execution_becomes_terminal_before_commit(store):
+    from dataclasses import asdict
+
+    agent = started(store)
+    terminal = replace(agent, state="finished")
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+    calls = []
+
+    def commit(pipe, *args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            store.redis.hset(store.key("fixture", "executions"), agent.execution_id, json.dumps(asdict(terminal)))
+        return execute(pipe, *args, **kwargs)
+
+    with patch.object(pipe_type, "execute", commit):
+        store.drop_agent("fixture", agent.name, at=40)
+    assert len(calls) == 2
+    assert store.execution("fixture", agent.execution_id) == terminal
+    assert store.agents("fixture") == []
+    assert store.redis.llen(store.key("fixture", "history")) == 1
+
+
+def test_orphan_ending_keeps_a_concurrent_execution_update(store):
+    from dataclasses import asdict
+
+    agent = started(store)
+    changed = replace(agent, idle_ticks=1)
+    store.redis.hdel(store.key("fixture", "agents"), agent.name)
+    pipe_type = type(store.redis.pipeline())
+    execute = pipe_type.execute
+
+    def commit(pipe, *args, **kwargs):
+        store.redis.hset(store.key("fixture", "executions"), agent.execution_id, json.dumps(asdict(changed)))
+        return execute(pipe, *args, **kwargs)
+
+    with patch.object(pipe_type, "execute", commit):
+        assert store.execution_registry.end_orphan("fixture", agent) is False
+    assert store.execution("fixture", agent.execution_id) == changed
+    assert store.agents("fixture") == []
+
+
+@pytest.mark.parametrize(("state", "projected"), [("working", True), ("finished", False)])
+def test_reconciliation_skips_unavailable_runtime_reads_for_non_orphans(store, state, projected):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    agent = started(store)
+    agent = replace(agent, state=state)
+    store.put_agent("fixture", agent)
+    if not projected:
+        store.redis.hdel(store.key("fixture", "agents"), agent.name)
+    runtime = SimpleNamespace(live_names=lambda: set(), reported=Mock(side_effect=RuntimeError("runtime unavailable")))
+    assert store.execution_registry.reconcile("fixture", runtime) == []
+    assert store.execution("fixture", agent.execution_id) == agent
+    runtime.reported.assert_not_called()
+
+
+def test_a_recorded_seat_does_not_hide_a_later_dead_orphan(store):
+    from types import SimpleNamespace
+
+    recorded = started(store)
+    orphan = store.start_execution(
+        "fixture", AgentRecord(store.next_name("fixture", "eng"), "eng", "next-task", seat="eng-2@fixture")
+    )
+    store.redis.hdel(store.key("fixture", "agents"), orphan.name)
+    runtime = SimpleNamespace(live_names=lambda: set(), reported=lambda _: False)
+    assert store.execution_registry.reconcile("fixture", runtime) == [
+        f"ended orphan execution {orphan.execution_id} for {orphan.name}"
+    ]
+    assert store.execution("fixture", recorded.execution_id) == recorded
+    assert store.execution("fixture", orphan.execution_id) == replace(orphan, state="ended")
+    assert store.agents("fixture") == [recorded]

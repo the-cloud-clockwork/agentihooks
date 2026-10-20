@@ -292,7 +292,7 @@ class ExecutionRegistry:
         with self.redis.pipeline() as pipe:
             try:
                 pipe.watch(key, self.store.key(slug, "agents"))
-                current = self.occupants(slug, pipe).get(agent.seat)
+                current = self.occupants(slug).get(agent.seat)
                 if (
                     current != agent
                     or agent.state != "working"

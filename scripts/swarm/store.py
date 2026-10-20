@@ -424,7 +424,7 @@ class RedisStore:
                 try:
                     pipe.watch(self.key(slug, "agents"), self.key(slug, "executions"))
                     previous = pipe.hget(self.key(slug, "agents"), name)
-                    executions = [a for a in self.execution_registry.occupants(slug, pipe).values() if a.name == name]
+                    executions = [a for a in self.execution_registry.occupants(slug).values() if a.name == name]
                     pipe.multi()
                     if previous:
                         row = json.loads(previous)
@@ -433,13 +433,12 @@ class RedisStore:
                             reason = "handed off"
                         pipe.rpush(self.key(slug, "history"), json.dumps({**row, "ended_at": ended, "reason": reason}))
                     for agent in executions:
-                        if agent.state in ("ended", "finished"):
-                            continue
-                        pipe.hset(
-                            self.key(slug, "executions"),
-                            agent.execution_id,
-                            json.dumps(asdict(replace(agent, state="ended"))),
-                        )
+                        if agent.state != "finished":
+                            pipe.hset(
+                                self.key(slug, "executions"),
+                                agent.execution_id,
+                                json.dumps(asdict(replace(agent, state="ended"))),
+                            )
                     pipe.hdel(self.key(slug, "agents"), name)
                     pipe.hdel(self.key(slug, "desired-routes"), name)
                     pipe.hdel(self.key(slug, "state-since"), name)
