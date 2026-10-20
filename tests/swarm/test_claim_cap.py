@@ -184,6 +184,6 @@ def test_cap_report_dates_only_failures_within_the_counted_claims(store, failure
     actions = tick("sw", store, ledger, runtime, now_ms=1_792_440_004_000)
     report = ledger.comments[0][2]
     assert f"Last launch failure: {expected}. Change its scope" in report
-    assert report in actions[0]
+    assert f"blocked t1: {report}" in actions
     assert ledger.rows["t1"]["state"] == "blocked"
     assert all(row in store.launches("sw") for row in original)
