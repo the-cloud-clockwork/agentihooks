@@ -77,12 +77,10 @@ def _aggregator_problems(
             and base_id == "gate-required"
             and head_job.get("steps")
             in [
-                ci_reuse.gate_steps(
-                    **form,
-                    summary=summary,
-                    docs="docs" in ci_wiring.needs_of(head_job),
-                    watcher_loss=watcher_loss,
-                    inline_mutation=inline_mutation,
+                inline(
+                    ci_reuse.gate_steps(
+                        **form, summary=summary, docs="docs" in ci_wiring.needs_of(head_job), watcher_loss=watcher_loss
+                    )
                 )
                 for form in (
                     {},
@@ -94,7 +92,7 @@ def _aggregator_problems(
                 )
                 for summary in (False, True)
                 for watcher_loss in (False, True)
-                for inline_mutation in (False, True)
+                for inline in (list, ci_reuse.inline_mutation)
             ]
         )
         and not (field == "runs-on" and head_job.get(field) in runners(policy))

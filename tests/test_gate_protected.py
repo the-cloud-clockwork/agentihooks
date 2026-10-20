@@ -772,7 +772,7 @@ def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
 
     base, head = _aggregators()
     base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
-    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, summary=summary, inline_mutation=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary))
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
