@@ -1489,14 +1489,16 @@ key gets no lock; one that races a change of the controller lease fails with `th
 `agentihooks swarm tick` and `agentihooks swarm rename` take the lock the same way. Each first acquires the
 controller lease for this hive (the hive id from `scripts.swarm.commands.hive_id`: the hive membership, else
 `SWARM_HIVE_ID`, else the seeded registry id, else the hostname), then takes the tick lock with its own holder record,
-and releases it with its own token when it ends. The same hive gets the same lease epoch back, so a tick or rename
-killed mid run, by `kill -9`, a closed terminal or an out of memory kill, costs no wait: the next tick of this hive on
-the same machine sees the dead holder and takes the lock at once.
+and releases it with its own token when it ends. A tick or rename killed mid run, by `kill -9`, a closed terminal or
+an out of memory kill, costs no wait: the next tick of this hive on the same machine gets the same lease epoch back
+while the lease is live and sees the dead holder, or gets a new epoch after the lease expired; either way it takes the
+lock at once.
 
-A tick prints its outcome as an action line and exits normally; a rename fails with the error, which
-`agentihooks swarm rename` prints after the swarm id (`<id>: swarm <id>: another tick or rename is running`).
+A tick records the outcome as that swarm's tick result and ends normally; a rename fails with the error, and
+`agentihooks swarm rename` exits 1 with it on stderr after the swarm id
+(`swarm: <id>: swarm <id>: another tick or rename is running`).
 
-| Situation at take | `swarm tick` action | `swarm rename` error |
+| Situation at take | `swarm tick` result | `swarm rename` error |
 |---|---|---|
 | Another hive holds the controller lease | `the swarm belongs to another hive` | `swarm <id>: belongs to another hive` |
 | A live tick or rename holds the lock in this epoch | `another tick is running` | `swarm <id>: another tick or rename is running` |
