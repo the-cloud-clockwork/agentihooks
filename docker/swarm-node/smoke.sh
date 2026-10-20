@@ -141,11 +141,20 @@ PYEXIT
             fi
             ) &
             probes+=("$!")
+            names+=("$case")
         done
         status=0
-        for pid in "${probes[@]}"; do wait "$pid" || status=$?; done
+        for index in "${!probes[@]}"; do
+            wait "${probes[$index]}" && continue || status=$?
+            echo "worker profile probe ${names[$index]} failed with exit $status" >&2
+            tail -n 40 "$output/profile-${names[$index]}.log" "$output/profile-${names[$index]}.json" >&2
+        done
         if (( status )); then exit "$status"; fi
-        python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
+        python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures" || {
+            status=$?
+            echo "worker profile evidence failed with exit $status" >&2
+            exit "$status"
+        }
     ) &
     profile_pid=$!
 fi
