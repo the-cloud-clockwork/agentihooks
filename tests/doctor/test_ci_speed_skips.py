@@ -47,7 +47,9 @@ def skipped_run():
 
 
 def crossings(run):
-    return [finding for finding in ci_speed.findings([run], 0, 1792428000000) if finding.kind == "ci skipped record lag"]
+    return [
+        finding for finding in ci_speed.findings([run], 0, 1792428000000) if finding.kind == "ci skipped record lag"
+    ]
 
 
 def test_seven_minute_skipped_record_lag_names_the_run_job_and_clock(skipped_run):
@@ -105,5 +107,7 @@ def test_timer_delivers_one_skipped_record_finding_per_run_to_both_masters(skipp
         [item] = InboxStore(store.redis).inbox(f"master@{slug}")
         assert "stage-budget" in item.text
         assert "420 seconds" in item.text
-    saved = json.loads(store.redis.hget(store.key("skip-doctor", "doctor-findings"), "ci-skipped-record-lag/39282034448-1"))
+    saved = json.loads(
+        store.redis.hget(store.key("skip-doctor", "doctor-findings"), "ci-skipped-record-lag/39282034448-1")
+    )
     assert saved["measure"] == 420
