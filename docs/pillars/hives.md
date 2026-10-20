@@ -236,9 +236,10 @@ failed with "hive launch failed: `<cause>`".
 |---|---|
 | `identity` | The order does not match the admitted execution: generation, lane, task, harness, profile, account slot, route, target hive or state differ, the seat holds a newer execution, or the started agent reported a different harness, profile or account. |
 | `prompt` | The payload is missing, is not the order's task, or carries no opening prompt or a digest that does not match it. |
-| `refused` | The controller epoch moved on before or right after the launch, or the launch raised a swarm error. |
-| `expired` | The agent started after the order's expiry; the hive stops it. |
-| `ambiguous` | The agent may have started but its process could not be identified; the slot reservation decides it. |
+| `stale_epoch` | The order's controller epoch is older than the current controller lease when the hive takes it. |
+| `refused` | The controller epoch moved on between the order check and the launch or right after it, or the launch raised a swarm error. |
+| `expired` | The order expired before the hive took it, or the agent started after the expiry; the hive stops such an agent. |
+| `ambiguous` | The agent may have started but its process could not be identified, or the order was taken 300 seconds ago with no result. |
 | `<status>: <detail>` | The local runtime refused the spawn, such as `refused: <why>` or `unavailable: <why>`, with the runtime's own reason. |
 
 ## Worker hives in Kubernetes
