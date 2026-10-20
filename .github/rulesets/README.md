@@ -2,8 +2,8 @@
 
 These JSON files are update payloads for the existing repository rulesets,
 using the [GitHub REST API](https://docs.github.com/en/rest/repos/rules#update-a-repository-ruleset).
-They contain writable settings only. Both rulesets enforce deletion and force
-push protection, linear history and pull requests. `main-prod-lockdown` has no
+They contain writable settings only. `dev-no-delete` and `main-prod-lockdown`
+enforce deletion and force push protection, linear history and pull requests. `main-prod-lockdown` has no
 bypass actors. `dev-no-delete` lists two in `pull_request` mode, the repository
 admin role (`RepositoryRole` 5) and the agenticore GitHub App (`Integration`,
 its app id from the OpenBao `k8s/agenticore` field `GITHUB_APP_ID`), because
@@ -56,6 +56,7 @@ Verify the effective rules and bypass lists:
 ```bash
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/16090886 --jq .bypass_actors
+gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/25468405 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rulesets/15122747 --jq .bypass_actors
 gh api repos/The-Cloud-Clockwork/agentihooks/rules/branches/dev \
   --jq '.[] | select(.type == "pull_request") | .parameters.require_code_owner_review'
