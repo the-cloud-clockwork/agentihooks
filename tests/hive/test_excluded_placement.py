@@ -158,6 +158,8 @@ def test_a_hive_never_takes_an_agent_past_max_agents():
         ("eng", "frontend", [], "remote"),
         ("ci", "cicd", ["master"], "remote"),
         ("eng", "planner", ["plan"], "no live hive takes plan"),
+        ("eng", "planner", ["eng"], "no live hive takes plan"),
+        ("ci", "engineer", ["engineer"], "no live hive takes eng"),
     ],
 )
 def test_a_launch_keeps_an_agent_off_a_hive_that_excludes_its_lane_or_profile(setup, lane, profile, excluded, expected):
