@@ -5,7 +5,8 @@ import threading
 
 import pytest
 
-from scripts.swarm_ledger import authority_context, ledger_link
+from scripts.swarm import runtime
+from scripts.swarm_ledger import authority_context, ledger_authority, ledger_link
 from scripts.swarm_ledger.storage_migration import hosted as hosted_migration
 from tests.test_swarm_v2_launch import FIRST, World
 
@@ -167,3 +168,37 @@ def test_a_stale_probe_answer_is_checked_again(answering, tmp_path, monkeypatch)
     (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(stale))
 
     assert ledger_link.base(environ) == answering
+
+
+def test_the_workstation_tick_hands_each_spawned_agent_a_hosted_token(monkeypatch):
+    class Store:
+        def slugs(self):
+            return []
+
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setattr(hosted_migration, "server_secret", lambda: "hosted-secret")
+
+    with authority_context.for_tick(Store()):
+        handed = runtime._ledger_token("demo", "engineer@demo-1")
+
+    assert handed == {
+        "AGENTIHOOKS_LEDGER_AGENT_TOKEN": ledger_authority.agent_token("hosted-secret", "demo", "engineer@demo-1")
+    }
+
+
+def test_the_workstation_tick_survives_a_malformed_secret_store_answer(monkeypatch):
+    class Store:
+        def slugs(self):
+            return []
+
+    def malformed():
+        raise KeyError("data")
+
+    monkeypatch.delenv("SWARM_URL", raising=False)
+    monkeypatch.delenv("SWARM_SECRET", raising=False)
+    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setattr(hosted_migration, "server_secret", malformed)
+
+    with authority_context.for_tick(Store()):
+        assert runtime._ledger_token("demo", "engineer@demo-1") == {}

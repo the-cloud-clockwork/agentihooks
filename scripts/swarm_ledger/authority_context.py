@@ -30,7 +30,7 @@ def _hosted_secret(server_secret) -> str | None:
         return None
     try:
         return server_secret()
-    except (OSError, ValueError):
+    except (KeyError, OSError, TypeError, ValueError):
         return None
 
 
