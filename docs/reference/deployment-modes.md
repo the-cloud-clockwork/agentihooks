@@ -31,7 +31,7 @@ one Redis, which every ledger server and controller of the swarm share.
 - Whether a hive runs on subscriptions or api keys is a property of its slots, chosen per hive. See
   [Claude account load balancing](../pillars/load-balancing.md).
 
-Joining machines, roles, placement, failover timing and fencing are on the [Hives](../pillars/hives.md) page.
+Adding machines, roles, placement, failover timing and fencing are on the [Hives](../pillars/hives.md) page.
 
 ## Serving a live swarm from a distributed controller
 
@@ -232,7 +232,7 @@ python -c 'from scripts.swarm_ledger import ledger_link; print(ledger_link.remot
 |---|---|---|
 | `a remote ledger client needs SWARM_URL, the address of the hosted ledger server` | A mode other than `local` with neither `SWARM_URL` nor `LEDGER_URL` set | Set the hub address, or set `AGENTIHOOKS_DEPLOYMENT=local` for a workstation ledger |
 | `a remote ledger client needs a pinned agent identity; the operator credential stays on its host` | A hub address reached a shell with no swarm or no agent name, so the client is remote and will not use the page token | Run as a swarm agent, or set `AGENTIHOOKS_DEPLOYMENT=local` on a workstation that owns the ledger |
-| `a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential ...` | A pinned agent with no agent token, no `SWARM_SECRET` and no hive credential | Launch the agent through the swarm, which exports its token, or run `agentihooks hive join` on the worker |
+| `a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential ...` | A pinned agent with no agent token, no `SWARM_SECRET` and no hive credential | Launch the agent through the swarm, which exports its token, or run `agentihooks hive add` on the UI hive to deliver the worker's credential |
 | `a remote ledger client cannot make service writes; the operator credential stays on its host` | A service write from a remote client outside the tick and without a controller credential | Run it on the hub host, or through the tick |
 | A workstation stops starting its local ledger server after `LEDGER_URL` was added to its env | Rule 3: a hub address with no mode is remote | Set `AGENTIHOOKS_DEPLOYMENT=local`, or remove `LEDGER_URL` |
 | A process with `AGENTIHOOKS_DEPLOYMENT=local` still talks to the hosted ledger | `SWARM_URL` is set for this swarm and wins over the mode | Unset `SWARM_URL` in that process |
@@ -274,16 +274,18 @@ SWARM_MEMBER_REDIS_URL=rediss://swarm.example.internal:6379/0
 
 ```bash
 docker compose --profile join up -d
-agentihooks hive invite worker-1              # on the swarm host
-agentihooks hive join https://swarm.example.internal:8770 <code>   # on each worker
+# on the UI hive, once each worker is reachable over ssh
+agentihooks hive add ssh://worker@worker-1:22 --label worker-1 \
+  --url https://swarm.example.internal:8770/hive/refresh
+# on each worker, once hive add has delivered its hive.env
 agentihooks hive install
 ```
 
 - The ledger answers only the host names in `SWARM_PUBLIC_URL` and `SWARM_ALLOWED_HOSTS`.
-- The hive join endpoint always serves TLS; with `rediss`, Redis does too. When Redis stops answering, the endpoint
+- The hive endpoint always serves TLS; with `rediss`, Redis does too. When Redis stops answering, the endpoint
   answers 503 once a Redis call times out after five seconds and keeps admitting requests; see
-  [Join service limits](../pillars/hives.md#join-service-limits).
-- Each joined hive gets its own Redis user that writes only its own keys.
+  [Hive endpoint limits](../pillars/hives.md#hive-endpoint-limits).
+- Each added hive gets its own Redis user that writes only its own keys.
 
 ### No public ledger
 

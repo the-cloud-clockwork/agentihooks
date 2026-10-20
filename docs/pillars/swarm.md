@@ -1799,6 +1799,69 @@ shows data only as a count. `promote` only raises a note, never lowers it, and r
 reason. The culture is one text per swarm, kept in Redis outside the swarm's own keys, so like seat memory it
 survives `remove` and a swarm created again under the same id reads it.
 
+### Sessions that lose their swarm identity
+
+A hook knows a session belongs to a swarm from its environment: `AGENTIHOOKS_AGENT_NAME` names a swarm lane and
+`AGENTIHOOKS_SWARM` (or the slug inside the name) names the swarm. A session can lose those variables partway
+through its life. When the launch wrapper dies, the agent is reparented and `swarm_pin.unpin` strips those variables from
+its later hooks. Without the session pin described below, those hooks treat the session as an ordinary one: no preparation directive, no
+hard gate and no marker, however large the context grows. One tick spawned master reached 930 thousand tokens this
+way before the operator shut it down.
+
+The first time a hook sees a swarm session that already has a context usage snapshot, it writes a pin beside the
+markers: `~/.agentihooks/context_usage/<session id>.swarm`, a JSON object with the swarm slug and the compact limit.
+
+```json
+{"swarm": "rig-grade-swarm", "compact_limit": 600}
+```
+
+The minute tick writes the same pin for every live agent whose pane reports a conversation, with the swarm's
+configured `compact-limit` (or the default when none is set). A pin is written once and never overwritten. A later
+hook in that session that finds no swarm identity reads the slug from the pin, so the session still gets the
+preparation directive at the compact limit and, past the margin, the hard gate with its handoff command.
+
+| Session | Preparation and hard gate |
+|---|---|
+| Swarm identity in its environment | Yes; pinned once a usage snapshot exists |
+| Identity lost after a hook or the tick pinned it | Yes, from the pin |
+| No identity on any hook and never pinned by the tick | No |
+| Operator lane (`AGENTIHOOKS_SWARM_LANE=operator`) | No, and never pinned |
+| Nested session started from a swarm agent | Not from the parent's pin: it has its own session id |
+
+The preparation directive and the hard gate use the compact limit and margin of the hook process
+(`AGENTIHOOKS_COMPACT_LIMIT`, `AGENTIHOOKS_HANDOFF_MARGIN`). The limit stored in the pin is read by the Doctor
+detector below.
+
+### Doctor context overrun detector
+
+The Doctor's `context overrun` detector runs with the other detectors on every Doctor pass. For each agent of the
+watched swarm with a recorded conversation, it reads that session's context usage snapshot and raises a finding
+when the context is at or over the compact limit plus `AGENTIHOOKS_HANDOFF_MARGIN` and neither a `prepare` nor a
+`recycle` marker exists for the session. That state means the recycle directive never reached the session.
+
+The compact limit comes from the session's pin; a session with no pin uses the swarm's configured limit, else
+`AGENTIHOOKS_COMPACT_LIMIT` (default 600). The finding id is `context-overrun/<agent name>`, its evidence names
+the session, the context in thousands of tokens and the agent state, and its number is the context in thousands
+of tokens. Measure it before and after a fix:
+
+```bash
+agentihooks doctor rig-grade-swarm measure context-overrun/master@323133-0175
+```
+
+The command prints 0 once the finding is gone.
+
+### Troubleshooting context recycle
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| A swarm agent is past the hard gate and keeps working | `ls ~/.agentihooks/context_usage/<session id>.*` | No `.prepare` or `.recycle` marker and no `.swarm` pin: the session lost its identity before any hook or tick pinned it. The `context overrun` finding reports it; ask the agent for a handoff through the inbox. |
+| The snapshot reads under the limit while the pane shows more | `<session id>.json`, field `used_tokens` | The statusline has not refreshed the snapshot; the directive fires on the next hook after it does. |
+| A `context overrun` finding names the wrong limit | `<session id>.swarm`, field `compact_limit` | The pin keeps the limit from when it was written; `swarm set compact-limit` reaches only agents launched after it. |
+| An operator lane session gets no directive | `AGENTIHOOKS_SWARM_LANE` | Expected: operator sessions are never recycled or pinned. |
+
+[Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
+detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
+
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
@@ -2334,6 +2397,106 @@ agentihooks swarm <id> pr <final-pull-request-url>
 ```
 
 The task keeps each declaration in `pull_scopes`, a map from the pull request URL to its kind, `stage` or `prerequisite`, and its nonempty scope. The intent check grades a declared pull request against its declared scope alone, without the whole task text or the task's plan lines, and the parent intent stamped on its body names that scope in place of the task text. A declaration needs a GitHub pull request URL. A changed declaration is judged again. A pull request recorded without `--stage` or `--prerequisite` is the task's final pull request and is graded against the whole task contract; recording a declared pull request again without either option drops its declaration. A blank scope is refused, and one pull request declares one kind.
+
+### Proof loop health findings
+
+A `proof loop` finding identifies a task with **more than two reruns** or
+**more than three review rounds**, using the default caps. The health pass
+counts started agent lives and recorded review counters; moves into pull
+request state alone do not count as review rounds.
+
+#### Which starts count
+
+Started lives are read in start order for each task. The first started life
+never counts as a rerun, even when it has an excluded restart cause. Each later
+started life counts unless its recorded `after` cause excludes it:
+
+| Recorded cause | Meaning | Counts as a rerun? |
+|---|---|---|
+| `watchdog` | The stall watchdog reopened the task | No |
+| `park` | A continuation after `swarm park` | No |
+| `master` | The last recorded task state writer was a master | No |
+| Empty or absent | An ordinary restart with no recorded exclusion | Yes, after the first started life |
+
+The controller records these causes at launch; operators do not need to edit
+launch history. A failed launch that never reached `started` does not count.
+Exclusions apply to the marked start, so a later ordinary restart still counts.
+The current health pass also excludes a later start when its recorded pull
+request head differs from the preceding start and both heads are known.
+
+With no review counter over its cap and no change of recorded head:
+
+| Started lives in order | Counted reruns | Default finding? |
+|---|---|---|
+| First life, then four parked continuations | 0 | No |
+| First life, watchdog continuation, master continuation | 0 | No |
+| First life, then two ordinary restarts | 2 | No |
+| First life, then three ordinary restarts | 3 | Yes |
+| First life marked `park`, then three ordinary restarts | 3 | Yes |
+
+Review rounds use the **largest individual review counter** for the task,
+not their sum. For example, three rounds before the pull request and one on
+its first pull request give a review count of three. Four in one counter
+exceed the default cap. See [review round counters](#review-round-counters)
+for how those counters are separated and for the review gate's own limits.
+
+#### Configure the caps
+
+| Environment variable | Default | Finding condition |
+|---|---|---|
+| `AGENTIHOOKS_HEALTH_RERUNS` | `2` | Counted reruns strictly greater than this value |
+| `AGENTIHOOKS_HEALTH_REVIEW_ROUNDS` | `3` | Largest review counter strictly greater than this value |
+
+Values must be positive integers; zero, negative and nonnumeric values retain
+the defaults. Set them in the environment of the process running the health
+pass. For a manual status read with caps of four reruns and five review rounds:
+
+```bash
+AGENTIHOOKS_HEALTH_RERUNS=4 \
+AGENTIHOOKS_HEALTH_REVIEW_ROUNDS=5 \
+  agentihooks swarm <slug> status --json
+```
+
+Five counted reruns or six rounds in one counter would exceed these caps.
+This command configures only that invocation; configure the controller's
+launch environment for scheduled health passes. These health settings do not
+raise the review gate's three round limit or the separate claim cap. A start
+after a watchdog reopen still spends a claim even though it is excluded from
+the proof loop rerun count.
+
+#### Inspect and judge a finding
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+Read the finding's task, total starts, counted reruns and review rounds.
+Total starts can be high while counted reruns remain zero. Compare launch
+causes and head changes with the task's history before calling it a proof loop;
+a master hold or repeated parks alone are not evidence of repeated proof work.
+The master or operator records a verdict using the finding ID returned by status:
+
+```bash
+agentihooks swarm <slug> verdict 'proof-loop/<task>' false-positive \
+  --note 'The retained launch history shows only parked continuations'
+```
+
+Use that verdict only when the retained evidence supports it. A verdict hides
+the finding under the existing cooldown rules; it does not rewrite launch
+history or change either cap. If an excluded restart is still counted, check
+whether its started row retained the cause. Historical rows without a cause
+are treated as ordinary starts. The delivered change has a known gap if Redis
+fails between consuming a restart mark and recording the started row: the
+cause can be lost. Redis outage holds prevent spawning during an outage, but
+do not reconstruct a missing cause.
+
+[Pull request #3583](https://github.com/the-cloud-clockwork/agentihooks/pull/3583)
+records the restart exclusion change and its regression proofs, including a
+chain consisting only of parks. Its
+[green Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38937553476)
+validates the implementation; it does not establish a live reduction in false
+findings. Comparing before and after rates requires equal windows after the
+running controller has loaded the correction.
 
 ### Stalled activity findings
 

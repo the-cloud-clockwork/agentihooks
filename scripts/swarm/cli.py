@@ -1755,7 +1755,7 @@ def cmd_wait(store, args):
             {
                 "agent": agent.name,
                 "until": datetime.fromtimestamp(until / 1000, timezone.utc).isoformat(),
-                **({"on": held} if held else {}),
+                **({"on": held, "next": waits.FINISH_TURN} if held else {}),
             }
         )
     )

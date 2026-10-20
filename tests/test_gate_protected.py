@@ -776,6 +776,22 @@ def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize(("shell", "problems"), [("bash", 0), ("sh", 1), ("pwsh", 1)])
+def test_a_head_running_the_summary_under_pipefail_bash_is_green(form, shell, problems):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form, summary=True)
+    steps = ci_reuse.gate_steps(**form, summary=True)
+    steps[-1]["shell"] = shell
+    head["jobs"]["gate-required"]["steps"] = steps
+    assert len(_grade({"test.yml": head}, base={"test.yml": base})) == problems
+    assert ci_reuse.pipefail_summary(ci_reuse.gate_steps(**form, summary=True))[-1]["shell"] == "bash"
+    assert ci_reuse.pipefail_summary(steps)[:-1] == ci_reuse.gate_steps(**form, summary=True)[:-1]
+    assert "shell" not in ci_reuse.gate_steps(**form, summary=True)[-1]
+
+
 @pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
 def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
     from scripts import ci_reuse

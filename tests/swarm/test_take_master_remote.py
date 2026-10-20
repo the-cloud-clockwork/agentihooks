@@ -156,7 +156,7 @@ def test_a_remote_host_without_a_hive_id_is_refused_before_any_change(remote_tak
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "")
     assert run("sw", "take-master") == 1
     assert capsys.readouterr().err == (
-        "swarm: take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive join\n"
+        "swarm: take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive add\n"
     )
     assert (_masters(store), sent, broadcast.session_name(4242)) == ([], [], CARRIED)
 

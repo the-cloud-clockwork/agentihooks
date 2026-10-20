@@ -34,29 +34,42 @@ docker run -d --name "$run-member" --network "$run" -v "$tls/cert.pem:/tls/cert.
 ready=""
 for _ in $(seq 60); do
   logs="$(docker logs "$run-hive" 2>&1)"
-  if [[ $logs == *"hive join endpoint on https://"* ]]; then
+  if [[ $logs == *"hive endpoint on https://"* ]]; then
     ready=1
     break
   fi
   sleep 1
 done
 if [[ -z $ready ]]; then
-  printf 'the hive join endpoint never started:\n%s\n' "$logs" >&2
+  printf 'the hive endpoint never started:\n%s\n' "$logs" >&2
   exit 1
 fi
 
-if docker exec "$run-member" "${hive[@]}" join "http://$run-hive:8770" "unused" 2>/dev/null; then
-  printf 'a plain http join off loopback was accepted\n' >&2
-  exit 1
-fi
-printf 'plain http join off loopback: refused\n'
-code="$(docker exec "$run-hive" "${hive[@]}" invite member)"
-joined="$(docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code")"
-printf 'member container: %s\n' "${joined%%;*}"
-member_id="${joined#joined the hive as }"
-member_id="${member_id%%;*}"
+docker exec "$run-member" python -c '
+import urllib.error, urllib.request
 
-docker exec -i -e JOINED="$joined" "$run-member" python - <<'PY'
+try:
+    urllib.request.urlopen(urllib.request.Request("https://'"$run-hive"':8770/hive/join", data=b"{}"), timeout=5)
+except urllib.error.HTTPError as exc:
+    assert exc.code == 404, exc.code
+    print("hive/join: 404")
+else:
+    raise SystemExit("/hive/join exists")
+'
+member_env="$(docker exec "$run-hive" python -c '
+import os
+from scripts.hive import auth
+from scripts.swarm.store import redis_client, redis_url
+g = auth.mint(redis_client(), "member", redis_url(os.environ))
+print(g["id"])
+print(auth.env_text("https://'"$run-hive"':8770", g), end="")
+')"
+member_id="$(head -n1 <<< "$member_env")"
+tail -n +2 <<< "$member_env" | docker exec -i "$run-member" sh -c 'home="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"; umask 077; mkdir -p "$home"; cat > "$home/hive.env"'
+unset member_env
+printf 'member container: minted member %s\n' "$member_id"
+
+docker exec -i "$run-member" python - <<'PY'
 import os
 import stat
 import time
@@ -74,9 +87,7 @@ from scripts.swarm.store import redis_client
 env_file = Path.home() / ".agentihooks" / "hive.env"
 env = dict(line.split("=", 1) for line in env_file.read_text().splitlines())
 assert stat.S_IMODE(env_file.stat().st_mode) == 0o600
-assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in os.environ["JOINED"]
-assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in os.environ["JOINED"]
-print("hive.env: mode 0600, credentials absent from the join output")
+print("hive.env: mode 0600")
 client = redis_client()
 member = env["AGENTIHOOKS_HIVE_ID"]
 assert client.acl_whoami() == f"hive-{member}"
@@ -153,12 +164,6 @@ assert InboxStore(client, world=member).get(sent.id).reason == relay.FOREIGN_SEN
 assert InboxStore(client).open_items("master@proof") == []
 print("controller relay: a member send whose sender the member does not host is refused")
 PY
-
-if docker exec "$run-member" "${hive[@]}" join "https://$run-hive:8770" "$code" 2>/dev/null; then
-  printf 'a reused code joined\n' >&2
-  exit 1
-fi
-printf 'reused code: refused\n'
 
 docker exec "$run-hive" "${hive[@]}" revoke "$member_id"
 docker exec -i "$run-member" python - <<'PY'
