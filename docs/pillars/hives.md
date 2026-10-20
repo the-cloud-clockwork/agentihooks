@@ -88,6 +88,14 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
+`eng`, `ci` and `plan` run on headless hives. When a UI hive also takes one of them, placement tries the headless
+hives first and takes the UI hive only when no headless hive taking the role has room or none is live. A headless
+hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The agent record
+carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI hive records the
+pin as its reason. UI roles take only UI hives; the master
+keeps its headless fallback below. The engineer, cicd and planner
+profiles place as `eng`, `ci` and `plan`; a frontend or qa profile on any lane places as its UI role.
+
 When no live hive takes the role:
 
 - `qa` and `frontend` wait with "no UI hive live".

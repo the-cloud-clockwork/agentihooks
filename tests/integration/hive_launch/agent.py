@@ -90,7 +90,7 @@ def controller() -> None:
     record = AgentRecord(name, "eng", "task", seat=f"eng-1@{SLUG}", state="starting")
     store.put_agent(SLUG, record)
     store.seats.occupy(record.seat, name, lease.now_ms(store))
-    task = {"id": "task", "profile": "engineer", "seat": record.seat}
+    task = {"id": "task", "title": "Hive launch proof", "profile": "engineer", "seat": record.seat}
     with lease.kept(store, SLUG, held):
         placed = runtime.spawn(config, "eng", name, task)
         assert placed.execution.runtime_target["host_id"] == HIVE

@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/ledger_cutover.py:scripts.swarm.ledger_cutover.x__activate__mutmut_92:bc1c856e1fa61732563ba357130b77f6aa5bae471000e2cbc7c8e7df0a0612ce": {
+    "reader": "standards_reader",
+    "reason": "lease.current reads store only when _address(slug) is empty, and _address resolves to the ledger_route.scoped address, which settings guards as a non-empty api_url equal to pending_api_url that passed cli.api_address (http or https with a host); the None store is never dereferenced and _remote takes no store."
+  }
+}
