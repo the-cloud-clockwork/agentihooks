@@ -257,11 +257,16 @@ def test_session_start_kick_reaps_a_slow_check_before_returning(tmp_path, monkey
     try:
         assert deps_kick.kick(home=tmp_path) is True
         elapsed = time.monotonic() - began
-        group_alive = subprocess.run(["pgrep", "-g", str(started[0].pid)], capture_output=True).returncode == 0
+        try:
+            os.killpg(started[0].pid, 0)
+            group_alive = True
+        except ProcessLookupError:
+            group_alive = False
     finally:
-        with contextlib.suppress(ProcessLookupError):
-            os.killpg(started[0].pid, signal.SIGKILL)
-        started[0].wait()
+        if started:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(started[0].pid, signal.SIGKILL)
+            started[0].wait()
     assert elapsed < 5
     assert not group_alive, "the dependency check's process group outlived the session start kick"
 
