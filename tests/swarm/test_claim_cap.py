@@ -153,8 +153,8 @@ def test_a_crashed_cap_lets_the_claim_through_and_counts_a_fail_open_row(store, 
     ("failure_at", "expected"),
     [
         (1_792_439_999_999, "none"),
-        (1_792_440_000_000, "2026-10-20 00:00:00 UTC: no space left on device"),
-        (1_792_440_001_000, "2026-10-20 00:00:01 UTC: no space left on device"),
+        (1_792_440_000_000, "2026-10-19 20:00:00 UTC: no space left on device"),
+        (1_792_440_001_000, "2026-10-19 20:00:01 UTC: no space left on device"),
     ],
 )
 def test_cap_report_dates_only_failures_within_the_counted_claims(store, failure_at, expected):  # noqa: F811
