@@ -991,7 +991,13 @@ def _mutation_gate(event, inline, stats, mutation):
     needs["mutation"] = {"result": mutation}
     [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
     env = dict(
-        os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT=event, REUSED="false", INLINE=inline or ""
+        os.environ,
+        NEEDS=json.dumps(needs),
+        MUTATION="true",
+        KIND="false",
+        EVENT=event,
+        REUSED="false",
+        INLINE=inline or "",
     )
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
