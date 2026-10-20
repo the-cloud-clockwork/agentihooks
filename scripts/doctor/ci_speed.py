@@ -71,12 +71,12 @@ def cleared(records: list[dict]) -> list[str]:
     for run in records:
         for job in run["jobs"]:
             subject = _subject(run, job["labels"])
-            began, short, waited = groups.get(subject, (True, True, False))
+            short, waited = groups.get(subject, (True, False))
             quick = started(job) and iso_ms(job["started_at"]) - iso_ms(job["created_at"]) <= SHORT_WAIT_MS
-            groups[subject] = (began and started(job), short and quick, waited or (started(job) and not quick))
+            groups[subject] = (short and quick, waited or (started(job) and not quick))
     gone = []
-    for subject, (began, short, waited) in groups.items():
-        kinds = [kind for kind in SUMMARIES if short or ((began or waited) and kind != "ci runner wait")]
+    for subject, (short, waited) in groups.items():
+        kinds = [kind for kind in SUMMARIES if short or (waited and kind != "ci runner wait")]
         gone.extend(f"{kind.replace(' ', '-')}/{subject}" for kind in kinds)
     return gone
 
