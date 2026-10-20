@@ -114,6 +114,55 @@ def test_a_schedule_for_another_home_is_drift(tmp_path, scheduler, calls):
     ]
 
 
+def _scheduled(scheduler, home: Path, every: float, callback) -> None:
+    entry = scheduler.interval(
+        owner=sync.OWNER, payload=json.dumps({"script": str(home / "guard-daemon.sh")}), every=every
+    )
+    entry.timeout.connect(callback)
+    entry.start()
+
+
+def _other_callback(event, delivery_id, redis):
+    return None
+
+
+@pytest.mark.parametrize(("every", "callback"), [(300, sync.tick), (60, _other_callback)])
+def test_a_schedule_at_another_period_or_callback_is_drift(tmp_path, scheduler, every, callback):
+    for name in LINKS:
+        (tmp_path / name).symlink_to(sync.REPO / name)
+    _scheduled(scheduler, tmp_path, every, callback)
+    assert sync.drift(tmp_path) == [
+        f"{tmp_path / 'guard-daemon.sh'} is not scheduled every 60s on the agentihooks scheduler"
+    ]
+    assert sync.reconcile(tmp_path) == _installed(tmp_path)
+    [record] = _records(scheduler)
+    assert record["delay"] == 60 and record["slots"][0]["reference"] == "scripts.host_guard.sync:tick"
+
+
+def test_a_failed_reschedule_keeps_the_running_schedule(tmp_path, scheduler, monkeypatch, calls):
+    from redis.exceptions import ConnectionError
+
+    sync.install(tmp_path, enable=True)
+
+    def refuse(**options):
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(scheduler, "interval", refuse)
+    assert sync.install(tmp_path, enable=True).startswith("[!!]")
+    assert len(_records(scheduler)) == 1
+
+
+def test_reconcile_starts_the_scheduler_for_a_guard_in_sync(tmp_path, scheduler, calls):
+    from scripts.scheduler import service
+
+    sync.install(tmp_path, enable=True)
+    service.ensure_running.reset_mock()
+    assert sync.reconcile(tmp_path) == f"[OK] Host guard in sync with {sync.REPO}"
+    service.ensure_running.assert_called_once()
+    started_with = service.ensure_running.call_args.args[0]
+    assert started_with["AGENTIHOOKS_SWARM_REDIS_URL"] == os.environ["AGENTIHOOKS_SWARM_REDIS_URL"]
+
+
 def test_installing_one_home_keeps_the_schedule_of_another(tmp_path, scheduler, calls):
     other = tmp_path / "other"
     other.mkdir()

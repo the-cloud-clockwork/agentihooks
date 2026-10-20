@@ -14,6 +14,7 @@ LINKS = ("guard-daemon.sh", "guard-config.json")
 LEGACY = ("guard-daemon.timer", "guard-daemon.service")
 OWNER = "agentihooks-host-guard"
 EVERY = 60
+TICK = "scripts.host_guard.sync:tick"
 LIVE = ("ready", "active", "pending")
 
 
@@ -47,13 +48,28 @@ def _entries(scheduler) -> list:
     return [entry for entry in scheduler.owned(OWNER) if entry.state in LIVE]
 
 
-def _scripts() -> list[str] | None:
+def _records() -> list[dict] | None:
     from redis.exceptions import RedisError
 
     try:
-        return [json.loads(entry.record["payload"])["script"] for entry in _entries(_scheduler())]
+        return [entry.record for entry in _entries(_scheduler())]
     except RedisError:
         return None
+
+
+def _for(home: Path, records: list[dict]) -> list[dict]:
+    return [record for record in records if json.loads(record["payload"])["script"] == str(home / LINKS[0])]
+
+
+def _current(record: dict) -> bool:
+    return record["delay"] == EVERY and TICK in [slot.get("reference") for slot in record["slots"]]
+
+
+def _start() -> None:
+    from scripts.scheduler.service import ensure_running
+    from scripts.swarm.store import redis_url
+
+    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
 
 
 def drift(home: Path) -> list[str]:
@@ -68,10 +84,10 @@ def drift(home: Path) -> list[str]:
         path = _unit_dir(home) / name
         if path.exists():
             found.append(f"{path} still runs the guard on systemd instead of the agentihooks scheduler")
-    scripts = _scripts()
-    if scripts is None:
+    records = _records()
+    if records is None:
         found.append("the agentihooks scheduler is unreachable, so the guard schedule was not checked")
-    elif str(home / LINKS[0]) not in scripts:
+    elif not any(_current(record) for record in _for(home, records)):
         found.append(f"{home / LINKS[0]} is not scheduled every {EVERY}s on the agentihooks scheduler")
     return found
 
@@ -94,21 +110,18 @@ def _remove_units(home: Path) -> bool:
 def _schedule(home: Path) -> str:
     from redis.exceptions import RedisError
 
-    from scripts.scheduler.service import ensure_running
-    from scripts.swarm.store import redis_url
-
     try:
         scheduler = _scheduler()
         payload = json.dumps({"script": str(home / LINKS[0])})
-        for entry in _entries(scheduler):
-            if entry.record["payload"] == payload:
-                entry.cancel()
+        stale = [entry for entry in _entries(scheduler) if entry.record["payload"] == payload]
         entry = scheduler.interval(owner=OWNER, payload=payload, every=EVERY)
         entry.timeout.connect(tick)
         entry.start()
+        for old in stale:
+            old.cancel()
     except RedisError:
         return f"[!!] Host guard linked in {home}; Redis is unreachable, so the guard is not scheduled"
-    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
+    _start()
     return f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
 
 
@@ -128,11 +141,12 @@ def reconcile(home: Path) -> str:
     if not any(path.is_symlink() or path.exists() for path in paths):
         return "[--] Host guard not installed; agentihooks host-guard install adds it"
     if not drift(home):
+        _start()
         return f"[OK] Host guard in sync with {REPO}"
-    scripts = _scripts()
-    if scripts is None:
+    records = _records()
+    if records is None:
         return "[!!] Host guard not reconciled: the agentihooks scheduler is unreachable"
-    return install(home, enable=str(home / LINKS[0]) in scripts)
+    return install(home, enable=bool(_for(home, records)))
 
 
 def tick(event: dict, delivery_id: str, redis: "Redis") -> None:
