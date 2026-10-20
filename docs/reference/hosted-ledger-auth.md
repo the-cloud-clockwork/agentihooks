@@ -53,6 +53,8 @@ Every reader of `ledger_link.remote` treats `SWARM_URL` as a non-local deploymen
 
 The tick's own service writes still need `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, checked against the hosted ledger's Redis.
 
+Off loopback, `SWARM_URL` must be `https://`: clients refuse the ledger credential headers listed in [Ledger TLS](ledger-tls.md#the-refusal) over plain http.
+
 ## Evidence
 
 - `tests/swarm_ledger/test_edge_auth.py` covers the authority. It refuses a forged assertion, a wrong audience, a wrong issuer, an expired assertion, one without an expiry, an HS256 assertion, a failed certs read, the page credential and a wrong or foreign agent token. It accepts a valid assertion and a server secret agent token.
