@@ -544,7 +544,7 @@ PROC_ALLOWED = [
     "python3 -c \"import os; print(os.listdir('/proc/1'))\"",
     'test -n "${REDIS_URL:-}" && echo set || echo unset',
     "ls /proc/1/status",
-    "cat /proc/*/st*",
+    "cat /proc/*/status",
     "test -d /proc/$pid && echo alive",
 ]
 
