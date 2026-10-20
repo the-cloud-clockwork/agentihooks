@@ -19,7 +19,7 @@ def roots(environ: Mapping[str, str]) -> list[Path]:
 
 
 def listening(path: Path) -> bool:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as probe:
+    with socket.socket(socket.AF_UNIX) as probe:
         probe.settimeout(1)
         try:
             probe.connect(str(path))
@@ -33,7 +33,7 @@ def references(snap: Snapshot, proc: Path) -> list[str]:
     for row in snap.table.values():
         found += row.argv
         try:
-            links = list((proc / str(row.pid) / "fd").iterdir())
+            links = sorted((proc / str(row.pid) / "fd").iterdir())
         except OSError:
             continue
         for link in links:

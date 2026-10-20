@@ -141,6 +141,35 @@ def test_a_home_a_live_process_refers_to_is_never_touched(layout, kind):
     assert not orphan.exists()
 
 
+def test_unreadable_process_entries_do_not_hide_later_references(layout):
+    environ, legacy, _, state, proc = layout
+    owned = plant(legacy, "a1")
+    orphan = plant(legacy, "b2")
+    (proc / "42" / "fd").mkdir(parents=True)
+    (proc / "42" / "fd" / "3").write_text("not a link")
+    (proc / "42" / "fd" / "4").symlink_to(owned / "codex" / "config.toml")
+    table = {
+        41: Process(41, 1, 41, 41, 100, "S", "sh", ("sh",)),
+        42: Process(42, 1, 42, 42, 100, "S", "codex", ("codex",)),
+    }
+    result = codex_homes.sweep_codex_homes(later(table), state, act=True, proc=proc, environ=environ)
+    assert [item["path"] for item in result] == [str(orphan)]
+    assert owned.exists()
+
+
+def test_a_young_home_does_not_stop_the_sweep_of_older_ones(layout):
+    environ, legacy, _, state, proc = layout
+    young = plant(legacy, "a1")
+    old = plant(legacy, "b2")
+    stamp = time.time() - codex_homes.SETTLE_S - 60
+    for item in [old, *old.rglob("*")]:
+        os.utime(item, (stamp, stamp), follow_symlinks=False)
+    result = codex_homes.sweep_codex_homes(later(seconds=0), state, act=True, proc=proc, environ=environ)
+    assert [item["path"] for item in result] == [str(old)]
+    assert young.exists()
+    assert not old.exists()
+
+
 def test_a_listening_server_socket_marks_its_home_owned(layout):
     environ, _, _, state, proc = layout
     with tempfile.TemporaryDirectory(dir="/tmp") as short:
