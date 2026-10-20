@@ -975,7 +975,11 @@ def test_a_refresh_naming_lost_shards_files_its_own_fixer_when_nothing_lost_its_
 
 
 def recorded_test_failure(
-    run_id, shards, tests=("tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api",), missing=True
+    run_id,
+    shards,
+    tests=("tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api",),
+    missing=True,
+    messages=None,
 ):
     found = [
         {
@@ -1001,7 +1005,10 @@ def recorded_test_failure(
             output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
             return subprocess.CompletedProcess(argv, 0, output, "")
         if "/annotations" in argv[2]:
-            body = [{"annotation_level": "failure", "message": f"Missing coverage for shard {shards[-1][1]}"}]
+            body = [
+                {"annotation_level": "failure", "message": message}
+                for message in (messages if messages is not None else [f"Missing coverage for shard {shards[-1][1]}"])
+            ]
         elif "/jobs" in argv[2]:
             body = found
         else:
@@ -1023,3 +1030,72 @@ def test_the_same_failing_test_in_two_recorded_runs_files_one_fixer_across_shard
     assert "unit (3.12, 10)" in description
     assert len(ledger.raised) == 1
     assert len(master_items(store)) == 1
+
+
+def test_each_distinct_failing_test_keeps_its_own_fixer_across_runs(store):
+    ledger = Ledger()
+    refresh(
+        store,
+        ledger,
+        recorded_test_failure(900, [("3.12", 1)], tests=("tests/test_api.py::test_rule[1]",), missing=False),
+    )
+    refresh(
+        store,
+        ledger,
+        recorded_test_failure(901, [("3.12", 2)], tests=("tests/test_api.py::test_rule[2]",), missing=False),
+        NOW * 2,
+    )
+    assert len(ledger.added) == 2
+    assert "tests/test_api.py::test_rule[1]" in ledger.added[0][1]["description"]
+    assert "tests/test_api.py::test_rule[2]" in ledger.added[1][1]["description"]
+
+
+def test_two_tests_failing_in_the_same_shards_each_get_one_fixer(store):
+    ledger = Ledger()
+    refresh(
+        store,
+        ledger,
+        recorded_test_failure(
+            900, [("3.11", 1), ("3.12", 2)], tests=("tests/test_api.py::test_first", "tests/test_api.py::test_second")
+        ),
+    )
+    assert len(ledger.added) == 2
+    assert all("sonar" in fields["description"] for _, fields, _ in ledger.added)
+
+
+@pytest.mark.parametrize(
+    "messages",
+    [
+        ["Missing coverage for shard 99"],
+        ["Quality gate failed"],
+        ["Missing coverage for shard 2", "Quality gate failed"],
+    ],
+)
+def test_a_sonar_failure_not_explained_by_the_named_failing_test_keeps_its_fixer(store, messages):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], messages=messages))
+    assert len(ledger.added) == 2
+    assert any(fields["title"] == "Promotion red: sonar" for _, fields, _ in ledger.added)
+
+
+def test_a_failed_unit_job_without_named_tests_keeps_its_job_cause(store):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(900, [("3.12", 2)], tests=()))
+    assert {fields["title"] for _, fields, _ in ledger.added} == {
+        "Promotion red: sonar",
+        "Promotion red: unit (3.12, 2)",
+    }
+
+
+def test_an_unreadable_unit_log_leaves_the_run_unhandled(store):
+    ledger = Ledger()
+    recorded = recorded_test_failure(900, [("3.12", 2)])
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            raise subprocess.CalledProcessError(1, argv, stderr="log is unavailable")
+        return recorded(argv, **kwargs)
+
+    assert refresh(store, ledger, run) == []
+    assert ledger.added == []
+    assert not store.redis.get(promotion_watch.key(SLUG, "seen"))
