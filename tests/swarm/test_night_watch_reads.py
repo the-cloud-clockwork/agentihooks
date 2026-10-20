@@ -50,7 +50,7 @@ def test_night_watch_read_count_ignores_unrelated_freeze_history(monkeypatch):
     import fakeredis
 
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.create(SwarmConfig("watch", "/repo"))
+    store.create(SwarmConfig("watch", "/repo", max_eng=1, max_ci=0))
     store.update("watch", state="running")
     tasks = [
         {"id": str(index), "title": str(index), "state": "open", "lane": "eng", "kind": "code"} for index in range(32)
