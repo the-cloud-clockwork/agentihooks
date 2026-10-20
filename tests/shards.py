@@ -62,7 +62,7 @@ def assign_nodes(
     sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
     # A named group's tests in one file reuse what its first test built, which another shard would build again; a
-    # group longer than an even shard share still splits, since one shard could not hold it in its step budget.
+    # group longer than an even shard share still splits, since one shard cannot hold it.
     share = sum(durations.values()) / shards
     file_seconds: dict[str, float] = {}
     for node, duration in durations.items():
