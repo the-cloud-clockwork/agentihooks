@@ -499,6 +499,16 @@ Fencing stops a superseded agent or controller from acting after its replacement
 - **Ledger source.** Moving a workstation ledger into the hosted service with `--freeze` fences the source: its
   SQLite database refuses writes with "ledger moved to hosted service" and media writes answer 409.
 
+## Hive placement for one swarm on a local machine
+
+A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
+makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
+with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
+stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes roles=master,eng,ci,plan,dispatch
+max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
+tick. On a machine in any other mode the setting changes nothing.
+
 ## Worker hives in Kubernetes
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:

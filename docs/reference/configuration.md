@@ -442,6 +442,17 @@ Every agent reports gh as logged out at once:
 
 ---
 
+## Master Inbox Intent Grouping
+
+See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every process that hands out a swarm's master inbox pool.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | `on` | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for its intent verdicts before unanswered items go round robin |
+
+---
+
 ## Swarm Grafana Alerts
 
 See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick reads alert state through the gateway with these; no listener, token or secret path of its own.

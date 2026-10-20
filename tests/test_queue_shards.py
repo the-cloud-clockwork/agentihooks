@@ -1,8 +1,34 @@
 import json
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
+import yaml
 
 from tests import refresh_durations
+
+_ROOT = Path(__file__).resolve().parents[1]
+
+
+@pytest.fixture(autouse=True)
+def _a_420_second_step(monkeypatch):
+    from tests import queue_shards
+
+    monkeypatch.setattr(queue_shards, "STEP_SECONDS", 420)
+
+
+def test_the_planner_step_timeout_is_the_unit_run_tests_step_timeout():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
+    minutes = next(step for step in steps if step.get("name") == "Run tests")["timeout-minutes"]
+    result = subprocess.run(
+        [sys.executable, "-c", "from tests.queue_shards import STEP_SECONDS; print(STEP_SECONDS)"],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert int(result.stdout) == minutes * 60
 
 
 def test_queue_durations_keep_the_slowest_recent_measurement_and_expire_old_runs(tmp_path, monkeypatch):

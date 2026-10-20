@@ -13,6 +13,7 @@ agentihooks swarm <id> take-master [--replace]                    this session b
 agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
 agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
+agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
 agentihooks swarm <id> <profile> up                               from a terminal: any role or overlay profile (planner, engineer, cicd, qa, frontend) in a pane for you, no task
 agentihooks swarm <id> agent-up <profile>                         the same launch in its parser form
 agentihooks swarm <id> remove                                     drop a swarm with no agents left, and its activity counts
@@ -185,11 +186,14 @@ SCALING_KEYS = {
 ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
+HIVE_PLACEMENT = "hive-placement"
+ON_OFF = {"on": True, "off": False}
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
     **default_models.KEYS,
     **TRANSPORT_KEYS,
+    HIVE_PLACEMENT: "hive_placement",
 }
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
@@ -263,7 +267,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             slug,
             held,
             runtime or routed(herdr=HerdrRuntime()),
-            os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL),
+            controller.deployment_for(store.config(slug), os.environ),
         )
         from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
@@ -925,7 +929,15 @@ def api_address(value):
 def config_value(key, value):
     if key in default_models.KEYS or key in TRANSPORT_KEYS:
         return value
+    if key == HIVE_PLACEMENT:
+        return on_off(value)
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
+
+
+def on_off(value):
+    if value not in ON_OFF:
+        raise SwarmError("hive-placement takes on or off")
+    return ON_OFF[value]
 
 
 def _split_master_pairs(pairs, key, parse):
@@ -1031,6 +1043,7 @@ def cmd_set(store, args):
                 "memory_per_agent_mb": config.memory_per_agent_mb,
                 "swap_full_share": config.swap_full_share,
                 "swap_floor_mb": config.swap_floor_mb,
+                "hive_placement": config.hive_placement,
                 "api_url": config.api_url,
                 "codex_inbox_transport": config.codex_inbox_transport,
                 "master_affinity": {"desired": affinity.desired(config) or "auto", "order": master},

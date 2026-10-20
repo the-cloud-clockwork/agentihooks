@@ -1383,7 +1383,11 @@ jobs:
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: |
           read -ra files <<< "$FILES"
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          start=$SECONDS
+          status=0
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
+          echo "{\"seconds\":$((SECONDS - start)),\"job\":\"$GITHUB_JOB\"}" > elapsed.json
+          exit "$status"
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1412,7 +1416,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.leg }}
-          path: durations.json
+          path: |
+            durations.json
+            elapsed.json
           retention-days: 14
           overwrite: true
 
