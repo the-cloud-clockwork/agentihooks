@@ -1,4 +1,3 @@
-import errno
 import hashlib
 import io
 import json
@@ -8,7 +7,6 @@ import ssl
 import stat
 import subprocess
 import threading
-import time
 import urllib.error
 import urllib.request
 
@@ -35,21 +33,8 @@ def admin():
     return fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
 
 
-def _invite_key(code):
-    return f"{ROOT}-hive:invite:{hashlib.sha256(code.encode()).hexdigest()}"
-
-
-def test_invite_stores_only_the_code_hash_for_fifteen_minutes(admin):
-    code = auth.invite(admin, "laptop")
-
-    assert admin.keys("*") == [_invite_key(code)]
-    assert admin.get(_invite_key(code)) == "laptop"
-    assert admin.ttl(_invite_key(code)) == 900
-    assert code not in str(admin.keys("*"))
-
-
-def test_a_valid_code_joins_with_a_ledger_credential_and_a_redis_acl_user(admin, redis_lib):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+def test_a_minted_member_has_a_ledger_credential_and_a_redis_acl_user(admin, redis_lib):
+    grant = auth.mint(admin, "laptop", PUBLIC)
 
     assert grant["name"] == "laptop"
     assert grant["redis_url"].startswith(f"redis://hive-{grant['id']}:")
@@ -88,6 +73,24 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"%R~{ROOT}:*",
                     f"~{ROOT}:hive:m1",
                     f"~{ROOT}:hive:m1:*",
+                    f"~{ROOT}:swarm:*:agents",
+                    f"~{ROOT}:swarm:*:executions",
+                    f"~{ROOT}:swarm:*:identity-conflicts",
+                    f"~{ROOT}:swarm:*:desired-routes",
+                    f"~{ROOT}:swarm:*:state-since",
+                    f"~{ROOT}:swarm:*:claim:*",
+                    f"~{ROOT}:swarm:*:ready",
+                    f"~{ROOT}:swarm:*:restart-causes",
+                    f"~{ROOT}:swarm:*:transfers",
+                    f"~{ROOT}:swarm:*:handoff:*",
+                    f"~{ROOT}:swarm:*:handoff-seat:*",
+                    f"~{ROOT}:swarm:*:handoff-envelope:*",
+                    f"~{ROOT}:swarm:*:findings",
+                    f"~{ROOT}:swarm:*:merge-stall",
+                    f"~{ROOT}:swarm:*:merge-stall-notice",
+                    f"~{ROOT}:swarm:*:hive-placement-waits",
+                    f"~{ROOT}:seat:*:recaps",
+                    f"~{ROOT}:seat-of:*:exit",
                 ),
                 "channels": (f"{ROOT}:*",),
             },
@@ -120,13 +123,50 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
     assert any(fnmatchcase(key, pattern[3:]) for pattern in auth._acl_keys("m1") if pattern.startswith("%R~"))
 
 
+@pytest.mark.parametrize(
+    ("suffix", "writable"),
+    [
+        ("swarm:proof:claim:t1", True),
+        ("swarm:proof:agents", True),
+        ("swarm:proof:executions", True),
+        ("swarm:proof:identity-conflicts", True),
+        ("swarm:proof:desired-routes", True),
+        ("swarm:proof:state-since", True),
+        ("swarm:proof:ready", True),
+        ("swarm:proof:restart-causes", True),
+        ("swarm:proof:transfers", True),
+        ("swarm:proof:handoff:t1", True),
+        ("swarm:proof:handoff-seat:t1", True),
+        ("swarm:proof:handoff-envelope:t1", True),
+        ("swarm:proof:findings", True),
+        ("swarm:proof:merge-stall", True),
+        ("swarm:proof:merge-stall-notice", True),
+        ("swarm:proof:hive-placement-waits", True),
+        ("seat:eng-1@proof:recaps", True),
+        ("seat-of:engineer@0001-0001:exit", True),
+        ("swarm:proof:config", False),
+        ("swarm:proof:claim-journal:t1", False),
+        ("swarm:proof:task-authority:t1", False),
+        ("swarm:proof:tick-lock", False),
+        ("swarm:proof:launches", False),
+        ("swarm:index", False),
+        ("seat:eng-1@proof:learned", False),
+        ("names:engineer@0001-0001", False),
+    ],
+)
+def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(suffix, writable):
+    from fnmatch import fnmatchcase
+
+    key = f"{ROOT}:{suffix}"
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    assert any(fnmatchcase(key, pattern) for pattern in patterns) is writable
+
+
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
-    code = auth.invite(admin, "laptop")
-    grant = auth.exchange(admin, code, PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
 
-    assert len(code) == 32
-    int(code, 16)
     assert len(grant["id"]) == 16
     int(grant["id"], 16)
     assert len(password) == 43
@@ -139,32 +179,14 @@ def test_the_grant_sizes_and_member_record(admin, redis_lib):
 
 
 def test_the_member_url_replaces_credentials_already_in_the_hive_url(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), "redis://admin:secret@hive.example:6380/2")
+    grant = auth.mint(admin, "laptop", "redis://admin:secret@hive.example:6380/2")
 
     assert "admin" not in grant["redis_url"]
     assert "secret" not in grant["redis_url"]
     assert grant["redis_url"].endswith("@hive.example:6380/2")
 
 
-def test_a_reused_code_is_refused(admin):
-    code = auth.invite(admin, "laptop")
-    auth.exchange(admin, code, PUBLIC)
-
-    with pytest.raises(auth.HiveError, match="^invite code is invalid, expired or already used$"):
-        auth.exchange(admin, code, PUBLIC)
-
-
-def test_an_expired_code_is_refused(admin):
-    code = auth.invite(admin, "laptop")
-    admin.pexpire(_invite_key(code), 1)
-    time.sleep(0.01)
-
-    with pytest.raises(auth.HiveError, match="^invite code is invalid, expired or already used$"):
-        auth.exchange(admin, code, PUBLIC)
-
-
 def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypatch):
-    code = auth.invite(admin, "laptop")
     real = redis_lib.client.Pipeline.execute
 
     def refuse(pipe, raise_on_error=True):
@@ -174,7 +196,7 @@ def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypat
     monkeypatch.setattr(redis_lib.client.Pipeline, "execute", refuse)
 
     with pytest.raises(auth.HiveError) as refused:
-        auth.exchange(admin, code, PUBLIC)
+        auth.mint(admin, "laptop", PUBLIC)
 
     assert str(refused.value) == "Redis refused the new member (ERR Error in ACL SETUSER modifier)"
     assert admin.keys("*") == []
@@ -182,8 +204,8 @@ def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypat
 
 
 def test_revoke_cuts_both_credentials(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
-    other = auth.exchange(admin, auth.invite(admin, "desk"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
+    other = auth.mint(admin, "desk", PUBLIC)
 
     auth.revoke(admin, grant["id"])
 
@@ -200,7 +222,7 @@ def test_revoking_an_unknown_member_is_refused(admin):
 
 
 def test_a_rediss_url_keeps_tls_and_its_query(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), "rediss://hive.example:6380/0?ssl_ca_certs=/ca.pem")
+    grant = auth.mint(admin, "laptop", "rediss://hive.example:6380/0?ssl_ca_certs=/ca.pem")
 
     assert grant["redis_url"].startswith(f"rediss://hive-{grant['id']}:")
     assert grant["redis_url"].endswith("@hive.example:6380/0?ssl_ca_certs=/ca.pem")
@@ -255,65 +277,25 @@ def hive(admin):
     httpd.server_close()
 
 
-def test_join_over_http_writes_the_env_file_and_prints_no_secret(admin, hive, tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    code = auth.invite(admin, "laptop")
-
-    assert cli.main(["join", hive, code]) == 0
-
-    out = capsys.readouterr().out
-    env = dict(line.split("=", 1) for line in (tmp_path / "hive.env").read_text().splitlines())
-    (member_key,) = admin.keys(f"{auth.PREFIX}:member:*")
-    member_id = member_key.rpartition(":")[2]
-    assert out == f"joined the hive as {member_id}; credentials are in {tmp_path / 'hive.env'}\n"
-    assert env["AGENTIHOOKS_HIVE_ID"] == member_id
-    assert env["AGENTIHOOKS_HIVE_URL"] == hive
-    assert auth.ledger_member(admin, env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"]) == member_id
-    assert env["AGENTIHOOKS_HIVE_REDIS_URL"].startswith(f"redis://hive-{member_id}:")
-    assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in out
-    assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in out
-
-
-def test_an_invite_code_never_reads_as_a_join_option(admin, hive, tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    with monkeypatch.context() as m:
-        m.setattr(auth.secrets, "token_bytes", lambda n=None: b"\xf8" * (n or 32))
-        code = auth.invite(admin, "laptop")
-
-    assert not code.startswith("-")
-    assert cli.main(["join", hive, code]) == 0
-
-    out = capsys.readouterr().out
-    env = dict(line.split("=", 1) for line in (tmp_path / "hive.env").read_text().splitlines())
-    assert out == f"joined the hive as {env['AGENTIHOOKS_HIVE_ID']}; credentials are in {tmp_path / 'hive.env'}\n"
-    assert env["AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL"] not in out
-    assert env["AGENTIHOOKS_HIVE_REDIS_URL"] not in out
-
-
-def test_join_over_http_with_a_used_code_is_refused(admin, hive, tmp_path, monkeypatch, capsys):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    code = auth.invite(admin, "laptop")
-    auth.exchange(admin, code, PUBLIC)
-
-    assert cli.main(["join", hive, code]) == 1
-
-    assert capsys.readouterr().err == "hive join refused: invite code is invalid, expired or already used\n"
-    assert not (tmp_path / "hive.env").exists()
-
-
 @pytest.mark.parametrize(
     ("path", "body", "status", "error"),
     [
-        ("/other", b'{"code": "x"}', 404, "not found"),
-        ("/hive/join", b"not json", 400, server.BAD_BODY),
-        ("/hive/join", b"{}", 400, server.BAD_BODY),
-        ("/hive/join", b'{"code": 1}', 400, server.BAD_BODY),
-        ("/hive/join", b'{"code": null}', 400, server.BAD_BODY),
-        ("/hive/join", b"[]", 400, server.BAD_BODY),
-        ("/hive/join", b'{"code": "' + b"x" * server.MAX_BODY + b'"}', 400, server.BAD_BODY),
+        ("/other", b'{"ledger_credential": "x"}', 404, "not found"),
+        ("/hive/join", b'{"code": "x"}', 404, "not found"),
+        (server.REFRESH_PATH, b"not json", 400, server.BAD_REFRESH_BODY),
+        (server.REFRESH_PATH, b"{}", 400, server.BAD_REFRESH_BODY),
+        (server.REFRESH_PATH, b'{"ledger_credential": 1}', 400, server.BAD_REFRESH_BODY),
+        (server.REFRESH_PATH, b'{"ledger_credential": null}', 400, server.BAD_REFRESH_BODY),
+        (server.REFRESH_PATH, b"[]", 400, server.BAD_REFRESH_BODY),
+        (
+            server.REFRESH_PATH,
+            b'{"ledger_credential": "' + b"x" * server.MAX_BODY + b'"}',
+            400,
+            server.BAD_REFRESH_BODY,
+        ),
     ],
 )
-def test_the_join_endpoint_refuses_other_paths_and_bad_bodies(hive, path, body, status, error):
+def test_the_hive_endpoint_refuses_join_and_other_paths_and_bad_bodies(hive, path, body, status, error):
     request = urllib.request.Request(hive + path, data=body, method="POST")
 
     with pytest.raises(urllib.error.HTTPError) as refused:
@@ -323,46 +305,22 @@ def test_the_join_endpoint_refuses_other_paths_and_bad_bodies(hive, path, body, 
     assert json.load(refused.value) == {"error": error}
 
 
-def test_cli_invite_and_revoke(admin, monkeypatch, capsys):
+def test_cli_revoke(admin, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: admin)
 
-    assert cli.main(["invite", "laptop"]) == 0
-    code = capsys.readouterr().out.strip()
-    grant = auth.exchange(admin, code, PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     assert cli.main(["revoke", grant["id"]]) == 0
     assert capsys.readouterr().out == f"revoked {grant['id']}\n"
     assert cli.main(["revoke", grant["id"]]) == 1
     assert capsys.readouterr().err == f"hive revoke refused: no hive member {grant['id']}\n"
 
 
-def test_a_join_endpoint_off_loopback_needs_tls(admin):
-    with pytest.raises(auth.HiveError, match="needs --tls-cert and --tls-key$"):
+def test_a_hive_endpoint_off_loopback_needs_tls(admin):
+    with pytest.raises(
+        auth.HiveError,
+        match="^a hive endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key$",
+    ):
         server.make_server(admin, PUBLIC, "0.0.0.0", 0)
-
-
-@pytest.mark.parametrize(
-    ("url", "error"),
-    [
-        ("http://hive.example:8770", "a join off loopback carries credentials, so the hive URL must be https"),
-        (
-            "http://127.0.0.1:{port}",
-            f"the hive at http://127.0.0.1:{{port}} is unreachable "
-            f"(<urlopen error [Errno {errno.ECONNREFUSED}] {os.strerror(errno.ECONNREFUSED)}>)",
-        ),
-    ],
-)
-def test_join_refuses_plain_http_off_loopback_and_reports_an_unreachable_hive(
-    tmp_path, monkeypatch, capsys, url, error
-):
-    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    with socket.socket() as closed:
-        closed.bind(("127.0.0.1", 0))
-        port = closed.getsockname()[1]
-
-    assert cli.main(["join", url.format(port=port), "code"]) == 1
-
-    assert capsys.readouterr().err == f"hive join refused: {error.format(port=port)}\n"
-    assert not (tmp_path / "hive.env").exists()
 
 
 @pytest.mark.parametrize(
@@ -399,7 +357,7 @@ def cert(tmp_path):
     return str(tmp_path / "cert.pem"), str(tmp_path / "key.pem")
 
 
-def test_a_stalled_tls_client_does_not_block_an_https_join(admin, cert, tmp_path, monkeypatch, capsys):
+def test_a_stalled_tls_client_does_not_block_an_https_refresh(admin, cert, tmp_path, monkeypatch, capsys):
     httpd = server.make_server(admin, PUBLIC, "localhost", 0, cert)
     threading.Thread(target=httpd.serve_forever, daemon=True).start()
     stalled = socket.create_connection(("localhost", httpd.server_address[1]))
@@ -409,14 +367,16 @@ def test_a_stalled_tls_client_does_not_block_an_https_join(admin, cert, tmp_path
     monkeypatch.setattr(
         urllib.request, "urlopen", lambda request, timeout: real(request, timeout=timeout, context=trusting)
     )
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", f"https://localhost:{httpd.server_address[1]}")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", auth.mint(admin, "laptop", PUBLIC)["ledger_credential"])
     try:
-        assert cli.main(["join", f"https://localhost:{httpd.server_address[1]}", auth.invite(admin, "laptop")]) == 0
+        assert cli.main(["refresh"]) == 0
     finally:
         stalled.close()
         httpd.shutdown()
         httpd.server_close()
 
-    assert capsys.readouterr().out.startswith("joined the hive as ")
+    assert capsys.readouterr().out.startswith("refreshed the Redis credential of hive member ")
     assert (tmp_path / "home" / "hive.env").exists()
 
 
@@ -425,15 +385,17 @@ def test_an_unreadable_tls_certificate_is_refused(admin):
         server.make_server(admin, PUBLIC, "127.0.0.1", 0, ("/missing.pem", "/missing.pem"))
 
 
-def test_join_reports_a_body_that_is_not_json(tmp_path, monkeypatch, capsys):
+def test_refresh_reports_a_body_that_is_not_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", "http://127.0.0.1:1")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL", "led")
     monkeypatch.setattr(urllib.request, "urlopen", lambda request, timeout: io.BytesIO(b"<html>"))
 
-    assert cli.main(["join", "http://127.0.0.1:1", "code"]) == 1
+    assert cli.main(["refresh"]) == 1
 
     assert (
         capsys.readouterr().err
-        == "hive join refused: the hive at http://127.0.0.1:1 answered with a body that is not JSON\n"
+        == "hive refresh refused: the hive at http://127.0.0.1:1 answered with a body that is not JSON\n"
     )
 
 

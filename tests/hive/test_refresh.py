@@ -60,7 +60,7 @@ def _accepts(redis, url):
 
 
 def test_a_ledger_credential_recreates_a_redis_user_lost_on_restart(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     admin.acl_deluser(f"hive-{grant['id']}")
     admin.srem(auth.INDEX, grant["id"])
 
@@ -79,7 +79,7 @@ def test_a_ledger_credential_recreates_a_redis_user_lost_on_restart(admin):
 
 
 def test_a_refresh_retires_the_previous_password(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
 
     refreshed = auth.refresh(admin, grant["ledger_credential"], PUBLIC)
 
@@ -98,7 +98,7 @@ def test_an_unknown_ledger_credential_is_refused(admin, credential):
 
 
 def test_a_revoked_member_cannot_refresh(admin):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     auth.revoke(admin, grant["id"])
 
     with pytest.raises(auth.HiveError, match=f"^{NO_MEMBER}$"):
@@ -108,7 +108,7 @@ def test_a_revoked_member_cannot_refresh(admin):
 
 
 def test_a_redis_refusal_during_refresh_is_reported(admin, redis_lib, monkeypatch):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
 
     def refuse(self, *args, **kwargs):
         raise redis_lib.exceptions.ResponseError("NOPERM")
@@ -126,7 +126,7 @@ def _saved_users(aclfile):
 def test_join_refresh_and_revoke_save_the_acl_file(saved):
     redis, aclfile = saved
 
-    grant = auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+    grant = auth.mint(redis, "laptop", PUBLIC)
     assert _saved_users(aclfile) == ["default", f"hive-{grant['id']}"]
 
     aclfile.write_text("")
@@ -148,7 +148,7 @@ def test_a_failed_acl_save_undoes_the_join(saved, redis_lib, monkeypatch):
     monkeypatch.setattr(redis_lib.Redis, "acl_save", refuse)
 
     with pytest.raises(auth.HiveError, match=r"^Redis refused the new member \(.*save the ACLs\)$"):
-        auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+        auth.mint(redis, "laptop", PUBLIC)
 
     assert redis.acl_users() == ["default"]
     assert redis.keys(f"{auth.PREFIX}:member:*") == []
@@ -157,7 +157,7 @@ def test_a_failed_acl_save_undoes_the_join(saved, redis_lib, monkeypatch):
 
 def test_a_revoke_whose_acl_save_fails_is_reported_and_completes_on_retry(saved, redis_lib, monkeypatch):
     redis, aclfile = saved
-    grant = auth.exchange(redis, auth.invite(redis, "laptop"), PUBLIC)
+    grant = auth.mint(redis, "laptop", PUBLIC)
 
     def refuse(self):
         raise redis_lib.exceptions.ResponseError("ERR There was an error trying to save the ACLs")
@@ -184,7 +184,7 @@ def test_a_revoke_whose_acl_save_fails_is_reported_and_completes_on_retry(saved,
 
 
 def test_the_refresh_endpoint_answers_with_the_refreshed_grant(admin, hive):
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     body = json.dumps({"ledger_credential": grant["ledger_credential"]}).encode()
 
     with urllib.request.urlopen(urllib.request.Request(hive + "/hive/refresh", data=body), timeout=5) as response:
@@ -216,7 +216,7 @@ def test_the_refresh_endpoint_refuses_bad_credentials_and_bodies(hive, body, sta
 
 def _joined(admin, hive, tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
-    grant = auth.exchange(admin, auth.invite(admin, "laptop"), PUBLIC)
+    grant = auth.mint(admin, "laptop", PUBLIC)
     auth.write_env(tmp_path, hive, grant)
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", grant["id"])
     monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", hive)
@@ -444,7 +444,7 @@ def test_the_refresh_command_is_listed_with_its_help():
     (commands,) = cli._parser()._subparsers._group_actions
     helps = {action.dest: action.help for action in commands._choices_actions}
 
-    assert helps["refresh"] == "Mint a new Redis credential for this hive through its join service"
+    assert helps["refresh"] == "Mint a new Redis credential for this hive through its hive endpoint"
 
 
 def test_the_hive_home_comes_from_the_mapping_then_the_process(tmp_path, monkeypatch):

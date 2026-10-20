@@ -1,4 +1,4 @@
-"""The hive join endpoint: POST /hive/join {"code": ...} answers with the member's credentials."""
+"""The hive endpoint: POST /hive/refresh {"ledger_credential": ...} answers with a new Redis credential."""
 
 import ipaddress
 import json
@@ -15,7 +15,6 @@ from scripts.hive import auth
 if TYPE_CHECKING:
     from redis import Redis
 
-JOIN_PATH = "/hive/join"
 MAX_BODY = 4096
 REQUEST_TIMEOUT_S = 10
 MAX_HANDLERS = 32
@@ -23,10 +22,8 @@ REQUEST_DEADLINE_S = 30
 REDIS_TIMEOUT_S = 5
 REDIS_STALLED = "the hive Redis did not answer; try again"
 REFRESH_PATH = "/hive/refresh"
-BAD_BODY = "the body must be a JSON object with a string code"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"
 ROUTES = {
-    JOIN_PATH: ("code", BAD_BODY, "exchange"),
     REFRESH_PATH: ("ledger_credential", BAD_REFRESH_BODY, "refresh"),
 }
 
@@ -180,7 +177,7 @@ def make_server(
     ledger_ca: str | None = None,
 ) -> ThreadingHTTPServer:
     if tls is None and not is_loopback(host):
-        raise auth.HiveError("a join endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
+        raise auth.HiveError("a hive endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
     context = None
     if tls is not None:
         context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)

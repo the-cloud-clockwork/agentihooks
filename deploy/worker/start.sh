@@ -44,13 +44,6 @@ if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
     || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
 fi
 
-if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
-  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
-elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
-  code="$(< "${HIVE_JOIN_CODE_FILE:?a mounted join code or member credential is required}")"
-  agentihooks hive join "${HIVE_JOIN_URL:?the hive join URL is required}" "$code"
-  unset code
-fi
 python3 - <<'PY'
 import os, re, shlex, sys
 from pathlib import Path
@@ -103,6 +96,19 @@ EOF
   sshd_pid=$!
   sleep 1
   kill -0 "$sshd_pid"
+fi
+if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
+  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
+elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
+  wait_s="${HIVE_DELIVERY_WAIT_S:-900}"
+  deadline=$(( $(date +%s) + wait_s ))
+  until [[ -f "$AGENTIHOOKS_HOME/hive.env" ]]; do
+    if (( $(date +%s) >= deadline )); then
+      echo "worker-hive: no member credential was delivered within ${wait_s}s; run agentihooks hive add from the UI hive" >&2
+      exit 1
+    fi
+    sleep 2
+  done
 fi
 bundle=()
 [[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")

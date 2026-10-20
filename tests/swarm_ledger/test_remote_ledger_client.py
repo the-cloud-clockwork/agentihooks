@@ -240,7 +240,7 @@ def test_remote_refusals_name_what_is_missing():
             ledger.credentials(SLUG, service=True)
         with exits(
             "unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
-            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
+            "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive add"
         ):
             ledger.credentials(SLUG)
         os.environ.pop("AGENTIHOOKS_AGENT_NAME")

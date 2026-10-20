@@ -101,13 +101,17 @@ spec:
 EOF
 kubectl rollout status deployment/hive-redis --timeout=120s
 kubectl rollout status deployment/hive-join --timeout=120s
-code="$(kubectl exec deployment/hive-join -- agentihooks hive invite worker)"
-printf '%s' "$code" | kubectl create secret generic hive-code --from-file=code=/dev/stdin >/dev/null
-unset code
-helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml --show-only templates/worker-hive-state.yaml \
+member_env="$(kubectl exec deployment/hive-join -- python -c '
+import os
+from scripts.hive import auth
+from scripts.swarm.store import redis_client
+print(auth.env_text("https://hive-join:8770", auth.mint(redis_client(), "worker", os.environ["AGENTIHOOKS_SWARM_REDIS_URL"])), end="")
+')"
+printf '%s' "$member_env" | kubectl create secret generic hive-member --from-file=credential=/dev/stdin >/dev/null
+unset member_env
+helm template proof deploy/helm/agentihooks-swarm --show-only templates/worker-hive.yaml \
   --set workers.replicas=1 --set workers.maxAgents=1 --set workers.image.repository=local/agentihooks-hive-worker \
-  --set workers.image.pullPolicy=Never --set workers.joinUrl=https://hive-join:8770 \
-  --set workers.joinCodeSecret.name=hive-code --set workers.joinCodeSecret.key=code \
+  --set workers.image.pullPolicy=Never --set workers.credentialSecret.name=hive-member --set workers.credentialSecret.key=credential \
   --set workers.caSecret.name=hive-tls --set workers.caSecret.key=cert.pem | kubectl apply -f -
 deployment=proof-agentihooks-swarm-worker-hive
 kubectl rollout status "deployment/$deployment" --timeout=120s
@@ -169,7 +173,7 @@ replacement="$(kubectl get pods -l app.kubernetes.io/component=worker-hive -o js
 replacement_member="$(member_id "$replacement")"
 [[ "$replacement_member" == "$member" ]]
 prove_worker "$replacement_member" | tee "$out/replacement.txt"
-echo 'replacement pod reused durable membership without redeeming the join code again' | tee -a "$out/replacement.txt"
+echo 'replacement pod reused the mounted member credential without minting again' | tee -a "$out/replacement.txt"
 echo 'worker hive kind registration and scratch order acknowledgement: passed'
 if [[ "${GITHUB_EVENT_NAME:-}" == push && "${GITHUB_REF:-}" == refs/heads/dev ]]; then
   docker save "$image" -o "$out/image.tar"

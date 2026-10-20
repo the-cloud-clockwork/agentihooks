@@ -44,17 +44,16 @@ def _post(port, path, body):
 
 
 @pytest.mark.parametrize("trusted", [True, False])
-def test_the_join_and_refresh_answers_carry_the_ledger_ca_the_service_trusts(admin, pem, trusted):
+def test_the_refresh_answer_carries_the_ledger_ca_the_service_trusts(admin, pem, trusted):
+    grant = auth.mint(admin, "laptop", PUBLIC)
     httpd = server.make_server(admin, PUBLIC, "127.0.0.1", 0, ledger_ca=pem if trusted else None)
     port = _serving(httpd)
     try:
-        grant = _post(port, server.JOIN_PATH, {"code": auth.invite(admin, "laptop")})
         refreshed = _post(port, server.REFRESH_PATH, {"ledger_credential": grant["ledger_credential"]})
     finally:
         httpd.shutdown()
         httpd.server_close()
 
-    assert grant.get("ledger_ca") == (pem if trusted else None)
     assert refreshed.get("ledger_ca") == (pem if trusted else None)
     assert sorted(refreshed) == sorted(["id", "redis_url", *(["ledger_ca"] if trusted else [])])
 
@@ -65,38 +64,15 @@ def _granted(monkeypatch, tmp_path, **extra):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
 
 
-def test_join_writes_the_granted_ledger_ca_into_the_hive_home(tmp_path, monkeypatch, capsys, pem):
-    _granted(monkeypatch, tmp_path, ledger_ca=pem)
+def test_refresh_without_a_valid_ledger_ca_writes_none(tmp_path, monkeypatch):
+    for extra in ({}, {"ledger_ca": ""}, {"ledger_ca": "not a certificate"}, {"ledger_ca": 7}):
+        _granted(monkeypatch, tmp_path, **extra)
+        environ = {"AGENTIHOOKS_HIVE_URL": "https://hive.example", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "led"}
+        environ["AGENTIHOOKS_HOME"] = str(tmp_path)
 
-    assert cli.main(["join", "https://hive.example", "the-code"]) == 0
+        assert cli.refresh_env(environ) == "ab12"
 
-    assert (tmp_path / "ledger-ca.pem").read_text() == pem
-    assert capsys.readouterr().out == (
-        f"joined the hive as ab12; credentials are in {tmp_path / 'hive.env'}; "
-        f"the ledger CA is in {tmp_path / 'ledger-ca.pem'}\n"
-    )
-
-
-def test_join_writes_the_ledger_ca_to_the_file_ledger_clients_are_told_to_trust(tmp_path, monkeypatch, capsys, pem):
-    _granted(monkeypatch, tmp_path, ledger_ca=pem)
-    monkeypatch.setenv("LEDGER_CA_FILE", str(tmp_path / "trusted" / "ca.pem"))
-
-    assert cli.main(["join", "https://hive.example", "the-code"]) == 0
-
-    assert (tmp_path / "trusted" / "ca.pem").read_text() == pem
-    assert not (tmp_path / "ledger-ca.pem").exists()
-    assert sorted(path.name for path in (tmp_path / "trusted").iterdir()) == ["ca.pem"]
-    assert capsys.readouterr().out.endswith(f"; the ledger CA is in {tmp_path / 'trusted' / 'ca.pem'}\n")
-
-
-@pytest.mark.parametrize("extra", [{}, {"ledger_ca": ""}, {"ledger_ca": "not a certificate"}, {"ledger_ca": 7}])
-def test_join_without_a_valid_ledger_ca_writes_none(tmp_path, monkeypatch, capsys, extra):
-    _granted(monkeypatch, tmp_path, **extra)
-
-    assert cli.main(["join", "https://hive.example", "the-code"]) == 0
-
-    assert not (tmp_path / "ledger-ca.pem").exists()
-    assert capsys.readouterr().out == f"joined the hive as ab12; credentials are in {tmp_path / 'hive.env'}\n"
+        assert not (tmp_path / "ledger-ca.pem").exists()
 
 
 def test_refresh_rewrites_the_ledger_ca_in_the_hive_home(tmp_path, monkeypatch, pem):
@@ -155,9 +131,7 @@ def test_serve_hands_the_join_service_the_ledger_ca_it_trusts(admin, monkeypatch
     assert calls == [((admin, "redis://public:6379/0", "127.0.0.1", 8770, None), {"ledger_ca": pem})]
 
 
-def test_a_master_from_a_freshly_joined_hive_passes_its_ledger_join(
-    admin, cert, pem, tls_ledger, tmp_path, monkeypatch
-):
+def test_a_master_from_a_freshly_added_hive_passes_its_ledger_join(admin, cert, pem, tls_ledger, tmp_path, monkeypatch):
     home = tmp_path / "hive-home"
     for name in ("LEDGER_CA_PEM", "LEDGER_CA_FILE", "SSL_CERT_FILE", "SWARM_URL", "LEDGER_URL"):
         monkeypatch.delenv(name, raising=False)
@@ -181,7 +155,8 @@ def test_a_master_from_a_freshly_joined_hive_passes_its_ledger_join(
             joining.setattr(
                 urllib.request, "urlopen", lambda request, timeout: real(request, timeout=timeout, context=trusting)
             )
-            assert cli.main(["join", f"https://localhost:{port}", auth.invite(admin, "workstation")]) == 0
+            auth.write_env(home, f"https://localhost:{port}", auth.mint(admin, "workstation", PUBLIC))
+            assert cli.main(["refresh"]) == 0
     finally:
         httpd.shutdown()
         httpd.server_close()

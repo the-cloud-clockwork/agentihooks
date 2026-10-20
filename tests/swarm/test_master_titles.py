@@ -250,7 +250,7 @@ def test_a_codex_master_session_shows_its_title_while_herdr_keeps_the_agent_name
     )
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
     named = init_agent._name_in_herdr(
-        "w1:p2", init_agent.Names("master@a1b2c3-0002", "master 2 · rig"), "codex", {}, "", 1.0
+        "w1:p2", init_agent.Names("master@a1b2c3-0002", "master 2 · rig"), "codex", {}, "", init_agent.Launch(1.0)
     )
     assert named == ["agent_name=master-a1b2c3-0002", "session_name=master 2 · rig"]
     assert calls == [

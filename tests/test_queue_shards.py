@@ -120,8 +120,7 @@ def test_the_unit_command_uses_the_computed_queue_partition(tmp_path):
     args = json.loads((tmp_path / "args.json").read_text())
     assert args[args.index("--shard") + 1] == "7/48"
     assert workflow["jobs"]["unit"]["strategy"]["matrix"]["include"] == (
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
-        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}"
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}"
     )
 
 
@@ -358,7 +357,7 @@ def test_balanced_counts_keep_every_version_at_its_shard_floor(work, expected):
     assert _balanced(["3.11", "3.12"], lambda version, count: work[version] / count) == expected
 
 
-def test_shard_floors_match_the_unit_matrix_legs_of_a_merge_group():
+def test_merge_group_runs_unit_shards_on_python_312_only():
     from pathlib import Path
 
     import yaml
@@ -375,7 +374,9 @@ def test_shard_floors_match_the_unit_matrix_legs_of_a_merge_group():
     assert {
         version: len([shard for shard in legs["shard"] if (version, shard) not in excluded])
         for version in legs["python-version"]
-    } == SHARD_FLOORS
+    } == {"3.11": 0, "3.12": SHARD_FLOORS["3.12"]}
+    shard_check = workflow["jobs"]["shard-check"]["strategy"]["matrix"]["python-version"]
+    assert shard_check == "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.12\"]' || '[\"3.11\",\"3.12\"]') }}"
 
 
 def test_queue_prediction_pins_the_first_shard_files_and_ignores_removed_files(tmp_path):
@@ -485,6 +486,8 @@ def test_joint_queue_planning_keeps_version_specific_collections_and_hashes(tmp_
     assert result.returncode == 0, result.stdout + result.stderr
     plans = dict(line.split("=", 1) for line in output.read_text().splitlines())
     assert set(plans) == {"queue_311", "queue_312"}
+    assert plans["queue_311"] == ""
+    assert json.loads("[" + plans["queue_312"] + "]")
     for version, expected in cases.items():
         snapshot = tmp_path / "queue-input" / version
         data = (snapshot / ".test_durations").read_bytes()

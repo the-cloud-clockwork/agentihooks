@@ -28,24 +28,29 @@ def test_declared_wait_covers_the_gap(kind):
     assert traces.turn_gaps(record([held]), traces.Limits()) == []
 
 
-@pytest.mark.parametrize("waits", [[], [{"at": 60_000, "until": 3_600_000}], [{"at": 120_000, "until": 3_660_000}]])
-def test_uncovered_gap_names_its_bounds_and_wait_result(waits):
+@pytest.mark.parametrize(
+    "waits, minutes",
+    [([], 60), ([{"at": 60_000, "until": 1_800_000}], 31), ([{"at": 1_920_000, "until": 3_660_000}], 31)],
+)
+def test_uncovered_gap_names_its_bounds_and_wait_result(waits, minutes):
     [finding] = traces.turn_gaps(record(waits), traces.Limits())
-    assert finding.measure == 60
-    assert finding.summary == "1 gaps between turns over 30 minutes without a covering declared wait"
-    assert "turn 1 to turn 2: 60 minutes; gap 60000 to 3660000; no declared wait covered it" in finding.evidence
+    assert finding.measure == minutes
+    assert finding.summary == "1 gaps between turns with over 30 minutes outside declared waits"
+    assert finding.threshold == "over 30 minutes between turns outside declared waits"
+    assert f"turn 1 to turn 2: {minutes} minutes outside declared waits; gap 60000 to 3660000" in finding.evidence
 
 
 @pytest.mark.parametrize(
     "waits, covered",
     [
         ([{"at": 1_860_000, "until": 3_660_000}, {"at": 60_000, "until": 1_860_000}], True),
-        ([{"at": 60_000, "until": 1_860_000}, {"at": 1_860_001, "until": 3_660_000}], False),
+        ([{"at": 60_000, "until": 1_860_000}, {"at": 1_860_001, "until": 3_660_000}], True),
         ([{"at": 59_999, "until": 3_660_001}], True),
-        ([{"at": 0, "until": 59_999}, {"at": 60_001, "until": 3_660_000}], False),
+        ([{"at": 0, "until": 59_999}, {"at": 60_001, "until": 3_660_000}], True),
+        ([{"at": 60_000, "until": 120_000}, {"at": 3_600_000, "until": 3_660_000}], False),
     ],
 )
-def test_renewed_waits_must_cover_the_whole_gap(waits, covered):
+def test_renewed_waits_leave_only_uncovered_time(waits, covered):
     found = traces.turn_gaps(record(waits), traces.Limits())
     assert bool(found) is not covered
 

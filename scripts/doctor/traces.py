@@ -140,15 +140,14 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
     return found
 
 
-def _wait_covers(waits, start, end):
-    cursor = start
+def _uncovered_ms(waits, start, end):
+    cursor, uncovered = start, 0
     for held in sorted(waits, key=lambda held: held["at"]):
-        if held["at"] > cursor:
-            break
-        cursor = max(cursor, held["until"])
-        if cursor >= end:
-            return True
-    return False
+        left, right = max(cursor, held["at"]), min(end, held["until"])
+        if right > left:
+            uncovered += left - cursor
+            cursor = right
+    return uncovered + end - cursor
 
 
 def _long_gaps(trace, limit):
@@ -157,11 +156,12 @@ def _long_gaps(trace, limit):
 
 
 def _uncovered_gaps(trace, waits, limit):
-    return [
-        (a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS, a["end"], b["start"])
-        for a, b in _long_gaps(trace, limit)
-        if not _wait_covers(waits, a["end"], b["start"])
-    ]
+    found = []
+    for a, b in _long_gaps(trace, limit):
+        minutes = _uncovered_ms(waits, a["end"], b["start"]) // MINUTE_MS
+        if minutes > limit:
+            found.append((a["turn"], b["turn"], minutes, a["end"], b["start"]))
+    return found
 
 
 def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
@@ -178,16 +178,16 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
             Finding(
                 "turn gap",
                 _subject(trace),
-                f"{len(long)} gaps between turns over {limits.turn_gap_minutes} minutes without a covering declared wait",
+                f"{len(long)} gaps between turns with over {limits.turn_gap_minutes} minutes outside declared waits",
                 (
                     f"agent {_agent(trace)}",
                     *(
-                        f"turn {a} to turn {b}: {m} minutes; gap {start} to {end}; no declared wait covered it"
+                        f"turn {a} to turn {b}: {m} minutes outside declared waits; gap {start} to {end}"
                         for a, b, m, start, end in long
                     ),
                     *_partial(trace),
                 ),
-                f"over {limits.turn_gap_minutes} minutes between turns",
+                f"over {limits.turn_gap_minutes} minutes between turns outside declared waits",
                 max(gap[2] for gap in long),
             )
         )

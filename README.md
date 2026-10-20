@@ -233,10 +233,10 @@ panes on the same host. Credentials come from any mix of:
 
 ### Several machines
 
-A small company adds machines to one stack as hives. On the stack host,
-`agentihooks hive invite <name>` prints a one time join code and the Compose
-`join` profile runs the TLS join endpoint. On each member,
-`agentihooks hive join <url> <code>` stores its credentials and
+A small company adds machines to one stack as hives. On the UI hive,
+`agentihooks hive add <ssh target> --label <name> --url <hive endpoint>` saves
+the machine in herdr with `herdr machine add` and delivers its member
+credentials over SSH; headless hives add none. On each member,
 `agentihooks hive install` runs the hive service, which reports the machine's
 accounts and repositories and opens the agents the controller places on it.
 

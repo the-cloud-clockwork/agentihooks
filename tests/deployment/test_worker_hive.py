@@ -16,7 +16,7 @@ START = ROOT / "deploy/worker/start.sh"
 TOKEN = "fixture-github-token-value"
 
 
-def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
+def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -33,9 +33,6 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
     cli.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'printf "%s\\n" "$*" >> "$COMMAND_LOG"\n'
-        'if [[ "$*" == "hive join "* ]]; then\n'
-        '  [[ "$REFUSE" != join ]] || exit 9\n'
-        '  touch "$AGENTIHOOKS_HOME/hive.env"\nfi\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
         '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
@@ -50,10 +47,10 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
     home = tmp_path / "state"
     home.mkdir()
     (tmp_path / "home").mkdir()
-    credential = tmp_path / "member"
-    credential.write_text("fixture member credential\n")
-    code = tmp_path / "code"
-    code.write_text("fixture-code\n")
+    member = tmp_path / "member"
+    member.write_text("fixture member credential\n")
+    if credential == "delivered":
+        (home / "hive.env").write_text("fixture delivered hive env\n")
     repo = tmp_path / "source"
     subprocess.run(["git", "init", "--initial-branch=dev", str(repo)], check=True, capture_output=True)
     subprocess.run(
@@ -88,9 +85,7 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         "AGENTIHOOKS_HIVE_REDIS_URL": "redis://localhost:6379/15",
         "HIVE_REPO_ROOT": str(tmp_path / "repos"),
         "HIVE_REPOSITORIES": json.dumps([{"url": str(repo), "name": "checkout", "ref": "dev"}]),
-        "HIVE_JOIN_URL": "https://join.example.test",
-        "HIVE_JOIN_CODE_FILE": str(code),
-        "HIVE_CREDENTIAL_FILE": str(credential) if joined else "",
+        "HIVE_CREDENTIAL_FILE": str(member) if credential == "mounted" else "",
         "COMMAND_LOG": str(log),
         "REFUSE": refuse,
         "AH_CC_TOKEN_fixture": "fixture $token (value)",
@@ -99,6 +94,8 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         "SWARM_SECRET": "fixture tick secret",
         "SSHD_DIES": "yes" if sshd_dies else "no",
     }
+    if credential != "mounted":
+        env["HIVE_DELIVERY_WAIT_S"] = "0"
     if ssh:
         env |= {
             "HIVE_SSHD": str(sshd),
@@ -109,19 +106,22 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
     return result, log.read_text() if log.exists() else "", home, tmp_path / "repos/checkout"
 
 
-def test_code_join_clones_repo_and_configures_before_run(tmp_path):
+RUN = [
+    "bundle unlink",
+    "init",
+    "deps ensure",
+    "hive set worker-member ui=no ephemeral=yes excluded=master max-agents=20",
+    "hive run",
+]
+
+
+def test_mounted_member_clones_repo_and_configures_before_run(tmp_path):
     result, commands, home, repo = startup(tmp_path)
     assert result.returncode == 0, result.stderr
-    assert commands.splitlines() == [
-        "hive join https://join.example.test fixture-code",
-        "bundle unlink",
-        "init",
-        "deps ensure",
-        "hive set worker-member ui=no ephemeral=yes excluded=master max-agents=20",
-        "hive run",
-    ]
+    assert commands.splitlines() == RUN
     assert (repo / ".git").is_dir()
-    assert (home / "hive.env").exists()
+    assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
+    assert "fixture member credential" not in result.stdout + result.stderr
     container_env = home / "hive-container.env"
     assert container_env.stat().st_mode & 0o777 == 0o600
     assert "AGENTIHOOKS_HIVE_ID=worker-member\n" in container_env.read_text()
@@ -139,13 +139,35 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
     assert "SWARM_SECRET=" not in container_env.read_text()
 
 
+def test_a_delivered_hive_env_runs_without_waiting(tmp_path):
+    result, commands, home, _ = startup(tmp_path, credential="delivered")
+    assert result.returncode == 0, result.stderr
+    assert commands.splitlines() == RUN
+    assert (home / "hive.env").read_text() == "fixture delivered hive env\n"
+
+
+def test_no_delivered_credential_by_the_deadline_never_runs_the_worker(tmp_path):
+    result, commands, _, _ = startup(tmp_path, credential="none")
+    assert result.returncode == 1
+    assert commands == ""
+    assert result.stderr.splitlines()[-1] == (
+        "worker-hive: no member credential was delivered within 0s; run agentihooks hive add from the UI hive"
+    )
+
+
+def test_ssh_serves_the_mounted_keys_before_waiting_for_a_delivered_credential(tmp_path):
+    result, commands, home, _ = startup(tmp_path, credential="none", ssh=True)
+    assert result.returncode == 1
+    state = home / "ssh"
+    assert commands.splitlines() == [f"sshd -t -f {state}/sshd_config", f"sshd -D -e -f {state}/sshd_config"]
+
+
 def test_ssh_checks_its_config_then_serves_the_mounted_keys_before_init(tmp_path):
     result, commands, home, _ = startup(tmp_path, ssh=True)
     assert result.returncode == 0, result.stderr
     state = home / "ssh"
     config = (state / "sshd_config").read_text()
-    lines = commands.splitlines()
-    assert lines[1:5] == [
+    assert commands.splitlines()[0:4] == [
         f"sshd -t -f {state}/sshd_config",
         f"sshd -D -e -f {state}/sshd_config",
         "bundle unlink",
@@ -176,7 +198,7 @@ def test_failed_init_with_the_bundle_runs_again_on_the_package_roles(tmp_path):
     assert (
         "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone\n" in result.stderr
     )
-    assert commands.splitlines()[1:5] == [
+    assert commands.splitlines()[0:4] == [
         f"init --bundle {repo.parent / 'agentihooks-bundle'}",
         "bundle unlink",
         "init",
@@ -193,23 +215,6 @@ def test_failed_init_with_the_bundle_and_on_the_package_roles_never_runs_the_wor
     assert "hive set" not in commands
 
 
-def test_mounted_member_skips_join_and_keeps_private_credentials(tmp_path):
-    result, commands, home, _ = startup(tmp_path, joined=True)
-    assert result.returncode == 0, result.stderr
-    assert "hive join" not in commands
-    assert "hive set worker-member ui=no ephemeral=yes excluded=master max-agents=20\n" in commands
-    assert commands.endswith("hive run\n")
-    assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
-    assert "fixture member credential" not in result.stdout + result.stderr
-
-
-def test_refused_join_never_runs_the_worker(tmp_path):
-    result, commands, _, _ = startup(tmp_path, refuse="join")
-    assert result.returncode == 9
-    assert "hive run" not in commands
-    assert "hive set" not in commands
-
-
 def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     result, commands, _, repo = startup(tmp_path, bundle=True)
     assert result.returncode == 0, result.stderr
@@ -217,7 +222,7 @@ def test_bundle_is_cloned_beside_the_repos_and_linked_by_init(tmp_path):
     assert (bundle / ".git").is_dir()
     branch = subprocess.run(["git", "-C", str(bundle), "branch", "--show-current"], capture_output=True, text=True)
     assert branch.stdout == "dev\n"
-    assert commands.splitlines()[1:3] == [f"init --bundle {bundle}", "deps ensure"]
+    assert commands.splitlines()[0:2] == [f"init --bundle {bundle}", "deps ensure"]
     assert (repo.parent.parent / "state/linked-bundle").read_text() == str(bundle)
     assert commands.endswith("hive run\n")
 
@@ -255,7 +260,7 @@ def test_a_failed_bundle_clone_is_logged_and_the_hive_runs_on_the_package_roles(
     assert result.returncode == 0, result.stderr
     assert "worker-hive: bundle clone failed; init runs on the package roles alone\n" in result.stderr
     assert not (repo.parent / "agentihooks-bundle").exists()
-    assert commands.splitlines()[1:4] == ["bundle unlink", "init", "deps ensure"]
+    assert commands.splitlines()[0:3] == ["bundle unlink", "init", "deps ensure"]
     assert commands.endswith("hive run\n")
 
 
@@ -265,7 +270,7 @@ def test_an_emptied_origin_unlinks_the_bundle_a_persistent_home_kept(tmp_path):
     result, commands, _, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert f"init --bundle {kept}" not in commands
-    assert commands.splitlines()[1:4] == ["bundle unlink", "init", "deps ensure"]
+    assert commands.splitlines()[0:3] == ["bundle unlink", "init", "deps ensure"]
 
 
 def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots_kept(tmp_path, monkeypatch, cert):

@@ -21,7 +21,7 @@ def hive():
     import fakeredis
 
     redis = fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True)
-    grant = auth.exchange(redis, auth.invite(redis, "member"), "redis://localhost:6379/0")
+    grant = auth.mint(redis, "member", "redis://localhost:6379/0")
     store = RedisStore(redis)
     store.names.adopt(SLUG, "323133", "", "")
     for name in (WORKER, MASTER):
@@ -124,7 +124,7 @@ def test_a_member_token_is_bound_to_its_ledger_and_agent(live, hive):
 
 def test_revoke_keeps_another_members_tokens_working(live, hive):
     store, grant = hive
-    other = auth.exchange(store.redis, auth.invite(store.redis, "other"), "redis://localhost:6379/0")
+    other = auth.mint(store.redis, "other", "redis://localhost:6379/0")
     store.start_execution(SLUG, AgentRecord(WORKER, "eng", "proof", seat=f"eng-1@{SLUG}", hive=other["id"]))
     token = mint(live, other, WORKER)[1]["data"]["token"]
     auth.revoke(store.redis, grant["id"])

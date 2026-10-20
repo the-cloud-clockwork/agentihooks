@@ -225,8 +225,8 @@ class _CapStore:
     def handoff_envelope(self, slug, task_id):
         return None
 
-    def launch_failure(self, slug, task_id):
-        return None
+    def launches(self, slug):
+        return []
 
     def reset_claims(self, slug, task_id):
         self.lives = 0
