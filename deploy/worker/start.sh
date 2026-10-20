@@ -129,7 +129,7 @@ from scripts.swarm_ledger import ledger_ca
 
 roots = ssl.get_default_verify_paths().cafile
 system = Path(roots).read_text() if roots else ''
-if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system + os.environ['LEDGER_CA_PEM'].strip() + '\n') is None:
+if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' + os.environ['LEDGER_CA_PEM'].strip() + '\n') is None:
     raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
 PY
 fi
