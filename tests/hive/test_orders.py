@@ -178,7 +178,7 @@ def test_runtime_failure_is_typed(setup):
     ack = setup.orders.ack(setup.order)
     assert ack.status == "failed"
     assert ack.target == {}
-    assert ack.failure == "unavailable"
+    assert ack.failure == "unavailable: no launch slot"
 
 
 def test_missing_prompt_is_refused(setup):
