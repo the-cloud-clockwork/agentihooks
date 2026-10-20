@@ -311,9 +311,7 @@ def _violation(rule: str, description: str) -> str:
         f"  Rule:        {rule}\n"
         f"  Reason:      {description}\n"
         "  Doctrine:    CI Manifesto §2 + rules/code-is-source.md\n"
-        "  Action:      change the source code, commit, push to dev, let CI deploy.\n"
-        "  Unlock:      set KUBECTL_MUTATION_GUARD_EXEC_ALLOW=ns/pod-glob or\n"
-        "               disable controls."
+        "  Action:      change the source code, commit, push to dev, let CI deploy."
     )
     return msg
 
@@ -384,6 +382,8 @@ def _target_allowlisted(namespace: Optional[str], pod: Optional[str]) -> bool:
 
 
 _VALUE_FLAGS = ("-n", "--namespace", "-c", "--container")
+# Any other flag may take the next token as its value, so the target is unknown and nothing is allowlisted.
+_BOOL_FLAGS = ("-i", "-t", "-it", "-ti", "--stdin", "--tty", "-q", "--quiet", "--no-preserve")
 
 
 def _kubectl_positionals(args: str) -> tuple[Optional[str], list[str]]:
@@ -403,6 +403,8 @@ def _kubectl_positionals(args: str) -> tuple[Optional[str], list[str]]:
                 namespace = value
         elif not tok.startswith("-"):
             positional.append(tok)
+        elif not sep and tok not in _BOOL_FLAGS:
+            return None, []
     return namespace, positional
 
 
@@ -435,6 +437,25 @@ def _violation_or_allow(rule: str, description: str, namespace: Optional[str], p
         )
         return None
     return _violation(rule, description)
+
+
+def _exec_violation(target_args: str, after_dash: str) -> Optional[str]:
+    """Return the violation for one `kubectl exec` segment, or None when it is safe or its pod is allowlisted."""
+    namespace, pod = _parse_kubectl_target(target_args)
+    for pattern, rule, description in _EXEC_MUTATION_PATTERNS:
+        if not pattern.search(after_dash):
+            continue
+        if rule != "exec-shell-c":
+            return _violation_or_allow(rule, description, namespace, pod)
+        for inner_pat, inner_rule in _INNER_SHELL_PATTERNS:
+            if inner_pat.search(after_dash):
+                return _violation_or_allow(
+                    f"exec-shell-c:{inner_rule}",
+                    f"kubectl exec ... -- sh/bash -c with mutation pattern ({inner_rule})",
+                    namespace,
+                    pod,
+                )
+    return None
 
 
 def _controls_disabled(session_id: str) -> bool:
@@ -477,33 +498,23 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
     # the after-dash content may include quoted sh -c bodies we want to
     # introspect)
     for match in _KUBECTL_EXEC_RE.finditer(command):
-        after_dash = match.group(2)
-        namespace, pod = _parse_kubectl_target(match.group(1))
-        for pattern, rule, description in _EXEC_MUTATION_PATTERNS:
-            if pattern.search(after_dash):
-                if rule == "exec-shell-c":
-                    for inner_pat, inner_rule in _INNER_SHELL_PATTERNS:
-                        if inner_pat.search(after_dash):
-                            return _violation_or_allow(
-                                f"exec-shell-c:{inner_rule}",
-                                f"kubectl exec ... -- sh/bash -c with mutation pattern ({inner_rule})",
-                                namespace,
-                                pod,
-                            )
-                    continue
-                return _violation_or_allow(rule, description, namespace, pod)
+        reason = _exec_violation(match.group(1), match.group(2))
+        if reason:
+            return reason
 
     # 3. kubectl cp direction (run on stripped — positional paths don't
     # carry quotes legitimately, and stripping suppresses text mentions)
     for match in _KUBECTL_CP_RE.finditer(stripped):
         if _check_kubectl_cp_into_pod(match.group(1)):
             namespace, pod = _cp_dest_target(match.group(1))
-            return _violation_or_allow(
+            reason = _violation_or_allow(
                 "kubectl-cp-into-pod",
                 "kubectl cp <local> <pod>:<path> (copy INTO a pod — push the file via the image build)",
                 namespace,
                 pod,
             )
+            if reason:
+                return reason
 
     # 4. SSH with remote write patterns (run on ORIGINAL — the SSH remote
     # command is by definition inside quotes that the hook needs to inspect)
@@ -550,12 +561,9 @@ def check_kubectl_mutation(payload: dict) -> None:
 
     session_id = payload.get("session_id", "")
     if _controls_disabled(session_id):
-        try:
-            from hooks.observability import otel
+        from hooks.observability import otel
 
-            otel.emit_event(_OTEL_KUBECTL_MUTATION, {"session.id": session_id, "action": "allow", "bypass": True})
-        except Exception:
-            pass
+        otel.emit_event(_OTEL_KUBECTL_MUTATION, {"session.id": session_id, "action": "allow", "bypass": True})
         return
 
     tool_input = payload.get("tool_input", {}) or {}

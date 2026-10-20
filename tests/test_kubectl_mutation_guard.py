@@ -1,7 +1,7 @@
 """Tests for hooks.context.kubectl_mutation_guard.
 
 Validates the HARD-FLOOR live-patching guard against the doctrine in
-CI Manifesto §3.5 + rules/code-is-source.md.
+CI Manifesto §2 + rules/code-is-source.md.
 """
 
 from __future__ import annotations
@@ -254,13 +254,29 @@ def test_bypass_lookup_failure_keeps_the_guard(monkeypatch, emitted):
     assert emitted == []
 
 
-def test_violation_message_names_doctrine_and_unlocks():
+def test_violation_message_names_doctrine_and_volunteers_no_unlock():
     msg = check_kubectl_mutation_command("kubectl exec -n other other-pod -- tee /etc/config.yaml")
     assert "  Rule:        exec-tee\n" in msg
     assert "  Reason:      kubectl exec ... -- tee (writes a file inside the pod)\n" in msg
-    assert "  Doctrine:    CI Manifesto §2 + rules/code-is-source.md\n" in msg
-    assert "  Unlock:      set KUBECTL_MUTATION_GUARD_EXEC_ALLOW=ns/pod-glob or\n" in msg
-    assert msg.endswith("\n               disable controls.")
+    assert "\n  Doctrine:    CI Manifesto §2 + rules/code-is-source.md\n  Action:" in msg
+    assert msg.endswith("\n  Action:      change the source code, commit, push to dev, let CI deploy.")
+    assert "KUBECTL_MUTATION_GUARD_EXEC_ALLOW" not in msg
+    assert "disable controls" not in msg
+
+
+@pytest.mark.parametrize(
+    "cmd",
+    [
+        "kubectl exec -n ns web-1 -- tee /etc/a; kubectl exec -n prod db-1 -- tee /etc/b",
+        "kubectl exec -n ns web-1 -- sh -c 'echo x > /etc/a' && kubectl exec -n prod db-1 -- tee /etc/b",
+        "kubectl cp ./a ns/web-1:/etc/a && kubectl cp ./b prod/db-1:/etc/b",
+        "kubectl exec -n ns web-1 -- tee /etc/a; kubectl edit deploy/foo -n prod",
+        "kubectl exec -n ns web-1 -- tee /etc/a; ssh host 'echo x > /etc/b'",
+    ],
+)
+def test_allowlisted_segment_does_not_hide_a_later_mutation(monkeypatch, cmd):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "ns/web-*")
+    assert check_kubectl_mutation_command(cmd) is not None
 
 
 def test_violation_message_carries_the_rule_description():
@@ -315,15 +331,28 @@ def test_target_allowlisted(monkeypatch, allow, namespace, pod, expected):
         ("-c ctr mypod", (None, "mypod")),
         ("--container ctr mypod", (None, "mypod")),
         ("--container=ctr mypod", (None, "mypod")),
-        ("-it mypod", (None, "mypod")),
         ("mypod extra", (None, "mypod")),
         ("mypod -n", ("", "mypod")),
         ("-it", (None, None)),
+        ("--context=web-1 mypod", (None, "mypod")),
+        ("-n ns --context web-1 db-1", (None, None)),
+        ("-n ns db-1 --as admin", (None, None)),
         ("'unbalanced", (None, None)),
     ],
 )
 def test_parse_kubectl_target(args, target):
     assert guard._parse_kubectl_target(args) == target
+
+
+@pytest.mark.parametrize("flag", ["-i", "-t", "-it", "-ti", "--stdin", "--tty", "-q", "--quiet", "--no-preserve"])
+def test_boolean_flags_keep_the_target(flag):
+    assert guard._parse_kubectl_target(f"-n ns {flag} mypod") == ("ns", "mypod")
+
+
+def test_unknown_value_flag_allowlists_nothing(monkeypatch, emitted):
+    monkeypatch.setenv("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "ns/web-*")
+    assert check_kubectl_mutation_command("kubectl exec -n ns --context web-1 db-1 -- tee /etc/x") is not None
+    assert emitted == []
 
 
 @pytest.mark.parametrize(
