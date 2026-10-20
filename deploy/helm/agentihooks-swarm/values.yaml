@@ -195,10 +195,6 @@ workers:
     tag: dev
     pullPolicy: Always
   repositories: []
-  joinUrl: ""
-  joinCodeSecret:
-    name: ""
-    key: ""
   credentialSecret:
     name: ""
     key: ""
@@ -217,9 +213,6 @@ workers:
   ssh:
     enabled: false
     port: 2222
-  persistence:
-    size: 1Gi
-    storageClassName: ""
   # Memory in MiB per agent, multiplied by maxAgents into the pod's memory request and limit.
   memoryPerAgentMi:
     request: 700

@@ -121,7 +121,12 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
     )
-    assert job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
+    versions = jobs["unit"]["strategy"]["matrix"]["python-version"]
+    assert job["strategy"]["matrix"]["python-version"] == (
+        "${{ fromJSON(github.event_name == 'merge_group' && '[\"3.12\"]' || '"
+        + json.dumps(versions, separators=(",", ":"))
+        + "') }}"
+    )
     assert "shard-check" in jobs["gate-required"]["needs"]
     steps = job["steps"]
     assert all("steps.lookup" not in step.get("if", "") for step in steps)

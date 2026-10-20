@@ -141,13 +141,13 @@ A remote client picks the first that applies:
 
 1. The tick credential `X-Ledger-Tick`, inside a swarm tick that holds the server secret.
 2. `X-Controller-Credential` from `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, when the process has no pinned agent.
-3. For a pinned agent, `X-Ledger-Token` with `X-Ledger-Agent`. The token is `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without it, the client derives one from `SWARM_SECRET`; without either, it asks the ledger for a `hive.` token with the hive credential `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` that `agentihooks hive join` writes.
+3. For a pinned agent, `X-Ledger-Token` with `X-Ledger-Agent`. The token is `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without it, the client derives one from `SWARM_SECRET`; without either, it asks the ledger for a `hive.` token with the hive credential `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` that `agentihooks hive add` delivers.
 
 A remote client refuses, before any request:
 
 - a write that needs the operator credential: `a remote ledger client cannot make service writes; the operator credential stays on its host`;
 - a process without a pinned agent, which needs both `AGENTIHOOKS_SWARM` and `AGENTIHOOKS_AGENT_NAME`, and with no controller credential: `unauthenticated: a remote ledger client needs a pinned agent identity; the operator credential stays on its host`;
-- a pinned agent with no token, no secret and no hive credential: `unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join`.
+- a pinned agent with no token, no secret and no hive credential: `unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive add`.
 
 A remote read is tried three times, pausing 0.5 and then 1 second, on a connection error or a 5xx answer; a write is sent once. A request times out after 10 seconds. A `403` whose body carries `Missing or wrong ledger credential` ends the command with `unauthenticated: the ledger server refused the credential`; a `401` or `403` to the hive token request ends it with `unauthenticated: the ledger server refused the hive credential: <status>`. Remote writes never queue in the local outbox: an unreachable ledger ends the command with `ledger server not answering on <address>`.
 
@@ -210,9 +210,9 @@ agentihooks ledger --slug my-ledger --as engineer@abc123-0001 alert list
 | `a remote ledger client needs SWARM_URL, the address of the hosted ledger server` | The process is remote through `AGENTIHOOKS_DEPLOYMENT`, but has neither `SWARM_URL` nor `LEDGER_URL` | Set `SWARM_URL` |
 | A local ledger server still starts on the workstation | `SWARM_URL` is missing from the environment the hook or tick runs in, or the session is bound to another swarm | Put `SWARM_URL` in `~/.agentihooks/.env`; check `AGENTIHOOKS_SWARM` names the hosted ledger's slug |
 | `unauthenticated: a remote ledger client needs a pinned agent identity` | No `AGENTIHOOKS_AGENT_NAME`, or no `AGENTIHOOKS_SWARM` (a pinned agent needs both), and no controller credential | Run as a named agent, or give the tick `AGENTIHOOKS_CONTROLLER_CREDENTIAL` |
-| `unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential` | A named agent with no token, no `SWARM_SECRET` and no hive join | Set `AGENTIHOOKS_LEDGER_AGENT_TOKEN`, or run the agent from the tick |
+| `unauthenticated: a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential` | A named agent with no token, no `SWARM_SECRET` and no hive credential delivered | Set `AGENTIHOOKS_LEDGER_AGENT_TOKEN`, or run the agent from the tick |
 | `unauthenticated: the ledger server refused the credential` | The token was derived for another slug or name, or from another secret | Derive it again for the exact slug and agent name from the server's current secret |
-| `unauthenticated: the ledger server refused the hive credential: <status>` | The hive credential from `agentihooks hive join` is wrong or no longer known to the ledger | Join the hive again, or set `AGENTIHOOKS_LEDGER_AGENT_TOKEN` |
+| `unauthenticated: the ledger server refused the hive credential: <status>` | The hive credential from `agentihooks hive add` is wrong or no longer known to the ledger | Run `agentihooks hive add` again from the UI hive, or set `AGENTIHOOKS_LEDGER_AGENT_TOKEN` |
 | A spawned agent has no `SWARM_SECRET` | Intended: the tick and the launcher remove it | Nothing to fix; the agent uses its own `AGENTIHOOKS_LEDGER_AGENT_TOKEN` |
 
 ## Evidence
