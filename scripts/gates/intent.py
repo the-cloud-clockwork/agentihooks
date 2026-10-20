@@ -795,8 +795,12 @@ class Check:
         return []
 
     def _isolated(self, task, step, *args):
+        from scripts.swarm.ledger_client import LedgerRefused
+
         try:
             return step(*args)
+        except LedgerRefused:
+            raise
         except Exception as exc:  # one task's failure is logged and never ends the tick run
             who = Who(name=task.get("claimed_by", ""), task=task["id"])
             log.append(self.slug, log.Row.of(NAME, "fail-open", who, reason=f"{type(exc).__name__}: {exc}"), self.home)
