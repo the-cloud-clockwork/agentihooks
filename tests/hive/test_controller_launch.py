@@ -77,8 +77,9 @@ def test_no_advertised_slot_does_not_probe_controller_credentials(setup):
     setup.herdr.choose.assert_not_called()
 
 
-def test_publishes_fenced_order_after_host_admission(setup):
+def test_publishes_fenced_order_after_host_admission(setup, monkeypatch):
     from scripts.hive.orders import Ack, Consumer, Orders
+    from scripts.swarm import launch_check
     from scripts.swarm.store import AgentRecord
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -108,6 +109,7 @@ def test_publishes_fenced_order_after_host_admission(setup):
     runtime.namespace.return_value = "namespace"
     runtime.table.return_value = {12: SimpleNamespace(start_time=34)}
     consumer = Consumer(store.redis, "remote", runtime)
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [f"{profile}-host"])
 
     def consume(_):
         assert consumer.poll() == 1
@@ -129,7 +131,10 @@ def test_publishes_fenced_order_after_host_admission(setup):
             "pane_id": "pane",
             "model": "selected-model",
             "effort": "high",
-            "profile_decision": {"validation": {"pid": 12}},
+            "profile_decision": {"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
+            "launched_at": 0,
+            "launch_timings": {},
+            "overlays": [],
         },
     )
     assert order.hive == "remote"
@@ -151,7 +156,7 @@ def test_publishes_fenced_order_after_host_admission(setup):
         model="selected-model",
         effort="high",
         profile="engineer",
-        profile_decision={"validation": {"pid": 12}},
+        profile_decision={"validation": {"pid": 12}, "host_overlays": ["engineer-host"]},
         execution=outcome.value.execution,
     )
 
