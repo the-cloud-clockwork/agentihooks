@@ -44,8 +44,8 @@ class SchemaLedger(LedgerClient):
         with self.lock:
             doc = self.docs[slug]
             if ops is not None:
+                epoch = lease.EPOCH.get()
                 for op in ops:
-                    epoch = op.pop("controller_epoch", None)
                     self.epochs.append((slug, op["op"], epoch))
                     if self.leases is not None and epoch is not None:
                         live = lease.current(self.leases, slug)
