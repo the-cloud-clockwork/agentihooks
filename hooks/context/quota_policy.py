@@ -280,7 +280,7 @@ def evaluate(session_id: str) -> Decision | None:
 def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
     from scripts.routing import reservation
 
-    if not environ.get(reservation.AGENT_NAME, "").startswith(reservation.MASTER_NAME):
+    if not str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME):
         return candidates
     return [c for c in candidates if c.login]
 
