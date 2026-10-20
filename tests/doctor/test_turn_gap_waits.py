@@ -81,7 +81,12 @@ def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_
     assert traces.turn_gaps(sample, traces.Limits()) == []
     [partial] = traces.wait_coverage(sample, traces.Limits())
     assert (partial.kind, partial.subject, partial.measure) == ("wait history partial", "sw", 1)
-    assert partial.summary == "wait history of 1 agents with turn gaps over 30 minutes not read in budget"
+    assert partial.summary == "wait history of 1 agent with turn gaps over 30 minutes not read in budget"
+    two = traces.wait_coverage({**sample, "waits_unread": ["engineer", "ci"]}, traces.Limits())[0]
+    assert two.summary == "wait history of 2 agents with turn gaps over 30 minutes not read in budget"
+    assert two.evidence[0] == "unread: engineer, ci"
+    six = traces.wait_coverage({**sample, "waits_unread": list("abcdef")}, traces.Limits())[0]
+    assert (six.evidence[0], six.measure) == ("unread: a, b, c, d, e", 6)
     assert partial.evidence == (
         "unread: engineer",
         "turn gap findings skip agents whose wait history was not read",

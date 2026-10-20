@@ -197,7 +197,7 @@ def waits(
     seconds: float,
     clock: Callable[[], float] = time.monotonic,
 ) -> tuple[dict[str, list[dict]], list[str]]:
-    """Each named agent's wait history until the budget is spent; the agents left unread come back apart."""
+    """Each named agent's wait history until the budget is spent; the agents left unread are returned as a list."""
     deadline = clock() + seconds
     found = {}
     for name in names:

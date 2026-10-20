@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, fields
 from statistics import median
 
+from scripts.doctor.words import plural
 from scripts.swarm.health.findings import Finding
 
 MINUTE_MS = 60_000
@@ -188,14 +189,14 @@ def gap_agents(record: dict, limits: Limits) -> list[str]:
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
-    unread = record.get("waits_unread") or []
+    unread = record.get("waits_unread", [])
     if not unread:
         return []
     return [
         Finding(
             "wait history partial",
             record["slug"],
-            f"wait history of {len(unread)} agents with turn gaps over {limits.turn_gap_minutes} minutes "
+            f"wait history of {plural(len(unread), 'agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
             "not read in budget",
             (
                 "unread: " + ", ".join(unread[:5]),
