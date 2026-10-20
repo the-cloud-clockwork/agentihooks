@@ -441,13 +441,13 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> done [--pr URL] [proof flags]` | Close the task with the proof its kind needs; the swarm then closes the session. |
 | `agentihooks swarm <id> merge priority URL` | The master or operator moves a green critical pull request ahead of waiting dev queue entries. Running entries stay in place. Waiting entries ahead are removed tail first and requeued in their original order after the critical request; their swarm owners receive an inbox message. Entries behind an already queued critical request stay in place. A failed insertion still attempts to restore every displaced entry and reports any restoration failure. |
 | `agentihooks swarm <id> ready DOC` | Release the seat of a task of any kind whose reviewed pull request waits only on checks and the merge queue. Refuses at manual or assist autonomy, without a recorded open pull request, or unless the worktree is clean and its head is the pull request head. Checks the document like `handoff`, records the pull request, head and worktree, marks the task `awaiting` `merge` (still `pr`), stores the handoff and ends the session; the finished agent no longer holds a seat and the tick never reopens the task as an orphan. Each tick the merge pass watches its checks like a checks wait, queues its green head as is like `merge queue`, waits on the queue like a merge wait, then writes the same done fields `done` writes, closes its group members and removes the worktree with `wt.sh done`. A task of a kind other than code or ci is not closed on the merge: it goes back to `open` with no claimant, its pull request and handoff kept and a comment that it awaits its proof, and the worktree is removed. Red checks, a closed pull request or a queue ejection reopen the task for the next engineer with the handoff and leave the worktree in place; a green ejection with no failed merge group run of its own is queued again instead ([Ready merge pass queue exits](#ready-merge-pass-queue-exits)). Five refusals GitHub returns (a GraphQL error, or a base other than `dev`) reopen it too; any other queue failure, an outage or checks still running, is retried and never counted. The intent gate holds `ready` like `done` in its enforce and coach modes; off and observe let it pass without a verdict. |
-| `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
+| `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. A dependency that is not `done` turns the block into a checked wait on that task instead, keeping the claim. Before blocking, refuses while a task worktree holds commits its remote branch lacks, naming the push to run, and records a pushed branch on the task; see [Blocking with unpushed commits](#blocking-with-unpushed-commits). |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
 | `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
-| `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, or whose pull request already merged into `dev`, the task's own fork from `origin/dev`, see [Parking on a dependency already merged into dev](#parking-on-a-dependency-already-merged-into-dev)), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
+| `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched through that repository's recorded checkout or its URL, or whose pull request already merged into `dev`, the task's own fork from `origin/dev`, see [Parking on a dependency already merged into dev](#parking-on-a-dependency-already-merged-into-dev)), comments the ledger task with the blocker, comments the issue with the branch, records those other repositories in `parked_repos` (see [Park fetch and note across repositories](#park-fetch-and-note-across-repositories)), stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
 | `agentihooks swarm <id> restack` | After the parked blockers finish, fetch origin and rebase task work from `stacked_base` onto `origin/dev`. Run in a clean branch cut from the parked branch. Success clears `parked_on`; a conflict lists the files and retains the parked list. Resolve the files, run `git rebase --continue`, then run restack again to finish. |
 | `agentihooks swarm <id> learned TEXT [--maturity data\|note\|insight\|canon]` | Add a lesson to your seat's learned notes, kept for every later occupant. The maturity defaults to `note`; only the master writes `canon`. |
 | `agentihooks swarm <id> say TEXT [--to NAME\|eng\|ci]` | Post to the swarm chat. |
@@ -587,7 +587,7 @@ open dependency that carries a `branch` before it fetches that branch:
 | `pr_url` names a pull request in state `MERGED` with base `dev` | The task's own fork from `origin/dev`. The dependency branch is never fetched, so a deleted branch does not stop the park. |
 | `pr_url` names an open pull request, a closed one, or one merged into another branch, and the dependency is in the task's repository | Where the task branch left `origin/<branch>` of that dependency, as before. A deleted branch still refuses with `cannot fetch <branch>`. |
 | No `pr_url` | Same as an unmerged pull request: the dependency branch is fetched. |
-| `branch_repo` names another repository and the pull request is not merged into `dev` | That branch is fetched from the other repository, and the base is the task's own fork from `origin/dev`. |
+| `branch_repo` names another repository and the pull request is not merged into `dev` | That branch is fetched through the other repository's recorded checkout, or by URL without one, see [Park fetch and note across repositories](#park-fetch-and-note-across-repositories), and the base is the task's own fork from `origin/dev`. |
 | No `branch` | The dependency adds no base. It is still listed in `parked_on`. |
 
 The merged check comes first: a dependency merged into `dev` stacks on `dev`
@@ -622,6 +622,136 @@ Delivered by
 with a regression that refused with `cannot fetch eng-a: remote branch deleted`
 in [a red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38981617229)
 before the change and passed in [the green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38982011506).
+
+## Blocking with unpushed commits
+
+A blocked task reopens for the next engineer, who starts from the task's
+recorded branch. `swarm block` therefore checks that the work it hands over is
+on the remote first, as `swarm park` does, and records the branch it finds.
+The block check is looser than park's: it accepts a remote branch that contains
+the worktree head rather than one at exactly that head, ignores uncommitted
+changes, and passes a worktree with no work beyond `origin/dev`.
+
+The check runs after the dependency check: a dependency that is not `done`
+still turns the block into a checked wait on that task and keeps the claim, and
+no push is checked.
+
+For each task repository, the task's `repositories` or else the swarm repo,
+block finds the task worktree with the lookup `swarm publish` uses: a worktree
+on the branch the task records for that repository, else one on the agent's
+own branch name (`<agent>` or `<agent>-N`). Running block from the primary
+checkout still checks the task worktree. Each worktree found is compared with
+its remote branch: the local branch's upstream, else the task's recorded
+branch, else the local branch name, on `origin` when no upstream is set.
+
+| Worktree state | What block does |
+|---|---|
+| The remote branch exists and contains the worktree head | Records `branch`, `branch_repo` and `repository_branches` on the task, then blocks. |
+| The remote branch exists and lacks commits the worktree holds | Refuses. The task stays claimed and nothing is written. |
+| No remote branch, and the worktree holds commits beyond `origin/dev` | Refuses, as above. |
+| No remote branch, and nothing beyond `origin/dev` | Blocks without recording a branch. |
+| No task worktree in that repository | Blocks as before; that repository adds nothing to the record. |
+| More than one worktree matches | Refuses with `multiple task worktrees match; record the task branch before publishing`. |
+
+The refusal names the push to run:
+
+```text
+the worktree /home/me/dev/worktrees/agentihooks/engineer-323133-1771 holds commits origin lacks; push them with git -C /home/me/dev/worktrees/agentihooks/engineer-323133-1771 push -u origin engineer-323133-1771 before blocking
+```
+
+When the remote branch name differs from the local one, the command pushes
+`HEAD:<remote branch>` to that upstream remote instead. Run the named push,
+then block again:
+
+```bash
+git -C <worktree> push -u origin <branch>
+agentihooks swarm <id> block "<the blocker in plain words>"
+```
+
+The recorded fields match what `swarm publish` writes: `branch` is the
+worktree branch, `branch_repo` its `origin` URL with any password removed (and
+the user too for an `http` or `https` URL), and `repository_branches` maps each
+repository's primary checkout to its branch. For a task in several
+repositories, `repository_branches` carries every pushed one, while `branch`
+and `branch_repo` name the last repository pushed. The fields are written
+before the task turns `blocked`, so the next engineer's prepare finds the
+pushed branch. A task whose recorded branch is `dev`, `main`, `master` or `v1`
+refuses with `publication requires a task branch outside the protected
+branches`.
+
+The check only compares commits. Uncommitted changes in the worktree do not
+refuse a block; commit and push them first if the next engineer needs them.
+It also reads the local clone without fetching: a remote branch that moved to a
+commit this clone has not fetched refuses as if the worktree held unpushed
+commits, and the count beyond `origin/dev` uses the last fetched `origin/dev`.
+Run `git -C <worktree> fetch origin` and block again when the refusal names a
+branch you already pushed.
+
+Delivered by
+[pull request 4053](https://github.com/the-cloud-clockwork/agentihooks/pull/4053):
+its tests failed in [a red proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39030866219)
+before the change and passed in [the green proof](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39031050627).
+
+## Park fetch and note across repositories
+
+### Fetching a dependency branch in another repository
+
+When an open dependency's `branch_repo` names another repository and its pull
+request is not merged into `dev`, park fetches that branch before it records
+the task's fork from `origin/dev` as `stacked_base`. The dependency's
+`repository_branches` lists the checkouts its own publish recorded. Park uses
+the first of them whose `origin` matches `branch_repo` and runs:
+
+```bash
+git -C <that checkout> fetch origin <branch>
+```
+
+so the remote and credentials that checkout already uses apply, for example an
+agentihooks task parked on an antoncore dependency fetches through the local
+antoncore checkout. With no matching checkout, park fetches by URL as before:
+
+```bash
+git fetch -- <branch_repo> <branch>
+```
+
+A failed fetch refuses with `cannot fetch <branch> in <checkout>` or `cannot
+fetch <branch> from <branch_repo>` and parks nothing. Check that the checkout's
+`origin` points at the dependency repository and that `git -C <checkout> fetch
+origin` works, then park again.
+
+### Exact branch match
+
+Park's push check reads `git ls-remote --heads origin <branch>` and keeps only
+the line ending in exactly `refs/heads/<branch>`; block filters its remote the
+same way. A proof branch whose name ends with the same text, such as
+`diffcheck/<branch>`, is ignored, so it never makes a pushed task branch look
+unpushed or pushed at the wrong head.
+
+### The park ledger note
+
+Park comments the ledger task with one note naming the open dependencies by
+title:
+
+```text
+Parked on its branch until <title> and <title> is done. The next engineer restacks it onto dev and finishes it.
+```
+
+When that note would fail the ledger comment filter, for example over its
+fifty word limit with several long titles, park writes this instead:
+
+```text
+Parked on its branch until every open dependency is done. The next engineer restacks it onto dev and finishes it.
+```
+
+The note is written before the issue comment and the task update. If the issue
+comment fails, nothing is parked and park can run again: an agent's later
+comment on the same task amends its earlier one unless someone commented in
+between, so the task keeps one note.
+
+Delivered by
+[pull request 4053](https://github.com/the-cloud-clockwork/agentihooks/pull/4053),
+with the same red and green proofs as
+[Blocking with unpushed commits](#blocking-with-unpushed-commits).
 
 ## Publishing after a successor prepares a branch
 
