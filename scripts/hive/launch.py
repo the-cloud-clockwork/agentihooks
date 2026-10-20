@@ -69,7 +69,7 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
     return caps[0] if caps else fallback
 
 
-def by_origin(hives: list[dict], repo: str) -> list[dict]:
+def _by_origin(hives: list[dict], repo: str) -> list[dict]:
     """A hive that lists the origin of the swarm's checkout lists the swarm's repo, whatever path it keeps it at."""
     from scripts.hive.daemon import origin
 
@@ -119,7 +119,7 @@ class HiveLaunch:
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
-        hives = by_origin(hives, config.repo)
+        hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         if (
             role in registry.UI_ROLES

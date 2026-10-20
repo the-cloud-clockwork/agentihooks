@@ -2,7 +2,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.hive import launch, placement
+from scripts.hive import launch, placement, registry
 from scripts.hive.placement import Choice, choose
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
@@ -77,7 +77,6 @@ def test_a_headless_refusal_for_any_reason_falls_back_to_the_workstation(account
 
 @pytest.fixture
 def live(setup, tmp_path):
-    from scripts.hive import registry
     from scripts.swarm.capacity import Account
 
     checkout = tmp_path / "agentihooks"
@@ -101,7 +100,6 @@ def test_the_anton_hive_takes_an_engineer_for_a_swarm_repo_given_as_a_local_chec
 
 
 def test_a_full_anton_hive_sends_the_engineer_to_the_workstation_with_the_reason(live):
-    from scripts.hive import registry
 
     live.store.redis.set(f"{registry.key(ANTON)}:sessions", '{"eng": 1}')
     selected = live.launcher.select(live.config, "eng", {"id": "task"})
@@ -125,10 +123,11 @@ def test_a_checkout_without_an_origin_matches_only_by_its_path(live, tmp_path):
     assert live.launcher.select(config, "eng", {"id": "task", "hive": ANTON}) == placement.Wait(
         f"no hive for eng lists the repo {bare}"
     )
+    write_hive(live, **{**anton(repos=[POD, ORIGIN, str(bare)]), "heartbeat_at": live.hive["heartbeat_at"]})
+    assert live.launcher.select(config, "eng", {"id": "task", "hive": ANTON}).hive == ANTON
 
 
 def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
-    from scripts.hive import registry
     from scripts.swarm.tick import tick
     from tests.swarm.test_tick import FakeRuntime, tasks
 
