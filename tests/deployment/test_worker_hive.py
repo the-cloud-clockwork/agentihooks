@@ -285,7 +285,26 @@ def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots
     assert ledger_link.transport({"AGENTIHOOKS_HOME": str(home)})["context"].cert_store_stats()["x509_ca"] > 1
 
 
-def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path):
+def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path, monkeypatch):
     result, _, home, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert (home / "ledger-ca.pem").read_text() == "hosted ledger CA\n"
+
+
+@pytest.mark.parametrize("mounted_first", [False, True])
+def test_ledger_ca_cases_ignore_inherited_mount_in_either_order(tmp_path, monkeypatch, cert, mounted_first):
+    monkeypatch.setenv("LEDGER_CA_PEM", Path(cert[0]).read_text())
+    cases = [
+        test_without_a_mounted_ledger_ca_the_one_init_wrote_stays,
+        test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots_kept,
+    ]
+    if mounted_first:
+        cases.reverse()
+    for index, case in enumerate(cases):
+        root = tmp_path / str(index)
+        root.mkdir()
+        with monkeypatch.context() as isolated:
+            if case is test_without_a_mounted_ledger_ca_the_one_init_wrote_stays:
+                case(root, isolated)
+            else:
+                case(root, isolated, cert)
