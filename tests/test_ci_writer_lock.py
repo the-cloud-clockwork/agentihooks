@@ -4,6 +4,8 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts.ci_branch_lanes import problems
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -11,7 +13,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_writer_lock_keys_inputs_before_starting_the_postgres_scenario():
     caller = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]["writer-lock"]
     assert caller["uses"] == "./.github/workflows/writer-lock.yml"
-    jobs = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())["jobs"]
+    workflow = yaml.safe_load((ROOT / ".github/workflows/writer-lock.yml").read_text())
+    assert problems(workflow) == []
+    jobs = workflow["jobs"]
     key = jobs["inputs"]
     assert "services" not in key
     assert key["outputs"] == {
