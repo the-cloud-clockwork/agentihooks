@@ -172,7 +172,7 @@ def test_a_failed_launch_retires_a_master_whose_ask_item_is_gone(swarm, monkeypa
 
 def test_forget_counts_a_missing_ask_item_as_already_forgotten(swarm):
     store, _, _, master = swarm
-    record = {"at": 200, "reason": "test", "item": "gone", "world": "hive-a"}
+    record = {"at": 200, "reason": "test", "item": "gone"}
     store.redis.hset(store.key("sw", "master-retire-requests"), master.name, json.dumps(record))
     assert master_retire.forget(store, "sw", master.name) is True
     assert master_retire.reason(store, "sw", master.name) == ""
@@ -321,6 +321,19 @@ def test_a_master_on_a_joined_hive_is_retired_and_its_ask_closed_in_the_hive_inb
     assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
     assert hive.get(ask.id).state == "done"
     assert master_retire.reason(store, "sw", master.name) == ""
+
+
+def test_a_hold_made_from_a_hive_member_closes_its_ask_in_that_member_world(swarm, monkeypatch):
+    from scripts.hive import scope
+
+    store, _, _, master = swarm
+    monkeypatch.setattr(scope, "member", lambda: "hive-b")
+    assert master_retire.hold(store, "sw", master, "test", True, 200).startswith("asked")
+    member = InboxStore(store.redis, world="hive-b")
+    (ask,) = [i for i in member.inbox(master.name) if i.ref == master_retire.REF]
+    monkeypatch.setattr(scope, "member", lambda: "")
+    assert master_retire.hold(store, "sw", master, "test", True, 200 + WAIT) == ""
+    assert member.get(ask.id).state == "done"
 
 
 def test_the_idle_limit_leaves_a_master_held_for_another_reason_alone(swarm):
