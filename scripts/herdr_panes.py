@@ -49,9 +49,26 @@ def _path(record: PaneRecord, environ: dict[str, str]) -> Path:
     return root(environ) / f"{server}{re.sub(r'[^A-Za-z0-9_-]', '_', record.terminal_id or record.pane_id)}.json"
 
 
+def store_ref(url: str) -> str:
+    parts = urlparse(url)
+    if not parts.password:
+        return url
+    bare = parts._replace(netloc=parts.netloc.rpartition("@")[2]).geturl()
+    return f"{WITHHELD}:{hashlib.sha256(bare.encode()).hexdigest()[:16]}"
+
+
+def store_url(recorded: str, environ: dict[str, str]) -> str | None:
+    """A withheld store opens only on this environment's own URL; a legacy bare mark only when that URL withholds."""
+    if not recorded.startswith(WITHHELD):
+        return recorded
+    own = environ.get(STORE_ENV)
+    if own and (store_ref(own) == recorded or (recorded == WITHHELD and urlparse(own).password)):
+        return own
+    return None
+
+
 def _store(environ: dict[str, str]) -> str:
-    url = environ.get(STORE_ENV, "")
-    return WITHHELD if url and urlparse(url).password else url
+    return store_ref(environ.get(STORE_ENV, ""))
 
 
 def _write(record: PaneRecord, environ: dict[str, str]) -> PaneRecord:

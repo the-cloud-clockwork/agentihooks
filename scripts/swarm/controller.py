@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmError, connect
+from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
@@ -121,7 +122,7 @@ class FencedRuntime:
 
 
 def _hive_lane(lane: str, task: dict) -> bool:
-    return lane in ("eng", "ci") or (lane == "master" and task.get("id") == "master") or bool(task.get("hive"))
+    return lane in HIVE_LANES or (lane == "master" and task.get("id") == "master") or bool(task.get("hive"))
 
 
 def _read(path: str) -> str:

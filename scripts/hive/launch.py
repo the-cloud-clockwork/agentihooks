@@ -3,7 +3,7 @@ import os
 import time
 from dataclasses import dataclass, replace
 
-from scripts.hive import placement, placement_waits, registry
+from scripts.hive import orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
@@ -12,7 +12,7 @@ from scripts.swarm.tick import Placed
 from scripts.swarm_v2.runtime.base import Capability, Outcome, SpawnRequest, Status
 
 HIVE = "hive"
-ROLE_PROFILES = {"engineer": "eng", "cicd": "ci"}
+ROLE_PROFILES = {"engineer": "eng", "cicd": "ci", "planner": "plan"}
 TTL_MS = 300000
 ORDERS = "controller-launch-orders"
 ENDINGS = "launch-endings"
@@ -25,6 +25,7 @@ class Selection:
     account: capacity.Account
     route_kind: str
     master_placement: placement.MasterPlacement | None = None
+    fallback: str = ""
 
 
 def loaded_hives(store: RedisStore) -> list[dict]:
@@ -74,6 +75,7 @@ class HiveLaunch:
         self.store, self.slug, self.held, self.herdr = store, slug, held, herdr
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
+        self.opening = orders.build_opening
 
     def hives(self) -> list[dict]:
         return loaded_hives(self.store)
@@ -113,10 +115,14 @@ class HiveLaunch:
         route_kind = task.get("route_kind", "subscription")
         reason = placement.Wait("no advertised Claude account has room")
         for row in sorted(candidates, key=lambda row: (row.sessions, row.name)):
-            hive = placement.place(role, "claude", row.name, route_kind, config.repo, hives, now)
-            if isinstance(hive, str):
-                return self._record_wait(lane, task, Selection(decision, hive, row, route_kind))
-            reason = hive
+            choice = placement.choose(role, "claude", row.name, route_kind, config.repo, hives, now)
+            if isinstance(choice, placement.Choice):
+                fallback = (
+                    f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
+                )
+                selected = Selection(decision, choice.hive, row, route_kind, fallback=fallback)
+                return self._record_wait(lane, task, selected)
+            reason = choice
         return self._record_wait(lane, task, reason)
 
     def _master_selection(self, config, decision, hives, now, rows):
@@ -151,6 +157,9 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
+        task = orders.carried(
+            self.slug, {**request.task, "profile_decision": selected.profile.record()}, self.opening(request)
+        )
         admitted = self.admit(request, selected)
         if not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
@@ -158,7 +167,6 @@ class HiveLaunch:
             self.end(admitted, "account reservation is full")
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail="account reservation is full")
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
-        task = {**request.task, "profile_decision": selected.profile.record()}
         order = LaunchOrder(
             self.slug,
             admitted.execution_id,
@@ -172,6 +180,7 @@ class HiveLaunch:
             prompt_ref,
             self.held.epoch,
             lease.now_ms(self.store) + TTL_MS,
+            selected.hive,
         )
         with self.store.redis.pipeline() as pipe:
             pipe.set(prompt_ref, json.dumps(task), px=TTL_MS)
@@ -195,6 +204,7 @@ class HiveLaunch:
                     if selected.master_placement is not None
                     else {}
                 ),
+                **({"placement_fallback": selected.fallback} if selected.fallback else {}),
             },
             harness="claude",
             account=selected.account.name,
@@ -229,11 +239,13 @@ class HiveLaunch:
             status = Status.AMBIGUOUS if ack.failure == "ambiguous" else Status.REFUSED
             return Outcome("spawn", status, HIVE, detail=f"hive launch failed: {ack.failure}")
         current = self.store.execution_occupants(self.slug).get(agent.seat)
+        if current is None or current.execution_id != order.execution_id or agent.generation != order.generation:
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        if agent.state == "launching":
+            agent = self.record(agent, order, ack)
         if (
-            current is None
-            or current.execution_id != order.execution_id
-            or agent.generation != order.generation
-            or agent.runtime_target != ack.target
+            agent.runtime_target != ack.target
+            or agent.pane_id != ack.execution.get("pane_id", agent.pane_id)
             or agent.state != "working"
         ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
@@ -252,6 +264,29 @@ class HiveLaunch:
             desired_route_kind=agent.desired_route_kind if agent.lane == "master" else None,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
+
+    def record(self, agent: AgentRecord, order: LaunchOrder, ack: Ack) -> AgentRecord:
+        """A joined hive cannot write the swarm keyspace, so the controller records what it acknowledged."""
+        decision = ack.execution.get("profile_decision", {})
+        if ack.target.get("host_id") != order.hive or not isinstance(decision, dict):
+            raise SwarmError("hive launch acknowledgement does not match the live execution")
+        kept = (
+            {"master_placement": agent.profile_decision["master_placement"]}
+            if "master_placement" in agent.profile_decision
+            else {}
+        )
+        live = replace(
+            agent,
+            runtime_target=ack.target,
+            state="working",
+            pane_id=ack.execution.get("pane_id", agent.pane_id),
+            model=ack.execution.get("model", agent.model),
+            effort=ack.execution.get("effort", agent.effort),
+            profile_decision={**decision, **kept},
+        )
+        lease.require_epoch(self.store, self.slug, self.held.epoch)
+        self.store.execution_registry.update(self.slug, live)
+        return live
 
     def end(self, agent: AgentRecord, reason: str) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)

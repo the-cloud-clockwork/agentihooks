@@ -1,0 +1,192 @@
+import pytest
+
+from scripts.hive.placement import NO_UI_HIVE, Choice, Wait, choose, place
+from tests.hive.test_controller_launch import setup as setup
+from tests.hive.test_controller_launch import write_hive
+from tests.hive.test_placement import NOW, REPO, hive
+
+ALL_ROLES = ["master", "qa", "frontend", "eng", "ci", "plan"]
+
+
+def two_hosts(setup, anton_agents=0):
+    from scripts.hive import registry
+
+    setup.store.redis.delete(registry.key("remote"))
+    setup.store.redis.srem(registry.INDEX, "remote")
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10)
+    write_hive(setup, id="anton", ui="no", roles=["eng", "ci", "plan"], max_agents=2)
+    setup.store.redis.set(f"{registry.key('anton')}:sessions", f'{{"eng": {anton_agents}}}')
+
+
+ROLES = {
+    "frontend engineer": ("eng", "frontend", {"id": "task"}, "workstation"),
+    "qa agent": ("eng", "qa", {"id": "task"}, "workstation"),
+    "master": ("master", "master", {"id": "master"}, "workstation"),
+    "engineer": ("eng", "engineer", {"id": "task"}, "anton"),
+    "planner": ("plan", "planner", {"id": "task"}, "anton"),
+}
+
+
+@pytest.mark.parametrize(("lane", "profile", "task", "host"), ROLES.values(), ids=ROLES.keys())
+def test_each_role_lands_on_its_host_kind(setup, lane, profile, task, host):
+    from scripts.hive.launch import Selection
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
+    selected = setup.launcher.select(setup.config, lane, task)
+    assert isinstance(selected, Selection)
+    assert selected.hive == host
+    assert selected.fallback == ""
+
+
+def test_a_full_headless_fleet_falls_back_to_the_workstation_with_the_reason_recorded(setup):
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    two_hosts(setup, anton_agents=2)
+    task = {"id": "task", "seat": "eng-1@fixture", "controller_epoch": setup.held.epoch}
+    selected = setup.launcher.select(setup.config, "eng", task)
+    assert selected.hive == "workstation"
+    assert selected.fallback == "no headless hive for eng has room"
+    name = setup.store.next_name(setup.config.slug, "eng")
+    admitted = setup.launcher.admit(SpawnRequest(setup.config, "eng", name, task), selected)
+    assert admitted.profile_decision["placement_fallback"] == "no headless hive for eng has room"
+
+
+def test_a_task_pinned_to_a_ui_hive_records_the_pin_as_its_reason(setup):
+    two_hosts(setup)
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task", "hive": "workstation"})
+    assert (selected.hive, selected.fallback) == ("workstation", "the task is pinned to workstation")
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task", "hive": "anton"})
+    assert (selected.hive, selected.fallback) == ("anton", "")
+
+
+def test_an_account_a_headless_hive_advertises_wins_over_an_earlier_account_that_only_fits_the_workstation(setup):
+    from scripts.hive import registry
+    from scripts.swarm.capacity import Account
+
+    two_hosts(setup)
+    write_hive(
+        setup,
+        id="workstation",
+        ui="yes",
+        roles=ALL_ROLES,
+        max_agents=10,
+        slots=[
+            {"harness": "claude", "account": "first", "kind": "subscription"},
+        ],
+    )
+    write_hive(
+        setup,
+        id="anton",
+        ui="no",
+        roles=["eng", "ci", "plan"],
+        max_agents=2,
+        slots=[
+            {"harness": "claude", "account": "second", "kind": "subscription"},
+        ],
+    )
+    setup.herdr._quota_accounts = [
+        Account("claude", "first", "room", 0, 80, 80, 6),
+        Account("claude", "second", "room", 1, 80, 80, 6),
+    ]
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert (selected.hive, selected.account.name, selected.fallback) == ("anton", "second", "")
+    setup.store.redis.set(f"{registry.key('anton')}:sessions", '{"eng": 2}')
+    selected = setup.launcher.select(setup.config, "eng", {"id": "task"})
+    assert (selected.hive, selected.account.name) == ("workstation", "first")
+    assert selected.fallback == "no headless hive for eng has room"
+
+
+def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision("planner", "lane", "planner")
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    assert fenced.runtime.router.placed_backend("plan", {"id": "task"}) == "hive"
+    assert fenced.placement_refusal("plan", {"id": "task"}) == ""
+    assert fenced.runtime.hive_launch.select(setup.config, "plan", {"id": "task"}).hive == "anton"
+
+
+def host(hive_id: str, ui: str, **fields) -> dict:
+    return hive(hive_id, **{"ui": ui, "roles": ["eng"] if ui == "no" else ALL_ROLES, "max_agents": 4, **fields})
+
+
+FALLBACKS = {
+    "headless with room": ([host("ws", "yes"), host("anton", "no", agents=3)], Choice("anton"), "subscription"),
+    "headless full": (
+        [host("ws", "yes"), host("anton", "no", agents=4)],
+        Choice("ws", "no headless hive for eng has room"),
+        "subscription",
+    ),
+    "no headless live": (
+        [host("ws", "yes"), host("anton", "no", heartbeat_at=0)],
+        Choice("ws", "no live headless hive takes eng"),
+        "subscription",
+    ),
+    "headless without the repo waits": (
+        [host("ws", "yes"), host("anton", "no", repos=["other"])],
+        Wait("no headless hive for eng lists the repo agentihooks"),
+        "subscription",
+    ),
+    "headless with one free place but without the slot waits": (
+        [host("ws", "yes"), host("anton", "no", agents=3, slots=[])],
+        Wait("no headless hive for eng advertises the claude slot acct"),
+        "subscription",
+    ),
+    "the fallback honours prefer among UI hives": (
+        [
+            host("ws", "yes"),
+            host("vm", "yes", agents=3, prefer={"eng": 1}),
+            host("anton", "no", agents=4),
+        ],
+        Choice("vm", "no headless hive for eng has room"),
+        "subscription",
+    ),
+    "the fallback checks the login on the UI hive": (
+        [host("ws", "yes", interactive={"claude": ""}), host("anton", "no", agents=4)],
+        Wait("no headless hive for eng has room"),
+        "interactive",
+    ),
+    "headless without the login waits": (
+        [host("ws", "yes"), host("anton", "no", interactive={"claude": ""})],
+        Wait("no headless hive for eng holds the claude login for acct"),
+        "interactive",
+    ),
+    "one full and one without the slot waits": (
+        [host("ws", "yes"), host("anton", "no", agents=4), host("pod", "no", slots=[])],
+        Wait("no headless hive for eng advertises the claude slot acct"),
+        "subscription",
+    ),
+    "full headless and a full workstation wait": (
+        [host("ws", "yes", agents=4), host("anton", "no", agents=4)],
+        Wait("no headless hive for eng has room"),
+        "subscription",
+    ),
+    "only headless": ([host("anton", "no", agents=1), host("pod", "no", agents=2)], Choice("anton"), "subscription"),
+}
+
+
+@pytest.mark.parametrize("case", FALLBACKS.values(), ids=FALLBACKS.keys())
+def test_a_non_ui_role_takes_a_ui_hive_only_when_no_headless_hive_has_room(case):
+    hives, expected, route = case
+    assert choose("eng", "claude", "acct", route, REPO, hives, NOW) == expected
+
+
+def test_a_fleet_without_a_ui_hive_keeps_the_plain_reason():
+    assert place("eng", "claude", "acct", "subscription", REPO, [host("anton", "no", agents=4)], NOW) == Wait(
+        "no hive for eng has room"
+    )
+
+
+def test_ui_roles_take_only_ui_hives_even_when_a_headless_hive_lists_them():
+    hives = [host("ws", "yes", agents=3), host("anton", "no", roles=ALL_ROLES)]
+    for role in ("qa", "frontend", "master"):
+        assert choose(role, "claude", "acct", "subscription", REPO, hives, NOW) == Choice("ws")
+    beside_a_master_pc = [host("pc", "yes", roles=["master"]), hives[1]]
+    assert choose("qa", "claude", "acct", "subscription", REPO, beside_a_master_pc, NOW) == Wait(NO_UI_HIVE)

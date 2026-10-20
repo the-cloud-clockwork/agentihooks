@@ -61,17 +61,44 @@ def server_only(read_token):
     return read
 
 
-def test_local_mode_reads_the_page_token_and_ignores_ledger_url(live):
-    env = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": WORKER, "LEDGER_URL": "https://far:1"}
+def test_explicit_local_mode_reads_the_page_token_and_ignores_ledger_url(live):
+    env = {
+        "AGENTIHOOKS_DEPLOYMENT": "local",
+        "AGENTIHOOKS_SWARM": "rig-grade-swarm",
+        "AGENTIHOOKS_AGENT_NAME": WORKER,
+        "LEDGER_URL": "https://far:1",
+    }
     with patch.dict(os.environ, env):
-        os.environ.pop("AGENTIHOOKS_DEPLOYMENT", None)
         assert ledger.credentials(SLUG) == {
             "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, WORKER),
             "X-Ledger-Agent": WORKER,
         }
         assert ledger.credentials(SLUG, service=True) == {"X-Ledger-Token": live["admin"]}
-    local = {"LEDGER_URL": "https://far:1", "LEDGER_DIR": "/elsewhere", "LEDGER_HOST": "127.0.0.1", "LEDGER_PORT": "9"}
+    local = {
+        "AGENTIHOOKS_DEPLOYMENT": "local",
+        "LEDGER_URL": "https://far:1",
+        "LEDGER_DIR": "/elsewhere",
+        "LEDGER_HOST": "127.0.0.1",
+        "LEDGER_PORT": "9",
+    }
+    assert ledger_link.remote(local) is False
+    assert ledger_link.remote({**local, "SWARM_URL": "https://swarm.example"}) is True
     assert ledger_link.base(local) == "http://127.0.0.1:9"
+
+
+def test_a_hub_address_without_a_deployment_mode_is_a_remote_client_that_never_reads_the_page_token():
+    def refuse(_slug):
+        raise AssertionError("a remote client read the page token")
+
+    hub = {key: value for key, value in REMOTE.items() if key != "AGENTIHOOKS_DEPLOYMENT"}
+    assert ledger_link.remote(hub) is True
+    assert ledger_link.remote({}) is False
+    assert ledger_link.base(hub) == "https://hub.example"
+    with patch.dict(os.environ, {**hub, "AGENTIHOOKS_LEDGER_AGENT_TOKEN": "launch-token"}):
+        os.environ.pop("AGENTIHOOKS_DEPLOYMENT", None)
+        os.environ.pop("SWARM_URL", None)
+        with patch.object(ledger.repository, "token", refuse):
+            assert ledger.credentials(SLUG) == {"X-Ledger-Token": "launch-token", "X-Ledger-Agent": WORKER}
 
 
 def test_non_local_mode_reaches_the_ledger_at_ledger_url():
@@ -128,6 +155,17 @@ def test_a_remote_client_with_a_hive_credential_joins_and_comments(live, hive):
     assert not {join["id"], say["id"]} & set(reply["rejected"])
     assert WORKER in state["_meta"]["members"]
     assert any(entry.get("text") == "Remote hello" for entry in state["chat"])
+
+
+def test_remote_swarm_state_uses_the_callers_agent_credential(live, hive):
+    from scripts.swarm.ledger_client import LedgerClient
+
+    with patch.dict(os.environ, {**REMOTE, "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": CREDENTIAL}):
+        os.environ.pop("AGENTIHOOKS_LEDGER_AGENT_TOKEN", None)
+        with patch.object(ledger.repository, "token", server_only(ledger.repository.token)):
+            ledger.request(SLUG, [{"op": "join", "id": uuid.uuid4().hex, "by": WORKER}])
+            state = LedgerClient().state(SLUG)
+    assert WORKER in state["_meta"]["members"]
 
 
 def test_a_remote_client_without_a_credential_is_refused(live, hive):

@@ -35,4 +35,17 @@ def bound(value: str | None) -> Iterator[None]:
         _current = previous
 
 
+@contextmanager
+def for_tick(store: object) -> Iterator[list[str]]:
+    from scripts.swarm_ledger.storage_migration.hosted import server_secret
+
+    value = server_secret() if os.environ.get("SWARM_URL") else None
+    with bound(value):
+        slugs = store.slugs()
+        if not value and any(store.config(slug).api_url or store.config(slug).pending_api_url for slug in slugs):
+            value = server_secret()
+        with bound(value):
+            yield slugs
+
+
 os.register_at_fork(after_in_child=_clear)

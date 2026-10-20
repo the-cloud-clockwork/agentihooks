@@ -12,7 +12,7 @@ pytestmark = pytest.mark.unit
 def setup():
     import fakeredis
 
-    from scripts.hive.orders import Consumer, LaunchOrder, Orders
+    from scripts.hive.orders import Consumer, LaunchOrder, Orders, carried
     from scripts.swarm import lease
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
     from scripts.swarm.tick import Placed
@@ -37,7 +37,7 @@ def setup():
             runtime_target={"host_id": "host"},
         ),
     )
-    redis.set("prompt", json.dumps({"id": "task", "description": "launch this task"}))
+    redis.set("prompt", json.dumps(carried("fixture", {"id": "task", "description": "launch this task"}, "opening")))
     order = LaunchOrder(
         "fixture",
         agent.execution_id,
@@ -51,6 +51,7 @@ def setup():
         "prompt",
         held.epoch,
         lease.now_ms(store) + 60000,
+        "host",
     )
     placed = Placed(
         "pane",
@@ -85,15 +86,14 @@ def test_order_ack_and_live_execution(setup):
     assert ack.status == "live"
     assert ack.failure == ""
     assert ack.target == {"host_id": "host", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
-    live = setup.store.execution("fixture", setup.agent.execution_id)
-    assert live.generation == setup.agent.generation
-    assert live.pane_id == "pane"
-    assert live.state == "working"
-    assert live.runtime_target == ack.target
+    assert setup.store.execution("fixture", setup.agent.execution_id) == setup.agent
     placed = setup.runtime.spawn.return_value.value
-    assert live.model == placed.model
-    assert live.effort == placed.effort
-    assert live.profile_decision == placed.profile_decision
+    assert ack.execution == {
+        "pane_id": placed.pane_id,
+        "model": placed.model,
+        "effort": placed.effort,
+        "profile_decision": placed.profile_decision,
+    }
     request = setup.runtime.spawn.call_args.args[0]
     assert request.name == setup.agent.name
     assert request.lane == "eng"
@@ -157,9 +157,15 @@ def test_crashed_launch_is_ambiguous_and_never_relaunched(setup):
 def test_wrong_host_cannot_admit_execution(setup):
     from scripts.hive.orders import Consumer
 
-    setup.orders.send("other", setup.order)
+    item = setup.orders.send("other", setup.order)
     Consumer(setup.redis, "other", setup.runtime).poll()
-    assert setup.orders.ack(setup.order).failure == "identity"
+    assert json.loads(setup.redis.hget(f"{setup.orders.stream('other')}:acks", item)) == {
+        "status": "failed",
+        "target": {},
+        "failure": "identity",
+    }
+    assert setup.orders.ack(setup.order) is None
+    assert not setup.redis.xrange(setup.orders.stream("other"))
     setup.runtime.spawn.assert_not_called()
 
 
@@ -456,8 +462,9 @@ def test_order_keys_isolate_hives_and_execution_receipts(setup):
     assert setup.orders.stream("other") != setup.orders.stream("host")
     assert setup.orders.receipt(replace(setup.order, slug="other")) != setup.orders.receipt(setup.order)
     assert setup.orders.store.redis is setup.redis
+    assert setup.orders.receipt(replace(setup.order, hive="other")) != setup.orders.receipt(setup.order)
     assert setup.orders.receipt(setup.order) == (
-        f"{setup.store.key('fixture', 'launch-orders')}:{setup.order.execution_id}:{setup.order.generation}"
+        f"{registry.key('host')}:launch-orders:fixture:{setup.order.execution_id}:{setup.order.generation}"
     )
 
 
@@ -523,6 +530,71 @@ def test_mismatched_admission_reports_the_identity_refusal(setup):
 
     with pytest.raises(SwarmError, match="^launch order does not match the admitted execution$"):
         setup.consumer.identity(replace(setup.order, generation=9), setup.agent)
+
+
+def _outside(redis, prefix):
+    readers = {
+        "string": redis.get,
+        "hash": redis.hgetall,
+        "list": lambda key: redis.lrange(key, 0, -1),
+        "set": redis.smembers,
+        "zset": lambda key: redis.zrange(key, 0, -1, withscores=True),
+        "stream": redis.xrange,
+    }
+    return {key: readers[redis.type(key)](key) for key in redis.keys("*") if not key.startswith(prefix)}
+
+
+def test_a_joined_hive_applies_a_launch_order_writing_only_its_own_keys(setup):
+    from scripts.hive import registry
+
+    setup.orders.send("host", setup.order)
+    before = _outside(setup.redis, registry.key("host"))
+    assert setup.consumer.poll() == 1
+    assert _outside(setup.redis, registry.key("host")) == before
+    ack = setup.orders.ack(setup.order)
+    assert ack.status == "live"
+    assert ack.target == {"host_id": "host", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    assert ack.execution == {
+        "pane_id": "pane",
+        "model": "selected-model",
+        "effort": "high",
+        "profile_decision": {"validation": {"pid": 12}},
+    }
+
+
+def test_a_joined_hive_acknowledges_an_unknown_execution_when_redis_denies_the_conflict_count(setup, monkeypatch):
+    from redis.exceptions import NoPermissionError
+
+    from scripts.hive.orders import Ack
+
+    def denied(*args, **kwargs):
+        raise NoPermissionError("No permissions to access a key")
+
+    order = replace(setup.order, execution_id="unknown")
+    setup.orders.send("host", order)
+    monkeypatch.setattr(setup.redis, "incr", denied)
+    assert setup.consumer.poll() == 1
+    assert setup.orders.ack(order) == Ack("failed", {}, "identity")
+    setup.runtime.spawn.assert_not_called()
+
+
+def test_a_refused_launch_terminates_the_placed_pane_and_process(setup):
+    placed = setup.runtime.spawn.return_value.value
+    setup.runtime.spawn.return_value = replace(setup.runtime.spawn.return_value, value=replace(placed, profile="qa"))
+    setup.orders.send("host", setup.order)
+    setup.consumer.poll()
+    stopped = setup.runtime.terminate.call_args.args[0]
+    assert stopped.runtime_target == {"host_id": "host", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    assert stopped.pane_id == "pane"
+
+
+def test_an_order_for_another_hive_does_not_hold_back_the_rest_of_the_batch(setup):
+    stray = setup.orders.send("host", replace(setup.order, hive="other"))
+    setup.orders.send("host", setup.order)
+    assert setup.consumer.poll() == 2
+    assert json.loads(setup.redis.hget(f"{setup.orders.stream('host')}:acks", stray))["failure"] == "identity"
+    assert setup.orders.ack(setup.order).status == "live"
+    assert not setup.redis.xrange(setup.orders.stream("host"))
 
 
 @pytest.mark.parametrize(

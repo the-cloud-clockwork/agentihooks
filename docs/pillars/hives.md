@@ -34,6 +34,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
 - The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`. It
   always serves TLS from `SWARM_TLS_DIR`.
 - Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys.
+  A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
+  records the execution as working, with the hive's process target, pane, model and effort.
   Invites and credentials sit outside what a member can read.
 - `hive install` writes and enables the `agentihooks-hive` user service, which runs `hive run` and restarts five
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
@@ -85,6 +87,14 @@ login. Each step that empties the list names its reason, and the launch waits wi
 
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
+
+`eng`, `ci` and `plan` run on headless hives. When a UI hive also takes one of them, placement tries the headless
+hives first and takes the UI hive only when no headless hive taking the role has room or none is live. A headless
+hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The agent record
+carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI hive records the
+pin as its reason. UI roles take only UI hives; the master
+keeps its headless fallback below. The engineer, cicd and planner
+profiles place as `eng`, `ci` and `plan`; a frontend or qa profile on any lane places as its UI role.
 
 When no live hive takes the role:
 

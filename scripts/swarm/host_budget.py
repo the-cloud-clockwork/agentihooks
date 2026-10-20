@@ -71,7 +71,11 @@ def spawn_room(config: SwarmConfig, sample: HostSample | Room | None, previous: 
 def memory_room(sample: HostSample, thresholds: Thresholds) -> int:
     if swap_full(sample, thresholds):
         return 0
-    return max(0, (sample.available_mb - sample.swap_used_mb) // per_agent_mb(sample, thresholds))
+    return max(0, (sample.available_mb - counted_swap_mb(sample, thresholds)) // per_agent_mb(sample, thresholds))
+
+
+def counted_swap_mb(sample: HostSample, thresholds: Thresholds) -> int:
+    return 0 if swap_above_share(sample, thresholds) else sample.swap_used_mb
 
 
 def swap_above_share(sample: HostSample, thresholds: Thresholds) -> bool:
@@ -97,22 +101,22 @@ def memory_text(sample: HostSample, thresholds: Thresholds, memory: int) -> str:
             "no memory room"
         )
     stale = ""
+    supply = (
+        f"{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB swap in use"
+    )
     if swap_above_share(sample, thresholds):
         stale = (
             f"{swap} but {sample.available_mb} MB available memory is at or above the {thresholds.swap_floor_mb} MB "
             "floor, so the swap reads stale; "
         )
+        supply = f"{sample.available_mb} MB available memory"
     figure = "the configured figure"
     if sample.measured_agents:
         figure = (
             f"the larger of {sample.agent_mb} MB measured over {sample.measured_agents} Claude agent trees "
             f"and the configured {thresholds.memory_per_agent_mb} MB"
         )
-    return (
-        f"{stale}{sample.available_mb} MB available memory less {sample.swap_used_mb} of {sample.swap_total_mb} MB "
-        f"swap in use fits {memory} "
-        f"at {per_agent_mb(sample, thresholds)} MB each, {figure}"
-    )
+    return f"{stale}{supply} fits {memory} at {per_agent_mb(sample, thresholds)} MB each, {figure}"
 
 
 def load_room(sample: HostSample, thresholds: Thresholds) -> int | None:

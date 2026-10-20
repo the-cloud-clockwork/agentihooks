@@ -151,12 +151,17 @@ def changes(before: dict, after: dict) -> dict:
 
 
 def write_rows(connection, slug: str, before: dict, after: dict) -> None:
+    deletes, upserts = {}, {}
     for path, row in changes(before, after).items():
         old = before.get(path)
         if old and (row is None or old[0] != row[0]):
-            connection.execute(f"DELETE FROM {old[0]} WHERE slug=? AND path=?", (slug, path))
+            deletes.setdefault(old[0], []).append((slug, path))
         if row is not None:
-            connection.execute(
-                f"INSERT INTO {row[0]} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
-                (slug, path, *row[1:]),
-            )
+            upserts.setdefault(row[0], []).append((slug, path, *row[1:]))
+    for table, rows in deletes.items():
+        connection.executemany(f"DELETE FROM {table} WHERE slug=? AND path=?", rows)
+    for table, rows in upserts.items():
+        connection.executemany(
+            f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
+            rows,
+        )

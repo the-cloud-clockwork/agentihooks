@@ -69,6 +69,10 @@ def ledger_get(handler: object, services: Services, slug: str, path: str) -> dic
 
 
 def ledger_read(services: Services, slug: str, path: str, query: dict) -> dict:
+    if path == "controller-lease":
+        from . import controller_lease
+
+        return controller_lease.read(slug)
     if path.split("/")[0] == "hierarchy":
         return resources.hierarchy_read(services.repository, slug, path, query)
     if path == "architecture":
@@ -155,6 +159,10 @@ def ledger_operation(handler: object, services: Services, slug: str, path: str, 
     if handler.command == "PUT" and path in PAGE_WRITES:
         return getattr(handler, PAGE_WRITES[path])(slug)
     payload = body(handler, services)
+    if path == "controller-lease/actions":
+        from . import controller_lease
+
+        return controller_lease.act(slug, principal, payload)
     if path == "lifecycle/actions":
         return admin.lifecycle(services, principal, slug, payload)
     if path == "swarm/actions":

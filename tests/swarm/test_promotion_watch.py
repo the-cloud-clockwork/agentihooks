@@ -788,3 +788,133 @@ def test_an_open_outage_task_holds_a_later_outage_and_a_green_run_closes_it(stor
     assert len(ledger.raised) == 1
     refresh(store, ledger, gh([{**GREEN, "id": 903}]), NOW * 3)
     assert ledger.tasks[0]["state"] == "done"
+
+
+UPLOADED = [*RAN, {"name": "Upload durations", "conclusion": "failure"}]
+LOST_SHARDS = [
+    "unit (3.11, 1)",
+    "unit (3.11, 4)",
+    "unit (3.11, 5)",
+    "unit (3.12, 4)",
+    "unit (3.12, 9)",
+]
+CONSUMERS = [
+    (
+        "sonar",
+        [
+            {"name": "Wait for the coverage merge", "conclusion": "failure"},
+            {"name": "Hold the Delivery L2 conditions", "conclusion": "failure"},
+        ],
+        ["Process completed with exit code 2.", "Missing coverage for shard 1"],
+    ),
+    (
+        "shard-check (3.12)",
+        [{"name": "Check every collected test ran in exactly one shard", "conclusion": "failure"}],
+        ["27833 collected tests did not run in exactly one of 3 shards."],
+    ),
+    (
+        "shard-check (3.11)",
+        [
+            {"name": "Check every collected test ran in exactly one shard", "conclusion": "failure"},
+            {"name": "Summarize reused, ran and flaky tests", "conclusion": "failure"},
+        ],
+        [
+            "Process completed with exit code 2.",
+            "No shard durations at shard-durations/*/durations.json, so those shards cannot be graded.",
+        ],
+    ),
+    ("refresh-durations", [{"name": "Refresh measured durations", "conclusion": "failure"}], []),
+]
+FAILED_TESTS = [*RAN[:1], {"name": "Run tests", "conclusion": "failure"}]
+
+
+def recorded_outage(extra=()):
+    shards = [(name, UPLOADED, DOWNLOAD) for name in LOST_SHARDS]
+    return [*shards, ("unit (3.12, 10)", FAILED_TESTS, []), *CONSUMERS, *extra]
+
+
+def test_jobs_that_failed_for_want_of_lost_unit_shard_output_join_the_outage_task(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run(recorded_outage()))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: unit (3.12, 10)",
+    ]
+    description = ledger.added[0][1]["description"]
+    assert f"the jobs {', '.join(LOST_SHARDS)} lost their runner infrastructure" in description
+    assert (
+        "the jobs refresh-durations, shard-check (3.11), shard-check (3.12), sonar failed for want of their unit shard "
+        "output" in description
+    )
+    assert "unit (3.12, 10)" not in description
+    assert len(ledger.raised) == 1
+
+
+def test_a_job_outside_the_shard_output_consumers_beside_an_outage_files_its_own_fixer(store):
+    ledger = Ledger()
+    lint = ("lint", [{"name": "Run ruff", "conclusion": "failure"}], ["F401 unused import"])
+    refresh(store, ledger, outage_run(recorded_outage([lint])))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: lint",
+        "Promotion red: unit (3.12, 10)",
+    ]
+    assert "lint" not in ledger.added[0][1]["description"]
+
+
+def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its_runner(store):
+    ledger = Ledger()
+    found = [("docs", RAN, DOWNLOAD), ("unit (3.12, 10)", FAILED_TESTS, []), *CONSUMERS[:1]]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: sonar",
+        "Promotion red: unit (3.12, 10)",
+    ]
+
+
+@pytest.mark.parametrize(
+    "consumer",
+    ["coverage-ratchet", "coverage-baseline", "flake-budget", "stage-budget", "sonar (3.12)", "refresh-durations"],
+)
+def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer):
+    ledger = Ledger()
+    found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], [])]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    assert ledger.added[0][1]["description"].endswith(
+        f"lost their runner infrastructure (Failed to resolve action download info); the jobs {consumer} failed for "
+        "want of their unit shard output. No code change is due; the swarm closes this task when a later dev push run "
+        "passes."
+    )
+
+
+def test_a_job_that_only_starts_like_a_unit_shard_does_not_starve_its_consumers(store):
+    ledger = Ledger()
+    found = [("unit-selected (3.12)", RAN, DOWNLOAD), *CONSUMERS[:1]]
+    refresh(store, ledger, outage_run(found))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: sonar",
+    ]
+
+
+def test_a_consumer_that_lost_its_own_runner_is_named_once_among_the_lost_jobs(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("sonar", RAN, DOWNLOAD), ("unit (3.12, 1)", RAN, DOWNLOAD)]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    description = ledger.added[0][1]["description"]
+    assert "the jobs sonar, unit (3.12, 1) lost their runner infrastructure" in description
+    assert "unit shard output" not in description
+
+
+@pytest.mark.parametrize(("lost", "failed"), [("unit smoke (3.12)", "sonar"), ("unit (3.12, 1)", "sonar report")])
+def test_only_the_job_name_before_its_matrix_marks_a_unit_shard_or_a_consumer(store, lost, failed):
+    ledger = Ledger()
+    refresh(
+        store, ledger, outage_run([(lost, RAN, DOWNLOAD), (failed, [{"name": "Grade", "conclusion": "failure"}], [])])
+    )
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        f"Promotion red: {failed}",
+    ]

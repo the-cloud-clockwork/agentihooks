@@ -1,3 +1,4 @@
+import hashlib
 import json
 from dataclasses import replace
 from types import SimpleNamespace
@@ -37,6 +38,7 @@ def setup():
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
+    launcher.opening = lambda request: f"opening for {request.name}"
     return SimpleNamespace(store=store, config=config, held=held, hive=hive, herdr=herdr, launcher=launcher)
 
 
@@ -119,10 +121,24 @@ def test_publishes_fenced_order_after_host_admission(setup):
     assert outcome.value.execution.state == "working"
     assert runtime.spawn.call_count == 1
     order = setup.launcher.orders_for(task["id"])
-    assert orders.ack(order) == Ack("live", outcome.value.execution.runtime_target)
+    assert orders.ack(order) == Ack(
+        "live",
+        outcome.value.execution.runtime_target,
+        "",
+        {
+            "pane_id": "pane",
+            "model": "selected-model",
+            "effort": "high",
+            "profile_decision": {"validation": {"pid": 12}},
+        },
+    )
+    assert order.hive == "remote"
     assert json.loads(store.redis.get(order.prompt_ref)) == {
         **task,
         "profile_decision": setup.herdr._profile_decision.return_value.record(),
+        "hive_opening": f"opening for {name}",
+        "hive_opening_digest": hashlib.sha256(f"opening for {name}".encode()).hexdigest(),
+        "hive_seeds": {},
     }
     assert order.prompt_ref == store.key(slug, f"launch-prompt:{order.execution_id}")
     assert 0 < store.redis.pttl(order.prompt_ref) <= 300000
@@ -208,7 +224,13 @@ def request_for(setup, name=None, lane="eng", route="subscription"):
         setup.config,
         lane,
         name,
-        {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch, "route_kind": route},
+        {
+            "id": "task",
+            "title": "Launch on a hive",
+            "seat": record.seat,
+            "controller_epoch": setup.held.epoch,
+            "route_kind": route,
+        },
     )
 
 
@@ -229,6 +251,7 @@ def order_for(setup, request, selected):
         "prompt",
         setup.held.epoch,
         0,
+        selected.hive,
     )
 
 
@@ -390,7 +413,7 @@ def write_hive(setup, **changes):
 
 
 def live_order(setup, route="subscription"):
-    from scripts.hive.orders import Consumer
+    from scripts.hive.orders import Consumer, carried
     from scripts.swarm import lease
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -400,7 +423,7 @@ def live_order(setup, route="subscription"):
     request = request_for(setup, route=route)
     selected = setup.launcher.select(setup.config, "eng", request.task)
     order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
-    setup.store.redis.set("prompt", json.dumps(request.task))
+    setup.store.redis.set("prompt", json.dumps(carried("fixture", request.task, "opening")))
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
     runtime = Mock()
@@ -433,8 +456,8 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     _, order, ack = live_order(setup, route)
-    live = setup.store.execution_registry.get("fixture", order.execution_id)
     result = setup.launcher.complete(order, ack)
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
     assert result == Outcome(
         "spawn",
         Status.OK,
@@ -453,7 +476,9 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     )
 
 
-@pytest.mark.parametrize("bad", ["target", "generation", "state", "missing occupant", "replaced occupant"])
+@pytest.mark.parametrize(
+    "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
+)
 def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad):
     from unittest.mock import patch
 
@@ -463,11 +488,17 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     live = setup.store.execution_registry.get("fixture", order.execution_id)
     current = setup.store.execution_occupants("fixture")
     if bad == "target":
+        setup.launcher.complete(order, ack)
         ack = replace(ack, target={**ack.target, "pid": 99})
+    elif bad == "pane":
+        setup.launcher.complete(order, ack)
+        ack = replace(ack, execution={**ack.execution, "pane_id": "other"})
+    elif bad == "host":
+        ack = replace(ack, target={**ack.target, "host_id": "elsewhere"})
     elif bad == "generation":
         order = replace(order, generation=order.generation + 1)
     elif bad == "state":
-        setup.store.execution_registry.update("fixture", replace(live, state="launching"))
+        setup.store.execution_registry.update("fixture", replace(live, state="suspect"))
     elif bad == "missing occupant":
         current = {}
     else:
@@ -802,6 +833,19 @@ def test_old_controller_cannot_admit_after_lease_takeover(setup):
         setup.launcher.admit(request, selected)
 
 
+def test_old_controller_cannot_record_an_acknowledgement_after_lease_takeover(setup):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    admitted = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert lease.release(setup.store, "fixture", setup.held)
+    lease.acquire(setup.store, "fixture", "next controller")
+    with pytest.raises(SwarmError):
+        setup.launcher.record(admitted, order, ack)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
 @pytest.mark.parametrize("lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("eng", "frontend")])
 def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lane, profile):
     from scripts.hive.orders import Consumer
@@ -1099,3 +1143,45 @@ def test_unsupported_harness_wait_records_its_lane(setup):
     config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
     assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("Codex hive placement is not enabled")
     assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
+
+
+def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
+    target = {"host_id": "remote", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    metadata = {"pane_id": "pane", "model": "selected-model", "effort": "high", "profile_decision": {"pid": 12}}
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", target, "", metadata))
+    result = setup.launcher.wait(order)
+    assert result.ok
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert live.state == "working"
+    assert live.runtime_target == target
+    assert (live.pane_id, live.model, live.effort) == ("pane", "selected-model", "high")
+    assert live.profile_decision == {"pid": 12}
+    assert result.value.execution == live
+
+
+def test_an_acknowledgement_without_metadata_keeps_the_admitted_fields(setup):
+    from scripts.hive.orders import Ack
+
+    _, order, ack = live_order(setup)
+    admitted = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert setup.launcher.complete(order, Ack("live", ack.target)).ok
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert live == replace(admitted, runtime_target=ack.target, state="working", profile_decision={})
+
+
+def test_a_malformed_profile_decision_is_refused_before_recording(setup):
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    with pytest.raises(SwarmError) as error:
+        setup.launcher.complete(order, replace(ack, execution={**ack.execution, "profile_decision": []}))
+    assert str(error.value) == "hive launch acknowledgement does not match the live execution"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
