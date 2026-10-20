@@ -89,20 +89,25 @@ def _truncate(path: Path) -> None:
     path.write_bytes(data[: len(data) // 2])
 
 
-def test_a_malformed_dev_coverage_drops_the_reuse_plan_so_the_shard_runs_its_tests(tmp_path, monkeypatch, capsys):
+def test_a_malformed_dev_coverage_fails_without_changing_the_shared_reuse_plan(tmp_path, monkeypatch, capsys):
     source = tmp_path / "dev.coverage"
     _record(source, {"tests/test_a.py::one|run": {"hooks/a.py": [(-1, 2), (2, -1)]}})
     _truncate(source)
     reused = tmp_path / "reused.json"
-    reused.write_text(json.dumps({"tests": ["tests/test_a.py::one"], "files": []}))
+    plan = json.dumps({"tests": ["tests/test_a.py::one"], "files": []})
+    reused.write_text(plan)
     monkeypatch.setenv("ARTIFACT", "coverage-3.12-9")
     args = ["--coverage", str(source), "--commit", "HEAD", "--reused", str(reused), "--repo", str(ROOT)]
     args += ["--captures", str(tmp_path / "none"), "--captures-out", str(tmp_path / "js")]
-    assert reused_coverage.main([*args, "--out", str(tmp_path / "out" / ".coverage")]) == 0
-    assert not reused.exists()
+    status = reused_coverage.main([*args, "--out", str(tmp_path / "out" / ".coverage")])
+    output = capsys.readouterr().out
+    assert status == 1
+    assert reused.read_text() == plan
     assert not (tmp_path / "out" / ".coverage").exists()
-    warnings = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning::")]
-    assert len(warnings) == 1 and "coverage-3.12-9" in warnings[0]
+    errors = [line for line in output.splitlines() if line.startswith("::error::")]
+    assert len(errors) == 1
+    assert "coverage-3.12-9 from HEAD is unusable (" in errors[0]
+    assert "database" in errors[0]
 
 
 def test_the_check_names_a_truncated_or_tableless_database_and_passes_a_recorded_one(tmp_path):
