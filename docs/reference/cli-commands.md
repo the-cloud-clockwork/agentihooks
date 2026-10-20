@@ -607,7 +607,7 @@ agentihooks scratch rm <task-dir>       # safe replacement for rm -rf "$dir": re
 A path is actionable only when it is **unused** and **removing it loses nothing**:
 
 - Unused: no live process has its cwd inside it, no lease holder is alive (pid + `/proc` start time + `boot_id`, or a live session file with the same `sessionId` and matching `procStart`), nothing in it changed recently (except a clean pushed worktree whose lease holders are all gone), and the machine has been up at least 2 h.
-- Worktrees: clean and reachable from a remote after 2 h idle (`remove`), or at once when its lease names holders and none is alive; dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first). Primary checkouts, `dev`/`main`/`master`, git-locked worktrees and any merge/rebase in progress are never touched.
+- Worktrees: clean and reachable from a remote after 2 h idle (`remove`), or at once when its lease names holders and none is alive; dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first), or removed without a push when its primary checkout sits in the same scratch root; any worktree untouched `WT_STALE_DAYS` days (7), whatever holds it except a protected branch or a live owner. Primary checkouts, `dev`/`main`/`master`, git-locked worktrees and any merge/rebase in progress are never touched.
 - Scratch task dirs (`~/scratchpad/<repo>/<task>`): idle past the root's `idle_days`, then the oldest dead dirs while the root is over `budget_gb`. A `.keep` file pins a dir; files at depth ≤ 2 are never touched.
 - Injection traces (`~/.agentihooks/injections/<session>.jsonl`): removed once the session is no longer live and the trace was last written more than `AGENTIHOOKS_TRACE_KEEP_DAYS` ago (default: the root's `idle_days`, 14). Liveness is checked again right before removal.
 - An action is `due` only after two sweeps at least 1 h apart in the same boot, except removal of a clean pushed worktree whose owner left, which is due on first sight. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
@@ -624,6 +624,8 @@ Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in
 
 Each worktree gets the first verdict that applies, checked top to bottom. The reason is the text `gc` prints in parentheses after the path.
 
+A worktree untouched for `WT_STALE_DAYS` days (default 7) loses every `keep` and `skip` below except the primary checkout, a protected branch and a live lease holder: it is removed, pushed to `wip/` first when it holds uncommitted or unpushed work, with the reason `untouched over <days> days though <the hold it overrode>`.
+
 | Condition | Action | Reason | Due |
 |---|---|---|---|
 | The repository's primary checkout | `keep` | `primary checkout` | never |
@@ -638,6 +640,7 @@ Each worktree gets the first verdict that applies, checked top to bottom. The re
 | Clean, head on a remote, lease names holders and none is alive | `remove` | `clean and on a remote, owner left` | on first sight |
 | Clean, head on a remote, no lease or a lease with no holders, idle 2 h | `remove` | `clean and on a remote` | after confirmation |
 | Clean, head on a remote, no holders, idle under 2 h | `keep` | `clean, recent` | never |
+| Uncommitted changes or a head on no remote, idle 24 h, the primary checkout inside the same scratch root | `remove` | `unique work in a scratch repository, owner gone` | after confirmation |
 | Uncommitted changes or a head on no remote, idle 24 h | `snapshot` | `unique work, owner gone: push to wip/ then remove` | after confirmation |
 | Uncommitted changes or a head on no remote, idle under 24 h | `keep` | `unique work, recent` | never |
 
@@ -645,7 +648,7 @@ Clean means `git status --porcelain` lists nothing, untracked files included. He
 
 The owner left verdict ignores idle time and confirmation. `wt.sh new` and `agentihooks lease <worktree>` record the calling agent session as a holder when one is found among the parent processes, and every tool call that names a path inside the worktree adds its session. Once each of those sessions has ended, a clean pushed worktree goes at the next `gc --enforce`, usually within the hour. The process, live holder and boot grace checks above still come first, and `--enforce` repeats them against a fresh process snapshot before it removes anything. A worktree nobody leased becomes due once it has been idle 2 h and two sweeps at least 1 h apart have seen it so, and the verdict never applies to unpushed or uncommitted work.
 
-A repository at the `WT_MAX_PER_REPO` cap (60) refuses `wt.sh new`. To free it:
+When the repository is at the `WT_MAX_PER_REPO` cap (60) or free space is below `WT_MIN_FREE_GB` (50), `wt.sh new` and `wt.sh tmp` first run `agentihooks gc --make-room <repo> --root <worktree root> --min-free-gb <floor> --max-per-repo <cap>`. It evicts the oldest worktrees not held by the primary checkout, a protected branch, a git operation, a process inside or a live lease holder: clean pushed ones are removed, unique work is pushed to `wip/` and then removed, and one whose push fails is kept. The cap evicts only that repository's worktrees; the floor evicts from every repository under the root. `wt.sh` refuses only when nothing safe is left. To free a repository by hand:
 
 ```bash
 agentihooks gc --path ~/dev/worktrees/agentihooks          # report; owner left removals print as due
