@@ -76,7 +76,11 @@ CONTROLLER = (
 )
 
 
-@pytest.mark.parametrize("reruns", [[], ["--reruns", "2"]], ids=["no-reruns", "reruns"])
+@pytest.mark.parametrize(
+    "reruns",
+    [[], ["--reruns", "2"], ["--reruns", "2", "-p", "tests.flake_ledger"]],
+    ids=["no-reruns", "reruns", "flake-ledger"],
+)
 def test_a_run_whose_last_test_crashes_its_worker_ends(tmp_path, reruns):
     project = tmp_path / "project"
     project.mkdir()
@@ -87,6 +91,7 @@ def test_a_run_whose_last_test_crashes_its_worker_ends(tmp_path, reruns):
     command += ["--cov=.", "--cov-report=", "--cov-context=test", f"--basetemp={tmp_path / 'base' / 'b' / 'b'}"]
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_", "PYTEST_"))}
     env["PYTHONPATH"] = str(ROOT)
+    env["CI_FLAKES"] = str(tmp_path / "flakes.jsonl")
     process = subprocess.Popen(
         command,
         cwd=project,
@@ -107,7 +112,7 @@ def test_a_run_whose_last_test_crashes_its_worker_ends(tmp_path, reruns):
         os.killpg(process.pid, signal.SIGKILL)
         output = f"timed out\n{processes.stdout}\n" + process.communicate()[0]
     assert "replacing crashed worker" in output, output
-    assert "crashed while running 'test_cases.py::test_crash'" in output, output
+    assert "node down: Not properly terminated" in output, output
     assert not re.findall(r"^\[gw\d+\] .*\bERROR\b", output, re.M), output
     assert len(set(re.findall(r"^\[gw\d+\] .*\bPASSED (test_cases.py::test_ok\[\d+\])", output, re.M))) == 60, output
     data = coverage.CoverageData(str(project / ".coverage"))
