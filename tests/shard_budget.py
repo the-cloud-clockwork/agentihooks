@@ -9,7 +9,7 @@ STEPS = {"unit": "Run tests", "unit-selected": "Run the selected tests"}
 
 def step_seconds(job: str) -> int:
     block = WORKFLOW.read_text().split(f"\n  {job}:\n", 1)[1]
-    step = block.split(f"- name: {STEPS[job]}\n", 1)[1]
+    step = block.split(f"- name: {STEPS[job]}\n", 1)[1].split("\n      - ", 1)[0]
     return int(re.search(r"^ +timeout-minutes: (\d+)$", step, re.MULTILINE)[1]) * 60
 
 
