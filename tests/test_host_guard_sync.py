@@ -157,8 +157,10 @@ def test_the_live_home_is_the_account_home(tmp_path, monkeypatch):
 
 
 def test_reconcile_leaves_a_home_without_a_guard_alone(tmp_path, calls):
-    assert sync.reconcile(tmp_path) == "[--] Host guard not installed; agentihooks host-guard install adds it"
-    assert list(tmp_path.iterdir()) == []
+    home = tmp_path / "bare"
+    home.mkdir()
+    assert sync.reconcile(home) == "[--] Host guard not installed; agentihooks host-guard install adds it"
+    assert list(home.iterdir()) == []
 
 
 def test_reconcile_brings_an_installed_guard_back_to_the_repository(tmp_path, calls):
