@@ -961,9 +961,7 @@ def test_claude_render_creates_the_shared_folders_a_fresh_home_lacks(world):
     from scripts.profiles import render
 
     shared = world["home"] / ".claude"
-    for name in ("projects", "sessions", "todos"):
-        if (shared / name).exists():
-            shutil.rmtree(shared / name)
+    shutil.rmtree(shared, ignore_errors=True)
     out = render.render_claude("rb-role")
     for name in ("projects", "sessions", "todos"):
         assert (shared / name).is_dir()
