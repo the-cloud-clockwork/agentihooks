@@ -109,6 +109,27 @@ def test_refresh_rewrites_the_ledger_ca_in_the_hive_home(tmp_path, monkeypatch, 
     assert (tmp_path / "ledger-ca.pem").read_text() == pem
 
 
+def test_refresh_writes_the_ledger_ca_to_the_file_its_own_environment_names(tmp_path, monkeypatch, pem):
+    _granted(monkeypatch, tmp_path, ledger_ca=pem)
+    environ = {"AGENTIHOOKS_HIVE_URL": "https://hive.example", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "led"}
+    environ["LEDGER_CA_FILE"] = str(tmp_path / "named.pem")
+
+    assert cli.refresh_env(environ) == "ab12"
+
+    assert (tmp_path / "named.pem").read_text() == pem
+    assert not (tmp_path / "ledger-ca.pem").exists()
+
+
+def test_place_creates_the_given_home_whatever_the_environment_names(tmp_path, pem):
+    home = tmp_path / "fresh" / "home"
+
+    assert ledger_ca.place(home, pem, {"AGENTIHOOKS_HOME": str(tmp_path / "elsewhere")}) == home / "ledger-ca.pem"
+
+    assert (home / "ledger-ca.pem").read_text() == pem
+    assert sorted(path.name for path in home.iterdir()) == ["ledger-ca.pem"]
+    assert not (tmp_path / "elsewhere").exists()
+
+
 def test_served_reads_the_ca_pem_then_the_ca_file(tmp_path, pem):
     (tmp_path / "ledger-ca.pem").write_text(pem)
 

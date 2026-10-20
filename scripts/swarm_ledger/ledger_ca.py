@@ -43,7 +43,9 @@ def served(environ=os.environ) -> str | None:
     pem = environ.get(ledger_link.CA_ENV, "")
     if not pem.strip():
         found = ledger_link.ca_file(environ)
-        pem = found.read_text() if found.is_file() else ""
+        if not found.is_file():
+            return None
+        pem = found.read_text()
     return pem if certificate(pem) else None
 
 
