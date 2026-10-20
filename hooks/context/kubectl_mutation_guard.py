@@ -368,8 +368,11 @@ _OTEL_KUBECTL_MUTATION = "agentihooks.guardrail.kubectl_mutation_detected"
 
 def _exec_allowlist_entries() -> list[str]:
     """Parse KUBECTL_MUTATION_GUARD_EXEC_ALLOW: comma-separated `namespace/pod-glob` entries."""
-    raw = os.environ.get("KUBECTL_MUTATION_GUARD_EXEC_ALLOW", "")
-    return [entry.strip() for entry in raw.split(",") if entry.strip() and "/" in entry.strip()]
+    raw = os.environ.get("KUBECTL_MUTATION_GUARD_EXEC_ALLOW")
+    if not raw:
+        return []
+    entries = (entry.strip() for entry in raw.split(","))
+    return [entry for entry in entries if "/" in entry]
 
 
 def _target_allowlisted(namespace: Optional[str], pod: Optional[str]) -> bool:
@@ -380,54 +383,45 @@ def _target_allowlisted(namespace: Optional[str], pod: Optional[str]) -> bool:
     return any(fnmatch.fnmatch(candidate, entry) for entry in _exec_allowlist_entries())
 
 
+_VALUE_FLAGS = ("-n", "--namespace", "-c", "--container")
+
+
+def _kubectl_positionals(args: str) -> tuple[Optional[str], list[str]]:
+    """Split kubectl arguments into the namespace flag value and the positional arguments."""
+    try:
+        tokens = shlex.split(args)
+    except ValueError:
+        return None, []
+    namespace: Optional[str] = None
+    positional: list[str] = []
+    remaining = iter(tokens)
+    for tok in remaining:
+        flag, sep, value = tok.partition("=")
+        if flag in _VALUE_FLAGS:
+            value = value if sep else next(remaining, "")
+            if flag in ("-n", "--namespace"):
+                namespace = value
+        elif not tok.startswith("-"):
+            positional.append(tok)
+    return namespace, positional
+
+
 def _parse_kubectl_target(args: str) -> tuple[Optional[str], Optional[str]]:
     """Extract (namespace, pod) from the flags+target text before `--` in a kubectl exec command."""
-    try:
-        tokens = shlex.split(args.strip())
-    except ValueError:
-        return None, None
-    namespace: Optional[str] = None
-    pod: Optional[str] = None
-    i = 0
-    while i < len(tokens):
-        tok = tokens[i]
-        if tok in ("-n", "--namespace"):
-            if i + 1 < len(tokens):
-                namespace = tokens[i + 1]
-            i += 2
-            continue
-        if tok.startswith("--namespace="):
-            namespace = tok.split("=", 1)[1]
-        elif tok.startswith("-n=") and len(tok) > 3:
-            namespace = tok.split("=", 1)[1]
-        elif tok in ("-c", "--container"):
-            i += 2
-            continue
-        elif not tok.startswith("-") and pod is None:
-            pod = tok.rsplit("/", 1)[-1]
-        i += 1
-    return namespace, pod
+    namespace, positional = _kubectl_positionals(args)
+    if not positional:
+        return namespace, None
+    return namespace, positional[0].rpartition("/")[2]
 
 
 def _cp_dest_target(cmd_args: str) -> tuple[Optional[str], Optional[str]]:
     """Extract (namespace, pod) of the destination side of a `kubectl cp` INTO a pod."""
-    try:
-        tokens = shlex.split(cmd_args.strip())
-    except ValueError:
-        return None, None
-    positional = [t for t in tokens if not t.startswith("-")]
+    namespace, positional = _kubectl_positionals(cmd_args)
     if len(positional) < 2:
-        return None, None
-    dst = positional[1]
-    if ":" not in dst:
-        return None, None
-    remote, _, _ = dst.partition(":")
-    if not remote or remote.startswith("/") or remote.startswith("."):
-        return None, None
-    if "/" in remote:
-        namespace, pod = remote.split("/", 1)
-        return namespace, pod
-    return None, remote
+        return namespace, None
+    remote = positional[1].partition(":")[0]
+    dest_namespace, _, pod = remote.rpartition("/")
+    return dest_namespace or namespace, pod
 
 
 def _violation_or_allow(rule: str, description: str, namespace: Optional[str], pod: Optional[str]) -> Optional[str]:
@@ -437,10 +431,20 @@ def _violation_or_allow(rule: str, description: str, namespace: Optional[str], p
 
         otel.emit_event(
             _OTEL_KUBECTL_MUTATION,
-            {"rule": rule, "namespace": namespace or "", "pod": pod or "", "action": "allow", "allowlisted": True},
+            {"rule": rule, "namespace": namespace or "", "pod": pod, "action": "allow", "allowlisted": True},
         )
         return None
     return _violation(rule, description)
+
+
+def _controls_disabled(session_id: str) -> bool:
+    """True when the operator has disabled controls for this session (bypass mode)."""
+    try:
+        from hooks.context.controls_toggle import is_controls_disabled
+
+        return is_controls_disabled(session_id)
+    except Exception:
+        return False
 
 
 def check_kubectl_mutation_command(command: str) -> Optional[str]:
@@ -487,7 +491,7 @@ def check_kubectl_mutation_command(command: str) -> Optional[str]:
                                 pod,
                             )
                     continue
-                return _violation_or_allow(rule, description or f"kubectl exec mutation ({rule})", namespace, pod)
+                return _violation_or_allow(rule, description, namespace, pod)
 
     # 3. kubectl cp direction (run on stripped — positional paths don't
     # carry quotes legitimately, and stripping suppresses text mentions)
@@ -545,15 +549,7 @@ def check_kubectl_mutation(payload: dict) -> None:
     from hooks.hook_manager import BlockAction
 
     session_id = payload.get("session_id", "")
-    bypass = False
-    try:
-        from hooks.context.controls_toggle import is_controls_disabled
-
-        bypass = is_controls_disabled(session_id)
-    except Exception:
-        bypass = False
-
-    if bypass:
+    if _controls_disabled(session_id):
         try:
             from hooks.observability import otel
 
