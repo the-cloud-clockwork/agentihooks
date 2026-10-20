@@ -138,10 +138,13 @@ The count is `1` when adoption is recorded. Redis rebuilds the ACL from its temp
 
 ```bash
 cd "${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/swarm-stack"
-docker compose ps
-docker compose logs --tail 50 swarm controller redis
-docker compose down
+project="$(sed -n 's/^SWARM_COMPOSE_PROJECT=//p' .env)"
+docker compose --project-name "${project:-agentihooks-swarm}" ps
+docker compose --project-name "${project:-agentihooks-swarm}" logs --tail 50 swarm controller redis
+docker compose --project-name "${project:-agentihooks-swarm}" down
 ```
+
+The packaged `compose.yaml` declares no project name, so pass `--project-name`; a plain `docker compose` in that folder looks for a project named `swarm-stack` and finds nothing.
 
 A failed run exits 1 and names the dependency that failed, its fix and, for a service, the command that shows its logs. When a service fails, the last ten lines Docker Compose printed come first:
 
