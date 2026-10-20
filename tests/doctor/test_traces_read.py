@@ -503,7 +503,7 @@ def test_reads_reach_langfuse_through_the_internal_ingress_while_the_public_tunn
     assert traces_read.client(env)("traces", {"page": 1}) == {"data": []}
     [request] = sent
     assert str(request.url) == "https://10.10.30.200/api/public/traces?page=1"
-    assert request.headers["Host"] == "langfuse.homeofanton.com"
+    assert (b"Host", b"langfuse.homeofanton.com") in request.headers.raw
     assert request.extensions["sni_hostname"] == "langfuse.homeofanton.com"
     assert request.headers["Authorization"] == "Basic cGs6c2s="
     assert request.extensions["timeout"]["read"] == traces_read.Budget.request_seconds
