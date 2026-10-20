@@ -19,12 +19,15 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [CLI Commands](cli-commands.md) | All `agentihooks` subcommands and flags: init, uninstall, claude, ignore |
 | [Developer account login](account-login.md) | Claude and Codex login, managed shell tokens, OpenBao paths and key names, refresh authority and token stores |
 | [Task scope authorizations](../pillars/swarm.md#task-scope-authorizations) | Record master or operator scope, retrace a plan, interpret authorized pieces and configure enforcement |
+| [Master inbox intent grouping](../pillars/swarm.md#intent-grouping) | Settings, how a pooled item is matched to a master, token cost per item, fallbacks to round robin, Redis keys and troubleshooting |
 | [Decision classifier](classifier.md) | `hooks.classifier`: typed questions to the LiteLLM decision models, failover, down cache, decision log, `classify` and `classifier stats` |
 | [Observability with Langfuse](observability-langfuse.md) | Every telemetry path and where it goes, turning Langfuse on per profile, other OTLP backends, checking a trace arrived, how the Doctor reads traces |
 | [Presentation layer architecture](presentation-layer.md) | The ledger pages, HOME and BIN as a product: constraints, today's architecture, limits, target (static pages, `/api/v1`, server-sent events, SQLite behind a repository) and the migration order |
 | [Ledger watcher replay verification](watch-ledger-replay.md) | Heartbeat frames, replay assertions, test configuration and first-attempt CI evidence |
 | [Ledger design with Impeccable live](ledger-design-live.md) | Start an Impeccable live session against a scratch ledger server; the rules that keep it away from the shared server |
 | [Grafana bottleneck alerts](grafana-bottleneck-alerts.md) | How the swarm tick reads bottleneck alert state from Grafana through the gateway, its two settings, the alert label contract, upgrading from the removed push intake, verification and troubleshooting |
+| [Deployment modes](deployment-modes.md) | `AGENTIHOOKS_DEPLOYMENT`: the `local`, `compose` and `distributed` modes, where the controller, ledger and Redis run, and the regulated site recipe |
+| [Hives](../pillars/hives.md) | Joining machines, settings, repos and checkouts, placement and master placement, launches on a hive and their refusal causes, failover timing, fencing and worker hive pods |
 | [Hosted ledger auth](hosted-ledger-auth.md) | `SWARM_AUTH_MODE`: local page tokens, or edge with the Cloudflare Access operator and agent tokens from `SWARM_SECRET`; configuration, usage and troubleshooting |
 | [Pull request mutation gate](mutation-gate.md) | Graded lines and bases, [continuation preflight runs](mutation-gate.md#continuation-publication-and-preflight-runs), push preflight reuse, forwarded reports, measured shard costs, split mutants, combined grades, CI proof examples, evidence inspection and survivor clearances |
 | [One push per pull request](../pillars/swarm.md#one-push-per-pull-request) | The `one-push` gate: opening a pull request only after both reviewers ran and the work is on origin, refused pushes while checks run or the pull request is queued, the red check exception, gate modes, lifts and troubleshooting |
@@ -45,5 +48,6 @@ See [Focused proof CPU worker limits](../ci-timing.md#focused-proof-cpu-worker-l
 | [Browser cache](browser-cache.md) | Verified Chromium preparation, dev push only saving, restore scope, workflow configuration and cache inspection |
 | [WSL disk reclaim](wsl-disk.md) | Sparse VHDX so space `agentihooks gc` frees returns to Windows; why `/tmp` empties on WSL |
 | [CODEX-COMPAT](CODEX-COMPAT.md) | The `codex` install target: hook contract, surface map, divergences |
+| [Profile launch home](profile-launch-home.md) | How `init-agent --profile` renders one home, records it and mounts it through `select-profile --home`; home checks, refusals, limits and troubleshooting |
 | [Managed Codex terminals](codex-managed-terminal.md) | Installed runtime dependencies, connection verification, transport selection, herdr viewer reopening, push master inbox duties, handoffs, retirement closing viewers and removing the runtime home, and attachment failures |
 | [Codex inbox transport](codex-inbox-transport.md) | The `app_server` default, the Claude inbox channel against broadcast topics and Bun plugins, qualified versions, canary order, failure diagnosis and rollback |

@@ -179,7 +179,26 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.router.placement.backend == "hive"
     assert fenced.has_capacity(setup.config)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    assert fenced.placement_refusal("master", {}) == ""
+    assert fenced.placement_refusal("master", {}).startswith("the workstation hive spawns master work: ")
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_local_machine_swarm_with_hive_placement_sends_eng_to_a_joined_hive_and_the_master_home(setup):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    write_hive(setup, id="workstation", ui="yes", roles=["master", "plan", "dispatch"])
+    config = setup.store.update(setup.config.slug, hive_placement=True)
+    deployment = controller.deployment_for(config, {"AGENTIHOOKS_DEPLOYMENT": "local"})
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, config.slug, setup.held, routed, deployment)
+    assert fenced.router.placement.backend == "hive"
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.runtime.hive_launch.select(config, "eng", {"id": "task"}).hive == "remote"
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    assert fenced.runtime.hive_launch.select(config, "master", {"id": "master"}).hive == "workstation"
     setup.herdr.spawn.assert_not_called()
 
 
@@ -202,7 +221,8 @@ def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setu
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.placement_refusal("master", pinned) == ""
-    assert fenced.placement_refusal("master", {"id": "master", "hive": "gone"}) == NO_UI_HIVE
+    gone = fenced.placement_refusal("master", {"id": "master", "hive": "gone"})
+    assert gone == f"the workstation hive spawns master work: {NO_UI_HIVE}"
     fenced.runtime.spawn = Mock(return_value="placed on the hive")
     fenced.runtime.original_runtime = Mock()
     assert fenced.spawn(setup.config, "master", "name", pinned) == "placed on the hive"
@@ -320,6 +340,40 @@ def test_replay_refuses_another_claimant(setup):
     assert result.operation == "spawn"
     assert result.backend == "hive"
     assert len(setup.store.execution_registry.records("fixture")) == 1
+
+
+def test_expired_order_of_a_retired_claimant_is_ended_and_replaced(setup):
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="working"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.store.drop_agent("fixture", request.name)
+    other = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(other) == "pending"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
+        "reason": "hive launch order abandoned",
+        "generation": order.generation,
+    }
+    replacement = setup.launcher.orders_for("task")
+    assert replacement.execution_id != order.execution_id
+    assert setup.store.execution_registry.get("fixture", replacement.execution_id).name == other.name
+
+
+def test_an_order_is_abandoned_from_its_expiry_instant_only_without_its_claimant(setup, monkeypatch):
+    from scripts.hive import launch
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    previous = setup.store.execution_registry.get("fixture", order.execution_id)
+    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at)
+    assert not setup.launcher.abandoned(order, previous)
+    setup.store.drop_agent("fixture", request.name)
+    assert setup.launcher.abandoned(order, previous)
+    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at - 1)
+    assert not setup.launcher.abandoned(order, previous)
 
 
 def test_publication_uses_one_redis_transaction(setup):
@@ -905,13 +959,16 @@ def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lan
     setup.herdr.spawn.assert_not_called()
 
 
-@pytest.mark.parametrize("disabled", [[], ["hive"]])
-def test_original_remote_master_placement_is_kept_when_worker_hive_routing_is_disabled(setup, disabled):
-    from scripts.swarm.controller import FencedRuntime
+@pytest.mark.parametrize("disabled", [[], ["hive"], ["kubernetes"]])
+def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead(setup, monkeypatch, disabled):
+    from scripts.swarm import controller
+    from scripts.swarm.controller import DISABLED, FencedRuntime, SwarmError
     from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.masters import MasterSeats
     from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, Status
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
+    MasterSeats(setup.store.redis).set_count("fixture", 2)
     backend = Mock()
     backend.backend = "kubernetes"
     backend.capabilities = frozenset((Capability.SPAWN,))
@@ -919,23 +976,20 @@ def test_original_remote_master_placement_is_kept_when_worker_hive_routing_is_di
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     task = {"id": "master-2"}
+    refused = (
+        DISABLED.format(backend="hive")
+        if disabled == ["hive"]
+        else "the workstation hive spawns master work: no live hive can run the master with interactive, "
+        "subscription or api authentication"
+    )
+    assert fenced.placement_refusal("master", task) == refused
+    with pytest.raises(SwarmError, match=refused):
+        fenced.spawn(setup.config, "master", "master name", task)
+    backend.spawn.assert_not_called()
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
     assert fenced.placement_refusal("master", task) == ""
-    assert fenced.spawn(setup.config, "master", "master name", task) == Placed("master pane", "claude")
-    request = backend.spawn.call_args.args[0]
-    assert request.lane == "master"
-    assert request.task == {**task, "controller_epoch": setup.held.epoch}
-
-
-def test_original_master_backend_refuses_its_own_disabled_runtime(setup):
-    from scripts.swarm.controller import FencedRuntime
-    from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter
-    from scripts.swarm_v2.runtime.routed import RoutedRuntime
-
-    placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([], disabled=["kubernetes"], placement=placement))
-    fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    assert fenced.placement_refusal("master", {"id": "master-2"}) == "the workstation hive spawns master work"
 
 
 def test_controller_reports_a_placement_wait_for_a_worker_without_a_ui_hive(setup):

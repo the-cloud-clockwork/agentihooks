@@ -329,7 +329,8 @@ a free session under its quota band`.
 ## `agentihooks balance`
 
 Probe and rank every Claude account, plus the api row when an endpoint is
-configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `api`), `STATE`,
+configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `interactive`,
+`api`; the Codex default login reads `interactive`, as routing offers it), `STATE`,
 `SESSIONS` (live/cap), `WEIGHT` (api rows), `CAP`, `ROUTING LEFT` and the five
 hour and weekly windows (`n/a` on an api row).
 
@@ -368,7 +369,11 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 | `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
+| `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default 120 for Claude, 90 for Codex) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
+| `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
+| `--overlay <name>` | Overlay the profile wears; repeat for up to three |
+| `--bundle-revision <commit>` | Render the profile only from this bundle commit |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
@@ -393,6 +398,38 @@ changes that. The output adds `workspace_id`, `tab_id`, `pane_id` and `agent_nam
 Agents: `--agent claude|codex`; without it, the harness of the account the session
 rotation picks: the eligible Claude or Codex account with the fewest live sessions
 under its band cap (see Load balancing). Codex runs directly (`route_status=direct`).
+
+With `--profile`, the output adds `profile_validation=validated` and
+`profile_binding=<json>` once the launched session has run its binding canary.
+The launcher starts the session through `agentihooks select-profile NAME
+--home=<recorded home>`, so a pull of `dev` or another code root between
+prepare and launch does not change the home the session mounts.
+
+---
+
+## `agentihooks select-profile`
+
+Select a profile, model and effort for one run, mount its rendered home and
+start `agentihooks claude` or `agentihooks codex`.
+
+```bash
+agentihooks select-profile engineer --agent claude -- --model opus
+agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/engineer/<key>/claude" --agent claude --dry-run
+```
+
+| Flag | Meaning |
+|---|---|
+| `name` | Profile to select |
+| `--agent claude\|codex\|copilot` | Harness (default `claude`); per-run profiles support `claude` and `codex` |
+| `--model`, `--effort minimal\|low\|medium\|high\|xhigh\|max` | Model and effort; otherwise the profile's `profile.yml` defaults, then the harness defaults |
+| `--overlay <name>` | Wear this overlay; repeat for up to three |
+| `--bundle-revision <commit>` | Render only from this bundle commit |
+| `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
+| `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
+
+Arguments after `--` pass through to the harness. A refusal exits 2 with
+`agentihooks select-profile: <reason>` and fails a pending launch report. Home
+checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.md).
 
 ---
 

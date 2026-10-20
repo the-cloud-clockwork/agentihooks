@@ -527,11 +527,11 @@ class SQLiteLedgerRepository:
             with connection:
                 request_metrics.begin(connection, BEGIN_IMMEDIATE)
                 entry = self._entry(connection, slug)
-                state = json.loads(entry.text)
+                state = entry.mutable()
                 rejected, ctx = mutation.apply(slug, state, self.domain, changes, ops, gate)
                 written = self._write(connection, slug, entry, state, ctx.events if ctx.changed else [])
             self._remember(slug, written)
-        return (json.loads(written.text) if copy_state else written.state), rejected
+        return (written.mutable() if copy_state else written.state), rejected
 
     def _write(self, connection, slug: str, entry: Entry, state: dict, events: list) -> Entry:
         meta, previous = state["_meta"], entry.state["_meta"]

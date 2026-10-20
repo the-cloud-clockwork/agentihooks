@@ -372,7 +372,7 @@ def test_serve_defaults_and_port_type():
 def served(admin, monkeypatch):
     calls, printed = [], []
 
-    def make_server(*args):
+    def make_server(*args, **kwargs):
         calls.append(args)
         return SimpleNamespace(server_address=("127.0.0.1", 4321), serve_forever=lambda: None)
 

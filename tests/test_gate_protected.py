@@ -765,6 +765,34 @@ def test_a_head_adding_the_reviewed_summary_is_green(form, summary):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary))
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
+def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, promotion=True))
+    if weaken == "trusted output":
+        step["env"]["INLINE"] = "${{ needs.mutation-plan.outputs.inline }}"
+    else:
+        step["run"] = step["run"].replace(' and $inline == "true")', ")")
+    head["jobs"]["gate-required"]["steps"] = [step]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
 @pytest.mark.parametrize("change", ["extra", "before", "reordered", "altered", "partial"])
 def test_a_head_changing_the_summary_steps_is_red(change):
     from scripts import ci_reuse
@@ -782,6 +810,89 @@ def test_a_head_changing_the_summary_steps_is_red(change):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == [
         "The head's Gate — Required changes its steps; the protected branch grades with its own."
     ]
+
+
+@pytest.mark.parametrize("separate", [False, True])
+@pytest.mark.parametrize("declared", [False, True])
+@pytest.mark.parametrize("runner", ["ubuntu-latest", _anton()])
+def test_the_reviewed_summary_may_run_outside_required_grading(separate, declared, runner):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=True)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(summary=not separate)
+    config = {}
+    if separate:
+        head["jobs"]["test-summary"] = {
+            "needs": ["unit", "unit-selected"],
+            "if": "${{ always() }}",
+            "runs-on": runner,
+            "timeout-minutes": 5,
+            "steps": yaml.safe_load(_REVIEWED_SUMMARY),
+        }
+        head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+        head["jobs"]["gate-required"]["needs"].append("unit-selected")
+        if declared:
+            config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    expected = (
+        []
+        if not separate or declared
+        else ["test.yml/test-summary runs on pull requests but is not a need of Gate — Required."]
+    )
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
+
+
+@pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
+@pytest.mark.parametrize("declared_on_base", [False, True])
+def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_base):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    summary = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": ci_reuse.summary_steps(),
+    }
+    summary[change] = {
+        "steps": [{"run": "true"}],
+        "needs": ["unit"],
+        "if": "${{ success() }}",
+        "runs-on": "anton",
+        "timeout-minutes": 30,
+        "env": {"EXTRA": "value"},
+    }[change]
+    head["jobs"]["test-summary"] = summary
+    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    problems = _grade(
+        {"test.yml": head},
+        base={"test.yml": base},
+        head_config=config,
+        base_config=config if declared_on_base else {},
+    )
+    assert "The test summary must use the reviewed reporting job." in problems
+
+
+def test_the_separate_summary_keeps_the_protected_declaration_expiry():
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    head["jobs"]["test-summary"] = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": ci_reuse.summary_steps(),
+    }
+    key = "test.yml/test-summary"
+    problems = _grade(
+        {"test.yml": head},
+        base={"test.yml": base},
+        base_config={"not_gates": {key: {**_entry(), "expires": "2026-10-01"}}},
+        head_config={"not_gates": {key: _entry()}},
+    )
+    assert "test.yml/test-summary expired on 2026-10-01." in problems
 
 
 @pytest.mark.parametrize("promotion", [False, True])

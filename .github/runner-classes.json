@@ -17,6 +17,8 @@
   "hive-worker.yml/contracts": "light",
   "hive-worker.yml/kind": "standard",
   "hive-worker.yml/publish": "standard",
+  "ledger-load.yml/compare": "standard",
+  "ledger-load.yml/compare-grade": "light",
   "ledger-load.yml/load": "standard",
   "ledger-row-memory.yml/replay": "batch",
   "lost-runner.yml/watch": "hosted",
@@ -75,5 +77,6 @@
   "test.yml/test-count": "standard",
   "test.yml/unit": "standard",
   "test.yml/unit-selected": "standard",
+  "test.yml/writer-lock": "standard",
   "worker-resources.yml/measure": "batch"
 }

@@ -267,7 +267,7 @@ def test_the_required_workflow_uses_the_protected_canonical_aggregation():
         else ({"queue_tier": True, "consolidated": True}, {"queue_tier": True, "promotion": True, "consolidated": True})
     )
     assert steps in [
-        ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss)
+        ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary, watcher_loss=watcher_loss))
         for form in forms
         for summary in (False, True)
         for watcher_loss in (False, True)
@@ -979,6 +979,66 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
         needs[job]["result"] = status
     result = _gate(ci_reuse.gate_steps(queue_tier=True, consolidated=True, watcher_loss=True), needs)
     assert result.returncode != 0, result.stdout + result.stderr
+
+
+def _mutation_gate(form, event, inline, stats, mutation):
+    from scripts import ci_reuse
+
+    needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar")}
+    needs["select"] = {"result": "success", "outputs": {"scope": "none"}}
+    if form.get("queue_tier") and not form.get("consolidated"):
+        needs["durations"] = {"result": "success"}
+    needs["mutation-plan"] = {"result": "success"}
+    needs["mutation-stats"] = {"result": stats}
+    needs["mutation"] = {"result": mutation}
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form))
+    env = dict(
+        os.environ,
+        NEEDS=json.dumps(needs),
+        MUTATION="true",
+        KIND="false",
+        EVENT=event,
+        REUSED="false",
+        INLINE=inline or "",
+    )
+    return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
+
+
+@pytest.mark.parametrize(
+    "form",
+    [{}, {"selected": True}, {"queue_tier": True}, {"promotion": True}, {"queue_tier": True, "consolidated": True}],
+)
+@pytest.mark.parametrize("event", ["pull_request", "workflow_dispatch"])
+@pytest.mark.parametrize(
+    ("inline", "stats", "mutation", "passes"),
+    [
+        ("true", "success", "skipped", True),
+        ("false", "success", "success", True),
+        ("false", "success", "skipped", False),
+        (None, "success", "skipped", False),
+        ("true", "failure", "skipped", False),
+        ("true", "skipped", "skipped", False),
+        ("true", "success", "failure", False),
+        ("true", "success", "cancelled", False),
+    ],
+)
+def test_the_inline_mutation_form_skips_the_shard_job_only_for_an_inline_plan(
+    form, event, inline, stats, mutation, passes
+):
+    result = _mutation_gate(form, event, inline, stats, mutation)
+    assert (result.returncode == 0) == passes, result.stdout + result.stderr
+
+
+def test_the_inline_mutation_form_derives_inline_from_a_one_part_one_shard_plan():
+    from scripts import ci_reuse
+
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
+    assert step["env"]["INLINE"] == (
+        "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}"
+    )
+    [plain] = ci_reuse.gate_steps(queue_tier=True, consolidated=True)
+    assert "INLINE" not in plain["env"]
+    assert "$inline" not in plain["run"]
 
 
 def test_the_watcher_loss_rule_is_written_once_for_the_watcher_job():

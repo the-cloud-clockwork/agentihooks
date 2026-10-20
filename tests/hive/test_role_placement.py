@@ -6,6 +6,7 @@ from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, REPO, hive
 
 ALL_ROLES = ["master", "qa", "frontend", "eng", "ci", "plan", "dispatch"]
+OFF_HIVE_LANE = "unhived"
 
 
 def two_hosts(setup, anton_agents=0):
@@ -114,6 +115,30 @@ def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
     assert fenced.runtime.hive_launch.select(setup.config, "plan", {"id": "task"}).hive == "anton"
 
 
+MASTER_WAIT = "no live hive can run the master with interactive, subscription or api authentication"
+
+
+@pytest.mark.parametrize("lacks", [{"repos": []}, {"slots": []}], ids=["repo", "slot"])
+def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_never_headless(setup, lacks):
+    from scripts.hive.placement import Wait
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    two_hosts(setup)
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, **lacks)
+    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    assert setup.launcher.select(setup.config, "master", {"id": "master"}) == Wait(MASTER_WAIT)
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    refused = fenced.placement_refusal("master", {"id": "master"})
+    assert refused == f"the workstation hive spawns master work: {MASTER_WAIT}"
+    with pytest.raises(controller.SwarmError, match="the workstation hive spawns master work"):
+        fenced.spawn(setup.config, "master", "master name", {"id": "master"})
+
+
 def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_only_when_none_has_room(setup):
     from scripts.hive import registry
     from scripts.swarm import controller
@@ -139,6 +164,184 @@ def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_o
     assert admitted.profile_decision["placement_fallback"] == "no headless hive for dispatch has room"
 
 
+def hive_controller(setup):
+    from scripts.swarm import controller
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    return controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+
+
+@pytest.mark.parametrize("seat", ["master", "master-2", "master-3"])
+def test_every_master_seat_is_placed_by_the_ui_host_rule(setup, monkeypatch, seat):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.masters import MasterSeats
+
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    fenced = hive_controller(setup)
+    assert fenced.placement_refusal("master", {"id": seat}) == ""
+    assert fenced.runtime.router.placed_backend("master", {"id": seat}) == "hive"
+    assert fenced.runtime.hive_launch.select(setup.config, "master", {"id": seat}).hive == "workstation"
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, repos=[])
+    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    assert fenced.placement_refusal("master", {"id": seat}) == f"the workstation hive spawns master work: {MASTER_WAIT}"
+
+
+@pytest.mark.parametrize("seat", ["master", "master-2"])
+def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypatch, seat):
+    from unittest.mock import Mock
+
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    two_hosts(setup)
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, repos=[])
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    fenced = hive_controller(setup)
+    fenced.runtime.hive_launch.spawn = Mock()
+    setup.herdr.spawn.return_value = "placed on the workstation"
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    assert fenced.placement_refusal("master", {"id": seat}) == ""
+    assert fenced.spawn(setup.config, "master", "master name", {"id": seat}) == "placed on the workstation"
+    _, lane, name, task = setup.herdr.spawn.call_args.args
+    assert (lane, name, task["id"], task["controller_epoch"]) == ("master", "master name", seat, setup.held.epoch)
+    fenced.spawn(setup.config, "master", "master name", {})
+    assert setup.herdr.spawn.call_args.args[3]["id"] == "master"
+    setup.herdr.spawn.reset_mock()
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    with pytest.raises(controller.SwarmError, match=f"the workstation hive spawns master work: {MASTER_WAIT}"):
+        fenced.spawn(setup.config, "master", "master name", {"id": seat})
+    setup.herdr.spawn.assert_not_called()
+    fenced.runtime.hive_launch.spawn.assert_not_called()
+
+
+def test_only_master_work_moves_to_the_workstation_herdr_server(setup, monkeypatch):
+    from scripts.swarm import controller
+
+    two_hosts(setup)
+    fenced = hive_controller(setup)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    assert (
+        fenced.placement_refusal(OFF_HIVE_LANE, {"id": OFF_HIVE_LANE})
+        == f"the workstation hive spawns {OFF_HIVE_LANE} work"
+    )
+    with pytest.raises(controller.SwarmError, match=f"the workstation hive spawns {OFF_HIVE_LANE} work"):
+        fenced.spawn(setup.config, OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", {"id": OFF_HIVE_LANE})
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_refused_hive_lane_stays_refused_when_the_workstation_herdr_answers(setup, monkeypatch):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision("qa", "task", "qa")
+    fenced = hive_controller(setup)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    task = {"id": "task", "hive": "anton"}
+    assert fenced.placement_refusal("eng", task) == NO_UI_HIVE
+    with pytest.raises(controller.SwarmError, match=NO_UI_HIVE):
+        fenced.spawn(setup.config, "eng", "eng name", task)
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_master_fill_spawns_a_refused_seat_two_master_on_the_workstation_herdr_server(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import controller, lease
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm_v2 import master_fill
+    from scripts.swarm_v2.masters import MasterSeats
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+    from tests.swarm.test_tick import FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    MasterSeats(store.redis).set_count("sw", 2)
+    herdr = FakeRuntime()
+    herdr._profile_decision = lambda *args: ProfileDecision("master", "lane", "master")
+    herdr._quota_accounts = []
+    held = lease.acquire(store, "sw", "controller")
+    routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
+    fenced = controller.FencedRuntime(store, "sw", held, routed, "compose")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 1)
+    assert actions == [f"the workstation hive spawns master work: {NO_UI_HIVE}"]
+    assert herdr.masters == []
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 2)
+    assert len(actions) == 1 and actions[0].startswith("spawned master ")
+    [(_, task)] = herdr.masters
+    assert (task["id"], task["controller_epoch"]) == ("master-2", held.epoch)
+    assert actions[0].endswith("in seat master-2@sw")
+
+
+def test_only_the_counted_master_seats_route_to_hive_placement(setup):
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
+    router = hive_controller(setup).runtime.router
+    assert [router.placed_backend("master", {"id": seat}) for seat in ("master-0", "master-3", "master-4")] == [
+        "local",
+        "hive",
+        "local",
+    ]
+
+
+def test_the_workstation_probe_asks_the_herdr_server_named_by_the_environment(monkeypatch):
+    import os
+
+    from scripts import herdr_host
+    from scripts.swarm import controller
+
+    seen = []
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: seen.append(environ) or True)
+    assert controller._workstation_herdr() is True
+    assert seen == [dict(os.environ)]
+
+
+@pytest.mark.parametrize(
+    ("task", "placed"),
+    [({"id": "d"}, "original runtime"), ({"id": "d", "hive": "workstation"}, "hive runtime")],
+    ids=["unpinned", "pinned"],
+)
+def test_a_non_hive_lane_spawns_through_the_original_runtime_unless_pinned_to_a_hive(setup, task, placed):
+    from unittest.mock import Mock
+
+    fenced = hive_controller(setup)
+    fenced.runtime.hive_launch.select = Mock(return_value=Choice("workstation"))
+    original = Mock()
+    original.router.placed_backend.return_value = "kubernetes"
+    original.router.enabled_backend.return_value = "kubernetes"
+    original.spawn.return_value = "original runtime"
+    fenced.runtime.original_runtime = original
+    fenced.runtime.spawn = Mock(return_value="hive runtime")
+    assert fenced.placement_refusal(OFF_HIVE_LANE, task) == ""
+    assert fenced.spawn(setup.config, OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", task) == placed
+
+
+def test_a_runtime_without_hive_launch_spawns_a_non_hive_lane_through_itself(setup):
+    from scripts.swarm import controller
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+    from tests.swarm.test_tick import FakeRuntime
+
+    herdr = FakeRuntime()
+    routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, controller.LOCAL)
+    fenced.spawn(setup.config, OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", {"id": "d"})
+    assert herdr.spawned == [(OFF_HIVE_LANE, f"{OFF_HIVE_LANE} name", "d")]
+
+
 def host(hive_id: str, ui: str, **fields) -> dict:
     return hive(hive_id, **{"ui": ui, "roles": ["eng"] if ui == "no" else ALL_ROLES, "max_agents": 4, **fields})
 
@@ -155,14 +358,14 @@ FALLBACKS = {
         Choice("ws", "no live headless hive takes eng"),
         "subscription",
     ),
-    "headless without the repo waits": (
+    "headless without the repo falls back": (
         [host("ws", "yes"), host("anton", "no", repos=["other"])],
-        Wait("no headless hive for eng lists the repo agentihooks"),
+        Choice("ws", "no headless hive for eng lists the repo agentihooks"),
         "subscription",
     ),
-    "headless with one free place but without the slot waits": (
+    "headless with one free place but without the slot falls back": (
         [host("ws", "yes"), host("anton", "no", agents=3, slots=[])],
-        Wait("no headless hive for eng advertises the claude slot acct"),
+        Choice("ws", "no headless hive for eng advertises the claude slot acct"),
         "subscription",
     ),
     "the fallback honours prefer among UI hives": (
@@ -179,14 +382,14 @@ FALLBACKS = {
         Wait("no headless hive for eng has room"),
         "interactive",
     ),
-    "headless without the login waits": (
+    "headless without the login falls back": (
         [host("ws", "yes"), host("anton", "no", interactive={"claude": ""})],
-        Wait("no headless hive for eng holds the claude login for acct"),
+        Choice("ws", "no headless hive for eng holds the claude login for acct"),
         "interactive",
     ),
-    "one full and one without the slot waits": (
+    "one full and one without the slot falls back": (
         [host("ws", "yes"), host("anton", "no", agents=4), host("pod", "no", slots=[])],
-        Wait("no headless hive for eng advertises the claude slot acct"),
+        Choice("ws", "no headless hive for eng advertises the claude slot acct"),
         "subscription",
     ),
     "full headless and a full workstation wait": (
@@ -199,7 +402,7 @@ FALLBACKS = {
 
 
 @pytest.mark.parametrize("case", FALLBACKS.values(), ids=FALLBACKS.keys())
-def test_a_non_ui_role_takes_a_ui_hive_only_when_no_headless_hive_has_room(case):
+def test_a_non_ui_role_takes_a_ui_hive_only_when_no_headless_hive_takes_it(case):
     hives, expected, route = case
     assert choose("eng", "claude", "acct", route, REPO, hives, NOW) == expected
 

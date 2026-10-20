@@ -6,8 +6,6 @@ from pathlib import Path
 import pytest
 import yaml
 
-from tests.shard_budget import RUN_TESTS_MINUTES
-
 pytestmark = pytest.mark.unit
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -157,10 +155,30 @@ def test_the_shard_check_job_grades_the_budget_on_the_stored_durations():
 
 
 def test_the_default_budget_is_the_run_tests_step_deadline(tmp_path):
-    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]["unit"]["steps"]
-    minutes = next(step for step in steps if step.get("name") == "Run tests")["timeout-minutes"]
-    assert RUN_TESTS_MINUTES == minutes
+    minutes = _step_minutes("unit", "Run tests")
     result = _budget(tmp_path, [100.0])
     assert result.stdout.splitlines()[0] == (
         f"1 shards, slowest 100.0 s of test time against the {minutes} minute Run tests deadline of {minutes * 60} s"
     )
+
+
+def _step_minutes(job, name):
+    steps = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"][job]["steps"]
+    return next(step for step in steps if step.get("name") == name)["timeout-minutes"]
+
+
+def test_a_selected_leg_is_graded_against_the_selected_tests_step_deadline(tmp_path):
+    seconds = _step_minutes("unit-selected", "Run the selected tests") * 60
+    path = tmp_path / "durations-3.12-1" / "durations.json"
+    path.parent.mkdir()
+    path.write_text(json.dumps({"test_suite.py::test_0": 10.0}))
+    (path.parent / "elapsed.json").write_text(json.dumps({"seconds": seconds + 1, "job": "unit-selected"}))
+    result = subprocess.run(
+        [sys.executable, "-m", "tests.shard_budget", str(path)], cwd=_ROOT, capture_output=True, text=True
+    )
+    assert result.returncode == 1
+    assert result.stdout.splitlines()[0] == (
+        f"1 shards, slowest {seconds + 1:.1f} s of test time against the {seconds // 60} minute "
+        f"Run the selected tests deadline of {seconds} s"
+    )
+    assert f"::error::1 of 1 shards passed the {seconds} s budget." in result.stdout

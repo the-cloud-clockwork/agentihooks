@@ -206,7 +206,7 @@ def test_a_controller_deployment_ticks_its_swarm_on_its_own_ledger_link(store, m
     acquired = []
     monkeypatch.setattr(lease, "acquire", lambda _store, slug, owner: acquired.append((slug, ledger.base(slug))))
     with authority_context.bound(None):
-        actions = cli.run_tick(store, "selected", runtime=object())
+        actions = cli.run_tick(store, "selected", runtime=object(), scheduled=True)
     assert actions == ["the swarm belongs to another hive"]
     assert acquired == [("selected", "https://ledger.kind.test:8765")]
     assert ledger_route.configured(store, "selected") == ""

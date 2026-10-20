@@ -64,7 +64,7 @@ def past_window(items, now_ms, window_ms, receivers=None):
     found, receivers = [], receivers or {}
     for item in items:
         waited = now_ms - item["created_at"]
-        if item["state"] in CLOSED or waited < window_ms:
+        if item.get("fyi") or item["state"] in CLOSED or waited < window_ms:
             continue
         receiver = receivers.get(reader(item)) or receivers.get(item["address"], Receiver())
         if not _waiting(item, receiver, window_ms):

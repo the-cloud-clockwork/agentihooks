@@ -263,9 +263,9 @@ def stop_server(server: subprocess.Popen) -> None:
 def client(api: ResourceClient, name: str, item: str, start: float, deadline: float, results: dict) -> None:
     for n in itertools.count():
         began = start + n * write_every()
-        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        time.sleep(max(0.0, began - time.monotonic()))
         op = {"op": "add", "thread": f"{item}/comments", "id": f"c-{uuid.uuid4().hex[:10]}", "by": name}
         try:
             sent = time.monotonic()
@@ -285,9 +285,9 @@ def reader(api: ResourceClient, items: list[str], start: float, deadline: float,
     """One agent polling its own task, phase and follow up, READS_PER_SECOND single resource reads a second."""
     for n in itertools.count():
         began = start + n / READS_PER_SECOND
-        time.sleep(max(0.0, began - time.monotonic()))
         if began >= deadline:
             return
+        time.sleep(max(0.0, began - time.monotonic()))
         try:
             sent = time.monotonic()
             api.request(SLUG, items[n % len(items)])

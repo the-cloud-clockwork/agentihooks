@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
-from scripts import codex_router, session_bands
-from scripts.hive import registry
+from scripts import codex_router, github_app_cli, session_bands
+from scripts.hive import quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
+RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
@@ -39,6 +40,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     processes = account_sessions.local_processes()
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
+    adopt_caps(redis, report)
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
@@ -63,6 +65,35 @@ def beat(redis: "Redis", local_id: str) -> None:
     consumer.sync_workspaces(TTL_SECONDS)
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    publish_config(redis, local_id, report["repos"])
+
+
+def adopt_caps(redis: "Redis", report: dict) -> None:
+    """A subscription slot takes the cap of a newer reading another live hive published, since quota is per account."""
+    now = int(time.time() * 1000)
+    for hive in registry.hives(redis):
+        if not registry.live(hive, now):
+            continue
+        quotas = json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}")
+        caps = {f"{slot['harness']}:{slot['account']}": slot["cap"] for slot in hive["slots"] if "cap" in slot}
+        for slot in report["slots"]:
+            name = f"{slot['harness']}:{slot['account']}"
+            reading = quotas.get(name)
+            if slot["kind"] == "subscription" and name in caps and _newer(reading, report["quota"][name]):
+                slot["cap"] = caps[name]
+                report["quota"][name] = reading
+
+
+def _newer(reading: dict | None, mine: dict) -> bool:
+    if reading is None or reading["observed_at"] is None:
+        return False
+    return mine["observed_at"] is None or reading["observed_at"] > mine["observed_at"]
+
+
+def publish_config(redis: "Redis", local_id: str, repos: list[str]) -> None:
+    from scripts.hive import config
+
+    config.publish(redis, local_id, repos)
 
 
 def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
@@ -82,12 +113,28 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def run(redis: "Redis") -> None:
+def run(connect: Callable[[], "Redis"]) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    lost = (ConnectionError, TimeoutError)
     local_id = hive_id()
+    quota_refresh.refresh(os.environ)
+    worker, attempted_at = None, time.time()
+    renewed = time.time()
+    failures = 0
     while True:
-        started = time.monotonic()
-        beat(redis, local_id)
-        scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+        try:
+            redis = connect()
+            while True:
+                started = time.monotonic()
+                worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
+                renewed = github_app_cli.renew(renewed, time.time())
+                beat(redis, local_id)
+                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+                failures = 0
+        except lost:
+            time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
+            failures += 1
 
 
 def unit(binary: str) -> str:

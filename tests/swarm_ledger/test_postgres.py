@@ -21,6 +21,9 @@ class Cursor:
 
     def execute(self, sql, parameters):
         self.raw.log.append((sql, parameters))
+        if self.raw.lost:
+            self.raw.lost -= 1
+            raise psycopg2.errors.LockNotAvailable("canceling statement due to lock timeout")
         if self.raw.fail is not None:
             raise self.raw.fail
 
@@ -45,7 +48,7 @@ class Cursor:
 class Raw:
     def __init__(self):
         self.log, self.closed, self.status, self.fail = [], False, IDLE, None
-        self.commits = self.rollbacks = 0
+        self.commits = self.rollbacks = self.lost = 0
         self.rollback_fails = None
 
     def cursor(self):
@@ -70,13 +73,14 @@ class Raw:
 def opened(monkeypatch):
     made = []
 
-    def connect(address):
+    def connect(address, **settings):
         made.append(address)
+        opened.settings.append(settings)
         raw = Raw()
         opened.raws.append(raw)
         return raw
 
-    opened.raws = []
+    opened.raws, opened.settings = [], []
     opened.made = made
     monkeypatch.setattr(postgres, "POOLS", {})
     monkeypatch.setattr(psycopg2, "connect", connect)
@@ -227,12 +231,64 @@ def test_a_pool_closes_a_connection_it_cannot_roll_back_or_that_closed(opened):
 
 
 def test_a_pool_that_cannot_connect_raises_the_sqlite_error(monkeypatch):
-    def refuse(address):
+    def refuse(address, **settings):
         raise psycopg2.OperationalError("refused")
 
     monkeypatch.setattr(psycopg2, "connect", refuse)
     with pytest.raises(sqlite3.DatabaseError, match="^refused$"):
         postgres.Pool(ADDRESS).take()
+
+
+def test_a_new_connection_bounds_lock_waits_idle_transactions_and_statements_and_keeps_alive(opened):
+    postgres.Pool(ADDRESS).take()
+    assert opened.settings == [
+        {
+            "options": "-c lock_timeout=10s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s",
+            "keepalives": 1,
+            "keepalives_idle": 30,
+            "keepalives_interval": 10,
+            "keepalives_count": 3,
+        }
+    ]
+
+
+def test_a_writer_that_loses_its_lock_wait_rolls_back_and_asks_again(opened):
+    connection = postgres.Connection(ADDRESS)
+    raw = opened.raws[0]
+    raw.lost = 2
+    cursor = connection.execute(sqlite.BEGIN_IMMEDIATE)
+    assert isinstance(cursor, Cursor) and cursor.raw is raw
+    assert raw.log == [("SELECT pg_advisory_xact_lock(1279607879)", ())] * 3
+    assert raw.rollbacks == 2
+
+
+def test_a_writer_never_granted_the_lock_fails_with_the_named_reason(opened):
+    connection = postgres.Connection(ADDRESS)
+    raw = opened.raws[0]
+    raw.lost = 4
+    with pytest.raises(
+        sqlite3.OperationalError, match="^the ledger writer lock was not granted in 3 waits of 10 seconds$"
+    ):
+        connection.execute(sqlite.BEGIN_IMMEDIATE)
+    assert len(raw.log) == 3 and raw.rollbacks == 3 and raw.lost == 1
+
+
+def test_the_writer_lock_is_refused_inside_an_open_transaction_so_no_retry_discards_its_work(opened):
+    connection = postgres.Connection(ADDRESS)
+    raw = opened.raws[0]
+    raw.status = BUSY
+    with pytest.raises(sqlite3.OperationalError, match="^cannot start a transaction within a transaction$"):
+        connection.execute(sqlite.BEGIN_IMMEDIATE)
+    assert raw.log == [] and raw.rollbacks == 0
+
+
+def test_a_writer_lock_failure_other_than_a_lost_wait_is_mapped_at_once(opened):
+    connection = postgres.Connection(ADDRESS)
+    raw = opened.raws[0]
+    raw.fail = psycopg2.OperationalError("server closed the connection unexpectedly")
+    with pytest.raises(sqlite3.DatabaseError, match="^server closed the connection unexpectedly$"):
+        connection.execute(sqlite.BEGIN_IMMEDIATE)
+    assert len(raw.log) == 1 and raw.rollbacks == 0
 
 
 def test_one_pool_per_address(opened):
@@ -336,7 +392,7 @@ def test_the_database_folder_opens_a_pooled_connection_and_raises_when_unreachab
         assert connection.raw is opened.raws[0]
     assert postgres.pool(ADDRESS).idle == [opened.raws[0]]
 
-    def refuse(address):
+    def refuse(address, **settings):
         raise psycopg2.OperationalError("refused")
 
     monkeypatch.setattr(postgres, "POOLS", {})

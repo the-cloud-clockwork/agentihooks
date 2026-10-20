@@ -116,3 +116,27 @@ def test_doctor_reads_ended_wait_history_for_historical_agents(redis, monkeypatc
     idle.end_wait(redis, "sw", "engineer", until)
     found = detect.readers(store, ledger, "sw", 4_000_000, environ={})["trace"]()
     assert [f.id for f in found if f.kind == "turn gap"] == expected
+
+
+def test_doctor_reads_wait_history_only_for_agents_with_a_long_turn_gap(redis, monkeypatch):
+    def trace(name, second_start):
+        return {
+            "name": name,
+            "tags": [f"agent:{name}"],
+            "session_id": f"{name}-session",
+            "observations": [
+                {"type": "SPAN", "turn": 1, "start": 0, "end": 60_000},
+                {"type": "SPAN", "turn": 2, "start": second_start, "end": second_start + 60_000},
+            ],
+        }
+
+    record = {"traces": [trace("engineer", 3_660_000), trace("ci", 120_000)], "sessions": [], "merged": []}
+    monkeypatch.setattr(traces_read, "client", lambda env: None)
+    monkeypatch.setattr(traces_read, "record", lambda *args: record)
+    asked = []
+    monkeypatch.setattr(idle, "wait_history", lambda r, slug, name: asked.append((slug, name)) or [])
+    store = SimpleNamespace(redis=redis, agents=lambda slug: [])
+    found = detect.readers(store, SimpleNamespace(tasks=lambda slug: []), "sw", 4_000_000, environ={})["trace"]()
+    assert asked == [("sw", "engineer")]
+    assert [f.id for f in found if f.kind == "turn gap"] == ["turn-gap/engineer-session"]
+    assert record["waits_unread"] == []

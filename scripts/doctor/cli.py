@@ -13,7 +13,10 @@ agentihooks doctor <slug> task FINDING --fix code|tune
 agentihooks doctor <slug> measure FINDING      run the detectors once and print the finding's number, 0 when gone;
                                                master-launch-missed replays the last hour's (or --since to --until)
                                                failed master launches and counts those no finding put before the
-                                               Doctor master, refusing when the journal is unreadable
+                                               Doctor master, refusing when the journal is unreadable; a CI speed
+                                               finding prints its run's own value, then its tier or runner label
+                                               class over the last hour (or --since to --until); a bare class name
+                                               prints every tier or label set
 agentihooks doctor <slug> rates [--hours N] [--at TIME] [--json]
                                                each coordination failure's number and the gate log counts over the
                                                last N hours (24), or the N hours before and after TIME side by side;
@@ -35,7 +38,17 @@ from argparse import Namespace
 from datetime import datetime, timezone
 from pathlib import Path
 
-from scripts.doctor import detect, interventions, loop, master_launches, rates, rates_read, spawn_read, spawns
+from scripts.doctor import (
+    ci_measure,
+    detect,
+    interventions,
+    loop,
+    master_launches,
+    rates,
+    rates_read,
+    spawn_read,
+    spawns,
+)
 from scripts.doctor.priming import SUFFIX, TEMPLATE, cancel_master_items, doctor_slug
 from scripts.inbox.store import InboxError, InboxStore
 from scripts.swarm import cli as swarm
@@ -259,6 +272,11 @@ def cmd_measure(store, args):
     if args.finding == master_launches.MISSED:
         print(f"{args.finding} {_master_missed(store, slug, doctor, now, window or (now - HOUR_MS, now))}")
         return
+    ci = ci_measure.target(args.finding)
+    if ci:
+        for line in ci_measure.measure(args.finding, ci, window or (now - HOUR_MS, now), now):
+            print(line)
+        return
     if args.finding.startswith("failed-spawn/"):
         bounds = {"since": _at(window[0]), "until": _at(window[1])} if window else {}
         found = spawns.failed(spawn_read.records(store, slug, now, **bounds))
@@ -295,8 +313,11 @@ def _window(args: Namespace, now: int) -> tuple[int, int] | None:
         raise SwarmError("--since and --until must be supplied together")
     if args.since is None:
         return None
-    if not args.finding.startswith("failed-spawn/") and args.finding != master_launches.MISSED:
-        raise SwarmError(f"journal bounds are only supported for failed-spawn findings and {master_launches.MISSED}")
+    bounded = args.finding.startswith("failed-spawn/") or args.finding == master_launches.MISSED
+    if not bounded and not ci_measure.target(args.finding):
+        raise SwarmError(
+            f"journal bounds are only supported for failed-spawn and CI speed findings and {master_launches.MISSED}"
+        )
     since, until = _at_ms(args.since, "--since"), _at_ms(args.until, "--until")
     zoned = all(datetime.fromisoformat(text).tzinfo for text in (args.since, args.until))
     if args.finding == master_launches.MISSED and not zoned:

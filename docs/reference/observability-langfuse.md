@@ -249,6 +249,7 @@ Each scan joins it with:
 | `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
 | `trace coverage partial` | the historical backfill has not read every trace's observations yet |
+| `wait history partial` | the wait history of an agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
 
 Threshold `AGENTIHOOKS_DOCTOR_ACTIVE_STALE_SECONDS` (60), grace
 `AGENTIHOOKS_DOCTOR_ACTIVE_GRACE_SECONDS` (60). A fault is raised at the first

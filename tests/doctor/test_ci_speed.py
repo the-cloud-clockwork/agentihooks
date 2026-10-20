@@ -96,16 +96,16 @@ def test_runner_wait_crosses_only_above_five_minutes(wait, count):
 
 
 def test_a_still_queued_job_uses_now_and_remains_visible_after_its_creation_window():
-    [finding] = ci_speed.findings([record([job(0, queued=True, created=-301)])], NOW - 60000, NOW)
-    assert finding.kind == "ci queue age unconfirmed" and finding.measure == 301
+    [finding] = ci_speed.findings([record([job(0, queued=True, created=-901)])], NOW - 60000, NOW)
+    assert finding.kind == "ci queue age unconfirmed" and finding.measure == 901
 
 
 @pytest.mark.parametrize("status", ["queued", "pending", "waiting"])
 def test_unstarted_jobs_ignore_placeholder_start_timestamps(status):
-    waiting = job(0, queued=True, created=-301)
+    waiting = job(0, queued=True, created=-901)
     waiting.update(status=status, started_at=waiting["created_at"])
     [finding] = ci_speed.findings([record([waiting])], NOW - 60000, NOW)
-    assert finding.measure == 301
+    assert finding.measure == 901
 
 
 def test_a_previously_started_job_outside_the_pass_window_is_not_counted_again():
@@ -188,8 +188,8 @@ def test_a_job_starting_at_the_window_boundary_is_included():
 
 
 def test_a_queued_job_remains_visible_when_the_cursor_is_after_now():
-    [finding] = ci_speed.findings([record([job(0, queued=True, created=-301)])], NOW + 1, NOW)
-    assert finding.measure == 301
+    [finding] = ci_speed.findings([record([job(0, queued=True, created=-901)])], NOW + 1, NOW)
+    assert finding.measure == 901
 
 
 def test_unrelated_pull_request_workflows_have_no_tier_budget():

@@ -61,7 +61,7 @@ def test_summary_command_prints_the_artifact_counts(tmp_path, monkeypatch, capsy
 
 def test_required_summary_writes_current_artifact_counts_even_after_gate_failure(tmp_path):
     workflow = yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())
-    gate = workflow["jobs"]["gate-required"]
+    gate = workflow["jobs"].get("test-summary", workflow["jobs"]["gate-required"])
     step = next(step for step in gate["steps"] if step.get("name") == "Summarize this run's tests")
     assert step["if"] == "${{ always() }}"
     assert "flake-budget" not in gate["needs"]

@@ -938,11 +938,9 @@ def _prompt_signals(payload: dict, session_id: str, typed: bool) -> None:
             contains_pr_signal,
             contains_release_signal,
         )
-        from hooks.context.pane_guard import observe_pane_signal
         from hooks.context.prod_lockdown import set_hotfix_signal, set_release_signal
 
         prompt = payload.get("prompt", "")
-        observe_pane_signal(session_id, prompt, typed)
         if prompt and typed:
             from hooks.context.conditions import arm_gate, contains_condition_signal
 
@@ -1335,12 +1333,10 @@ def _plan_read_guard(payload: dict, tool_name: str) -> None:
 
 def _check_shell_guards(payload: dict) -> None:
     from hooks.context.local_test_guard import check_local_tests
-    from hooks.context.pane_guard import check_panes
     from hooks.context.swarm_wait_nudge import check_github_watch
 
     check_local_tests(payload)
     check_github_watch(payload)
-    check_panes(payload)
     if payload.get("tool_name") != "Bash":
         return
     try:

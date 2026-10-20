@@ -7,6 +7,7 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+from tests.shard_budget import step_seconds
 from tests.shards import (
     FIRST_SHARD_FILES,
     SECONDS_PER_SOURCE_BYTE,
@@ -17,7 +18,7 @@ from tests.shards import (
 )
 
 WORKERS = 4
-STEP_SECONDS = 420
+STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.5
 MAX_SHARDS = 30

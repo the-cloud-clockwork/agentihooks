@@ -46,10 +46,13 @@ def test_guard_skips_a_long_lived_tick_and_agent_wrapper_and_still_reaps_the_oth
         _probe(comm, "agentihooks", "swarm", "tick"),
         _probe(comm, "-m", "scripts.swarm.scheduled_tick"),
         _probe(comm, "/home/u/.local/bin/agentihooks", "select-profile", "engineer", "--agent", "claude"),
+        _probe(comm, "/home/u/.venv/bin/agentihooks", "swarm", "tick-watch"),
+        _probe(comm, "/home/u/.venv/bin/agentihooks", "swarm", "prober"),
+        _probe(comm, "/home/u/.venv/bin/agentihooks", "swarm", "waker"),
     ]
     others = [
         _probe(comm, "agentihooks", "ledger", "watch", "rig-grade-swarm"),
-        _probe(comm, "agentihooks", "swarm", "tick-watch"),
+        _probe(comm, "agentihooks", "swarm", "waker-report"),
     ]
     try:
         assert _guard(tmp_path, config, comm).returncode == 0
@@ -62,7 +65,7 @@ def test_guard_skips_a_long_lived_tick_and_agent_wrapper_and_still_reaps_the_oth
         for tick in ticks:
             assert f"SKIPPED pid={tick.pid} name={comm} reason=excluded_command" in log
         for other in others:
-            assert f"KILLED pid={other.pid} name={comm} reason=ghost_detected count=5" in log
+            assert f"KILLED pid={other.pid} name={comm} reason=ghost_detected count=8" in log
     finally:
         for process in [*ticks, *others]:
             process.kill()

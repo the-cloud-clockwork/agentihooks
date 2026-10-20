@@ -1,5 +1,9 @@
 {{- if gt (int .Values.workers.replicas) 0 }}
 {{- $workers := .Values.workers }}
+{{- $github := $workers.githubAuth }}
+{{- if not (has $github.mode (list "token" "app")) }}
+{{- fail "workers.githubAuth.mode must be token or app" }}
+{{- end }}
 {{- $credential := $workers.credentialSecret }}
 {{- $code := $workers.joinCodeSecret }}
 {{- if eq (empty $credential.name) (empty $code.name) }}
@@ -14,6 +18,20 @@
 {{- if lt (int $workers.maxAgents) 1 }}
 {{- fail "workers.maxAgents must be positive" }}
 {{- end }}
+{{- if and $workers.ssh.enabled (not $credential.name) }}
+{{- fail "workers.ssh needs credentialSecret: the hive sshd keys ride in the member credential Secret" }}
+{{- end }}
+{{- if and $workers.ssh.enabled (lt (int $workers.ssh.port) 1024) }}
+{{- fail "workers.ssh.port must be 1024 or higher: sshd runs as the unprivileged worker" }}
+{{- end }}
+{{- $perAgent := $workers.memoryPerAgentMi }}
+{{- if or (lt (int $perAgent.request) 1) (lt (int $perAgent.limit) (int $perAgent.request)) }}
+{{- fail "workers.memoryPerAgentMi needs a positive request and a limit no lower than it" }}
+{{- end }}
+{{- if or (hasKey ($workers.resources.requests | default dict) "memory") (hasKey ($workers.resources.limits | default dict) "memory") }}
+{{- fail "set worker hive memory with workers.memoryPerAgentMi, not workers.resources" }}
+{{- end }}
+{{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
 {{- $secret := $credential }}
 {{- $path := "credential" }}
 {{- if $code.name }}
@@ -49,6 +67,21 @@ spec:
           imagePullPolicy: {{ $workers.image.pullPolicy }}
           {{- include "swarm.containerSecurity" . | nindent 10 }}
           env:
+            {{- if $github.secretName }}
+            - name: HIVE_GITHUB_AUTH_MODE
+              value: {{ $github.mode | quote }}
+            {{- $keys := dict "GITHUB_TOKEN" $github.tokenKey }}
+            {{- if eq $github.mode "app" }}
+            {{- $keys = dict "GITHUB_APP_ID" $github.appIdKey "GITHUB_APP_INSTALLATION_ID" $github.installationIdKey "GITHUB_APP_PRIVATE_KEY" $github.privateKeyKey }}
+            {{- end }}
+            {{- range $name, $key := $keys }}
+            - name: {{ $name }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $github.secretName }}
+                  key: {{ required "each selected workers.githubAuth Secret key is required" $key }}
+            {{- end }}
+            {{- end }}
             - name: SWARM_HIVE_ID
               valueFrom:
                 fieldRef:
@@ -74,6 +107,19 @@ spec:
             - name: SSL_CERT_FILE
               value: /run/hive-ca/ca.pem
             {{- end }}
+            {{- if $workers.ssh.enabled }}
+            - name: HIVE_SSH_AUTHORIZED_KEYS_FILE
+              value: /run/hive-join/ssh/authorized_keys
+            - name: HIVE_SSH_HOST_KEY_FILE
+              value: /run/hive-join/ssh/host_key
+            - name: HIVE_SSH_PORT
+              value: {{ $workers.ssh.port | quote }}
+            {{- end }}
+          {{- if $workers.ssh.enabled }}
+          ports:
+            - name: ssh
+              containerPort: {{ $workers.ssh.port }}
+          {{- end }}
           {{- with $workers.envFromSecrets }}
           envFrom:
             {{- range . }}
@@ -95,7 +141,7 @@ spec:
               readOnly: true
             {{- end }}
           resources:
-            {{- toYaml $workers.resources | nindent 12 }}
+            {{- toYaml (mergeOverwrite (deepCopy $workers.resources) $memory) | nindent 12 }}
       volumes:
         - name: join
           secret:
@@ -104,6 +150,12 @@ spec:
             items:
               - key: {{ required "worker join Secret key is required" $secret.key }}
                 path: {{ $path }}
+              {{- if $workers.ssh.enabled }}
+              - key: authorized_keys
+                path: ssh/authorized_keys
+              - key: host_key
+                path: ssh/host_key
+              {{- end }}
         - name: home
           {{- if $code.name }}
           persistentVolumeClaim:

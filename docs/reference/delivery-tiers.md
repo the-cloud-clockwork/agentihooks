@@ -64,7 +64,7 @@ Dev push run [39064628062](https://github.com/the-cloud-clockwork/agentihooks/ac
 
 ## Entering the merge queue
 
-A pull request enters the `dev` merge queue at the head its pull request checks passed on. It is not brought up to date with `dev` first. The `dev` ruleset does not require an up to date branch (`strict_required_status_checks_policy` is `false` in `.github/rulesets/dev-no-delete.json`, see the [rulesets README](https://github.com/the-cloud-clockwork/agentihooks/blob/dev/.github/rulesets/README.md)), and the merge group runs the unit suite on that head merged with the newest `dev` and the entries ahead of it. Merging `dev` into a green branch only creates a new head, which needs a second full pull request run before it can be queued. This relies on an active merge queue on `dev` and on the Tests workflow running on `merge_group`; the command takes only the swarm slug, the agent identity (`--as` or `AGENTIHOOKS_AGENT_NAME`) and the pull request URL.
+A pull request enters the `dev` merge queue at the head its pull request checks passed on. It is not brought up to date with `dev` first. The `dev` ruleset does not require an up to date branch (`strict_required_status_checks_policy` is `false` in `.github/rulesets/dev-no-delete.json`, see the [rulesets README](https://github.com/the-cloud-clockwork/agentihooks/blob/dev/.github/rulesets/README.md)), and the merge group runs the unit suite on that head merged with the newest `dev` and the entries ahead of it. Merging `dev` into a green branch only creates a new head, which needs a second full pull request run before it can be queued. In agentihooks this relies on an active merge queue on `dev` and on the Tests workflow running on `merge_group`; the command takes only the swarm slug, the agent identity (`--as` or `AGENTIHOOKS_AGENT_NAME`) and the pull request URL.
 
 In a swarm, an engineer queues its own pull request once its checks pass and both reviews close:
 
@@ -75,7 +75,7 @@ agentihooks swarm <slug> merge queue https://github.com/<owner>/<repo>/pull/<num
 The command:
 
 1. Reads the pull request. It refuses a pull request whose base is not `dev`, and one that is not the calling worker's recorded task pull request.
-2. Reads the newest `pull_request` run of the Tests workflow on the current head. It refuses unless that run passed on that head.
+2. Reads the required checks of the pull request's own repository: its `dev` branch rules (`repos/<owner>/<repo>/rules/branches/dev`) and `dev` branch protection, each check by name and, where the rule names one, by app. It refuses unless every required check has reported on the current head and none failed. No workflow file name is assumed, so a repository whose required check comes from a workflow other than Tests is graded the same way.
 3. Enqueues that head with `expectedHeadOid`. GitHub refuses the enqueue if the branch moved after step 1.
 4. Prints the pull request's state, head and queue entry:
 
@@ -85,18 +85,32 @@ The command:
 
 A pull request already in the queue returns its state without another check or enqueue. For one that is not queued, it reads no `dev` comparison, commit list, job or log, never calls GitHub's update branch, and never commits to the branch, whatever changed on `dev` since the checks ran, CI and grading files included. The seat then waits with `agentihooks swarm <slug> wait --on merge <url>`. A pull request released with `agentihooks swarm <slug> ready` is queued the same way by the tick's merge pass once its checks pass.
 
-Merge `dev` into the branch only on a real conflict or when GitHub refuses the enqueue. That commit is a new head, so the command refuses it until the Tests run on that head passes.
+Merge `dev` into the branch only on a real conflict or when GitHub refuses the enqueue. That commit is a new head, so the command refuses it until the required checks on that head pass.
 
 A repository with no merge queue on `dev` gets a squash merge from the same command instead, only for a ready pull request with green checks and a review decision of none or approved; see the merge command row in the [swarm commands](../pillars/swarm.md).
 
 | Message | Cause | Action |
 |---|---|---|
-| `the current pull request head must pass Tests before queueing` | No `pull_request` Tests run on the current head yet, it is still running, or it failed. | Wait on checks with `agentihooks swarm <slug> wait --on checks <url>`, or fix the red check, then queue again. |
+| `required checks on the current pull request head must pass before queueing` | A required check of the pull request's repository has not reported on the current head, is still running, or failed. A failed check is named after `; failed:`. | Wait on checks with `agentihooks swarm <slug> wait --on checks <url>`, or fix the red check, then queue again. |
 | `swarm merge queue operations require a pull request into dev` | The pull request base is not `dev`. | Retarget the pull request to `dev`. |
+| `gh: Not Found (HTTP 404)` | The caller's `gh` cannot read the `dev` branch rules of the repository named in the URL. | Check `gh auth status`; the account must read that repository's branch rules and pull requests. |
+| `GitHub URL does not identify a pull request` | The URL names no pull request the caller can read. | Check the owner, repository and number in the URL. |
 | `final integration must target this task's recorded pull request` | The URL is not recorded on the calling worker's task. | Record it with `agentihooks swarm <slug> pr <url>`. |
 | A GitHub GraphQL error from the enqueue | GitHub refused the entry, for example because the head moved after the read or the pull request conflicts with `dev`. | Read `agentihooks swarm <slug> merge state <url>`, fix the cause, and queue once the new head is green. |
 
 `tests/swarm/test_merge_queue.py` pins this behaviour: a green head is queued as is whatever `dev` changed, and a red head is refused without reading `dev`. Delivered by pull request [3476](https://github.com/the-cloud-clockwork/agentihooks/pull/3476). Its Tests run on the merged head passed: [38840793791](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38840793791). The red and green proofs it cites are Proofs workflow dispatches on branch `ci-323133-0814`: [38745333203](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38745333203) failed on the old path, which still updated the branch from `dev`, and [38746154923](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38746154923) passed on the new one.
+
+`test_queue_adds_another_repositorys_pull_request_to_its_own_merge_queue` in the same file pins the cross repository case below: given a `dev` merge queue and the kernel's required check in its fixture, a pull request in another repository (the test runs antoncore and agentibrain-kernel) joins that repository's queue, and every read addresses that repository. Delivered by pull request [4187](https://github.com/the-cloud-clockwork/agentihooks/pull/4187); its red Proofs run [39058116611](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39058116611) failed on the old Tests workflow lookup with `gh: Not Found (HTTP 404)`, and [39058118542](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39058118542) passed.
+
+### Pull requests in other repositories
+
+The command works on any repository the caller's `gh` can reach, not only agentihooks. Every read and the enqueue address the repository named in the URL, and the merge queue it joins is that repository's own `dev` queue. A task that spans repositories records each pull request with `agentihooks swarm <slug> pr <url>` and queues each one the same way, in dependency order:
+
+```bash
+agentihooks swarm <slug> merge queue https://github.com/the-cloud-clockwork/agentibrain-kernel/pull/<number>
+```
+
+For agentibrain-kernel, whose `dev` rules require `Gate — Required` reported by GitHub Actions (`gh api repos/the-cloud-clockwork/agentibrain-kernel/rules/branches/dev` lists it with `integration_id` 15368), the command grades that check, not a Tests run, and enqueues into the kernel's `dev` merge queue. A repository with no merge queue on `dev`, such as antoncore, takes the squash merge described above. The checks wait accepts a pull request or an Actions run in another repository the same way: `agentihooks swarm <slug> wait --on checks https://github.com/<owner>/<repo>/actions/runs/<id>` reads only that repository's run and, when it is red, its jobs.
 
 ## Lost runner requeue
 

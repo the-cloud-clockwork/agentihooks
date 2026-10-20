@@ -15,7 +15,11 @@ DURATION_JOB = (
     if "durations" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     else "select"
 )
-UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"}
+UNIT = {DURATION_JOB, "split", "unit", "shard-check", "test-count", "gate-required"} | (
+    {"test-summary"}
+    if "test-summary" in yaml.safe_load((ROOT / ".github/workflows/test.yml").read_text())["jobs"]
+    else set()
+)
 QUEUE = UNIT | {"queue-fail-fast"}
 PULL_REQUEST = (
     UNIT
@@ -35,6 +39,7 @@ PROMOTION = (PULL_REQUEST - {"mutation-plan", "mutation-stats", "mutation", "lin
     "swarm-image",
     "worker-image",
     "brain-smoke",
+    "writer-lock",
     "ledger-load",
     "kind-due",
     "helm-kind",
@@ -86,7 +91,12 @@ def jobs_for(event, base_ref="dev", scope="full"):
             completed[name] = SimpleNamespace(
                 result="success" if runs else "skipped",
                 outputs=SimpleNamespace(
-                    due="true", reused="false", scope=scope if runs else "", analysis="A1" if runs else ""
+                    due="true",
+                    reused="false",
+                    scope=scope if runs else "",
+                    analysis="A1" if runs else "",
+                    shards="[0, 1]",
+                    stats_parts="[0, 1]",
                 ),
             )
             del pending[name]
@@ -122,7 +132,9 @@ def test_the_retired_queue_baseline_leaves_the_workflow_and_the_gate_takes_the_p
     steps = jobs["gate-required"]["steps"]
     steps[0]["run"] = steps[0]["run"].replace('"lint", "docs", "semgrep"', '"lint", "semgrep"')
     assert steps in [
-        ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+        ci_reuse.inline_mutation(
+            ci_reuse.gate_steps(queue_tier=True, promotion=True, **options, summary=summary, watcher_loss=True)
+        )
         for summary in (False, True)
     ]
 

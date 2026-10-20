@@ -98,7 +98,10 @@ Claude masters prefer a valid native claude.ai login at launch and handoff;
 workers retain their token and API routing. Declare the master account and
 optional tier with `agentihooks balance master-account` as described under
 [reserved headroom](load-balancing.md#master-accounts-and-reserved-headroom).
-The declaration alone neither signs in nor enables Remote Control.
+The declaration alone neither signs in nor enables Remote Control. A master on
+an interactive login has no token to probe; its quota reading comes from its
+own sessions, as described under
+[Quota readings for an interactive master account](load-balancing.md#quota-readings-for-an-interactive-master-account).
 
 For the lead Claude master to appear in the Claude app, the operator enables
 the optional master login and signs in from their own terminal:
@@ -137,18 +140,6 @@ Claude process must remain running and have network access. According to the
   trust before launch; an untrusted noninteractive launch cannot answer the
   native trust prompt.
 
-Outside the explicitly enabled private login route, a Claude master tries its
-valid interactive login first. If that is unavailable, it falls back to normal
-subscription token placement and configured API capacity under the
-[live share rules](load-balancing.md#live-share-weight). With the default API
-weight of zero, the order is interactive login, token pool, then API overflow;
-a nonzero weight can select API capacity earlier. If no permitted account has
-room, launch fails. A fallback master may use the headroom reserved against
-workers, but cannot bypass a spent or otherwise ineligible account. Its desired
-interactive route is retained: the next handoff or recycle checks login again
-and returns to it when available, rather than changing credentials in the
-running process.
-
 Inspect `agentihooks swarm <id> status` and the ledger master card for the
 recorded launch decision:
 
@@ -163,6 +154,67 @@ recorded launch decision:
 
 Codex masters have no Claude Remote Control decision. These findings report
 lost access; they do not stop the master or change its authentication.
+
+#### Auth fallback and move back
+
+This behavior covers one host: the login probe, the placement and the recorded
+route all belong to the machine running the swarm tick. It applies outside the
+explicitly enabled private login route.
+
+| Master | Tries the login first | Records the desired interactive route |
+|---|---|---|
+| Front door Claude master (seat `master@<id>`, or no seat) with no ordered route | Yes | Yes |
+| Pool Claude master (`master-2@<id>` and later) with no ordered route | Yes | No |
+| Any master whose task orders a route (`route_kind`) | No: the ordered route is used | No |
+| Codex master, or the successor of a Codex master | No | No |
+
+A master with no harness set takes the login on Claude. A master whose
+predecessor ran on Codex stays on Codex, unless its profile is Claude only.
+
+A login is valid when `claude auth status --text` exits zero and prints
+`Login method: Claude account`. The probe runs without the routed credentials:
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL`, every `AH_CC_TOKEN_<slug>` and every `CLAUDE_CODE_USE_*`
+variable are removed. It runs when the route is chosen at every master spawn,
+including a handoff, a quota handoff and a recycle. A failed, timed out or
+expired check at that point sends the master to fallback placement. A master
+routed to the login is checked once more just before launch; a failure there
+refuses that launch as unavailable, and the
+[master outage](#master-outage-and-promotion) rules bring a master back.
+
+On fallback the master is placed with normal subscription token placement and
+configured API capacity under the
+[live share rules](load-balancing.md#live-share-weight). With the default API
+weight of zero, the order is interactive login, token pool, then API overflow;
+a nonzero weight can select API capacity earlier. The master may use room
+[reserved from workers](load-balancing.md#master-accounts-and-reserved-headroom),
+even when the declared master account is the only account with room. It cannot
+bypass a spent or otherwise ineligible account; if no permitted account has
+room, launch fails.
+
+A quota handoff whose successor finds a valid login skips the quota transfer to
+another token account and launches on the login. Without a valid login, the
+quota handoff moves to another account as for any agent.
+
+The desired route is stored per agent in the swarm's `desired-routes` record,
+outside the agent projection, and in the execution record. A resumed master
+keeps it, each new placement sets it again and dropping the agent removes it.
+The running master never changes credentials: the next handoff or recycle
+checks the login again and returns to it when it is valid, with no operator
+action. That successor launch clears `master-fallback-auth/<seat>`.
+
+Restore phone access after a fallback, in a shell with none of the routed
+credential variables above set:
+
+```bash
+claude auth status --text                 # must print: Login method: Claude account
+claude auth login                         # renew the native login if it is expired
+agentihooks swarm <id> status             # master-fallback-auth/<seat> stays until the next master launch
+```
+
+With `AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true`, renew the private login with
+`agentihooks claude login --master` instead; see
+[Master claude ai login](../reference/account-login.md#master-claude-ai-login).
 
 ### Master outage and promotion
 
@@ -232,6 +284,89 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   by item id. A match sends the item to that master, so related items reach the same master together. Any
   classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
   round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
+  [Intent grouping](#intent-grouping) gives every rule.
+
+#### Sizing settings
+
+`master-per`, `masters-step` and the manual `masters=N` count decide the master count. The tick reads them in this
+order:
+
+| Setting | Effect |
+|---|---|
+| `master-per=N\|hive` | Overrides the step: one seat per N working agents rounded up, or one per hive. |
+| `masters-step=N` (N of 1 or more) | One master plus the working agents divided by N, rounded down. |
+| `masters-step=0` | With `master-per=off`, no scaling: the count stays the manual `masters=N` and the tick only fills empty seats. |
+| `master-per=off` | The default. Hands sizing back to `masters-step`. |
+
+`swarm create` stores `masters-step=12`. A swarm created before the setting existed loads `0`, so it keeps its manual
+count until the step is set. A stopping or stopped swarm never scales; the tick only fills its seats.
+
+```bash
+# Read the step; the first status line includes "masters step 12"
+agentihooks swarm my-swarm status
+
+# One extra master per 8 working agents instead of per 12
+agentihooks swarm my-swarm set masters-step=8
+
+# Pin three masters; this also sets the step to 0
+agentihooks swarm my-swarm set masters=3
+
+# Turn scaling back on, after a pinned count or for a swarm created before the setting
+agentihooks swarm my-swarm set masters-step=12
+```
+
+A `masters=N` and a `masters-step=N` in the same command keep the step given, and the step then sizes the count.
+
+`set` prints the stored settings as JSON, `masters_step` among them, and runs one tick at once on a running swarm,
+so a rise launches its seat in the same command. On the ledger page the Capacity row shows **masters step** after
+the engineer, CI and planner caps, with `−` and `+` buttons and a number field. Apply writes it through the same
+setting and accepts 0 to 50.
+
+Working agents are the swarm's agents outside the master lane that have not finished: engineer, CI and planner
+agents, and any other lane a template adds. With the default step:
+
+| Working agents | Wanted masters | Seats |
+|---|---|---|
+| 0 to 11 | 1 | `master@<id>` |
+| 12 to 23 | 2 | adds `master-2@<id>` |
+| 24 to 35 | 3 | adds `master-3@<id>` |
+
+#### Scaling over time
+
+With the default step, a swarm grows from 11 to 12 working agents. The next tick sets the seat count to two,
+launches `master-2@<id>` and prints `master seats 1 to 2 for 12 working agents`. On the masters channel, every master
+reads `Master seats are now 2 for 12 working agents. Phase owners: ...`, naming the phases each seat owns.
+
+The swarm then falls back to 11 agents. The count stays at two while the cool off runs, and a return to 12 agents
+ends the cool off with no change. A rise that stays below the seat count restarts it instead: a swarm holding three
+seats that falls to 11 agents (wanted one) and climbs back to 12 (wanted two) starts its ten minutes again. After ten
+minutes at a lower wanted count:
+
+1. The tick sends each extra backend master an inbox item from `swarm`: write a Handoff v2 for the lead master, run
+   `agentihooks swarm <id> handoff <doc>` and stop. The tick prints
+   `asked <agent> to hand off retiring seat master-2@<id>`.
+2. When that master has left its seat, the tick retires the seat. Its handoff document reaches `master@<id>` as an
+   inbox item. Every open item still at the seat is redirected to `master@<id>`, except the retire request, which
+   is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
+3. The seat count falls, phase owners rebalance and the masters channel announces the new owners.
+
+An extra backend seat that is empty and has no live seat above it retires at once when the cool off ends, and the
+tick prints
+`closed empty master seat <seat>`. If the swarm grows again before a retiring master leaves, its retire request is
+withdrawn with the note `the swarm grew again, so seat <seat> stays`.
+
+The swarm's master seat record keeps the seat count, and a `retire-seconds` list beside it keeps each retirement
+time, in seconds from the retire request to the retirement. Both are written to the `master_scaling` metrics table as
+`master_seat_count` and `master_retire_seconds`.
+
+#### Master scaling troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| A swarm with 30 agents keeps one master. | Its step is `0`: it was created before the setting, or a later `set masters=N` reset it. Run `set masters-step=12`. |
+| The count did not fall when agents finished. | The cool off has not run ten minutes at the lower count, or a rise restarted it. A count falls only past seats whose master has left; a master asked to hand off keeps its seat until it runs `swarm <id> handoff`. |
+| `master-2@<id>` still answers after the step changed. | The cool off has not run ten minutes, the asked master has not handed off yet, the swarm is stopping or stopped and so never shrinks, or a `master-per` rule overrides the step (run `set master-per=off`). |
+| The front door seat never retires. | That is by design: scaling only retires backend seats, highest number first. |
 
 ### Master inbox pool
 
@@ -294,6 +429,87 @@ pool items, points to the live seat list: check `swarm <id> status` for finished
 history, which `msg read <id>` prints for the master that claimed it, for the `claimed from the master pool by <seat>`
 line naming that seat. `msg read` also marks the item read, so run it only as the master taking up the item.
 
+#### Intent grouping
+
+Intent grouping sends a pooled item to the master that recently handled related work, so a run of items about one
+task, pull request or question reaches one master instead of being dealt across all of them. Round robin stays the
+rule for every item the classifier cannot place.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | on (unset) | `1`, `true`, `yes` or `on`, in any case and with surrounding spaces, keeps grouping on; any other value, such as `false`, `0` or an empty string, turns it off |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for all of its verdicts. An unreadable value keeps 3 |
+
+Both are read from the environment of the process that hands out the pool: the sender of an item to `master@<id>`
+(an agent's `msg send`, a question or follow up, a tick item) and the inbox redelivery pass. Set them where those
+processes get their environment, such as the profile `env` block or an `.env` file under the AgentiHooks home, so
+every sender agrees. The verdicts come from the [decision classifier](../reference/classifier.md), which needs
+`AGENTIHOOKS_CLASSIFIER_URL` and `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY`.
+
+```bash
+# turn grouping off for this shell and everything it starts
+export MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS=false
+# give the classifier five seconds per pool pass
+export MASTER_INBOX_CLASSIFIER_TIMEOUT_S=5
+```
+
+How an item is placed, on every pool pass (each send into the pool and each redelivery pass):
+
+1. **Recent items.** Each live master keeps the first lines of the last 15 items the pool handed to it, newest first.
+   Every claim adds one, whether intent or round robin chose the master. The list expires 24 hours after its last
+   addition. A master with no recent items is not asked about, so the first items of a new swarm go round robin.
+2. **Every waiting item is compared.** The pass takes every item still waiting in the pool, the new one and older
+   ones alike, and asks one yes or no question per item and master: does the new item continue the same work, task
+   or question as one of that master's recent items. All questions of one pass run in parallel, at most 16 at a time,
+   under one deadline of `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`.
+3. **Match.** A verdict of 0.7 or more is a match. The item goes to the matching master with the highest verdict;
+   equal verdicts go to the seat whose name sorts last. Without a match the item takes its round robin turn.
+4. **Live seats only.** A matched master that is no longer live, or the master that just let the item lapse on
+   redelivery, is passed over and the item takes its round robin turn. Operator items never enter the pool and are
+   never classified.
+
+What one item costs:
+
+| Saving | How |
+|---|---|
+| First lines only | The question carries the item's first line, cut to 120 characters, and the master's recent first lines. The rest of the item never leaves the inbox. |
+| One verdict per master | Each question asks for one probability, never a choice list or a score. |
+| API models only | The question goes to the classifier API models in `AGENTIHOOKS_CLASSIFIER_MODELS` order. A failed model passes the question to the next one, except a 400 that does not name context or tokens, which ends that question with a request error. When every model fails or the key is refused, the API is marked down for `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` (default 120 seconds) and every verdict goes round robin until it clears. The [classifier failover table](../reference/classifier.md#failover) has every case. The Haiku and Luna command line fallbacks are not used, so no agent session is started for a verdict. |
+| Cache by item | Verdicts are stored in one hash per item, one field per master and exact recent list. A later pass asks again only when that master's recent items changed. The hash expires one hour after the last pass that asked a question for the item. A verdict that lands after the deadline is still stored for the next pass. |
+
+The token estimate is the JSON request length divided by four. With 15 recent lines of 120 plain ASCII characters,
+one question is estimated at no more than 700 tokens, so such an item costs about 700 tokens per live master that has
+recent items, once per change of that master's recent list. Quotes and non-ASCII characters are escaped in JSON and
+raise the estimate, up to several times for text that is mostly non-ASCII.
+
+Any classifier error, any question unanswered at the deadline, and any verdict under 0.7 leaves the item to round
+robin in the same pass. A slow classifier delays the pass by at most the timeout and never keeps an item in the pool.
+With the flag off no question is asked and no recent items are recorded; delivery is plain round robin.
+
+A new item enters the pool only while two or more masters are live, but a redelivery pass classifies the items
+already waiting there whatever the live count, provided a live master has recent items. With one live master those
+questions change nothing, since that master takes every item, yet they still appear in the decision log and the
+`tokens` counters.
+
+Inspect grouping in Redis (prefix `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`) and in the classifier decision
+log, where every question is recorded under purpose `master-inbox-intent`:
+
+```bash
+redis-cli LRANGE agentihooks:inbox:pool:<id>:recent:master-2@<id> 0 -1
+redis-cli HGETALL agentihooks:inbox:pool:<id>:intent:<item id>
+agentihooks classifier stats --purpose master-inbox-intent
+```
+
+The `recent` list holds the first lines a master was handed. The `intent` hash holds one field per master and recent
+list, `<seat>|<hash of the recent list>`, whose value is that verdict, and a `tokens` field counting the estimated
+tokens sent for the item over every pass.
+
+| Symptom | Check |
+|---|---|
+| Related items still spread across masters | `classifier stats` shows calls and their sources. Calls with no source mean no model answered: check `AGENTIHOOKS_CLASSIFIER_URL`, the key and the down marker described in the classifier reference. No calls at all means grouping is off in the sending process, the pool is empty, no live master has recent items yet, or every verdict was already cached. |
+| Items placed correctly but slowly | Every send into the pool waits up to `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`. Lower it; late verdicts still fill the cache for the next pass. |
+| A master receives unrelated items | Verdicts below 0.7 cannot route; read the item's `intent` hash for the verdicts each master got. A matched master never takes an item it just let lapse. |
+
 ## Commands
 
 The swarm id is a lowercase slug of letters, digits and dashes, starting with a letter, at most 48 long.
@@ -351,8 +567,8 @@ The Swarm panel's controls (`start`, `pause`, `stop`, `stop --now`, `close`, `re
 | `agentihooks swarm <id> set lane-split-gate=deny\|log only\|skip` | Operator or master only. The lane split moves one seat between the eng and ci lanes after the bottleneck report names the same stage three ticks running, and the `seat_wait` remedy moves one from ci to eng. It defaults to `log only`, recording each would-be move in the swarm gate log; `deny` lets it move seats, `skip` holds every move without logging. In every mode it holds a move into a lane with no ready task, and it never moves caps the operator or the master set with `max-eng-agents` or `max-ci-agents`, through `swarm set`, the ledger page or `create` flags; those caps stay where they set them for the swarm's life, and a swarm stored before the pin existed counts as set. A tick hold names its reason in the tick's held line; a remedy hold names it in the task proposal to the master. |
 | `agentihooks swarm <id> set talk-gate=deny\|log only\|skip` | Operator or master only. The ledger server counts each eng and ci agent's talk writes (comments, chat lines, follow-ups) since its last outcome: a pushed commit, an opened pull request, resolved checks, a task state, pull request or proof change. Past 10, `deny` refuses the write and `log only` (the default) logs the would-be deny in the gate log. Talk owed to the operator and a typed `lift the talk gate` pass. The ledger hook's nudge and Stop gate also restart on an outcome and skip tool calls made inside sub-agents. |
 | `agentihooks swarm <id> set intent-gate=deny\|log only\|skip` | Operator or master only. `swarm pr` writes the parent intent (project overview, phase, task) into the pull request body and arms the task's intent check. On the next tick the classifier reads that intent with the pull request title, body, changed files, the task proof and the task's plan slice, resolved the way `agentihooks plan read` resolves it (phase range, plan artifact or Swarm v2 package, without the shared sections), and judges whether the phase can use the change as delivered and whether it weakens anything the phase builds; under 0.3, or a weakening at 0.5 or more, the verdict is fail, with reasons. It also asks phase fit on its own, so a fail names its criterion: a change that fits the phase but is not usable yet fails on delivery, never as a phase mismatch. Each verdict records its stage, criterion, model and definition digest. `python -m scripts.gates.intent_calibration` measures the check on its corpus of retained and control inputs. `deny` returns a failed task to its agent (claimed again, a ledger comment and an inbox item); `log only` (the default) logs the fail in the gate log; `skip` skips the check. The `intent` gate (`python -m scripts.gates intent`) refuses `gh pr merge` and `swarm done` while the verdict is fail, or pending for under two minutes; a check still pending after two minutes passes unchecked and is counted. A pass names the plan lines it judged. A task whose plan passed intent at `swarm trace-plan` opens its pull request on that pass, with no pending hold, and the tick still judges the pull request and replaces the plan verdict. Running `swarm pr` again starts a new check. A split task's halves are judged and merged one by one; see [Intent grading of each half](#intent-grading-of-each-half). |
-| `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. |
-| `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. |
+| `agentihooks swarm <id> master move --to HIVE` | Orders the live master to hand off so its successor starts on that hive. It refuses the hive the master already runs on, a hive that is not live, and a hive hive placement would not give the master. One durable inbox order reaches the master seat; after the master's Handoff v2 the tick starts the successor through hive launch on the named hive. A master that leaves without handing off gets no pin. Walkthrough: [Master failover and master move](hives.md#master-failover-and-master-move). |
+| `agentihooks swarm <id> set master-move-grace=SECONDS` | How long the hive running the master may stay without a heartbeat before the tick moves the master. Default 300. Past it, and while the runtime does not see the master live, the tick records a recovery handoff that names its unknowns, bumps the master seat generation, fences the old execution on that hive and starts the successor on a live hive chosen by hive placement, or unpinned when no hive qualifies. A hive that never beat, or whose record is gone, never moves its master. A returning hive terminates each fenced execution by its recorded process group before it writes its heartbeat, and takes no launch orders while one still runs. See [Automatic failover](hives.md#automatic-failover). |
 | `agentihooks swarm <id> set snapshot-minutes=N` | While the swarm runs, a background job the tick starts writes an automatic snapshot every N minutes to `~/.agentihooks/swarm/<id>/snapshots/auto-<ms>.json` and removes the oldest past ten. Default 30; a swarm without the setting takes `AGENTIHOOKS_SWARM_SNAPSHOT_MINUTES`; 0 turns automatic snapshots off. `snapshot.json` from `snapshot` and `stop` is separate and never pruned. |
 | `agentihooks swarm <id> set eng-agent=codex eng-model=M eng-effort=E eng-kind=K eng-role=TEXT` | Change one lane field (`ci-` likewise); the next spawn in that lane uses it. |
 | `agentihooks swarm <id> save-template NAME` | Write this swarm's caps, compact limit and lane map as the user template NAME. |
@@ -433,7 +649,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the newest `pull_request` run of the Tests workflow on the current head and refuses unless that run passed (`the current pull request head must pass Tests before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
@@ -1775,6 +1991,52 @@ A tick prints each action as `<id>: <action>` on stdout and ends normally; a ren
 | A killed tick or rename of this hive left the lock on this machine | takes it at once | takes it at once |
 | A holder on another machine, or a bare token, holds it in this epoch | `another tick is running` until the key expires | `swarm <id>: another tick or rename is running` until the key expires |
 
+#### Release on every return
+
+A tick pass releases the lock in its `finally` on every return: the ledger in the bin (`the ledger is in the bin,
+stopped`), a ledger that is gone, a failed ledger health probe (`Ledger health probe failed`), an exception
+partway through, and a normal end. A tick pass stopped at its 450 second deadline, or by `SIGTERM` from the
+service, releases every lock it holds before it exits and prints `the swarm tick stopped <why>; released <n> held
+tick locks`. Only a process killed outright, such as by `SIGKILL` or a service start timeout, leaves its lock
+behind, and the next minute tick replaces that lock through the dead holder check.
+
+#### Reopening a swarm from the bin
+
+`agentihooks swarm <id> reopen` sets the swarm running and runs one tick itself. When that tick dies holding the
+lock, the next minute tick on the same host takes the lock over and spawns the master; the swarm does not wait out
+the ten minute expiry. A Doctor start that reopens a closed Doctor ledger goes through the same reopen path.
+
+```bash
+agentihooks swarm <id> reopen
+journalctl --user -t agentihooks-swarm --since "-3 min"
+agentihooks swarm <id> status
+```
+
+The journal shows the next tick's actions with the master spawn, and `status` lists the master online.
+
+#### Troubleshooting a held tick lock
+
+When every tick of one swarm returns `another tick is running` in a few milliseconds, read the lock record:
+
+```bash
+redis-cli GET agentihooks:swarm:<id>:tick-lock
+redis-cli PTTL agentihooks:swarm:<id>:tick-lock
+ps -o pid,lstart,cmd -p <pid from the record>
+```
+
+- A live process under that id, with the record's start time, is a real tick still running: wait for it.
+- A record with no `host`, `pid` and `start` fields, or a `host` other than this machine's, is never replaced
+  early. Update the installed agentihooks to current `dev` so later ticks write holder records; the held lock
+  frees itself when its `PTTL` reaches zero.
+
+`tests/swarm/test_cli.py` pins this behavior. `test_a_binned_swarm_reopened_by_a_tick_that_died_holding_the_lock_spawns_its_master_at_the_next_tick`
+bins a swarm, checks the binned tick left no lock, reopens it through a tick that dies holding the lock, and
+asserts that the next tick spawns the master and leaves no lock. Three more tests assert no lock is left after
+a tick returns because its ledger is gone, fails partway through, or fails its ledger health probe. They were added by
+[pull request 4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098). Its red proof ran on a plant
+branch that removed the dead holder check and reproduced the observed `another tick is running` loop
+([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39042891977)).
+
 ### Tick heartbeat and stale watcher
 
 Every tick pass that runs to its end writes the swarm's heartbeat to Redis: when the pass ended, and when each
@@ -2517,6 +2779,58 @@ about ten seconds at its default interval. Stable ids
 prevent duplicate inbox items. Ledger replay is limited to its retained history of 2000 events: writes
 older than that history cannot be reconstructed by replay. The ledger records a notice naming the lost
 revision range for the operator; the watcher and tick also report trimmed history gaps.
+
+#### Queued ledger writes
+
+Ledger talk uses the same outbox when the local ledger server does not answer: answers, relays, new list
+items and comments with an author and no attachments queue as `ledger` records in `inbox-outbox.jsonl`. Any
+other ledger write is refused while ledger records wait, with
+`ledger talk queued while the server was down still waits in <outbox>; retry once it lands`. A ledger linked
+to a remote server never queues here.
+
+Every `agentihooks ledger` call replays the waiting ledger records before its own write; the swarm tick and
+each inbox connection replay them too. Each record is judged by what the ledger server answers:
+
+| Server answer on replay | Result |
+|---|---|
+| Applied | The record leaves the outbox. |
+| No connection | The ledger lane stops; this record and every later ledger record wait for the next replay. Inbox records are not held by it. |
+| 5xx or 429 | The whole ledger lane waits, up to the busy age, then the record is set aside. |
+| 409 revision conflict, no expected revision in its ops | Only later records that write the same resources wait, up to the busy age. |
+| 409 revision conflict, ops carry `expected_revision`, all append only | Sent once more without the expected revision, so the server applies it at the current revision. A second conflict counts as busy for those resources. |
+| 409 revision conflict, ops carry `expected_revision`, any other op | Set aside at once: the revision it expected has moved and can never apply. |
+| Any other refusal, or a resource that cannot be read from the record | Set aside at once with the reason. |
+
+Append only ops are `add`, `add_item`, `relay` and `answer`. A write that reached the client before the server
+went down can carry the `expected_revision` the client read then, so a queued comment on a thread that has
+since moved meets this case on the first replay after the thread moves.
+
+A record's resources are the threads, lists or items its ops write: the thread of a comment, the list of
+a new item, the task or phase of a task or phase op, `members` for joins and acknowledgements. A record
+held by a conflict adds its resources to the held set, so a later record that shares any of them also
+waits, and the order of writes to each resource holds. Records for other items, and every inbox record,
+keep replaying behind it.
+
+| Setting | Default | Behaviour |
+|---|---|---|
+| `AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S` | 3600 seconds | Set aside a ledger record still busy or in conflict this long after it was queued. |
+
+A set aside record goes to `inbox-outbox.skipped.jsonl` with its reason, and the replay prints it:
+
+```text
+agentihooks msg: queued message <id> was refused on replay (the ledger server answered 409 revision conflict
+on <path> since this write was queued, so its expected revision can never apply); kept in <skipped outbox>
+```
+
+A record set aside after the busy age carries `<server answer> for over <busy age> seconds
+(AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S)`. A set aside write was not applied: read its op in the skipped
+file and write it again against the current ledger.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| Comments on one thread wait while other ledger writes land | A record for that thread is in revision conflict without an expected revision | Wait for the busy age, or resolve the conflict on the thread; other writes are not held. |
+| A ledger write other than talk is refused while talk waits | Queued ledger records wait: the server is down, answers 5xx or 429, or a record is held by a revision conflict | Bring the ledger server back; `agentihooks swarm <id> status` shows the queued count. |
+| A queued comment never appeared and the set aside count rose | Its revision moved while it waited, or the server refused it | Read the reason in the skipped file and write the comment again. |
 
 ### Outage holds and recovery
 

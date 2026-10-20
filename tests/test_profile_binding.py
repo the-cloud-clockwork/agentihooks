@@ -265,6 +265,8 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         str(tmp_path),
         "--route-timeout",
         "0.1",
+        "--canary-timeout",
+        "0.1",
     ]
     native = (
         ["--model", "configured-model", "--effort", "medium"]
@@ -294,7 +296,8 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         reasons = {
             "wrong": "live harness profile mismatch with requested choice",
             "missing": f"missing profile home: {tmp_path / 'missing'}",
-            "absent": "mounted profile canary did not validate before timeout",
+            "absent": "mounted profile canary did not validate before timeout: "
+            f"the {target} agent reported no canary within 0.1s",
             "account": "live process account differs from requested route",
         }
         assert output.err == f"agentihooks init-agent: {reasons[control]}\n"

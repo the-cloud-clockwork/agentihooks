@@ -206,16 +206,29 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
+  githubAuth:
+    mode: token
+    secretName: ""
+    tokenKey: GITHUB_TOKEN
+    appIdKey: GITHUB_APP_ID
+    installationIdKey: GITHUB_APP_INSTALLATION_ID
+    privateKeyKey: GITHUB_APP_PRIVATE_KEY
+  # Operator keys and the stable host key come from credentialSecret; publish the port outside this chart.
+  ssh:
+    enabled: false
+    port: 2222
   persistence:
     size: 1Gi
     storageClassName: ""
+  # Memory in MiB per agent, multiplied by maxAgents into the pod's memory request and limit.
+  memoryPerAgentMi:
+    request: 700
+    limit: 2048
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
       ephemeral-storage: 1Gi
     limits:
-      memory: 2Gi
       ephemeral-storage: 10Gi
 
 worker:

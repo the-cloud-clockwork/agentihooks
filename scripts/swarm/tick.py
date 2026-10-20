@@ -937,10 +937,11 @@ def _owner_hold(slug, store, runtime, task):
 
 
 def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
-    agents, actions = store.agents(slug), []
+    agents = store.agents(slug)
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
-    for lane, task in _spawn_order(slug, config, store, agents, rows, doc, runtime):
+    order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
+    for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
             return actions + held
@@ -1036,7 +1037,7 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
     decision = capacity.read(store, slug)
     caps = capacity.caps(decision, config)
     dispatched = dispatcher.claim_key(config, doc)
-    queue = []
+    queue, waits = [], []
     for lane, cap in caps.items():
         busy = sum(
             1 for a in agents if a.lane == lane and not _ended(a, rows) and _current_owner(a, rows.get(a.task, {}))
@@ -1044,9 +1045,10 @@ def _spawn_order(slug, config, store, agents, rows, doc, runtime):
         ready = ready_in_order(slug, store, rows, doc, lane, dispatched)
         if "tasks" in decision:
             ready = [task for task in ready if task["id"] in decision["tasks"]]
-        ready = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
+        ready, refused = profile_first.placeable(slug, config, store, runtime, lane, ready, max(cap - busy, 0))
         queue += [(busy + rank, lane, task) for rank, task in enumerate(ready)]
-    return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])]
+        waits += refused
+    return [(lane, task) for _, lane, task in sorted(queue, key=lambda entry: entry[0])], waits
 
 
 def _admission(runtime):

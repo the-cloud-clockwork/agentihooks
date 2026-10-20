@@ -14,6 +14,7 @@ from hooks.lifecycle.run import sweep
 from hooks.lifecycle.scratch_rm import remove_scratch
 from hooks.lifecycle.timer import install_timer, remove_timer
 from scripts import herdr_gc
+from scripts.host_guard import sync as host_guard
 from scripts.swarm import naming
 
 GB = 1 << 30
@@ -44,6 +45,8 @@ def _parser() -> argparse.ArgumentParser:
     name.add_argument("kind", choices=("worktree", "tmp"))
     name.add_argument("--repo", default=".", help="Any checkout of the repository")
     name.add_argument("--check", default="", help="Exit 1 unless this is a built worktree name for the session")
+    guard = sub.add_parser("host-guard", help="Link the host process guard to this checkout, or report its drift")
+    guard.add_argument("action", choices=("install", "check"))
     return parser
 
 
@@ -139,6 +142,8 @@ def main(argv: list[str]) -> int:
         return _scratch_new(args.name) if args.action == "new" else _scratch_rm(args.name)
     if args.command == "name":
         return _name(args.kind, args.repo, args.check)
+    if args.command == "host-guard":
+        return host_guard.run(args.action, Path.home())
     if args.install_timer or args.remove_timer:
         root = str(Path(__file__).resolve().parents[1])
         print(install_timer(sys.executable, root) if args.install_timer else remove_timer())

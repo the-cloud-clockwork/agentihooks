@@ -6,6 +6,7 @@ import yaml
 
 from tests.ledger_load import paired
 
+ROOT = Path(__file__).resolve().parents[2]
 BASE = {"seconds": 90, "errors": 0, "write_p50_s": 1.0, "busiest_cores": 0.5}
 
 
@@ -59,12 +60,38 @@ def test_the_same_code_bound_is_the_widest_single_pair_ratio_in_either_direction
 
 
 def test_the_recorded_same_code_runs_fit_inside_the_margin_the_workflow_states():
-    root = Path(__file__).resolve().parents[2]
-    workflow = yaml.safe_load((root / ".github/workflows/hierarchy-cpu.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())
     margin = float(workflow["jobs"]["grade"]["env"]["SAME_CODE_MARGIN"])
-    recorded = paired.recorded_runs(root / "tests/ledger_load/same_code_pairs.json")
+    recorded = paired.recorded_runs(ROOT / "tests/ledger_load/same_code_pairs.json")
     assert len(recorded) >= 3
     assert paired.same_code_bound(recorded) <= margin
+
+
+def compare_mode() -> tuple[int, float]:
+    jobs = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]
+    pairs = jobs.get("compare", {}).get("strategy", {}).get("matrix", {}).get("pair", [1, 2])
+    return len(pairs), float(jobs.get("compare-grade", {}).get("env", {}).get("SAME_CODE_MARGIN", paired.MARGIN))
+
+
+def test_compare_mode_passes_one_same_code_pair_two_times_apart_and_fails_a_three_times_slower_write():
+    count, margin = compare_mode()
+    apart = {**BASE, "write_p50_s": 2.0, "busiest_cores": 1.0}
+    assert paired.regressions([(BASE, apart), *[(BASE, BASE)] * (count - 1)], margin) == []
+    slower = {**BASE, "write_p50_s": 3.0}
+    assert paired.regressions([(BASE, slower)] * count, margin) == [
+        f"head write p50 median pair ratio 3.00 exceeds the {margin}x margin"
+    ]
+
+
+def test_compare_mode_records_its_own_same_code_runs_inside_the_margin_its_grade_states():
+    count, margin = compare_mode()
+    recorded = paired.recorded_runs(ROOT / "tests/ledger_load/compare_same_code_pairs.json")
+    assert len(recorded) >= 3
+    assert all(len(pairs) == count for pairs in recorded)
+    assert paired.same_code_bound(recorded) <= margin
+    grade = yaml.safe_load((ROOT / ".github/workflows/ledger-load.yml").read_text())["jobs"]["compare-grade"]
+    run = next(step["run"] for step in grade["steps"] if "tests.ledger_load.paired" in step.get("run", ""))
+    assert '--margin "$SAME_CODE_MARGIN" --same-code tests/ledger_load/compare_same_code_pairs.json' in run
 
 
 def test_the_graded_measure_is_the_repeat_when_the_gate_measured_twice():

@@ -3,11 +3,15 @@ import ast
 import json
 import math
 import os
+import subprocess
+import time
+import zipfile
 from datetime import UTC, datetime
 from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
@@ -18,6 +22,13 @@ from tests.dep_manifest import changes as recorded_changes
 # Upper quartile of measured worker seconds per mutant; stored test timings did not predict the cost.
 MUTANT_SECONDS = 5.6
 WORKERS = 4
+RECORD_RETRY_SECONDS = 10
+RECORD_ERRORS = (subprocess.SubprocessError, OSError, ValueError, KeyError, zipfile.BadZipFile)
+
+
+def shard_workers() -> int:
+    quota = os.environ.get("MUTATION_SHARD_CPU_QUOTA")
+    return quota_workers(WORKERS, float(quota) if quota else None)
 
 
 def estimate(
@@ -25,6 +36,7 @@ def estimate(
     changes: dict[str, set[int]],
     selection: dict[str, list[str]] | None = None,
     manifest: dict | None = None,
+    everything: bool = False,
 ) -> tuple[float, int, list[str]]:
     mutants, tests = 0, set()
     drift = record_drift(root, manifest) if manifest is not None else None
@@ -43,7 +55,7 @@ def estimate(
             path, _, name = node(test).partition("[")[0].partition("::")
             recorded.setdefault(path, set()).add(name)
     for path, lines in changes.items():
-        chosen = select_tests(root, Path(path))
+        chosen = every_test(root) if everything else select_tests(root, Path(path))
         if manifest is not None:
             chosen = sorted({*chosen, *recorded_tests(root, manifest, path, lines)})
         if drift is not None and path not in unrecorded:
@@ -62,6 +74,30 @@ def estimate(
         # mutmut emits only mutants inside a function or method.
         mutants += sum(1 for mutation in mutations if mutation.contained_by_top_level_function)
     return mutants * MUTANT_SECONDS, mutants, sorted(tests)
+
+
+def every_test(root: Path) -> list[str]:
+    return sorted(path.relative_to(root).as_posix() for path in (root / "tests").rglob("test_*.py") if path.is_file())
+
+
+def record_failure(error: Exception) -> str:
+    detail = getattr(error, "stderr", None)
+    if isinstance(detail, bytes):
+        detail = detail.decode(errors="replace")
+    return f"{type(error).__name__}: {(detail or '').strip() or error}"
+
+
+def read_record(repository: str) -> tuple[tuple[dict, dict] | None, str]:
+    before = datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
+    for attempt in (1, 2):
+        try:
+            return find_record(repository, before), ""
+        except RECORD_ERRORS as error:
+            reason = record_failure(error)
+            print(f"Reading the recorded dev coverage failed on attempt {attempt}: {reason}")
+        if attempt == 1:
+            time.sleep(RECORD_RETRY_SECONDS)
+    return None, reason
 
 
 def recorded_tests(root: Path, manifest: dict, path: str, lines: set[int]) -> set[str]:
@@ -178,7 +214,7 @@ def narrow(
 
 
 def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
-    return max(1, min(limit, mutants, math.ceil(seconds / (WORKERS * target))))
+    return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
 
 
 def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
@@ -186,7 +222,7 @@ def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
     buckets = [
         bucket
         for index in range(parts)
-        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), WORKERS)
+        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), shard_workers())
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 
@@ -224,16 +260,21 @@ def main() -> int:
     bases = own_bases(root, args.base, args.head, graded_green)
     print(f"Mutation bases: {' '.join(bases)}")
     changes = discover_changes(root, bases, args.head)
-    manifest = None
+    manifest, failure = None, ""
     if args.repository:
-        found = find_record(args.repository, datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"))
-        if found is None:
+        found, failure = read_record(args.repository)
+        if failure:
+            print(
+                "::warning title=Mutation selection fallback::The recorded dev coverage could not be read, so every"
+                f" test module is selected for each changed file: {failure}"
+            )
+        elif found is None:
             print("No dev test dependency manifest found; tests are selected by import only.")
         else:
             run, manifest = found
             print(f"Recorded coverage from dev run {run['id']} adds the tests that executed a changed function.")
     selection = {}
-    seconds, mutants, tests = estimate(root, changes, selection, manifest)
+    seconds, mutants, tests = estimate(root, changes, selection, manifest, bool(failure))
     validate_tests(root, tests)
     browser = str(needs_browser(root, sorted({test_file(test) for test in tests}))).lower()
     (root / ".mutation-selection.json").write_text(json.dumps(selection) + "\n")

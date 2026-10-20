@@ -70,6 +70,26 @@ def test_a_refusal_with_another_cause_stays_a_403(port, monkeypatch):
     )
 
 
+def test_any_redis_error_on_the_invite_delete_is_a_refusal(admin, port, monkeypatch):
+    from redis.exceptions import RedisError
+
+    monkeypatch.setattr(admin, "getdel", _raises(RedisError("unknown reply from the server")))
+
+    assert _post(port, server.JOIN_PATH, {"code": "any"}) == (
+        403,
+        {"error": "Redis refused the invite (unknown reply from the server)"},
+    )
+
+
+@pytest.mark.parametrize("kind", ["TimeoutError", "ConnectionError"])
+def test_a_stalled_invite_delete_stays_a_503(admin, port, kind, monkeypatch):
+    from redis import exceptions
+
+    monkeypatch.setattr(admin, "getdel", _raises(getattr(exceptions, kind)("Timeout reading from socket")))
+
+    assert _post(port, server.JOIN_PATH, {"code": "any"}) == (503, {"error": server.REDIS_STALLED})
+
+
 def test_the_join_service_redis_client_drops_connections_made_before_its_bound(admin):
     from redis.backoff import NoBackoff
     from redis.retry import Retry

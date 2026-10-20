@@ -3,8 +3,9 @@
 import hashlib
 import json
 import os
+from datetime import datetime, timezone
 
-from scripts.doctor import ci_speed, ci_speed_read
+from scripts.doctor import ci_speed, ci_speed_read, github_status
 from scripts.doctor.words import plural
 from scripts.inbox.seats import seat_address
 from scripts.inbox.store import InboxStore
@@ -102,6 +103,50 @@ def retract(store, doctor, watched, cleared, now_ms):
     return gone
 
 
+def _incidents(state, now_ms):
+    """The tracked GitHub incidents and the open Actions ones holding findings; an unread status page holds none."""
+    current = github_status.unresolved()
+    incidents = github_status.track(state.get("incidents", {}), current, now_ms)
+    return incidents, [incident for incident in incidents.values() if current and incident["end"] is None]
+
+
+def _crossings(state, runs, span, incidents, held):
+    """This pass window's grouped CI speed findings, none while an incident holds them, and the superseded ids."""
+    since, now_ms = span
+    width = interval_minutes(os.environ) * MINUTE_MS
+    window = now_ms - now_ms % width
+    groups = {
+        identity: entry for identity, entry in state.get("groups", {}).items() if entry["window"] >= window - width
+    }
+    cleared = ci_speed.cleared(runs)
+    gone = [*ci_speed.prune(groups, cleared), *cleared]
+    if not held:
+        ci_speed.group(groups, runs, since, now_ms, window, github_status.windows(incidents, now_ms))
+    state["groups"] = groups
+    current = {identity: entry for identity, entry in groups.items() if entry["window"] == window}
+    found = []
+    if not held:
+        found.extend(ci_speed.grouped(current))
+        found.extend(finding for run in runs for finding in ci_speed.skipped(run))
+    return found, gone
+
+
+def _hold(mail, watched, doctor, held):
+    for incident in held:
+        if incident["noticed"]:
+            continue
+        began = datetime.fromtimestamp(incident["start"] / 1000, timezone.utc).strftime("%d %B %H:%M UTC")
+        text = (
+            f"Doctor CI speed findings on the swarm {watched} are held: GitHub reports an unresolved incident "
+            f"affecting Actions, {incident['name']}, since {began}. {incident['link']} "
+            "Runs are still read and counted; findings resume when it resolves, and runs with jobs created "
+            "during it are labelled."
+        )
+        for slug in (watched, doctor):
+            mail.send(SENDER, seat_address(slug, MASTER), text)
+        incident["noticed"] = True
+
+
 def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str]:
     key = store.key(doctor, "ci-speed")
     state = json.loads(store.redis.get(key) or "{}")
@@ -110,7 +155,8 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     snapshot = ci_speed_read.read(
         since, end, pending=state.get("pending"), known=state.get("known"), active=end == now_ms
     )
-    found = ci_speed.findings(snapshot["runs"], since, now_ms)
+    incidents, held = _incidents(state, now_ms)
+    found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held)
     report = {
         "complete": snapshot["complete"] and end == now_ms,
         "runs": len(snapshot["runs"]),
@@ -121,6 +167,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     }
     if not snapshot["complete"]:
         report["error"] = snapshot["error"]
+    if not snapshot["complete"] and not held:
         found.append(
             Finding(
                 "ci speed read",
@@ -131,20 +178,27 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
                 1,
             )
         )
-    record(store, doctor, found, now_ms, limits(os.environ).cooldown_minutes * MINUTE_MS)
-    report["retracted"] = len(retract(store, doctor, watched, ci_speed.cleared(snapshot["runs"]), now_ms))
+    cooldown_ms = limits().cooldown_minutes * MINUTE_MS
+    judgments = store.redis.hgetall(verdicts(store, doctor).key)
+    found = ci_speed.unjudged(found, judgments, now_ms, cooldown_ms)
+    record(store, doctor, found, now_ms, cooldown_ms)
+    report["retracted"] = len(retract(store, doctor, watched, gone, now_ms))
     report["unverified"] = snapshot.get("unverified", 0)
     mail = InboxStore(store.redis)
+    _hold(mail, watched, doctor, held)
+    notices = {ci_speed.notice_key(finding, judgments): finding for finding in found}
     for slug in (watched, doctor):
         notified = store.key(doctor, "ci-speed-notified", slug)
-        fresh = [finding for finding in found if not store.redis.sismember(notified, finding.id)]
+        fresh = {
+            identity: finding for identity, finding in notices.items() if not store.redis.sismember(notified, identity)
+        }
         if fresh:
             mail.send(
                 SENDER,
                 seat_address(slug, MASTER),
-                news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh]),
+                news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh.values()]),
             )
-            store.redis.sadd(notified, *(finding.id for finding in fresh))
+            store.redis.sadd(notified, *fresh)
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
         state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
@@ -158,7 +212,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         if run["status"] == "completed"
     }
     state["known"] = {} if snapshot["complete"] else {**state.get("known", {}), **finished}
-    state["report"] = report
+    state.update(report=report, incidents=incidents)
     store.redis.set(key, json.dumps(state))
     status = (
         "complete"
@@ -167,10 +221,11 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
         if snapshot["complete"]
         else f"incomplete: {report['error']}"
     )
+    paused = "".join(f"; findings held during GitHub incident {incident['name']}" for incident in held)
     return [
         f"doctor CI speed: {status}; {report['runs']} runs read of {report['discovered_runs']} discovered, "
         f"{report['jobs']} jobs, {report['crossings']} crossings, {report['api_calls']} API calls, "
-        f"{report['retracted']} retracted, {report['unverified']} queued jobs not reread"
+        f"{report['retracted']} retracted, {report['unverified']} queued jobs not reread{paused}"
     ]
 
 

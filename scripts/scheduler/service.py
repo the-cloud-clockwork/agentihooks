@@ -20,6 +20,7 @@ from scripts.scheduler.core import Scheduler
 ROOT = Path(__file__).resolve().parents[2]
 RECORD = "supervisor.json"
 DRAIN_S = 30
+STARTER = "AGENTIHOOKS_SCHEDULER_STARTER"
 
 
 class AlreadyRunning(RuntimeError):
@@ -87,17 +88,22 @@ def _command(mode: str) -> list[str]:
 def supervise(stop: Event | None = None) -> None:
     stopped = stop if stop is not None else Event()
     loaded = revision(ROOT)
+    starter = int(os.environ.get(STARTER) or 0)
     with machine_lock("supervisor"):
         _identify(loaded)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
-                if stopped.wait(1):
+                if stopped.wait(1) or _abandoned(starter):
                     child.terminate()
                     child.wait()
                     return
-            if stopped.wait(1):
+            if stopped.wait(1) or _abandoned(starter):
                 return
+
+
+def _abandoned(starter: int) -> bool:
+    return bool(starter) and os.getppid() != starter
 
 
 def _identify(loaded: str) -> None:
@@ -148,6 +154,19 @@ def drain(pid: int, environ: Mapping[str, str]) -> bool:
     return True
 
 
+def installed() -> bool:
+    from scripts.install import install_root
+
+    return install_root().resolve() == ROOT.resolve()
+
+
+def _spawn_env(active: Mapping[str, str]) -> dict[str, str]:
+    spawned = {key: value for key, value in active.items() if key != STARTER}
+    if not installed():
+        spawned[STARTER] = str(os.getpid())
+    return spawned
+
+
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     active = dict(os.environ if environ is None else environ)
     if not (
@@ -162,7 +181,7 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
                 subprocess.Popen(
                     _command("supervise"),
                     cwd=Path(__file__).resolve().parents[2],
-                    env=active,
+                    env=_spawn_env(active),
                     stdin=subprocess.DEVNULL,
                     stdout=log,
                     stderr=log,

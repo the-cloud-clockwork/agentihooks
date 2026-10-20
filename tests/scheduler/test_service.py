@@ -97,7 +97,7 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setattr(service, "revision", lambda root: "loaded")
     child = Mock()
-    child.poll.return_value = None
+    child.poll.side_effect = [None]
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=Mock(return_value=child)))
     stop = Mock(spec=Event)
     stop.is_set.return_value = False
@@ -118,6 +118,7 @@ def test_agentihooks_starts_one_detached_supervisor_when_redis_is_configured(
 
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    monkeypatch.setattr(service, "installed", lambda: True)
     spawn = Mock()
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
     assert service.ensure_running({}) is False
@@ -265,6 +266,7 @@ def test_supervisor_startup_and_log_use_the_explicit_domain(tmp_path, monkeypatc
     from scripts.scheduler import service
 
     monkeypatch.setattr(service.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(service, "installed", lambda: True)
     active = {
         "AGENTIHOOKS_DEPLOYMENT": "cloud",
         "AGENTIHOOKS_HIVE_ID": "member",
@@ -297,7 +299,7 @@ def test_a_supervisor_records_the_root_and_revision_it_loaded_before_its_runner(
     monkeypatch.setattr(service.time, "time", lambda: 1_000.0)
     seen = []
     child = Mock()
-    child.poll.return_value = None
+    child.poll.side_effect = [None]
 
     def spawn(argv, **kwargs):
         seen.append(json.loads((tmp_path / "supervisor.json").read_text()))
@@ -480,3 +482,65 @@ def test_a_signalled_runner_finishes_the_dispatch_in_hand_and_exits(monkeypatch,
     assert dispatched == ["finished"]
     with service.machine_lock("runner"):
         pass
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_only_a_supervisor_off_the_installed_code_is_tied_to_its_starter(monkeypatch, tmp_path, installed):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr("scripts.install.install_root", lambda: service.ROOT if installed else tmp_path / "installed")
+    spawn = Mock()
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn, DEVNULL=subprocess.DEVNULL))
+    environ = {"REDIS_URL": "redis://proof.invalid/0", service.STARTER: "7"}
+    assert service.ensure_running(environ) is True
+    tied = {} if installed else {service.STARTER: str(os.getpid())}
+    assert spawn.call_args.kwargs["env"] == {"REDIS_URL": "redis://proof.invalid/0", **tied}
+    assert environ[service.STARTER] == "7"
+
+
+@pytest.mark.parametrize("installed", [False, True])
+def test_installed_compares_the_loaded_root_with_the_installed_agentihooks(monkeypatch, tmp_path, installed):
+    from scripts.scheduler import service
+
+    monkeypatch.setattr("scripts.install.install_root", lambda: service.ROOT if installed else tmp_path)
+    assert service.installed() is installed
+
+
+def _tied_supervisor(monkeypatch, tmp_path, service, parents, polls):
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
+    monkeypatch.setattr(service, "revision", lambda root: "loaded")
+    child = Mock()
+    child.poll.side_effect = polls
+    spawn = Mock(return_value=child)
+    monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=spawn))
+    ppids = iter(parents)
+    monkeypatch.setattr(
+        service,
+        "os",
+        SimpleNamespace(environ={service.STARTER: "41"}, getpid=service.os.getpid, getppid=lambda: next(ppids)),
+    )
+    stop = Mock(spec=Event)
+    stop.is_set.return_value = False
+    stop.wait.return_value = False
+    service.supervise(stop)
+    return child, spawn, stop
+
+
+def test_a_tied_supervisor_stops_its_runner_once_its_starter_is_gone(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    child, spawn, stop = _tied_supervisor(monkeypatch, tmp_path, service, [41, 41, 1], [None, None, None])
+    spawn.assert_called_once()
+    child.terminate.assert_called_once_with()
+    child.wait.assert_called_once_with()
+    assert stop.wait.call_count == 3
+
+
+def test_a_tied_supervisor_ends_between_runners_once_its_starter_is_gone(monkeypatch, tmp_path):
+    from scripts.scheduler import service
+
+    child, spawn, stop = _tied_supervisor(monkeypatch, tmp_path, service, [41, 1], [1, 1])
+    assert spawn.call_count == 2
+    child.terminate.assert_not_called()
+    assert stop.wait.call_count == 2

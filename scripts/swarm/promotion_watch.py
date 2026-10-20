@@ -47,12 +47,13 @@ SHARD_JOB = "unit"
 SHARD_CONSUMERS = (
     "sonar",
     "shard-check",
-    "refresh-durations",
     "coverage-ratchet",
     "coverage-baseline",
     "flake-budget",
     "stage-budget",
 )
+REFRESH_JOB = "refresh-durations"
+LOST_SAMPLES_SIGN = "kept no samples from durations-"
 REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
@@ -125,12 +126,19 @@ def runner_lost(job: dict, why: str) -> bool:
     )
 
 
+def starves(failed: tuple[str, str], shards_lost: bool) -> bool:
+    job = failed[0].split(" (")[0]
+    if job == REFRESH_JOB:
+        return LOST_SAMPLES_SIGN in failed[1]
+    return shards_lost and job in SHARD_CONSUMERS
+
+
 def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple[str, str]]:
     gone = [(job, why) for job, why in causes if runner_lost(named[job], why)]
     if not gone:
         return causes
     shards_lost = any(job.split(" (")[0] == SHARD_JOB for job, _ in gone)
-    starved = [c for c in causes if shards_lost and c not in gone and c[0].split(" (")[0] in SHARD_CONSUMERS]
+    starved = [c for c in causes if c not in gone and starves(c, shards_lost)]
     signs = [sign for sign in OUTAGE_SIGNS if any(sign in why for _, why in gone)]
     because = "; ".join(signs) or f"{SETUP_STEP} failed or {TEST_STEP} never ran"
     names = ", ".join(job for job, _ in gone)
