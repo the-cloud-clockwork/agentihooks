@@ -436,7 +436,7 @@ def _launch_checks(slug, store, ledger, runtime, rows, doc, now_ms):
             facts.get(agent.name, {}),
             doc,
             launch_check.bundled(agent.profile),
-            launch_check.declared(agent.profile, agent.overlays),
+            launch_check.expected(agent),
         )
         if found and now_ms - launch_check.session_started_at(agent) < launch_check.DEADLINE_MS:
             continue

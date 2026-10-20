@@ -325,6 +325,9 @@ class HiveLaunch:
             execution=agent,
             route_kind=agent.route_kind,
             desired_route_kind=agent.desired_route_kind if agent.lane == "master" else None,
+            launched_at=agent.launched_at,
+            overlays=agent.overlays,
+            launch_timings=agent.launch_timings,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 
@@ -346,6 +349,9 @@ class HiveLaunch:
             model=ack.execution.get("model", agent.model),
             effort=ack.execution.get("effort", agent.effort),
             profile_decision={**decision, **kept},
+            launched_at=ack.execution.get("launched_at", agent.launched_at),
+            launch_timings=ack.execution.get("launch_timings", agent.launch_timings),
+            overlays=ack.execution.get("overlays", agent.overlays),
         )
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.store.execution_registry.update(self.slug, live)
