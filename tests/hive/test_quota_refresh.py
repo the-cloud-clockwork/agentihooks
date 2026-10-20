@@ -123,8 +123,11 @@ def test_start_leaves_fresh_readings_alone(monkeypatch, worker):
 
 
 def test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start(monkeypatch, tmp_path):
-    environ = {"AH_CC_TOKEN_one": "sentinel", "AGENTIHOOKS_HOME": str(tmp_path)}
-    monkeypatch.setattr(daemon.os, "environ", environ)
+    for name in [name for name in daemon.os.environ if name.startswith(balancer.TOKEN_PREFIX)]:
+        monkeypatch.delenv(name)
+    monkeypatch.setenv("AH_CC_TOKEN_one", "sentinel")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    environ = daemon.os.environ
     monkeypatch.setattr(daemon, "hive_id", lambda: "pod")
     monkeypatch.setattr(daemon, "claude_signed_in", lambda: False)
     monkeypatch.setattr(daemon, "_claude_snapshots", lambda observed: None)
