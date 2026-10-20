@@ -820,6 +820,7 @@ LOST_SHARDS = [
     "unit (3.12, 4)",
     "unit (3.12, 9)",
 ]
+REFRESHED = [{"name": "Refresh measured durations", "conclusion": "failure"}]
 CONSUMERS = [
     (
         "sonar",
@@ -845,7 +846,14 @@ CONSUMERS = [
             "No shard durations at shard-durations/*/durations.json, so those shards cannot be graded.",
         ],
     ),
-    ("refresh-durations", [{"name": "Refresh measured durations", "conclusion": "failure"}], []),
+    (
+        "refresh-durations",
+        REFRESHED,
+        [
+            "refresh durations: 3395 of 27833 tests have no stored duration; run 900 kept no samples from "
+            "durations-3.11-2, durations-3.11-6"
+        ],
+    ),
 ]
 FAILED_TESTS = [*RAN[:1], {"name": "Run tests", "conclusion": "failure"}]
 
@@ -897,7 +905,7 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
 
 @pytest.mark.parametrize(
     "consumer",
-    ["coverage-ratchet", "coverage-baseline", "flake-budget", "stage-budget", "sonar (3.12)", "refresh-durations"],
+    ["coverage-ratchet", "coverage-baseline", "flake-budget", "stage-budget", "sonar (3.12)"],
 )
 def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer):
     ledger = Ledger()
@@ -940,3 +948,27 @@ def test_only_the_job_name_before_its_matrix_marks_a_unit_shard_or_a_consumer(st
         "Promotion red: runner outage",
         f"Promotion red: {failed}",
     ]
+
+
+def test_a_refresh_naming_lost_shards_joins_an_outage_no_unit_shard_reported(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("worker-image / worker-image (startup)", RAN, DOWNLOAD), CONSUMERS[-1]]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
+    assert "the jobs refresh-durations failed for want of their unit shard output" in ledger.added[0][1]["description"]
+
+
+def test_a_refresh_that_failed_on_its_own_cause_beside_a_lost_unit_shard_files_its_own_fixer(store):
+    ledger = Ledger()
+    own = ("refresh-durations", REFRESHED, ["refresh durations: malformed sample file durations.json: Expecting value"])
+    refresh(store, ledger, outage_run([("unit (3.12, 1)", RAN, DOWNLOAD), own]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        "Promotion red: refresh-durations",
+    ]
+    assert "refresh-durations" not in ledger.added[0][1]["description"]
+
+
+def test_a_refresh_naming_lost_shards_files_its_own_fixer_when_nothing_lost_its_runner(store):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([CONSUMERS[-1]]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: refresh-durations"]

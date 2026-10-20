@@ -379,8 +379,9 @@ api slots keep their own.
 
 ### Master placement
 
-The master follows the same host rule as role placement: it runs only on a live UI hive with the `master` role
-that lists the repo. It is placed in two tiers, each tried in `prefer` order:
+Every master seat, the lead and seats two and up, follows the same host rule as role placement: it runs only on a
+live UI hive with the `master` role that lists the repo. A seat that owns a Kubernetes hive is placed by this rule
+too, never on a worker pod. It is placed in two tiers, each tried in `prefer` order:
 
 1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
 2. A UI hive with the `master` role and a subscription or api slot for that harness.
@@ -456,9 +457,10 @@ Limitations:
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
-login for the master's harness, the hive controller leaves the master to the workstation herdr server. It refuses
-the launch with "the workstation hive spawns master work" followed by the placement reason, and the tick reports
-that line in its actions.
+login for the master's harness, the hive controller leaves the master to the workstation herdr server. It does the
+same when the hive runtime is disabled on the controller. When the controller's own herdr server answers, the
+controller spawns the master there. Otherwise it refuses the launch with "the workstation hive spawns master work"
+followed by the placement reason, and the tick reports that line in its actions.
 
 The `master-headless` health finding marks a master record placed on a headless hive before this rule. The
 `master-fallback-auth` finding marks a master that wanted its interactive login and runs on another route, so phone
