@@ -1673,6 +1673,69 @@ shows data only as a count. `promote` only raises a note, never lowers it, and r
 reason. The culture is one text per swarm, kept in Redis outside the swarm's own keys, so like seat memory it
 survives `remove` and a swarm created again under the same id reads it.
 
+### Sessions that lose their swarm identity
+
+A hook knows a session belongs to a swarm from its environment: `AGENTIHOOKS_AGENT_NAME` names a swarm lane and
+`AGENTIHOOKS_SWARM` (or the slug inside the name) names the swarm. A session can lose those variables partway
+through its life. When the launch wrapper dies, the agent is reparented and the swarm pin strips the identity from
+its later hooks. Without a pin, those hooks treat the session as an ordinary one: no preparation directive, no
+hard gate and no marker, however large the context grows. One tick spawned master reached 930 thousand tokens this
+way before the operator shut it down.
+
+The first time a hook sees a swarm session that already has a context usage snapshot, it writes a pin beside the
+markers: `~/.agentihooks/context_usage/<session id>.swarm`, a JSON object with the swarm slug and the compact limit.
+
+```json
+{"swarm": "rig-grade-swarm", "compact_limit": 600}
+```
+
+The minute tick writes the same pin for every live agent whose pane reports a conversation, with the swarm's
+configured `compact-limit` (or the default when none is set). A pin is written once and never overwritten. A later
+hook in that session that finds no swarm identity reads the slug from the pin, so the session still gets the
+preparation directive at the compact limit and, past the margin, the hard gate with its handoff command.
+
+| Session | Preparation and hard gate |
+|---|---|
+| Swarm identity in its environment | Yes; pinned once a usage snapshot exists |
+| Identity lost after a hook or the tick pinned it | Yes, from the pin |
+| No identity on any hook and never pinned by the tick | No |
+| Operator lane (`AGENTIHOOKS_SWARM_LANE=operator`) | No, and never pinned |
+| Nested session started from a swarm agent | Not from the parent's pin: it has its own session id |
+
+The preparation directive and the hard gate use the compact limit and margin of the hook process
+(`AGENTIHOOKS_COMPACT_LIMIT`, `AGENTIHOOKS_HANDOFF_MARGIN`). The limit stored in the pin is read by the Doctor
+detector below.
+
+### Doctor context overrun detector
+
+The Doctor's `context overrun` detector runs with the other detectors on every Doctor pass. For each agent of the
+watched swarm with a recorded conversation, it reads that session's context usage snapshot and raises a finding
+when the context is at or over the compact limit plus `AGENTIHOOKS_HANDOFF_MARGIN` and neither a `prepare` nor a
+`recycle` marker exists for the session. That state means the recycle directive never reached the session.
+
+The compact limit comes from the session's pin; a session with no pin uses the swarm's configured limit, else
+`AGENTIHOOKS_COMPACT_LIMIT` (default 600). The finding id is `context-overrun/<agent name>`, its evidence names
+the session, the context in thousands of tokens and the agent state, and its number is the context in thousands
+of tokens. Measure it before and after a fix:
+
+```bash
+agentihooks doctor rig-grade-swarm measure context-overrun/master@323133-0175
+```
+
+The command prints 0 once the finding is gone.
+
+### Troubleshooting context recycle
+
+| Symptom | Check | Cause and action |
+|---|---|---|
+| A swarm agent is past the hard gate and keeps working | `ls ~/.agentihooks/context_usage/<session id>.*` | No `.prepare` or `.recycle` marker and no `.swarm` pin: the session lost its identity before any hook or tick pinned it. The `context overrun` finding reports it; ask the agent for a handoff through the inbox. |
+| The snapshot reads under the limit while the pane shows more | `<session id>.json`, field `used_tokens` | The statusline has not refreshed the snapshot; the directive fires on the next hook after it does. |
+| A `context overrun` finding names the wrong limit | `<session id>.swarm`, field `compact_limit` | The pin keeps the limit from when it was written; `swarm set compact-limit` reaches only agents launched after it. |
+| An operator lane session gets no directive | `AGENTIHOOKS_SWARM_LANE` | Expected: operator sessions are never recycled or pinned. |
+
+[Pull request #4024](https://github.com/the-cloud-clockwork/agentihooks/pull/4024) delivered the pin and the
+detector; its red Proofs run reproduced a stripped identity master whose directive returned nothing.
+
 ## One task per agent life
 
 An agent is spawned for one task, told that task in its opening prompt, and ends when the task is done or
