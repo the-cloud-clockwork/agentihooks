@@ -32,6 +32,28 @@ def test_a_task_over_twice_the_median_at_its_merge_is_still_raised():
     assert "uncached tokens 2000, median of the other merged tasks 250" in found.evidence
 
 
-def test_a_task_merged_before_a_heavy_one_keeps_its_verdict():
-    record = _record([("a", 400, 50), ("b", 500, 60), ("heavy", 5000, 100), ("old", 800, 70)])
+def _task(task, tokens, *spans):
+    return {
+        "tags": [f"task:{task}"],
+        "observations": [
+            {"type": "GENERATION", "turn": None, "tokens": tokens},
+            *({"type": "SPAN", "turn": n, "start": start, "end": end} for n, (start, end) in enumerate(spans, 1)),
+        ],
+    }
+
+
+def test_a_task_finishes_at_the_latest_end_of_its_turns():
+    record = {
+        "merged": ["a", "b", "heavy"],
+        "traces": [
+            _task("a", 400, (40, 50)),
+            _task("b", 500, (50, 60)),
+            _task("heavy", 5000, (10, 100), (2, 5)),
+        ],
+    }
+    assert [f.subject for f in traces.task_cost(record, traces.Limits())] == ["heavy"]
+
+
+def test_a_task_finished_at_the_same_time_counts_in_the_median():
+    record = {"merged": ["a", "heavy"], "traces": [_task("a", 400, (40, 50)), _task("heavy", 5000, (45, 50))]}
     assert [f.subject for f in traces.task_cost(record, traces.Limits())] == ["heavy"]
