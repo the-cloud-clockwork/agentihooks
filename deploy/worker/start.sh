@@ -3,7 +3,7 @@ set -euo pipefail
 
 export HIVE_GITHUB_AUTH_MODE="${HIVE_GITHUB_AUTH_MODE:-token}"
 if [[ "${AGENTIHOOKS_GITHUB_AUTH_READY:-}" != 1 ]]; then
-  exec python3 -m scripts.github_app_cli exec "$0" "$@"
+  exec python3 -m scripts.github_app_cli exec bash "$0" "$@"
 fi
 umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
