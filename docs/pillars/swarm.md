@@ -1494,11 +1494,11 @@ an out of memory kill, costs no wait: the next tick of this hive on the same mac
 while the lease is live and sees the dead holder, or gets a new epoch after the lease expired; either way it takes the
 lock at once.
 
-A tick records the outcome as that swarm's tick result and ends normally; a rename fails with the error, and
+A tick prints each action as `<id>: <action>` on stdout and ends normally; a rename fails with the error, and
 `agentihooks swarm rename` exits 1 with it on stderr after the swarm id
 (`swarm: <id>: swarm <id>: another tick or rename is running`).
 
-| Situation at take | `swarm tick` result | `swarm rename` error |
+| Situation at take | `swarm tick` output | `swarm rename` error |
 |---|---|---|
 | Another hive holds the controller lease | `the swarm belongs to another hive` | `swarm <id>: belongs to another hive` |
 | A live tick or rename holds the lock in this epoch | `another tick is running` | `swarm <id>: another tick or rename is running` |
