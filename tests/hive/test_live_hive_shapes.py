@@ -25,26 +25,32 @@ ANTON = "abd795cc73466951"
 def root(**fields) -> dict:
     return hive(
         "root",
-        roles=["master", "eng", "ci", "plan", "dispatch"],
-        max_agents=16,
-        slots=[{"harness": "claude", "account": name, "kind": "subscription", "cap": 6} for name in ROOT_ACCOUNTS],
-        interactive={"claude": "", "codex": ""},
-        repos=[CHECKOUT, ORIGIN],
-        **fields,
+        **{
+            "roles": ["master", "eng", "ci", "plan", "dispatch"],
+            "max_agents": 16,
+            "slots": [
+                {"harness": "claude", "account": name, "kind": "subscription", "cap": 6} for name in ROOT_ACCOUNTS
+            ],
+            "interactive": {"claude": "", "codex": ""},
+            "repos": [CHECKOUT, ORIGIN],
+            **fields,
+        },
     )
 
 
 def anton(**fields) -> dict:
     return hive(
         ANTON,
-        ui="no",
-        ephemeral="yes",
-        roles=["eng"],
-        max_agents=1,
-        slots=[{"harness": "claude", "account": ANTON_ACCOUNT, "kind": "subscription", "cap": 0}],
-        interactive={"claude": "", "codex": ""},
-        repos=[POD, ORIGIN],
-        **fields,
+        **{
+            "ui": "no",
+            "ephemeral": "yes",
+            "roles": ["eng"],
+            "max_agents": 1,
+            "slots": [{"harness": "claude", "account": ANTON_ACCOUNT, "kind": "subscription", "cap": 0}],
+            "interactive": {"claude": "", "codex": ""},
+            "repos": [POD, ORIGIN],
+            **fields,
+        },
     )
 
 

@@ -253,7 +253,7 @@ def test_a_second_tick_does_not_overspawn(store):
 
 class RefusingRuntime(FakeRuntime):
     def placement_refusal(self, lane, task):
-        return "no headless hive for eng lists the repo /repo" if task["id"] == "t1" else ""
+        return "no headless hive for eng lists the repo /repo" if task.get("id") == "t1" else ""
 
 
 def test_a_placement_wait_is_logged_in_the_tick_output(store):
