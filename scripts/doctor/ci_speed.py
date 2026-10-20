@@ -237,3 +237,10 @@ def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int)
         if finding.evidence_identity is None
         or not any(_covered(finding, identity, verdict) for identity, verdict in recent.items())
     ]
+
+
+def notice_key(finding: Finding, records: dict) -> str:
+    prior = records.get(finding.id)
+    if finding.evidence_identity is None or prior is None or not json.loads(prior)["verdict"]:
+        return finding.id
+    return json.dumps([finding.id, finding.evidence_identity, finding.measure])

@@ -224,6 +224,37 @@ def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change,
     assert found == ([current] if expected else [])
 
 
+@pytest.mark.parametrize("change", ["new run", "worse wait"])
+def test_judged_group_delivers_new_evidence_once_within_the_same_window(store, monkeypatch, change):  # noqa: F811
+    status(monkeypatch)
+    run = waiting(1, "2026-10-19T16:40:00Z")
+    run["jobs"][0].update(
+        started_at="2026-10-19T16:59:00Z",
+        completed_at="2026-10-19T17:00:00Z",
+        status="completed",
+        runner_name="runner",
+    )
+    records = [run]
+    monkeypatch.setattr(
+        ci_speed_read,
+        "read",
+        lambda *args, **kwargs: snapshot(records, complete=False, error="pagination pending"),
+    )
+    store.redis.set(store.key(DOCTOR, "ci-speed"), json.dumps({"last": AFTER - 60000}))
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    [finding] = [entry for entry in details(store) if entry["kind"] == "ci runner wait"]
+    loop.verdicts(store, DOCTOR).judge(finding["id"], "established", "investigated", "reader", AFTER)
+    if change == "new run":
+        records.append({**run, "id": 2})
+    else:
+        run["jobs"][0]["created_at"] = "2026-10-19T16:39:59Z"
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 60000)
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 120000)
+    for texts in items(store).values():
+        assert len(texts) == 2
+        assert "ci-runner-wait/" in texts[1]
+
+
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, down=True)
     runs(monkeypatch, [waiting(n, "2026-10-19T15:51:00Z") for n in range(1, 3)])

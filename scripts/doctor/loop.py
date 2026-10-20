@@ -175,22 +175,26 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
             )
         )
     cooldown_ms = limits(os.environ).cooldown_minutes * MINUTE_MS
-    found = ci_speed.unjudged(found, store.redis.hgetall(verdicts(store, doctor).key), now_ms, cooldown_ms)
+    judgments = store.redis.hgetall(verdicts(store, doctor).key)
+    found = ci_speed.unjudged(found, judgments, now_ms, cooldown_ms)
     record(store, doctor, found, now_ms, cooldown_ms)
     report["retracted"] = len(retract(store, doctor, watched, gone, now_ms))
     report["unverified"] = snapshot.get("unverified", 0)
     mail = InboxStore(store.redis)
     _hold(mail, watched, doctor, held)
+    notices = {ci_speed.notice_key(finding, judgments): finding for finding in found}
     for slug in (watched, doctor):
         notified = store.key(doctor, "ci-speed-notified", slug)
-        fresh = [finding for finding in found if not store.redis.sismember(notified, finding.id)]
+        fresh = {
+            identity: finding for identity, finding in notices.items() if not store.redis.sismember(notified, identity)
+        }
         if fresh:
             mail.send(
                 SENDER,
                 seat_address(slug, MASTER),
-                news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh]),
+                news(watched, [{"id": finding.id, **finding.as_dict(), "verdict": None} for finding in fresh.values()]),
             )
-            store.redis.sadd(notified, *(finding.id for finding in fresh))
+            store.redis.sadd(notified, *fresh)
             store.redis.hset(_timer_key(store, doctor), "last_new", now_ms)
     if snapshot["complete"]:
         state.update(last=end, pending=[run["id"] for run in snapshot["runs"] if run["status"] != "completed"])
