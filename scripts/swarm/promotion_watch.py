@@ -178,7 +178,7 @@ def test_causes(
         for test in sorted(tests):
             groups.setdefault(test, []).append(job)
     jobs = [job for jobs in groups.values() for job in jobs]
-    consequences = [(job, why) for job, why in remaining if coverage_consequence(job, why, named, jobs)]
+    consequences = [(job, why) for job, why in remaining if coverage_consequence(job, why, jobs)]
     grouped = []
     for test, jobs in groups.items():
         identity = f"unit test {test}"
@@ -189,18 +189,16 @@ def test_causes(
     return [*grouped, *[cause for cause in remaining if cause not in consequences]]
 
 
-def coverage_consequence(job: str, why: str, named: dict[str, dict], jobs: list[str]) -> bool:
+def coverage_consequence(job: str, why: str, jobs: list[str]) -> bool:
     if job.split(" (")[0] != "sonar":
         return False
     missing = set(re.findall(r"Missing coverage for shard (\d+)", why))
     shards = {match[1] for name in jobs if (match := re.fullmatch(r"unit \(3\.12, (\d+)\)", name))}
     allowed = {"Wait for the coverage merge", "Hold the Delivery L2 conditions"}
-    steps = {s["name"] for s in named[job].get("steps") or [] if s.get("conclusion") in FAILED}
     details = why.removeprefix(f"{job}: ").split("; ")
     return (
         bool(missing)
         and missing <= shards
-        and steps <= allowed
         and all(
             part in allowed
             or re.fullmatch(r"(?:Missing coverage for shard \d+|Process completed with exit code \d+\.)", part)
