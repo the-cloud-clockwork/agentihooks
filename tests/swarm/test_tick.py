@@ -1561,6 +1561,22 @@ def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     assert runtime.masters == [] and store.config("sw").state == "stopped"
 
 
+@pytest.mark.parametrize("state", ["stopped", "paused", "running"])
+def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
+    from scripts.swarm import tick as module
+
+    store.update("sw", state=state)
+    seen = []
+    monkeypatch.setattr(module.resume, "track_outages", lambda *args: seen.append("outages"))
+    monkeypatch.setattr(module, "_verify", lambda *args: seen.append("verify") or [])
+    monkeypatch.setattr(module.pane_evidence, "sweep", lambda *args: seen.append("panes") or [])
+    monkeypatch.setattr(
+        store.execution_registry, "reconcile", lambda *args: seen.append("executions") or []
+    )
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert seen == ([] if state == "stopped" else ["panes", "executions", "outages", "verify"])
+
+
 def test_a_dead_master_is_respawned(store):
     runtime = FakeRuntime()
     tick("sw", store, tasks(), runtime, 1)
