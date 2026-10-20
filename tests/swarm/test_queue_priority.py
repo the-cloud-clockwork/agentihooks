@@ -828,3 +828,17 @@ def test_priority_notifies_the_claimant_of_an_entry_a_conflict_keeps_out(priorit
     assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P9", "P3"]
     assert queue_priority.refresh(p.store, "sw", p.tasks) == []
     assert p.queue.mutations == [("dequeue", 3), ("dequeue", 2), ("queue", 9), ("queue", 3)]
+
+
+@pytest.mark.parametrize(
+    "raw, reason",
+    [
+        ({"isDraft": True, "headRefOid": "moved", "mergeable": "CONFLICTING"}, "it became a draft"),
+        ({"isDraft": False, "headRefOid": "moved", "mergeable": "CONFLICTING"}, "its head moved"),
+        ({"isDraft": False, "headRefOid": "head2", "mergeable": "CONFLICTING"}, "it has merge conflicts with dev"),
+        ({"isDraft": False, "headRefOid": "head2", "mergeable": "UNKNOWN"}, ""),
+    ],
+)
+def test_an_entry_stays_out_for_its_first_blocker(raw, reason):
+    assert "isDraft mergeable" in merge_queue.FIELDS
+    assert queue_priority.blocker(raw, "head2") == reason
