@@ -67,6 +67,7 @@ UNKNOWN_ACTION = Ack(FAILED, {}, "unknown_action")
 COMMAND_BATCH = 32
 SENT = {"sent": "1"}
 OPENING, DIGEST, SEEDS = prompt.CARRIED, "hive_opening_digest", "hive_seeds"
+ORIGIN = "hive_origin"
 
 
 def build_opening(request: SpawnRequest) -> str:
@@ -295,7 +296,7 @@ class Consumer:
     def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
-        config = replace(config, lanes={**config.lanes, order.lane: chosen})
+        config = replace(config, repo=task.get(ORIGIN) or config.repo, lanes={**config.lanes, order.lane: chosen})
         task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
         task["launch_assignment"] = {
             "profile": order.profile,

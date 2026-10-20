@@ -173,6 +173,6 @@ def test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start(monkey
     )
     monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(object())
+        daemon.run(object)
     assert beats[0] == [{"harness": "claude", "account": "one", "kind": "subscription", "cap": 6}]
     probe.assert_called_once()

@@ -28,6 +28,7 @@ class Selection:
     route_kind: str
     master_placement: placement.MasterPlacement | None = None
     fallback: str = ""
+    origin: str = ""
 
 
 def loaded_hives(store: RedisStore) -> list[dict]:
@@ -75,8 +76,15 @@ def _by_origin(hives: list[dict], repo: str) -> list[dict]:
 
     identity = origin(Path(repo))
     return [
-        {**hive, "repos": [*hive["repos"], repo]} if identity and identity in hive["repos"] else hive for hive in hives
+        {**hive, "repos": [*hive["repos"], repo], orders.ORIGIN: identity}
+        if identity and identity in hive["repos"] and repo not in hive["repos"]
+        else hive
+        for hive in hives
     ]
+
+
+def _matched_origin(hives: list[dict], hive: str) -> str:
+    return next(found.get(orders.ORIGIN, "") for found in hives if found["id"] == hive)
 
 
 def _first_choice(
@@ -150,7 +158,9 @@ class HiveLaunch:
             fallback = (
                 f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
             )
-            found = Selection(decision, choice.hive, row, route_kind, fallback=fallback)
+            found = Selection(
+                decision, choice.hive, row, route_kind, fallback=fallback, origin=_matched_origin(hives, choice.hive)
+            )
         return self._record_wait(lane, task, found)
 
     def _master_selection(self, config, decision, hives, now, rows):
@@ -166,7 +176,14 @@ class HiveLaunch:
         else:
             row = accounts[_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
-        return Selection(decision, selected.hive, account, selected.route_kind, selected)
+        return Selection(
+            decision,
+            selected.hive,
+            account,
+            selected.route_kind,
+            selected,
+            origin=_matched_origin(hives, selected.hive),
+        )
 
     def orders_for(self, task: str) -> LaunchOrder | None:
         raw = self.store.redis.hget(self.store.key(self.slug, ORDERS), task)
@@ -185,8 +202,15 @@ class HiveLaunch:
         selected = self.select(request.config, request.lane, request.task)
         if isinstance(selected, placement.Wait):
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail=selected.reason)
+        named = replace(request, config=replace(request.config, repo=selected.origin)) if selected.origin else request
         task = orders.carried(
-            self.slug, {**request.task, "profile_decision": selected.profile.record()}, self.opening(request)
+            self.slug,
+            {
+                **request.task,
+                "profile_decision": selected.profile.record(),
+                **({orders.ORIGIN: selected.origin} if selected.origin else {}),
+            },
+            self.opening(named),
         )
         admitted = self.admit(request, selected)
         if not self.slots.reserve(
