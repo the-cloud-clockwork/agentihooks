@@ -72,4 +72,4 @@ assert 'persistentVolumeClaim' in home, 'joined membership must survive pod repl
 assert any(o and o.get('kind') == 'PersistentVolumeClaim' and o['metadata']['name'] == home['persistentVolumeClaim']['claimName'] for o in objects)
 print('one time membership survives pod replacement: passed')
 PY
-echo 'missing, shared and reused join material a per agent memory limit below its request and a fixed pod memory: refused'
+echo 'missing, shared and reused join material, a per agent memory limit below its request and a fixed pod memory: refused'
