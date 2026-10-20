@@ -95,6 +95,7 @@ def test_make_room_evicts_through_the_cli_and_skips_the_sweep(repo, monkeypatch,
     from hooks.lifecycle import evict
 
     done = repo.worktree("done")
+    age(done, 3600)
     monkeypatch.setattr(gc_cli, "take_snapshot", lambda: snap())
     monkeypatch.setattr(evict, "free_gb", lambda _path: 1000)
     monkeypatch.setattr(gc_cli, "sweep", lambda **_kwargs: pytest.fail("make-room ran the sweep"))

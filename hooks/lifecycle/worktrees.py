@@ -107,6 +107,10 @@ def _throwaway(lease: Lease | None) -> bool:
     return bool(lease) and lease.kind == "ephemeral"
 
 
+def needs_rescue(state: TreeState, lease: Lease | None) -> bool:
+    return bool(state.dirty or state.unpushed) and not _throwaway(lease)
+
+
 def _idle_verdict(state: TreeState, lease: Lease | None, idle: float) -> tuple[str, str, bool]:
     if _throwaway(lease):
         if idle >= CLEAN_IDLE:
@@ -130,8 +134,7 @@ def classify(path: Path, root: Root, snap: Snapshot) -> Finding:
     held = _held(state, lease, snap)
     action, reason, immediate = ("keep", held, False) if held else _idle_verdict(state, lease, idle)
     if action == "keep" and idle >= stale_after() and not pinned(state, lease, snap):
-        rescue = (state.dirty or state.unpushed) and not _throwaway(lease)
-        action = "snapshot" if rescue else "remove"
+        action = "snapshot" if needs_rescue(state, lease) else "remove"
         reason = f"untouched over {stale_after() / DAY:g} days though {reason}"
     elif state.busy and held == f"git {state.busy} in progress":
         action = "skip"

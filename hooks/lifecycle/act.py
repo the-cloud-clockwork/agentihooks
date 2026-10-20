@@ -154,7 +154,7 @@ def apply(item: Finding, journal: Journal) -> str:
         if item.action == "snapshot":
             try:
                 note = f"pushed {snapshot(path)}; "
-            except ActionError as error:
+            except (ActionError, subprocess.TimeoutExpired) as error:
                 if not item.disposable:
                     raise
                 note = f"push failed in a scratch repository ({error}); "

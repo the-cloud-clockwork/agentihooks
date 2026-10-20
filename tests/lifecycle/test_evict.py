@@ -31,6 +31,7 @@ def test_full_cap_evicts_the_oldest_safe_worktree_first(repo, tmp_path):
 def test_unique_work_is_pushed_to_wip_before_eviction(repo, tmp_path):
     work = repo.worktree("work")
     (work / "notes.txt").write_text("unsaved\n")
+    age(work, HOUR)
     lines = make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty)
     [ref] = wip_refs(repo).split()
     assert ref.startswith("refs/heads/wip/primary/work-")
@@ -52,6 +53,7 @@ def test_held_worktrees_are_never_evicted(repo, tmp_path):
 
 def test_boot_grace_does_not_hold_an_eviction(repo, tmp_path):
     done = repo.worktree("done")
+    age(done, HOUR)
     lines = make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(uptime=60), plenty)
     assert lines == [f"evicted {done}: removed"]
 
@@ -107,6 +109,7 @@ def test_failed_push_keeps_the_worktree_and_moves_on(repo, tmp_path):
 def test_scratch_repository_work_is_evicted_when_its_push_fails(repo, tmp_path):
     fixture = repo.worktree("fixture", base=tmp_path / "group" / "task")
     (fixture / "notes.txt").write_text("unsaved\n")
+    age(fixture, HOUR)
     git(repo.primary, "remote", "set-url", "--push", "origin", str(tmp_path / "missing.git"))
     scratch = Root("scratchpad", str(tmp_path), "scratch")
     [line] = make_room(repo.primary, scratch, 0, 1, tmp_path / "home", snap(), plenty)
@@ -120,15 +123,21 @@ def test_candidates_carry_the_eviction_finding_oldest_first(repo, tmp_path):
 
     clean = repo.worktree("clean")
     work = repo.worktree("work")
-    (work / "notes.txt").write_text("unsaved\n")
+    plant = repo.worktree("plant")
+    add_holder(plant, "ephemeral", Holder("", 1, 1, "gone"), 0.0)
+    for path in (work, plant):
+        (path / "notes.txt").write_text("unsaved\n")
     age(work, 5 * HOUR)
+    age(plant, 3 * HOUR)
     age(clean, HOUR)
+    repo.worktree("fresh")
     found = _candidates(repo.root(), snap())
     assert [entry[3] for entry in found] == [
         Finding(str(work), "worktrees", "worktree", "snapshot", "evicted"),
+        Finding(str(plant), "worktrees", "worktree", "remove", "evicted"),
         Finding(str(clean), "worktrees", "worktree", "remove", "evicted"),
     ]
-    assert [entry[2] for entry in found] == [repo.primary.resolve(), repo.primary.resolve()]
+    assert [entry[2] for entry in found] == [repo.primary.resolve()] * 3
 
 
 def test_free_space_exactly_at_the_floor_evicts_nothing(repo, tmp_path):
@@ -151,3 +160,16 @@ def test_free_gb_takes_the_smaller_filesystem_and_skips_missing_ones(tmp_path, m
     assert free_gb(tmp_path / "absent" / "deeper") == 30
     monkeypatch.setattr(evict, "EXTRA_FILESYSTEMS", (str(tmp_path / "nowhere"),))
     assert free_gb(tmp_path) == 80
+
+
+def test_a_worktree_younger_than_a_minute_is_never_evicted(repo, tmp_path):
+    from hooks.lifecycle.evict import FRESH
+
+    assert FRESH == 60
+    young = repo.worktree("young")
+    age(young, 50)
+    assert make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty) == []
+    age(young, 70)
+    assert make_room(repo.primary, repo.root(), 0, 1, tmp_path / "home", snap(), plenty) == [
+        f"evicted {young}: removed"
+    ]

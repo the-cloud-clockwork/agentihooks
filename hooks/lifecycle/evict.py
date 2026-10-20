@@ -9,9 +9,10 @@ from hooks.lifecycle.lease import read_lease
 from hooks.lifecycle.liveness import Snapshot
 from hooks.lifecycle.locks import removing
 from hooks.lifecycle.model import Finding, Root
-from hooks.lifecycle.worktrees import _held, _throwaway, discover, registered, scratch_repository
+from hooks.lifecycle.worktrees import _held, discover, needs_rescue, registered, scratch_repository
 
 GB = 1 << 30
+FRESH = 60
 EXTRA_FILESYSTEMS = ("/mnt/c",)
 
 
@@ -26,14 +27,14 @@ def _candidates(root: Root, snap: Snapshot) -> list[tuple[float, Path, Path, Fin
     found = []
     for path, _root in discover([root]):
         state = inspect(path, snap.now)
-        if state is None:
+        if state is None or snap.now - state.last_touch < FRESH:
             continue
         lease = read_lease(path, "worktree")
         if _held(state, lease, snap, grace=False):
             continue
-        rescue = bool(state.dirty or state.unpushed) and not _throwaway(lease)
-        action = "snapshot" if rescue else "remove"
+        rescue = needs_rescue(state, lease)
         disposable = rescue and scratch_repository(state, root)
+        action = "snapshot" if rescue else "remove"
         item = Finding(str(path), root.id, "worktree", action, "evicted", disposable=disposable)
         found.append((state.last_touch, path, Path(state.primary).resolve(), item))
     return sorted(found, key=lambda entry: entry[0])

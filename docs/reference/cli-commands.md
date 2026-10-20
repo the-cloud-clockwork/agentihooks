@@ -641,9 +641,9 @@ A worktree untouched for `WT_STALE_DAYS` days (default 7) loses every `keep` and
 | Clean, head on a remote, no lease or a lease with no holders, idle 2 h | `remove` | `clean and on a remote` | after confirmation |
 | Clean, head on a remote, no holders, idle under 2 h | `keep` | `clean, recent` | never |
 | Uncommitted changes or a head on no remote, idle 24 h | `snapshot` | `unique work, owner gone: push to wip/ then remove` | after confirmation |
+| Uncommitted changes or a head on no remote, idle under 24 h | `keep` | `unique work, recent` | never |
 
 A `snapshot` of a worktree whose primary checkout sits inside the same scratch root adds `; scratch repository: removed if the push fails` to its reason: when the push to `wip/` fails, the worktree is removed anyway, so a test fixture with an unreachable origin cannot hold its scratch folder forever.
-| Uncommitted changes or a head on no remote, idle under 24 h | `keep` | `unique work, recent` | never |
 
 Clean means `git status --porcelain` lists nothing, untracked files included. Head on a remote means `git rev-list HEAD --not --remotes` is empty, so a branch pushed under any name counts. Idle time runs from the newest of the worktree's index, `HEAD`, reflog and changed files. After confirmation means the action is `due` once two sweeps in the same boot, at least 1 h apart, gave it the same action; any `gc` run, report-only included, counts as a sweep. In the report, the second column is `due` when `--enforce` acts on the line and `pending` while it waits for that confirmation.
 

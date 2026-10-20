@@ -200,6 +200,14 @@ def test_stale_worktree_is_acted_on_whatever_holds_it(repo, monkeypatch):
         "snapshot",
         "untouched over 3 days though a process works inside",
     )
+    plant = repo.worktree("stale-plant")
+    add_holder(plant, "ephemeral", Holder("", 1, 1, "gone"), 0.0)
+    (plant / "notes.txt").write_text("unsaved\n")
+    age(plant, 4 * DAY)
+    assert verdict(repo, plant, cwds=(str(plant),)) == (
+        "remove",
+        "untouched over 3 days though a process works inside",
+    )
     age(used, 2 * DAY)
     assert verdict(repo, used, cwds=(str(used),)) == ("keep", "a process works inside")
 

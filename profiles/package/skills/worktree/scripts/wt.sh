@@ -117,7 +117,8 @@ preflight() {
   command -v agentihooks >/dev/null 2>&1 \
     || die "REFUSED — ${short}. Finish worktrees with 'wt.sh done <name>' and run 'agentihooks gc'."
   agentihooks gc --make-room "${REPO}" --root "${WORKTREE_ROOT}" \
-    --min-free-gb "${WT_MIN_FREE_GB}" --max-per-repo "${WT_MAX_PER_REPO}" >&2 || true
+    --min-free-gb "${WT_MIN_FREE_GB}" --max-per-repo "${WT_MAX_PER_REPO}" >&2 \
+    || echo "wt: worktree eviction failed (exit $?)" >&2
   short="$(shortfall)"
   [[ -z "${short}" ]] || die "REFUSED — ${short} and no safe worktree is left to evict"
 }
