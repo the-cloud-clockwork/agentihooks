@@ -828,9 +828,42 @@ def test_the_reviewed_summary_may_run_outside_required_grading(separate):
             "timeout-minutes": 5,
             "steps": yaml.safe_load(_REVIEWED_SUMMARY),
         }
-        head["jobs"]["unit-selected"] = {"if": "${{ false }}"}
+        head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
+        head["jobs"]["gate-required"]["needs"].append("unit-selected")
         config = {"not_gates": {"test.yml/test-summary": _entry()}}
     assert _grade({"test.yml": head}, base={"test.yml": base}, head_config=config) == []
+
+
+@pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
+@pytest.mark.parametrize("declared_on_base", [False, True])
+def test_a_separate_summary_cannot_change_its_reviewed_job(change, declared_on_base):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    summary = {
+        "needs": ["unit", "unit-selected"],
+        "if": "${{ always() }}",
+        "runs-on": "ubuntu-latest",
+        "timeout-minutes": 5,
+        "steps": ci_reuse.summary_steps(),
+    }
+    summary[change] = {
+        "steps": [{"run": "true"}],
+        "needs": ["unit"],
+        "if": "${{ success() }}",
+        "runs-on": "anton",
+        "timeout-minutes": 30,
+        "env": {"EXTRA": "value"},
+    }[change]
+    head["jobs"]["test-summary"] = summary
+    config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    problems = _grade(
+        {"test.yml": head},
+        base={"test.yml": base},
+        head_config=config,
+        base_config=config if declared_on_base else {},
+    )
+    assert "The test summary must use the reviewed reporting job." in problems
 
 
 @pytest.mark.parametrize("promotion", [False, True])

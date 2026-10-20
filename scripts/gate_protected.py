@@ -175,7 +175,26 @@ def grade(
     problems = _aggregator_problems(base_gates[0], head_gates[0], policy, retired)
     problems += _reuse_problems(base_workflows[file]["jobs"], head_jobs, policy)
     problems += duration_problems
-    return problems + ci_wiring.check(head_workflows, _protected_config(base_config, head_config), today)
+    config = _protected_config(base_config, head_config)
+    summary = head_jobs.get("test-summary")
+    if summary is not None:
+        canonical = [
+            {
+                "needs": ["unit", "unit-selected"],
+                "if": "${{ always() }}",
+                "runs-on": runner,
+                "timeout-minutes": 5,
+                "steps": ci_reuse.summary_steps(),
+            }
+            for runner in runners(policy)
+        ]
+        if summary not in canonical:
+            problems.append("The test summary must use the reviewed reporting job.")
+        else:
+            key = f"{file}/test-summary"
+            if key in head_config.get("not_gates", {}):
+                config["not_gates"][key] = head_config["not_gates"][key]
+    return problems + ci_wiring.check(head_workflows, config, today)
 
 
 def _git(root: Path, *args: str) -> str:
