@@ -630,3 +630,27 @@ def test_spawn_without_validation_is_reported_ambiguous(setup):
     placed = replace(setup.runtime.spawn.return_value.value, profile_decision={})
     setup.runtime.spawn.return_value = replace(setup.runtime.spawn.return_value, value=placed)
     assert setup.consumer.apply(setup.order) == Ack("failed", {"host_id": "host"}, "ambiguous")
+
+
+def test_launch_runs_in_the_hive_checkout_of_the_swarm_repository(setup, monkeypatch):
+    from scripts.hive import daemon
+
+    monkeypatch.setattr(daemon, "checkout", lambda repo: f"/hive/{repo}")
+    setup.consumer.apply(setup.order)
+    assert setup.runtime.spawn.call_args.args[0].config.repo == "/hive/agentihooks"
+
+
+@pytest.mark.parametrize(
+    "status,detail,failure",
+    [
+        ("UNAVAILABLE", "directory does not exist: /x", "unavailable: directory does not exist: /x"),
+        ("REFUSED", "", "refused"),
+        ("AMBIGUOUS", "init-agent timed out", "ambiguous"),
+    ],
+)
+def test_runtime_failure_carries_its_cause(setup, status, detail, failure):
+    from scripts.hive.orders import Ack
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    setup.runtime.spawn.return_value = Outcome("spawn", Status[status], "local", detail=detail)
+    assert setup.consumer.apply(setup.order) == Ack("failed", {}, failure)
