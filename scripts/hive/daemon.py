@@ -213,7 +213,7 @@ def repositories() -> list[str]:
     return sorted(identities | {str(path) for path in checkouts})
 
 
-def checkout(repo: str) -> str:
+def local_checkout(repo: str) -> str:
     matches = sorted(str(path) for path in _checkouts() if origin(path) == repo)
     return matches[0] if matches else repo
 

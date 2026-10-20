@@ -293,11 +293,9 @@ class Consumer:
             raise SwarmError("launch order names a replaced execution")
 
     def launch(self, order: LaunchOrder, agent: AgentRecord, task: dict) -> Ack:
-        from scripts.hive import daemon
-
         config = self.store.config(order.slug)
         chosen = {**config.lanes.get(order.lane, {}), "agent": order.harness, "role": order.profile}
-        config = replace(config, repo=daemon.checkout(config.repo), lanes={**config.lanes, order.lane: chosen})
+        config = replace(config, lanes={**config.lanes, order.lane: chosen})
         task = {**task, "route_kind": order.route_kind, "controller_epoch": order.epoch}
         task["launch_assignment"] = {
             "profile": order.profile,

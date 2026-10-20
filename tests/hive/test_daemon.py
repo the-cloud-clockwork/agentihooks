@@ -816,7 +816,7 @@ def test_checkout_maps_an_identity_to_the_first_local_checkout_with_that_origin(
     for name, url in origins:
         (tmp_path / name / ".git").mkdir(parents=True)
         (tmp_path / name / ".git" / "config").write_text(f'[remote "origin"]\n\turl = {url}\n')
-    assert daemon.checkout("github.com/org/name") == str(tmp_path / "a-main")
-    assert daemon.checkout("github.com/org/other") == str(tmp_path / "c")
-    assert daemon.checkout("github.com/org/missing") == "github.com/org/missing"
-    assert daemon.checkout(str(tmp_path / "b-copy")) == str(tmp_path / "b-copy")
+    assert daemon.local_checkout("github.com/org/name") == str(tmp_path / "a-main")
+    assert daemon.local_checkout("github.com/org/other") == str(tmp_path / "c")
+    assert daemon.local_checkout("github.com/org/missing") == "github.com/org/missing"
+    assert daemon.local_checkout(str(tmp_path / "b-copy")) == str(tmp_path / "b-copy")
