@@ -200,3 +200,21 @@ def test_the_status_line_reports_queued_jobs_not_reread(store, monkeypatch):  # 
     monkeypatch.setattr(ci_speed_read, "read", lambda *args, **kwargs: snapshot(unverified=3))
     actions_taken = cli.timer(store, DOCTOR, FOUND_AT, False)
     assert any("0 retracted, 3 queued jobs not reread" in action for action in actions_taken)
+
+
+def test_a_confirmed_runner_wait_covers_the_still_queued_siblings_of_its_run_and_labels():
+    late = {**REFINE, "id": 1, "started_at": "2026-10-19T15:37:00Z"}
+    sibling = {**STALE, "id": 2, "created_at": "2026-10-19T15:21:56Z", "started_at": "2026-10-19T15:21:56Z"}
+    found = ci_speed.findings([{**PREFLIGHT, "jobs": [late, sibling]}], FOUND_AT - 60000, FOUND_AT)
+    assert [finding.id for finding in found] == [WAIT_ID]
+
+
+def test_an_unconfirmed_queue_age_is_held_until_it_outlasts_the_next_doctor_pass():
+    assert ci_speed.findings([{**PREFLIGHT, "jobs": [STALE]}], FOUND_AT - 60000, FOUND_AT) == []
+    edge = {**STALE, "created_at": "2026-10-19T15:22:32Z", "started_at": "2026-10-19T15:22:32Z"}
+    assert ci_speed.findings([{**PREFLIGHT, "jobs": [edge]}], FOUND_AT - 60000, FOUND_AT) == []
+    held = {**STALE, "created_at": "2026-10-19T15:22:31Z", "started_at": "2026-10-19T15:22:31Z"}
+    [finding] = ci_speed.findings([{**PREFLIGHT, "jobs": [held]}], FOUND_AT - 60000, FOUND_AT)
+    assert finding.id == AGE_ID
+    assert finding.measure == 901
+    assert finding.threshold == "unconfirmed queue age over 15 minutes"
