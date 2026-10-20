@@ -156,7 +156,7 @@ def _uncovered_gaps(trace, waits, limit):
 
 def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
     found = []
-    unread = set(record.get("waits_unread", ()))
+    unread = set(record.get("waits_unread", []))
     for trace in record["traces"]:
         if _agent(trace) in unread:
             continue
