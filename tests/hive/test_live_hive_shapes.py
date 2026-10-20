@@ -209,7 +209,7 @@ MISSING = placement.Wait(f"hive gone is not in the hive listing for {ORIGIN}")
 
 
 def test_a_hive_missing_from_the_listing_is_refused_naming_the_origin(live):
-    hives = launch._by_origin([root(), anton()], live.config.repo)
+    hives = launch._by_origin([root(repos=[live.config.repo, ORIGIN]), anton()], live.config.repo)
     assert launch._matched_origin(hives, "gone", live.config.repo) == MISSING
     assert launch._matched_origin(hives, ANTON, live.config.repo) == ORIGIN
     assert launch._matched_origin(hives, "root", live.config.repo) == ""
@@ -224,3 +224,12 @@ def test_a_master_placed_on_a_hive_missing_from_the_listing_waits_instead_of_rai
     placed = placement.MasterPlacement("gone", ROOT_ACCOUNTS[0], "subscription", False)
     monkeypatch.setattr(launch.placement, "place_master", lambda *args: placed)
     assert live.launcher.select(live.config, "master", {"id": "master"}) == MISSING
+
+
+def test_a_missing_hive_for_a_checkout_without_an_origin_is_refused_naming_its_path(tmp_path):
+    bare = tmp_path / "local"
+    (bare / ".git").mkdir(parents=True)
+    (bare / ".git" / "config").write_text("[core]\n\tbare = false\n")
+    assert launch._matched_origin([anton()], "gone", str(bare)) == placement.Wait(
+        f"hive gone is not in the hive listing for {bare}"
+    )
