@@ -102,6 +102,7 @@ SECRETISH_NAME = re.compile(
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
+SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
 CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
@@ -472,7 +473,7 @@ def proc_environ_verdict(command, cwd=""):
     flat = QUOTING.sub("", command)
     entered = [op.lstrip("/").split("/")[0] for op in CD_OPERAND.findall(flat)]
     in_proc = bool(PROC_DIR.match(cwd)) or any(fnmatch.fnmatchcase("proc", top) for top in entered)
-    words = flat.split()
+    words = SHELL_WORD_BREAK.split(flat)
     named = any(path_reads_environ(w) for w in words) or (in_proc and any(leaf_names_environ(w) for w in words))
     if named or ((in_proc or PROC_DIR.search(flat)) and BARE_ENVIRON.search(flat)):
         return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
