@@ -1,4 +1,8 @@
 {
+  "writer-lock": {
+    "paths": ["hooks", "scripts/swarm_ledger", "tests/__init__.py", "tests/conftest.py", "tests/swarm_ledger", "pyproject.toml", ".github/test-excludes.txt", ".github/workflows/writer-lock.yml"],
+    "tools": ["python 3.12", "uv 0.12.23", "postgres 16"]
+  },
   "brain-smoke": {
     "paths": ["hooks", "scripts", "profiles", "pyproject.toml", ".github/workflows/brain-smoke.yml"],
     "tools": ["python 3.12", "uv 0.12.23", "opentelemetry-collector-contrib 0.96.0"]
