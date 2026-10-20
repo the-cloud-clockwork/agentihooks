@@ -127,7 +127,7 @@ def test_the_order(hives, expected):
 
 
 def test_a_headless_hive_never_takes_a_master():
-    hives = [eng("a", roles=["master", "eng"]), eng("b"), hive("vm", roles=["qa"], heartbeat_at=0)]
+    hives = [hive("a", ui="no", roles=["master", "eng"]), eng("b"), hive("vm", roles=["qa"], heartbeat_at=0)]
     assert place("master", "claude", "acct", "subscription", REPO, hives, NOW) == NO_UI
     assert place("qa", "claude", "acct", "subscription", REPO, hives, NOW) == NO_UI
 

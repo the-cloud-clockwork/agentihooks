@@ -299,6 +299,22 @@ agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-ag
 - Engineer, CI, planner and dispatcher work runs on the pods. For the PC to take the dispatcher when every pod is
   full, its roles must list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
 
+## Comparing hive configuration
+
+Every hive runs agents with the workstation's configuration. Each beat publishes, at most every fifteen minutes,
+the hive's configuration named without values or host paths: account token names, agentihooks env setting names,
+the linked bundle and profiles, installed Claude rules and skills, managed MCP servers, satisfied bundle
+dependencies and repo identities.
+
+```bash
+agentihooks hive compare               # this machine's hive is the base
+agentihooks hive compare --base root
+```
+
+The first line is the base with a count per section; every other live hive follows as `equal`, `differs` with one
+`<section> missing|extra <name>` line per difference, or `no configuration published`. The command exits 1 when
+any hive differs or published nothing.
+
 ## Placement
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that take the role,
@@ -313,27 +329,33 @@ hive over an ephemeral one, then the hive id.
 the headless hives first and takes the UI hive only when no headless hive taking the role has room or none is live.
 A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
 agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. UI roles take only UI hives; the master keeps its headless fallback below. The
+hive records the pin as its reason. UI roles take only UI hives, the master included. The
 engineer, cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa
 profile on any lane places as its UI role.
 
 When no live hive takes the role:
 
-- `qa` and `frontend` wait with "no UI hive live".
+- `master`, `qa` and `frontend` wait with "no UI hive live".
 - Any other role waits with "no live hive takes" the role.
-- The master has its own chain, below.
+- With a UI hive live, the master follows its own chain, below.
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
 
+### Account caps on every hive
+
+Quota belongs to the account, so every hive reports the same cap for it. A subscription slot whose own reading is
+missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
+that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
+api slots keep their own.
+
 ### Master placement
 
-The master is placed in three tiers, each tried in `prefer` order:
+The master is placed in two tiers, each tried in `prefer` order:
 
 1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
 2. A UI hive with the `master` role and a subscription or api slot for that harness.
-3. A headless hive, `ui=no`, with a subscription or api slot, whatever its roles.
 
-Every tier also needs the hive to be live and to list the repo. With no candidate the master waits with "no live
+A headless hive, `ui=no`, never runs a master. Every tier also needs the hive to be live and to list the repo. With no candidate the master waits with "no live
 hive can run the master with interactive, subscription or api authentication".
 
 ### Who writes placement
@@ -394,12 +416,12 @@ Limitations:
 | A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
 | A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
 
-## Headless fallback
+## Headless hives never run a master
 
-When every UI hive is gone, the master still runs: tier three starts it on a headless hive through the same hive
-launch, on a subscription or api slot. Two health findings mark the state until it ends:
+When every UI hive is gone, the master waits with "no UI hive live" until one comes back; a headless hive refuses
+it. Two health findings still read older agent records:
 
-- `master-headless`: the master runs on a headless hive.
+- `master-headless`: a master placed on a headless hive before this rule.
 - `master-fallback-auth`: the master wanted its interactive login and runs on another route, so phone access
   through Remote Control is lost.
 
@@ -679,7 +701,7 @@ Only the operator can edit. An agent's credential gets
 
 The button sends the swarm control `master_move` with the hive id. The server runs
 `agentihooks swarm <slug> master move --to <hive>`, so the move behaves as described in
-[Headless fallback](#headless-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
+[Headless hives never run a master](#headless-hives-never-run-a-master) and in the [swarm commands](swarm.md): the live master hands off and its
 successor starts on that hive.
 
 The button is off when:
