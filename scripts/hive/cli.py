@@ -1,4 +1,4 @@
-"""agentihooks hive invite|join|revoke|controller|serve|set|show|list."""
+"""agentihooks hive invite|join|revoke|controller|serve|set|show|list|run|install|bundle-origin."""
 
 import argparse
 import contextlib
@@ -13,7 +13,7 @@ from collections.abc import Iterator, Mapping, MutableMapping
 from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
-from scripts.hive import auth, registry, server
+from scripts.hive import auth, bundle_origin, registry, server
 from scripts.swarm_ledger import ledger_ca
 
 LOCK_FILE = "hive.lock"
@@ -136,6 +136,10 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("install", help="Write and enable the hive user service")
     compare = sub.add_parser("compare", help="List each live hive's configuration against a base hive's")
     compare.add_argument("--base", help="The base hive id; defaults to this machine's hive")
+    origin = sub.add_parser(
+        "bundle-origin", help="Write the linked bundle's git address and branch into the hive settings record"
+    )
+    origin.add_argument("--path", default=bundle_origin.SETTINGS_PATH, help="OpenBao record under the secret mount")
     return parser
 
 
@@ -228,6 +232,8 @@ def main(argv: list[str]) -> int:
             print(f"issued a controller credential; it is in {path}")
         elif args.command in ("set", "show", "list"):
             _registry(args)
+        elif args.command == "bundle-origin":
+            print(bundle_origin.publish(os.environ, args.path))
         else:
             return _serve(args)
     except auth.HiveError as exc:
