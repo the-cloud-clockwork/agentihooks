@@ -25,10 +25,11 @@ def _refresh(monkeypatch, samples, collected):
 
 def test_a_refresh_missing_one_shard_names_it_in_one_error_line(tmp_path, monkeypatch, capsys):
     samples = tmp_path / "samples"
-    for version in ("3.11", "3.12"):
-        _shard(samples, "11", version, 1, {"t.py::a@g": 1.0})
+    for version in refresh_durations.VERSIONS:
         _shard(samples, "11", version, 2, {"t.py::old@g": 1.0})
-        _shard(samples, "12", version, 1, {"t.py::a@g": 1.0})
+        for shard in range(1, refresh_durations.SHARDS + 1):
+            if shard != 2:
+                _shard(samples, "12", version, shard, {"t.py::a@g": 1.0})
 
     assert _refresh(monkeypatch, samples, ["t.py::a", "t.py::b"]) == 1
     assert capsys.readouterr().out == (
@@ -39,15 +40,13 @@ def test_a_refresh_missing_one_shard_names_it_in_one_error_line(tmp_path, monkey
 
 def test_a_run_that_lost_a_whole_version_names_its_shards(tmp_path, monkeypatch, capsys):
     samples = tmp_path / "samples"
-    for shard in (1, 2):
-        _shard(samples, "11", "3.11", shard, {"t.py::a@g": 1.0})
-        _shard(samples, "11", "3.12", shard, {"t.py::a@g": 1.0})
+    for shard in range(1, refresh_durations.SHARDS + 1):
         _shard(samples, "12", "3.12", shard, {"t.py::a@g": 1.0})
 
     assert _refresh(monkeypatch, samples, ["t.py::a"]) == 1
+    lost = ", ".join(f"durations-3.11-{shard}" for shard in range(1, 13))
     assert capsys.readouterr().out == (
-        "::error::refresh durations: run 12 kept no durations for Python 3.11;"
-        " run 12 kept no samples from durations-3.11-1, durations-3.11-2\n"
+        f"::error::refresh durations: run 12 kept no durations for Python 3.11; run 12 kept no samples from {lost}\n"
     )
 
 

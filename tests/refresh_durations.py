@@ -12,6 +12,8 @@ from tests.duration_coverage import collected_tests, validate_coverage
 
 _ROOT = Path(__file__).parent.parent
 RUNS = 5
+VERSIONS = ("3.11", "3.12")
+SHARDS = 12
 ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-3.12-1&per_page=100"
 
 
@@ -87,7 +89,7 @@ def local_samples(folder: Path) -> list[dict[str, float]]:
 
 
 def parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser()
+    arg_parser = argparse.ArgumentParser()
     parser.add_argument(
         "--ci", type=int, default=0, metavar="RUNS", help="take the durations CI kept from its last RUNS runs"
     )
@@ -95,7 +97,7 @@ def parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--samples", type=Path, help="read run folders from here instead of GitHub, keeping only the newest RUNS"
     )
-    return parser
+    return arg_parser
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -128,13 +130,13 @@ def main(argv: list[str] | None = None) -> None:
 
 
 def missing_shards(folder: Path, run: str) -> list[str]:
-    def shards(pattern: str) -> set[tuple[str, int]]:
-        found = (re.fullmatch(r"durations-(3\.\d+)-(\d+)", path.parent.name) for path in folder.glob(pattern))
-        return {(match[1], int(match[2])) for match in found if match}
-
-    expected = shards("*/durations-*/durations.json")
-    kept = shards(f"{run}/durations-*/durations.json")
-    return [f"durations-{version}-{shard}" for version, shard in sorted(expected - kept)]
+    found = (
+        re.fullmatch(r"durations-(3\.\d+)-(\d+)", path.parent.name)
+        for path in folder.glob(f"{run}/durations-*/durations.json")
+    )
+    kept = {(match[1], int(match[2])) for match in found if match}
+    expected = [(version, shard) for version in VERSIONS for shard in range(1, SHARDS + 1)]
+    return [f"durations-{version}-{shard}" for version, shard in expected if (version, shard) not in kept]
 
 
 def cli(argv: list[str] | None = None) -> None:

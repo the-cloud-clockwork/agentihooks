@@ -864,6 +864,13 @@ def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypa
         refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
 
 
+def test_refresh_durations_names_missing_shards_from_the_push_unit_matrix():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    assert matrix["python-version"] == list(refresh_durations.VERSIONS)
+    assert matrix["shard"] == list(range(1, refresh_durations.SHARDS + 1))
+
+
 def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):
     samples = tmp_path / "samples"
     for version in ("3.11", "3.12"):
