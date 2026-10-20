@@ -626,6 +626,16 @@ _INLINE = "Mutate the only shard in the statistics job"
             ],
             [],
         ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "failure",
+                    "steps": [{"name": _INLINE, "conclusion": "success"}, {"name": "Upload", "conclusion": "failure"}],
+                }
+            ],
+            ["failure"],
+        ),
     ],
 )
 def test_pull_request_grading_counts_the_shard_mutated_inside_the_statistics_job(jobs, expected):

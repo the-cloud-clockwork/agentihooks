@@ -10,8 +10,9 @@ PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 TESTS = "actions/workflows/test.yml/runs"
 SHARDS = (
     '.jobs[] | if (.name | startswith("mutation (")) then .conclusion'
-    ' elif (.name | startswith("mutation-stats")) then (.steps[]?'
-    ' | select(.name == "Mutate the only shard in the statistics job" and .conclusion != "skipped") | .conclusion)'
+    ' elif (.name | startswith("mutation-stats")) then (.conclusion as $job | .steps[]?'
+    ' | select(.name == "Mutate the only shard in the statistics job" and .conclusion != "skipped")'
+    ' | if $job == "success" then .conclusion else $job end)'
     " else empty end"
 )
 
