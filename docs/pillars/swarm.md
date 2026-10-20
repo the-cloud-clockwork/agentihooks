@@ -1478,13 +1478,13 @@ step, so a long pass keeps it.
 
 A pass that finds the lock taken returns `another tick is running` and does nothing else, unless one of these holds:
 
-- the record carries a lower epoch, so a newer controller takes over;
+- the record carries a different epoch, so a newer controller takes over;
 - the holder record names this host and its process is gone: the process id no longer exists, is a zombie, or now
   belongs to a process with another start time.
 
-In either case the pass replaces the lock and ticks at once. A record from another host, or one with no holder
-fields, is never judged dead: it blocks the swarm until it expires. Ticks run by an install that predates holder
-records write such locks.
+In either case the pass replaces the lock and ticks at once. A record in the same epoch from another host, or
+one with no holder fields, is never judged dead: it blocks the swarm until it expires. Ticks run by an install
+that predates holder records write such locks.
 
 The pass releases the lock in its `finally` on every return: the ledger in the bin (`the ledger is in the bin,
 stopped`), a ledger that is gone, a failed ledger health probe (`Ledger health probe failed`), an exception
@@ -1526,8 +1526,8 @@ ps -o pid,lstart,cmd -p <pid from the record>
 bins a swarm, checks the binned tick left no lock, reopens it through a tick that dies holding the lock, and
 asserts that the next tick spawns the master and leaves no lock. Three more tests assert no lock is left after
 the ledger gone return, an exception partway through and a failed ledger health probe. They were added by
-[pull request 4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098), whose red run removed the dead
-holder check and reproduced the observed `another tick is running` loop
+[pull request 4098](https://github.com/the-cloud-clockwork/agentihooks/pull/4098). Its red proof ran on a plant
+branch that removed the dead holder check and reproduced the observed `another tick is running` loop
 ([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39042891977)).
 
 ### Tick heartbeat and stale watcher
