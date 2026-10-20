@@ -19,12 +19,13 @@ from pathlib import Path
 
 import httpx
 
+from hooks.config import langfuse_route
 from hooks.observability.signals import safe_name
 from scripts.doctor import registry
 from scripts.swarm.runtime import SWARM_HOME
 
 DEFAULT_HOST = "https://langfuse.homeofanton.com"
-INGRESS = "10.10.30.200"
+INGRESS = httpx.URL(langfuse_route({})[0]).host
 PAGE = 100
 OBSERVATION_PAGE = 50
 WORKED = {"claimed", "pr", "done"}
