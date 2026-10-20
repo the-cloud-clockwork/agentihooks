@@ -53,7 +53,7 @@ exit "$status"
         elif step.get("run", "").startswith("bash scripts/packaging/pull-runtime-image.sh "):
             assert "if" not in step
         elif step.get("id") == "build":
-            assert step["if"] == "${{ !cancelled() }}"
+            assert "if" not in step
         elif "run" in step:
             assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)
