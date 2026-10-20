@@ -186,14 +186,15 @@ SCALING_KEYS = {
 ADDRESS_KEYS = {"api-url": "api_url", "api-url-pending": "pending_api_url"}
 NO_API_ADDRESS = "api-url takes an http or https address with a host and no credentials"
 TRANSPORT_KEYS = {"codex-inbox-transport": "codex_inbox_transport"}
+HIVE_PLACEMENT = "hive-placement"
+ON_OFF = {"on": True, "off": False}
 CONFIG_KEYS = {
     **SCALING_KEYS,
     **ADDRESS_KEYS,
     **default_models.KEYS,
     **TRANSPORT_KEYS,
+    HIVE_PLACEMENT: "hive_placement",
 }
-HIVE_PLACEMENT = "hive-placement"
-ON_OFF = {"on": True, "off": False}
 GATE_KEYS = {f"{name}-gate": name for name in catalog.defaults()}
 GATE_MODES = modes.MODES
 RETIRES_MASTER = frozenset({"stop now", "close ledger"})
@@ -928,7 +929,15 @@ def api_address(value):
 def config_value(key, value):
     if key in default_models.KEYS or key in TRANSPORT_KEYS:
         return value
+    if key == HIVE_PLACEMENT:
+        return on_off(value)
     return api_address(value) if key in ADDRESS_KEYS else scaling_value(key, value)
+
+
+def on_off(value):
+    if value not in ON_OFF:
+        raise SwarmError("hive-placement takes on or off")
+    return ON_OFF[value]
 
 
 def _split_master_pairs(pairs, key, parse):
@@ -977,11 +986,6 @@ def cmd_set(store, args):
             continue
         if key == "autonomy":
             changes["autonomy"] = value
-            continue
-        if key == HIVE_PLACEMENT:
-            if value not in ON_OFF:
-                raise SwarmError("hive-placement takes on or off")
-            changes["hive_placement"] = ON_OFF[value]
             continue
         if key in EFFORT_KEYS:
             changes[EFFORT_KEYS[key]] = value
