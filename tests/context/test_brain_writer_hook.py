@@ -84,6 +84,43 @@ def test_drain_quarantines_unparseable(tmp_path, http_ok):
     assert not list(tmp_path.glob("*.json"))
 
 
+@pytest.mark.parametrize(
+    "bad_payload",
+    [
+        None,
+        {"type": "lesson", "content": None},
+        {"type": "lesson", "content": 12},
+        {"type": "lesson", "content": "bad", "attrs": [["a"]]},
+    ],
+)
+def test_drain_quarantines_malformed_payload_and_continues(tmp_path, http_ok, bad_payload):
+    (tmp_path / "aa-broken.json").write_text(json.dumps(bad_payload))
+    (tmp_path / "zz-valid.json").write_text(json.dumps(MARKER))
+    assert _drain_outbox(str(tmp_path)) == 1
+    assert (tmp_path / "aa-broken.json.bad").exists()
+    assert not list(tmp_path.glob("*.json"))
+    assert len(http_ok) == 1
+    assert http_ok[0][0]["content"] == "test lesson"
+
+
+def test_drain_quarantines_corrupt_installation_and_continues(tmp_path, http_ok, monkeypatch):
+    from hooks import config
+    from scripts.swarm_v2 import keyspace
+
+    home = tmp_path / "home"
+    home.mkdir()
+    (home / keyspace.INSTALLATION_FILE).write_text("{}")
+    monkeypatch.setattr(config, "AGENTIHOOKS_HOME", str(home))
+    (tmp_path / "aa-broken.json").write_text(json.dumps(MARKER))
+    valid = {**MARKER, "idempotency_key": "a" * 32}
+    (tmp_path / "zz-valid.json").write_text(json.dumps(valid))
+    assert _drain_outbox(str(tmp_path)) == 1
+    assert (tmp_path / "aa-broken.json.bad").exists()
+    assert not list(tmp_path.glob("*.json"))
+    assert len(http_ok) == 1
+    assert http_ok[0][1] == valid["idempotency_key"]
+
+
 def test_drain_keeps_files_on_refusal(tmp_path, monkeypatch):
     monkeypatch.setattr(brain_http, "brain_http_enabled", lambda: True)
     monkeypatch.setattr(brain_http, "post", lambda *a, **k: None)
