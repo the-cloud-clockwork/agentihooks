@@ -235,7 +235,8 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
 
 #### Sizing settings
 
-Three settings decide the master count. The tick reads them in this order:
+`master-per`, `masters-step` and the manual `masters=N` count decide the master count. The tick reads them in this
+order:
 
 | Setting | Effect |
 |---|---|
@@ -283,10 +284,10 @@ With the default step, a swarm grows from 11 to 12 working agents. The next tick
 launches `master-2@<id>` and prints `master seats 1 to 2 for 12 working agents`. On the masters channel, every master
 reads `Master seats are now 2 for 12 working agents. Phase owners: ...`, naming the phases each seat owns.
 
-The swarm then falls back to 11 agents. The count stays at two while the cool off runs. A wanted count at or above
-the seat count, here a return to 12 agents, ends the cool off. With three seats, a rise in the wanted count that stays
-below the seat count, such as 11 agents back to 12 (wanted one to two), restarts it. After ten minutes at a lower
-wanted count:
+The swarm then falls back to 11 agents. The count stays at two while the cool off runs, and a return to 12 agents
+ends the cool off with no change. A rise that stays below the seat count restarts it instead: a swarm holding three
+seats that falls to 11 agents (wanted one) and climbs back to 12 (wanted two) starts its ten minutes again. After ten
+minutes at a lower wanted count:
 
 1. The tick sends each extra backend master an inbox item from `swarm`: write a Handoff v2 for the lead master, run
    `agentihooks swarm <id> handoff <doc>` and stop. The tick prints
@@ -296,8 +297,8 @@ wanted count:
    is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
 3. The seat count falls, phase owners rebalance and the masters channel announces the new owners.
 
-An extra backend seat with no live master in it or in any seat above it retires at once when the cool off ends,
-and the tick prints
+An extra backend seat that is empty and has no live seat above it retires at once when the cool off ends, and the
+tick prints
 `closed empty master seat <seat>`. If the swarm grows again before a retiring master leaves, its retire request is
 withdrawn with the note `the swarm grew again, so seat <seat> stays`.
 
