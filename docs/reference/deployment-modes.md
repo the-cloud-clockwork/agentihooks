@@ -75,7 +75,8 @@ agentihooks hive install
 ```
 
 - The ledger answers only the host names in `SWARM_PUBLIC_URL` and `SWARM_ALLOWED_HOSTS`.
-- The hive join endpoint always serves TLS; with `rediss`, Redis does too.
+- The hive join endpoint always serves TLS; with `rediss`, Redis does too. When Redis stops answering, the endpoint
+  answers 503 within 5 seconds and keeps admitting requests; see [Join service limits](../pillars/hives.md#join-service-limits).
 - Each joined hive gets its own Redis user that writes only its own keys.
 
 ### No public ledger
