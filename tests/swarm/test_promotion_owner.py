@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from scripts.swarm import promotion_watch
+from scripts.swarm import controller, lease, promotion_watch
 from scripts.swarm.ledger_client import LedgerClient, LedgerRefused
 from scripts.swarm.store import RedisStore, SwarmConfig
 
@@ -37,11 +37,20 @@ class SchemaLedger(LedgerClient):
         self.lock = threading.RLock()
         self.operations = []
         self.refuse = False
+        self.leases = None
+        self.epochs = []
 
     def _call(self, slug, ops=None):
         with self.lock:
             doc = self.docs[slug]
             if ops is not None:
+                for op in ops:
+                    epoch = op.pop("controller_epoch", None)
+                    self.epochs.append((slug, op["op"], epoch))
+                    if self.leases is not None and epoch is not None:
+                        live = lease.current(self.leases, slug)
+                        if live is None or live.epoch != epoch:
+                            raise LedgerRefused(f"ledger {slug}: server refused: 409 stale_controller")
                 checked = schemas.check_operations(
                     {"operation_id": ops[0]["id"], "ops": ops, "guards": {}},
                     ledger_core,
@@ -164,6 +173,24 @@ def test_handover_reconciles_prior_repairs_on_green_and_allows_the_next_real_fai
     monkeypatch.setitem(RED, "conclusion", "failure")
     observe(store, ledger, DOCTOR, NOW + promotion_watch.REFRESH_MS * 2)
     assert [task["id"] for task in ledger.docs[DOCTOR]["tasks"]] == ["promo-902-0"]
+
+
+def test_a_doctor_tick_closes_watched_repairs_on_green_under_the_watched_lease(linked, monkeypatch):
+    store, ledger = linked
+    observe(store, ledger, WATCHED)
+    watched = lease.acquire(store, WATCHED, "watched-hive")
+    store.redis.set(store.key(DOCTOR, "control-epoch"), watched.epoch + 5)
+    doctor = lease.acquire(store, DOCTOR, "doctor-hive")
+    store.update(WATCHED, state="stopped")
+    ledger.leases = store
+    monkeypatch.setitem(RED, "id", 901)
+    monkeypatch.setitem(RED, "conclusion", "success")
+    tick = controller.FencedLedger(store, DOCTOR, doctor, ledger)
+    later = NOW + promotion_watch.REFRESH_MS
+    promotion_watch.refresh(DOCTOR, store.config(DOCTOR), store, tick, tick.state(DOCTOR), later, github)
+    assert ledger.docs[WATCHED]["tasks"][0]["state"] == "done"
+    assert {(slug, epoch) for slug, kind, epoch in ledger.epochs if kind == "task_update"} == {(WATCHED, watched.epoch)}
+    assert store.redis.get(promotion_watch.key(DOCTOR, "seen")) == "901"
 
 
 def test_a_green_run_releases_a_fixer_the_master_kept_blocked_so_the_next_red_files_again(linked, monkeypatch):
