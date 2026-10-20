@@ -309,11 +309,11 @@ def test_absent_merge_cwd_uses_the_calling_directory(session, tmp_path, monkeypa
 
     def run(argv, **kwargs):
         seen.append(kwargs["cwd"])
-        return subprocess.CompletedProcess(argv, 0, "dev", "")
+        return subprocess.CompletedProcess(argv, 0, *gh(argv))
 
     monkeypatch.setattr(subprocess, "run", run)
     prod_lockdown.check_prod_lockdown({"tool_input": {"command": "gh pr merge 123 --squash"}, "session_id": session})
-    assert seen == [str(tmp_path)]
+    assert seen == [str(tmp_path), str(tmp_path)]
 
 
 def test_pr_refusal_preserves_the_full_diagnostic_and_log(session, monkeypatch):
