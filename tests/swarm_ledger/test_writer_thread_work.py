@@ -3,13 +3,10 @@ import pstats
 import threading
 import types
 
-import pytest
-
 from scripts.swarm_ledger.repository import entry, fragments
 from tests.swarm_ledger import operations_cpu_replay as replay
 from tests.swarm_ledger.test_operations_cpu_contract import small_corpus
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WHOLE_TEXT = {(fragments.__file__, "encoded"), (entry.__file__, "text")}
 
 
