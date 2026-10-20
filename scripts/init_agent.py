@@ -214,6 +214,7 @@ LAUNCH_GRACE_S = 3
 STARTED_ROUTES = ("routed", "bare", "direct")
 PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
 CODEX_READY_S = 120.0
+CANARY_TIMEOUT_S = {"claude": 120.0, "codex": 90.0}
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -710,6 +711,11 @@ def _parser() -> argparse.ArgumentParser:
         help="Seconds to wait for the new session to report which account it was routed to",
     )
     parser.add_argument(
+        "--canary-timeout",
+        type=float,
+        help="Seconds to wait for the new session to run its profile canary; default 120 for Claude, 90 for Codex",
+    )
+    parser.add_argument(
         "--handoff",
         action="store_true",
         help="Quota handoff: route to an account other than this session's, never fall back to bare "
@@ -1056,7 +1062,8 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
         return 3
     try:
         _route_reported(active_env, args.route_timeout, route)
-        report += _binding_result(active_env, args.route_timeout, route)
+        canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
+        report += _binding_result(active_env, canary, route)
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)
