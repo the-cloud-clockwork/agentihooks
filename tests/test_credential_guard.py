@@ -528,7 +528,7 @@ PROC_ENVIRON_READS = [
 
 PROC_ALLOWED = [
     "cat /proc/meminfo",
-    "python3 -c \"import os; print(os.environ.get('HOME'))\"",
+    "python3 -c \"import os; print(os.listdir('/proc/1'))\"",
     'test -n "${REDIS_URL:-}" && echo set || echo unset',
     "ls /proc/1/status",
 ]
