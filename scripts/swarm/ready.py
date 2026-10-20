@@ -364,8 +364,12 @@ def _unmergeable(run, row, found, pull):
         if result.get("queued") or result.get("state") == "MERGED":
             return [f"dequeue of {url} for task {task_id} awaits confirmation"]
     if "on" in found and fresh.mergeable != "CONFLICTING":
+        tries = found.get("recoveries", 0)
+        if tries >= QUEUE_TRIES:
+            run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=url, task=task_id))
+            return _reopen(run, row, found, STUCK)
         found["on"] = {"kind": RECOVER, "target": url, "head": fresh.head or found["head"]}
-        found["retry_at"], found["recoveries"] = run.now_ms + BACKOFF_MS, 0
+        found["retry_at"], found["recoveries"] = run.now_ms + BACKOFF_MS * 2**tries, tries
         save(run.store, run.slug, task_id, found)
         run.ledger.comment(run.slug, task_id, DEQUEUED.format(url=url), by="swarm")
         return [f"dequeued {url} for task {task_id}: {TRANSIENT}"]
@@ -400,6 +404,7 @@ def _recover(run, row, found, pull):
         run.ledger.raise_alert(run.slug, ALERT_SOURCE, REQUEUE_FAILED.format(url=url, task=task_id, why=exc))
         return _retry(run, row, found, f"could not requeue {url} for task {task_id}: {exc}")
     found["on"], found["queued_at"] = {"kind": "merge", "target": url}, run.now_ms
+    found["recoveries"] = found.get("recoveries", 0) + 1
     save(run.store, run.slug, task_id, found)
     run.ledger.comment(run.slug, task_id, RECOVERED.format(url=url), by="swarm")
     return [f"queued {url} for task {task_id}"]

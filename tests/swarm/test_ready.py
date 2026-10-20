@@ -1326,6 +1326,7 @@ def watcher(merging, cached, fresh, now, store=None):
 
 def dequeued_transient(merging):
     queued_at_now(merging)
+    merging.queue.extra = {"queued": False}
     merging.pulls[URL] = transient()
     return merging.run(NOW + 60_000)
 
@@ -1461,6 +1462,36 @@ def test_a_new_head_after_a_transient_dequeue_reopens_the_task(merging):
     due = ready.record(merging.store, "sw", "t1")["retry_at"]
     assert merging.run(due)[0] == f"task t1 reopened, {URL} {ready.MOVED}"
     assert merging.queued == [("queue", URL), ("dequeue", URL)]
+
+
+def test_a_head_that_turns_unmergeable_after_every_requeue_reopens_after_bounded_recoveries(merging):
+    queued_at_now(merging)
+    merging.queue.extra = {"queued": False}
+    now, waits_ms = NOW, []
+    for _ in range(ready.QUEUE_TRIES):
+        now += 60_000
+        merging.pulls[URL] = transient()
+        assert merging.run(now) == [f"dequeued {URL} for task t1: {ready.TRANSIENT}"]
+        due = ready.record(merging.store, "sw", "t1")["retry_at"]
+        waits_ms.append(due - now)
+        now = due
+        merging.pulls[URL] = GREEN
+        assert merging.run(now) == [f"queued {URL} for task t1"]
+    assert waits_ms == [ready.BACKOFF_MS * 2**tries for tries in range(ready.QUEUE_TRIES)]
+    merging.pulls[URL] = transient()
+    assert merging.run(now + 60_000)[0] == f"task t1 reopened, {URL} {ready.STUCK}"
+    assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["awaiting"] == "fix"
+    assert merging.ledger.alerts == [(ready.ALERT_SOURCE, ready.GAVE_UP.format(url=URL, task="t1"))]
+
+
+def test_an_unmergeable_entry_on_a_task_outside_the_merge_pass_reopens_with_its_cause(merging):
+    merging.rows["t1"]["awaiting"] = ""
+    ready.forget(merging.store, "sw", "t1")
+    merging.pulls[URL] = transient()
+    merging.queue.extra = {"queued": False}
+    assert merging.run()[0] == f"task t1 reopened, {URL} is marked unmergeable by GitHub"
+    assert merging.queued == [("dequeue", URL)]
+    assert merging.rows["t1"]["state"] == "open" and merging.rows["t1"]["claimed_by"] == ""
 
 
 @pytest.mark.parametrize("queued", [True, False])
@@ -1864,7 +1895,8 @@ def test_a_planted_unmergeable_entry_leaves_the_queue_within_two_full_ticks(env,
 
     def graphql(query, values, run):
         if query == ready.queue_record.GROUPS:
-            raise SwarmError("queue unreadable in this fixture")
+            entries = {"nodes": [], "pageInfo": {"hasNextPage": False, "endCursor": None}}
+            return {"viewer": {"login": "bot"}, "resource": {"repository": {"mergeQueue": {"entries": entries}}}}
         if query == ready.merge_queue.DEQUEUE:
             assert values == {"id": "pull"}
             dequeued.append(values["id"])
