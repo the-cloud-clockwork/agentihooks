@@ -366,9 +366,9 @@ def test_expired_order_of_a_departed_claimant_left_working_is_abandoned(setup):
     request = request_for(setup)
     order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
     agent = setup.store.execution_registry.get("fixture", order.execution_id)
-    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
-    setup.store.drop_agent("fixture", request.name)
     setup.store.execution_registry.update("fixture", replace(agent, state="working"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.store.redis.hdel(setup.store.key("fixture", "agents"), request.name)
     other = request_for(setup)
     setup.launcher.wait = Mock(return_value="pending")
     assert setup.launcher.spawn(other) == "pending"
