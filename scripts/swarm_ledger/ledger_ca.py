@@ -3,6 +3,7 @@
 import os
 import ssl
 from collections.abc import Callable
+from pathlib import Path
 
 from scripts import openbao_kv
 from scripts.swarm_ledger import ledger_link
@@ -36,3 +37,20 @@ def install(environ=os.environ, opener: Callable | None = None) -> str:
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(pem)
     return f"ledger CA: {target}"
+
+
+def served(environ=os.environ) -> str | None:
+    pem = environ.get(ledger_link.CA_ENV, "").strip()
+    if not pem:
+        found = ledger_link.ca_file(environ)
+        pem = found.read_text() if found.is_file() else ""
+    return pem if certificate(pem) else None
+
+
+def place(home: Path, pem: object) -> Path | None:
+    if not certificate(pem):
+        return None
+    target = ledger_link.ca_file({"AGENTIHOOKS_HOME": str(home)})
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(pem)
+    return target
