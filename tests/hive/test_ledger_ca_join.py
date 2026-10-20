@@ -122,7 +122,9 @@ def test_serve_hands_the_join_service_the_ledger_ca_it_trusts(admin, monkeypatch
     assert calls == [((admin, "redis://public:6379/0", "127.0.0.1", 8770, None), {"ledger_ca": pem})]
 
 
-def test_a_master_from_a_freshly_joined_hive_passes_its_ledger_join(admin, cert, pem, tls_ledger, tmp_path, monkeypatch):
+def test_a_master_from_a_freshly_joined_hive_passes_its_ledger_join(
+    admin, cert, pem, tls_ledger, tmp_path, monkeypatch
+):
     home = tmp_path / "hive-home"
     for name in ("LEDGER_CA_PEM", "LEDGER_CA_FILE", "SSL_CERT_FILE", "SWARM_URL", "LEDGER_URL"):
         monkeypatch.delenv(name, raising=False)
