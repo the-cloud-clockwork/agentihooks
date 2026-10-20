@@ -55,13 +55,13 @@ agentihooks swarm my-swarm set api-url=https://swarm.example.internal
   was, so the swarm keeps writing its current ledger.
 - Each live agent verifies its staged credential against the hosted metadata API and writes a readiness receipt.
   `ledger-ready` prints the readiness record built from those receipts: `ready`, `missing` (live agents without a
-  current receipt for the staged address),
-  `missing_masters` (configured master seats with no live master), `pending_url`, `active_url` and `staged_at`.
+  current receipt for the staged address), `missing_masters` (configured master seats with no live master),
+  `pending_url`, `active_url` and `staged_at`.
 - `set api-url` to the staged address activates it. The controller lease first moves to the hosted ledger; then one
   local Redis transaction clears the workstation's controller ownership, writes `api_url`, clears the staged address
-  and drops the readiness receipts. When that transaction fails, the moved lease is released again.
-  From then on every swarm command, tick and wait for this swarm routes to the hosted ledger. Other swarms on the
-  workstation stay local.
+  and drops the readiness receipts. When the transaction is refused because the cohort changed, the moved lease is
+  released again. From then on every swarm command, tick and wait for this swarm routes to the hosted ledger. Other
+  swarms on the workstation stay local.
 
 Activation refuses, and changes nothing, with:
 
@@ -127,13 +127,13 @@ The routed runtime places each launch by lane and profile:
 
 `controller.workers.cap` is the launch cap per approved account: each account the worker route offers takes at most
 that many live workers. With one approved account and `cap: 1`, as on Anton, one worker runs at a time. The swarm's
-own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take `eng`, `ci`, `plan` and `dispatch` as described on the
-[Hives](../pillars/hives.md#placement) page instead.
+own caps (`max-eng-agents`, `max-ci-agents`) still apply on top. With hive placement on, worker hive Pods take
+`eng`, `ci`, `plan` and `dispatch` as described on the [Hives](../pillars/hives.md#placement) page instead.
 
 ### Verify
 
 ```bash
-agentihooks swarm rig-grade-swarm status --json      # the Anton engineer appears with its execution and task
+agentihooks swarm my-swarm status --json      # the Anton engineer appears with its execution and task
 kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller | grep 'controller:'
 kubectl -n agentihooks-swarm-workers get pods -l swarm.agentihooks.io/controller-owner
 ```
