@@ -10,13 +10,13 @@ ROOT = Path(__file__).resolve().parents[2]
 START = ROOT / "deploy/worker/start.sh"
 
 
-def startup(tmp_path, *, joined=False, refused=False, init_fails=False, ssh=False):
+def startup(tmp_path, *, joined=False, refused=False, init_fails=False, ssh=False, sshd_dies=False):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
     sshd = tools / "sshd"
     sshd.write_text(
-        '#!/usr/bin/env bash\nprintf "sshd %s\\n" "$*" >> "$COMMAND_LOG"\n[[ "$1" != -D ]] || exec sleep 5 >/dev/null 2>&1\n'
+        '#!/usr/bin/env bash\nprintf "sshd %s\\n" "$*" >> "$COMMAND_LOG"\n[[ "$1" != -D ]] || [[ "$SSHD_DIES" == yes ]] || exec sleep 5 >/dev/null 2>&1\n'
     )
     sshd.chmod(0o755)
     keys = tmp_path / "keys"
@@ -76,6 +76,9 @@ def startup(tmp_path, *, joined=False, refused=False, init_fails=False, ssh=Fals
         "REFUSE_INIT": "yes" if init_fails else "no",
         "AH_CC_TOKEN_fixture": "fixture $token (value)",
         "AH_CC_TOKEN_quoted": "it's quoted",
+        "AH_CC_TOKEN_escaped": "back\\\\slash",
+        "SWARM_SECRET": "fixture tick secret",
+        "SSHD_DIES": "yes" if sshd_dies else "no",
     }
     if ssh:
         env |= {
@@ -110,7 +113,9 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
     )
     assert sourced.stdout == "fixture $token (value)"
     assert "AH_CC_TOKEN_quoted" not in container_env.read_text()
-    assert "AH_CC_TOKEN_quoted holds a single quote" in result.stderr
+    assert "AH_CC_TOKEN_quoted holds a quote or backslash" in result.stderr
+    assert "AH_CC_TOKEN_escaped=" not in container_env.read_text()
+    assert "SWARM_SECRET=" not in container_env.read_text()
 
 
 def test_ssh_checks_its_config_then_serves_the_mounted_keys_before_init(tmp_path):
@@ -129,6 +134,12 @@ def test_ssh_checks_its_config_then_serves_the_mounted_keys_before_init(tmp_path
     assert "Port 2222\n" in config
     assert "AllowTcpForwarding no\n" in config
     assert "PasswordAuthentication no\n" in config
+
+
+def test_an_sshd_that_dies_at_start_never_runs_the_worker(tmp_path):
+    result, commands, _, _ = startup(tmp_path, ssh=True, sshd_dies=True)
+    assert result.returncode != 0
+    assert "init --profile engineer" not in commands
 
 
 def test_failed_profile_init_never_runs_the_worker(tmp_path):

@@ -31,9 +31,10 @@ import os, re, shlex, sys
 from pathlib import Path
 
 keep = re.compile(r'^(AH_|AGENTIHOOKS_|HIVE_|SWARM_|SSL_CERT_FILE)')
-kept = {k: v for k, v in sorted(os.environ.items()) if keep.match(k) and '\n' not in v}
-for k in [k for k, v in kept.items() if "'" in v]:
-    print(f'worker-hive: {k} holds a single quote, which python-dotenv cannot read back; left out', file=sys.stderr)
+tick_only = {'SWARM_SECRET', 'AGENTIHOOKS_LEDGER_AGENT_TOKEN'}
+kept = {k: v for k, v in sorted(os.environ.items()) if keep.match(k) and k not in tick_only and '\n' not in v}
+for k in [k for k, v in kept.items() if "'" in v or '\\' in v]:
+    print(f'worker-hive: {k} holds a quote or backslash, which python-dotenv cannot read back; left out', file=sys.stderr)
     del kept[k]
 lines = [f'{k}={shlex.quote(v)}' for k, v in kept.items()]
 target = Path(os.environ['AGENTIHOOKS_HOME']) / 'hive-container.env'
