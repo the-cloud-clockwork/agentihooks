@@ -131,7 +131,7 @@ def slow_background_paint(tab):
         """() => {
           const post = scheduler.postTask.bind(scheduler);
           scheduler.postTask = (task, options) =>
-            new Promise((done) => setTimeout(done, 300)).then(() => post(task, options));
+            new Promise((done) => setTimeout(done, 100)).then(() => post(task, options));
         }"""
     )
 
@@ -148,7 +148,7 @@ def test_freezing_a_plan_from_its_row_sends_the_freeze_and_disables_its_rows(pag
     tab, sent = page
     tab.click("#item-plans-v2 > details.plan-fold > summary .freeze")
     assert sent_ops(tab, sent, "freeze_set") == [{"op": "freeze_set", "verb": "freeze", "target": "plans/v2"}]
-    tab.wait_for_function("() => document.querySelector('#item-phases-p2').classList.contains('frozen')")
+    tab.wait_for_function("() => document.querySelector('#item-tasks-t2').classList.contains('frozen')")
     assert freeze_text(tab, "#item-plans-v2") == "unfreeze"
     assert row_state(tab, "#item-tasks-t2")["rank"] == [True]
 
