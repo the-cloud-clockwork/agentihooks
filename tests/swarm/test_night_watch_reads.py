@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import fakeredis
 import pytest
 
 from scripts.swarm import claim_hold, freeze
@@ -48,6 +47,8 @@ def test_no_covering_freeze_never_reads_a_target_title(monkeypatch):
 
 
 def test_night_watch_read_count_ignores_unrelated_freeze_history(monkeypatch):
+    import fakeredis
+
     store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
     store.create(SwarmConfig("watch", "/repo"))
     store.update("watch", state="running")
