@@ -50,6 +50,7 @@ WATCHER_LOSS = (
     ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
 )
 
+
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
