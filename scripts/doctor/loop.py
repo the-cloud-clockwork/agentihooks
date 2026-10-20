@@ -174,7 +174,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
                 1,
             )
         )
-    cooldown_ms = limits(os.environ).cooldown_minutes * MINUTE_MS
+    cooldown_ms = limits().cooldown_minutes * MINUTE_MS
     judgments = store.redis.hgetall(verdicts(store, doctor).key)
     found = ci_speed.unjudged(found, judgments, now_ms, cooldown_ms)
     record(store, doctor, found, now_ms, cooldown_ms)

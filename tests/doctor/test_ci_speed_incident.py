@@ -182,6 +182,7 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
         assert len(texts) == 1
 
 
+@pytest.mark.parametrize("kind,scope", [("ci tier wall time", "merge_group"), ("ci runner wait", '["fleet/queue"]')])
 @pytest.mark.parametrize("legacy", [False, True])
 @pytest.mark.parametrize(
     "change,expected",
@@ -192,20 +193,22 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
         ({"evidence_identity": ("1", "2 attempt 2", 900)}, True),
         ({"measure": 901}, True),
         ({"subject": "200-pull_request"}, True),
-        ({"kind": "ci runner wait"}, True),
+        ({"kind": "ci queue age unconfirmed"}, True),
         ({"elapsed": 60000}, True),
     ],
 )
-def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change, expected, legacy):  # noqa: F811
+def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change, expected, legacy, kind, scope):  # noqa: F811
     from dataclasses import replace
 
     from scripts.swarm.health.findings import Finding
 
     original = Finding(
-        "ci tier wall time",
-        "100-merge_group",
+        kind,
+        f"100-{scope}",
         "queue tier slow",
-        ("2 runs, queue, worst 900 seconds, median 900 seconds, runs 1, 2",),
+        ("2 runs, pool, runs legacy, worst 900 seconds, median 900 seconds, runs 1, 2",)
+        if legacy
+        else ("human readable wording changed",),
         "wall time",
         900,
         evidence_identity=("1", "2", 900),
@@ -218,7 +221,7 @@ def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change,
         del prior["evidence_identity"], prior["verdict"]["evidence_identity"]
         store.redis.hset(judgments.key, original.id, json.dumps(prior))
     elapsed = change.get("elapsed", 59999)
-    current = replace(original, subject="200-merge_group")
+    current = replace(original, subject=f"200-{scope}")
     current = replace(current, **{key: value for key, value in change.items() if key != "elapsed"})
     found = ci_speed.unjudged([current], store.redis.hgetall(judgments.key), AFTER + elapsed, 60000)
     assert found == ([current] if expected else [])
@@ -253,6 +256,11 @@ def test_judged_group_delivers_new_evidence_once_within_the_same_window(store, m
     for texts in items(store).values():
         assert len(texts) == 2
         assert "ci-runner-wait/" in texts[1]
+    records.append({**run, "id": 3})
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 180000)
+    for texts in items(store).values():
+        assert len(texts) == 3
+        assert "runs 1, 2, 3" in texts[2] if change == "new run" else "runs 1, 3" in texts[2]
 
 
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811

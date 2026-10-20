@@ -221,7 +221,7 @@ def _covered(finding, identity, verdict):
     if kind != finding.kind.replace(" ", "-") or subject.partition("-")[2] != finding.subject.partition("-")[2]:
         return False
     identity = verdict.get("evidence_identity")
-    members = identity[:-1] if identity is not None else verdict["evidence"][0].partition(", runs ")[2].split(", ")
+    members = identity[:-1] if identity is not None else verdict["evidence"][0].rpartition(", runs ")[2].split(", ")
     return finding.measure <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
 
 
