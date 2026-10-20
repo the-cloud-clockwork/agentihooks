@@ -219,11 +219,6 @@ def account(
     return found
 
 
-def login_account() -> str:
-    email = (_read(home() / CONFIG).get(ACCOUNT) or {}).get("emailAddress")
-    return aicode_tokens.slug(email) if email else ""
-
-
 def child(environ: Mapping[str, str], target: Path, marked: str = "") -> dict[str, str]:
     kept = {name: value for name, value in environ.items() if not name.startswith(DROPPED)}
     marker = {f"{INTERACTIVE_PREFIX}{marked}": "1"} if marked else {}
