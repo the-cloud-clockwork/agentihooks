@@ -49,7 +49,7 @@ def test_old_idle_master_retires_once_with_recap_and_closed_pane(store, state):
         assert store.agents("sw") == [agent]
         assert rt.killed == rt.closed == []
         assert store.memory.recaps(agent.seat) == []
-        assert store.seats.exit_of(agent.name) is None
+        assert store.seats.exit_of(agent.name) == {}
         return
     assert store.agents("sw") == []
     assert rt.killed == [agent.name] and rt.closed == [agent.pane_id]
