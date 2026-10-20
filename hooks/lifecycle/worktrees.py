@@ -69,7 +69,7 @@ def discover(roots: list[Root]) -> list[tuple[Path, Root]]:
     return sorted(found.items())
 
 
-def _held(state: TreeState, lease: Lease | None, snap: Snapshot, grace: bool = True) -> str:
+def _held(state: TreeState, lease: Lease | None, snap: Snapshot) -> str:
     if state.path == state.primary:
         return "primary checkout"
     if state.branch in PROTECTED:
@@ -82,7 +82,7 @@ def _held(state: TreeState, lease: Lease | None, snap: Snapshot, grace: bool = T
         return "a process works inside"
     if lease_alive(lease, snap):
         return "owner session alive"
-    if grace and in_boot_grace(snap):
+    if in_boot_grace(snap):
         return "boot grace"
     return ""
 

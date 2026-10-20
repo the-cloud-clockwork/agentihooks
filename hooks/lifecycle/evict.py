@@ -1,12 +1,13 @@
 import shutil
 import subprocess
+from dataclasses import replace
 from pathlib import Path
 from typing import Callable
 
 from hooks.lifecycle.act import ActionError, Journal, apply
 from hooks.lifecycle.gitstate import inspect
 from hooks.lifecycle.lease import read_lease
-from hooks.lifecycle.liveness import Snapshot
+from hooks.lifecycle.liveness import BOOT_GRACE, Snapshot
 from hooks.lifecycle.locks import removing
 from hooks.lifecycle.model import Finding, Root
 from hooks.lifecycle.worktrees import _held, discover, needs_rescue, registered, scratch_repository
@@ -30,7 +31,7 @@ def _candidates(root: Root, snap: Snapshot) -> list[tuple[float, Path, Path, Fin
         if state is None or snap.now - state.last_touch < FRESH:
             continue
         lease = read_lease(path, "worktree")
-        if _held(state, lease, snap, False):
+        if _held(state, lease, replace(snap, uptime=BOOT_GRACE)):
             continue
         rescue = needs_rescue(state, lease)
         disposable = rescue and scratch_repository(state, root)

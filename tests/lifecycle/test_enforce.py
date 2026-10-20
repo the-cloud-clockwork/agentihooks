@@ -33,6 +33,7 @@ def test_snapshot_pushes_wip_with_skip_ci_and_skips_big_files(repo, monkeypatch)
     files = git(repo.origin, "ls-tree", "-r", "--name-only", f"refs/heads/{ref}").split()
     assert "notes.txt" in files and "big.bin" not in files
     assert git(repo.origin, "show", f"refs/heads/{ref}:README") == "changed"
+    assert git(repo.primary, "for-each-ref", "refs/heads/wip") == ""
     assert git(path, "status", "--porcelain")
 
 
