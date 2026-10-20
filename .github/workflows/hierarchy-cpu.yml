@@ -31,19 +31,20 @@ jobs:
       matrix:
         pair: [1, 2, 3, 4]
     steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+          fetch-depth: 0
+          filter: tree:0
       - name: Resolve the base, the previous dev head on a push or else the merge base with dev, unless one was given
         id: base
         env:
-          GH_TOKEN: ${{ github.token }}
           BASE: ${{ inputs.base }}
           BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
         run: |
           [[ -n "$BASE" ]] || BASE="$BEFORE"
-          [[ -n "$BASE" ]] || BASE=$(gh api "repos/$GITHUB_REPOSITORY/compare/dev...$GITHUB_SHA" --jq .merge_base_commit.sha)
+          [[ -n "$BASE" ]] || BASE=$(git -C head merge-base HEAD origin/dev)
           echo "sha=$BASE" >> "$GITHUB_OUTPUT"
-      - uses: actions/checkout@v4
-        with:
-          path: head
       - uses: actions/checkout@v4
         with:
           ref: ${{ steps.base.outputs.sha }}
