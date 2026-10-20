@@ -1464,6 +1464,127 @@ The gate was delivered in [pull request 2116](https://github.com/the-cloud-clock
 [pull request 4736](https://github.com/the-cloud-clockwork/agentihooks/pull/4736)
 made it count commits in the folder the command runs in.
 
+## Promotion fixer intake
+
+The minute tick runs the promotion watch for every swarm. The watch reads the newest finished push run of Tests on
+`dev`. For a red run it files one urgent `ci` task per failed job, raises a promotion alert on the ledger and sends
+the master an inbox item. The tasks are named `promo-<run id>-<n>`. For a later green run it closes those tasks and
+the alert. Several swarms can watch one repository, a watched swarm and its Doctor most often. Only one of them, the
+intake owner, files and closes promotion fixer tasks for that repository. A failed check of one run is filed once,
+in the owner's ledger.
+
+### Choosing the owner
+
+Each repository has one owner record in Redis, `agentihooks:swarm:promotion-owner:<identity>`. The identity is the
+SHA-256 of the repository's git common directory (`git rev-parse --path-format=absolute --git-common-dir`). The
+primary checkout and all of its worktrees share one identity, and separate clones get separate ones. When `git` is
+missing or the path is not a repository, the resolved checkout path is the identity. `AGENTIHOOKS_SWARM_KEY_PREFIX`
+replaces the leading `agentihooks`.
+
+Each pass works under the record's lock, `<record>:lock`, held for at most 300 seconds. A swarm that finds the lock
+taken skips the pass and tries again on its next tick. Under the lock the watch elects the owner:
+
+1. The candidates are every running swarm whose repository has the same identity. Proof swarms (`proof-…`) are
+   never candidates and never run the watch.
+2. While the recorded owner is still a candidate, it stays the owner, even when a swarm it would lose to starts
+   again.
+3. Otherwise the new owner is the first candidate by name that is not a Doctor of its linked swarm, so a watched
+   swarm wins over its Doctor even when the Doctor's name sorts first. When only Doctors run, the first Doctor by
+   name owns intake. When no swarm is running, the swarm running the pass takes it.
+4. A new election writes `owner`, the former owner as `previous` (empty on the first election), and a
+   `swarm:<owner>` field, which is never removed. The `swarm:` fields are the history of every swarm that has owned
+   intake for the repository.
+
+Every other swarm returns from the watch with no action. Its ledger gets no promotion task or alert.
+
+### Handover
+
+An owner that stops, pauses, drains or is removed stops being a candidate. The next pass by another running swarm on
+the repository elects a new owner with no command from anyone. The new owner continues from the old one's state:
+
+- **Handled runs.** The record's `seen` field holds the newest run the owners have handled. The new owner starts from
+  the higher of that value and its own, so it does not file a run the old owner already handled again.
+- **Active repairs.** Before it files, the owner collects the causes still held by open promotion tasks in its own
+  ledger and in the ledger of every swarm in the history. A cause already held by an open task in a former owner's
+  ledger is not filed again. That task, its claim, comments and proof stay where they are.
+- **Green runs.** A green run closes every open or blocked task whose id starts with `promo-`, and the live
+  promotion alerts, in the owner's ledger and in every former owner's ledger. It then releases every held cause that is not claimed or in
+  `pr`, so the next red run with the same cause files a fresh task.
+
+### Repeated observations and failed writes
+
+The watch reads GitHub at most once a minute per swarm and handles a run only once. A run already handled, a task id
+already in the ledger and a cause still held by an open task are all skipped, so every pass over the same red run
+files nothing new.
+
+The owner records a task's cause in its held causes before it writes the task to the ledger. When the ledger refuses
+the write, the tick logs `skipped scripts.swarm.promotion_watch.refresh: the ledger refused its write`. The run is not
+marked handled, and the held cause is dropped on the next pass because no live task carries it. The next pass by the
+owner, or by a new owner after a handover, files the same `promo-<run id>-<n>` task once.
+
+A run whose only failure is Sonar finding that `dev` moved past its commit is still reported as superseded and files
+nothing. Failed jobs that lost their runner still share one runner outage task.
+
+### Checking the owner
+
+Find the identity of a checkout and read its record:
+
+```bash
+REPO=~/dev/tcc-ecosystem/agentihooks
+ID=$(git -C "$REPO" rev-parse --path-format=absolute --git-common-dir | xargs realpath | tr -d '\n' | sha256sum | cut -d' ' -f1)
+redis-cli HGETALL "agentihooks:swarm:promotion-owner:$ID"
+redis-cli TTL "agentihooks:swarm:promotion-owner:$ID:lock"   # -2 when no pass holds the lock
+```
+
+The live record for this repository on 20 October 2026, with both swarms running:
+
+```text
+owner                          rig-grade-swarm-doctor
+previous                       rig-grade-swarm
+swarm:rig-grade-swarm          rig-grade-swarm
+swarm:rig-grade-swarm-doctor   rig-grade-swarm-doctor
+seen                           39434216882
+```
+
+The election picks a Doctor over its watched swarm only while the watched swarm is not running, so the Doctor took
+intake during such a gap and keeps it while it runs. Promotion fixer tasks for this repository are filed in the
+Doctor ledger until the Doctor stops running. Read the causes a swarm holds, keyed by task id, and the newest run it
+handled:
+
+```bash
+redis-cli HGETALL agentihooks:swarm:<id>:promotion:jobs
+redis-cli GET agentihooks:swarm:<id>:promotion:seen
+```
+
+To count fixer records for one run across linked ledgers, list the promotion tasks in each one:
+
+```bash
+RUN=<run id>
+for slug in rig-grade-swarm rig-grade-swarm-doctor; do
+  agentihooks ledger --slug "$slug" show | jq -r --arg run "promo-$RUN-" \
+    '.tasks[] | select(.id | startswith($run)) | [.id, .state, .title] | @tsv'
+done
+```
+
+A failed check of one run appears in one ledger only. A task with the same run in a second ledger was filed before
+intake ownership, or by a swarm on a different repository identity.
+
+| Symptom | Cause | Action |
+|---|---|---|
+| A running swarm never files promotion tasks | Another running swarm on the same repository owns intake | Read `owner` in the record. Promotion tasks and alerts for the repository live in that swarm's ledger |
+| A Doctor files promotion tasks | Its watched swarm was not running when an owner was last elected, and the Doctor keeps intake while it runs | Expected. The watched swarm takes intake back only after the Doctor stops running |
+| A new owner did not refile an open repair | The cause is held by an open task in a former owner's ledger | Expected. Work the task in that ledger; a green run closes it there |
+| Two swarms on one repository both file | Their checkouts resolve to different git common directories, for example two separate clones | Compare `git rev-parse --git-common-dir` for both `repo` settings; point both swarms at the same clone or its worktrees |
+| No promotion task for a red run | The lock was held, the run was superseded before Sonar, or its causes are held by open tasks | Check the lock `TTL`, the tick journal for `superseded before Sonar analysis`, and `promotion:jobs` for every swarm in the history |
+| The same task id appears after a ledger outage | The first write was refused and the pass was retried | Expected: the retry files the task once, and later passes skip the id because the ledger already holds it |
+
+Delivered in [pull request 3937](https://github.com/the-cloud-clockwork/agentihooks/pull/3937), with
+[issue 3917](https://github.com/the-cloud-clockwork/agentihooks/issues/3917) as the spec. Its CI runs prove the seams
+with two linked swarms on the real ledger operation schema: one watched and Doctor pair files one fixer, concurrent
+observers share one intake, independent repositories and worktree aliases, handover after failed persistence and on
+newer runs, and green reconciliation. The live before and after count of fixer records per failed check in an
+exposed equal window belongs to a separate Doctor measurement task and is not recorded here.
+
 ## Plan tracing for promotion fixer tasks
 
 Promotion failures create fixer tasks whose identifiers include the Actions run
