@@ -2209,6 +2209,106 @@ agentihooks swarm <id> pr <final-pull-request-url>
 
 The task keeps each declaration in `pull_scopes`, a map from the pull request URL to its kind, `stage` or `prerequisite`, and its nonempty scope. The intent check grades a declared pull request against its declared scope alone, without the whole task text or the task's plan lines, and the parent intent stamped on its body names that scope in place of the task text. A declaration needs a GitHub pull request URL. A changed declaration is judged again. A pull request recorded without `--stage` or `--prerequisite` is the task's final pull request and is graded against the whole task contract; recording a declared pull request again without either option drops its declaration. A blank scope is refused, and one pull request declares one kind.
 
+### Proof loop health findings
+
+A `proof loop` finding identifies a task with **more than two reruns** or
+**more than three review rounds**, using the default caps. The health pass
+counts started agent lives and recorded review counters; moves into pull
+request state alone do not count as review rounds.
+
+#### Which starts count
+
+Started lives are read in start order for each task. The first started life
+never counts as a rerun, even when it has an excluded restart cause. Each later
+started life counts unless its recorded `after` cause excludes it:
+
+| Recorded cause | Meaning | Counts as a rerun? |
+|---|---|---|
+| `watchdog` | The stall watchdog reopened the task | No |
+| `park` | A continuation after `swarm park` | No |
+| `master` | The last recorded task state writer was a master | No |
+| Empty or absent | An ordinary restart with no recorded exclusion | Yes, after the first started life |
+
+The controller records these causes at launch; operators do not need to edit
+launch history. A failed launch that never reached `started` does not count.
+Exclusions apply to the marked start, so a later ordinary restart still counts.
+The current health pass also excludes a later start when its recorded pull
+request head differs from the preceding start and both heads are known.
+
+With no review counter over its cap and no change of recorded head:
+
+| Started lives in order | Counted reruns | Default finding? |
+|---|---|---|
+| First life, then four parked continuations | 0 | No |
+| First life, watchdog continuation, master continuation | 0 | No |
+| First life, then two ordinary restarts | 2 | No |
+| First life, then three ordinary restarts | 3 | Yes |
+| First life marked `park`, then three ordinary restarts | 3 | Yes |
+
+Review rounds use the **largest individual review counter** for the task,
+not their sum. For example, three rounds before the pull request and one on
+its first pull request give a review count of three. Four in one counter
+exceed the default cap. See [review round counters](#review-round-counters)
+for how those counters are separated and for the review gate's own limits.
+
+#### Configure the caps
+
+| Environment variable | Default | Finding condition |
+|---|---|---|
+| `AGENTIHOOKS_HEALTH_RERUNS` | `2` | Counted reruns strictly greater than this value |
+| `AGENTIHOOKS_HEALTH_REVIEW_ROUNDS` | `3` | Largest review counter strictly greater than this value |
+
+Values must be positive integers; zero, negative and nonnumeric values retain
+the defaults. Set them in the environment of the process running the health
+pass. For a manual status read with caps of four reruns and five review rounds:
+
+```bash
+AGENTIHOOKS_HEALTH_RERUNS=4 \
+AGENTIHOOKS_HEALTH_REVIEW_ROUNDS=5 \
+  agentihooks swarm <slug> status --json
+```
+
+Five counted reruns or six rounds in one counter would exceed these caps.
+This command configures only that invocation; configure the controller's
+launch environment for scheduled health passes. These health settings do not
+raise the review gate's three round limit or the separate claim cap. A start
+after a watchdog reopen still spends a claim even though it is excluded from
+the proof loop rerun count.
+
+#### Inspect and judge a finding
+
+```bash
+agentihooks swarm <slug> status --json
+```
+
+Read the finding's task, total starts, counted reruns and review rounds.
+Total starts can be high while counted reruns remain zero. Compare launch
+causes and head changes with the task's history before calling it a proof loop;
+a master hold or repeated parks alone are not evidence of repeated proof work.
+The master or operator records a verdict using the finding ID returned by status:
+
+```bash
+agentihooks swarm <slug> verdict 'proof loop/<task>' false-positive \
+  --note 'The retained launch history shows only parked continuations'
+```
+
+Use that verdict only when the retained evidence supports it. A verdict hides
+the finding under the existing cooldown rules; it does not rewrite launch
+history or change either cap. If an excluded restart is still counted, check
+whether its started row retained the cause. Historical rows without a cause
+are treated as ordinary starts. The delivered change has a known gap if Redis
+fails between consuming a restart mark and recording the started row: the
+cause can be lost. Redis outage holds prevent spawning during an outage, but
+do not reconstruct a missing cause.
+
+[Pull request #3583](https://github.com/the-cloud-clockwork/agentihooks/pull/3583)
+records the restart exclusion change and its regression proofs, including a
+chain consisting only of parks. Its
+[green Tests run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38937553476)
+validates the implementation; it does not establish a live reduction in false
+findings. Comparing before and after rates requires equal windows after the
+running controller has loaded the correction.
+
 ### Stalled activity findings
 
 A `stalled` health finding means a pane reports `working` while its recorded
