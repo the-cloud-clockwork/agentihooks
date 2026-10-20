@@ -1,7 +1,7 @@
 ---
 title: Profile launch home
 parent: Reference
-nav_order: 17
+nav_order: 18
 ---
 
 # Profile launch home
@@ -31,9 +31,9 @@ a different home, so the binding canary validates the home the launch recorded.
    opens:
 
    ```bash
-   agentihooks select-profile NAME --home=<recorded home> \
+   agentihooks select-profile NAME \
      [--overlay=<overlay> ...] [--bundle-revision=<commit>] \
-     --agent claude|codex -- <harness arguments>
+     --home=<recorded home> --agent claude|codex -- <harness arguments>
    ```
 
    Fresh launches, `--resume` and `--handoff` all take this command.
