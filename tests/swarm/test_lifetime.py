@@ -44,6 +44,13 @@ def test_old_idle_master_retires_once_with_recap_and_closed_pane(store, state):
     agent, rt = idle_master(store, state)
     ledger = FakeLedger([])
     actions = tick("sw", store, ledger, rt, 6 * HOUR + 2)
+    if state == "stopped":
+        assert actions == tick("sw", store, ledger, rt, 7 * HOUR) == []
+        assert store.agents("sw") == [agent]
+        assert rt.killed == rt.closed == []
+        assert store.memory.recaps(agent.seat) == []
+        assert store.seats.exit_of(agent.name) is None
+        return
     assert store.agents("sw") == []
     assert rt.killed == [agent.name] and rt.closed == [agent.pane_id]
     assert len(store.memory.recaps(agent.seat)) == 1
