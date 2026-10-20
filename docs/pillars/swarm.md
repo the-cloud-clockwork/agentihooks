@@ -2018,15 +2018,14 @@ lane, profile, overlays, model, transport, task and state each take a set
 percentage, and age, plus execution and terminal on remote swarms, share the
 rest. Dragging a header edge, or focusing its grip and pressing the arrow keys,
 saves column widths that fix the layout at any page width; Reset layout clears
-them. Below 1024 pixels with no saved widths, columns size to their content and
-the panel scrolls sideways; only an agent name longer than 24 characters ends in
-an ellipsis.
+them. Below 1024 pixels with no saved widths, columns size to their content,
+nothing clips, and the panel scrolls sideways.
 
 - **Ellipsis.** A cell's text stays on one line. Transport and promoted state
   labels run inline, so they end in the cell's ellipsis. A detail line under a
   label, such as a Remote Control detail or an execution's location, sits on
-  its own line and ends in its own ellipsis. An agent name ellipsizes past 24
-  characters, or sooner inside a narrowed agent column.
+  its own line and ends in its own ellipsis. An agent name ellipsizes inside a
+  narrowed agent column.
 - **Hover text.** One hover text covers the whole cell, wherever the pointer
   lands: everything the cell shows, joined by spaces, with transport and
   promoted state given as their summaries.
