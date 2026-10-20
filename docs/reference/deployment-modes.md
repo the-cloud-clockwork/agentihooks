@@ -93,7 +93,8 @@ LEDGER_HOST=127.0.0.1
 LEDGER_PORT=8765
 ```
 
-A workstation that reaches the hosted ledger for its own swarm only. `SWARM_URL` wins even under explicit local mode:
+A workstation that reaches the hosted ledger for its own swarm only.
+`SWARM_URL` wins even under explicit local mode:
 
 ```bash
 AGENTIHOOKS_DEPLOYMENT=local
