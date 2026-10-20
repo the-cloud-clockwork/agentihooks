@@ -1220,6 +1220,7 @@ jobs:
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -1366,6 +1367,7 @@ jobs:
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
+        shell: bash
         run: |
           touch flakes.jsonl
           echo "Tests retried in place: $(wc -l < flakes.jsonl)" | tee -a "$GITHUB_STEP_SUMMARY"
@@ -2351,6 +2353,7 @@ jobs:
 
       - name: Summarize this run's tests
         if: ${{ always() }}
+        shell: bash
         run: python3 "$GITHUB_WORKSPACE/scripts/ci_gate_summary.py" test-reports | tee -a "$GITHUB_STEP_SUMMARY"
 
   refresh-durations:
