@@ -229,19 +229,26 @@ def _publish_tick_status(store, slug, doc):
             raise
 
 
-def _inactive_tick(store, slug, ledger, runtime):
+def _bin_stop(store, slug, ledger, runtime):
+    store.redis.set(store.key(slug, "ledger-binned"), 1)
+    _, left = stop_now(store, slug, runtime, ledger)
+    return [
+        f"the ledger is in the bin, still retiring {', '.join(left)}" if left else "the ledger is in the bin, stopped"
+    ]
+
+
+def _stopped_tick(store, slug, ledger, runtime, held):
+    from scripts.swarm import command_runner, controller
+
+    ledger = controller.FencedLedger(store, slug, held, ledger)
+    runtime = controller.FencedRuntime(
+        store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
+    )
+    controls = timing.call(command_runner.consume, store, slug)
     if timing.call(ledger.binned, slug):
-        store.redis.set(store.key(slug, "ledger-binned"), 1)
-        _, left = stop_now(store, slug, runtime, ledger)
-        return [
-            f"the ledger is in the bin, still retiring {', '.join(left)}"
-            if left
-            else "the ledger is in the bin, stopped"
-        ], {}
-    if store.config(slug).state == "stopped":
-        doc = timing.call(ledger.state, slug)
-        return timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
-    return None, {}
+        return controls + _bin_stop(store, slug, ledger, runtime), {}
+    doc = timing.call(ledger.state, slug)
+    return controls + timing.call(tick, slug, store, ledger, runtime, now_ms()), doc
 
 
 @timing.instrument_tick
@@ -255,7 +262,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         return [CONTROLLER_TICKS]
     tick_stop.check()
     ledger = ledger or LedgerClient()
-    health_ledger = ledger
     outbox.flush(InboxStore(store.redis))
     runtime = runtime or routed(herdr=HerdrRuntime())
     held = lease.acquire(store, slug, commands.hive_id())
@@ -274,21 +280,24 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
     doc = {}
     try:
         timing.keep()
-        ledger = controller.FencedLedger(store, slug, held, ledger)
-        runtime = controller.FencedRuntime(
-            store, slug, held, runtime, controller.deployment_for(store.config(slug), os.environ)
-        )
-        controls = timing.call(command_runner.consume, store, slug)
-        inactive, doc = _inactive_tick(store, slug, ledger, runtime)
-        if inactive is not None:
-            return controls + inactive
+        if store.config(slug).state == "stopped":
+            actions, doc = _stopped_tick(store, slug, ledger, runtime, held)
+            return actions
         timing.call(relay.relay, store.redis)
         timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
         outage.providers(store, slug, runtime, now_ms())
-        if isinstance(health_ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-            slug, now_ms(), lambda: isinstance(health_ledger.metadata(slug), dict)
+        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
+            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
         ):
             return ["Ledger health probe failed"]
+        ledger = controller.FencedLedger(store, slug, held, ledger)
+        runtime = controller.FencedRuntime(
+            store,
+            slug,
+            held,
+            runtime or routed(herdr=HerdrRuntime()),
+            controller.deployment_for(store.config(slug), os.environ),
+        )
         from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
 
         pressured = skip_refused(incidents.host_pressure, store, slug)
@@ -296,6 +305,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         probed = restarted + timing.call(ledger_probe.observe, store, slug, ledger, runtime, now_ms())
         timing.call(prompt_backlog.observe, store, slug, now_ms() // 1000)
         with spawn_stall.watch(store, slug, ledger, now_ms, runtime):
+            controls = timing.call(command_runner.consume, store, slug)
+            if timing.call(ledger.binned, slug):
+                return _bin_stop(store, slug, ledger, runtime)
             inbox = InboxStore(store.redis)
             try:
                 doc = timing.call(ledger.state, slug)
