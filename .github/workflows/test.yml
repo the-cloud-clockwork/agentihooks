@@ -1500,16 +1500,8 @@ jobs:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
         run: |
-          ran=$(jq -s '[.[] | keys[] | sub("@[^\\[\\]]*$"; "")] | unique | length' shard-durations/*/durations.json)
-          flaky=$(cat shard-flakes/*/flakes.jsonl 2> /dev/null | jq -s '[.[] | select(.outcome == "flaky")] | length')
-          reused=0
-          source="no plan"
-          if [[ -f "$PLAN" ]]; then
-            reused=$(jq -n --slurpfile plan "$PLAN" --slurpfile collected collected-data/collected.json \
-              '($collected[0] | map({(.): true}) | add // {}) as $set | [$plan[0].tests[] | select($set[.])] | length')
-            source="dev run $(jq -r .run "$PLAN")"
-          fi
-          echo "Python $PYTHON_VERSION: ran $ran, reused $reused from $source, flaky $flaky" | tee -a "$GITHUB_STEP_SUMMARY"
+          python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
+            --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check release shards with legacy collection
         if: github.event.pull_request.base.ref == 'main'

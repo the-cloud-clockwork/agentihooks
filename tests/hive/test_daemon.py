@@ -804,3 +804,19 @@ def test_repositories_follow_a_worktree_link_to_its_common_config(monkeypatch, t
     checkout.mkdir(parents=True)
     (checkout / ".git").write_text(f"gitdir: {common / 'worktrees' / 'wt'}\n")
     assert daemon.repositories() == sorted(["github.com/org/name", str(checkout)])
+
+
+def test_checkout_maps_an_identity_to_the_first_local_checkout_with_that_origin(monkeypatch, tmp_path):
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    origins = [
+        ("b-copy", "git@github.com:Org/Name.git"),
+        ("a-main", "https://github.com/org/name"),
+        ("c", "git@github.com:org/other.git"),
+    ]
+    for name, url in origins:
+        (tmp_path / name / ".git").mkdir(parents=True)
+        (tmp_path / name / ".git" / "config").write_text(f'[remote "origin"]\n\turl = {url}\n')
+    assert daemon.local_checkout("github.com/org/name") == str(tmp_path / "a-main")
+    assert daemon.local_checkout("github.com/org/other") == str(tmp_path / "c")
+    assert daemon.local_checkout("github.com/org/missing") == "github.com/org/missing"
+    assert daemon.local_checkout(str(tmp_path / "b-copy")) == str(tmp_path / "b-copy")
