@@ -52,6 +52,7 @@ class Candidate:
     observed_at: float
     cap: int | None = None
     reserved: bool = False
+    login: bool = False
 
     def full(self) -> bool:
         return self.cap is not None and self.sessions >= self.cap
@@ -271,9 +272,17 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=reserved(subscriptions, held) + _api_accounts(sessions),
+        others=master_targets(reserved(subscriptions, held) + _api_accounts(sessions), os.environ),
         push=push_active(session_id),
     )
+
+
+def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
+    from scripts.routing import reservation
+
+    if not str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME):
+        return candidates
+    return [c for c in candidates if c.login]
 
 
 def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Decision | None:

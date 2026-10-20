@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
+from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
@@ -276,7 +277,7 @@ def run_once(store: RedisStore, ledger=None, runtime=None, messenger=None, runti
     runtimes = runtimes or {}
     return {
         slug: run_tick(store, slug, ledger, runtimes.get(slug, runtime), messenger, scheduled=True)
-        for slug in store.slugs()
+        for slug in ticked(store.slugs(), os.environ.get(HOST_SWARMS_ENV, ""))
     }
 
 

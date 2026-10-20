@@ -784,6 +784,67 @@ def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
 
 
+def _master_at(monkeypatch, week_used, five_used=10.0, logins=()):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+    from scripts.swarm_v2 import quota
+
+    for name in ("AH_ROUTE_API", "AGENTIHOOKS_TARGET"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@1")
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setattr(qp, "_session_windows", lambda session_id: (five_used, week_used, None, None))
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "main")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
+    monkeypatch.setattr(quota, "fleet_observations", lambda environ: {})
+    others = [
+        qp.Candidate("main", five_used, week_used, 1, 0.0, 6, login=True),
+        qp.Candidate("token", 10.0, 5.0, 0, 0.0, 6),
+        *(qp.Candidate(name, 10.0, week, 0, 0.0, 6, login=True) for name, week in logins),
+    ]
+    monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: others)
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [qp.Candidate("api", None, None, 0, 0.0, 4)])
+    monkeypatch.setattr(qp, "push_active", lambda session_id: False)
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: MASTER_HELD)
+    return qp.evaluate("s")
+
+
+def test_a_master_hands_off_at_98_percent_of_the_week_to_the_claude_ai_login_with_the_most_room(monkeypatch):
+    assert qp.QUOTA_HANDOFF_WEEK_PCT == 98
+    decision = _master_at(monkeypatch, 98.0, logins=[("second", 60.0), ("third", 20.0)])
+    assert (decision.action, decision.trigger, decision.account, decision.target.account) == (
+        "handoff",
+        "week",
+        "main",
+        "third",
+    )
+    assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
+    assert _master_at(monkeypatch, 97.9, logins=[("third", 20.0)]) is None
+
+
+def test_a_master_is_never_handed_to_a_token_or_the_api(monkeypatch):
+    decision = _master_at(monkeypatch, 98.0)
+    assert (decision.action, decision.target) == ("stop", None)
+    assert [c.account for c in decision.others] == ["main"]
+
+
+def test_a_master_hands_off_at_99_percent_of_the_five_hour_window_while_another_login_is_free(monkeypatch):
+    assert qp.QUOTA_HANDOFF_5H_PCT == 99
+    decision = _master_at(monkeypatch, 40.0, 99.0, logins=[("second", 20.0)])
+    assert (decision.action, decision.trigger, decision.target.account) == ("handoff", "five_hour", "second")
+    assert _master_at(monkeypatch, 40.0, 99.0).target is None
+    assert _master_at(monkeypatch, 40.0, 98.9, logins=[("second", 20.0)]) is None
+
+
+def test_only_masters_are_limited_to_claude_ai_logins():
+    token, login = qp.Candidate("token", 10.0, 5.0, 0, 0.0, 6), qp.Candidate("second", 10.0, 5.0, 0, 0.0, 6, login=True)
+    assert qp.master_targets([token, login], {"AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001"}) == [login]
+    assert qp.master_targets([token, login], {"AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"}) == [token, login]
+    assert qp.master_targets([token, login], {}) == [token, login]
+
+
 @pytest.mark.parametrize("five_used", [None, 100.0])
 @pytest.mark.parametrize("week_used", [10.0, 98.0])
 def test_codex_handoff_policy_uses_only_current_and_target_weeks(monkeypatch, five_used, week_used):
