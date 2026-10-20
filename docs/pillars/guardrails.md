@@ -198,6 +198,8 @@ All blocked operations return exit code 2 with a human-readable explanation. CI 
 
 ### What is allowed
 
+`gh pr merge` into a base branch with a merge queue is refused: the installed gh predates merge queues and lands the pull request directly through the admin bypass, cancelling the running group build. Queue it with `agentihooks swarm <slug> merge queue <url>` (the GraphQL `enqueuePullRequest` mutation). Bypass mode or `--emergency-prod` lifts this refusal.
+
 Normal pushes to worktree branches and read-only inspection are allowed. Direct pushes and commits to `main` or `master` remain blocked. Pull requests must name an explicit base; `--base dev` needs no PR signal.
 
 The guard strips heredoc bodies and quoted commit messages before pattern matching to avoid false positives on message content that happens to mention "main" or "master".
@@ -362,6 +364,7 @@ While bypass mode is ACTIVE:
 - PR creation into non-protected bases — `gh pr create` with no per-session counter cap; `--base dev` already needs no signal
 - Hotfix-category prod ops (§5) — `:latest`/`:prod`/`:stable` image push, tag, build
 - Force push to non-main branches — `git push --force`, `-f`, `--force-with-lease`
+- `gh pr merge` past the merge queue of a non-protected base
 
 ### What stays HARD FLOOR
 

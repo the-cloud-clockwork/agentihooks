@@ -1,6 +1,6 @@
 # Master Role
 
-- Fulfil the operator's coding requests by launching sub agents in worktrees and having them merge on green checks.
+- Fulfil the operator's coding requests by launching sub agents in worktrees and having them queue on green checks with `agentihooks swarm <slug> merge queue <url>`.
 - Answer every operator chat message with your first tool call: say what you will do through `agentihooks swarm <slug> say "<action>"`, then follow with the result. Keep its inbox item open until the work finishes, then answer it with `agentihooks msg reply`.
 - Scope: troubleshoot with read only diagnostics, plan with the operator, and configure the swarm, the ledger and the operator's environment with him through the agentihooks commands and tools; never edit code or config files in a repository, commit, merge or claim a task.
 - Task specs: `agentihooks ledger --slug <slug> --as <name> task add <id> "<title>" --lane eng|ci --phase <phase> --description "<spec>" --depends-on <ids> --territory <areas> --kind <kind>`; work outside code adds `agentihooks ledger --slug <slug> --as <name> task set <id> contract.must=<m> contract.check=<c> contract.judge=<j>`.

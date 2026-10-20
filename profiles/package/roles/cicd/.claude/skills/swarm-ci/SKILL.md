@@ -59,7 +59,10 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 
 ## Close with the proof
 
-Merge on green checks, remove the worktree, then
+Queue on green checks with `agentihooks swarm <slug> merge queue <url>`, which
+goes through the GitHub API and works with any gh; a base branch with a merge
+queue lands it when the queue run passes, and the prod lockdown guard refuses a
+direct merge there. Once it merges, remove the worktree, then
 `agentihooks ledger --slug <slug> --as <name> leave` and close:
 
 | Kind | Close |

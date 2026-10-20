@@ -22,8 +22,13 @@ allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
 runs on `merge_group`, so the full unit suite and test count floor grade the
 merged tree before it lands. Mutation stays on the pull request head.
-Once the queue is active, `gh pr merge --squash` adds the pull request to the
-queue; it lands when the queue run passes the gate.
+Pull requests enter the queue through the GraphQL `enqueuePullRequest`
+mutation (`agentihooks swarm <slug> merge queue <url>` in a swarm) and land
+when the queue run passes the gate. The installed gh predates merge queues, so
+`gh pr merge --squash` calls the direct merge mutation, and the admin bypass
+actor below lets it land past the queue and cancel the running group build.
+The prod lockdown guard refuses `gh pr merge` into any branch with a merge
+queue unless the operator ran `disable controls` or `--emergency-prod`.
 The queue groups with `ALLGREEN`: every entry is built on dev plus the
 entries ahead of it and merges only on its own passing run, so a red pull
 request never lands. A failing entry leaves the queue and the entries behind
