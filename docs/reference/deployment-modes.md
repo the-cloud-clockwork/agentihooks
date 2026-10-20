@@ -48,8 +48,8 @@ ANTHROPIC_AUTH_TOKEN=<delivered by your secret store, never committed>
 
 A base URL on a host other than `api.anthropic.com` with a token makes the slot a `gateway` api slot. With no
 `AH_CC_TOKEN_<slug>` subscription on the hive, the api slot is the only route placement can pick. Cap it with
-`agentihooks balance set claude-api-max-sessions=N`. A master on such a hive runs through tier two or three of
-[master placement](../pillars/hives.md#master-placement).
+`agentihooks balance set claude-api-max-sessions=N`. A master on such a hive needs `ui=yes` and runs through tier two
+of [master placement](../pillars/hives.md#master-placement).
 
 ### Compose on a private network
 

@@ -196,6 +196,15 @@ def test_an_untyped_prompt_closes_it():
     assert not pane_guard.has_pane_signal("s1")
 
 
+def test_a_swarm_session_never_opens_a_quota_handoff_terminal(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    monkeypatch.setattr(quota_policy, "evaluate", lambda session: SimpleNamespace(action="handoff"))
+    with pytest.raises(BlockAction):
+        check("agentihooks init-agent --handoff --prompt-file /s/repo/handoff/s1.md")
+
+
 @pytest.mark.parametrize(
     ("command", "action", "allowed"),
     [
