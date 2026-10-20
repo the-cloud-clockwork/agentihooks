@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import os
 import shutil
+import signal
 import subprocess
 import time
 from collections.abc import Mapping
@@ -51,10 +53,15 @@ def _start(home: Path, environ: Mapping[str, str]) -> bool:
     home.mkdir(parents=True, exist_ok=True)
     stamp.touch()
     try:
-        subprocess.Popen([exe, "codex", "refresh"], **DETACHED)
+        process = subprocess.Popen([exe, "codex", "refresh"], **DETACHED)
     except OSError:
         stamp.unlink()
         raise
+    with contextlib.suppress(subprocess.TimeoutExpired):
+        process.wait(timeout=1.0)
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(process.pid, signal.SIGKILL)
+    process.wait()
     return True
 
 
