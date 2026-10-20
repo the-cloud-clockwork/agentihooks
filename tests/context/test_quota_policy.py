@@ -784,7 +784,7 @@ def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
 
 
-def _master_at(monkeypatch, week_used):
+def _master_at(monkeypatch, week_used, five_used=10.0):
     from hooks.context import account_sessions
     from scripts.routing import reservation
     from scripts.swarm_v2 import quota
@@ -794,13 +794,13 @@ def _master_at(monkeypatch, week_used):
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@1")
     monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
-    monkeypatch.setattr(qp, "_session_windows", lambda session_id: (10.0, week_used, None, None))
+    monkeypatch.setattr(qp, "_session_windows", lambda session_id: (five_used, week_used, None, None))
     monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
     monkeypatch.setattr(account_sessions, "session_account", lambda pid: "main")
     monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(quota, "fleet_observations", lambda environ: {})
     others = [
-        qp.Candidate("main", 10.0, week_used, 1, 0.0, 6),
+        qp.Candidate("main", five_used, week_used, 1, 0.0, 6),
         qp.Candidate("small", 10.0, 60.0, 0, 0.0, 6),
         qp.Candidate("spare", 10.0, 20.0, 0, 0.0, 6),
     ]
@@ -822,6 +822,13 @@ def test_a_master_hands_off_at_98_percent_of_the_week_to_the_account_with_the_mo
     )
     assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
     assert _master_at(monkeypatch, 97.9) is None
+
+
+def test_a_master_hands_off_at_99_percent_of_the_five_hour_window_while_another_account_is_free(monkeypatch):
+    assert qp.QUOTA_HANDOFF_5H_PCT == 99
+    decision = _master_at(monkeypatch, 40.0, 99.0)
+    assert (decision.action, decision.trigger, decision.target.account) == ("handoff", "five_hour", "spare")
+    assert _master_at(monkeypatch, 40.0, 98.9) is None
 
 
 @pytest.mark.parametrize("five_used", [None, 100.0])
