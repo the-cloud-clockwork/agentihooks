@@ -70,6 +70,9 @@ def test_the_workflow_runs_an_even_number_of_hierarchy_pairs_against_the_merge_b
     script = "\n".join(step.get("run", "") for step in job["steps"])
     assert 'order=(base head)\n[[ "$PAIR" == [13] ]] || order=(head base)' in script
     assert "merge_base_commit" in script
+    assert '[[ -n "$BASE" ]] || BASE="$BEFORE"' in script
+    assert job["steps"][0]["env"]["BEFORE"] == "${{ github.event_name == 'push' && github.event.before || '' }}"
+    assert workflow()[True]["workflow_call"]["inputs"]["base"]["default"] == ""
     assert "did not halve" not in script
 
 
