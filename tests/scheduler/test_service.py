@@ -97,7 +97,7 @@ def test_supervisor_terminates_its_active_child_on_shutdown(monkeypatch, tmp_pat
     monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     monkeypatch.setattr(service, "revision", lambda root: "loaded")
     child = Mock()
-    child.poll.return_value = None
+    child.poll.side_effect = [None]
     monkeypatch.setattr(service, "subprocess", SimpleNamespace(Popen=Mock(return_value=child)))
     stop = Mock(spec=Event)
     stop.is_set.return_value = False
@@ -299,7 +299,7 @@ def test_a_supervisor_records_the_root_and_revision_it_loaded_before_its_runner(
     monkeypatch.setattr(service.time, "time", lambda: 1_000.0)
     seen = []
     child = Mock()
-    child.poll.return_value = None
+    child.poll.side_effect = [None]
 
     def spawn(argv, **kwargs):
         seen.append(json.loads((tmp_path / "supervisor.json").read_text()))
