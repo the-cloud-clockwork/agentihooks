@@ -1,4 +1,4 @@
-"""Grade head hierarchy CPU per read against base runs paired on one runner, by the geometric mean head over base ratio."""
+"""Grade head hierarchy CPU per read against base runs paired on one runner by the geometric mean pair ratio."""
 
 import argparse
 import json
