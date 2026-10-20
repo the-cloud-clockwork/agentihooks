@@ -232,6 +232,89 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   by item id. A match sends the item to that master, so related items reach the same master together. Any
   classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
   round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
+  [Intent grouping](#intent-grouping) gives every rule.
+
+#### Sizing settings
+
+`master-per`, `masters-step` and the manual `masters=N` count decide the master count. The tick reads them in this
+order:
+
+| Setting | Effect |
+|---|---|
+| `master-per=N\|hive` | Overrides the step: one seat per N working agents rounded up, or one per hive. |
+| `masters-step=N` (N of 1 or more) | One master plus the working agents divided by N, rounded down. |
+| `masters-step=0` | With `master-per=off`, no scaling: the count stays the manual `masters=N` and the tick only fills empty seats. |
+| `master-per=off` | The default. Hands sizing back to `masters-step`. |
+
+`swarm create` stores `masters-step=12`. A swarm created before the setting existed loads `0`, so it keeps its manual
+count until the step is set. A stopping or stopped swarm never scales; the tick only fills its seats.
+
+```bash
+# Read the step; the first status line includes "masters step 12"
+agentihooks swarm my-swarm status
+
+# One extra master per 8 working agents instead of per 12
+agentihooks swarm my-swarm set masters-step=8
+
+# Pin three masters; this also sets the step to 0
+agentihooks swarm my-swarm set masters=3
+
+# Turn scaling back on, after a pinned count or for a swarm created before the setting
+agentihooks swarm my-swarm set masters-step=12
+```
+
+A `masters=N` and a `masters-step=N` in the same command keep the step given, and the step then sizes the count.
+
+`set` prints the stored settings as JSON, `masters_step` among them, and runs one tick at once on a running swarm,
+so a rise launches its seat in the same command. On the ledger page the Capacity row shows **masters step** after
+the engineer, CI and planner caps, with `−` and `+` buttons and a number field. Apply writes it through the same
+setting and accepts 0 to 50.
+
+Working agents are the swarm's agents outside the master lane that have not finished: engineer, CI and planner
+agents, and any other lane a template adds. With the default step:
+
+| Working agents | Wanted masters | Seats |
+|---|---|---|
+| 0 to 11 | 1 | `master@<id>` |
+| 12 to 23 | 2 | adds `master-2@<id>` |
+| 24 to 35 | 3 | adds `master-3@<id>` |
+
+#### Scaling over time
+
+With the default step, a swarm grows from 11 to 12 working agents. The next tick sets the seat count to two,
+launches `master-2@<id>` and prints `master seats 1 to 2 for 12 working agents`. On the masters channel, every master
+reads `Master seats are now 2 for 12 working agents. Phase owners: ...`, naming the phases each seat owns.
+
+The swarm then falls back to 11 agents. The count stays at two while the cool off runs, and a return to 12 agents
+ends the cool off with no change. A rise that stays below the seat count restarts it instead: a swarm holding three
+seats that falls to 11 agents (wanted one) and climbs back to 12 (wanted two) starts its ten minutes again. After ten
+minutes at a lower wanted count:
+
+1. The tick sends each extra backend master an inbox item from `swarm`: write a Handoff v2 for the lead master, run
+   `agentihooks swarm <id> handoff <doc>` and stop. The tick prints
+   `asked <agent> to hand off retiring seat master-2@<id>`.
+2. When that master has left its seat, the tick retires the seat. Its handoff document reaches `master@<id>` as an
+   inbox item. Every open item still at the seat is redirected to `master@<id>`, except the retire request, which
+   is withdrawn. The tick prints `retired master seat master-2@<id> after <seconds> seconds`.
+3. The seat count falls, phase owners rebalance and the masters channel announces the new owners.
+
+An extra backend seat that is empty and has no live seat above it retires at once when the cool off ends, and the
+tick prints
+`closed empty master seat <seat>`. If the swarm grows again before a retiring master leaves, its retire request is
+withdrawn with the note `the swarm grew again, so seat <seat> stays`.
+
+The swarm's master seat record keeps the seat count, and a `retire-seconds` list beside it keeps each retirement
+time, in seconds from the retire request to the retirement. Both are written to the `master_scaling` metrics table as
+`master_seat_count` and `master_retire_seconds`.
+
+#### Master scaling troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| A swarm with 30 agents keeps one master. | Its step is `0`: it was created before the setting, or a later `set masters=N` reset it. Run `set masters-step=12`. |
+| The count did not fall when agents finished. | The cool off has not run ten minutes at the lower count, or a rise restarted it. A count falls only past seats whose master has left; a master asked to hand off keeps its seat until it runs `swarm <id> handoff`. |
+| `master-2@<id>` still answers after the step changed. | The cool off has not run ten minutes, the asked master has not handed off yet, the swarm is stopping or stopped and so never shrinks, or a `master-per` rule overrides the step (run `set master-per=off`). |
+| The front door seat never retires. | That is by design: scaling only retires backend seats, highest number first. |
 
 ### Master inbox pool
 
@@ -293,6 +376,87 @@ return. An item that stays in the pool while masters are live, or a master that 
 pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters, and the item's
 history, which `msg read <id>` prints for the master that claimed it, for the `claimed from the master pool by <seat>`
 line naming that seat. `msg read` also marks the item read, so run it only as the master taking up the item.
+
+#### Intent grouping
+
+Intent grouping sends a pooled item to the master that recently handled related work, so a run of items about one
+task, pull request or question reaches one master instead of being dealt across all of them. Round robin stays the
+rule for every item the classifier cannot place.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | on (unset) | `1`, `true`, `yes` or `on`, in any case and with surrounding spaces, keeps grouping on; any other value, such as `false`, `0` or an empty string, turns it off |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for all of its verdicts. An unreadable value keeps 3 |
+
+Both are read from the environment of the process that hands out the pool: the sender of an item to `master@<id>`
+(an agent's `msg send`, a question or follow up, a tick item) and the inbox redelivery pass. Set them where those
+processes get their environment, such as the profile `env` block or an `.env` file under the AgentiHooks home, so
+every sender agrees. The verdicts come from the [decision classifier](../reference/classifier.md), which needs
+`AGENTIHOOKS_CLASSIFIER_URL` and `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY`.
+
+```bash
+# turn grouping off for this shell and everything it starts
+export MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS=false
+# give the classifier five seconds per pool pass
+export MASTER_INBOX_CLASSIFIER_TIMEOUT_S=5
+```
+
+How an item is placed, on every pool pass (each send into the pool and each redelivery pass):
+
+1. **Recent items.** Each live master keeps the first lines of the last 15 items the pool handed to it, newest first.
+   Every claim adds one, whether intent or round robin chose the master. The list expires 24 hours after its last
+   addition. A master with no recent items is not asked about, so the first items of a new swarm go round robin.
+2. **Every waiting item is compared.** The pass takes every item still waiting in the pool, the new one and older
+   ones alike, and asks one yes or no question per item and master: does the new item continue the same work, task
+   or question as one of that master's recent items. All questions of one pass run in parallel, at most 16 at a time,
+   under one deadline of `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`.
+3. **Match.** A verdict of 0.7 or more is a match. The item goes to the matching master with the highest verdict;
+   equal verdicts go to the seat whose name sorts last. Without a match the item takes its round robin turn.
+4. **Live seats only.** A matched master that is no longer live, or the master that just let the item lapse on
+   redelivery, is passed over and the item takes its round robin turn. Operator items never enter the pool and are
+   never classified.
+
+What one item costs:
+
+| Saving | How |
+|---|---|
+| First lines only | The question carries the item's first line, cut to 120 characters, and the master's recent first lines. The rest of the item never leaves the inbox. |
+| One verdict per master | Each question asks for one probability, never a choice list or a score. |
+| API models only | The question goes to the classifier API models in `AGENTIHOOKS_CLASSIFIER_MODELS` order. A failed model passes the question to the next one, except a 400 that does not name context or tokens, which ends that question with a request error. When every model fails or the key is refused, the API is marked down for `AGENTIHOOKS_CLASSIFIER_DOWN_TTL_S` (default 120 seconds) and every verdict goes round robin until it clears. The [classifier failover table](../reference/classifier.md#failover) has every case. The Haiku and Luna command line fallbacks are not used, so no agent session is started for a verdict. |
+| Cache by item | Verdicts are stored in one hash per item, one field per master and exact recent list. A later pass asks again only when that master's recent items changed. The hash expires one hour after the last pass that asked a question for the item. A verdict that lands after the deadline is still stored for the next pass. |
+
+The token estimate is the JSON request length divided by four. With 15 recent lines of 120 plain ASCII characters,
+one question is estimated at no more than 700 tokens, so such an item costs about 700 tokens per live master that has
+recent items, once per change of that master's recent list. Quotes and non-ASCII characters are escaped in JSON and
+raise the estimate, up to several times for text that is mostly non-ASCII.
+
+Any classifier error, any question unanswered at the deadline, and any verdict under 0.7 leaves the item to round
+robin in the same pass. A slow classifier delays the pass by at most the timeout and never keeps an item in the pool.
+With the flag off no question is asked and no recent items are recorded; delivery is plain round robin.
+
+A new item enters the pool only while two or more masters are live, but a redelivery pass classifies the items
+already waiting there whatever the live count, provided a live master has recent items. With one live master those
+questions change nothing, since that master takes every item, yet they still appear in the decision log and the
+`tokens` counters.
+
+Inspect grouping in Redis (prefix `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`) and in the classifier decision
+log, where every question is recorded under purpose `master-inbox-intent`:
+
+```bash
+redis-cli LRANGE agentihooks:inbox:pool:<id>:recent:master-2@<id> 0 -1
+redis-cli HGETALL agentihooks:inbox:pool:<id>:intent:<item id>
+agentihooks classifier stats --purpose master-inbox-intent
+```
+
+The `recent` list holds the first lines a master was handed. The `intent` hash holds one field per master and recent
+list, `<seat>|<hash of the recent list>`, whose value is that verdict, and a `tokens` field counting the estimated
+tokens sent for the item over every pass.
+
+| Symptom | Check |
+|---|---|
+| Related items still spread across masters | `classifier stats` shows calls and their sources. Calls with no source mean no model answered: check `AGENTIHOOKS_CLASSIFIER_URL`, the key and the down marker described in the classifier reference. No calls at all means grouping is off in the sending process, the pool is empty, no live master has recent items yet, or every verdict was already cached. |
+| Items placed correctly but slowly | Every send into the pool waits up to `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`. Lower it; late verdicts still fill the cache for the next pass. |
+| A master receives unrelated items | Verdicts below 0.7 cannot route; read the item's `intent` hash for the verdicts each master got. A matched master never takes an item it just let lapse. |
 
 ## Commands
 
