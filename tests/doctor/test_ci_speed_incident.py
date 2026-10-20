@@ -187,9 +187,9 @@ def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):
     "change,expected",
     [
         ({}, False),
-        ({"evidence_identity": ("1",), "measure": 899}, False),
-        ({"evidence_identity": ("1", "2", "3")}, True),
-        ({"evidence_identity": ("1", "2 attempt 2")}, True),
+        ({"evidence_identity": ("1", 899), "measure": 899}, False),
+        ({"evidence_identity": ("1", "2", "3", 900)}, True),
+        ({"evidence_identity": ("1", "2 attempt 2", 900)}, True),
         ({"measure": 901}, True),
         ({"subject": "200-pull_request"}, True),
         ({"kind": "ci runner wait"}, True),
@@ -208,7 +208,7 @@ def test_grouped_speed_return_uses_the_judged_members_and_measure(store, change,
         ("2 runs, queue, worst 900 seconds, median 900 seconds, runs 1, 2",),
         "wall time",
         900,
-        evidence_identity=("1", "2"),
+        evidence_identity=("1", "2", 900),
     )
     loop.record(store, DOCTOR, [original], AFTER, 60000)
     judgments = loop.verdicts(store, DOCTOR)

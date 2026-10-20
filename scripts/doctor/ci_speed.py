@@ -210,7 +210,7 @@ def grouped(groups: dict) -> list[Finding]:
                 (*evidence, *(member["evidence"] for member in members)),
                 THRESHOLDS[entry["kind"]],
                 max(measures),
-                evidence_identity=tuple(member["run"] for member in members),
+                evidence_identity=(*[member["run"] for member in members], max(measures)),
             )
         )
     return found
@@ -220,10 +220,9 @@ def _covered(finding, identity, verdict):
     kind, _, subject = identity.partition("/")
     if kind != finding.kind.replace(" ", "-") or subject.partition("-")[2] != finding.subject.partition("-")[2]:
         return False
-    members = verdict.get("evidence_identity")
-    if members is None:
-        members = verdict["evidence"][0].partition(", runs ")[2].split(", ")
-    return finding.measure <= verdict["measure"] and set(finding.evidence_identity).issubset(members)
+    identity = verdict.get("evidence_identity")
+    members = identity[:-1] if identity is not None else verdict["evidence"][0].partition(", runs ")[2].split(", ")
+    return finding.measure <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
 
 
 def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
