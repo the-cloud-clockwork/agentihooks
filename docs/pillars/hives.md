@@ -33,7 +33,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
   and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
 - The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`. It
   always serves TLS from `SWARM_TLS_DIR`.
-- Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys.
+- Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys;
+  [Member keys](#member-keys) lists what lives there.
   A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
   records the execution as working, with the hive's process target, pane, model and effort.
   Invites and credentials sit outside what a member can read.
@@ -46,6 +47,126 @@ agentihooks hive install          # user service that runs agentihooks hive run
 
 A Kubernetes worker pod joins the same way from its entrypoint; see
 [Worker hives in Kubernetes](#worker-hives-in-kubernetes).
+
+## Member keys
+
+A member's Redis user `hive-<id>` reads every key under the swarm root and writes only the member's own hive key and
+the keys below it. With the default root `agentihooks` (set by `AGENTIHOOKS_SWARM_KEY_PREFIX`), the member
+`lab-vm` gets these key patterns:
+
+```text
+%R~agentihooks:*            read every swarm key
+~agentihooks:hive:lab-vm    write the hive record
+~agentihooks:hive:lab-vm:*  write everything below it
+```
+
+Every other write, including another member's keys, the controller's inbox and the launch slot rows, is refused
+by Redis with `NOPERM`. So every piece of state a member process writes lives below its own hive key:
+
+| State | Where a member keeps it | Who reads it there |
+|---|---|---|
+| Launch order receipt and acknowledgement | `<root>:hive:<id>:...` | The controller, which records the execution as working. |
+| Inbox items, sequence counters, delivery owners, seen marks and the master pool | `<root>:hive:<id>:inbox:...` | The member's own agents; the controller routes sends to the member's agents there and relays mail out of it. |
+| Session readings: heartbeat, prompt, session model, progress, wait, waited, woke, wait history and stop blocks | `<root>:hive:<id>:swarm:...` | The controller's idle and wait checks, and the progress and stop gates, for agents placed on that member. |
+| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh. |
+
+### Which keys a process uses
+
+A process counts as the member only while it talks Redis as that member: `AGENTIHOOKS_HIVE_ID` is set and the
+Redis URL it resolves is `AGENTIHOOKS_HIVE_REDIS_URL`. `hive join` writes both to `hive.env`; a process resolves the
+hive Redis URL only when `AGENTIHOOKS_DEPLOYMENT` is `compose` or `distributed`. Any other process, the controller included, uses the
+controller keys under the plain root.
+
+The controller finds an agent's member from the agent's execution record: the hive it was placed on, when that hive
+is in the hive index and holds a member record. An agent on any other host, and every agent in local mode, keeps
+its inbox and session readings in the controller keys under the plain root. Those keys are the same as before
+member scoping, so a local install and a single host install see no change.
+
+### Mail across members
+
+- **Into a member.** A controller send to an address that a member runs, by name or by the seat it occupies, is
+  written into that member's inbox keys. The member's agents read and answer it there.
+- **Out of a member.** A member writes mail to any other address, such as `master@<slug>` on the swarm host, in its
+  own inbox keys, where it waits. Every swarm tick relays each waiting item to its address's inbox with the same item
+  id and withdraws the member's copy with the reason `relayed to its address's inbox`. A relay retry after a lost
+  response finds the id already sent and only withdraws the copy.
+- **Refused sender.** The relay withdraws an item whose sender the member does not run, with the reason
+  `refused: the hive member that sent it does not run its sender`. A member cannot send in another agent's name.
+- **Master pool.** A member pools mail across live masters only while every live master's inbox sits in the same
+  keys as the sender's. When their inboxes span the controller and a member, or two members, the item goes to its
+  address unpooled.
+
+The flow for an engineer that a member runs and the master on the swarm host:
+
+```bash
+# On the member: the engineer reports to the master; the item waits in the member's inbox keys
+agentihooks msg send master@rig "the pull request is green and queued"
+
+# On the swarm host, after the next tick relays it
+agentihooks msg inbox              # run as the master: the item shows with the same id
+agentihooks msg reply <id> "thanks, take the next task"
+# The reply is written into the member's inbox keys, where the engineer reads it
+```
+
+### Launch slot rows
+
+Launch slot rows count how many executions hold each account slot. Only the controller writes them; a member never
+touches them. Reserve and acknowledge run in the controller, and every tick the controller refreshes the rows of
+member executions from what each member reports:
+
+1. A launch reserves a row for at most 300 seconds while the launch order is unacknowledged.
+2. The controller reads the member's acknowledgement and marks the row live, kept for 45 seconds.
+3. Every swarm tick reads the sessions report of each live hive, a heartbeat under ninety seconds old, and keeps the
+   live rows of the executions it reports alive for two ticks, 120 seconds at the default tick. Only executions
+   whose agent record places them on that same hive count, so a hive cannot hold a slot for an execution it does not
+   run.
+4. A row whose hive stops reporting the execution, or stops beating, is no longer refreshed. It lapses within two
+   ticks and the slot is free for the next launch.
+
+`AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets the tick, and with it the refresh lifetime.
+
+### Checking a member's scope
+
+Read the Redis user's key patterns on the swarm Redis, as an admin user:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ACL GETUSER hive-lab-vm
+```
+
+The `keys` field lists the three patterns above. On the member, a write outside them fails with `NOPERM`; this
+probe tries to write a key in the controller's inbox, which the member must not reach:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SET agentihooks:inbox:probe 1
+# (error) NOPERM ...
+```
+
+The packaged smoke tests check the same scope end to end: `scripts/packaging/hive-join-smoke.sh` joins a member on
+Redis 7 and asserts that the shared inbox, shared session readings and another member's keys are refused, that the
+member's own inbox and readings are allowed, and that the relay refuses a sender the member does not run.
+`scripts/packaging/compose-hive-smoke.sh` relays a member agent's mail to the master and reads the host's reply from
+the member's own keys.
+
+### Limitations
+
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read only
+  the controller inbox. Mail held for an agent a member runs gets no wake, escalation or exit settlement, and the
+  controller's seen marks for such agents stay in the controller keys.
+- A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
+  master, done, handoff and seat exits, sit outside its keys and are refused.
+- A member's master pool, filled while every live master sat on that member, drains only on the next send there.
+- The launch slot lifetime of two ticks assumes a tick finishes within one tick interval.
+- The pane cleanup's alias prompt scan reads only the controller's prompt keys.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Mail a member agent sent never reaches the master | No swarm tick has run since the send; the relay runs once per tick. | Check the swarm is started and its controller lease is held: `agentihooks swarm <slug> status`. |
+| A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
+| A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
+| The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it joined with `hive join`. |
+| A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
 
 ## Settings
 
@@ -139,6 +260,7 @@ off and its successor starts on the named hive.
 | Controller lease | three ticks, 180 seconds by default | Another controller takes over at a higher epoch once it lapses. |
 | Worker execution lease | 240 seconds | A Swarm v2 Pod worker keeps its task through a controller handover; see [worker execution lease through a controller rollout](swarm.md#worker-execution-lease-through-a-controller-rollout). |
 | Launch slot reservation | 300 seconds | A started launch order not acknowledged by then is recorded as ambiguous. |
+| Launch slot refresh | two ticks, 120 seconds by default | Each tick keeps the live slot rows a live hive reports; see [Launch slot rows](#launch-slot-rows). |
 
 The master moves when its hive's heartbeat is older than the grace and the runtime does not see the master live,
 so a lost master hive is replaced between five and six minutes after its last beat at the defaults. A hive that
