@@ -214,7 +214,11 @@ trace is also found by its `agent:<name>` tag.
 The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings in
 `scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads the
 same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and
-`LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). The swarm tick runs
+`LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). Reads for that
+hostname connect to the internal ingress `10.10.30.200` instead of the public
+tunnel, sending the hostname as `Host` and TLS server name so the certificate is
+still verified against it; a tunnel outage no longer fails a read, while a 5xx
+or a timeout on the internal path still raises `trace reader unavailable`. The swarm tick runs
 it with the other detectors every `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it
 is the one monitor of trace freshness. Among ticks, only `swarm tick`, the
 command the timer unit runs, and the controller loop run it. A tick another swarm
