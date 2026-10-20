@@ -1572,7 +1572,7 @@ def test_a_stale_conflict_watch_cannot_clear_a_new_claim_generation(merging, suc
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def replace_owner(action, url):
+    def replace_owner(action, url, journal=None):
         merging.rows["t1"] = {**merging.rows["t1"], "claimed_by": successor, "claim_generation": 2}
         merging.store.release("sw", "t1", AGENT)
         merging.store.claim("sw", "t1", successor, 60_000)
@@ -1636,7 +1636,7 @@ def test_a_changed_pull_binding_survives_the_stale_conflict_watch(merging, field
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def changed(action, url):
+    def changed(action, url, journal=None):
         merging.rows["t1"] = {**merging.rows["t1"], field: value}
         return {"queued": False}
 
@@ -1674,7 +1674,7 @@ def test_an_owner_registered_during_dequeue_keeps_its_claim(merging):
         {"state": "OPEN", "mergeable": "CONFLICTING", "mergeQueueEntry": {"id": "entry", "state": "UNMERGEABLE"}}
     )
 
-    def registered(action, url):
+    def registered(action, url, journal=None):
         merging.store.put_agent("sw", AgentRecord(AGENT, "eng", "t1"))
         return {"queued": False}
 
