@@ -90,6 +90,7 @@ def test_live_agents_are_read_before_retired_ones_each_newest_gap_first():
 
 def test_the_partial_read_counts_the_live_agents_left_unread():
     sample = {**record([]), "slug": "sw", "waits_unread": ["engineer", "ci", "dev"], "active": [{"agent": "ci"}]}
+    sample["active"].append({"agent": "read"})
     [partial] = traces.wait_coverage(sample, traces.Limits())
     assert partial.evidence[1] == "live agents unread: 1"
     sample["active"].append({"agent": "dev"})
@@ -97,7 +98,7 @@ def test_the_partial_read_counts_the_live_agents_left_unread():
 
 
 def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial():
-    sample = {**record([]), "slug": "sw", "waits": {}, "waits_unread": ["engineer"]}
+    sample = {**record([]), "slug": "sw", "waits": {}, "waits_unread": ["engineer"], "active": [{"agent": "ci"}]}
     assert traces.turn_gaps(sample, traces.Limits()) == []
     judged = {**record([])["traces"][0], "name": "ci", "tags": ["agent:ci"], "session_id": "ci-session"}
     after = traces.turn_gaps({**sample, "traces": [*sample["traces"], judged]}, traces.Limits())
