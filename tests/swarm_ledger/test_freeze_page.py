@@ -188,7 +188,9 @@ def test_unfreeze_sends_the_clear_and_restores_the_rows(page):
     slow_background_paint(tab)
     tab.click("#item-plans-v2 > details.plan-fold > summary .freeze")
     assert sent_ops(tab, sent, "freeze_clear") == [{"op": "freeze_clear", "target": "plans/v2"}]
-    tab.wait_for_function("() => !document.querySelector('#item-phases-p2').classList.contains('frozen')")
+    tab.wait_for_function(
+        "() => ['#item-phases-p2', '#item-tasks-t2'].every((sel) => !document.querySelector(sel).classList.contains('frozen'))"
+    )
     assert row_state(tab, "#item-tasks-t2")["rank"] == [False]
     assert row_state(tab, "#item-phases-p2")["checkbox"] == [False]
     assert freeze_text(tab, "#item-plans-v2") == "freeze"
