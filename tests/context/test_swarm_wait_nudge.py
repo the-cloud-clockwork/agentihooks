@@ -59,6 +59,10 @@ def _declare(redis, slug="rig", name=NAME):
         _bash('await tools.exec_command({cmd:"sleep 900", workdir:"/a\\$b"});'),
         _bash('await tools.exec_command({workdir:"/w", cmd:"sleep 900"});'),
         _bash('await tools.exec_command({cmd:"sleep 900", workdir:"\\uZZ"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\\\$x"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\v"});'),
+        _bash('await tools.exec_command({cmd:"sleep \\\n900"});'),
+        _bash('await tools.exec_command({cmd:"ls\\nsleep 900"});'),
     ],
 )
 def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):

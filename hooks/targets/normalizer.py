@@ -377,8 +377,10 @@ def _codex_answers(resp: Any) -> Any:
 # Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
 _EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
-_JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"?')
-_JS_ONLY_ESCAPE = re.compile(r'\\([^"\\/bfnrtuvx0-9\n\r])')
+_JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"?', re.DOTALL)
+_JS_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
+_JSON_KEPT_ESCAPES = '"\\/bfnrtux0123456789'
+_JS_ESCAPE_TEXT = {"v": "\\u000b", "\n": ""}
 _ROLLOUT_TAIL_BYTES = 1 << 20
 
 
@@ -399,9 +401,16 @@ def _exec_fields(program: str, pos: int) -> dict[str, Any]:
 
 def _js_string(literal: str) -> str | None:
     try:
-        return json.loads(_JS_ONLY_ESCAPE.sub(r"\1", literal))
+        return json.loads(_JS_ESCAPE.sub(_json_escape, literal))
     except ValueError:
         return None
+
+
+def _json_escape(match: re.Match[str]) -> str:
+    char = match.group(1)
+    if char in _JSON_KEPT_ESCAPES:
+        return match.group()
+    return _JS_ESCAPE_TEXT.get(char, char)
 
 
 def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:

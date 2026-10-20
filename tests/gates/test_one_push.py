@@ -245,9 +245,7 @@ def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypa
             tmp_path, earlier, exec_command("gh pr ready 1", work) + exec_command("gh pr ready 1", tree)
         ),
         "malformed": lambda: codex_rollout(tmp_path, earlier + 'exec_command({cmd:"gh pr ready 2",workdir:"open'),
-        "undecodable": lambda: codex_rollout(
-            tmp_path, earlier + 'exec_command({cmd:"gh pr \\x2 ready 1",workdir:"/x"});'
-        ),
+        "undecodable": lambda: codex_rollout(tmp_path, 'exec_command({cmd:"gh pr ready 1",workdir:"/x\\x2"});'),
         "beyond-tail": lambda: codex_rollout(tmp_path, earlier, filler=1 << 20),
         "no-rollout": lambda: tmp_path / "missing.jsonl",
     }
