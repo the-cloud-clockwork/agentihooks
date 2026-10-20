@@ -193,7 +193,7 @@ def grade(
         else:
             key = f"{file}/test-summary"
             if key in head_config.get("not_gates", {}):
-                config["not_gates"][key] = head_config["not_gates"][key]
+                config["not_gates"].setdefault(key, head_config["not_gates"][key])
     return problems + ci_wiring.check(head_workflows, config, today)
 
 
