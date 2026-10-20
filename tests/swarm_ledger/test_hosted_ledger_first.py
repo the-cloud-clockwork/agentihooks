@@ -1,4 +1,5 @@
 import http.server
+import io
 import json
 import socket
 import threading
@@ -157,7 +158,7 @@ def test_a_later_command_reuses_a_fresh_probe_answer_instead_of_waiting_on_a_sil
     environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: silent})
     assert ledger_link.base(environ) == WORKSTATION
     monkeypatch.setattr(hosted_probe, "_answers", {})
-    monkeypatch.setattr(ledger_link, "serving", lambda *args: pytest.fail("probed again inside the cache window"))
+    monkeypatch.setattr(hosted_probe, "healthy", lambda url: pytest.fail("probed again inside the cache window"))
 
     assert ledger_link.base(environ) == WORKSTATION
 
@@ -166,17 +167,46 @@ def test_a_later_command_reuses_a_fresh_answer_that_the_hosted_ledger_answered(a
     environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
     assert ledger_link.base(environ) == answering
     monkeypatch.setattr(hosted_probe, "_answers", {})
-    monkeypatch.setattr(ledger_link, "serving", lambda *args: pytest.fail("probed again inside the cache window"))
+    monkeypatch.setattr(hosted_probe, "healthy", lambda url: pytest.fail("probed again inside the cache window"))
 
     assert ledger_link.base(environ) == answering
 
 
 def test_the_probe_waits_only_the_probe_window(monkeypatch):
     seen = []
-    monkeypatch.setattr(ledger_link, "serving", lambda timeout, url: seen.append((timeout, url)) or "")
+
+    def urlopen(request, timeout):
+        seen.append((request.full_url, timeout))
+        return io.BytesIO(b'{"ok": true}')
+
+    monkeypatch.setattr(ledger_link, "urlopen", urlopen)
 
     assert hosted_probe.answered("https://hosted.example", {})
-    assert seen == [(hosted_probe.PROBE_S, "https://hosted.example")]
+    assert seen == [("https://hosted.example/healthz", hosted_probe.PROBE_S)]
+
+
+@pytest.mark.parametrize(
+    ("status", "body"), [(200, b"<html>sign in</html>"), (200, b'["not", "health"]'), (503, b"{}")]
+)
+def test_an_access_login_page_or_an_error_status_is_not_the_hosted_ledger_answering(status, body):
+    class Page(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(status)
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *args):
+            pass
+
+    httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Page)
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    try:
+        url = f"http://127.0.0.1:{httpd.server_address[1]}"
+        environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: url})
+        assert ledger_link.base(environ) == WORKSTATION
+    finally:
+        httpd.shutdown()
+        httpd.server_close()
 
 
 def test_a_stale_probe_answer_is_checked_again(answering, tmp_path, monkeypatch):

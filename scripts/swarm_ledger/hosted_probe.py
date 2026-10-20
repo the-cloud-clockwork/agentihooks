@@ -1,8 +1,10 @@
 """The hosted ledger an agent resolves first, kept only while its health check answers."""
 
+import http.client
 import json
 import os
 import time
+import urllib.request
 from pathlib import Path
 
 HOSTED_ENV = "AGENTIHOOKS_HOSTED_LEDGER_URL"
@@ -28,9 +30,17 @@ def probe_file(environ=os.environ) -> Path:
     return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "hosted-ledger-probe.json"
 
 
-def answered(url: str, environ=os.environ) -> bool:
-    from scripts.swarm_ledger.ledger_link import serving
+def healthy(url: str) -> bool:
+    from scripts.swarm_ledger import ledger_link
 
+    try:
+        with ledger_link.urlopen(urllib.request.Request(f"{url}/healthz"), PROBE_S) as response:
+            return isinstance(json.loads(response.read()), dict)
+    except (OSError, ValueError, http.client.HTTPException):
+        return False
+
+
+def answered(url: str, environ=os.environ) -> bool:
     path, now = probe_file(environ), time.time()
     try:
         cached = json.loads(path.read_text())
@@ -40,7 +50,7 @@ def answered(url: str, environ=os.environ) -> bool:
     at = cached.get("at")
     if cached.get("url") == url and isinstance(at, int | float) and 0 <= now - at < PROBE_TTL_S:
         return bool(cached.get("answers"))
-    answers = serving(PROBE_S, url) is not None
+    answers = healthy(url)
     try:
         path.write_text(json.dumps({"url": url, "at": now, "answers": answers}))
     except OSError:

@@ -173,7 +173,8 @@ A remote client sends to `SWARM_URL`, else `LEDGER_URL`, with any trailing slash
 ### Hosted ledger first
 
 `AGENTIHOOKS_HOSTED_LEDGER_URL` names the hosted ledger every agent tries first. A process checks it once, with a
-2 second `/healthz` request; any HTTP answer counts, a refused, reset or timed out connection does not. The answer is
+2 second `/healthz` request. It answers only with a JSON object; a refused, reset or timed out connection, an error
+status, or a page such as an access login does not. The answer is
 kept for 30 seconds in `hosted-ledger-probe.json` under the agentihooks home, so hooks and commands inside that
 window reuse it instead of waiting on a silent ledger. When it does not answer, the process falls through to rule 3
 onwards: a workstation agent reaches its workstation ledger server, a hive agent its `SWARM_URL` or `LEDGER_URL`.
