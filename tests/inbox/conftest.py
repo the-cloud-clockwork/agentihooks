@@ -6,6 +6,7 @@ import pytest
 @pytest.fixture
 def mcp_sdk():
     # An alarm inside the cold SDK import drops mcp.server but keeps mcp.server.stdio for the rest of the worker.
+    import fakeredis  # noqa: F401
     import mcp.server.lowlevel  # noqa: F401
     import mcp.server.stdio  # noqa: F401
     import mcp.shared.message  # noqa: F401
@@ -14,7 +15,7 @@ def mcp_sdk():
 
 
 @pytest.fixture
-def recovery_deadline():
+def recovery_deadline(mcp_sdk):
     def expired(signum, frame):
         raise AssertionError("recovery loop exceeded its deadline")
 
