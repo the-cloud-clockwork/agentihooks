@@ -17,7 +17,6 @@ class Publishing:
         self.published = {}
         self.queued = threading.Condition()
         self.pending = {}
-        self.running = 0
         self.worker = None
 
     def __getattr__(self, name):
@@ -46,10 +45,8 @@ class Publishing:
     def run(self) -> None:
         while True:
             with self.queued:
-                while not self.pending:
-                    self.queued.wait()
-                slug, entry = self.pending.popitem()
-                self.running += 1
+                self.queued.wait_for(lambda: self.pending)
+                slug, entry = next(iter(self.pending.items()))
             try:
                 if entry.generation > self.published.get(slug, -1):
                     self.publish(slug, entry.state)
@@ -58,13 +55,15 @@ class Publishing:
                 sys.stderr.write(f"stream publish for {slug} generation {entry.generation}: {exc}\n")
             finally:
                 with self.queued:
-                    self.running -= 1
+                    held = self.pending.pop(slug)
+                    if held is not entry:
+                        self.pending[slug] = held
                     self.queued.notify_all()
 
-    def drain(self) -> None:
+    def drain(self, timeout: float) -> None:
         with self.queued:
-            while self.pending or self.running:
-                self.queued.wait()
+            if not self.queued.wait_for(lambda: not self.pending, timeout):
+                raise TimeoutError(f"stream publications still pending after {timeout} s")
 
     def get_document(self, slug: str) -> dict:
         return json.loads(self.current(slug).text)
