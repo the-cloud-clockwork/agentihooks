@@ -778,3 +778,53 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head
     assert alerts == [
         ("sw", f"merge-priority-requeue:{URL[:-1]}2", f"Could not requeue {URL[:-1]}2: GitHub unavailable")
     ]
+
+
+def test_priority_notifies_the_claimant_of_an_entry_a_conflict_keeps_out(priority, monkeypatch):
+    p = priority
+    refusal = "gh: Pull request has merge conflicts and Pull request not in mergeable state"
+    run = p.queue.run
+
+    def conflicted(command, **kwargs):
+        if "enqueuePullRequest" in " ".join(command) and "id=P2" in command:
+            return subprocess.CompletedProcess(command, 1, "", refusal)
+        done = run(command, **kwargs)
+        response = json.loads(done.stdout)
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
+        if raw and raw.get("id") == "P2":
+            raw["mergeable"] = "CONFLICTING"
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    monkeypatch.setattr(p.queue, "run", conflicted)
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    writes, sent = [], []
+    monkeypatch.setattr(
+        queue_record.Journal, "write", lambda self, *args, **extra: writes.append((self.url, args, extra))
+    )
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
+    )
+    with pytest.raises(SwarmError) as failed:
+        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+    assert str(failed.value) == f"could not restore {URL[:-1]}2: {refusal}"
+    reason = "it has merge conflicts with dev"
+    assert sent == [
+        (
+            "swarm",
+            "ci@owner",
+            f"Your pull request {URL[:-1]}2 left the merge queue in an interrupted priority and stays out "
+            f"because {reason}. Queue it again once its checks pass.",
+            {"fyi": True},
+        )
+    ]
+    assert (
+        URL[:-1] + "2",
+        ("priority-requeue-skipped", URL[:-1] + "2", "head2", None, None),
+        {"reason": reason},
+    ) in writes
+    assert queue_priority.Displaced(p.store, "sw").pulls() == []
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P9", "P3"]
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert p.queue.mutations == [("dequeue", 3), ("dequeue", 2), ("queue", 9), ("queue", 3)]
