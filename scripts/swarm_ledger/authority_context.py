@@ -24,7 +24,7 @@ def tick_headers(slug: str) -> dict[str, str]:
 
 
 def _hosted_secret(server_secret) -> str | None:
-    from scripts.swarm_ledger.ledger_link import HOSTED_ENV
+    from scripts.swarm_ledger.hosted_probe import HOSTED_ENV
 
     if not os.environ.get(HOSTED_ENV):
         return None

@@ -6,7 +6,7 @@ import threading
 import pytest
 
 from scripts.swarm import runtime
-from scripts.swarm_ledger import authority_context, ledger_authority, ledger_link
+from scripts.swarm_ledger import authority_context, hosted_probe, ledger_authority, ledger_link
 from scripts.swarm_ledger.storage_migration import hosted as hosted_migration
 from tests.test_swarm_v2_launch import FIRST, World
 
@@ -18,8 +18,8 @@ HIVE = {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}
 
 @pytest.fixture(autouse=True)
 def fresh_probes(monkeypatch, tmp_path):
-    monkeypatch.setattr(ledger_link, "_answers", {})
-    monkeypatch.setattr(ledger_link, "probe_file", lambda environ=None: tmp_path / "hosted-ledger-probe.json")
+    monkeypatch.setattr(hosted_probe, "_answers", {})
+    monkeypatch.setattr(hosted_probe, "probe_file", lambda environ=None: tmp_path / "hosted-ledger-probe.json")
 
 
 @pytest.fixture
@@ -58,28 +58,28 @@ WORKSTATION = "http://127.0.0.1:8765"
 
 
 def test_a_workstation_agent_resolves_the_answering_hosted_ledger_first(answering):
-    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering + "/"})
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering + "/"})
 
     assert ledger_link.base(environ) == answering
     assert ledger_link.remote(environ)
 
 
 def test_a_workstation_agent_falls_back_to_the_workstation_server_when_the_hosted_one_does_not_answer(silent):
-    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: silent})
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: silent})
 
     assert ledger_link.base(environ) == WORKSTATION
     assert not ledger_link.remote(environ)
 
 
 def test_a_session_without_a_hosted_credential_keeps_the_workstation_server(answering):
-    environ = workstation(**{ledger_link.HOSTED_ENV: answering})
+    environ = workstation(**{hosted_probe.HOSTED_ENV: answering})
 
     assert ledger_link.base(environ) == WORKSTATION
     assert not ledger_link.remote(environ)
 
 
 def test_a_hive_agent_resolves_the_hosted_ledger_before_its_swarm_address(answering, silent):
-    environ = {**HIVE, "AGENTIHOOKS_DEPLOYMENT": "distributed", "SWARM_URL": silent, ledger_link.HOSTED_ENV: answering}
+    environ = {**HIVE, "AGENTIHOOKS_DEPLOYMENT": "distributed", "SWARM_URL": silent, hosted_probe.HOSTED_ENV: answering}
 
     assert ledger_link.base(environ) == answering
     assert ledger_link.remote(environ)
@@ -90,14 +90,14 @@ def test_a_hive_agent_falls_back_to_its_swarm_address_when_the_hosted_ledger_doe
         **HIVE,
         "AGENTIHOOKS_DEPLOYMENT": "distributed",
         "SWARM_URL": "https://workstation.example",
-        ledger_link.HOSTED_ENV: silent,
+        hosted_probe.HOSTED_ENV: silent,
     }
 
     assert ledger_link.base(environ) == "https://workstation.example"
 
 
 def test_a_routed_swarm_address_still_wins_over_the_hosted_ledger(answering):
-    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering})
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
 
     with ledger_link.ledger_route.scoped("demo", "https://routed.example"):
         assert ledger_link.base(environ, slug="demo") == "https://routed.example"
@@ -109,7 +109,7 @@ def test_the_workstation_tick_binds_the_hosted_secret_so_launches_carry_hosted_t
             return []
 
     monkeypatch.delenv("SWARM_URL", raising=False)
-    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
     monkeypatch.setattr(hosted_migration, "server_secret", lambda: "hosted-secret")
 
     with authority_context.for_tick(Store()):
@@ -126,7 +126,7 @@ def test_the_workstation_tick_runs_without_a_hosted_secret(monkeypatch):
 
     monkeypatch.delenv("SWARM_URL", raising=False)
     monkeypatch.delenv("SWARM_SECRET", raising=False)
-    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
     monkeypatch.setattr(hosted_migration, "server_secret", unavailable)
 
     with authority_context.for_tick(Store()):
@@ -134,36 +134,36 @@ def test_the_workstation_tick_runs_without_a_hosted_secret(monkeypatch):
 
 
 def test_a_hive_launch_hands_the_hosted_ledger_address_to_the_worker_home(monkeypatch):
-    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example/")
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example/")
     world = World(monkeypatch)
     world.launch(FIRST)
     [spawned] = world.runtime.requests
 
-    assert spawned.task["endpoints"][ledger_link.HOSTED_ENV] == "https://hosted.example"
+    assert spawned.task["endpoints"][hosted_probe.HOSTED_ENV] == "https://hosted.example"
 
 
 def test_a_hive_launch_without_a_hosted_ledger_hands_only_the_swarm_api(monkeypatch):
-    monkeypatch.delenv(ledger_link.HOSTED_ENV, raising=False)
+    monkeypatch.delenv(hosted_probe.HOSTED_ENV, raising=False)
     world = World(monkeypatch)
     world.launch(FIRST)
     [spawned] = world.runtime.requests
 
-    assert ledger_link.HOSTED_ENV not in spawned.task["endpoints"]
+    assert hosted_probe.HOSTED_ENV not in spawned.task["endpoints"]
 
 
 def test_a_later_command_reuses_a_fresh_probe_answer_instead_of_waiting_on_a_silent_ledger(
     silent, tmp_path, monkeypatch
 ):
-    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: silent})
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: silent})
     assert ledger_link.base(environ) == WORKSTATION
-    monkeypatch.setattr(ledger_link, "_answers", {})
+    monkeypatch.setattr(hosted_probe, "_answers", {})
     monkeypatch.setattr(ledger_link, "serving", lambda *args: pytest.fail("probed again inside the cache window"))
 
     assert ledger_link.base(environ) == WORKSTATION
 
 
 def test_a_stale_probe_answer_is_checked_again(answering, tmp_path, monkeypatch):
-    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering})
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
     stale = {"url": answering, "at": 0, "answers": False}
     (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(stale))
 
@@ -176,7 +176,7 @@ def test_the_workstation_tick_hands_each_spawned_agent_a_hosted_token(monkeypatc
             return []
 
     monkeypatch.delenv("SWARM_URL", raising=False)
-    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
     monkeypatch.setattr(hosted_migration, "server_secret", lambda: "hosted-secret")
 
     with authority_context.for_tick(Store()):
@@ -197,7 +197,7 @@ def test_the_workstation_tick_survives_a_malformed_secret_store_answer(monkeypat
 
     monkeypatch.delenv("SWARM_URL", raising=False)
     monkeypatch.delenv("SWARM_SECRET", raising=False)
-    monkeypatch.setenv(ledger_link.HOSTED_ENV, "https://hosted.example")
+    monkeypatch.setenv(hosted_probe.HOSTED_ENV, "https://hosted.example")
     monkeypatch.setattr(hosted_migration, "server_secret", malformed)
 
     with authority_context.for_tick(Store()):
@@ -206,7 +206,7 @@ def test_the_workstation_tick_survives_a_malformed_secret_store_answer(monkeypat
 
 @pytest.mark.parametrize("cached", [{"at": "soon", "answers": False}, {"at": 10**12, "answers": False}, ["junk"]])
 def test_a_corrupt_or_future_probe_answer_is_checked_again(answering, tmp_path, cached):
-    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering})
+    environ = workstation(**TOKEN, **{hosted_probe.HOSTED_ENV: answering})
     if isinstance(cached, dict):
         cached = {**cached, "url": answering}
     (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(cached))

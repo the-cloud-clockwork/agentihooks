@@ -11,7 +11,7 @@ from typing import Protocol
 from hooks.context import profile_chain
 from scripts.swarm import live_binding, profile_choice, prompt
 from scripts.swarm.store import AgentRecord, SwarmError
-from scripts.swarm_ledger import ledger_link
+from scripts.swarm_ledger import hosted_probe
 from scripts.swarm_v2 import broadcast_bridge, worker_home
 from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -114,8 +114,8 @@ def quota_predecessor(task: dict) -> tuple[str, str] | None:
 
 
 def hosted_ledger() -> dict[str, str]:
-    url = ledger_link.hosted_address()
-    return {ledger_link.HOSTED_ENV: url} if url else {}
+    url = hosted_probe.address()
+    return {hosted_probe.HOSTED_ENV: url} if url else {}
 
 
 def kept(agent: AgentRecord, reason: str) -> AgentRecord:

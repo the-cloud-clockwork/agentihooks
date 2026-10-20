@@ -6,13 +6,12 @@ import json
 import os
 import socket
 import ssl
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from scripts.swarm_ledger import ledger_route
+from scripts.swarm_ledger import hosted_probe, ledger_route
 
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
@@ -26,10 +25,6 @@ CREDENTIAL_HEADERS = (
     "X-Ledger-Migration",
 )
 TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV, CA_FILE_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM", "LEDGER_CA_FILE"
-HOSTED_ENV = "AGENTIHOOKS_HOSTED_LEDGER_URL"
-HOSTED_CREDENTIALS = ("AGENTIHOOKS_LEDGER_AGENT_TOKEN", "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL")
-HOSTED_PROBE_S, HOSTED_PROBE_TTL_S = 2, 30
-_answers: dict[str, bool] = {}
 
 
 class Cleartext(SystemExit):
@@ -37,7 +32,7 @@ class Cleartext(SystemExit):
 
 
 def base(environ=os.environ, slug="") -> str:
-    if selected := ledger_route.url(slug) or hosted(environ):
+    if selected := ledger_route.url(slug) or hosted_probe.hosted(environ):
         return selected
     if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
@@ -46,41 +41,6 @@ def base(environ=os.environ, slug="") -> str:
         return url.rstrip("/")
     host, port = address(environ)
     return f"{scheme(environ)}://{host}:{port}"
-
-
-def hosted(environ=os.environ) -> str:
-    url = hosted_address(environ)
-    if not url or not any(environ.get(name) for name in HOSTED_CREDENTIALS):
-        return ""
-    if url not in _answers:
-        _answers[url] = answered(url, environ)
-    return url if _answers[url] else ""
-
-
-def hosted_address(environ=os.environ) -> str:
-    return environ.get(HOSTED_ENV, "").strip().rstrip("/")
-
-
-def probe_file(environ=os.environ) -> Path:
-    return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "hosted-ledger-probe.json"
-
-
-def answered(url: str, environ=os.environ) -> bool:
-    path, now = probe_file(environ), time.time()
-    try:
-        cached = json.loads(path.read_text())
-    except (OSError, ValueError):
-        cached = {}
-    cached = cached if isinstance(cached, dict) else {}
-    at = cached.get("at")
-    if cached.get("url") == url and isinstance(at, int | float) and 0 <= now - at < HOSTED_PROBE_TTL_S:
-        return bool(cached.get("answers"))
-    answers = serving(HOSTED_PROBE_S, url, environ) is not None
-    try:
-        path.write_text(json.dumps({"url": url, "at": now, "answers": answers}))
-    except OSError:
-        pass
-    return answers
 
 
 def scheme(environ=os.environ) -> str:
@@ -157,7 +117,7 @@ def remote(environ=os.environ, slug="") -> bool:
     mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
     return bool(
         ledger_route.url(slug)
-        or hosted(environ)
+        or hosted_probe.hosted(environ)
         or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
     ) or (bool(environ.get("LEDGER_URL")) if mode is None else mode != "local")
 
@@ -216,9 +176,9 @@ def folder(environ=os.environ) -> Path:
     return Path(environ.get("LEDGER_DIR", Path.home() / "development-ledger")).expanduser()
 
 
-def serving(timeout: float = 1, url: str | None = None, environ=os.environ) -> str | None:
+def serving(timeout: float = 1, url: str | None = None) -> str | None:
     try:
-        with urlopen(urllib.request.Request(f"{url or base()}/healthz"), timeout, environ) as resp:
+        with urlopen(urllib.request.Request(f"{url or base()}/healthz"), timeout) as resp:
             body = json.loads(resp.read())
     except http.client.RemoteDisconnected:
         return None
