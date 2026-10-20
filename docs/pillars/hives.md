@@ -76,8 +76,8 @@ agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-ag
 
 - The master runs on the PC while it is live, and on the VM when the PC is gone.
 - QA and frontend work runs on the VM, the only hive that takes them.
-- Engineer, CI, planner and dispatcher work runs on the pods. The PC takes the dispatcher when every pod is full only
-  once its roles list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
+- Engineer, CI, planner and dispatcher work runs on the pods. For the PC to take the dispatcher when every pod is
+  full, its roles must list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
 
 ## Placement
 
