@@ -469,7 +469,7 @@ def env_dump_verdict(command):
     )
 
 
-def proc_environ_verdict(command, cwd=""):
+def proc_environ_verdict(command, cwd):
     flat = QUOTING.sub("", command)
     entered = [op.lstrip("/").split("/")[0] for op in CD_OPERAND.findall(flat)]
     in_proc = bool(PROC_DIR.match(cwd)) or any(fnmatch.fnmatchcase("proc", top) for top in entered)

@@ -559,6 +559,8 @@ PROC_ALLOWED = [
     "cat /proc/*/status",
     "test -d /proc/$pid && echo alive",
     "cd /home/x/procs && cat e*",
+    "cd Xproc && cat environ",
+    "cat build/environ",
 ]
 
 
@@ -567,7 +569,7 @@ class TestProcEnvironReads:
     def test_read_is_refused_with_the_leak_free_alternative(self, command):
         verdict = decide(_bash(command))
         assert verdict is not None
-        assert "process environment file" in verdict
+        assert "reading a process environment file under /proc" in verdict
         assert 'test -n "${VAR:-}"' in verdict
         assert ENV_NAMES_SAFE in verdict
 
@@ -591,6 +593,6 @@ class TestProcEnvironReads:
         assert verdict is not None
         assert ENV_NAMES_SAFE in verdict
 
-    @pytest.mark.parametrize("path", ["docs/environ", "proc/1/environ"])
+    @pytest.mark.parametrize("path", ["docs/environ", "proc/1/environ", "/X/proc/1/environ"])
     def test_read_tool_on_an_environ_file_elsewhere_passes(self, path):
         assert decide({"tool_name": "Read", "tool_input": {"file_path": path}}) is None
