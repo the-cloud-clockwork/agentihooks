@@ -930,9 +930,11 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     from scripts.swarm import controller
     from scripts.swarm.controller import DISABLED, FencedRuntime, SwarmError
     from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.masters import MasterSeats
     from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, Status
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
+    MasterSeats(setup.store.redis).set_count("fixture", 2)
     backend = Mock()
     backend.backend = "kubernetes"
     backend.capabilities = frozenset((Capability.SPAWN,))
