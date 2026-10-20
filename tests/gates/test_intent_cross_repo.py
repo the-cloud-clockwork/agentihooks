@@ -294,7 +294,10 @@ def test_one_task_failing_before_it_is_judged_never_ends_the_tick_run(tmp_path, 
 
     monkeypatch.setattr(intent, "_bind_pulls", bound)
     view = {"title": PULLS[HERE]["title"], "body": "", "files": [".github/workflows/sonar.yml"]}
-    ask = lambda state: intent.judge(state, classifier(0.9))  # noqa: E731
+
+    def ask(state):
+        return intent.judge(state, classifier(0.9))
+
     actions = intent.Check(SLUG, "enforce", NOW, Ledger(), Mail(), lambda url: view, ask, home=tmp_path).run(
         {**DOC, "tasks": [{**task(), "id": "t0", "claimed_by": "eng"}, task()]}
     )
