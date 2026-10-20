@@ -260,7 +260,7 @@ def test_recovery_records_each_cancel_and_observed_completion(monkeypatch, no_sl
     if force:
         states.append(RUN)
     states.append({**RUN, "status": "completed"} if completed else RUN)
-    api, record = watched(monkeypatch, RUN, stalled_run(), states)
+    api, record = watched(monkeypatch, RUN, [lost(started=stamp(NOW - timedelta(hours=1)))], states)
     assert record["detected_at"] == "2026-10-19T16:00:01+00:00"
     assert record["cancel_requested_at"] == "2026-10-19T16:00:02+00:00"
     assert record["force_cancel_requested_at"] == ("2026-10-19T16:00:03+00:00" if force else None)
