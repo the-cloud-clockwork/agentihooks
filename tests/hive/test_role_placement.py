@@ -163,6 +163,57 @@ def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_o
     assert admitted.profile_decision["placement_fallback"] == "no headless hive for dispatch has room"
 
 
+def hive_controller(setup):
+    from scripts.swarm import controller
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    return controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+
+
+@pytest.mark.parametrize("seat", ["master", "master-2", "master-3"])
+def test_every_master_seat_is_placed_by_the_ui_host_rule(setup, seat):
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.masters import MasterSeats
+
+    MasterSeats(setup.store.redis).set_count(setup.config.slug, 3)
+    two_hosts(setup)
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    fenced = hive_controller(setup)
+    assert fenced.placement_refusal("master", {"id": seat}) == ""
+    assert fenced.runtime.router.placed_backend("master", {"id": seat}) == "hive"
+    assert fenced.runtime.hive_launch.select(setup.config, "master", {"id": seat}).hive == "workstation"
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, repos=[])
+    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    assert fenced.placement_refusal("master", {"id": seat}) == f"the workstation hive spawns master work: {MASTER_WAIT}"
+
+
+@pytest.mark.parametrize("seat", ["master", "master-2"])
+def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypatch, seat):
+    from unittest.mock import Mock
+
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+
+    two_hosts(setup)
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, repos=[])
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    fenced = hive_controller(setup)
+    fenced.runtime.hive_launch.spawn = Mock()
+    setup.herdr.spawn.return_value = "placed on the workstation"
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    assert fenced.placement_refusal("master", {"id": seat}) == ""
+    assert fenced.spawn(setup.config, "master", "master name", {"id": seat}) == "placed on the workstation"
+    _, lane, name, task = setup.herdr.spawn.call_args.args
+    assert (lane, name, task["id"], task["controller_epoch"]) == ("master", "master name", seat, setup.held.epoch)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    with pytest.raises(controller.SwarmError, match=f"the workstation hive spawns master work: {MASTER_WAIT}"):
+        fenced.spawn(setup.config, "master", "master name", {"id": seat})
+    assert setup.herdr.spawn.call_count == 1
+    fenced.runtime.hive_launch.spawn.assert_not_called()
+
+
 def host(hive_id: str, ui: str, **fields) -> dict:
     return hive(hive_id, **{"ui": ui, "roles": ["eng"] if ui == "no" else ALL_ROLES, "max_agents": 4, **fields})
 
