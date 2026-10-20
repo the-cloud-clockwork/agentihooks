@@ -114,9 +114,20 @@ def test_live_still_fails_on_a_swarm_left_off_the_host_ticked_list(store, capsys
     assert capsys.readouterr().out == "controller: no live controller lease for ['workstation']\n"
 
 
+def test_live_requires_every_lease_while_no_host_ticked_list_is_set(store, monkeypatch, capsys):
+    from scripts.swarm.store import SwarmConfig
+
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+    held(store)
+    store.create(SwarmConfig("XXXX", "agentihooks", 2, 0))
+
+    assert controller_probes.live(ENV, store, Fetch(), "hive-fixture") == 1
+    assert capsys.readouterr().out == "controller: no live controller lease for ['XXXX']\n"
+
+
 @pytest.mark.parametrize(
     ("host_swarms", "expected"),
-    [("", ["a", "b", "c"]), ("b", ["a", "c"]), ("c,a", ["b"]), ("a,b,c", [])],
+    [("", ["a", "b", "c"]), ("b", ["a", "c"]), ("c,a", ["b"]), ("a,b,c", []), (" a , c", ["b"])],
 )
 def test_ticked_drops_exactly_the_host_ticked_swarms_in_order(host_swarms, expected):
     assert controller_probes.ticked(["a", "b", "c"], host_swarms) == expected

@@ -12,7 +12,7 @@ LIVE_TIMEOUT = 3
 
 
 def ticked(slugs: list[str], host_swarms: str) -> list[str]:
-    left = set(host_swarms.split(","))
+    left = {slug.strip() for slug in host_swarms.split(",")}
     return [slug for slug in slugs if slug not in left]
 
 

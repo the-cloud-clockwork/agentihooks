@@ -409,3 +409,14 @@ def test_the_controller_never_ticks_a_host_ticked_swarm(store, monkeypatch):
 
     assert controller.run_once(store) == {"hosted": ["hosted"]}
     assert ticks == ["hosted"]
+
+
+def test_the_controller_ticks_every_swarm_while_no_host_ticked_list_is_set(store, monkeypatch):
+    from scripts.swarm import cli, controller
+    from scripts.swarm.store import SwarmConfig
+
+    store.create(SwarmConfig("XXXX", "agentihooks", 2, 0))
+    monkeypatch.setattr(cli, "run_tick", lambda saved, slug, *args, **kwargs: [slug])
+    monkeypatch.delenv("AGENTIHOOKS_CONTROL_HOST_SWARMS", raising=False)
+
+    assert controller.run_once(store) == {"XXXX": ["XXXX"]}
