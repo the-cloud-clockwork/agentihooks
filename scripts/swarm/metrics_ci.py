@@ -45,14 +45,14 @@ FAILURES = metrics_outbox.Table(
 
 
 def metered(runs: list[dict]) -> list[dict]:
-    later = [
+    queue_and_promotion = [
         r
         for r in runs
         if (r["event"] == "merge_group" or (r["event"] == "push" and r["head_branch"] == "dev"))
         and r["status"] == "completed"
         and r["conclusion"] in ci_speed.FINISHED
     ]
-    return ci_speed.finished(runs) + later
+    return ci_speed.finished(runs) + queue_and_promotion
 
 
 def _base(slug, item, ts_ms, event_id):
