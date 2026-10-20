@@ -153,16 +153,18 @@ below whichever home the hive runs the agent in.
 
 ### What the hive does with it
 
-Before it launches, the hive checks the payload and acknowledges the order as failed with the reason `prompt` when:
+An order the hive picks up after its 300 seconds is acknowledged as failed with the reason `expired` before the
+payload is read. Otherwise the hive checks the payload and acknowledges the order as failed with the reason `prompt`
+when:
 
-- the payload key is gone, which happens after its 300 seconds;
+- the payload key is missing;
 - the payload is not JSON, or its task id differs from the order's;
 - `hive_opening` is missing or not text, or `hive_opening_digest` does not match it.
 
 The controller ends the execution, drops the launch order and reports the spawn refused with
-`hive launch failed: prompt`.
+`hive launch failed: <reason>`.
 
-A payload that passes is materialized below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
+A payload that passes is written below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
 
 - `steering.md` is replaced with the controller's copy on every launch.
 - `progress.md` and `proof.md` are written only when the hive does not hold them yet. On a relaunch of the same task
@@ -172,20 +174,20 @@ The agent then starts with `hive_opening` exactly as carried. The hive does not 
 
 ### Work folder lines on the ledger page
 
-Every heartbeat, every fifteen seconds, each hive writes the work folder lines of the executions it hosts to
+On every fifteen second heartbeat, each hive writes the work folder lines of the executions it hosts to
 `<root>:hive:<hive id>:workspaces`, expiring after 45 seconds. Each entry holds `latest_progress` and
 `latest_proof`: the last three non-blank lines of `progress.md` and `proof.md`, read from the last 4,096 bytes of
-each. The copy covers every swarm task whose latest execution, the live one or else the one started last, is a
+each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution, the live one or else the one started last, is a
 worker on that hive. Masters are left out.
 
 When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
 or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
 the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
 
-### Resume and recovery texts
+### Resume and recovery prompts
 
 The restore prompt after a reboot and the resume prompt after an outage tell the agent to re-read its task folder.
-For an agent on a remote hive both texts name `~/.agentihooks/swarm/<slug>/tasks/<task id>`, the folder below the
+For an agent on a remote hive both prompts name `~/.agentihooks/swarm/<slug>/tasks/<task id>`, the folder below the
 hive's home, instead of the controller's absolute path.
 
 ### Upgrading
@@ -197,7 +199,8 @@ newer hive. Deploy the controller first, then the hives.
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport, or the payload expired before the hive read it. | Upgrade the controller. If it is current, check that the hive beats (`agentihooks hive list` shows `live`) and reads Redis. |
+| Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport and sends no opening and digest. | Upgrade the controller, then the hive. |
+| Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
 | A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
 | A relaunched agent on the same hive does not see proof lines written on another machine | `progress.md` and `proof.md` already on a hive are kept, never merged. | Copy the missing lines into the hive's work folder, or append them from the agent. |
 
