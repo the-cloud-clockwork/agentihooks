@@ -708,3 +708,40 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
         assert [row["kind"] for row in box.recent("delivery_events", NOW)] == ["merge_queued"]
     finally:
         box.close()
+
+
+def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    agents = [
+        {"runtime_backend": "local", "runtime_target": {"host_id": "root"}},
+        {"runtime_backend": "local", "runtime_target": {}},
+        {"runtime_backend": "local", "runtime_target": {"host_id": "hive-a"}},
+        {"runtime_backend": "kubernetes", "runtime_target": {"host_id": "root"}},
+    ]
+    counts = metrics_swarm.placement_counts(agents)
+    assert counts == {"workstation_agents": 2, "hive_agents": 2}
+    host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 4), counts)
+    assert [host[key] for key in ("workstation_agents", "hive_agents")] == [2, 2]
+    assert [metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 4), {})[key] for key in counts] == [0, 0]
+    assert {"workstation_agents", "hive_agents"} <= {column for column, _ in metrics_swarm.HOST.columns}
+
+
+def test_swarm_review_rounds_ship_as_review_round_events(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
+        folder = tmp_path / "reviews"
+        folder.mkdir()
+        lines = [{"task": "t", "counter": "rounds", "round": round_, "at": NOW + round_} for round_ in (1, 2)]
+        (folder / "rounds.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+        rows = metrics_swarm.read_review_rounds(SLUG, box).rows
+        assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
+            ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
+            ("review round", "tasks/t", NOW + 2, "swarm:t:rounds:2"),
+        ]
+        delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
+        assert [row["kind"] for row in delivery] == ["review_round", "review_round"]
+        assert len({row["event_id"] for row in delivery}) == 2
+    finally:
+        box.close()
