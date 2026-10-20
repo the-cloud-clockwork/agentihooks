@@ -1645,16 +1645,20 @@ A setting takes a positive whole number of minutes; any other value keeps the de
 
 The green, red and unmergeable cases count from the latest of these moments:
 
-- the first tick that saw the case (for red, the last push or the moment the checks turned red),
+- for green and unmergeable, the first tick of an unbroken run of ticks that saw the case; for red, the last push
+  or the moment the checks turned red, whichever is later,
 - the last push to the pull request,
 - the start of the owner's current session on the task,
 - the moment the tick last ended the owner's wait.
 
-The last moment gives a woken owner the full limit. The tick ends a wait on checks, merge or intent in the same
-pass that runs the watchdog, so without it the pass that ended an owner's wait on checks could also reopen the
+A green or unmergeable mark lives only from one pass to the next: a pass that does not see the case, or skips the
+task because something holds it, drops the mark, and the next sighting starts a fresh clock.
+
+The last moment gives a woken owner the full limit. The tick ends the owner's waits, such as a wait on checks,
+merge or intent, in the same pass that runs the watchdog, so without it the pass that ended an owner's wait on checks could also reopen the
 task as green for ten minutes before the owner had a turn to queue it. Only a wait the tick ends records this
 moment, kept for 24 hours; a wait the owner declares or ends itself leaves it unchanged. The owner not live case
-counts from the first tick that saw it and ignores these moments.
+counts from the first tick of an unbroken run that saw it and ignores these moments.
 
 #### What holds the watchdog
 
@@ -1686,7 +1690,7 @@ agentihooks ledger --slug <slug> task set <task> after_release=
 ```
 
 A tag lookup that fails, exits non zero or runs past 30 seconds lists no tags, so every waiting task stays held.
-So that a held task never stays held silently, each tick that finds a task with `after_release` set, no open
+So that a held task never stays held silently, each tick of a swarm that is not stopped that finds a task with `after_release` set, no open
 alert from source `release` and a failed lookup raises one ledger alert to the master:
 
 ```text
@@ -1704,8 +1708,9 @@ two limits after it was sent goes to the operator's Priorities and to ntfy at `A
 (default the Anton alerts topic), with `NTFY_USER` and `NTFY_PASS` for basic authentication. The open alerts show
 as `stall` health findings in `swarm status`.
 
-With the `stall` gate on `log only`, the default, a pull request case past its limit records the would-be reopen
-and agent stop in the swarm gate log and sends the alert only. On `deny` it stops the live owner, reopens the task
+With the `stall` gate on `log only`, the default, a pull request case past its limit records the would-be reopen,
+and the would-be stop when the owner is live, in the swarm gate log and sends the alert only; that alert's action
+reads `alert only; the lane split owns the cause`, the same text the unclaimed case uses. On `deny` it stops the live owner, reopens the task
 to `open` with no claimant, and comments on the task. A task whose fresh ledger row has moved to another state or
 claimant, a green or owner case whose task now awaits a ready merge, and an owner held by an outage are left
 alone. See the `set stall-gate` command for the modes.
@@ -1717,7 +1722,7 @@ alone. See the `set stall-gate` command for the modes.
 | A green pull request held for the next release is reopened | No `after_release` on the task | `task set <task> after_release=<current release>` |
 | A task with `after_release` never resumes after the release | The new tag is not newer, or is not three dotted numbers | Check `git ls-remote --tags --refs origin` in the swarm repository against the task's tag |
 | A `release` alert names held tasks | The tag lookup fails | Fix the repository's `origin` remote or network, then close the alert |
-| The green limit seems to restart | A push, a new owner session or the tick ending the owner's wait restarted the clock | Queue the pull request once its checks pass |
+| The green limit seems to restart | A push, a new owner session, the tick ending the owner's wait, or a pass that skipped or did not see the case restarted the clock | Queue the pull request once its checks pass |
 
 ### Ledger event pass
 
