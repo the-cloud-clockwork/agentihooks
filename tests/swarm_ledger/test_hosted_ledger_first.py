@@ -202,3 +202,13 @@ def test_the_workstation_tick_survives_a_malformed_secret_store_answer(monkeypat
 
     with authority_context.for_tick(Store()):
         assert runtime._ledger_token("demo", "engineer@demo-1") == {}
+
+
+@pytest.mark.parametrize("cached", [{"at": "soon", "answers": False}, {"at": 10**12, "answers": False}, ["junk"]])
+def test_a_corrupt_or_future_probe_answer_is_checked_again(answering, tmp_path, cached):
+    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering})
+    if isinstance(cached, dict):
+        cached = {**cached, "url": answering}
+    (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(cached))
+
+    assert ledger_link.base(environ) == answering

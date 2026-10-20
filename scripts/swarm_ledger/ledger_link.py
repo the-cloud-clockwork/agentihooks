@@ -71,7 +71,9 @@ def answered(url: str, environ=os.environ) -> bool:
         cached = json.loads(path.read_text())
     except (OSError, ValueError):
         cached = {}
-    if isinstance(cached, dict) and cached.get("url") == url and now - cached.get("at", 0) < HOSTED_PROBE_TTL_S:
+    cached = cached if isinstance(cached, dict) else {}
+    at = cached.get("at")
+    if cached.get("url") == url and isinstance(at, int | float) and 0 <= now - at < HOSTED_PROBE_TTL_S:
         return bool(cached.get("answers"))
     answers = serving(HOSTED_PROBE_S, url, environ) is not None
     try:
