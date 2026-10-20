@@ -214,6 +214,18 @@ def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypa
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
+def test_only_master_work_moves_to_the_workstation_herdr_server(setup, monkeypatch):
+    from scripts.swarm import controller
+
+    two_hosts(setup)
+    fenced = hive_controller(setup)
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    assert fenced.placement_refusal("dispatch", {"id": "dispatch"}) == "the workstation hive spawns dispatch work"
+    with pytest.raises(controller.SwarmError, match="the workstation hive spawns dispatch work"):
+        fenced.spawn(setup.config, "dispatch", "dispatch name", {"id": "dispatch"})
+    setup.herdr.spawn.assert_not_called()
+
+
 def host(hive_id: str, ui: str, **fields) -> dict:
     return hive(hive_id, **{"ui": ui, "roles": ["eng"] if ui == "no" else ALL_ROLES, "max_agents": 4, **fields})
 
