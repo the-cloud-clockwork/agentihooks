@@ -92,3 +92,11 @@ join = next(v for v in pod['volumes'] if v['name'] == 'join')
 assert [i['path'] for i in join['secret']['items']] == ['credential', 'ssh/authorized_keys', 'ssh/host_key']
 print('worker hive sshd keys, host key, port and profile: passed')
 PY
+if helm template proof "$chart" --set workers.replicas=1 \
+  --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential \
+  --set workers.ssh.enabled=true --set workers.ssh.port=22 > "$out/port.out" 2> "$out/port.err"; then
+  echo 'a privileged worker hive sshd port was accepted' >&2
+  exit 1
+fi
+grep -q 'workers.ssh.port must be 1024 or higher' "$out/port.err"
+echo 'privileged worker hive sshd port: refused'

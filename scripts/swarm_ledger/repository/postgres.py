@@ -11,6 +11,16 @@ from .sqlite import BEGIN, BEGIN_IMMEDIATE, ROWS_SCHEMA, SCHEMA, TABLES_SQL, Sna
 URL = "AGENTIHOOKS_SWARM_DATABASE_URL"
 WRITER_LOCK = 0x4C454447
 KEPT = 8
+LOCK_WAIT = 10
+LOCK_TRIES = 3
+LOCK_REFUSED = f"the ledger writer lock was not granted in {LOCK_TRIES} waits of {LOCK_WAIT} seconds"
+SESSION = {
+    "options": f"-c lock_timeout={LOCK_WAIT}s -c idle_in_transaction_session_timeout=15s -c statement_timeout=60s",
+    "keepalives": 1,
+    "keepalives_idle": 30,
+    "keepalives_interval": 10,
+    "keepalives_count": 3,
+}
 READ_SNAPSHOT = "SET TRANSACTION ISOLATION LEVEL REPEATABLE READ"
 TABLES = "SELECT table_name FROM information_schema.tables WHERE table_schema=current_schema()"
 STATEMENTS = {
@@ -100,7 +110,7 @@ class Pool:
             if self.idle:
                 return self.idle.pop()
         with mapped():
-            return errors().connect(self.address)
+            return errors().connect(self.address, **SESSION)
 
     def give(self, raw) -> None:
         psycopg2 = errors()
@@ -137,6 +147,8 @@ class Connection:
             raise sqlite3.OperationalError("hosted fences belong to SQLite ledger folders")
         if sql.startswith("PRAGMA"):
             return Empty()
+        if sql == BEGIN_IMMEDIATE:
+            return self.lock()
         with mapped():
             if sql == BEGIN:
                 if self.raw.get_transaction_status() != errors().extensions.TRANSACTION_STATUS_IDLE:
@@ -145,6 +157,22 @@ class Connection:
             cursor = self.raw.cursor()
             cursor.execute(translate(sql, isinstance(parameters, Mapping)), parameters)
         return cursor
+
+    def lock(self) -> object:
+        """The writer lock, asked for again after each wait the server ends at its lock timeout."""
+        psycopg2 = errors()
+        lost = psycopg2.errors.LockNotAvailable
+        with mapped():
+            if self.raw.get_transaction_status() != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+                raise sqlite3.OperationalError("cannot start a transaction within a transaction")
+            for _ in range(LOCK_TRIES):
+                cursor = self.raw.cursor()
+                try:
+                    cursor.execute(translate(BEGIN_IMMEDIATE), ())
+                    return cursor
+                except lost:
+                    self.raw.rollback()
+        raise sqlite3.OperationalError(LOCK_REFUSED)
 
     def executemany(self, sql: str, rows: Iterable) -> None:
         with mapped(), self.raw.cursor() as cursor:

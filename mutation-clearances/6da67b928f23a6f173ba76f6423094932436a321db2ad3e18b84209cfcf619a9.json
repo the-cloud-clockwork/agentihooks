@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/events/publishing.py:scripts.swarm_ledger.events.publishing.x\u01c1Publishing\u01c1run__mutmut_13:c50029dc1023a038ca9dfbee0039142df8e47773218bdcec700f368fc9af46ec": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: stored generations are now_ms << GENERATION_SHIFT or the previous generation + 1, never negative, so -1 and -2 both sit below every stored value and the comparison agrees for every reachable entry."
+  }
+}

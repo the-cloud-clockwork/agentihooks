@@ -31,6 +31,10 @@ agentihooks hive install          # user service that runs agentihooks hive run
 
 - `hive join` writes `~/.agentihooks/hive.env` (mode 0600) with the hive id, the swarm URL, a ledger credential
   and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
+- When the join service trusts a ledger CA (`LEDGER_CA_PEM`, else `ledger-ca.pem` in its home), `hive join` and
+  `hive refresh` write it to the file ledger clients trust: `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in
+  the hive home. A grant without one leaves that file as it is. The Helm hive join service reads the CA from the
+  ledger TLS secret.
 - The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
   The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
   and `--tls-key`, and refuses to serve on a non-loopback address without them. The join endpoint's request,
@@ -324,6 +328,22 @@ agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-ag
 - Engineer, CI, planner and dispatcher work runs on the pods. For the PC to take the dispatcher when every pod is
   full, its roles must list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
 
+## Comparing hive configuration
+
+Every hive runs agents with the workstation's configuration. Each beat keeps the hive's configuration published,
+named without values or host paths: account token names, agentihooks env setting names, the linked bundle and
+profiles, installed Claude rules and skills, managed MCP servers, satisfied bundle dependencies and repo identities.
+The snapshot lives fifteen minutes and is rebuilt once under a minute is left, so dependency checks run rarely.
+
+```bash
+agentihooks hive compare               # this machine's hive is the base
+agentihooks hive compare --base root
+```
+
+The first line is the base with a count per section; every other live hive follows as `equal`, `differs` with one
+`<section> missing|extra <name>` line per difference, or `no configuration published`. The command exits 1 when
+any hive differs or published nothing.
+
 ## Placement
 
 Every launch places its agent on one hive. For a worker role, placement keeps the live hives that take the role,
@@ -350,10 +370,18 @@ When no live hive takes the role:
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
 
+### Account caps on every hive
+
+Quota belongs to the account, so every hive reports the same cap for it. A subscription slot whose own reading is
+missing or older takes the cap and reading of the newest one another live hive published for that account. A hive
+that holds a token but never probes it, such as a worker pod, still shows the account's real cap; interactive and
+api slots keep their own.
+
 ### Master placement
 
-The master follows the same host rule as role placement: it runs only on a live UI hive with the `master` role
-that lists the repo. It is placed in two tiers, each tried in `prefer` order:
+Every master seat, the lead and seats two and up, follows the same host rule as role placement: it runs only on a
+live UI hive with the `master` role that lists the repo. A seat that owns a Kubernetes hive is placed by this rule
+too, never on a worker pod. It is placed in two tiers, each tried in `prefer` order:
 
 1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
 2. A UI hive with the `master` role and a subscription or api slot for that harness.
@@ -429,9 +457,10 @@ Limitations:
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
-login for the master's harness, the hive controller leaves the master to the workstation herdr server. It refuses
-the launch with "the workstation hive spawns master work" followed by the placement reason, and the tick reports
-that line in its actions.
+login for the master's harness, the hive controller leaves the master to the workstation herdr server. It does the
+same when the hive runtime is disabled on the controller. When the controller's own herdr server answers, the
+controller spawns the master there. Otherwise it refuses the launch with "the workstation hive spawns master work"
+followed by the placement reason, and the tick reports that line in its actions.
 
 The `master-headless` health finding marks a master record placed on a headless hive before this rule. The
 `master-fallback-auth` finding marks a master that wanted its interactive login and runs on another route, so phone
@@ -683,6 +712,10 @@ The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (de
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
 below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
 network, so it schedules on any node.
+
+A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
+CI work as Pods while its master, planners and dispatcher stay on the workstation; see
+[Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
 
 ## Ledger Hives panel
 

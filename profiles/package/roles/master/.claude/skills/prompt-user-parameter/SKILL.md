@@ -5,9 +5,8 @@ description: >
   runs a command he must take part in, without the value entering any
   transcript. Writes a throwaway script in a scratch folder, opens it in a
   herdr pane beside the master pane where he types the value hidden, and
-  watches a status file for DONE or ERROR. Runs only when the operator's own
-  prompt this turn says "open pane". Use when he says "open pane and prompt me
-  for it" or "open a pane for the secret".
+  watches a status file for DONE or ERROR. Use when he says "open a pane and
+  prompt me for it" or "open a pane for the secret".
 argument-hint: "<what is needed>"
 ---
 
@@ -17,13 +16,9 @@ The operator types the value into a pane only he sees. The value reaches the
 command that needs it through the environment of a throwaway script and never
 passes through your context, a log, a status file or a command argument.
 
-Run it only when the operator's own prompt this turn, typed in this pane,
-says `open pane` (or `open a pane`, `open the pane`). A PreToolUse guard
-denies `open_param_pane.sh` and `run_param_pane.sh` otherwise, and you never open the pane on your
-own. Without the phrase, add the ask to Priorities with `agentihooks ledger
---slug <slug> --as <name> priority add <item> "<the ask in plain words>"`, or
-write the command in this pane for him to run, one flag per line joined with
-backslashes, and continue other work.
+Run it when the operator asks for the value; no typed phrase and no guard gate
+it. When he is away, add the ask to Priorities with `agentihooks ledger
+--slug <slug> --as <name> priority add <item> "<the ask in plain words>"`.
 
 ## Steps
 
@@ -43,7 +38,7 @@ backslashes, and continue other work.
    long lived process. Use a tool's environment variable or stdin option when
    it has one. The script runs with `bash -e`, so the first failing step ends
    it; an empty value fails `read_secret`.
-3. Only when his prompt this turn says `open pane`, open the pane: `bash <skill dir>/scripts/open_param_pane.sh <script> "<pane title>"`.
+3. Open the pane: `bash <skill dir>/scripts/open_param_pane.sh <script> "<pane title>"`.
    It prints `pane=<id>` and `status=<file>`.
 4. Tell the operator in plain words what to type in the new pane, then start
    a Monitor on the status file that emits its first line and exits when the
@@ -58,7 +53,7 @@ backslashes, and continue other work.
    carries the exit code; the runner deleted the script too, and the pane
    stays open showing the failing step until the operator presses Enter, so
    ask him what it said instead of reading the pane. Write a corrected script
-   and open a new pane only when his next prompt says `open pane` again.
+   and open a new pane.
 
 ## Done when
 

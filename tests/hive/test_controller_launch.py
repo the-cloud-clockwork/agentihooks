@@ -925,13 +925,16 @@ def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lan
     setup.herdr.spawn.assert_not_called()
 
 
-@pytest.mark.parametrize("disabled", [[], ["hive"]])
-def test_original_remote_master_placement_is_kept_when_worker_hive_routing_is_disabled(setup, disabled):
-    from scripts.swarm.controller import FencedRuntime
+@pytest.mark.parametrize("disabled", [[], ["hive"], ["kubernetes"]])
+def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead(setup, monkeypatch, disabled):
+    from scripts.swarm import controller
+    from scripts.swarm.controller import DISABLED, FencedRuntime, SwarmError
     from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.masters import MasterSeats
     from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, Status
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
+    MasterSeats(setup.store.redis).set_count("fixture", 2)
     backend = Mock()
     backend.backend = "kubernetes"
     backend.capabilities = frozenset((Capability.SPAWN,))
@@ -939,23 +942,20 @@ def test_original_remote_master_placement_is_kept_when_worker_hive_routing_is_di
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     task = {"id": "master-2"}
+    refused = (
+        DISABLED.format(backend="hive")
+        if disabled == ["hive"]
+        else "the workstation hive spawns master work: no live hive can run the master with interactive, "
+        "subscription or api authentication"
+    )
+    assert fenced.placement_refusal("master", task) == refused
+    with pytest.raises(SwarmError, match=refused):
+        fenced.spawn(setup.config, "master", "master name", task)
+    backend.spawn.assert_not_called()
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
     assert fenced.placement_refusal("master", task) == ""
-    assert fenced.spawn(setup.config, "master", "master name", task) == Placed("master pane", "claude")
-    request = backend.spawn.call_args.args[0]
-    assert request.lane == "master"
-    assert request.task == {**task, "controller_epoch": setup.held.epoch}
-
-
-def test_original_master_backend_refuses_its_own_disabled_runtime(setup):
-    from scripts.swarm.controller import FencedRuntime
-    from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter
-    from scripts.swarm_v2.runtime.routed import RoutedRuntime
-
-    placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([], disabled=["kubernetes"], placement=placement))
-    fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    assert fenced.placement_refusal("master", {"id": "master-2"}) == "the workstation hive spawns master work"
 
 
 def test_controller_reports_a_placement_wait_for_a_worker_without_a_ui_hive(setup):

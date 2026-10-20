@@ -1,4 +1,21 @@
+import json
+
 from .fragments import encoded
+from .rows import encode
+
+SCALARS = frozenset({str, int, float, bool, type(None)})
+
+
+def thawed(value: object) -> object:
+    """A fresh copy of value with the containers and keys a JSON round trip would give, sharing immutable scalars."""
+    kind = type(value)
+    if kind is list:
+        return [thawed(item) for item in value]
+    if kind is dict and all(type(key) is str for key in value):
+        return {key: thawed(item) for key, item in value.items()}
+    if kind in SCALARS:
+        return value
+    return json.loads(encode(value))
 
 
 class Entry:
@@ -11,3 +28,6 @@ class Entry:
     @property
     def text(self) -> str:
         return encoded(self.fragments) if self._text is None else self._text
+
+    def mutable(self) -> dict:
+        return thawed(self.state)
