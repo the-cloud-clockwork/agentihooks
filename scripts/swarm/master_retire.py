@@ -4,7 +4,7 @@ import json
 import os
 
 from scripts.inbox import exits
-from scripts.inbox.store import CLOSED, InboxStore
+from scripts.inbox.store import CLOSED, InboxError, InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 MINUTES = "AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES"
@@ -51,7 +51,10 @@ def forget(store: RedisStore, slug: str, name: str) -> bool:
     store.redis.hdel(_key(store, slug), name)
     request = json.loads(raw)
     inbox = InboxStore(store.redis, world=request.get("world", ""))
-    item = inbox.get(request["item"])
+    try:
+        item = inbox.get(request["item"])
+    except InboxError:
+        return True
     if item.state not in CLOSED:
         inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
     return True
