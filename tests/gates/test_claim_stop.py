@@ -584,3 +584,41 @@ def test_the_gate_entry_runs_it_by_name():
     from scripts.gates.entry import GATES
 
     assert isinstance(GATES["claim-stop"], ClaimStop)
+
+
+def test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_only(rig):
+    other = URL + "1"
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL], rig.pulls[other] = RED, PENDING
+    on = {"kind": "checks", "target": other}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {other}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    rig.pulls[other] = GREEN
+    assert rig.stop().allowed
+    rig.pulls[other] = RED
+    decision = rig.stop()
+    assert decision.reason.startswith(f"checks failed on {other}: tests (1), lint. Fix")
+    rig.pulls[URL], rig.pulls[other] = PENDING, MERGED
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+
+
+def test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop(rig):
+    run = "https://github.com/o/r/actions/runs/123"
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = RED
+    on = {"kind": "checks", "target": run}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {run}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    assert rig.stop().allowed
+    assert rig.stop().allowed
+    assert rig.task["state"] == "pr"
+
+
+def test_a_checks_wait_on_the_task_pull_request_keeps_grading_it(rig):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = RED
+    on = {"kind": "checks", "target": URL}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {URL}", rig.clock[0], on=on)
+    assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")

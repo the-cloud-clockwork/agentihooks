@@ -1003,3 +1003,29 @@ def test_a_wait_during_a_ledger_outage_still_refuses_the_stop(rig):
     (rig.tree / "new").write_text("new\n")
     wait_on(rig, {"kind": "task", "target": "t2"})
     assert rig.stop().reason == TEMPLATE
+
+
+@pytest.mark.parametrize("target", ["https://github.com/o/r/pull/7", "https://github.com/o/r/pull/8"])
+def test_a_live_merge_wait_on_an_open_pull_request_lets_a_refused_push_stop(rig, target):
+    from scripts.swarm.ledger_events import PullRequest
+
+    rig.ledger.task["pr_url"] = "https://github.com/o/r/pull/7"
+    theirs = refuse_the_push(rig)
+    with_task(rig, "claimed")
+    seen = []
+    rig.gate._github = lambda url: seen.append(url) or PullRequest("OPEN", None, 1, False, True, queued=True)
+    wait_on(rig, {"kind": "merge", "target": target})
+    assert rig.stop().allowed
+    assert seen == [target]
+    assert rig.remote_head() == theirs
+
+
+@pytest.mark.parametrize("state", ["MERGED", "CLOSED", None])
+def test_a_merge_wait_on_a_pull_request_no_longer_open_still_refuses_the_stop(rig, state):
+    from scripts.swarm.ledger_events import PullRequest
+
+    refuse_the_push(rig)
+    with_task(rig, "claimed")
+    rig.gate._github = lambda url: PullRequest(state, None, 1, False, True) if state else None
+    wait_on(rig, {"kind": "merge", "target": "https://github.com/o/r/pull/8"})
+    assert rig.stop().reason == TEMPLATE
