@@ -206,7 +206,6 @@ class HiveLaunch:
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
                 self.end(previous, "hive launch order abandoned")
-                self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:
