@@ -381,7 +381,7 @@ def test_deleting_python_in_the_sessions_own_worktree_of_another_repo_is_allowed
     check({"tool_name": patch_name, "tool_input": tool_input, "cwd": str(launch)})
 
 
-def test_the_worktree_root_is_compared_resolved(tmp_path, launch, monkeypatch):
+def test_a_symlinked_worktree_root_still_matches(tmp_path, launch, monkeypatch):
     own = _repo_worktree(tmp_path / "worktrees", "antoncore", "engineer-323133-2196")
     (tmp_path / "link").symlink_to(tmp_path / "worktrees")
     monkeypatch.setenv("WORKTREE_ROOT", str(tmp_path / "link"))
