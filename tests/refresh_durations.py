@@ -50,7 +50,10 @@ def keep_newest(folder: Path, limit: int, keep: str | None = None) -> None:
 def ci_samples(folder: Path, version: str = "*", run: str = "*") -> list[dict[str, float]]:
     samples = []
     for path in sorted(folder.glob(f"{run}/durations-{version}-*/durations.json")):
-        durations = json.loads(path.read_text())
+        try:
+            durations = json.loads(path.read_text())
+        except ValueError as error:
+            raise ValueError(f"malformed sample file {path}: {error}") from error
         samples.append({re.sub(r"@[^\[\]]*$", "", nodeid): seconds for nodeid, seconds in durations.items()})
     return samples
 
@@ -120,5 +123,38 @@ def main(argv: list[str] | None = None) -> None:
         (_ROOT / name).write_text(json.dumps(durations, indent=4, sort_keys=True) + "\n")
 
 
+def missing_shards(folder: Path, run: str) -> list[str]:
+    def shards(pattern: str) -> set[tuple[str, int]]:
+        found = (re.fullmatch(r"durations-(3\.\d+)-(\d+)", path.parent.name) for path in folder.glob(pattern))
+        return {(match[1], int(match[2])) for match in found if match}
+
+    expected = shards("*/durations-*/durations.json")
+    kept = shards(f"{run}/durations-*/durations.json")
+    return [f"durations-{version}-{shard}" for version, shard in sorted(expected - kept)]
+
+
+def cli(argv: list[str] | None = None) -> None:
+    args = sys.argv[1:] if argv is None else argv
+    try:
+        main(args)
+    except SystemExit as error:
+        if not isinstance(error.code, str):
+            raise
+        cause = error.code
+    except Exception as error:
+        cause = str(error) or type(error).__name__
+    else:
+        return
+    known = argparse.ArgumentParser(add_help=False)
+    known.add_argument("--samples", type=Path)
+    known.add_argument("--ci-run")
+    parsed, _ = known.parse_known_args(args)
+    if parsed.samples and parsed.ci_run and parsed.samples.is_dir():
+        if lost := missing_shards(parsed.samples, parsed.ci_run):
+            cause += f"; run {parsed.ci_run} kept no samples from {', '.join(lost)}"
+    print(f"::error::refresh durations: {' '.join(cause.split())}")
+    raise SystemExit(1)
+
+
 if __name__ == "__main__":
-    main()
+    cli()

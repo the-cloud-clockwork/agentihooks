@@ -4,7 +4,7 @@ import sys
 
 import pytest
 
-from tests import duration_coverage
+from tests import duration_coverage, refresh_durations
 
 pytestmark = pytest.mark.unit
 
@@ -62,3 +62,34 @@ def test_a_malformed_sample_file_is_named(tmp_path, monkeypatch, capsys):
         f"::error::refresh durations: malformed sample file {samples}/12/durations-3.11-1/durations.json: "
     )
     assert line.count("\n") == 1
+
+
+@pytest.mark.parametrize(
+    ("error", "line"),
+    [
+        (RuntimeError(), "RuntimeError"),
+        (RuntimeError("collection\nfailed"), "collection failed"),
+        (SystemExit("run 3 kept no durations"), "run 3 kept no durations"),
+    ],
+)
+def test_every_failure_prints_one_named_line(monkeypatch, capsys, error, line):
+    def fail(argv):
+        raise error
+
+    monkeypatch.setattr(refresh_durations, "main", fail)
+    with pytest.raises(SystemExit) as stopped:
+        refresh_durations.cli(["--ci-run", "3"])
+    assert stopped.value.code == 1
+    assert capsys.readouterr().out == f"::error::refresh durations: {line}\n"
+
+
+def test_a_usage_exit_and_a_success_keep_their_own_outcome(monkeypatch, capsys):
+    monkeypatch.setattr(refresh_durations, "main", lambda argv: None)
+    assert refresh_durations.cli(["--ci-run", "3"]) is None
+    monkeypatch.setattr(
+        refresh_durations, "main", lambda argv: refresh_durations.argparse.ArgumentParser().parse_args(argv)
+    )
+    with pytest.raises(SystemExit) as stopped:
+        refresh_durations.cli(["--unknown"])
+    assert stopped.value.code == 2
+    assert "::error::" not in capsys.readouterr().out
