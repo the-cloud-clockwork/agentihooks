@@ -1,6 +1,6 @@
-from scripts.gates import modes
 import time
 
+from scripts.gates import modes
 from scripts.gates.claims import CAP, GATE, launch_failure, refusal
 from scripts.swarm_ledger.ledger_comments import problems
 
