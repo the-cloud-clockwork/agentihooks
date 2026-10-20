@@ -8,7 +8,7 @@ from difflib import SequenceMatcher
 from functools import cache
 from pathlib import Path
 
-from scripts.ci_cpu_quota import worker_count
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.browser import needs_browser
 from scripts.ci_mutation.scope import discover_changes, graded_green, own_bases, select_tests, test_file
 from scripts.ci_mutation.selection import changed_mutations, file_seconds, part_files, stats_shards
@@ -23,7 +23,7 @@ WORKERS = 4
 
 def shard_workers() -> int:
     quota = os.environ.get("MUTATION_SHARD_CPU_QUOTA")
-    return worker_count(WORKERS, float(quota) if quota else None)
+    return quota_workers(WORKERS, float(quota) if quota else None)
 
 
 def estimate(

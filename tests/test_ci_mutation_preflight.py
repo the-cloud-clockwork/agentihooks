@@ -168,7 +168,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
-    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}"}
+    assert sized["env"] == {"GH_TOKEN": "${{ github.token }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
     from scripts.ci_mutation import plan as planner
     from tests.test_ci_mutation_plan import _project
 

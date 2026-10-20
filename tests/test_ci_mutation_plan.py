@@ -560,19 +560,24 @@ def test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts(tmp_path,
     assert plan_shards({"scripts.sample.x__mutmut_1": 1.0})["workers"] == workers
 
 
-@pytest.mark.parametrize("workflow", ["test.yml", "mutation-preflight.yml"])
-def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota(workflow):
+def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
     import yaml
 
-    jobs = yaml.safe_load((Path(__file__).parents[1] / ".github/workflows" / workflow).read_text())["jobs"]
-    steps = [
-        step
-        for job in jobs.values()
+    planners = (
+        "scripts.ci_mutation.plan ",
+        "scripts.ci_mutation.measured ",
+        "scripts.ci_mutation.replay prepare",
+        "python .refinement-proof/run.py",
+    )
+    steps = {
+        f"{path.name}/{name}/{step.get('name', step['run'])}": step
+        for path in sorted((Path(__file__).parents[1] / ".github/workflows").glob("*.yml"))
+        for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items()
         for step in job.get("steps", [])
-        if any(f"scripts.ci_mutation.{name} " in step.get("run", "") for name in ("plan", "measured"))
-    ]
-    assert steps
-    assert all(step.get("env", {}).get("MUTATION_SHARD_CPU_QUOTA") == "3" for step in steps)
+        if any(planner in step.get("run", "") for planner in planners)
+    }
+    assert len(steps) >= 6
+    assert [key for key, step in steps.items() if step.get("env", {}).get("MUTATION_SHARD_CPU_QUOTA") != "3"] == []
 
 
 def _timed_tests(tmp_path, seconds, marks=None):
