@@ -134,7 +134,7 @@ def test_independent_worker_groups_balance_without_serializing_each_other():
     assert sorted(node for part in parts for node in part) == nodes
 
 
-def test_one_files_xdist_group_stays_on_one_shard_in_collection_order():
+def test_one_files_xdist_group_stays_on_one_shard_with_its_summed_time():
     from tests.shards import assign_nodes
 
     durations = {

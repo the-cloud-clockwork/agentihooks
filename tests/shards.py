@@ -61,7 +61,7 @@ def assign_nodes(
     workers: int,
     sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
-    # A named group's tests in one file share what its first test builds, so they move as one unit in collection order.
+    # A named group's tests in one file reuse what its first test built, which another shard would build again.
     units: dict[str, list[str]] = {}
     for node in durations:
         path = node.split("::", 1)[0]
