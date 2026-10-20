@@ -363,7 +363,7 @@ def _unmergeable(run, row, found, pull):
             return [f"could not dequeue {url} for task {task_id}: {exc}"]
         if result.get("queued") or result.get("state") == "MERGED":
             return [f"dequeue of {url} for task {task_id} awaits confirmation"]
-    if "on" in found and fresh.mergeable != "CONFLICTING":
+    if found.get("on") and fresh.mergeable != "CONFLICTING":
         tries = found.get("recoveries", 0)
         if tries >= QUEUE_TRIES:
             run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=url, task=task_id))
