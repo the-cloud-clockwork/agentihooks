@@ -58,7 +58,7 @@ The tick's own service writes still need `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, ch
 A remote client picks the first that applies:
 
 1. The tick credential `X-Ledger-Tick`, inside a swarm tick that holds the server secret.
-2. `X-Controller-Credential` from `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, when the process has no pinned agent name.
+2. `X-Controller-Credential` from `AGENTIHOOKS_CONTROLLER_CREDENTIAL`, when the process has no pinned agent.
 3. For a pinned agent, `X-Ledger-Token` with `X-Ledger-Agent`. The token is `AGENTIHOOKS_LEDGER_AGENT_TOKEN`; without it, the client derives one from `SWARM_SECRET`; without either, it asks the ledger for a `hive.` token with the hive credential `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` that `agentihooks hive join` writes.
 
 A remote client refuses, before any request:
