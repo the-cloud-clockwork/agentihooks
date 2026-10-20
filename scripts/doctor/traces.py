@@ -104,11 +104,17 @@ def _task_costs(record):
     return costs
 
 
+def _finished(record, task):
+    traced = [t for t in record["traces"] if f"task:{task}" in t["tags"]]
+    return max(o.get("end", 0) for t in traced for o in _turns(t))
+
+
 def task_cost(record: dict, limits: Limits) -> list[Finding]:
     costs = [c for c in _task_costs(record) if c["tokens"]]
+    finished = {c["task"]: _finished(record, c["task"]) for c in costs}
     found = []
     for cost in costs:
-        others = [c["tokens"] for c in costs if c is not cost]
+        others = [c["tokens"] for c in costs if c is not cost and finished[c["task"]] <= finished[cost["task"]]]
         if not others or cost["tokens"] <= limits.task_cost_ratio * median(others):
             continue
         found.append(
