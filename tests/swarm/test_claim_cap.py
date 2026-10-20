@@ -157,7 +157,7 @@ def test_a_crashed_cap_lets_the_claim_through_and_counts_a_fail_open_row(store, 
         (1_792_440_001_000, "2026-10-20 00:00:01 UTC: no space left on device"),
     ],
 )
-def test_cap_report_dates_only_failures_within_the_counted_claims(store, failure_at, expected):
+def test_cap_report_dates_only_failures_within_the_counted_claims(store, failure_at, expected):  # noqa: F811
     ledger, runtime = CommentingLedger([{"id": "t1"}]), FakeRuntime()
     for name, at in (
         ("previous", 1_792_008_000_000),
