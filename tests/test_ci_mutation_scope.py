@@ -577,6 +577,67 @@ def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_p
     assert calls[checked + 2 :] == jobs_listed
 
 
+_INLINE = "Mutate the only shard in the statistics job"
+
+
+@pytest.mark.parametrize(
+    ("jobs", "expected"),
+    [
+        (
+            [{"name": "mutation (0)", "conclusion": "success"}, {"name": "mutation (1)", "conclusion": "failure"}],
+            ["success", "failure"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "success",
+                    "steps": [{"name": _INLINE, "conclusion": "success"}],
+                },
+                {"name": "mutation", "conclusion": "skipped"},
+            ],
+            ["success"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "failure",
+                    "steps": [{"name": _INLINE, "conclusion": "failure"}],
+                }
+            ],
+            ["failure"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "success",
+                    "steps": [{"name": _INLINE, "conclusion": "skipped"}],
+                },
+                {"name": "mutation (0)", "conclusion": "success"},
+            ],
+            ["success"],
+        ),
+        (
+            [
+                {"name": "mutation-stats (1)", "conclusion": "success"},
+                {"name": "mutation-plan", "conclusion": "success"},
+            ],
+            [],
+        ),
+    ],
+)
+def test_pull_request_grading_counts_the_shard_mutated_inside_the_statistics_job(jobs, expected):
+    import json
+    import subprocess
+
+    from scripts.ci_mutation import scope
+
+    found = subprocess.run(["jq", "-r", scope.SHARDS], input=json.dumps({"jobs": jobs}), capture_output=True, text=True)
+    assert (found.returncode, found.stdout.split()) == (0, expected), found.stderr
+
+
 @pytest.mark.parametrize("helper", ["oracle.py", "transitive", "fixture", "other.py", "dev.py"])
 def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_their_tests_import(tmp_path, helper):
     from scripts.ci_mutation.scope import discover_changes

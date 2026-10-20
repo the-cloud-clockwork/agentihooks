@@ -1329,6 +1329,30 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}
 
 
+def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
+    jobs = _mutation_workflow()["jobs"]
+    stats, mutation = jobs["mutation-stats"], jobs["mutation"]
+    single = "needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]'"
+    assert f"!({single})" in mutation["if"]
+    assert jobs["gate-required"]["steps"][0]["env"]["INLINE"] == "${{ " + single + " }}"
+    names = [step.get("name") for step in stats["steps"]]
+    mutate = stats["steps"][names.index("Mutate the only shard in the statistics job")]
+    assert mutate["id"] == "mutate"
+    assert mutate["if"] == f"{single} && needs.mutation-plan.outputs.forwarded != 'true'"
+    assert mutate["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
+    assert mutate["run"] == (
+        'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats'
+    )
+    assert names.index("Upload mutation stats part") < names.index(mutate["name"])
+    report = stats["steps"][names.index("Upload complete inline mutation evidence")]
+    assert report["if"] == "always() && steps.mutate.outcome != 'skipped'"
+    assert report["with"]["name"] == "mutation-report-0"
+    assert (
+        report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
+    assert names.index(mutate["name"]) < names.index(report["name"])
+
+
 def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader():
     jobs = _mutation_workflow()["jobs"]
     plan, stats, mutation = jobs["mutation-plan"], jobs["mutation-stats"], jobs["mutation"]
