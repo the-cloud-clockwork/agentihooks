@@ -256,6 +256,7 @@ def _live_group_members(pgid: int) -> list[str]:
     return members
 
 
+@pytest.mark.wall_clock
 @pytest.mark.parametrize("script", ["sleep 30 &\nwait\n", "sleep 30 &\nexit 0\n"], ids=["slow", "leaves-a-child"])
 def test_session_start_kick_leaves_no_check_process_behind(tmp_path, monkeypatch, script):
     exe = tmp_path / "agentihooks"
