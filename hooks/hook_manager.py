@@ -1125,6 +1125,8 @@ def _inject_after_tool(payload: dict) -> None:
     session_id, cwd = payload.get("session_id", ""), payload.get("cwd", "")
     _inject_inbox(session_id, cwd)
     _inject_refocus(session_id, "tool")
+    for context in _wait_nudge_blocks(payload):
+        inject_context(context, also_log=False, skip_compression=True, kind="refocus")
     quota = posttool_context(session_id, payload.get("tool_name"), cwd)
     if quota:
         inject_context(quota, also_log=False, skip_compression=True, kind="alert")

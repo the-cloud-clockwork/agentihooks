@@ -34,31 +34,30 @@ def test_a_refresh_missing_one_shard_names_it_in_one_error_line(tmp_path, monkey
     assert _refresh(monkeypatch, samples, ["t.py::a", "t.py::b"]) == 1
     assert capsys.readouterr().out == (
         "::error::refresh durations: 1 of 2 tests have no stored duration;"
-        " run 12 kept no samples from durations-3.11-2, durations-3.12-2\n"
+        " run 12 kept no samples from durations-3.12-2\n"
     )
 
 
-def test_a_run_that_lost_a_whole_version_names_its_shards(tmp_path, monkeypatch, capsys):
+def test_a_run_that_lost_every_shard_names_them_all(tmp_path, monkeypatch, capsys):
     samples = tmp_path / "samples"
-    for shard in range(1, refresh_durations.SHARDS + 1):
-        _shard(samples, "12", "3.12", shard, {"t.py::a@g": 1.0})
+    samples.mkdir()
 
     assert _refresh(monkeypatch, samples, ["t.py::a"]) == 1
-    lost = ", ".join(f"durations-3.11-{shard}" for shard in range(1, 13))
+    lost = ", ".join(f"durations-3.12-{shard}" for shard in range(1, refresh_durations.SHARDS + 1))
     assert capsys.readouterr().out == (
-        f"::error::refresh durations: run 12 kept no durations for Python 3.11; run 12 kept no samples from {lost}\n"
+        f"::error::refresh durations: run 12 kept no durations for Python 3.12; run 12 kept no samples from {lost}\n"
     )
 
 
 def test_a_malformed_sample_file_is_named(tmp_path, monkeypatch, capsys):
     samples = tmp_path / "samples"
-    _shard(samples, "12", "3.11", 1, "{not json")
-    _shard(samples, "12", "3.12", 1, {"t.py::a@g": 1.0})
+    _shard(samples, "12", "3.12", 1, "{not json")
+    _shard(samples, "12", "3.12", 2, {"t.py::a@g": 1.0})
 
     assert _refresh(monkeypatch, samples, ["t.py::a"]) == 1
     line = capsys.readouterr().out
     assert line.startswith(
-        f"::error::refresh durations: malformed sample file {samples}/12/durations-3.11-1/durations.json: "
+        f"::error::refresh durations: malformed sample file {samples}/12/durations-3.12-1/durations.json: "
     )
     assert line.count("\n") == 1
 

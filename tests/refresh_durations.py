@@ -12,7 +12,7 @@ from tests.duration_coverage import collected_tests, validate_coverage
 
 _ROOT = Path(__file__).parent.parent
 RUNS = 5
-VERSIONS = ("3.11", "3.12")
+VERSIONS = ("3.12",)
 SHARDS = 12
 ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-3.12-1&per_page=100"
 
@@ -113,7 +113,7 @@ def main(argv: list[str] | None = None) -> None:
                 run_ids = [args.ci_run] if args.ci_run else []
                 run_ids = list(dict.fromkeys([*run_ids, *(ci_run_ids(args.ci) if args.ci else [])]))[: args.ci or 1]
                 ci_download(run_ids, folder)
-            for version in ("3.11", "3.12"):
+            for version in VERSIONS:
                 candidates[f".test_durations-{version}"] = ci_medians(folder, version, args.ci_run, collected)
                 candidates[f".test_durations-slowest-{version}"] = ci_medians(
                     folder, version, args.ci_run, collected, slowest=True

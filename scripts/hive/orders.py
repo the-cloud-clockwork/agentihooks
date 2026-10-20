@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field, replace
 from typing import TYPE_CHECKING
 
 from scripts.hive import registry
-from scripts.swarm import lease, prompt, reaper
+from scripts.swarm import launch_check, lease, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
@@ -330,7 +330,13 @@ class Consumer:
             "pane_id": placed.pane_id,
             "model": placed.model,
             "effort": placed.effort,
-            "profile_decision": placed.profile_decision,
+            "profile_decision": {
+                **placed.profile_decision,
+                launch_check.HOST_OVERLAYS: launch_check.declared(order.profile, placed.overlays),
+            },
+            "launched_at": placed.launched_at,
+            "launch_timings": placed.launch_timings,
+            "overlays": list(placed.overlays),
         }
         return Ack("live", target, "", execution)
 

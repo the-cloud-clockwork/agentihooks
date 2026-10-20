@@ -22,7 +22,7 @@ PATCH = {
         "name": {"type": "string", "minLength": 1, "maxLength": 200},
         "ui": FLAG,
         "ephemeral": FLAG,
-        "roles": {"type": "array", "items": {"enum": list(registry.ROLES)}},
+        "excluded": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "prefer": {"type": "object", "additionalProperties": {"type": "integer"}},
         "max_agents": {"type": "integer"},
     },
@@ -33,7 +33,7 @@ MISSING = "resource_missing"
 def pairs(payload: dict) -> list[str]:
     found = []
     for field, value in payload.items():
-        if field == "roles":
+        if field == "excluded":
             value = ",".join(value)
         elif field == "prefer":
             value = ",".join(f"{role}:{rank}" for role, rank in value.items())

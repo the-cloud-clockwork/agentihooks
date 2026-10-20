@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 [![Docs](https://img.shields.io/badge/docs-GitHub%20Pages-blue)](https://the-cloud-clockwork.github.io/agentihooks/)
 
 AgentiHooks is a harness for [Claude Code](https://code.claude.com/docs) and
@@ -32,7 +32,7 @@ Full documentation: [the-cloud-clockwork.github.io/agentihooks](https://the-clou
 
 ## Quick start
 
-Requirements: Python 3.11 or later, [uv](https://docs.astral.sh/uv/), and Claude
+Requirements: Python 3.12 or later, [uv](https://docs.astral.sh/uv/), and Claude
 Code or Codex. A swarm also needs Docker with the Compose plugin and
 [herdr](https://herdr.dev), the terminal runtime the swarm
 opens its agent panes in.
@@ -233,10 +233,10 @@ panes on the same host. Credentials come from any mix of:
 
 ### Several machines
 
-A small company adds machines to one stack as hives. On the stack host,
-`agentihooks hive invite <name>` prints a one time join code and the Compose
-`join` profile runs the TLS join endpoint. On each member,
-`agentihooks hive join <url> <code>` stores its credentials and
+A small company adds machines to one stack as hives. On the UI hive,
+`agentihooks hive add <ssh target> --label <name> --url <hive endpoint>` saves
+the machine in herdr with `herdr machine add` and delivers its member
+credentials over SSH; headless hives add none. On each member,
 `agentihooks hive install` runs the hive service, which reports the machine's
 accounts and repositories and opens the agents the controller places on it.
 

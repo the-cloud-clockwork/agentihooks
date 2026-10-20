@@ -1,10 +1,8 @@
 import argparse
-import functools
 import hashlib
 import json
 import re
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 from tests.shard_budget import step_seconds
@@ -22,7 +20,6 @@ STEP_SECONDS = step_seconds("unit")
 STARTUP_SECONDS = 30
 SLOWDOWN = 1.5
 MAX_SHARDS = 30
-SHARD_FLOORS = {"3.11": 6, "3.12": 12}
 
 
 def matrix(root: Path, versions: dict[str, dict[str, float]], counts: dict[str, int] | None = None) -> list[dict]:
@@ -81,14 +78,14 @@ def _estimates(durations: dict[str, float], collected: list[str]) -> dict[str, f
 def _combine(argv: list[str]) -> None:
     parser = argparse.ArgumentParser()
     source = parser.add_mutually_exclusive_group(required=True)
-    source.add_argument("--plans", nargs=2)
+    source.add_argument("--plans", nargs="+")
     source.add_argument("--from-output", type=Path)
     parser.add_argument("--root", type=Path)
     parser.add_argument("--inputs", type=Path)
     args = parser.parse_args(argv)
     if args.from_output:
         outputs = dict(line.split("=", 1) for line in args.from_output.read_text().splitlines())
-        fragments = [outputs["queue_311"], outputs["queue_312"]]
+        fragments = [outputs["queue_312"]]
     else:
         fragments = args.plans
     plan = [leg for fragment in fragments for leg in json.loads("[" + fragment + "]")]
@@ -97,12 +94,7 @@ def _combine(argv: list[str]) -> None:
         if not (args.from_output and args.root and args.inputs):
             raise SystemExit(f"{len(plan)} queue jobs exceed the pool of {MAX_SHARDS}")
         plan = _capped(plan, args.root, args.inputs)
-        args.from_output.write_text(
-            "".join(
-                f"queue_{version.replace('.', '')}={json.dumps([leg for leg in plan if leg['python-version'] == version])[1:-1]}\n"
-                for version in ("3.11", "3.12")
-            )
-        )
+        args.from_output.write_text(f"queue_312={json.dumps(plan)[1:-1]}\n")
     peak = max(leg["predicted_seconds"] for leg in plan)
     if capped and peak >= STEP_SECONDS:
         print(f"::warning::The capped queue plan predicts {peak:.1f}s, over {STEP_SECONDS}s of the step timeout")
@@ -114,30 +106,10 @@ def _combine(argv: list[str]) -> None:
 def _capped(plan: list[dict], root: Path, inputs: Path) -> list[dict]:
     needed = {leg["python-version"]: leg["total"] for leg in plan}
     versions = {version: json.loads((inputs / version / ".test_durations").read_text()) for version in needed}
-    files = discover_test_files(root)
-    grouped = grouped_files(root, files)
-    sizes = source_sizes(root, files)
-
-    @functools.cache
-    def predict(version: str, count: int) -> float:
-        return _predicted(versions[version], count, grouped, sizes)
-
-    counts = _balanced(list(needed), predict)
     print(
-        f"::warning::{sum(needed.values())} queue jobs exceed the pool of {MAX_SHARDS}; capped "
-        + " and ".join(f"Python {version} at {counts[version]}" for version in needed)
-        + " shards"
+        f"::warning::{sum(needed.values())} queue jobs exceed the pool of {MAX_SHARDS}; capped at {MAX_SHARDS} shards"
     )
-    return matrix(root, versions, counts)
-
-
-def _balanced(versions: list[str], predict: Callable[[str, int], float]) -> dict[str, int]:
-    first, second = versions
-    splits = (
-        {first: count, second: MAX_SHARDS - count}
-        for count in range(SHARD_FLOORS[first], MAX_SHARDS - SHARD_FLOORS[second] + 1)
-    )
-    return min(splits, key=lambda counts: max(predict(*leg) for leg in counts.items()))
+    return matrix(root, versions, dict.fromkeys(needed, MAX_SHARDS))
 
 
 def main(argv: list[str] | None = None) -> None:

@@ -377,21 +377,40 @@ def _codex_answers(resp: Any) -> Any:
 # Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
 _EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
+_JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"?', re.DOTALL)
+_JS_ESCAPE = re.compile(r"\\(.)", re.DOTALL)
+_JSON_KEPT_ESCAPES = '"\\/bfnrtux0123456789'
+_JS_ESCAPE_TEXT = {"v": "\\u000b", "\n": ""}
 _ROLLOUT_TAIL_BYTES = 1 << 20
 
 
-def _exec_calls(program: str) -> list[dict[str, Any]]:
-    decoder = json.JSONDecoder()
-    calls = []
-    for start in _EXEC_CALL.finditer(program):
-        fields: dict[str, Any] = {}
-        pos = start.end()
-        while field := _EXEC_FIELD.match(program, pos):
-            pos = field.end()
-            if program.startswith('"', pos):
-                fields[field.group(1)], pos = decoder.raw_decode(program, pos)
-        calls.append(fields)
-    return calls
+def exec_calls(program: str) -> list[dict[str, Any]]:
+    return [_exec_fields(program, start.end()) for start in _EXEC_CALL.finditer(program)]
+
+
+def _exec_fields(program: str, pos: int) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    while field := _EXEC_FIELD.match(program, pos):
+        pos = field.end()
+        if program.startswith('"', pos):
+            text = _JS_STRING.match(program, pos)
+            pos = text.end()
+            fields[field.group(1)] = _js_string(text.group())
+    return fields
+
+
+def _js_string(literal: str) -> str | None:
+    try:
+        return json.loads(_JS_ESCAPE.sub(_json_escape, literal))
+    except ValueError:
+        return None
+
+
+def _json_escape(match: re.Match[str]) -> str:
+    char = match.group(1)
+    if char in _JSON_KEPT_ESCAPES:
+        return match.group()
+    return _JS_ESCAPE_TEXT.get(char, char)
 
 
 def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:
@@ -405,7 +424,7 @@ def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:
         except (ValueError, KeyError, TypeError):
             continue
         if isinstance(item, dict) and item.get("type") == "custom_tool_call" and item.get("name") == "exec":
-            return _exec_calls(str(item.get("input")))
+            return exec_calls(str(item.get("input")))
     return []
 
 
@@ -413,6 +432,8 @@ def _codex_workdir(transcript: str, command: str) -> str:
     try:
         calls = _last_exec_calls(transcript)
     except (OSError, ValueError):
+        return ""
+    if any(None in call.values() for call in calls):
         return ""
     workdirs = {call.get("workdir") for call in calls if call.get("cmd") == command}
     return (workdirs.pop() or "") if len(workdirs) == 1 else ""

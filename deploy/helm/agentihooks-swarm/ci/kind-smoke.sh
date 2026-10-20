@@ -22,6 +22,7 @@ if [[ -n ${KIND_LAYER_CACHE:-} ]]; then
 fi
 python3 tests/kind_request.py
 python3 tests/chart_github_auth.py "$chart"
+python3 tests/chart_hive_home.py "$chart"
 
 finish() {
   status=$?

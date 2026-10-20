@@ -134,12 +134,7 @@ class HiveLaunch:
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
-        if (
-            role in registry.UI_ROLES
-            and lane != "master"
-            and not any(hive["ui"] == "yes" and registry.live(hive, now) for hive in hives)
-        ):
-            return self._record_wait(lane, task, placement.Wait(placement.NO_UI_HIVE))
+        hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
             return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"))
@@ -178,7 +173,7 @@ class HiveLaunch:
         ]
         selected = placement.place_master("claude", "", config.repo, available, now)
         if isinstance(selected, placement.Wait):
-            return selected if hives else placement.Wait(placement.NO_UI_HIVE)
+            return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
         if selected.route_kind == "interactive":
             account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:
@@ -325,6 +320,9 @@ class HiveLaunch:
             execution=agent,
             route_kind=agent.route_kind,
             desired_route_kind=agent.desired_route_kind if agent.lane == "master" else None,
+            launched_at=agent.launched_at,
+            overlays=agent.overlays,
+            launch_timings=agent.launch_timings,
         )
         return Outcome("spawn", Status.OK, HIVE, placed)
 
@@ -346,6 +344,9 @@ class HiveLaunch:
             model=ack.execution.get("model", agent.model),
             effort=ack.execution.get("effort", agent.effort),
             profile_decision={**decision, **kept},
+            launched_at=ack.execution.get("launched_at", agent.launched_at),
+            launch_timings=ack.execution.get("launch_timings", agent.launch_timings),
+            overlays=ack.execution.get("overlays", agent.overlays),
         )
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.store.execution_registry.update(self.slug, live)

@@ -19,6 +19,10 @@ from scripts.swarm.store import SwarmError
 KINDS = ("checks", "merge", "reply", "task", "mutation", "intent")
 BARE_MAX_MINUTES = 60
 CHECKED_MINUTES = 12 * 60
+FINISH_TURN = (
+    "finish the current turn now unless you have independent work; do not sleep or poll, "
+    "the swarm tick ends this wait and sends your next prompt"
+)
 FRESH_MS = 5 * 60_000
 TASK_ENDS = ("done", "blocked")
 SENDER = "swarm"

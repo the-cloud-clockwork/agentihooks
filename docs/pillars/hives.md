@@ -9,50 +9,64 @@ permalink: /docs/pillars/hives/
 {: .no_toc }
 
 A hive is one machine that runs swarm agents: a workstation, a VM or a Kubernetes pod. Each hive joins the swarm
-once, beats every fifteen seconds, and takes the roles its settings allow.
+once, beats every fifteen seconds, and takes every agent type its `excluded` setting allows.
 
 1. TOC
 {:toc}
 
 ---
 
-## Joining a hive
+## Adding a machine to a hive
 
-The swarm host mints a one time code; the new machine exchanges it for its own credentials.
+A machine joins a hive only through the UI hive: a UI hive adds the machine and delivers its credentials to it
+over SSH. A headless hive cannot add one.
 
 ```bash
-# On the swarm host: a code valid for fifteen minutes
-agentihooks hive invite lab-vm
+# On the UI hive
+agentihooks hive add ssh://worker@lab-vm:22 --label lab-vm \
+  --url https://swarm.example.internal:8770/hive/refresh
 
-# On the new machine
-agentihooks hive join https://swarm.example.internal:8770 <code>
+# On the new machine, once hive add has delivered its hive.env
 agentihooks hive install          # user service that runs agentihooks hive run
 ```
 
-- `hive join` writes `~/.agentihooks/hive.env` (mode 0600) with the hive id, the swarm URL, a ledger credential
-  and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
-- When the join service trusts a ledger CA (`LEDGER_CA_PEM`, else `ledger-ca.pem` in its home), `hive join` and
-  `hive refresh` write it to the file ledger clients trust: `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in
-  the hive home. A grant without one leaves that file as it is. The Helm hive join service reads the CA from the
-  ledger TLS secret.
-- The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
+- `hive add <ssh target> --label <name> --url <url> [--redis-url URL]` refuses unless the local hive record has
+  `ui=yes`, with `hive add refused: hive <id> is headless; only a UI hive adds machines`. On a UI hive it runs
+  `herdr machine add --label <name> --remote-session default <target>` (300 second timeout) unless
+  `herdr machine list --json` already holds that target, so a rerun only redelivers the credential; it mints a hive member
+  named after the label, and delivers it: `ssh -o BatchMode=yes <target>` (60 second timeout) writes the member's
+  `hive.env` (mode 0600) into `${AGENTIHOOKS_HOME:-$HOME/.agentihooks}/hive.env` on the remote machine. If delivery
+  fails, the minted member is revoked and the command exits 1. On success it prints
+  `added <target> to herdr as <label>; its hive member is <id>`.
+- `--url` is this hive's refresh endpoint as the new machine reaches it, saved into the delivered `hive.env`.
+  A refusal prints `hive add refused: <reason>`, such as `herdr exited 1: <stderr>`, `ssh exited 255: <stderr>`
+  or `herdr failed (<error>)`.
+- The delivered `hive.env` carries the hive id, the hive URL, a ledger credential and a Redis URL for the hive's
+  own Redis user: `AGENTIHOOKS_HIVE_ID`, `AGENTIHOOKS_HIVE_URL`, `AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL` and
+  `AGENTIHOOKS_HIVE_REDIS_URL`. `agentihooks hive refresh` posts to the URL saved there. The hive URL must be https
+  unless it is loopback.
+- When the hive endpoint trusts a ledger CA (`LEDGER_CA_PEM`, else `ledger-ca.pem` in its home), `hive refresh`
+  writes it to the file ledger clients trust: `LEDGER_CA_FILE` when set, else `ledger-ca.pem` in the hive home.
+  A grant without one leaves that file as it is. The Helm hive endpoint reads the CA from the ledger TLS secret.
+- The hive endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`.
   The Compose service always serves TLS from `SWARM_TLS_DIR`; bare `hive serve` serves TLS only with `--tls-cert`
-  and `--tls-key`, and refuses to serve on a non-loopback address without them. The join endpoint's request,
-  handler and Redis time limits, and the 503 it answers when Redis does not reply, are under
-  [Join service limits](#join-service-limits).
+  and `--tls-key`, and refuses to serve on a non-loopback address without them. It serves only
+  `POST /hive/refresh`; the endpoint's request, handler and Redis time limits, and the 503 it answers when Redis
+  does not reply, are under [Hive endpoint limits](#hive-endpoint-limits).
 - Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys;
   [Member keys](#member-keys) lists what lives there.
   A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
   records the execution as working, with the hive's process target, pane, model and effort.
-  Invites and credentials sit outside what a member can read.
+  Credentials sit outside what a member can read.
 - `hive install` writes and enables the `agentihooks-hive` user service, which runs `hive run` and restarts five
   seconds after any exit. `hive run` publishes sessions, quota, slots and repos every fifteen seconds.
 - `agentihooks hive refresh` mints a new Redis credential; `agentihooks hive revoke <id>` deletes a member's
   ledger credential and Redis user.
-- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, roles and max agents.
+- `agentihooks hive list` prints one line per hive: id, `live` or `stale`, ui, max agents and excluded (`none` when
+  empty).
   `agentihooks hive show <id>` prints the full record as JSON.
 
-A Kubernetes worker pod joins the same way from its entrypoint; see
+A Kubernetes worker pod joins the same way, waiting for `hive add` to deliver its credential; see
 [Worker hives in Kubernetes](#worker-hives-in-kubernetes).
 
 ## Repos and checkouts
@@ -80,11 +94,11 @@ Placement drops a hive whose list lacks the task's repo, with "no hive for `<rol
 When a launch names the repo by origin identity, the hive starts the agent in its own checkout with that origin,
 the first by path when it holds several. A repo given as a path launches in that path.
 
-## Join service limits
+## Hive endpoint limits
 
-`agentihooks hive serve` answers `POST /hive/join` (a one time code for credentials) and `POST /hive/refresh` (a
-ledger credential for a new Redis password) on one thread per request. Every limit in this table is a constant in
-the service; no flag or environment variable changes one.
+`agentihooks hive serve` answers `POST /hive/refresh` (a ledger credential for a new Redis password) on one thread
+per request; any other path answers 404, like any unknown path. Every limit in this table is a constant in the
+service; no flag or environment variable changes one.
 
 | Limit | Value | Effect |
 |---|---|---|
@@ -96,7 +110,7 @@ the service; no flag or environment variable changes one.
 
 The request deadline does not interrupt a handler waiting on Redis, which holds a separate connection, so the
 Redis client's own timeout is what frees a handler while Redis stalls. The swarm Redis client reads with a
-ten-second timeout; the join service lowers it to five seconds. A stalled call then raises after five seconds, the
+ten-second timeout; the hive endpoint lowers it to five seconds. A stalled call then raises after five seconds, the
 handler answers 503 and its slot is free for the next request.
 
 The service applies the bound when `agentihooks hive serve` builds the server. It sets the socket timeout on the
@@ -110,36 +124,26 @@ seconds.
 
 | Status | Body `error` | Cause |
 |---|---|---|
-| 200 | none | The code or credential was accepted; the body carries the grant. |
-| 400 | `the body must be a JSON object with a string code` (`string ledger_credential` on refresh) | The body is missing, over 4096 bytes, not JSON, or lacks that string field. |
-| 403 | the refusal reason, such as `invite code is invalid, expired or already used` | The code or credential is not valid, or Redis returned an error other than a timeout, a lost connection or a refused login while the service wrote or refreshed the member. |
-| 404 | `not found` | The path is not `/hive/join` or `/hive/refresh`. |
+| 200 | none | The credential was accepted; the body carries the grant. |
+| 400 | `the body must be a JSON object with a string ledger_credential` | The body is missing, over 4096 bytes, not JSON, or lacks that string field. |
+| 403 | the refusal reason, such as `the ledger credential belongs to no hive member` | The credential is not valid, or Redis returned an error other than a timeout, a lost connection or a refused login while the service refreshed the member. |
+| 404 | `not found` | The path is not `/hive/refresh`. |
 | 503 | `the hive Redis did not answer; try again` | A Redis call timed out, the connection to Redis was refused or dropped, or Redis refused the service's own login (`WRONGPASS`, `NOAUTH`). |
 
 The 503 text is fixed and carries no Redis detail. The service writes no request log, so for an answered request the
 client's reply is the only record.
 
-The first Redis call of a join, which deletes the invite, sits outside the 403 handling. A Redis error there other
-than a timeout, a lost connection or a refused login, such as an access control denial (`NOPERM`), gets no answer:
-the service prints a traceback to its standard error and closes the connection, and `hive join` reports the hive as
-unreachable.
-
 ### What a client sees
 
 ```text
-$ agentihooks hive join https://swarm.example.internal:8770 <code>
-hive join refused: the hive Redis did not answer; try again
-
 $ agentihooks hive refresh
 hive refresh refused: the hive Redis did not answer; try again
 ```
 
-Both commands exit 1. The bound is per Redis call. When Redis stalls after the invite was deleted, a join spends one
-timeout on writing the member and a second on removing it, about ten seconds, which is as long as the client waits. The
-client may then report the timeout instead of the 503:
+The command exits 1. The bound is per Redis call. The client may report the timeout instead of the 503:
 
 ```text
-hive join refused: the hive at https://swarm.example.internal:8770 is unreachable (timed out)
+hive refresh refused: the hive at https://swarm.example.internal:8770 is unreachable (timed out)
 ```
 
 A hive whose own Redis credential was refused refreshes it through this service. When the service answers 503, the
@@ -150,31 +154,30 @@ refusals. This error comes from the swarm's `redis_client()` helper, so commands
 
 ### Check the bound against a live service
 
-A made-up code reaches Redis through the service without consuming a real invite. Add `--cacert` for a private
-certificate authority.
+A made-up credential reaches Redis through the service without touching a real member. Add `--cacert` for a
+private certificate authority.
 
 ```bash
 curl -sS -m 15 -w '\nstatus %{http_code} in %{time_total}s\n' \
-  -d '{"code":"not-a-real-code"}' https://swarm.example.internal:8770/hive/join
+  -d '{"ledger_credential": "not-a-real-credential"}' https://swarm.example.internal:8770/hive/refresh
 ```
 
 | Redis state | Output |
 |---|---|
-| Answering | `{"error": "invite code is invalid, expired or already used"}` and `status 403` at once |
+| Answering | `{"error": "the ledger credential belongs to no hive member"}` and `status 403` at once |
 | Accepting the connection, never replying | `{"error": "the hive Redis did not answer; try again"}` and `status 503` after about 5 seconds |
 
-The CI test `test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound` runs both routes
+The CI test `test_a_request_stalled_inside_redis_answers_and_frees_its_slot_within_the_bound` runs this route
 against a listener that accepts connections and never replies, with one handler slot and a Redis timeout of one
-second: each answers 503 and the slot is free within twice that timeout.
+second: it answers 503 and the slot is free within twice that timeout.
 
-### Join service troubleshooting
+### Hive endpoint troubleshooting
 
 | Symptom | Reading | Action |
 |---|---|---|
-| `hive join` answers 503 or reports the hive unreachable, then the same code answers `invite code is invalid, expired or already used` | The service deletes the invite with its first Redis call, so a call that Redis applied before the timeout, or a later call that failed, leaves the code used. On a Redis error it tries to remove the partly created member. | Run `agentihooks hive invite <name>` on the swarm host for a new code. |
 | `hive refresh` answers 503 | The refresh did not complete, or completed without the reply reaching the client. | Run `agentihooks hive refresh` again. Each success replaces the previous Redis password, and the command takes a per-host lock so two callers do not retire each other's password. |
-| Every join and refresh answers 503 | Redis is stalled, unreachable or refusing the service's connection. | From the swarm host, run `agentihooks hive list`. It opens its own Redis connection with a 3-second connect and 10-second read timeout, so an error or a pause there points at Redis and not at the join service. Fix Redis, then repeat the request. |
-| 403 text `Redis refused the new member (...)` or `Redis refused the refreshed member (...)` | Redis returned an error other than a timeout, a lost connection or a refused login; see Answers. | Read the detail in the message. |
+| Every refresh answers 503 | Redis is stalled, unreachable or refusing the service's connection. | From the swarm host, run `agentihooks hive list`. It opens its own Redis connection with a 3-second connect and 10-second read timeout, so an error or a pause there points at Redis and not at the hive endpoint. Fix Redis, then repeat the request. |
+| 403 text `Redis refused the refreshed member (...)` | Redis returned an error other than a timeout, a lost connection or a refused login; see Answers. | Read the detail in the message. |
 
 ## Member keys
 
@@ -201,7 +204,7 @@ by Redis with `NOPERM`. So every piece of state a member process writes lives be
 ### Which keys a process uses
 
 A process counts as the member only while it talks Redis as that member: `AGENTIHOOKS_HIVE_ID` is set and the
-Redis URL it resolves is `AGENTIHOOKS_HIVE_REDIS_URL`. `hive join` writes both to `hive.env`; a process resolves the
+Redis URL it resolves is `AGENTIHOOKS_HIVE_REDIS_URL`. `hive add` delivers both in `hive.env`; a process resolves the
 hive Redis URL only when `AGENTIHOOKS_DEPLOYMENT` is `compose` or `distributed`. Any other process, the
 controller included, uses the controller keys under the plain root.
 
@@ -269,7 +272,7 @@ redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SET agentihooks:inbox:probe 1
 # (error) NOPERM ...
 ```
 
-The packaged smoke tests check the same scope end to end: `scripts/packaging/hive-join-smoke.sh` joins a member on
+The packaged smoke tests check the same scope end to end: `scripts/packaging/hive-join-smoke.sh` adds a member on
 Redis 7 and asserts that the shared inbox, shared session readings and another member's keys are refused, that the
 member's own inbox and readings are allowed, and that the relay refuses a sender the member does not run.
 `scripts/packaging/compose-hive-smoke.sh` relays a member agent's mail to the master and reads the host's reply from
@@ -293,7 +296,7 @@ the member's own keys.
 | Mail a member agent sent never reaches the master | No swarm tick has run since the send; the relay runs once per tick. | Check the swarm is started and its controller lease is held: `agentihooks swarm <slug> status`. |
 | A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
 | A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
-| The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it joined with `hive join`. |
+| The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it was added with `hive add`. |
 | A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
 
 ## Settings
@@ -306,27 +309,29 @@ Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
 | `name` | text | the hive id | Display name. |
 | `ui` | `yes`, `no` | `no` | The machine has a screen and a person at it. |
 | `ephemeral` | `yes`, `no` | `no` | The machine can disappear, such as a pod. Placement prefers lasting hives on a tie. |
-| `roles` | comma list of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` | none | Work the hive takes. |
+| `excluded` | comma list of lane roles or profiles, such as `master,frontend,qa` | `master` on `ui=no`, none on `ui=yes` | Work the hive never takes. An empty value excludes nothing. |
 | `prefer` | comma list of `role:rank` | none | Rank 1 is chosen first for that role; unranked hives come after ranked ones. |
-| `max-agents` | whole number, 1 or more | `1` | Working agents the hive runs at once. Masters do not count against it. |
+| `max-agents` | whole number, 1 or more | `20` on `ui=no`, `10` on `ui=yes` | Working agents the hive runs at once. Masters do not count against it. |
 
-`master`, `qa` and `frontend` are UI roles: a hive with `ui=no` refuses them, and `prefer` refuses a role the hive
-does not take.
+Every hive takes every agent type (master, eng, ci, plan, dispatch and any profile) unless the agent's lane role,
+role or profile is in its `excluded` list. `prefer` refuses a role the hive excludes. An unset `excluded` or
+`max-agents` follows the hive's current `ui`. A hive registered with the old `roles` setting drops it, with its
+stored `max-agents`, on its next `hive set` or heartbeat, and reads under the defaults until then.
 
-### Roles and prefer: the operator's layout
+### Excluded and prefer: the operator's layout
 
 The operator runs a PC, a VM and a set of pods:
 
 ```bash
-agentihooks hive set pc  ui=yes roles=master prefer=master:1
-agentihooks hive set vm  ui=yes roles=master,qa,frontend prefer=master:2,qa:1,frontend:1
-agentihooks hive set pod-1 ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1
+agentihooks hive set pc  ui=yes excluded=qa,frontend,eng,ci,plan prefer=master:1
+agentihooks hive set vm  ui=yes excluded=eng,ci,plan prefer=master:2,qa:1,frontend:1
+agentihooks hive set pod-1 ui=no ephemeral=yes max-agents=20
 ```
 
-- The master runs on the PC while it is live, and on the VM when the PC is gone.
-- QA and frontend work runs on the VM, the only hive that takes them.
-- Engineer, CI, planner and dispatcher work runs on the pods. For the PC to take the dispatcher when every pod is
-  full, its roles must list `dispatch`: `agentihooks hive set pc roles=master,dispatch`.
+- The master runs on the PC while it is live, and on the VM when the PC is gone; the pods exclude it by default.
+- QA and frontend work runs on the VM, then on a pod when the VM is gone.
+- Engineer, CI, planner and dispatcher work runs on the pods, and on the PC when every pod is full once the PC no
+  longer excludes that role.
 
 ## Comparing hive configuration
 
@@ -346,7 +351,8 @@ any hive differs or published nothing.
 
 ## Placement
 
-Every launch places its agent on one hive. For a worker role, placement keeps the live hives that take the role,
+Every launch places its agent on one hive. For a worker role, placement keeps the live hives that do not exclude
+its lane, role or profile,
 then drops, in order, those with no room under `max-agents`, those that do not advertise the account slot the
 router picked, those that do not list the task's repo, and, for an interactive login, those that do not hold that
 login. Each step that empties the list names its reason, and the launch waits with it.
@@ -354,18 +360,18 @@ login. Each step that empties the list names its reason, and the launch waits wi
 Among the hives left, placement picks the lowest `prefer` rank for the role, then the most room, then a lasting
 hive over an ephemeral one, then the hive id.
 
-`eng`, `ci`, `plan` and `dispatch` run on headless hives. When a UI hive also takes one of them, placement tries
-the headless hives first and takes the UI hive only when no headless hive taking the role has room or none is live.
+`eng`, `ci`, `plan` and `dispatch` prefer headless hives, and `master`, `qa` and `frontend` prefer UI hives.
+Placement tries the preferred kind first and takes the other kind only when no preferred hive taking the role has
+room or none is live.
 A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
 agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. UI roles, the master included, take only UI hives. The engineer, cicd, planner
+hive records the pin as its reason. The engineer, cicd, planner
 and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
 its UI role.
 
 When no live hive takes the role:
 
-- `qa` and `frontend` wait with "no UI hive live".
-- Any other role waits with "no live hive takes" the role.
+- Every role waits with "no live hive takes" the role.
 - The master has its own chain, below.
 
 A hive counts as live while its last heartbeat is under ninety seconds old. Codex launches are not placed on hives.
@@ -380,13 +386,12 @@ api slots keep their own.
 ### Master placement
 
 Every master seat, the lead and seats two and up, follows the same host rule as role placement: it runs only on a
-live UI hive with the `master` role that lists the repo. A seat that owns a Kubernetes hive is placed by this rule
-too, never on a worker pod. It is placed in two tiers, each tried in `prefer` order:
+live hive that does not exclude `master` and lists the repo. UI hives come before headless ones, so a worker pod,
+which excludes `master` by default, runs a master only when its `excluded` list drops it. Within each kind it is
+placed in two tiers, each tried in `prefer` order:
 
-1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
-2. A UI hive with the `master` role and a subscription or api slot for that harness.
-
-A headless hive never runs the master, whatever its roles.
+1. A hive that holds the native interactive login for the master's harness.
+2. A hive with a subscription or api slot for that harness.
 
 A hive names a subscription slot by its `AH_CC_TOKEN_<slug>` slug; a hosted controller names the same account by
 its Secret key. The two may differ only in `_` against `-`, and master placement treats them as one account. A
@@ -399,14 +404,14 @@ full".
 ### Who writes placement
 
 A member's Redis user reads agent records and placement but never writes them. Only the controller and the ledger
-server write placement; join, refresh and revoke keep the hive index.
+server write placement; add, refresh and revoke keep the hive index.
 
 | Keys under the swarm root | Member Redis user | Written by |
 |---|---|---|
 | Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read only | The controller and the ledger server. |
 | Claims, seats, names and placement waits | read only | The controller and the ledger server. |
 | Launch slot rows `launch-slot:*` | read only | The controller, which reserves, acknowledges and refreshes them. |
-| Hive index `hives` | read only | `hive join` and `hive refresh` add the member; `hive revoke` and a failed join remove it. |
+| Hive index `hives` | read only | `hive add` and `hive refresh` add the member; `hive revoke` and a failed add remove it. |
 | The member's own hive record and every key below it | read and write | The member's `hive run` beat and the agents it runs. |
 
 The ledger issues an agent token to a member only for an agent whose record names that member as its hive. A member
@@ -425,7 +430,7 @@ What a member process does differently:
   `failed` with the reason `refused` to the member's own acknowledgement hash and drops the order. The `hive run`
   service keeps running and takes the next order.
 
-Check a member's scope from the member, with the credentials `hive join` wrote:
+Check a member's scope from the member, with the credentials `hive add` delivered:
 
 ```bash
 . ~/.agentihooks/hive.env
@@ -434,7 +439,7 @@ redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:agents 
 redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SADD agentihooks:hives forged                      # (error) NOPERM ...
 ```
 
-`scripts/packaging/hive-join-smoke.sh` runs the same check on Redis 7 after a join. The member's writes to agent
+`scripts/packaging/hive-join-smoke.sh` runs the same check on Redis 7 after an add. The member's writes to agent
 records, executions, another member's keys, the hive index and a launch slot row are refused. Its beat, an agent
 heartbeat and an inbox send succeed, and the member stays in the hive index. `scripts/packaging/compose-hive-smoke.sh`
 also checks that a member stays indexed after a Redis restart and a refresh.
@@ -688,8 +693,7 @@ A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks
 makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
 with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
 stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
-(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes roles=master,eng,ci,plan,dispatch
-max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
 tick. On a machine in any other mode the setting changes nothing.
 
 ## Worker hives in Kubernetes
@@ -700,9 +704,12 @@ The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each 
    when git asks, and exports it as `GH_TOKEN` so gh is logged in; the token is never written or printed.
 2. Clones the repos in `workers.repositories` under its repo root, and the bundle at `HIVE_BUNDLE_URL` and
    `HIVE_BUNDLE_REF` beside them as `agentihooks-bundle`.
-3. Installs a mounted credential as `hive.env`, or joins with a mounted one time code.
+3. Installs a mounted credential as `hive.env`. With no mounted credential and no `hive.env` yet, it starts sshd
+   and waits for one, up to `HIVE_DELIVERY_WAIT_S` (default 900) seconds, then exits 1 with
+   `worker-hive: no member credential was delivered within <n>s; run agentihooks hive add from the UI hive`.
 4. Runs `agentihooks init` with the bundle linked, then `agentihooks deps ensure`. The role is rendered at spawn.
-5. Sets itself `ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=<workers.maxAgents>`.
+5. Sets itself `ui=no ephemeral=yes excluded=<workers.excluded> max-agents=<workers.maxAgents>`, by default
+   `excluded=master max-agents=20`.
 6. Runs `agentihooks hive run`.
 
 The bundle origin and the token come from the hive settings record through `workers.envFromSecrets`. Write the
@@ -723,17 +730,25 @@ init runs again on the package roles alone, with the bundle unlinked; a failed i
 pod. A failed `deps ensure` logs its reason and each launch retries it. The image carries node, npm, uv and gh; npm
 global installs and uv tools land in `~/.local` under the worker home.
 
-Give exactly one of `workers.joinCodeSecret` or `workers.credentialSecret`. A join code runs with a persistent
-home. Credentials come from ExternalSecrets by name. The hive id is the one minted when the code was exchanged, so
-replicas that mount the same credential would report the same hive id and agent limit; the chart refuses
-`workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
-credential is installed.
+`workers.credentialSecret` is required; it carries the member credential and, with `workers.ssh.enabled`, also the
+sshd `authorized_keys` and host key the pod installs for `agentihooks hive add` to reach it. Credentials come from
+ExternalSecrets by name. Replicas that mount the same credential would report the same hive id and agent limit, so
+the chart refuses `workers.replicas` above 1. Scale by installing one release per hive credential and adding each
+pod with `agentihooks hive add` from the UI hive; the pod name is used only when no credential is installed.
 
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
-below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
-network, so it schedules on any node.
+below the request, and memory set under `workers.resources`. `workers.nodeSelector`, `workers.affinity` and
+`workers.tolerations` place the pod; by default it schedules on any node and never uses the host network.
+
+`workers.homeVolume` is the volume source of `/home/worker`, which holds the repo clones, worktrees and scratchpad. It
+defaults to an emptyDir on the node root disk; a `hostPath` of type `Directory` on a data disk, or a
+`persistentVolumeClaim` (set `emptyDir: null` beside it; the chart refuses more or fewer than one source) keeps them on
+a larger disk. A hostPath of type `Directory` starts the pod only where the path exists, so create it only on the
+mounted data disk. Any source other than an emptyDir rolls the pod out by
+Recreate so two hives never share it. `workers.worktreeMinFreeGb` (default 50) reaches agents as `WT_MIN_FREE_GB`,
+the free space `wt.sh new` requires.
 
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
@@ -751,7 +766,7 @@ in place and moves the master to another hive.
 | hive | The hive's name; hovering shows its id. |
 | state | `live` while the last heartbeat is under ninety seconds old, else `quiet`. |
 | ui, ephemeral | `yes` or `no`, editable. |
-| roles | Comma list, editable. |
+| excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | Whole number, editable. |
 | agents | Working agents against max agents, such as `1/3`. |
@@ -784,7 +799,7 @@ The page converts what was typed before it sends it:
 
 | Field | Typed | Sent |
 |---|---|---|
-| roles | `eng, ci` | `["eng", "ci"]` |
+| excluded | `master, qa` | `["master", "qa"]` |
 | prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
 | max agents | `4` | `4`; anything other than digits is sent as text and refused |
 
@@ -826,7 +841,7 @@ credential answers `403 forbidden` with `swarm controls need the operator`.
 | `PATCH /api/v1/hives/<id>` | the operator | The hive after the change. |
 
 Every answer is `{"data": ..., "revision": "<sha256 of data>"}`. A hive carries its stored record (`id`, `name`,
-`ui`, `ephemeral`, `roles`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
+`ui`, `ephemeral`, `excluded`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
 `heartbeat_at`, `version`) and three computed fields:
 
 - `live`: `true` while the heartbeat is under ninety seconds old.
@@ -877,7 +892,7 @@ curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
 |---|---|---|
 | 400 | `schema_invalid` | The body has no field, an unknown field or a wrong type (`Request does not match the resource schema`), or the hive registry refuses the value and names why. |
 | 403 | `forbidden` | `Missing or wrong ledger credential`: no `X-Ledger-Slug`, an unknown ledger or a wrong token. `Hive settings need the operator`: the credential is an agent's. |
-| 404 | `resource_missing` | `No such hive`. A PATCH never creates a hive; register one with `agentihooks hive join`. |
+| 404 | `resource_missing` | `No such hive`. A PATCH never creates a hive; register one with `agentihooks hive add`. |
 | 405 | `method_not_allowed` | Anything but GET on the list, or GET and PATCH on one hive. |
 | 503 | `storage_error` | Redis is unreachable or a hive record is unreadable. |
 

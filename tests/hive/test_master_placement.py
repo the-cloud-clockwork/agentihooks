@@ -8,9 +8,7 @@ REPO = "agentihooks"
 
 def hive(name, **fields):
     return {
-        **registry._default(name),
-        "roles": ["master"],
-        "ui": "yes",
+        **registry._default(name, "yes"),
         "repos": [REPO],
         "heartbeat_at": NOW,
         "agents": 0,
@@ -34,7 +32,7 @@ def test_master_prefers_the_declared_interactive_login_before_ui_tokens():
 @pytest.mark.parametrize("kind", ["subscription", "api"])
 def test_master_falls_back_to_a_ui_slot_before_a_preferred_headless_hive(kind):
     hives = [
-        hive("headless", ui="no", prefer={"master": 0}),
+        hive("headless", ui="no", excluded=[], prefer={"master": 0}),
         hive("ui", slots=[{"harness": "claude", "account": "fallback", "kind": kind}]),
     ]
     assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.MasterPlacement(
@@ -42,12 +40,19 @@ def test_master_falls_back_to_a_ui_slot_before_a_preferred_headless_hive(kind):
     )
 
 
-@pytest.mark.parametrize("roles", [[], ["master"]])
-def test_master_never_uses_a_headless_hive_when_ui_hives_cannot_run_it(roles):
-    hives = [hive("ui", repos=[]), hive("headless", ui="no", roles=roles)]
-    assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.Wait(
-        "no live hive can run the master with interactive, subscription or api authentication"
-    )
+@pytest.mark.parametrize(
+    ("excluded", "expected"),
+    [
+        (
+            ["master"],
+            placement.Wait("no live hive can run the master with interactive, subscription or api authentication"),
+        ),
+        ([], placement.MasterPlacement("headless", "token", "subscription", False)),
+    ],
+)
+def test_master_uses_a_headless_hive_only_when_it_does_not_exclude_the_master(excluded, expected):
+    hives = [hive("ui", repos=[]), hive("headless", ui="no", excluded=excluded)]
+    assert placement.place_master("claude", "login", REPO, hives, NOW) == expected
 
 
 def test_master_reconsiders_interactive_hives_at_the_next_handoff():
@@ -64,7 +69,7 @@ def test_master_reconsiders_interactive_hives_at_the_next_handoff():
     [
         {"heartbeat_at": 1},
         {"repos": []},
-        {"roles": ["eng"]},
+        {"excluded": ["master"]},
         {"slots": []},
         {"slots": [{"harness": "codex", "account": "token", "kind": "subscription"}]},
         {"slots": [{"harness": "claude", "account": "token", "kind": "interactive"}]},
@@ -99,7 +104,7 @@ def test_master_ties_follow_hive_preference_room_lifetime_and_slot_name():
 
 def test_master_skips_ineligible_hives_and_slots_without_ending_the_search():
     hives = [
-        hive("wrong-role", roles=["eng"]),
+        hive("wrong-role", excluded=["master"]),
         hive(
             "valid",
             slots=[

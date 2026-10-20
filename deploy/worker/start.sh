@@ -44,13 +44,6 @@ if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
     || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
 fi
 
-if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
-  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
-elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
-  code="$(< "${HIVE_JOIN_CODE_FILE:?a mounted join code or member credential is required}")"
-  agentihooks hive join "${HIVE_JOIN_URL:?the hive join URL is required}" "$code"
-  unset code
-fi
 python3 - <<'PY'
 import os, re, shlex, sys
 from pathlib import Path
@@ -104,6 +97,19 @@ EOF
   sleep 1
   kill -0 "$sshd_pid"
 fi
+if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
+  install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
+elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
+  wait_s="${HIVE_DELIVERY_WAIT_S:-900}"
+  deadline=$(( $(date +%s) + wait_s ))
+  until [[ -f "$AGENTIHOOKS_HOME/hive.env" ]]; do
+    if (( $(date +%s) >= deadline )); then
+      echo "worker-hive: no member credential was delivered within ${wait_s}s; run agentihooks hive add from the UI hive" >&2
+      exit 1
+    fi
+    sleep 2
+  done
+fi
 bundle=()
 [[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
 if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
@@ -134,5 +140,5 @@ agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
-  "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"
+  "excluded=${HIVE_EXCLUDED-master}" "max-agents=${HIVE_MAX_AGENTS:-20}"
 exec agentihooks hive run

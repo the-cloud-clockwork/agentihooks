@@ -5,21 +5,14 @@
 {{- fail "workers.githubAuth.mode must be token or app" }}
 {{- end }}
 {{- $credential := $workers.credentialSecret }}
-{{- $code := $workers.joinCodeSecret }}
-{{- if eq (empty $credential.name) (empty $code.name) }}
-{{- fail "workers need a credentialSecret or joinCodeSecret, exactly one" }}
-{{- end }}
-{{- if and $code.name (ne (int $workers.replicas) 1) }}
-{{- fail "one time join codes require workers.replicas=1" }}
+{{- if not $credential.name }}
+{{- fail "workers need a credentialSecret" }}
 {{- end }}
 {{- if gt (int $workers.replicas) 1 }}
 {{- fail "workers.replicas above 1 is refused: one hive credential is one hive, so every replica would report the same hive id and agent limit; install one release per hive credential to scale" }}
 {{- end }}
 {{- if lt (int $workers.maxAgents) 1 }}
 {{- fail "workers.maxAgents must be positive" }}
-{{- end }}
-{{- if and $workers.ssh.enabled (not $credential.name) }}
-{{- fail "workers.ssh needs credentialSecret: the hive sshd keys ride in the member credential Secret" }}
 {{- end }}
 {{- if and $workers.ssh.enabled (lt (int $workers.ssh.port) 1024) }}
 {{- fail "workers.ssh.port must be 1024 or higher: sshd runs as the unprivileged worker" }}
@@ -31,13 +24,10 @@
 {{- if or (hasKey ($workers.resources.requests | default dict) "memory") (hasKey ($workers.resources.limits | default dict) "memory") }}
 {{- fail "set worker hive memory with workers.memoryPerAgentMi, not workers.resources" }}
 {{- end }}
-{{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
-{{- $secret := $credential }}
-{{- $path := "credential" }}
-{{- if $code.name }}
-{{- $secret = $code }}
-{{- $path = "code" }}
+{{- if ne (len $workers.homeVolume) 1 }}
+{{- fail "workers.homeVolume needs exactly one volume source; set emptyDir: null beside a hostPath or persistentVolumeClaim" }}
 {{- end }}
+{{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -47,7 +37,7 @@ metadata:
     app.kubernetes.io/component: worker-hive
 spec:
   replicas: {{ $workers.replicas }}
-  {{- if $code.name }}
+  {{- if not (hasKey $workers.homeVolume "emptyDir") }}
   strategy:
     type: Recreate
   {{- end }}
@@ -61,6 +51,18 @@ spec:
         app.kubernetes.io/component: worker-hive
     spec:
       {{- include "swarm.podSecurity" . | nindent 6 }}
+      {{- with $workers.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $workers.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with $workers.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: worker-hive
           image: {{ include "swarm.image" (dict "Values" (dict "image" $workers.image)) }}
@@ -88,21 +90,16 @@ spec:
                   fieldPath: metadata.name
             - name: AGENTIHOOKS_DEPLOYMENT
               value: {{ .Values.deployment | quote }}
-            - name: HIVE_ROLES
-              value: {{ join "," $workers.roles | quote }}
+            - name: HIVE_EXCLUDED
+              value: {{ join "," $workers.excluded | quote }}
             - name: HIVE_MAX_AGENTS
               value: {{ $workers.maxAgents | quote }}
+            - name: WT_MIN_FREE_GB
+              value: {{ $workers.worktreeMinFreeGb | quote }}
             - name: HIVE_REPOSITORIES
               value: {{ $workers.repositories | toJson | quote }}
-            {{- if $credential.name }}
             - name: HIVE_CREDENTIAL_FILE
               value: /run/hive-join/credential
-            {{- else }}
-            - name: HIVE_JOIN_URL
-              value: {{ required "workers.joinUrl is required with a join code" $workers.joinUrl | quote }}
-            - name: HIVE_JOIN_CODE_FILE
-              value: /run/hive-join/code
-            {{- end }}
             {{- if $workers.caSecret.name }}
             - name: SSL_CERT_FILE
               value: /run/hive-ca/ca.pem
@@ -145,11 +142,11 @@ spec:
       volumes:
         - name: join
           secret:
-            secretName: {{ $secret.name }}
+            secretName: {{ $credential.name }}
             defaultMode: 0440
             items:
-              - key: {{ required "worker join Secret key is required" $secret.key }}
-                path: {{ $path }}
+              - key: {{ required "worker join Secret key is required" $credential.key }}
+                path: credential
               {{- if $workers.ssh.enabled }}
               - key: authorized_keys
                 path: ssh/authorized_keys
@@ -157,12 +154,7 @@ spec:
                 path: ssh/host_key
               {{- end }}
         - name: home
-          {{- if $code.name }}
-          persistentVolumeClaim:
-            claimName: {{ include "swarm.fullname" . }}-worker-hive-state
-          {{- else }}
-          emptyDir: {}
-          {{- end }}
+          {{- toYaml $workers.homeVolume | nindent 10 }}
         - name: tmp
           emptyDir: {}
         {{- if $workers.caSecret.name }}

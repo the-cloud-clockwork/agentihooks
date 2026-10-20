@@ -4,16 +4,16 @@ on:
   workflow_call:
     inputs:
       base:
-        description: Revision to compare on the same real ledger and runner
+        description: Revision to compare on the same real ledger and runner; empty compares hierarchy against the previous dev head on a push, else the merge base with dev, and load against 726353637
         type: string
         required: false
-        default: 726353637ab44da81bdbd374ec393db275856e22
+        default: ''
   workflow_dispatch:
     inputs:
       base:
-        description: Revision to compare on the same real ledger and runner
-        required: true
-        default: 726353637ab44da81bdbd374ec393db275856e22
+        description: Revision to compare on the same real ledger and runner; empty compares hierarchy against the merge base with dev and load against 726353637
+        required: false
+        default: ''
 
 permissions:
   contents: read
@@ -26,13 +26,28 @@ jobs:
   hierarchy:
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v4
         with:
           path: head
+          fetch-depth: 0
+          filter: tree:0
+      - name: Resolve the base, the previous dev head on a push or else the merge base with dev, unless one was given
+        id: base
+        env:
+          BASE: ${{ inputs.base }}
+          BEFORE: ${{ github.event_name == 'push' && github.event.before || '' }}
+        run: |
+          [[ -n "$BASE" ]] || BASE="$BEFORE"
+          [[ -n "$BASE" ]] || BASE=$(git -C head merge-base HEAD origin/dev)
+          echo "sha=$BASE" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
+          ref: ${{ steps.base.outputs.sha }}
           path: base
       - uses: actions/setup-python@v5
         with:
@@ -58,43 +73,24 @@ jobs:
           cp head/tests/swarm_ledger/operations_corpus.json.gz base/tests/swarm_ledger/operations_corpus.json.gz
           cp head/tests/ledger_load/gate.py base/tests/ledger_load/gate.py
           cp head/tests/ledger_load/memory.py base/tests/ledger_load/memory.py
-          git -C head fetch --depth=1 origin "$BASE"
+      - name: Profile and measure one base and head pair of hierarchy routes on this runner, base first on odd pairs
         env:
-          BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
-      - name: Profile and measure base and head hierarchy routes on the same runner
+          PAIR: ${{ matrix.pair }}
         run: |
-          for side in base head; do
+          order=(base head)
+          [[ "$PAIR" == [13] ]] || order=(head base)
+          for side in "${order[@]}"; do
             ( cd "$side" && HIERARCHY_CPU_REPORT="$GITHUB_WORKSPACE/hierarchy-evidence/$side.json" \
               python -m pytest tests/ledger_load/hierarchy_probe.py -n 0 -s --tb=short )
           done
-      - name: Require byte identical hierarchy responses and at most half the CPU per read
-        run: |
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          base = json.loads(Path('hierarchy-evidence/base.json').read_text())
-          head = json.loads(Path('hierarchy-evidence/head.json').read_text())
-          assert base['source'] == head['source']
-          assert base['requests'] == head['requests'] == 16
-          assert [row['outputs'] for row in base['observations']] == [row['outputs'] for row in head['observations']], 'Hierarchy response bytes changed'
-          print(json.dumps({
-              'requests_per_side': head['requests'],
-              'base_cpu_seconds_per_read': base['mean_cpu_seconds'],
-              'head_cpu_seconds_per_read': head['mean_cpu_seconds'],
-              'ratio': head['mean_cpu_seconds'] / base['mean_cpu_seconds'],
-              'base_profile': base['profile'],
-              'head_profile': head['profile'],
-          }, indent=2))
-          assert head['mean_cpu_seconds'] <= base['mean_cpu_seconds'] / 2, 'Hierarchy CPU did not halve'
-          PY
       - name: Stop Redis
         if: always()
         run: redis-cli -p 6379 shutdown nosave || true
-      - name: Preserve hierarchy profiles and exact response bodies
+      - name: Preserve the pair's hierarchy profiles and exact response bodies
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hierarchy-cpu
+          name: hierarchy-pair-${{ matrix.pair }}
           path: hierarchy-evidence/*.json
           if-no-files-found: error
 
@@ -171,12 +167,13 @@ jobs:
           if-no-files-found: error
 
   grade:
-    needs: load
+    needs: [load, hierarchy]
     if: ${{ !cancelled() }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     env:
       SAME_CODE_MARGIN: '1.25'
+      HIERARCHY_SAME_CODE_MARGIN: '1.3'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -186,12 +183,22 @@ jobs:
         with:
           pattern: load-pair-*
           path: load-evidence
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: hierarchy-pair-*
+          path: hierarchy-evidence
       - name: Fail when the median head over base pair ratio exceeds the margin set from recorded same code pairs
         run: |
           python -m tests.ledger_load.paired \
             --base load-evidence/load-pair-{1,2,3,4,5}/base.log \
             --head load-evidence/load-pair-{1,2,3,4,5}/head.log \
             --margin "$SAME_CODE_MARGIN" --same-code tests/ledger_load/same_code_pairs.json
+      - name: Fail when hierarchy responses changed or the geometric mean head over base CPU ratio exceeds the margin set from recorded same code runs
+        if: ${{ !cancelled() }}
+        run: |
+          python -m tests.ledger_load.hierarchy_paired \
+            --pairs hierarchy-evidence/hierarchy-pair-{1,2,3,4} \
+            --margin "$HIERARCHY_SAME_CODE_MARGIN" --same-code tests/ledger_load/hierarchy_same_code.json
       - name: Report server peak memory
         if: always()
         run: |
