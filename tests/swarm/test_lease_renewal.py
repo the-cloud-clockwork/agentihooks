@@ -137,6 +137,40 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     assert lease.current(store, "sw") == stolen
 
 
+def test_a_tick_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
+    for slug in ("sw", "peer", "idle"):
+        store.create(SwarmConfig(slug, ".", 1, 0))
+    peer = lease.acquire(store, "peer", "peer-hive")
+    store.redis.set(store.key("sw", "control-epoch"), peer.epoch + 4)
+    held = lease.acquire(store, "sw", "home")
+    seen = []
+    ledger = controller.FencedLedger(
+        store,
+        "sw",
+        held,
+        SimpleNamespace(
+            update_task=lambda *args, **kwargs: seen.append((args, kwargs, lease.EPOCH.get())),
+            read=lambda: seen.append(((), {}, lease.EPOCH.get())),
+        ),
+    )
+    ledger.update_task("sw", "t", {})
+    ledger.update_task(slug="sw", task_id="t", fields={})
+    ledger.update_task("peer", "t", {})
+    ledger.update_task(slug="peer", task_id="t", fields={})
+    ledger.update_task("idle", "t", {})
+    ledger.read()
+    assert seen == [
+        (("sw", "t", {}), {}, held.epoch),
+        ((), {"slug": "sw", "task_id": "t", "fields": {}}, held.epoch),
+        (("peer", "t", {}), {}, peer.epoch),
+        ((), {"slug": "peer", "task_id": "t", "fields": {}}, peer.epoch),
+        (("idle", "t", {}), {}, None),
+        ((), {}, held.epoch),
+    ]
+    assert held.epoch != peer.epoch
+    assert lease.EPOCH.get() is None
+
+
 def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # noqa: F811
     store, ledger, rt = env
     run("sw", "create", "--repo", "/repo")
