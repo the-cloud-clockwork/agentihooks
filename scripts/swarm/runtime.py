@@ -774,6 +774,8 @@ class HerdrRuntime:
         return False
 
     def _argv(self, config, name, agent, text, prompt_name, profile, worn=()):
+        from scripts.hive import daemon
+
         path = self.home / config.slug / "prompts" / prompt_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -786,7 +788,7 @@ class HerdrRuntime:
             "--workspace",
             naming.space(config.repo, config.code, config.slug),
             "--dir",
-            config.repo,
+            daemon.local_checkout(config.repo),
         ]
         argv += [
             "--name",

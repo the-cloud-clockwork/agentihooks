@@ -10,6 +10,8 @@ from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_cpu_quota import quota_cpus
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
@@ -191,7 +193,7 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
 
 
 def worker_count(requested: int) -> int:
-    return requested if os.environ.get("CI") else min(requested, 2)
+    return quota_workers(requested, quota_cpus()) if os.environ.get("CI") else min(requested, 2)
 
 
 def shard_collector(collect, shard: tuple[int, int]):

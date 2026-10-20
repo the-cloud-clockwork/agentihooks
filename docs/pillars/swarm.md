@@ -35,7 +35,10 @@ Run `agentihooks swarm rename` to rename every live registered swarm's agents an
 `agentihooks swarm <id> rename` for one swarm. Running it again makes no changes. Running sessions retain
 their launch names; durable aliases keep inbox delivery, crew ownership, terminate selection, waits and
 heartbeats working under either name. Herdr uses dashes where canonical names use an at sign, as approved
-by the operator.
+by the operator. For each swarm with agents, a rename takes the swarm's tick lock for up to ten minutes, so no tick
+runs beside it, and fails for a swarm whose tick is running or that another hive controls. A rename killed mid run on
+the same machine does not hold up the next tick (see
+[Tick lock holder record](#tick-lock-holder-record)).
 
 Every swarm agent is named `<type>@<code>-<number>`: `master@a1b2c3-0001`, `engineer@a1b2c3-0002`,
 `ci@a1b2c3-0001`. The type is `master`, `engineer` or `ci`. The code is six lowercase hex characters minted once
@@ -441,7 +444,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 | `agentihooks swarm <id> block NOTE` | Comment the blocker, mark the task `blocked`, end the session. |
 | `agentihooks swarm <id> trace-plan` | Trace `plan.md` in your task work folder, one piece per line (`- what \| area, area \| why`), to the task, its phase and the project intent through the classifier. A piece under 0.3 is cut and, once the plan passes, filed as a follow-up. The task's latest five scope authorizations, master relays of operator words and operator or master comments starting `In scope:`, travel in the trace intent, and the classifier asks whether each covers each piece that is not a clearance; a piece covered at 0.7 is kept, its row and the report's `authorized` name the authorization and it is never filed as a cut. A new authorization retraces an unchanged plan without counting a failed plan; a follow up filed before the authorization stays filed. See [Task scope authorizations](#task-scope-authorizations) for recording scope, report examples and troubleshooting. A plan with more than half its pieces cut, or sized above one pull request at confidence 0.7, fails; the second failed plan blocks the task when `trace-plan-gate=deny` (default `log only` logs it). A piece appended to a passing plan is traced alone. Before the task's pull request opens, a plan that does not fail is also judged by the intent check as a plan, on its kept pieces and plan slice: whether the planned work serves the phase, covers the task and weakens nothing, with no demand for shipped code or proof; that verdict is printed as `intent` and logged like a pull request verdict. The verdict lands in `plan-verdict.json`; no classifier answer gives `unchecked`, counted in the gate log. The `build` gate (`python -m scripts.gates build`, on Edit, Write, MultiEdit, NotebookEdit, Serena edit tools and `git commit`) refuses an engineer's or CI agent's edit before a passing verdict for the current `plan.md`, and an edit or staged file outside the kept pieces' areas and the task territory; the work folder, `~/scratchpad` and files outside any git work tree are exempt, and an `unchecked` verdict lets edits through, counted. `build-gate` defaults to `log only`. |
 | `agentihooks swarm <id> plan approve PHASE [--note TEXT]` / `plan send-back PHASE --note TEXT` | Decide the slice of a phase in review. At `manual` and `assist` autonomy the operator decides with the **Approve plan** and **Send back** buttons on the phase row, and the command refuses an agent naming them (at `assist` the master posts its recommendation as a phase comment). At `delegate` and `full` only the master decides. Approve moves the phase to building and the tick claims its tasks on the same pass. Send back reopens the plan task, records the note for the planner's steering and counts a round; when the planner finishes again the tick reopens the review. The third send back leaves the plan task done, marks the review escalated and raises a priority naming the notes; only the operator decides after that, and an operator send back reopens the plan task whatever the count. |
-| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), at most MINUTES or 12 hours; the tick then ends it and sends you an inbox item, which for a red Actions run names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
+| `agentihooks swarm <id> wait [MINUTES] [--on checks PR_URL\|RUN_URL\|reply ITEM\|task ID] [--reason TEXT]` | Declare a wait. While it holds, the tick counts no idle tick for you, so you are neither nudged nor retired. A checked wait (`--on`) lasts until the tick sees its thing resolve (the checks finish or the pull request closes or merges, an Actions run completes, is cancelled or is missing, the inbox item closes, the task is done or blocked), or until it expires after MINUTES, or 12 hours when MINUTES is omitted. When the thing resolves the tick ends the wait and sends you an inbox item; expiry sends none. For a red Actions run the item names its conclusion and each failed, timed out or cancelled job, or says its jobs could not be read; [When a checks wait ends](#when-a-checks-wait-ends) gives the green and red rule for pull request checks. A bare wait lasts MINUTES, at most 60. The `claim-stop` gate (`python -m scripts.gates claim-stop`, run from a Stop condition) refuses an eng or ci agent's stop while it holds a claimed or pr task with work owed: its pull request merged (run `done`), checks failed (fix or block) or green (merge), or no pull request and no live wait. Pending checks pass the stop and record a checked wait on them, unless a live wait on a reply or a task already holds, which is kept with its reason. The third block in a row with no outcome between blocks the task. The `push-stop` gate, beside it in the engineer, cicd and qa roles, pushes the agent's task branches itself (any worktree `~/dev/worktrees/<repo>/<agent>[-N]` on its own branch, never `dev` or `main`), writes the branch and head as a ledger comment on the task, and refuses the stop with one fixed message, also sent to the agent's inbox, over uncommitted changes, a push origin refused, or pushed work with no pull request and no ledger line since the push. Planners, plan tasks, the master and the operator's sessions pass. The `one-push` gate, in the same roles on Bash calls running `git` or `gh`, keeps a pull request to one push: an eng or ci agent's `gh pr create` or `gh pr ready` is refused until the `standards-reader` and `spec-reader` sub-agents ran for its task (Claude sessions only) and its checkout is committed and on origin, with `--draft` open for the block path; a `git push` to the task branch is refused while the task's open pull request has checks running or waits in the merge queue, unless a check is red; a required check that has not reported yet counts as running. A reader counts once launched; the gate cannot see a review close. See [One push per pull request](#one-push-per-pull-request) for the refusals, configuration and troubleshooting. |
 | `agentihooks swarm <id> progress --doing TEXT --ends-when TEXT` | Say what you are doing and when it ends: a ledger line on your task, a line in its work folder `progress.md` and an outcome on the progress signal. The tick raises a quiet flag (`gates/quiet/<agent>`, a gate log `count` row) on an eng or ci agent holding a claimed or pr task with no progress signal (last outcome, work folder progress line, start) for 30 minutes and no live checked wait. While it stands the `quiet` gate (`python -m scripts.gates quiet`, behind a bash flag test on every tool call) refuses every call except `agentihooks ledger`, `swarm` and `msg` commands; `progress` clears it. The stale claim finding reads the same quiet minutes, and each idle tick is a gate log `count` row (`idle-ticks`) for `doctor rates`. |
 | `agentihooks swarm <id> handoff DOC [--recap FILE]` | Finish the session but keep the task: the next tick spawns a successor with the document in its prompt. `--recap` adds the recap (what you did, where you stopped, what you promised) to your seat; older recaps are kept. A hook asks for it when the session reaches `AGENTIHOOKS_COMPACT_LIMIT` thousand tokens (default 600). |
 | `agentihooks swarm <id> park DOC` | Park a stacked task whose dependency is still open. Refuses unless the task's `branch` is on origin at the worktree head, the worktree holds no uncommitted changes or untracked files and, where the repo has issues, the task has an issue. Checks the document like `handoff`, writes `parked_on` (the open dependencies) and `stacked_base` (where the branch left the newest dependency branch; for a dependency whose `branch_repo` is another repository, fetched from there, or whose pull request already merged into `dev`, the task's own fork from `origin/dev`, see [Parking on a dependency already merged into dev](#parking-on-a-dependency-already-merged-into-dev)), records those other repositories in `parked_repos`, comments the issue with the branch and the ledger task with the blocker, stores the handoff, ends the session and removes the worktree with `wt.sh done --pushed`, which keeps the pushed branch, since the next engineer cuts its own from the pushed branch. The tick reopens the task, which waits until its blockers are done. A read only task, any kind other than `code` or `ci`, parks without a branch or worktree: park writes only `parked_on`, the dependencies not yet done and, in a Doctor swarm, the code fixes it measures that carry no `applied_at`, comments the ledger task and stores the handoff carrying its recorded window. |
@@ -837,6 +840,56 @@ instead. For an intentional re-export, write `import name as name` or list the
 name in `__all__`; ruff accepts both without a suppression. Old suppressed
 lines outside the diff still pass, because they are not changed lines.
 
+#### Touched functions
+
+The size and complexity stage grades a function only when its syntax tree
+differs from the same named function at the merge base. The comparison
+ignores line and column positions, so reformatting, rewrapping or reindenting
+a function, moving it within the file, or editing comments inside it leaves it
+untouched and ungraded, however far over a limit it already is. A change to
+its statements, arguments, decorators, default values or docstring touches
+it, as does a change to a function nested inside it. Every function in a new
+file, and a function new to a file, is touched. File length is graded for
+every changed file.
+
+Function names are qualified by their enclosing classes and functions
+(`Reconciler.apply`, `outer.inner`); a repeated name in one file gets a
+counter (`handler#2`).
+
+#### Shrink only allowlist
+
+The fallback reads `tests/SIZE_ALLOWLIST.json` from the merge base, never from
+the worktree, so an entry added or raised on a branch has no effect on that
+branch's push. A repository without the file has no allowlist. The file uses
+the `scripts.size_limits` format: function entries are keyed
+`<path>::<qualified name>`, file entries by path.
+
+```json
+{
+  "scripts/reconcile.py::reconcile_unit": {"C901": 25, "PLR0912": 25},
+  "scripts/reconcile.py::Reconciler.apply": {"PLR0913": 9, "function-lines": 340},
+  "scripts/reconcile.py": {"file-lines": 3400}
+}
+```
+
+`C901`, `PLR0912` and `PLR0913` grade the rule of that name, `function-lines`
+the function length and `file-lines` the file length. A listed unit's cap is
+the smaller of its listed value and its merge base value when the unit is
+already over its limit at the base, and the listed value otherwise. An
+allowlisted offender that is over its limit at the base can therefore stay
+the same size or shrink, never grow, and raising its entry gives it no extra
+room. Over its cap it fails with `grew from <cap> to <head>`.
+
+Measured in [pull request 4082](https://github.com/the-cloud-clockwork/agentihooks/pull/4082)
+on litellm-state `origin/dev` 53949d4, `scripts/reconcile.py`, a file with ten
+existing complexity offenders, among them `reconcile_unit` at `C901` 25:
+
+| Change | Result |
+|---|---|
+| A format only rewrite of 175 lines, including `reconcile_unit` | Passes: no function's logic changed |
+| A new 8 argument function carrying `# noqa: PLR0913` | Fails: `proof_wide PLR0913 ... (8 > 7)`; the suppression is ignored |
+| One extra branch planted in `reconcile_unit` | Fails: `C901` and `PLR0912` grew from 25 to 26 |
+
 #### Reports and failures
 
 A failed gate stops the publication. The error names the fallback and the
@@ -850,7 +903,7 @@ finding is one report line:
 | `path:row: would reformat a changed line` | `ruff format` would rewrite that changed line; `row` is the first such line. Run `ruff format path` and review the diff. |
 | `path: name RULE message` | A touched function over a complexity limit. |
 | `path: name exceeds 300 lines` or `path: file exceeds 3000 lines` | A touched function or changed file over its size limit. |
-| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base grew. |
+| `path: name lines grew from N to M`, `path: file lines grew from N to M` or `path: name RULE grew from N to M` | A function, file or complexity measure already over its limit at the merge base, or listed in the allowlist, grew above its base value or cap `N`. |
 | `ruff check exited N` or `ruff format exited N` | Ruff could not run, usually an invalid ruff configuration in the repository. When ruff writes its own error, the publication error shows that text instead of this line. |
 
 On a pass the gate records the passing head, which `publish` requires before
@@ -1414,6 +1467,49 @@ agentihooks swarm <id> merge state <url>
 
 `tests/swarm/test_ready.py` pins each row. `test_a_pull_request_that_leaves_the_queue_red_reopens_without_a_requeue` queues a pull request, lets it leave the queue red and asserts the reopen line, that no merge group run was read and that the pull request was queued only once. It was added by pull request [4733](https://github.com/the-cloud-clockwork/agentihooks/pull/4733) after the green exit test moved to the requeue path and the dev promotion [coverage ratchet](../reference/delivery-tiers.md#coverage-grading) reported the red exit reopen as a line no test ran any more ([red run](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39218945744)). The production code did not change.
 
+### When a checks wait ends
+
+A wait on a pull request's checks ends green only when every required check on the pull request's latest commit has passed. A queued, pending or cancelled required check holds the wait, and a result read from an older commit never ends it. The same judgment runs for `wait --on checks <pull request url>` and for the checks stage of the [`ready` merge pass](#ready-merge-pass-queue-exits). `swarm merge queue` applies only the head match and the branch rule confirmation of step 6.
+
+```bash
+agentihooks swarm <id> wait --on checks https://github.com/<owner>/<repo>/pull/<number>
+# later, as the tick action line:
+#   ended the wait of <agent>: checks on <url>, now green
+# and in the agent's inbox:
+#   Your wait on checks on <url>, now green has ended. Pick task <id> back up: agentihooks swarm <id> done, block, or wait on the next thing.
+```
+
+Each tick judges the wait in this order. A step that does not end it holds the wait until the next tick. A checked wait declared without MINUTES lasts 12 hours, with MINUTES it lasts MINUTES; at expiry it lapses without an inbox item.
+
+1. **Read.** The tick reads the pull request through its per tick view. No answer from GitHub holds the wait. A pull request that is no longer open ends it with `pull request <url>, now merged` or `now closed`.
+2. **Bind to the head.** The reading must come from the pull request's head commit (`headRefOid`). When the newest commit in the reading is another commit, the reading carries no head and holds the wait, so checks of an older commit cannot end it.
+3. **Follow pushes.** The wait records the head it judges. When the head differs from the recorded one, for example after a push, it records the new head and holds for that tick. Results of the previous head never count.
+4. **Resolve.** On a repository whose workflows declare the `Gate — Required` job, the checks are resolved when a required check is red, or when nothing is still running, the gate passed and every required check concluded `SUCCESS`, `SKIPPED` or `NEUTRAL`. A required check that is queued, `PENDING`, `EXPECTED` but not yet reported, or `CANCELLED` holds the wait even after the gate passed; a required workflow run that has not completed counts as running. A gate that ended skipped with nothing red holds it too. Only the newest run of each workflow counts, so a superseded run neither holds nor ends the wait. On a repository without the gate, the required checks, or every check when none is marked required, resolve once nothing runs and either one ended `FAILURE`, `ERROR`, `STARTUP_FAILURE` or `ACTION_REQUIRED`, or all passed with at least one `SUCCESS`; a timed out check alone does not resolve them there.
+5. **Read again.** The tick reads the pull request a second time without the per tick cache and repeats steps 2 to 4 on that reading. When the head moved between the two readings, it records the new head and holds.
+6. **Confirm green.** A green outcome is confirmed against the base branch's rules: the required status checks of its branch protection and its repository rulesets, read with the pull request's checks on the same head. The wait ends green only when that reading names the same head, every check the rules require has reported, and every one of them passed or was neutral. A check run from an app other than the one a rule names does not count for that rule. A GitHub error during this read holds the wait. A red outcome ends without this confirmation.
+
+The ending outcome is one line, used in the tick action line and the inbox notice:
+
+| Outcome | Text |
+|---|---|
+| Every required check passed on the head and the branch rules confirm it | `checks on <url>, now green` |
+| A required check failed | `checks on <url>, now red; failed: <check names>`, naming every failing check on the head, required or not |
+| A check failed and the gate ended skipped | `checks on <url>, now red; failed: <check names>; Gate — Required never passed` |
+| The pull request merged or closed | `pull request <url>, now merged` or `pull request <url>, now closed` |
+
+`swarm merge queue <url>` applies the same branch rule reading before it queues and refuses with `required checks on the current pull request head must pass before queueing`, followed by `; failed: <check names>` when any failed. The `ready` merge pass queues a pull request only after its checks end green this way.
+
+#### Troubleshooting a checks wait
+
+| Symptom | Cause and action |
+|---|---|
+| The wait holds although the gate shows green | A required check is still queued, pending, expected or was cancelled. Read `gh pr checks <url>`. Rerun a cancelled required check; the wait ends on the tick after it passes. |
+| The wait holds one tick longer after a push | The head moved, so the wait recorded the new head and holds for that tick. It judges only the new head's checks from then on. |
+| Every check on the pull request passed, yet the wait never ends green | The branch rules require a check the head never reports, or one reported by a different app. Compare the required contexts in the rulesets (`gh api repos/<owner>/<repo>/rules/branches/<base>`) and in classic branch protection (`gh api repos/<owner>/<repo>/branches/<base>/protection`) with the check names in `gh pr checks <url>`. The wait lapses at its expiry when nothing changes. |
+| The wait holds while GitHub is unreachable | Every read that fails holds the wait; the tick tries again each minute. |
+
+`tests/swarm/test_waits.py` pins the rule: `test_a_queued_required_check_holds_the_wait_after_the_gate_passed` holds the wait for a queued, pending, expected and cancelled required check beside a passed gate; `test_a_result_read_from_an_older_commit_never_ends_the_wait` holds it for a reading whose newest commit is not the head; `test_a_green_wait_holds_until_the_branch_rules_confirm_every_required_check` and `test_a_red_wait_ends_without_asking_the_branch_rules` cover the confirmation. `tests/swarm/test_ready.py::test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green` covers the merge pass. The behavior was delivered in [pull request 4114](https://github.com/the-cloud-clockwork/agentihooks/pull/4114); its tests failed first in [run 39043964843](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043964843).
+
 ## The minute tick
 
 An agentihooks scheduler cron (`* * * * *`, one per machine) runs `agentihooks swarm tick` every minute. `start`
@@ -1461,6 +1557,46 @@ of an `agentihooks controller run` install; `swarm tick` refuses to run with it 
 every 60 seconds. Redis server time determines expiry. The owner comes
 from `SWARM_HIVE_ID`, falling back to the hostname. Ledger and spawn writes carry the epoch; stale controllers
 are refused. The tick lock prevents two ticks in the same epoch and lets a higher epoch take over.
+
+### Tick lock holder record
+
+The tick lock is the Redis key `tick-lock` of the swarm, set for ten minutes. A running tick extends it to ten
+minutes again before every step; a rename does not extend it, so a rename that runs past ten minutes loses the lock.
+Its value is a holder record, a JSON object written by whoever takes the lock:
+
+```json
+{"epoch": 7, "token": "4f1c...", "host": "<boot id>:pid:[4026531836]", "pid": 41237, "start": "8812345"}
+```
+
+`epoch` is the controller lease epoch, `token` is random per take, `host` joins the machine's boot id with the
+taker's process namespace, and `pid` and `start` name the process and its start time from `/proc`. Only the holder
+whose record matches exactly can extend or release the lock, so a holder that lost its lock never deletes another's.
+
+A take succeeds when the key is empty, holds a record from another lease epoch, or holds a record of the same epoch
+whose holder is dead. A holder is dead only when its `host` equals the taker's and its process is gone, a zombie, or a
+different process with a reused pid (another start time). In the same epoch, a record from another host or pid
+namespace, a record missing `pid` or `start`, and a bare token that is not a JSON record are never judged dead; they
+block until the key expires, ten minutes after the holder's last extension. A take that races another write on the
+key gets no lock; one that races a change of the controller lease fails with `the controller lease is stale`.
+
+`agentihooks swarm tick` and `agentihooks swarm rename` take the lock the same way. Each first acquires the
+controller lease for this hive (the hive id from `scripts.swarm.commands.hive_id`: the hive membership, else
+`SWARM_HIVE_ID`, else the seeded registry id, else the hostname), then takes the tick lock with its own holder record,
+and releases it with its own token when it ends. A tick or rename killed mid run, by `kill -9`, a closed terminal or
+an out of memory kill, costs no wait: the next tick of this hive on the same machine gets the same lease epoch back
+while the lease is live and sees the dead holder, or gets a new epoch after the lease expired; either way it takes the
+lock at once.
+
+A tick prints each action as `<id>: <action>` on stdout and ends normally; a rename fails with the error, and
+`agentihooks swarm rename` exits 1 with it on stderr after the swarm id
+(`swarm: <id>: swarm <id>: another tick or rename is running`).
+
+| Situation at take | `swarm tick` output | `swarm rename` error |
+|---|---|---|
+| Another hive holds the controller lease | `the swarm belongs to another hive` | `swarm <id>: belongs to another hive` |
+| A live tick or rename holds the lock in this epoch | `another tick is running` | `swarm <id>: another tick or rename is running` |
+| A killed tick or rename of this hive left the lock on this machine | takes it at once | takes it at once |
+| A holder on another machine, or a bare token, holds it in this epoch | `another tick is running` until the key expires | `swarm <id>: another tick or rename is running` until the key expires |
 
 ### Tick heartbeat and stale watcher
 

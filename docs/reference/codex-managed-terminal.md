@@ -218,8 +218,7 @@ started with.
 
 The execution home is `<execution folder>/codex`. The execution folder is the
 parent of the server's socket, which the supervisor's launch line prints as
-`endpoint=unix://<path>`. Sockets sit under `$XDG_RUNTIME_DIR/cx` when that
-variable is set, else under `~/.agentihooks/cx`.
+`endpoint=unix://<path>`. Sockets sit under `$HOME/.agentihooks/cx`.
 
 ### Refusals
 
@@ -275,10 +274,12 @@ check is cited here.
 ## Lifecycle and failures
 
 Reopening a viewer and retiring an execution are separate operations. Managed
-execution retirement uses its supervised runtime. The ordinary runtime resume
-path refuses a managed execution with `unsupported resume: a managed Codex
-execution continues through its supervised server`. Use terminal reopening for
-a live execution. Renaming a managed agent renames its herdr pane and registry
+execution retirement uses its supervised runtime and closes the execution's
+recorded viewers; see [Retire a managed
+execution](#retire-a-managed-execution). The ordinary runtime resume path
+refuses a managed execution with `unsupported resume: a managed Codex execution
+continues through its supervised server`. Use terminal reopening for a live
+execution. Renaming a managed agent renames its herdr pane and registry
 identity without typing a session-name command into the viewer.
 
 Retiring a managed execution closes the agent's recorded pane, which after a
@@ -315,6 +316,103 @@ The live qualification also recorded these viewer limits:
 | Reopen fails with `unknown execution identity; display labels cannot identify attempts` | The agent is listed, but its execution identity has no stored record. Check `agentihooks swarm <id> status` for the agent's current execution. |
 | Agent runs no attachable app-server | The recorded harness or transport lacks native terminal attachment. Use its normal terminal path. |
 | Closing a viewer leaves the agent working | Expected: the viewer does not own execution lifetime or inbox delivery. |
+| A viewer shows `Reconnecting to server…` after its agent retired | Retirement had no live record of that pane: it was opened some other way than `agentihooks swarm <id> terminal`, it is the launch pane after a reopen replaced it on the record, its pane id was reused for another terminal, or it runs on a revision without viewer cleanup. Close the pane by hand. See [Retire a managed execution](#retire-a-managed-execution). |
+| `retire failed` finding with `refusal: viewer pane <pane>: …` or `refusal: runtime home: …` | Retirement ended the server but could not close a pane or remove the execution folder. The binding stays connected and the tick retries; fix the named pane or folder. |
+
+## Retire a managed execution
+
+The tick and the lifecycle controls retire a managed Codex execution through
+the same supervised runtime path. Retirement runs these steps in order and
+stops at the first one that fails:
+
+1. End the supervised app-server, selected by the server process id and start
+   identity recorded on the transport binding. A missing binding, or one with
+   no recorded server process or start identity, is refused with
+   `managed server identity is unknown`. A server process that is already
+   gone, or whose start time no longer matches the recorded identity, counts
+   as ended.
+2. Close the agent's recorded pane, when it has one, and each viewer pane
+   recorded for the execution that herdr still lists on the terminal it was
+   recorded with. The agent's recorded pane is the launch pane until a reopen
+   replaces it with the newest viewer; it is closed without a terminal check.
+   A pane herdr reports as not found counts as closed.
+3. Remove the execution folder, the runtime folder holding the server socket
+   and the execution home `codex`. Before deleting it, any rollouts under the
+   home's `sessions` and `archived_sessions` folders are appended to the
+   canonical Codex home (`sqlite_home` from the home's `config.toml`, else
+   `~/.codex`; a `sqlite_home` inside the execution home also falls back to
+   `~/.codex`), so conversation history survives the removal. A canonical copy
+   that already holds the whole rollout is left as it is. A rollout whose
+   content diverged from the canonical copy is kept under
+   `recovered-<execution folder>`.
+4. Mark the binding `exited`, release it and forget the recorded viewers.
+
+### Recorded viewers
+
+`agentihooks swarm <id> terminal <execution-id>` records each viewer pane it
+opens, together with the herdr terminal it was opened on, in the swarm's
+`codex-viewers` hash keyed by pane. A viewer opened any other way, such as a
+hand run `codex resume --remote`, is not recorded and stays open after
+retirement.
+
+herdr reuses the ids of closed panes, so retirement closes a recorded viewer
+only while `herdr pane list` still shows that pane on the terminal it was
+recorded with. A viewer the operator already closed, whose id now belongs to
+another pane, is left alone, as is a recorded viewer with no terminal id.
+`herdr pane list` runs only when the execution has recorded viewers.
+
+### Removed folder
+
+Only a folder matching the socket layout is removed: its parent is named `cx`
+and its own name is the first sixteen characters of the execution id after the
+`exe-` prefix, as in `$HOME/.agentihooks/cx/<first 16 characters of the id
+after exe->`. The check is on those two names, not on the root. A binding whose
+recorded endpoint lies outside that layout keeps its folder; the binding is
+still marked exited. A folder already gone is skipped.
+
+### Refusals and retry
+
+A refusal leaves the binding connected and its viewer records in place, so the
+next tick retries the whole retirement; ending a server that is already gone
+does not refuse the retry. Most tick paths that retire an agent log their own
+`could not retire <agent> …, retrying next tick` line; the lost agent path logs
+only `lost <agent>`, and the idle stall path logs nothing on a refusal. Only
+the path that retires an ended execution counts failures: from its third
+failing tick, `agentihooks swarm <id> status` lists a `retire failed` health
+finding naming the process and the refusal. The count clears when the agent is
+dropped from the swarm.
+
+Known gap: removal catches only `OSError`. A malformed `config.toml` in the
+execution home raises out of retirement with no refusal recorded; a follow up
+on the ledger tracks it.
+
+Known gap: the lost agent path drops the agent from the swarm even when its
+managed retirement is refused, so that server keeps running with its binding
+connected, no later tick retries it and no finding is raised; a follow up on
+the ledger tracks it.
+
+| Refusal | Cause |
+|---|---|
+| `managed server identity is unknown` | The binding records no server process or start identity. |
+| `survived SIGKILL: <pids>`, `signal to <id> refused: <error>` | The server process or its group did not end. |
+| `pane list: <error>` | herdr could not list panes, so recorded viewers could not be checked. |
+| `viewer pane <pane>: <error>` | herdr refused to close the agent's recorded pane or a recorded viewer for a reason other than not found. |
+| `runtime home: <error>` | Removing the execution folder raised an `OSError`, for example a permission error. |
+
+The delivered behaviour is [pull request
+3898](https://github.com/the-cloud-clockwork/agentihooks/pull/3898) ([issue
+3896](https://github.com/the-cloud-clockwork/agentihooks/issues/3896)), proved
+red on a test-only head in [run
+39004056453](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39004056453)
+and green in [run
+39004150106](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39004150106),
+covered by the managed lifecycle tests in
+`tests/swarm/test_managed_lifecycle.py` and the attach tests in
+`tests/codex_session/test_attach.py`. Rollout preservation before removal
+arrived later in [pull request
+4339](https://github.com/the-cloud-clockwork/agentihooks/pull/4339). Those
+tests use fixture panes and folders; no live retirement of a herdr viewer is
+cited here.
 
 See [Swarm inbox delivery](../pillars/swarm.md#delivered-then-confirmed) for
 receipt, redelivery and closure rules, and [Codex compatibility](CODEX-COMPAT.md)

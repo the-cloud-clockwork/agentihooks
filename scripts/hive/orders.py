@@ -7,7 +7,7 @@ from scripts.hive import registry
 from scripts.swarm import lease, prompt, reaper
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
-from scripts.swarm_v2.runtime.base import SpawnRequest
+from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 from scripts.swarm_v2.runtime.process import launch_target
 
 if TYPE_CHECKING:
@@ -309,7 +309,7 @@ class Consumer:
             task["workspace"] = str(ledger_workspace.materialize(order.slug, order.task, task.get(SEEDS) or {}))
         outcome = self.runtime.spawn(SpawnRequest(config, order.lane, agent.name, task))
         if not outcome.ok:
-            return Ack("failed", {}, outcome.status.value)
+            return Ack("failed", {}, _failure(outcome))
         placed = outcome.value
         pid = placed.profile_decision.get("validation", {}).get("pid")
         try:
@@ -340,3 +340,9 @@ class Consumer:
 
 def _done(ok: bool) -> Ack:
     return Ack(DONE, {}) if ok else REFUSED
+
+
+def _failure(outcome: Outcome) -> str:
+    if outcome.status is Status.AMBIGUOUS or not outcome.detail:
+        return outcome.status.value
+    return f"{outcome.status.value}: {outcome.detail}"

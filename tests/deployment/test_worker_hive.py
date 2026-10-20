@@ -73,7 +73,7 @@ def test_code_join_clones_repo_and_configures_before_run(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands.splitlines() == [
         "hive join https://join.example.test fixture-code",
-        "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan max-agents=1",
+        "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1",
         "hive run",
     ]
     assert (repo / ".git").is_dir()
@@ -84,7 +84,7 @@ def test_mounted_member_skips_join_and_keeps_private_credentials(tmp_path):
     result, commands, home, _ = startup(tmp_path, joined=True)
     assert result.returncode == 0, result.stderr
     assert "hive join" not in commands
-    assert "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan max-agents=1\n" in commands
+    assert "hive set worker-member ui=no ephemeral=yes roles=eng,ci,plan,dispatch max-agents=1\n" in commands
     assert commands.endswith("hive run\n")
     assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
     assert "fixture member credential" not in result.stdout + result.stderr
