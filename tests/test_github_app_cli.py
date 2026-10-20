@@ -192,3 +192,41 @@ def test_a_missing_token_file_is_a_quiet_refusal(monkeypatch, tmp_path, capsys):
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     assert github_app_cli.main(["token"]) == 1
     assert capsys.readouterr() == ("", github_app_cli.REFUSED + "\n")
+
+
+def renewal(monkeypatch, tmp_path, mode="app", key=True):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", mode)
+    if key:
+        monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "pem")
+    else:
+        monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    mint = Mock(return_value="fresh")
+    monkeypatch.setattr(github_app_cli, "token", mint)
+    return tmp_path / "github-token", mint
+
+
+def test_renewal_rewrites_the_private_token_file_once_thirty_minutes_pass(monkeypatch, tmp_path):
+    path, mint = renewal(monkeypatch, tmp_path)
+    assert github_app_cli.renew(100.0, 100.0 + github_app_cli.RENEW_SECONDS - 1) == 100.0
+    mint.assert_not_called()
+    assert github_app_cli.renew(100.0, 100.0 + github_app_cli.RENEW_SECONDS) == 100.0 + github_app_cli.RENEW_SECONDS
+    assert path.read_text() == "fresh\n"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert not path.with_name("github-token.next").exists()
+
+
+@pytest.mark.parametrize("mode,key", [("token", True), ("app", False)])
+def test_renewal_needs_app_mode_and_the_app_key(monkeypatch, tmp_path, mode, key):
+    path, mint = renewal(monkeypatch, tmp_path, mode, key)
+    assert github_app_cli.renew(0.0, 99999.0) == 0.0
+    mint.assert_not_called()
+    assert not path.exists()
+
+
+def test_a_failed_renewal_keeps_the_old_file_and_retries(monkeypatch, tmp_path):
+    path, mint = renewal(monkeypatch, tmp_path)
+    path.write_text("old\n")
+    mint.side_effect = github_app_cli.GitAuthRefused(github_app_cli.REFUSED)
+    assert github_app_cli.renew(0.0, 99999.0) == 0.0
+    assert path.read_text() == "old\n"

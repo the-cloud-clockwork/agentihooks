@@ -210,6 +210,36 @@ def grouped(groups: dict) -> list[Finding]:
                 (*evidence, *(member["evidence"] for member in members)),
                 THRESHOLDS[entry["kind"]],
                 max(measures),
+                evidence_identity=(*[member["run"] for member in members], max(measures)),
             )
         )
     return found
+
+
+def _covered(finding, identity, verdict):
+    kind, _, subject = identity.partition("/")
+    if kind != finding.kind.replace(" ", "-") or subject.partition("-")[2] != finding.subject.partition("-")[2]:
+        return False
+    identity = verdict.get("evidence_identity")
+    members = identity[:-1] if identity is not None else verdict["evidence"][0].rpartition(", runs ")[2].split(", ")
+    return finding.measure <= verdict["measure"] and set(finding.evidence_identity[:-1]).issubset(members)
+
+
+def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
+    judgments = {identity: json.loads(raw)["verdict"] for identity, raw in records.items()}
+    recent = {
+        identity: verdict for identity, verdict in judgments.items() if verdict and now_ms < verdict["at"] + cooldown_ms
+    }
+    return [
+        finding
+        for finding in found
+        if finding.evidence_identity is None
+        or not any(_covered(finding, identity, verdict) for identity, verdict in recent.items())
+    ]
+
+
+def notice_key(finding: Finding, records: dict) -> str:
+    prior = records.get(finding.id)
+    if finding.evidence_identity is None or prior is None or not json.loads(prior)["verdict"]:
+        return finding.id
+    return json.dumps([finding.id, finding.evidence_identity, finding.measure])
