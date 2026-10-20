@@ -128,10 +128,8 @@ def test_install_reports_a_timer_systemd_would_not_enable(tmp_path, monkeypatch)
     monkeypatch.setattr(sync, "_live", lambda home: True)
     monkeypatch.setattr(sync, "_systemctl", lambda *args: calls.append(args) or args[0] == "daemon-reload")
     message = sync.install(tmp_path, enable=True)
-    assert (
-        message
-        == f"[!!] Host guard files installed in {tmp_path}; systemctl --user could not reload or enable guard-daemon.timer"
-    )
+    refused = "systemctl --user could not reload or enable guard-daemon.timer"
+    assert message == f"[!!] Host guard files installed in {tmp_path}; {refused}"
     assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
     assert sync.drift(tmp_path) == []
     assert sync.run("install", tmp_path) == 1
