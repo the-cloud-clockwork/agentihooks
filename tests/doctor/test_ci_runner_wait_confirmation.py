@@ -159,7 +159,7 @@ def test_a_finding_superseded_by_a_corrected_read_is_retracted(store, monkeypatc
     monkeypatch.setattr(ci_speed_read, "read", read)
     cli.timer(store, DOCTOR, FOUND_AT, False)
     details = store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
-    [raised] = [key for key in details if key.endswith('39278021878-1-["anton-oss-light"]')]
+    [raised] = [key for key in details if key.endswith('-["anton-oss-light"]')]
     cli.timer(store, DOCTOR, FOUND_AT + 60000, False)
     assert raised not in store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
     judged = json.loads(store.redis.hget(store.key(DOCTOR, "doctor-findings"), raised))
