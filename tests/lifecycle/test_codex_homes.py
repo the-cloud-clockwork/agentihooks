@@ -1,4 +1,5 @@
 import json
+import shutil
 import socket
 import tempfile
 import time
@@ -147,12 +148,40 @@ def test_a_failed_removal_is_reported_and_the_sweep_goes_on(layout, monkeypatch)
         if directory == first:
             raise PermissionError("denied")
         removed.append(directory)
+        shutil.rmtree(directory)
 
     monkeypatch.setattr(codex_homes, "remove_home", remove)
     result = codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ)
     assert result[0] == {"path": str(first), "action": "error", "error": "denied"}
     assert result[1]["action"] == "removed"
     assert removed == [second]
+    assert [json.loads(line)["path"] for line in (state / codex_homes.LOG).read_text().splitlines()] == [str(second)]
+
+
+def test_a_home_left_on_disk_is_reported_as_an_error_and_not_logged(layout, monkeypatch):
+    environ, legacy, _, state, proc = layout
+    stuck = plant(legacy, "a1")
+    monkeypatch.setattr(codex_homes, "remove_home", lambda directory: None)
+    result = codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ)
+    assert result == [{"path": str(stuck), "action": "error", "error": "home still present after removal"}]
+    assert stuck.exists()
+    assert not (state / codex_homes.LOG).exists()
+
+
+def test_an_unreadable_root_is_skipped_and_the_other_root_is_swept(layout, monkeypatch):
+    environ, legacy, current, state, proc = layout
+    plant(legacy, "a1")
+    kept = plant(current, "b2")
+    listed = Path.iterdir
+
+    def iterdir(path):
+        if path == legacy:
+            raise PermissionError("denied")
+        return listed(path)
+
+    monkeypatch.setattr(Path, "iterdir", iterdir)
+    result = codex_homes.sweep_codex_homes(later(), state, proc=proc, environ=environ)
+    assert [item["path"] for item in result] == [str(kept)]
 
 
 def test_lifecycle_sweep_reports_codex_homes_with_its_snapshot_scope_and_action(tmp_path, monkeypatch):

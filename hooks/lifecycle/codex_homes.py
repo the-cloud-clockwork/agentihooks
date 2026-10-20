@@ -46,7 +46,7 @@ def references(snap: Snapshot, proc: Path) -> list[str]:
 
 def owned(directory: Path, refs: list[str]) -> bool:
     marker = f"{directory}/"
-    return listening(directory / SOCKET_NAME) or any(marker in ref for ref in refs)
+    return any(marker in ref for ref in refs) or listening(directory / SOCKET_NAME)
 
 
 def homes(environ: Mapping[str, str], scope: str) -> list[Path]:
@@ -54,7 +54,11 @@ def homes(environ: Mapping[str, str], scope: str) -> list[Path]:
     for root in roots(environ):
         if root.is_symlink() or not root.is_dir():
             continue
-        for directory in sorted(root.iterdir()):
+        try:
+            entries = sorted(root.iterdir())
+        except OSError:
+            continue
+        for directory in entries:
             if directory.is_symlink() or not directory.is_dir():
                 continue
             if not scope or directory.is_relative_to(scope):
@@ -79,10 +83,13 @@ def sweep_codex_homes(
             info = {"path": str(directory), "bytes": walk_stats(directory)[1], "action": "would remove"}
             if act:
                 remove_home(directory)
+                if directory.exists():
+                    raise OSError("home still present after removal")
                 info["action"] = "removed"
-                with (home / LOG).open("a") as log:
-                    log.write(json.dumps(info) + "\n")
         except OSError as exc:
             info = {"path": str(directory), "action": "error", "error": str(exc)}
+        if info["action"] == "removed":
+            with (home / LOG).open("a") as log:
+                log.write(json.dumps(info) + "\n")
         records.append(info)
     return records
