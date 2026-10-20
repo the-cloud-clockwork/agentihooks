@@ -60,10 +60,9 @@ def test_the_same_code_bound_is_the_widest_single_pair_ratio_in_either_direction
 
 
 def test_the_recorded_same_code_runs_fit_inside_the_margin_the_workflow_states():
-    root = Path(__file__).resolve().parents[2]
-    workflow = yaml.safe_load((root / ".github/workflows/hierarchy-cpu.yml").read_text())
+    workflow = yaml.safe_load((ROOT / ".github/workflows/hierarchy-cpu.yml").read_text())
     margin = float(workflow["jobs"]["grade"]["env"]["SAME_CODE_MARGIN"])
-    recorded = paired.recorded_runs(root / "tests/ledger_load/same_code_pairs.json")
+    recorded = paired.recorded_runs(ROOT / "tests/ledger_load/same_code_pairs.json")
     assert len(recorded) >= 3
     assert paired.same_code_bound(recorded) <= margin
 
