@@ -3,9 +3,8 @@ import { $, store, stored } from "./dom.js";
 import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
-import { revealTarget } from "./outline.js";
+import { pageTo, revealTarget } from "./outline.js";
 import { renderSwarm, swarm } from "./swarm.js";
-import { pageIn, pagedOut } from "./sync.js";
 
 const tabScroll = {};
 
@@ -34,9 +33,7 @@ export function openHash() {
     return;
   }
   selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
-  const [kind, list, ...rest] = id.split("-");
-  if (kind === "item" && pagedOut(list, rest.join("-")))
-    pageIn(list, rest.join("-")).then(() => { const paged = revealTarget(id); if (paged) paged.scrollIntoView({ block: "start" }); });
+  pageTo(id);
 }
 
 export function wireTabs() {

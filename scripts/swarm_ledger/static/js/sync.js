@@ -123,7 +123,7 @@ function keepDropped(previous, next) {
     older[name] = [...dropped, ...older[name]].filter((i) => gone.has(i.id));
     pulled[name] = older[name].length;
   }
-  for (const name of touchedPaged(seenRev)) refreshClosed(name);
+  for (const name of new Set([...touchedPaged(seenRev), ...unsettled])) refreshClosed(name).catch(() => null);
   seenRev = meta.rev;
 }
 
@@ -147,20 +147,24 @@ export async function pageIn(name, id) {
 }
 
 const refreshing = {};
+const unsettled = new Set();
 
 async function refreshClosed(name) {
-  const closed = (meta.closed || {})[name];
   const want = (older[name] || []).length;
   const turn = (refreshing[name] = (refreshing[name] || 0) + 1);
+  unsettled.add(name);
   const rows = [];
-  while (closed && rows.length < want) {
+  while (rows.length < want) {
+    const closed = (meta.closed || {})[name];
+    if (!closed) break;
     const resp = await readClosed(name, closed.kept + rows.length);
-    if (!resp.ok) return;
+    if (turn !== refreshing[name] || !resp.ok) return;
     const { data } = await resp.json();
+    if (turn !== refreshing[name]) return;
     if (!data.length) break;
     rows.push(...withDefaults({ [name]: data })[name]);
   }
-  if (turn !== refreshing[name]) return;
+  unsettled.delete(name);
   const stale = new Set(older[name].map((i) => i.id));
   older[name] = rows.slice(0, want);
   pulled[name] = older[name].length;
@@ -182,6 +186,7 @@ function touchedPaged(since) {
 export async function loadClosed(name) {
   const closed = (meta.closed || {})[name];
   if (!closed) return;
+  refreshing[name] = (refreshing[name] || 0) + 1;
   const resp = await readClosed(name, closed.kept + (pulled[name] || 0));
   if (!resp.ok) return;
   const { data } = await resp.json();
@@ -190,6 +195,7 @@ export async function loadClosed(name) {
   older[name] = [...(older[name] || []), ...fresh];
   pulled[name] = fresh.length ? older[name].length : closed.hidden;
   mergeOlder(doc);
+  if (unsettled.has(name)) refreshClosed(name).catch(() => null);
 }
 
 function applyServer(server) {

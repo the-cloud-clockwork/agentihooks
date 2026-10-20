@@ -43,13 +43,15 @@ export function revealTarget(id) {
   return el;
 }
 
+export function pageTo(id) {
+  const [kind, list, ...rest] = id.split("-");
+  if (kind !== "item" || document.getElementById(id) || !pagedOut(list, rest.join("-"))) return null;
+  return pageIn(list, rest.join("-")).then(() => land(revealTarget(id)));
+}
+
 export function jumpTo(ev, item) {
   const id = `item-${item.replace("/", "-")}`;
-  const [list, key] = item.split("/");
-  if (!document.getElementById(id) && pagedOut(list, key)) {
-    ev.preventDefault();
-    return pageIn(list, key).then(() => land(revealTarget(id)));
-  }
+  if (pageTo(id)) return ev.preventDefault();
   const el = revealTarget(id);
   if (!el) return;
   ev.preventDefault();
