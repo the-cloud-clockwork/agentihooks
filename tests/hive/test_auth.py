@@ -88,6 +88,23 @@ def test_the_member_user_reads_every_root_key_and_writes_only_its_granted_patter
                     f"%R~{ROOT}:*",
                     f"~{ROOT}:hive:m1",
                     f"~{ROOT}:hive:m1:*",
+                    f"~{ROOT}:swarm:*:agents",
+                    f"~{ROOT}:swarm:*:executions",
+                    f"~{ROOT}:swarm:*:desired-routes",
+                    f"~{ROOT}:swarm:*:state-since",
+                    f"~{ROOT}:swarm:*:claim:*",
+                    f"~{ROOT}:swarm:*:ready",
+                    f"~{ROOT}:swarm:*:restart-causes",
+                    f"~{ROOT}:swarm:*:transfers",
+                    f"~{ROOT}:swarm:*:handoff:*",
+                    f"~{ROOT}:swarm:*:handoff-seat:*",
+                    f"~{ROOT}:swarm:*:handoff-envelope:*",
+                    f"~{ROOT}:swarm:*:findings",
+                    f"~{ROOT}:swarm:*:merge-stall",
+                    f"~{ROOT}:swarm:*:merge-stall-notice",
+                    f"~{ROOT}:swarm:*:hive-placement-waits",
+                    f"~{ROOT}:seat:*:recaps",
+                    f"~{ROOT}:seat-of:*:exit",
                 ),
                 "channels": (f"{ROOT}:*",),
             },
@@ -118,6 +135,45 @@ def test_a_member_writes_its_own_inbox_and_readings_and_no_other_members(suffix,
 
     assert any(fnmatchcase(key, pattern) for pattern in patterns) is writable
     assert any(fnmatchcase(key, pattern[3:]) for pattern in auth._acl_keys("m1") if pattern.startswith("%R~"))
+
+
+@pytest.mark.parametrize(
+    ("suffix", "writable"),
+    [
+        ("swarm:proof:claim:t1", True),
+        ("swarm:proof:agents", True),
+        ("swarm:proof:executions", True),
+        ("swarm:proof:desired-routes", True),
+        ("swarm:proof:state-since", True),
+        ("swarm:proof:ready", True),
+        ("swarm:proof:restart-causes", True),
+        ("swarm:proof:transfers", True),
+        ("swarm:proof:handoff:t1", True),
+        ("swarm:proof:handoff-seat:t1", True),
+        ("swarm:proof:handoff-envelope:t1", True),
+        ("swarm:proof:findings", True),
+        ("swarm:proof:merge-stall", True),
+        ("swarm:proof:merge-stall-notice", True),
+        ("swarm:proof:hive-placement-waits", True),
+        ("seat:eng-1@proof:recaps", True),
+        ("seat-of:engineer@0001-0001:exit", True),
+        ("swarm:proof:config", False),
+        ("swarm:proof:claim-journal:t1", False),
+        ("swarm:proof:task-authority:t1", False),
+        ("swarm:proof:tick-lock", False),
+        ("swarm:proof:launches", False),
+        ("swarm:index", False),
+        ("seat:eng-1@proof:learned", False),
+        ("names:engineer@0001-0001", False),
+    ],
+)
+def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_status(suffix, writable):
+    from fnmatch import fnmatchcase
+
+    key = f"{ROOT}:{suffix}"
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    assert any(fnmatchcase(key, pattern) for pattern in patterns) is writable
 
 
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
