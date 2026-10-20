@@ -245,9 +245,20 @@ def test_session_start_kick_spawns_only_when_stale(tmp_path, monkeypatch):
     assert spawned == [["/usr/bin/agentihooks", "deps", "ensure", "--quiet"]]
 
 
-def test_session_start_kick_reaps_a_slow_check_before_returning(tmp_path, monkeypatch):
+def _live_group_members(pgid: int) -> list[str]:
+    members = []
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        with contextlib.suppress(OSError):
+            fields = stat.read_text().rsplit(")", 1)[1].split()
+            if int(fields[2]) == pgid and fields[0] != "Z":
+                members.append(stat.parent.name)
+    return members
+
+
+@pytest.mark.parametrize("script", ["sleep 30 &\nwait\n", "sleep 30 &\nexit 0\n"], ids=["slow", "leaves-a-child"])
+def test_session_start_kick_leaves_no_check_process_behind(tmp_path, monkeypatch, script):
     exe = tmp_path / "agentihooks"
-    exe.write_text("#!/bin/sh\nsleep 30 &\nwait\n")
+    exe.write_text(f"#!/bin/sh\n{script}")
     exe.chmod(0o755)
     started = []
     popen = subprocess.Popen
@@ -257,18 +268,16 @@ def test_session_start_kick_reaps_a_slow_check_before_returning(tmp_path, monkey
     try:
         assert deps_kick.kick(home=tmp_path) is True
         elapsed = time.monotonic() - began
-        try:
-            os.killpg(started[0].pid, 0)
-            group_alive = True
-        except ProcessLookupError:
-            group_alive = False
+        deadline = time.monotonic() + 2
+        while (survivors := _live_group_members(started[0].pid)) and time.monotonic() < deadline:
+            time.sleep(0.05)
     finally:
         if started:
             with contextlib.suppress(ProcessLookupError):
                 os.killpg(started[0].pid, signal.SIGKILL)
             started[0].wait()
     assert elapsed < 5
-    assert not group_alive, "the dependency check's process group outlived the session start kick"
+    assert survivors == [], "the dependency check's process group outlived the session start kick"
 
 
 def test_session_start_kick_waits_for_a_fast_check(tmp_path, monkeypatch):
