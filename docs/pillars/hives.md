@@ -145,15 +145,13 @@ so a lost master hive is replaced between five and six minutes after its last be
 never beat, or whose record is gone, never moves its master. Set the grace with
 `agentihooks swarm <id> set master-move-grace=SECONDS`.
 
-On the move, the tick writes a recovery handoff that names its unknowns, bumps the master seat generation, fences
-the old execution and starts the successor on the hive master placement picks, or unpinned when none qualifies.
-The steps are in [Master failover and master move](#master-failover-and-master-move).
+The steps of the move are in [Automatic failover](#automatic-failover).
 
 ## Master failover and master move
 
 The master seat changes hive in two ways: the minute tick moves it off a hive that went quiet, and the operator
-moves it to a hive he names. Both end the same way: the successor starts through hive launch in the same master
-seat, pinned to the chosen hive.
+moves it to a hive he names. In both, the successor starts through hive launch in the same master seat. The
+operator move pins it to the named hive; the automatic move pins it when a live hive qualifies.
 
 ### Automatic failover
 
@@ -162,6 +160,8 @@ Each tick checks the live master record. It moves the master only when all of th
 - The master's hive has beaten at least once and its record still exists.
 - Its last heartbeat is older than `master-move-grace` seconds.
 - The runtime does not see the master's session live.
+
+A stopped swarm is checked only when an operator message is waiting for its master.
 
 Then, in one tick:
 
@@ -183,8 +183,8 @@ Tune the grace per swarm:
 agentihooks swarm rig-grade-swarm set master-move-grace=600
 ```
 
-A shorter grace replaces a lost master sooner; a hive that pauses longer than the grace, such as a laptop asleep,
-then loses its master. The default is 300 seconds.
+A hive that pauses longer than the grace, such as a laptop asleep, loses its master; a shorter grace replaces a
+lost master sooner. The default is 300 seconds.
 
 ### Operator master move
 
