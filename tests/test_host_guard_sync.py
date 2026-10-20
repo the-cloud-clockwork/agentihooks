@@ -372,7 +372,7 @@ def test_tick_runs_without_timeout_and_logs_a_failed_start(monkeypatch):
 
 def test_the_gc_command_parses_host_guard_actions():
     parser = gc_cli._parser()
-    assert HELP in parser.format_help()
+    assert HELP in " ".join(parser.format_help().split())
     for action in ("install", "check"):
         args = parser.parse_args(["host-guard", action])
         assert (args.command, args.action) == ("host-guard", action)
