@@ -45,7 +45,7 @@ def drift(home: Path) -> list[str]:
     return found
 
 
-def install(home: Path) -> str:
+def install(home: Path, enable: bool) -> str:
     for name in LINKS:
         staged = home / f".{name}.agentihooks"
         staged.unlink(missing_ok=True)
@@ -54,8 +54,8 @@ def install(home: Path) -> str:
     _unit_dir(home).mkdir(parents=True, exist_ok=True)
     for name in UNITS:
         (_unit_dir(home) / name).write_text((REPO / name).read_text())
-    if _live(home) and not (_systemctl("daemon-reload") and _systemctl("enable", "--now", TIMER)):
-        return f"[!!] Host guard files installed in {home}; systemctl --user could not enable {TIMER}"
+    if _live(home) and not (_systemctl("daemon-reload") and (not enable or _systemctl("enable", "--now", TIMER))):
+        return f"[!!] Host guard files installed in {home}; systemctl --user could not reload or enable {TIMER}"
     return f"[OK] Host guard installed in {home} from {REPO}"
 
 
@@ -65,12 +65,12 @@ def reconcile(home: Path) -> str:
         return "[--] Host guard not installed; agentihooks host-guard install adds it"
     if not drift(home):
         return f"[OK] Host guard in sync with {REPO}"
-    return install(home)
+    return install(home, enable=False)
 
 
 def run(action: str, home: Path) -> int:
     if action == "install":
-        message = install(home)
+        message = install(home, enable=True)
         print(message)
         return 0 if message.startswith("[OK]") else 1
     found = drift(home)

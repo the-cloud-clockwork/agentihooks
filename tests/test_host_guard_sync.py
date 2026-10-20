@@ -77,7 +77,7 @@ def test_a_changed_or_missing_unit_is_drift(tmp_path):
 
 
 def test_install_links_both_files_and_writes_both_units_into_an_empty_home(tmp_path, calls):
-    messages = sync.install(tmp_path)
+    messages = sync.install(tmp_path, enable=True)
     for name in LINKS:
         assert (tmp_path / name).is_symlink()
         assert (tmp_path / name).readlink() == sync.REPO / name
@@ -94,7 +94,7 @@ def test_install_replaces_a_stale_hand_copied_config_and_a_stale_unit(tmp_path, 
     config.unlink()
     config.write_text('{"excludes": []}')
     (_units(tmp_path) / "guard-daemon.timer").write_text("[Timer]\n")
-    sync.install(tmp_path)
+    sync.install(tmp_path, enable=True)
     assert config.is_symlink() and config.readlink() == sync.REPO / "guard-config.json"
     assert (_units(tmp_path) / "guard-daemon.timer").read_text() == (sync.REPO / "guard-daemon.timer").read_text()
     assert sync.drift(tmp_path) == []
@@ -102,18 +102,35 @@ def test_install_replaces_a_stale_hand_copied_config_and_a_stale_unit(tmp_path, 
 
 def test_install_reloads_and_enables_the_timer_only_in_the_live_home(tmp_path, monkeypatch, calls):
     monkeypatch.setattr(sync, "_live", lambda home: home == tmp_path)
-    sync.install(tmp_path)
+    sync.install(tmp_path, enable=True)
     assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
+
+
+def test_reconcile_reloads_units_but_never_enables_a_timer_the_operator_disabled(tmp_path, monkeypatch, calls):
+    monkeypatch.setattr(sync, "_live", lambda home: home == tmp_path)
+    (tmp_path / "guard-config.json").write_text("{}")
+    assert sync.reconcile(tmp_path) == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}"
+    assert calls == [("daemon-reload",)]
+    assert sync.drift(tmp_path) == []
+
+
+def test_reconcile_reports_a_failed_reload(tmp_path, monkeypatch):
+    monkeypatch.setattr(sync, "_live", lambda home: True)
+    monkeypatch.setattr(sync, "_systemctl", lambda *args: False)
+    (tmp_path / "guard-config.json").write_text("{}")
+    assert sync.reconcile(tmp_path) == (
+        f"[!!] Host guard files installed in {tmp_path}; systemctl --user could not reload or enable guard-daemon.timer"
+    )
 
 
 def test_install_reports_a_timer_systemd_would_not_enable(tmp_path, monkeypatch):
     calls = []
     monkeypatch.setattr(sync, "_live", lambda home: True)
     monkeypatch.setattr(sync, "_systemctl", lambda *args: calls.append(args) or args[0] == "daemon-reload")
-    message = sync.install(tmp_path)
+    message = sync.install(tmp_path, enable=True)
     assert (
         message
-        == f"[!!] Host guard files installed in {tmp_path}; systemctl --user could not enable guard-daemon.timer"
+        == f"[!!] Host guard files installed in {tmp_path}; systemctl --user could not reload or enable guard-daemon.timer"
     )
     assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
     assert sync.drift(tmp_path) == []
