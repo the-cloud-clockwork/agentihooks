@@ -125,3 +125,27 @@ def test_a_master_that_keeps_its_account_posts_nothing(previous, account):
     chat = _Chat()
     assert _moved(previous, account, chat) == []
     assert chat.lines == []
+
+
+def test_the_tick_names_the_new_account_when_a_master_successor_moves(monkeypatch):
+    from scripts.swarm import ledger_client
+    from scripts.swarm.store import MASTER
+    from scripts.swarm.tick import Placed, _master
+    from tests.swarm.test_tick_master import direct
+
+    chat = _Chat()
+    monkeypatch.setattr(ledger_client, "LedgerClient", lambda: chat)
+    swarm, runtime = direct()
+    spawn = runtime.spawn
+
+    def moved(config, lane, name, task):
+        placed = spawn(config, lane, name, task)
+        return Placed(placed.pane_id, placed.harness, account="roomy")
+
+    runtime.spawn = moved
+    swarm.put_handoff("sw", MASTER, "Continue the master task.", envelope={"launch": {**LAUNCH, "account": "login"}})
+    actions = _master("sw", swarm.config("sw"), swarm, runtime, 1)
+    name = runtime.masters[0][0]
+    assert actions == [f"spawned master {name}", f"master {name} moved from account login to roomy"]
+    assert [(slug, by) for slug, _, by in chat.lines] == [("sw", None)]
+    assert "account roomy" in chat.lines[0][1]
