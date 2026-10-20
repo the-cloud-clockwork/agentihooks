@@ -230,7 +230,7 @@ def test_wait_checks_have_a_separate_short_timer_and_service(tmp_path):
     assert ["systemctl", "--user", "enable", "--now", "agentihooks-swarm-waits.service"] not in calls
 
 
-def test_a_wait_service_that_kills_its_whole_group_is_rewritten_to_leave_the_supervisor_running(tmp_path, monkeypatch):
+def test_a_wait_service_without_kill_mode_process_is_rewritten_and_reloaded(tmp_path, monkeypatch):
     monkeypatch.setattr(timer, "reconcile", real_reconcile)
     calls = []
 
