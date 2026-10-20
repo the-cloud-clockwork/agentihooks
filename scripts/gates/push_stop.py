@@ -293,11 +293,9 @@ class PushStop:
         return LedgerClient()
 
     def github(self):
-        if self._github:
-            return self._github
         from scripts.swarm.ledger_events import view
 
-        return view
+        return self._github or view
 
     def now(self):
         if self._now:

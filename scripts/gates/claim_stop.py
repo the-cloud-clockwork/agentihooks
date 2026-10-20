@@ -65,7 +65,7 @@ def between_halves(task, pull):
 
 def named(live, url):
     on = (live or {}).get("on") or {}
-    target = on.get("target") or ""
+    target = on.get("target")
     return target if on.get("kind") == "checks" and target != url else ""
 
 

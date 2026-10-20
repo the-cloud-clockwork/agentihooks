@@ -4,7 +4,7 @@ import pytest
 
 from scripts.gates import Call, Gate, Who
 from scripts.gates.base import Decision
-from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, parked_by, refusal, ruling
+from scripts.gates.claim_stop import CHECKS_WAIT_MS, PLAIN, STREAK, ClaimStop, parked_by, refusal, ruling
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import idle
@@ -618,9 +618,12 @@ def test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop(rig):
 
 def test_a_checks_wait_on_the_task_pull_request_keeps_grading_it(rig):
     rig.task.update(state="pr", pr_url=URL)
-    rig.pulls[URL] = RED
+    rig.pulls[URL] = PENDING
     on = {"kind": "checks", "target": URL}
     idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {URL}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["until"] == rig.clock[0] + CHECKS_WAIT_MS
+    rig.pulls[URL] = RED
     assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")
 
 
