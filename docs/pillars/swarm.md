@@ -1333,17 +1333,17 @@ agentihooks swarm <id> merge state <url>
 
 ### When a checks wait ends
 
-A wait on a pull request's checks ends green only when every required check on the pull request's latest commit has passed. A queued, pending or cancelled required check holds the wait, and a result read from an older commit never ends it. The same judgement runs for `wait --on checks <pull request url>`, for the checks stage of the [`ready` merge pass](#ready-merge-pass-queue-exits) and, through the shared required check reading, for `swarm merge queue`.
+A wait on a pull request's checks ends green only when every required check on the pull request's latest commit has passed. A queued, pending or cancelled required check holds the wait, and a result read from an older commit never ends it. The same judgment runs for `wait --on checks <pull request url>` and for the checks stage of the [`ready` merge pass](#ready-merge-pass-queue-exits). `swarm merge queue` applies only the head match and the branch rule confirmation of step 6.
 
 ```bash
-agentihooks swarm <swarm> wait --on checks https://github.com/<owner>/<repo>/pull/<number>
+agentihooks swarm <id> wait --on checks https://github.com/<owner>/<repo>/pull/<number>
 # later, as the tick action line:
 #   ended the wait of <agent>: checks on <url>, now green
 # and in the agent's inbox:
-#   Your wait on checks on <url>, now green has ended. Pick task <id> back up: agentihooks swarm <swarm> done, block, or wait on the next thing.
+#   Your wait on checks on <url>, now green has ended. Pick task <id> back up: agentihooks swarm <id> done, block, or wait on the next thing.
 ```
 
-Each tick judges the wait in this order. A step that does not end it holds the wait until the next tick, up to the 12 hour cap of a checked wait.
+Each tick judges the wait in this order. A step that does not end it holds the wait until the next tick. A checked wait declared without MINUTES lasts 12 hours, with MINUTES it lasts MINUTES; at expiry it lapses without an inbox item.
 
 1. **Read.** The tick reads the pull request through its per tick view. No answer from GitHub holds the wait. A pull request that is no longer open ends it with `pull request <url>, now merged` or `now closed`.
 2. **Bind to the head.** The reading must come from the pull request's head commit (`headRefOid`). When the newest commit in the reading is another commit, the reading carries no head and holds the wait, so checks of an older commit cannot end it.
@@ -1357,7 +1357,7 @@ The ending outcome is one line, used in the tick action line and the inbox notic
 | Outcome | Text |
 |---|---|
 | Every required check passed on the head and the branch rules confirm it | `checks on <url>, now green` |
-| A required check failed | `checks on <url>, now red; failed: <check names>` |
+| A required check failed | `checks on <url>, now red; failed: <check names>`, naming every failing check on the head, required or not |
 | A check failed and the gate ended skipped | `checks on <url>, now red; failed: <check names>; Gate — Required never passed` |
 | The pull request merged or closed | `pull request <url>, now merged` or `pull request <url>, now closed` |
 
@@ -1369,10 +1369,10 @@ The ending outcome is one line, used in the tick action line and the inbox notic
 |---|---|
 | The wait holds although the gate shows green | A required check is still queued, pending, expected or was cancelled. Read `gh pr checks <url>`. Rerun a cancelled required check; the wait ends on the tick after it passes. |
 | The wait holds one tick longer after a push | The head moved, so the wait recorded the new head and holds for that tick. It judges only the new head's checks from then on. |
-| Every check on the pull request passed, yet the wait never ends green | The branch rules require a check the head never reports, or one reported by a different app. Compare the required contexts in `gh api repos/<owner>/<repo>/rules/branches/<base>` with the check names in `gh pr checks <url>`. The wait ends at its 12 hour cap when nothing changes. |
+| Every check on the pull request passed, yet the wait never ends green | The branch rules require a check the head never reports, or one reported by a different app. Compare the required contexts in the rulesets (`gh api repos/<owner>/<repo>/rules/branches/<base>`) and in classic branch protection (`gh api repos/<owner>/<repo>/branches/<base>/protection`) with the check names in `gh pr checks <url>`. The wait lapses at its expiry when nothing changes. |
 | The wait holds while GitHub is unreachable | Every read that fails holds the wait; the tick tries again each minute. |
 
-`tests/swarm/test_waits.py` pins the rule: `test_a_queued_required_check_holds_the_wait_after_the_gate_passed` holds the wait for a queued, pending, expected and cancelled required check beside a passed gate; `test_a_result_read_from_an_older_commit_never_ends_the_wait` holds it for a reading whose newest commit is not the head; `test_a_green_wait_holds_until_the_branch_rules_confirm_every_required_check` and `test_a_red_wait_ends_without_asking_the_branch_rules` cover the confirmation. `tests/swarm/test_ready.py::test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green` covers the merge pass. The behaviour was delivered in [pull request 4114](https://github.com/the-cloud-clockwork/agentihooks/pull/4114); its tests failed first in [run 39043964843](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043964843).
+`tests/swarm/test_waits.py` pins the rule: `test_a_queued_required_check_holds_the_wait_after_the_gate_passed` holds the wait for a queued, pending, expected and cancelled required check beside a passed gate; `test_a_result_read_from_an_older_commit_never_ends_the_wait` holds it for a reading whose newest commit is not the head; `test_a_green_wait_holds_until_the_branch_rules_confirm_every_required_check` and `test_a_red_wait_ends_without_asking_the_branch_rules` cover the confirmation. `tests/swarm/test_ready.py::test_the_merge_pass_queues_only_once_a_fresh_read_confirms_green` covers the merge pass. The behavior was delivered in [pull request 4114](https://github.com/the-cloud-clockwork/agentihooks/pull/4114); its tests failed first in [run 39043964843](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39043964843).
 
 ## The minute tick
 
