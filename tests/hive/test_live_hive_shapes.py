@@ -203,3 +203,24 @@ def test_a_tick_logs_the_wait_when_both_live_hives_are_full(live):
     actions = tick("sw", live.store, tasks(("t1", "eng")), runtime, now_ms=1_000)
     assert "task t1 waits: no headless hive for eng has room" in actions
     assert runtime.spawned == []
+
+
+MISSING = placement.Wait(f"hive gone is not in the hive listing for {ORIGIN}")
+
+
+def test_a_hive_missing_from_the_listing_is_refused_naming_the_origin(live):
+    hives = launch._by_origin([root(), anton()], live.config.repo)
+    assert launch._matched_origin(hives, "gone", live.config.repo) == MISSING
+    assert launch._matched_origin(hives, ANTON, live.config.repo) == ORIGIN
+    assert launch._matched_origin(hives, "root", live.config.repo) == ""
+
+
+def test_an_engineer_choice_of_a_hive_missing_from_the_listing_waits_instead_of_raising(live, monkeypatch):
+    monkeypatch.setattr(launch.placement, "choose", lambda *args: Choice("gone"))
+    assert live.launcher.select(live.config, "eng", {"id": "task"}) == MISSING
+
+
+def test_a_master_placed_on_a_hive_missing_from_the_listing_waits_instead_of_raising(live, monkeypatch):
+    placed = placement.MasterPlacement("gone", ROOT_ACCOUNTS[0], "subscription", False)
+    monkeypatch.setattr(launch.placement, "place_master", lambda *args: placed)
+    assert live.launcher.select(live.config, "master", {"id": "master"}) == MISSING
