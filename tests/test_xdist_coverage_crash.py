@@ -77,21 +77,23 @@ CONTROLLER = (
 
 
 @pytest.mark.parametrize(
-    "reruns",
-    [[], ["--reruns", "2"], ["--reruns", "2", "-p", "tests.flake_ledger"]],
-    ids=["no-reruns", "reruns", "flake-ledger"],
+    ("reruns", "ledger"),
+    [([], False), (["--reruns", "2"], False), (["--reruns", "2"], True)],
+    ids=["no-reruns", "reruns", "ledger"],
 )
-def test_a_run_whose_last_test_crashes_its_worker_ends(tmp_path, reruns):
+def test_a_run_whose_last_test_crashes_its_worker_ends(tmp_path, reruns, ledger):
     project = tmp_path / "project"
     project.mkdir()
     (project / "test_cases.py").write_text(LAST_CRASHES)
     (tmp_path / "base" / "b").mkdir(parents=True)
     command = [sys.executable, "-c", CONTROLLER, "test_cases.py", "-n", "3", "--dist", "loadgroup", "-v", *reruns]
-    command += ["-p", "no:cacheprovider", "-p", "tests.browser_coverage"]
+    command += ["-p", "no:cacheprovider", "-p", "tests.browser_coverage", "-p", "tests.flake_ledger"]
     command += ["--cov=.", "--cov-report=", "--cov-context=test", f"--basetemp={tmp_path / 'base' / 'b' / 'b'}"]
     env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_", "PYTEST_"))}
+    env.pop("CI_FLAKES", None)
     env["PYTHONPATH"] = str(ROOT)
-    env["CI_FLAKES"] = str(tmp_path / "flakes.jsonl")
+    if ledger:
+        env["CI_FLAKES"] = str(tmp_path / "flakes.jsonl")
     process = subprocess.Popen(
         command,
         cwd=project,
