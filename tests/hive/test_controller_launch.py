@@ -342,6 +342,22 @@ def test_replay_refuses_another_claimant(setup):
     assert len(setup.store.execution_registry.records("fixture")) == 1
 
 
+def test_expired_order_of_a_retired_claimant_is_ended_and_replaced(setup):
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    agent = setup.store.execution_registry.get("fixture", order.execution_id)
+    setup.store.execution_registry.update("fixture", replace(agent, state="working"))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.store.drop_agent("fixture", request.name)
+    other = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(other) == "pending"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    replacement = setup.launcher.orders_for("task")
+    assert replacement.execution_id != order.execution_id
+    assert setup.store.execution_registry.get("fixture", replacement.execution_id).name == other.name
+
+
 def test_publication_uses_one_redis_transaction(setup):
     from unittest.mock import patch
 

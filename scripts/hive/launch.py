@@ -193,11 +193,19 @@ class HiveLaunch:
         raw = self.store.redis.hget(self.store.key(self.slug, ORDERS), task)
         return LaunchOrder(**json.loads(raw)) if raw else None
 
+    def abandoned(self, order: LaunchOrder, previous: AgentRecord) -> bool:
+        return lease.now_ms(self.store) >= order.expires_at and all(
+            agent.name != previous.name for agent in self.store.agents(self.slug)
+        )
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
             previous = self.store.execution_registry.get(self.slug, order.execution_id)
             if previous.state in ("ended", "finished"):
+                self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
+            elif self.abandoned(order, previous):
+                self.end(previous, "hive launch order abandoned")
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
