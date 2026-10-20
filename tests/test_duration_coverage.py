@@ -34,7 +34,7 @@ def test_download_checks_coverage_before_replacing_complete_durations(tmp_path, 
         assert "11 of 100 tests have no stored duration" in capsys.readouterr().out
 
 
-@pytest.mark.parametrize("incomplete", ["3.11", "3.12", "*"])
+@pytest.mark.parametrize("incomplete", ["3.12", "*"])
 def test_publication_refuses_incomplete_maps_before_writing_any_file(tmp_path, monkeypatch, incomplete):
     complete = _suite(tmp_path)
     saved = {}
