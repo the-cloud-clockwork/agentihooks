@@ -23,6 +23,7 @@ NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
+OVERFLOW = "the local machine takes {lane} work: {reason}"
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
@@ -119,11 +120,27 @@ class FencedRuntime:
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
             if not isinstance(selected, Wait):
                 return ""
-            return f"{WORKSTATION.format(lane=lane)}: {selected.reason}" if lane == "master" else selected.reason
+            if lane == "master":
+                return f"{WORKSTATION.format(lane=lane)}: {selected.reason}"
+            return self._overflow(lane, task, selected)
         wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
+
+    def _overflow(self, lane: str, task: dict, waited) -> str:
+        if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
+            return waited.reason
+        from scripts.hive import placement_waits
+        from scripts.hive.placement import Choice, overflow
+
+        profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile") or ""
+        local_max = self.store.config(self.slug).local_max_agents
+        chosen = overflow(profile, waited, _local_agents(self.store, task["id"]), local_max)
+        if not isinstance(chosen, Choice):
+            return chosen.reason
+        placement_waits.observe(self.store, self.slug, lane, task["id"], "", lease.now_ms(self.store))
+        return OVERFLOW.format(lane=lane, reason=chosen.fallback)
 
     def has_capacity(self, config) -> bool:
         lease.renew(self.store, self.slug, self.held)
@@ -157,7 +174,21 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
     return frozenset(masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
 
 
+def _local_agents(store: RedisStore, task: str) -> int:
+    return sum(
+        agent.runtime_backend == WORKSTATION_BACKEND
+        and not agent.hive
+        and agent.lane != "master"
+        and agent.task != task
+        and agent.state != "finished"
+        for slug in store.slugs()
+        for agent in store.agents(slug)
+    )
+
+
 def _to_workstation(lane: str, refused: str) -> bool:
+    if refused.startswith(OVERFLOW.format(lane=lane, reason="")):
+        return True
     fallback_refusal = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
     return lane == "master" and fallback_refusal and _workstation_herdr()
 

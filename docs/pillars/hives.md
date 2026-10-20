@@ -696,6 +696,11 @@ stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on
 (`agentihooks hive install`, then `agentihooks hive set <id> ui=yes max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
 tick. On a machine in any other mode the setting changes nothing.
 
+Hives fill first. When no hive takes an eng, ci, plan or dispatch spawn, the tick runs it in the machine's own herdr
+panes while the machine runs fewer worker agents than `agentihooks swarm <id> set local-max-agents=N` (default 8),
+counted across every swarm on the machine. At the cap the spawn waits with the hive's reason and the local count.
+Masters, qa and frontend keep the UI host rule, and a task pinned to a hive never runs locally.
+
 ## Worker hives in Kubernetes
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:

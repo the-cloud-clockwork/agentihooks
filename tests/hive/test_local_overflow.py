@@ -114,7 +114,8 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     local_agents(setup, 1, slug="other")
     put = setup.store.put_agent
     put(setup.config.slug, AgentRecord("master-1", "master", "master"))
-    put(setup.config.slug, AgentRecord("eng-hive", "eng", "on-hive", runtime_backend="hive", hive="anton"))
+    put(setup.config.slug, AgentRecord("eng-hive", "eng", "on-hive", hive="anton"))
+    put(setup.config.slug, AgentRecord("eng-pod", "eng", "on-pod", runtime_backend="kubernetes"))
     put(setup.config.slug, AgentRecord("eng-done", "eng", "done", state="finished"))
     put(setup.config.slug, AgentRecord("eng-self", "eng", "task", state="starting"))
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
