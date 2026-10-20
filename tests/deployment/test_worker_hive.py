@@ -7,17 +7,16 @@ from pathlib import Path
 import pytest
 
 from scripts.swarm_ledger import ledger_link
-from tests.swarm_ledger.test_ledger_tls import cert  # noqa: F401
+from tests.swarm_ledger import test_ledger_tls
 
 pytestmark = pytest.mark.unit
+cert = test_ledger_tls.cert
 ROOT = Path(__file__).resolve().parents[2]
 START = ROOT / "deploy/worker/start.sh"
 TOKEN = "fixture-github-token-value"
 
 
-def startup(
-    tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url="", ledger_ca=""
-):
+def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
     tools = tmp_path / "bin"
     tools.mkdir()
     log = tmp_path / "commands"
@@ -100,8 +99,6 @@ def startup(
         "SWARM_SECRET": "fixture tick secret",
         "SSHD_DIES": "yes" if sshd_dies else "no",
     }
-    if ledger_ca:
-        env["LEDGER_CA_PEM"] = ledger_ca
     if ssh:
         env |= {
             "HIVE_SSHD": str(sshd),
@@ -271,9 +268,10 @@ def test_an_emptied_origin_unlinks_the_bundle_a_persistent_home_kept(tmp_path):
     assert commands.splitlines()[1:4] == ["bundle unlink", "init", "deps ensure"]
 
 
-def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots_kept(tmp_path, cert):
+def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots_kept(tmp_path, monkeypatch, cert):
     pem = Path(cert[0]).read_text()
-    result, _, home, _ = startup(tmp_path, ledger_ca=pem)
+    monkeypatch.setenv("LEDGER_CA_PEM", pem)
+    result, _, home, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     placed = (home / "ledger-ca.pem").read_text()
     assert "hosted ledger CA" not in placed
