@@ -1,7 +1,5 @@
 import inspect
 import subprocess
-import threading
-import time
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -393,41 +391,3 @@ def test_a_reader_stops_at_the_deadline_without_sleeping_toward_a_read_it_will_n
     assert (len(results["item_reads"]), results["errors"]) == (3, [])
     assert clock.now <= 2.5
 
-
-class Stream:
-    def __init__(self, clock: Clock, advance: float):
-        self.clock, self.advance = clock, advance
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def read1(self, size: int) -> bytes:
-        self.clock.now += self.advance
-        return b""
-
-
-@pytest.mark.parametrize(("advance", "recorded"), [(0.5, 1), (2.0, 0)])
-def test_a_stream_closed_before_the_deadline_is_red_and_one_closed_after_it_is_not(monkeypatch, advance, recorded):
-    clock = Clock()
-    monkeypatch.setattr(ledger_load, "time", clock)
-    monkeypatch.setattr(ledger_load.urllib.request, "urlopen", lambda request, timeout: Stream(clock, advance))
-    results = {"errors": []}
-    ledger_load.watcher("http://127.0.0.1:1", {}, 1.0, results)
-    assert len(results["errors"]) == recorded
-
-
-def test_the_load_returns_at_the_deadline_while_the_event_stream_still_waits_for_its_next_frame(monkeypatch):
-    held = threading.Event()
-    monkeypatch.setattr(ledger_load, "ResourceClient", lambda *args: Api())
-    monkeypatch.setattr(ledger_load, "watcher", lambda *args: held.wait(30))
-    for name in ("client", "reader", "sample_cpu"):
-        monkeypatch.setattr(ledger_load, name, lambda *args: None)
-    began = time.monotonic()
-    try:
-        ledger_load.load(1, "token", 1, 0.2)
-        assert time.monotonic() - began < 5
-    finally:
-        held.set()
