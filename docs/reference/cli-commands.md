@@ -632,14 +632,14 @@ Re-render every installed profile home from the bundle checkout and push the new
 agentihooks refresh-rules [--profile <name>] [--dry-run] [--clear]
 ```
 
-`agentihooks init` re-renders the profile homes of its own install target and refuses to run in a rendered profile home or with `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_PROFILE` set. `refresh-rules` runs there and re-renders the homes of every harness, so a manifesto or rule merged into the bundle reaches every rendered profile and its running sessions with no operator step.
+`agentihooks init` re-renders only the profile homes of its own install target. It refuses to run in a rendered profile home or with `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_PROFILE` set. `refresh-rules` runs there and re-renders the homes of every harness, so a manifesto or rule merged into the bundle reaches every rendered profile and its running sessions with no operator step.
 
 ### How it works
 
 1. Reads the installed rules: `~/.claude/CLAUDE.md` and every `~/.claude/rules/*.md`. In a rendered profile home (`CLAUDE_CONFIG_DIR`) it re-renders the profile first; that home has no `rules/` folder, its `CLAUDE.md` carries persona and rules together. In `~/.claude` it first copies the bundle rule files recorded at install into `~/.claude/rules`.
 2. Takes a snapshot of currently-alive session IDs from the broadcast registry.
 3. Writes `~/.agentihooks/force_refresh/rules-<profile>.json` containing the payload + pending session list.
-4. Re-renders every other installed profile home for each harness, `claude`, `codex` and `copilot`, from the bundle as the checkout holds it now, and prints `[OK] Re-rendered the <key> profile home` for each. It skips only the Claude home of the refreshed profile, the one `--profile` names or the one detected; run without `--profile` from a rendered home, that is the home step 1 already rendered. Codex and Copilot homes get no marker: their sessions load the new rules at their next start.
+4. Re-renders every other installed profile home for each harness, `claude`, `codex` and `copilot`, from the bundle as the checkout holds it now, and prints `[OK] Re-rendered the <key> profile home` for each. It skips only the Claude home of the refreshed profile, the one `--profile` names or the one detected. Run without `--profile` from a rendered home, that is the home step 1 already rendered. Codex and Copilot homes get no marker; their sessions load the new rules at their next start.
 5. Writes a refresh marker for every re-rendered Claude home, `rules-<key>.json` with that home's new rules, and prints `[OK] Refresh marker written for profile '<key>' (<n> sessions).`
 6. On each targeted session's next `UserPromptSubmit`, the hook checks that the session runs from the profile home the marker names, injects the rules of that profile's current home and removes the session from pending. A session of another profile is removed from pending with nothing injected.
 7. When pending drains → marker deleted. Otherwise marker auto-GCs after 24h.
