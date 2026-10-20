@@ -1,12 +1,20 @@
+import json
 import os
 import pwd
+import shutil
 import subprocess
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from redis import Redis
 
 REPO = Path(__file__).resolve().parent
 LINKS = ("guard-daemon.sh", "guard-config.json")
-UNITS = ("guard-daemon.service", "guard-daemon.timer")
-TIMER = "guard-daemon.timer"
+LEGACY = ("guard-daemon.timer", "guard-daemon.service")
+OWNER = "agentihooks-host-guard"
+EVERY = 60
+LIVE = ("ready", "active", "pending")
 
 
 def _unit_dir(home: Path) -> Path:
@@ -28,6 +36,26 @@ def _systemctl(*args: str) -> bool:
         return False
 
 
+def _scheduler():
+    from scripts.scheduler import Scheduler
+    from scripts.swarm.store import redis_client
+
+    return Scheduler(redis_client())
+
+
+def _entries(scheduler) -> list:
+    return [entry for entry in scheduler.owned(OWNER) if entry.state in LIVE]
+
+
+def _scripts() -> list[str] | None:
+    from redis.exceptions import RedisError
+
+    try:
+        return [json.loads(entry.record["payload"])["script"] for entry in _entries(_scheduler())]
+    except RedisError:
+        return None
+
+
 def drift(home: Path) -> list[str]:
     found = []
     for name in LINKS:
@@ -36,13 +64,50 @@ def drift(home: Path) -> list[str]:
             found.append(f"{path} is missing")
         elif not path.is_symlink() or path.resolve() != (REPO / name).resolve():
             found.append(f"{path} is not a link to {REPO / name}")
-    for name in UNITS:
+    for name in LEGACY:
         path = _unit_dir(home) / name
-        if not path.exists():
-            found.append(f"{path} is missing")
-        elif path.read_text() != (REPO / name).read_text():
-            found.append(f"{path} differs from {REPO / name}")
+        if path.exists():
+            found.append(f"{path} still runs the guard on systemd instead of the agentihooks scheduler")
+    scripts = _scripts()
+    if scripts is None:
+        found.append("the agentihooks scheduler is unreachable, so the guard schedule was not checked")
+    elif scripts != [str(home / LINKS[0])]:
+        found.append(f"{home / LINKS[0]} is not scheduled every {EVERY}s on the agentihooks scheduler")
     return found
+
+
+def _remove_units(home: Path) -> bool:
+    units = [_unit_dir(home) / name for name in LEGACY]
+    if not any(unit.exists() for unit in units):
+        return False
+    live = _live(home)
+    running = live and _systemctl("is-enabled", "--quiet", LEGACY[0])
+    if live:
+        _systemctl("disable", "--now", LEGACY[0])
+    for unit in units:
+        unit.unlink(missing_ok=True)
+    if live:
+        _systemctl("daemon-reload")
+    return running
+
+
+def _schedule(home: Path) -> str:
+    from redis.exceptions import RedisError
+
+    from scripts.scheduler.service import ensure_running
+    from scripts.swarm.store import redis_url
+
+    try:
+        scheduler = _scheduler()
+        for entry in _entries(scheduler):
+            entry.cancel()
+        entry = scheduler.interval(owner=OWNER, payload=json.dumps({"script": str(home / LINKS[0])}), every=EVERY)
+        entry.timeout.connect(tick)
+        entry.start()
+    except RedisError:
+        return f"[!!] Host guard linked in {home}; Redis is unreachable, so the guard is not scheduled"
+    ensure_running({**os.environ, "AGENTIHOOKS_SWARM_REDIS_URL": redis_url(os.environ)})
+    return f"[OK] Host guard installed in {home} from {REPO}, every {EVERY}s on the agentihooks scheduler"
 
 
 def install(home: Path, enable: bool) -> str:
@@ -51,21 +116,39 @@ def install(home: Path, enable: bool) -> str:
         staged.unlink(missing_ok=True)
         staged.symlink_to(REPO / name)
         staged.replace(home / name)
-    _unit_dir(home).mkdir(parents=True, exist_ok=True)
-    for name in UNITS:
-        (_unit_dir(home) / name).write_text((REPO / name).read_text())
-    if _live(home) and not (_systemctl("daemon-reload") and (not enable or _systemctl("enable", "--now", TIMER))):
-        return f"[!!] Host guard files installed in {home}; systemctl --user could not reload or enable {TIMER}"
-    return f"[OK] Host guard installed in {home} from {REPO}"
+    if _remove_units(home) or enable:
+        return _schedule(home)
+    return f"[--] Host guard linked in {home} from {REPO}; agentihooks host-guard install schedules it"
 
 
 def reconcile(home: Path) -> str:
-    paths = [home / name for name in LINKS] + [_unit_dir(home) / name for name in UNITS]
+    paths = [home / name for name in LINKS] + [_unit_dir(home) / name for name in LEGACY]
     if not any(path.is_symlink() or path.exists() for path in paths):
         return "[--] Host guard not installed; agentihooks host-guard install adds it"
     if not drift(home):
         return f"[OK] Host guard in sync with {REPO}"
-    return install(home, enable=False)
+    return install(home, enable=bool(_scripts()))
+
+
+def tick(event: dict, delivery_id: str, redis: "Redis") -> None:
+    from hooks._redis import redis_key
+
+    if not redis.set(redis_key("scheduler", f"{OWNER}:{delivery_id}"), "1", nx=True, ex=3600):
+        return
+    script = json.loads(event["payload"])["script"]
+    limit = ["timeout", str(EVERY * 2)] if shutil.which("timeout") else []
+    try:
+        subprocess.Popen(
+            [*limit, script],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as error:
+        from hooks.common import log
+
+        log("host guard failed to start", {"error": str(error)})
 
 
 def run(action: str, home: Path) -> int:

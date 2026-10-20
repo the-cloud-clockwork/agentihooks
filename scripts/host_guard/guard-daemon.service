@@ -1,6 +1,0 @@
-[Unit]
-Description=Process Guard Daemon — whitelist-based garbage collector
-
-[Service]
-Type=oneshot
-ExecStart=%h/guard-daemon.sh

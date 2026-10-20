@@ -1,13 +1,30 @@
+import json
+import os
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
+from scripts import gc_cli
 from scripts.host_guard import sync
 
 pytestmark = pytest.mark.unit
 
 LINKS = ("guard-daemon.sh", "guard-config.json")
-UNITS = ("guard-daemon.service", "guard-daemon.timer")
+LEGACY = ("guard-daemon.timer", "guard-daemon.service")
+HELP = "Link the host process guard to this checkout, or report its drift"
+
+
+@pytest.fixture
+def scheduler(monkeypatch):
+    import fakeredis
+
+    from scripts.scheduler.core import Scheduler
+
+    live = Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+    monkeypatch.setattr(sync, "_scheduler", lambda: live)
+    monkeypatch.setattr("scripts.scheduler.service.ensure_running", Mock(return_value=True))
+    return live
 
 
 @pytest.fixture
@@ -22,38 +39,49 @@ def calls(monkeypatch):
     return recorded
 
 
+@pytest.fixture
+def unreachable(monkeypatch):
+    from redis.exceptions import ConnectionError
+
+    def refuse():
+        raise ConnectionError("refused")
+
+    monkeypatch.setattr(sync, "_scheduler", refuse)
+
+
 def _units(home: Path) -> Path:
     return home / ".config" / "systemd" / "user"
 
 
-def _synced(home: Path) -> None:
-    for name in LINKS:
-        (home / name).symlink_to(sync.REPO / name)
-    _units(home).mkdir(parents=True)
-    for name in UNITS:
-        (_units(home) / name).write_text((sync.REPO / name).read_text())
+def _legacy(home: Path) -> None:
+    _units(home).mkdir(parents=True, exist_ok=True)
+    for name in LEGACY:
+        (_units(home) / name).write_text("[Unit]\n")
 
 
-def test_the_repository_ships_both_units_running_the_home_script():
-    assert "ExecStart=%h/guard-daemon.sh" in (sync.REPO / "guard-daemon.service").read_text()
-    assert "OnUnitActiveSec=60" in (sync.REPO / "guard-daemon.timer").read_text()
+def _records(scheduler) -> list[dict]:
+    return [entry.record for entry in scheduler.owned(sync.OWNER) if entry.state in sync.LIVE]
 
 
-def test_a_synced_home_reports_no_drift(tmp_path):
-    _synced(tmp_path)
+def _installed(home: Path) -> str:
+    return f"[OK] Host guard installed in {home} from {sync.REPO}, every 60s on the agentihooks scheduler"
+
+
+def test_a_synced_home_reports_no_drift(tmp_path, scheduler, calls):
+    sync.install(tmp_path, enable=True)
     assert sync.drift(tmp_path) == []
 
 
-def test_a_hand_copied_config_is_drift_even_when_its_text_matches(tmp_path):
-    _synced(tmp_path)
+def test_a_hand_copied_config_is_drift_even_when_its_text_matches(tmp_path, scheduler, calls):
+    sync.install(tmp_path, enable=True)
     config = tmp_path / "guard-config.json"
     config.unlink()
     config.write_text((sync.REPO / "guard-config.json").read_text())
     assert sync.drift(tmp_path) == [f"{config} is not a link to {sync.REPO / 'guard-config.json'}"]
 
 
-def test_a_link_to_another_copy_and_a_missing_script_are_drift(tmp_path):
-    _synced(tmp_path)
+def test_a_link_to_another_copy_and_a_missing_script_are_drift(tmp_path, scheduler, calls):
+    sync.install(tmp_path, enable=True)
     other = tmp_path / "other.json"
     other.write_text("{}")
     (tmp_path / "guard-config.json").unlink()
@@ -65,74 +93,80 @@ def test_a_link_to_another_copy_and_a_missing_script_are_drift(tmp_path):
     ]
 
 
-def test_a_changed_or_missing_unit_is_drift(tmp_path):
-    _synced(tmp_path)
-    service = _units(tmp_path) / "guard-daemon.service"
-    service.write_text("[Service]\nExecStart=/elsewhere\n")
-    (_units(tmp_path) / "guard-daemon.timer").unlink()
+def test_a_leftover_systemd_unit_and_a_missing_schedule_are_drift(tmp_path, scheduler, calls):
+    for name in LINKS:
+        (tmp_path / name).symlink_to(sync.REPO / name)
+    _legacy(tmp_path)
     assert sync.drift(tmp_path) == [
-        f"{service} differs from {sync.REPO / 'guard-daemon.service'}",
-        f"{_units(tmp_path) / 'guard-daemon.timer'} is missing",
+        f"{_units(tmp_path) / name} still runs the guard on systemd instead of the agentihooks scheduler"
+        for name in LEGACY
+    ] + [f"{tmp_path / 'guard-daemon.sh'} is not scheduled every 60s on the agentihooks scheduler"]
+
+
+def test_a_schedule_for_another_home_is_drift(tmp_path, scheduler, calls):
+    other = tmp_path / "other"
+    other.mkdir()
+    sync.install(other, enable=True)
+    for name in LINKS:
+        (tmp_path / name).symlink_to(sync.REPO / name)
+    assert sync.drift(tmp_path) == [
+        f"{tmp_path / 'guard-daemon.sh'} is not scheduled every 60s on the agentihooks scheduler"
     ]
 
 
-def test_install_links_both_files_and_writes_both_units_into_an_empty_home(tmp_path, calls):
-    messages = sync.install(tmp_path, enable=True)
+def test_an_unreachable_scheduler_is_reported_as_unchecked(tmp_path, unreachable):
+    for name in LINKS:
+        (tmp_path / name).symlink_to(sync.REPO / name)
+    assert sync.drift(tmp_path) == ["the agentihooks scheduler is unreachable, so the guard schedule was not checked"]
+
+
+def test_install_links_both_files_and_schedules_one_minute_interval(tmp_path, scheduler, calls):
+    from scripts.scheduler import service
+
+    assert sync.install(tmp_path, enable=True) == _installed(tmp_path)
+    assert sync.install(tmp_path, enable=True) == _installed(tmp_path)
     for name in LINKS:
         assert (tmp_path / name).is_symlink()
         assert (tmp_path / name).readlink() == sync.REPO / name
-    for name in UNITS:
-        assert (_units(tmp_path) / name).read_text() == (sync.REPO / name).read_text()
+    [record] = _records(scheduler)
+    assert record["kind"] == "interval" and record["delay"] == 60 and record["state"] == "active"
+    assert json.loads(record["payload"]) == {"script": str(tmp_path / "guard-daemon.sh")}
+    assert [{key: slot[key] for key in ("signal", "kind", "reference")} for slot in record["slots"]] == [
+        {"signal": "timeout", "kind": "callable", "reference": "scripts.host_guard.sync:tick"}
+    ]
+    assert service.ensure_running.call_count == 2
+    started_with = service.ensure_running.call_args.args[0]
+    assert started_with["AGENTIHOOKS_SWARM_REDIS_URL"] == os.environ["AGENTIHOOKS_SWARM_REDIS_URL"]
     assert sync.drift(tmp_path) == []
-    assert messages == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}"
     assert calls == []
 
 
-def test_install_replaces_a_stale_hand_copied_config_and_a_stale_unit(tmp_path, calls):
-    _synced(tmp_path)
+def test_install_replaces_a_stale_hand_copied_config(tmp_path, scheduler, calls):
     config = tmp_path / "guard-config.json"
-    config.unlink()
     config.write_text('{"excludes": []}')
-    (_units(tmp_path) / "guard-daemon.timer").write_text("[Timer]\n")
     sync.install(tmp_path, enable=True)
     assert config.is_symlink() and config.readlink() == sync.REPO / "guard-config.json"
-    assert (_units(tmp_path) / "guard-daemon.timer").read_text() == (sync.REPO / "guard-daemon.timer").read_text()
     assert sync.drift(tmp_path) == []
 
 
-def test_install_reloads_and_enables_the_timer_only_in_the_live_home(tmp_path, monkeypatch, calls):
+def test_install_moves_a_live_systemd_guard_onto_the_scheduler(tmp_path, scheduler, monkeypatch, calls):
     monkeypatch.setattr(sync, "_live", lambda home: home == tmp_path)
-    sync.install(tmp_path, enable=True)
-    assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
-
-
-def test_reconcile_reloads_units_but_never_enables_a_timer_the_operator_disabled(tmp_path, monkeypatch, calls):
-    monkeypatch.setattr(sync, "_live", lambda home: home == tmp_path)
-    (tmp_path / "guard-config.json").write_text("{}")
-    assert sync.reconcile(tmp_path) == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}"
-    assert calls == [("daemon-reload",)]
+    _legacy(tmp_path)
+    assert sync.install(tmp_path, enable=True) == _installed(tmp_path)
+    assert calls == [
+        ("is-enabled", "--quiet", "guard-daemon.timer"),
+        ("disable", "--now", "guard-daemon.timer"),
+        ("daemon-reload",),
+    ]
+    assert not any((_units(tmp_path) / name).exists() for name in LEGACY)
     assert sync.drift(tmp_path) == []
 
 
-def test_reconcile_reports_a_failed_reload(tmp_path, monkeypatch):
-    monkeypatch.setattr(sync, "_live", lambda home: True)
-    monkeypatch.setattr(sync, "_systemctl", lambda *args: False)
-    (tmp_path / "guard-config.json").write_text("{}")
-    assert sync.reconcile(tmp_path) == (
-        f"[!!] Host guard files installed in {tmp_path}; systemctl --user could not reload or enable guard-daemon.timer"
-    )
-
-
-def test_install_reports_a_timer_systemd_would_not_enable(tmp_path, monkeypatch):
-    calls = []
-    monkeypatch.setattr(sync, "_live", lambda home: True)
-    monkeypatch.setattr(sync, "_systemctl", lambda *args: calls.append(args) or args[0] == "daemon-reload")
-    message = sync.install(tmp_path, enable=True)
-    refused = "systemctl --user could not reload or enable guard-daemon.timer"
-    assert message == f"[!!] Host guard files installed in {tmp_path}; {refused}"
-    assert calls == [("daemon-reload",), ("enable", "--now", "guard-daemon.timer")]
-    assert sync.drift(tmp_path) == []
+def test_install_reports_an_unreachable_scheduler(tmp_path, unreachable, calls):
+    message = f"[!!] Host guard linked in {tmp_path}; Redis is unreachable, so the guard is not scheduled"
+    assert sync.install(tmp_path, enable=True) == message
     assert sync.run("install", tmp_path) == 1
+    assert (tmp_path / "guard-config.json").readlink() == sync.REPO / "guard-config.json"
 
 
 def test_systemctl_runs_the_user_manager_and_reads_its_exit(monkeypatch):
@@ -144,10 +178,10 @@ def test_systemctl_runs_the_user_manager_and_reads_its_exit(monkeypatch):
 
     monkeypatch.setattr(sync.subprocess, "run", run)
     assert sync._systemctl("daemon-reload") is True
-    assert sync._systemctl("enable", "--now", "guard-daemon.timer") is False
+    assert sync._systemctl("disable", "--now", "guard-daemon.timer") is False
     assert seen == [
         (["systemctl", "--user", "daemon-reload"], True, 20),
-        (["systemctl", "--user", "enable", "--now", "guard-daemon.timer"], True, 20),
+        (["systemctl", "--user", "disable", "--now", "guard-daemon.timer"], True, 20),
     ]
 
 
@@ -171,36 +205,120 @@ def test_the_live_home_is_the_account_home(tmp_path, monkeypatch):
     assert sync._live(tmp_path / "other") is False
 
 
-def test_reconcile_leaves_a_home_without_a_guard_alone(tmp_path, calls):
+def test_reconcile_leaves_a_home_without_a_guard_alone(tmp_path, scheduler, calls):
     home = tmp_path / "bare"
     home.mkdir()
     assert sync.reconcile(home) == "[--] Host guard not installed; agentihooks host-guard install adds it"
     assert list(home.iterdir()) == []
+    assert _records(scheduler) == []
 
 
-def test_reconcile_brings_an_installed_guard_back_to_the_repository(tmp_path, calls):
-    _units(tmp_path).mkdir(parents=True)
-    (_units(tmp_path) / "guard-daemon.timer").write_text("[Timer]\n")
+def test_reconcile_moves_an_enabled_systemd_guard_onto_the_scheduler(tmp_path, scheduler, monkeypatch, calls):
+    monkeypatch.setattr(sync, "_live", lambda home: True)
+    _legacy(tmp_path)
     (tmp_path / "guard-config.json").write_text('{"excludes": []}')
-    assert sync.reconcile(tmp_path) == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}"
+    assert sync.reconcile(tmp_path) == _installed(tmp_path)
     assert sync.drift(tmp_path) == []
 
 
-def test_reconcile_reports_a_guard_already_in_sync(tmp_path, calls):
-    _synced(tmp_path)
+def test_reconcile_never_schedules_a_guard_the_operator_disabled(tmp_path, scheduler, monkeypatch):
+    calls = []
+    monkeypatch.setattr(sync, "_live", lambda home: True)
+    monkeypatch.setattr(sync, "_systemctl", lambda *args: calls.append(args) or args[0] != "is-enabled")
+    _legacy(tmp_path)
+    (tmp_path / "guard-config.json").write_text("{}")
+    assert sync.reconcile(tmp_path) == (
+        f"[--] Host guard linked in {tmp_path} from {sync.REPO}; agentihooks host-guard install schedules it"
+    )
+    assert _records(scheduler) == []
+    assert not any((_units(tmp_path) / name).exists() for name in LEGACY)
+    assert (tmp_path / "guard-config.json").readlink() == sync.REPO / "guard-config.json"
+
+
+def test_reconcile_relinks_a_scheduled_guard_and_keeps_one_schedule(tmp_path, scheduler, calls):
+    sync.install(tmp_path, enable=True)
+    config = tmp_path / "guard-config.json"
+    config.unlink()
+    config.write_text("{}")
+    assert sync.reconcile(tmp_path) == _installed(tmp_path)
+    assert len(_records(scheduler)) == 1
+    assert sync.drift(tmp_path) == []
+
+
+def test_reconcile_reports_a_guard_already_in_sync(tmp_path, scheduler, calls):
+    sync.install(tmp_path, enable=True)
     assert sync.reconcile(tmp_path) == f"[OK] Host guard in sync with {sync.REPO}"
-    assert calls == []
 
 
-def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, capsys, calls):
+def test_check_exits_one_and_names_the_drift_then_zero_after_install(tmp_path, scheduler, capsys, calls):
     (tmp_path / "guard-config.json").write_text("{}")
     assert sync.run("check", tmp_path) == 1
     out = capsys.readouterr().out
     assert f"{tmp_path / 'guard-config.json'} is not a link to {sync.REPO / 'guard-config.json'}" in out
     assert sync.run("install", tmp_path) == 0
-    assert capsys.readouterr().out == f"[OK] Host guard installed in {tmp_path} from {sync.REPO}\n"
+    assert capsys.readouterr().out == f"{_installed(tmp_path)}\n"
     assert sync.run("check", tmp_path) == 0
     assert capsys.readouterr().out == f"[OK] Host guard in sync with {sync.REPO}\n"
+
+
+def test_tick_runs_the_home_script_once_per_delivery(monkeypatch):
+    import fakeredis
+
+    started = []
+    monkeypatch.setattr(sync.shutil, "which", lambda name: f"/usr/bin/{name}")
+    monkeypatch.setattr(sync.subprocess, "Popen", lambda command, **options: started.append((command, options)))
+    redis = fakeredis.FakeRedis(decode_responses=True)
+    event = {"payload": json.dumps({"script": "/home/me/guard-daemon.sh"})}
+    sync.tick(event, "delivery", redis)
+    sync.tick(event, "delivery", redis)
+    devnull = sync.subprocess.DEVNULL
+    assert started == [
+        (
+            ["timeout", "120", "/home/me/guard-daemon.sh"],
+            {"stdin": devnull, "stdout": devnull, "stderr": devnull, "start_new_session": True},
+        )
+    ]
+    [key] = redis.keys()
+    assert sync.OWNER in key and key.endswith(":delivery")
+    assert 0 < redis.ttl(key) <= 3600
+
+
+def test_tick_runs_without_timeout_and_logs_a_failed_start(monkeypatch):
+    import fakeredis
+
+    from hooks import common
+
+    started, logged = [], []
+    monkeypatch.setattr(sync.shutil, "which", lambda name: None)
+
+    def refuse(command, **options):
+        started.append(command)
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(sync.subprocess, "Popen", refuse)
+    monkeypatch.setattr(common, "log", lambda message, data: logged.append((message, data)))
+    sync.tick({"payload": json.dumps({"script": "/g.sh"})}, "one", fakeredis.FakeRedis(decode_responses=True))
+    assert started == [["/g.sh"]]
+    assert logged == [("host guard failed to start", {"error": "denied"})]
+
+
+def test_the_gc_command_parses_host_guard_actions():
+    parser = gc_cli._parser()
+    assert HELP in parser.format_help()
+    for action in ("install", "check"):
+        args = parser.parse_args(["host-guard", action])
+        assert (args.command, args.action) == ("host-guard", action)
+    with pytest.raises(SystemExit):
+        parser.parse_args(["host-guard", "remove"])
+
+
+def test_the_gc_command_runs_host_guard_in_the_home(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(gc_cli.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(sync, "run", lambda action, home: seen.append((action, home)) or 3)
+    assert gc_cli.main(["host-guard", "check"]) == 3
+    assert gc_cli.main(["host-guard", "install"]) == 3
+    assert seen == [("check", tmp_path), ("install", tmp_path)]
 
 
 def test_the_agentihooks_command_dispatches_host_guard(tmp_path, monkeypatch):
