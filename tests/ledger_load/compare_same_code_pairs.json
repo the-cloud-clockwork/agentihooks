@@ -1,0 +1,25 @@
+{
+  "runs": {
+    "39369348206": [
+      [{"errors": 0, "write_p50_s": 0.128, "busiest_cores": 0.203}, {"errors": 0, "write_p50_s": 0.095, "busiest_cores": 0.165}],
+      [{"errors": 0, "write_p50_s": 0.124, "busiest_cores": 0.168}, {"errors": 0, "write_p50_s": 0.12, "busiest_cores": 0.202}],
+      [{"errors": 0, "write_p50_s": 0.142, "busiest_cores": 0.195}, {"errors": 0, "write_p50_s": 0.107, "busiest_cores": 0.157}],
+      [{"errors": 0, "write_p50_s": 0.111, "busiest_cores": 0.178}, {"errors": 0, "write_p50_s": 0.118, "busiest_cores": 0.192}],
+      [{"errors": 0, "write_p50_s": 0.112, "busiest_cores": 0.17}, {"errors": 0, "write_p50_s": 0.136, "busiest_cores": 0.171}]
+    ],
+    "39369353196": [
+      [{"errors": 0, "write_p50_s": 0.129, "busiest_cores": 0.152}, {"errors": 0, "write_p50_s": 0.114, "busiest_cores": 0.148}],
+      [{"errors": 0, "write_p50_s": 0.115, "busiest_cores": 0.154}, {"errors": 0, "write_p50_s": 0.105, "busiest_cores": 0.161}],
+      [{"errors": 0, "write_p50_s": 0.117, "busiest_cores": 0.166}, {"errors": 0, "write_p50_s": 0.104, "busiest_cores": 0.145}],
+      [{"errors": 0, "write_p50_s": 0.104, "busiest_cores": 0.147}, {"errors": 0, "write_p50_s": 0.102, "busiest_cores": 0.156}],
+      [{"errors": 0, "write_p50_s": 0.101, "busiest_cores": 0.162}, {"errors": 0, "write_p50_s": 0.118, "busiest_cores": 0.153}]
+    ],
+    "39369357901": [
+      [{"errors": 0, "write_p50_s": 0.14, "busiest_cores": 0.184}, {"errors": 0, "write_p50_s": 0.125, "busiest_cores": 0.164}],
+      [{"errors": 0, "write_p50_s": 0.137, "busiest_cores": 0.193}, {"errors": 0, "write_p50_s": 0.128, "busiest_cores": 0.204}],
+      [{"errors": 0, "write_p50_s": 0.112, "busiest_cores": 0.21}, {"errors": 0, "write_p50_s": 0.1, "busiest_cores": 0.159}],
+      [{"errors": 0, "write_p50_s": 0.121, "busiest_cores": 0.174}, {"errors": 0, "write_p50_s": 0.134, "busiest_cores": 0.214}],
+      [{"errors": 0, "write_p50_s": 0.121, "busiest_cores": 0.196}, {"errors": 0, "write_p50_s": 0.12, "busiest_cores": 0.164}]
+    ]
+  }
+}

@@ -4,12 +4,15 @@ import os
 import subprocess
 import time
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 PROC = Path("/proc")
 SAMPLE_S = 0.5
 GIT_TIMEOUT_S = 5
+GH_TIMEOUT_S = 10
+MERGED_JQ = 'map(.merged_at | values) | first // ""'
 NO_DEV = {"newest": None, "merged_minutes": None}
 
 
@@ -73,17 +76,33 @@ def server(
 def newest_on_dev(repo: Path = REPO, now: float | None = None) -> dict:
     try:
         found = subprocess.run(
-            ["git", "-C", str(repo), "log", "-1", "--format=%ct%x09%s", "origin/dev"],
+            ["git", "-C", str(repo), "log", "-1", "--format=%H%x09%ct%x09%s", "origin/dev"],
             capture_output=True,
             text=True,
             timeout=GIT_TIMEOUT_S,
         )
     except (OSError, subprocess.TimeoutExpired):
         return dict(NO_DEV)
-    stamp, _, subject = found.stdout.strip().partition("\t")
+    sha, _, rest = found.stdout.strip().partition("\t")
+    stamp, _, subject = rest.partition("\t")
     if found.returncode or not stamp.isdigit():
         return dict(NO_DEV)
-    return {"newest": subject, "merged_minutes": int(((now or time.time()) - int(stamp)) / 60)}
+    merged = merged_at(repo, sha) or int(stamp)
+    return {"newest": subject, "merged_minutes": int(((now or time.time()) - merged) / 60)}
+
+
+def merged_at(repo: Path, sha: str) -> float | None:
+    try:
+        found = subprocess.run(
+            ["gh", "api", f"repos/{{owner}}/{{repo}}/commits/{sha}/pulls", "--jq", MERGED_JQ],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+            timeout=GH_TIMEOUT_S,
+        )
+        return datetime.fromisoformat(found.stdout.strip()).timestamp() if found.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired, ValueError):
+        return None
 
 
 def facts() -> dict:
