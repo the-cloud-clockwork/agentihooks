@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
-from scripts.hive import registry
+from scripts.hive import quota_refresh, registry
 from scripts.routing import claude_api, codex_api
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
@@ -84,8 +84,11 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
 
 def run(redis: "Redis") -> None:
     local_id = hive_id()
+    quota_refresh.refresh(os.environ)
+    worker, attempted_at = None, time.time()
     while True:
         started = time.monotonic()
+        worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
         beat(redis, local_id)
         scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
 

@@ -67,7 +67,7 @@ def details(store):  # noqa: F811
 
 def test_an_open_actions_incident_holds_speed_findings_and_says_so_once(store, monkeypatch):  # noqa: F811
     status(monkeypatch, INCIDENT)
-    runs(monkeypatch, [waiting(n, "2026-10-19T16:01:00Z") for n in range(1, 21)])
+    runs(monkeypatch, [waiting(n, "2026-10-19T15:51:00Z") for n in range(1, 21)])
     first = cli.timer(store, DOCTOR, DURING, False)
     cli.timer(store, DOCTOR, DURING + 60000, False)
     assert details(store) == []
@@ -83,10 +83,10 @@ def test_after_the_incident_resolves_one_grouped_finding_labels_runs_from_its_wi
     runs(monkeypatch, [])
     cli.timer(store, DOCTOR, DURING, False)
     status(monkeypatch)
-    runs(monkeypatch, [waiting(n, "2026-10-19T16:50:00Z") for n in range(1, 6)])
+    runs(monkeypatch, [waiting(n, "2026-10-19T16:40:00Z") for n in range(1, 6)])
     cli.timer(store, DOCTOR, AFTER, False)
     [finding] = details(store)
-    assert finding["measure"] == 600
+    assert finding["measure"] == 1200
     assert "5 runs" in finding["evidence"][0]
     assert "5 of these runs had jobs created during the GitHub incident" in finding["evidence"][1]
     for texts in items(store).values():
@@ -95,16 +95,16 @@ def test_after_the_incident_resolves_one_grouped_finding_labels_runs_from_its_wi
 
 def test_ten_runs_on_one_label_in_one_pass_are_one_finding(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
-    created = ["2026-10-19T16:53:00Z", "2026-10-19T16:54:00Z", "2026-10-19T16:52:00Z"] + ["2026-10-19T16:54:30Z"] * 7
+    created = ["2026-10-19T16:43:00Z", "2026-10-19T16:44:00Z", "2026-10-19T16:42:00Z"] + ["2026-10-19T16:44:30Z"] * 7
     runs(monkeypatch, [waiting(n, stamp) for n, stamp in enumerate(created, 1)])
     actions = cli.timer(store, DOCTOR, AFTER, False)
     [finding] = details(store)
     assert finding["kind"] == "ci queue age unconfirmed"
-    assert finding["summary"] == "anton-oss, self-hosted jobs read as queued up to 8.00 minutes in 10 runs"
+    assert finding["summary"] == "anton-oss, self-hosted jobs read as queued up to 18.00 minutes in 10 runs"
     assert finding["evidence"][0] == (
-        "10 runs, anton-oss, self-hosted, worst 480 seconds, median 330.0 seconds, runs 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
+        "10 runs, anton-oss, self-hosted, worst 1080 seconds, median 930.0 seconds, runs 1, 2, 3, 4, 5, 6, 7, 8, 9, 10"
     )
-    assert finding["measure"] == 480
+    assert finding["measure"] == 1080
     assert len(finding["evidence"]) == 11
     assert any("1 crossings" in action for action in actions)
     for texts in items(store).values():
@@ -114,7 +114,7 @@ def test_ten_runs_on_one_label_in_one_pass_are_one_finding(store, monkeypatch): 
 
 def test_a_wait_across_a_window_boundary_is_one_crossing_per_pass(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:50:00Z")])
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z")])
     before = cli.timer(store, DOCTOR, AFTER - 60000, False)
     after = cli.timer(store, DOCTOR, AFTER, False)
     assert any("1 crossings" in action for action in before)
@@ -126,7 +126,7 @@ def test_a_wait_across_a_window_boundary_is_one_crossing_per_pass(store, monkeyp
 
 def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
-    batch = waiting(3, "2026-10-19T16:50:00Z", labels=["anton-batch"])
+    batch = waiting(3, "2026-10-19T16:40:00Z", labels=["anton-batch"])
     wall = {
         "id": 4,
         "event": "merge_group",
@@ -135,7 +135,7 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
         "jobs": [{**waiting(4, "2026-10-19T16:40:00Z")["jobs"][0], "status": "in_progress", "runner_name": "r"}],
     }
     wall["jobs"][0]["started_at"] = "2026-10-19T16:41:00Z"
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:50:00Z"), batch, wall])
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z"), batch, wall])
     cli.timer(store, DOCTOR, AFTER, False)
     assert sorted(finding["kind"] for finding in details(store)) == [
         "ci queue age unconfirmed",
@@ -144,7 +144,7 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
     ]
     [tier] = [finding for finding in details(store) if finding["kind"] == "ci tier wall time"]
     assert tier["summary"] == "queue tier took up to 20.00 minutes in 1 run"
-    runs(monkeypatch, [waiting(2, "2026-10-19T16:52:00Z")])
+    runs(monkeypatch, [waiting(2, "2026-10-19T16:42:00Z")])
     cli.timer(store, DOCTOR, AFTER + 60000, False)
     [grown] = [f for f in details(store) if "anton-oss" in f["summary"]]
     assert "2 runs" in grown["evidence"][0] and "runs 1, 2" in grown["evidence"][0]
@@ -154,7 +154,7 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
 
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, down=True)
-    runs(monkeypatch, [waiting(n, "2026-10-19T16:01:00Z") for n in range(1, 3)])
+    runs(monkeypatch, [waiting(n, "2026-10-19T15:51:00Z") for n in range(1, 3)])
     actions = cli.timer(store, DOCTOR, DURING, False)
     [finding] = details(store)
     assert "2 runs" in finding["evidence"][0]
@@ -166,7 +166,7 @@ def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  #
 
 def test_an_incident_outside_actions_does_not_hold_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, PAGES)
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:01:00Z")])
+    runs(monkeypatch, [waiting(1, "2026-10-19T15:51:00Z")])
     cli.timer(store, DOCTOR, DURING, False)
     assert len(details(store)) == 1
     for texts in items(store).values():
@@ -176,7 +176,7 @@ def test_an_incident_outside_actions_does_not_hold_findings(store, monkeypatch):
 
 def test_an_incident_named_for_actions_without_components_holds_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, {**INCIDENT, "name": "Actions Job Delays", "components": []})
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:01:00Z")])
+    runs(monkeypatch, [waiting(1, "2026-10-19T15:51:00Z")])
     cli.timer(store, DOCTOR, DURING, False)
     assert details(store) == []
 
@@ -188,7 +188,7 @@ def test_a_resolved_incident_listed_again_holds_without_a_second_notice(store, m
     status(monkeypatch)
     cli.timer(store, DOCTOR, DURING + 60000, False)
     status(monkeypatch, INCIDENT)
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:01:00Z")])
+    runs(monkeypatch, [waiting(1, "2026-10-19T15:51:00Z")])
     actions = cli.timer(store, DOCTOR, DURING + 120000, False)
     assert details(store) == []
     assert any("held during GitHub incident" in action for action in actions)
@@ -241,7 +241,7 @@ def test_an_unread_status_page_keeps_an_open_incident_window_without_holding(sto
     runs(monkeypatch, [])
     loop.speed(store, DOCTOR, WATCHED, DURING)
     status(monkeypatch, down=True)
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:05:00Z")])
+    runs(monkeypatch, [waiting(1, "2026-10-19T15:55:00Z")])
     loop.speed(store, DOCTOR, WATCHED, DURING + 60000)
     [finding] = details(store)
     assert finding["evidence"][1] == f"1 of these runs had jobs created during the GitHub incident {INCIDENT['name']}"
@@ -262,11 +262,11 @@ def test_runs_created_after_an_incident_resolves_are_not_labelled(store, monkeyp
 
 def test_a_crossing_cleared_in_the_next_window_retracts_the_previous_window_group(store, monkeypatch):  # noqa: F811
     status(monkeypatch)
-    runs(monkeypatch, [waiting(1, "2026-10-19T16:50:00Z")])
+    runs(monkeypatch, [waiting(1, "2026-10-19T16:40:00Z")])
     loop.speed(store, DOCTOR, WATCHED, AFTER - 60000)
     [finding] = details(store)
-    started = waiting(1, "2026-10-19T16:50:00Z")
-    started["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:50:30Z", runner_name="r")
+    started = waiting(1, "2026-10-19T16:40:00Z")
+    started["jobs"][0].update(status="in_progress", started_at="2026-10-19T16:40:30Z", runner_name="r")
     runs(monkeypatch, [started])
     loop.speed(store, DOCTOR, WATCHED, AFTER)
     assert details(store) == []
@@ -276,7 +276,7 @@ def test_a_crossing_cleared_in_the_next_window_retracts_the_previous_window_grou
 
 def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents():
     start, end = iso_ms("2026-10-19T16:00:00Z"), iso_ms("2026-10-19T16:10:00Z")
-    now, window = iso_ms("2026-10-19T16:20:00Z"), iso_ms("2026-10-19T16:20:00Z")
+    now, window = iso_ms("2026-10-19T16:30:00Z"), iso_ms("2026-10-19T16:20:00Z")
     incidents = [(start, end, "Actions delays"), (end, end + 60000, "Webhooks delays")]
     retry = {**waiting(1, "2026-10-19T16:10:00Z", labels=()), "run_attempt": 2}
     wall = {
@@ -288,7 +288,7 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
             {
                 **waiting(4, "2026-10-19T16:00:00Z")["jobs"][0],
                 "status": "in_progress",
-                "started_at": "2026-10-19T16:01:00Z",
+                "started_at": "2026-10-19T15:51:00Z",
                 "runner_name": "r",
             }
         ],
@@ -296,12 +296,12 @@ def test_groups_label_retries_unassigned_runners_tiers_and_overlapping_incidents
     groups = ci_speed.group({}, [retry, wall], start, now, window, incidents)
     assert sorted(groups) == [f"ci-queue-age-unconfirmed/{window}-[]", f"ci-tier-wall-time/{window}-merge_group"]
     queued, tier = sorted(ci_speed.grouped(groups), key=lambda finding: finding.kind)
-    assert queued.summary == "unassigned jobs read as queued up to 10.00 minutes in 1 run"
+    assert queued.summary == "unassigned jobs read as queued up to 20.00 minutes in 1 run"
     assert queued.evidence[:2] == (
-        "1 run, unassigned, worst 600 seconds, median 600 seconds, runs 1 attempt 2",
+        "1 run, unassigned, worst 1200 seconds, median 1200 seconds, runs 1 attempt 2",
         "1 of these runs had jobs created during the GitHub incident Actions delays; Webhooks delays",
     )
-    assert queued.threshold == "unconfirmed queue age over 5 minutes"
-    assert tier.summary == "queue tier took up to 20.00 minutes in 1 run"
+    assert queued.threshold == "unconfirmed queue age over 15 minutes"
+    assert tier.summary == "queue tier took up to 30.00 minutes in 1 run"
     assert tier.evidence[1] == "1 of these runs had jobs created during the GitHub incident Actions delays"
     assert tier.threshold == "tier wall time over 15 minutes"

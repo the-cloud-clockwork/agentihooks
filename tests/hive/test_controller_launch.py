@@ -179,7 +179,26 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.router.placement.backend == "hive"
     assert fenced.has_capacity(setup.config)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    assert fenced.placement_refusal("master", {}) == ""
+    assert fenced.placement_refusal("master", {}).startswith("the workstation hive spawns master work: ")
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_local_machine_swarm_with_hive_placement_sends_eng_to_a_joined_hive_and_the_master_home(setup):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    write_hive(setup, id="workstation", ui="yes", roles=["master", "plan", "dispatch"])
+    config = setup.store.update(setup.config.slug, hive_placement=True)
+    deployment = controller.deployment_for(config, {"AGENTIHOOKS_DEPLOYMENT": "local"})
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, config.slug, setup.held, routed, deployment)
+    assert fenced.router.placement.backend == "hive"
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.runtime.hive_launch.select(config, "eng", {"id": "task"}).hive == "remote"
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    assert fenced.runtime.hive_launch.select(config, "master", {"id": "master"}).hive == "workstation"
     setup.herdr.spawn.assert_not_called()
 
 
@@ -202,7 +221,8 @@ def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setu
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.placement_refusal("master", pinned) == ""
-    assert fenced.placement_refusal("master", {"id": "master", "hive": "gone"}) == NO_UI_HIVE
+    gone = fenced.placement_refusal("master", {"id": "master", "hive": "gone"})
+    assert gone == f"the workstation hive spawns master work: {NO_UI_HIVE}"
     fenced.runtime.spawn = Mock(return_value="placed on the hive")
     fenced.runtime.original_runtime = Mock()
     assert fenced.spawn(setup.config, "master", "name", pinned) == "placed on the hive"

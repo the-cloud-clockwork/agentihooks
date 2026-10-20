@@ -14,6 +14,14 @@
 {{- if lt (int $workers.maxAgents) 1 }}
 {{- fail "workers.maxAgents must be positive" }}
 {{- end }}
+{{- $perAgent := $workers.memoryPerAgentMi }}
+{{- if or (lt (int $perAgent.request) 1) (lt (int $perAgent.limit) (int $perAgent.request)) }}
+{{- fail "workers.memoryPerAgentMi needs a positive request and a limit no lower than it" }}
+{{- end }}
+{{- if or (hasKey ($workers.resources.requests | default dict) "memory") (hasKey ($workers.resources.limits | default dict) "memory") }}
+{{- fail "set worker hive memory with workers.memoryPerAgentMi, not workers.resources" }}
+{{- end }}
+{{- $memory := dict "requests" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.request))) "limits" (dict "memory" (printf "%dMi" (mul $workers.maxAgents $perAgent.limit))) }}
 {{- $secret := $credential }}
 {{- $path := "credential" }}
 {{- if $code.name }}
@@ -95,7 +103,7 @@ spec:
               readOnly: true
             {{- end }}
           resources:
-            {{- toYaml $workers.resources | nindent 12 }}
+            {{- toYaml (mergeOverwrite (deepCopy $workers.resources) $memory) | nindent 12 }}
       volumes:
         - name: join
           secret:
