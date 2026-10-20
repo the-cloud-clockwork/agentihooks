@@ -972,3 +972,54 @@ def test_a_refresh_naming_lost_shards_files_its_own_fixer_when_nothing_lost_its_
     ledger = Ledger()
     refresh(store, ledger, outage_run([CONSUMERS[-1]]))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: refresh-durations"]
+
+
+def recorded_test_failure(
+    run_id, shards, tests=("tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api",), missing=True
+):
+    found = [
+        {
+            "id": n,
+            "name": f"unit ({python}, {shard})",
+            "conclusion": "failure",
+            "steps": FAILED_TESTS,
+        }
+        for n, (python, shard) in enumerate(shards, 1)
+    ]
+    if missing:
+        found.append(
+            {
+                "name": "sonar",
+                "conclusion": "failure",
+                "check_run_url": "https://api.github.com/check-runs/sonar",
+                "steps": [{"name": "Wait for the coverage merge", "conclusion": "failure"}],
+            }
+        )
+
+    def run(argv, **kwargs):
+        if argv[2].endswith("/logs"):
+            output = "\n".join(f"2026-10-20T12:47:13Z FAILED {test} - AssertionError: failure" for test in tests)
+            return subprocess.CompletedProcess(argv, 0, output, "")
+        if "/annotations" in argv[2]:
+            body = [{"annotation_level": "failure", "message": f"Missing coverage for shard {shards[-1][1]}"}]
+        elif "/jobs" in argv[2]:
+            body = found
+        else:
+            body = [{**RED, "id": run_id}]
+        return subprocess.CompletedProcess(argv, 0, "\n".join(json.dumps(item) for item in body), "")
+
+    return run
+
+
+def test_the_same_failing_test_in_two_recorded_runs_files_one_fixer_across_shard_moves(store):
+    ledger = Ledger()
+    refresh(store, ledger, recorded_test_failure(39424239023, [("3.11", 3), ("3.12", 10)]))
+    refresh(store, ledger, recorded_test_failure(39425295161, [("3.11", 5), ("3.12", 5)]), NOW * 2)
+    assert len(ledger.added) == 1
+    description = ledger.added[0][1]["description"]
+    assert "tests/test_ci_pull_request_api.py::test_no_script_a_step_runs_calls_the_api" in description
+    assert "sonar" in description
+    assert "unit (3.11, 3)" in description
+    assert "unit (3.12, 10)" in description
+    assert len(ledger.raised) == 1
+    assert len(master_items(store)) == 1
