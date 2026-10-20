@@ -363,12 +363,13 @@ def _unmergeable(run, row, found, pull):
             return [f"could not dequeue {url} for task {task_id}: {exc}"]
         if result.get("queued") or result.get("state") == "MERGED":
             return [f"dequeue of {url} for task {task_id} awaits confirmation"]
-    if found.get("on") and fresh.mergeable != "CONFLICTING":
+    head = fresh.head or found.get("head")
+    if found.get("on") and head and fresh.mergeable != "CONFLICTING":
         tries = found.get("recoveries", 0)
         if tries >= QUEUE_TRIES:
             run.ledger.raise_alert(run.slug, ALERT_SOURCE, GAVE_UP.format(url=url, task=task_id))
             return _reopen(run, row, found, STUCK)
-        found["on"] = {"kind": RECOVER, "head": fresh.head}
+        found["on"] = {"kind": RECOVER, "head": head}
         found["retry_at"], found["recoveries"] = run.now_ms + BACKOFF_MS * 2**tries, tries
         save(run.store, run.slug, task_id, found)
         run.ledger.comment(run.slug, task_id, DEQUEUED.format(url=url), by="swarm")
@@ -383,7 +384,7 @@ def _recover(run, row, found):
     fresh = run.reread(url)
     if fresh is None:
         return []
-    if fresh.head != found["on"]["head"]:
+    if fresh.head and fresh.head != found["on"]["head"]:
         return _reopen(run, row, found, MOVED)
     if fresh.mergeable == "CONFLICTING":
         return _reopen(run, row, found, fresh.merge_problem)
