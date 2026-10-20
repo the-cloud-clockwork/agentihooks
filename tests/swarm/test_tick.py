@@ -1570,9 +1570,7 @@ def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
     monkeypatch.setattr(module.resume, "track_outages", lambda *args: seen.append("outages"))
     monkeypatch.setattr(module, "_verify", lambda *args: seen.append("verify") or [])
     monkeypatch.setattr(module.pane_evidence, "sweep", lambda *args: seen.append("panes") or [])
-    monkeypatch.setattr(
-        store.execution_registry, "reconcile", lambda *args: seen.append("executions") or []
-    )
+    monkeypatch.setattr(store.execution_registry, "reconcile", lambda *args: seen.append("executions") or [])
     tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
     assert seen == ([] if state == "stopped" else ["panes", "executions", "outages", "verify"])
 
