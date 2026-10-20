@@ -115,3 +115,9 @@ def test_a_refused_round_is_not_logged(tmp_path):
     with pytest.raises(SwarmError):
         review_rounds.start("sw", "t1", tmp_path)
     assert [line["round"] for line in _logged(tmp_path)] == [1, 2, 3]
+
+
+def test_a_logged_round_carries_the_wall_clock_in_milliseconds(tmp_path, monkeypatch):
+    monkeypatch.setattr(review_rounds.time, "time", lambda: 1_800_000_000.25)
+    review_rounds.start("sw", "t1", tmp_path)
+    assert [line["at"] for line in _logged(tmp_path)] == [1_800_000_000_250]
