@@ -98,6 +98,20 @@ def test_kind_proof_checks_init_renders_the_engineer_profile_before_the_cluster_
     assert lines.index(check) < lines.index('wait "$cluster_pid"')
 
 
+def test_kind_proof_checks_the_bundle_system_tools_install_into_the_worker_home():
+    tools = [line for line in PROOF.read_text().splitlines() if '> "$out/tools.txt"' in line]
+    assert len(tools) == 1
+    for check in (
+        "node --version",
+        "npm --version",
+        "uv --version",
+        "gh --version",
+        'test "$(npm config get prefix)" = "$HOME/.local"',
+        '[[ ":$PATH:" == *":$HOME/.local/bin:"* ]]',
+    ):
+        assert f"&& {check} " in tools[0], check
+
+
 def test_base_inputs_cover_every_base_source_the_wheel_does_not_replace():
     dockerfile = (ROOT / "docker/swarm-node/Dockerfile").read_text()
     sources = {s for line in re.findall(r"^COPY (?:--\S+ )*(.+) \S+$", dockerfile, re.M) for s in line.split()}
