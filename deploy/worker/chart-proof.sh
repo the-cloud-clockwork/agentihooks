@@ -24,7 +24,11 @@ assert container['image'] == 'ghcr.io/the-cloud-clockwork/agentihooks-hive-worke
 assert pod['volumes'][0]['secret']['secretName'] == 'member'
 assert pod['volumes'][0]['secret']['items'] == [{'key': 'credential', 'path': 'credential'}]
 assert container['volumeMounts'][0]['readOnly'] is True
-print('worker replicas, identity, capacity and mounted credentials: passed')
+assert container['resources']['requests']['memory'] == '2100Mi', container['resources']
+assert container['resources']['limits']['memory'] == '6144Mi', container['resources']
+pinned = [key for key in ('nodeSelector', 'affinity', 'nodeName', 'hostNetwork') if key in pod]
+assert not pinned, f'the worker hive pod is pinned by {pinned}'
+print('worker replicas, identity, capacity, memory per agent, no node pin and mounted credentials: passed')
 PY
 if helm template proof "$chart" --set workers.replicas=1 > "$out/missing.out" 2> "$out/missing.err"; then
   echo 'workers accepted without join material' >&2
@@ -37,6 +41,18 @@ if helm template proof "$chart" --set workers.replicas=2 \
   exit 1
 fi
 grep -q 'one hive credential is one hive' "$out/shared.err"
+if helm template proof "$chart" --set workers.replicas=1 --set workers.memoryPerAgentMi.limit=100 \
+  --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential > "$out/memory.out" 2> "$out/memory.err"; then
+  echo 'a per agent memory limit below its request was accepted' >&2
+  exit 1
+fi
+grep -q 'workers.memoryPerAgentMi needs a positive request' "$out/memory.err"
+if helm template proof "$chart" --set workers.replicas=1 --set workers.resources.limits.memory=4Gi \
+  --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential > "$out/fixed.out" 2> "$out/fixed.err"; then
+  echo 'a fixed worker hive memory in workers.resources was accepted' >&2
+  exit 1
+fi
+grep -q 'set worker hive memory with workers.memoryPerAgentMi' "$out/fixed.err"
 if helm template proof "$chart" --set workers.replicas=2 --set workers.joinUrl=https://join.example.test \
   --set workers.joinCodeSecret.name=code --set workers.joinCodeSecret.key=code > "$out/reused.out" 2> "$out/reused.err"; then
   echo 'one time code accepted for multiple replicas' >&2
@@ -56,4 +72,4 @@ assert 'persistentVolumeClaim' in home, 'joined membership must survive pod repl
 assert any(o and o.get('kind') == 'PersistentVolumeClaim' and o['metadata']['name'] == home['persistentVolumeClaim']['claimName'] for o in objects)
 print('one time membership survives pod replacement: passed')
 PY
-echo 'missing, shared and reused join material: refused'
+echo 'missing, shared and reused join material, a per agent memory limit below its request and a fixed pod memory: refused'

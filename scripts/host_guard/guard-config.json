@@ -16,6 +16,7 @@
   "excludeCommands": [
     "(^|[ /])agentihooks swarm tick( |$)",
     " -m scripts[.]swarm[.]scheduled_tick( |$)",
-    "(^|[ /])agentihooks select-profile( |$)"
+    "(^|[ /])agentihooks select-profile( |$)",
+    "(^|[ /])agentihooks swarm (tick-watch|prober|waker)( |$)"
   ]
 }
