@@ -94,8 +94,8 @@ def run(connect: Callable[[], "Redis"]) -> None:
             while True:
                 started = time.monotonic()
                 beat(redis, local_id)
-                failures = 0
                 scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+                failures = 0
         except (ConnectionError, TimeoutError):
             time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
             failures += 1

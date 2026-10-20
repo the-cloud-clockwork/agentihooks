@@ -85,6 +85,10 @@ def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis
     assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
 
 
+def _once(connection):
+    return Mock(side_effect=[connection, AssertionError("reconnected")])
+
+
 def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     events = []
     connection = object()
@@ -98,7 +102,7 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
 
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(lambda: connection)
+        daemon.run(_once(connection))
     assert events == [(connection, "local"), 15]
 
 
@@ -110,7 +114,7 @@ def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     sleep = Mock(side_effect=KeyboardInterrupt)
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(object)
+        daemon.run(_once(object()))
     sleep.assert_called_once_with(12)
 
 
@@ -356,7 +360,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     sleep = Mock(side_effect=KeyboardInterrupt)
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(object)
+        daemon.run(_once(object()))
     sleep.assert_called_once_with(0)
 
 
@@ -364,15 +368,19 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
     import fakeredis
 
     server = fakeredis.FakeServer()
-    clients, sleeps, now = [], [], [1000.0]
+    clients, sleeps, queued, now = [], [], [], [1000.0]
+    stream = f"{registry.key('machine')}:orders"
 
     def connect():
+        assert len(clients) < 3
         clients.append(fakeredis.FakeRedis(server=server, decode_responses=True))
         return clients[-1]
 
     def backoff(seconds):
         sleeps.append(seconds)
         server.connected = len(sleeps) == 2
+        if server.connected:
+            queued.append(clients[-1].xadd(stream, {"order": "{}"}))
 
     def wait(seconds):
         if now[0] == 2000.0:
@@ -392,15 +400,18 @@ def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch
     assert sleeps == [1, 2]
     assert len(clients) == 3
     assert registry.show(clients[-1], "machine")["heartbeat_at"] == 2000000
+    assert clients[-1].xlen(stream) == 0
+    assert "invalid_order" in clients[-1].hget(f"{stream}:acks", queued[0])
 
 
-def test_run_backoff_is_capped_and_restarts_after_a_good_beat(monkeypatch):
+def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch):
     from redis.exceptions import ConnectionError, TimeoutError
 
-    outcomes = iter([ConnectionError] * 6 + [None, TimeoutError, None])
+    outcomes = iter([ConnectionError] * 6 + [None, None, TimeoutError, None])
     connections, sleeps, waits = [], [], []
 
     def connect():
+        assert len(connections) < 10
         connections.append(object())
         if len(connections) == 1:
             raise ConnectionError("refused")
@@ -414,7 +425,9 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat(monkeypatch):
 
     def wait(seconds):
         waits.append(seconds)
-        if len(waits) == 2:
+        if len(waits) == 1:
+            raise ConnectionError("lost while waiting")
+        if len(waits) == 3:
             raise KeyboardInterrupt
 
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
@@ -423,18 +436,16 @@ def test_run_backoff_is_capped_and_restarts_after_a_good_beat(monkeypatch):
     monkeypatch.setattr(daemon, "scheduled_wait", wait)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connect)
-    assert sleeps == [1, 2, 4, 8, 16, 30, 30, 1]
-    assert len(connections) == 9
+    assert sleeps == [1, 2, 4, 8, 16, 30, 30, 30, 1]
+    assert len(connections) == 10
 
 
 def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch):
-    sleeps = []
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", Mock(side_effect=ValueError("bad report")))
-    monkeypatch.setattr(daemon.time, "sleep", sleeps.append)
+    monkeypatch.setattr(daemon.time, "sleep", Mock(side_effect=AssertionError("retried")))
     with pytest.raises(ValueError, match="bad report"):
-        daemon.run(object)
-    assert sleeps == []
+        daemon.run(_once(object()))
 
 
 def test_default_install_location_and_executable_discovery(monkeypatch, tmp_path):
