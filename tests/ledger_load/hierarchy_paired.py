@@ -37,8 +37,11 @@ def regressions(pairs: list[tuple[dict | None, dict | None]], margin: float) -> 
     if problems or not pairs:
         return problems or ["no paired runs were given"]
     for number, (base, head) in enumerate(pairs, 1):
-        if not base["mean_cpu_seconds"]:
-            problems.append(f"hierarchy CPU was not measured on the base run of pair {number}")
+        problems += [
+            f"hierarchy CPU was not measured on the {side} run of pair {number}"
+            for side, run in zip(SIDES, (base, head))
+            if not run["mean_cpu_seconds"]
+        ]
         outputs = [[row["outputs"] for row in run["observations"]] for run in (base, head)]
         if base["source"] != head["source"] or base["requests"] != head["requests"] or outputs[0] != outputs[1]:
             problems.append(f"hierarchy responses of pair {number} differ between base and head")

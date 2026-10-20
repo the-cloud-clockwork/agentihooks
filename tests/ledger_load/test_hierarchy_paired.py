@@ -42,6 +42,9 @@ def test_changed_bytes_and_missing_reports_are_named():
     assert hierarchy_paired.regressions([(report(0.0), report(0.04))], 1.3) == [
         "hierarchy CPU was not measured on the base run of pair 1"
     ]
+    assert hierarchy_paired.regressions([(report(0.04), report(None))], 1.3) == [
+        "hierarchy CPU was not measured on the head run of pair 1"
+    ]
 
 
 def test_the_same_code_bound_is_the_widest_geometric_mean_in_either_direction():
