@@ -65,7 +65,7 @@ class Probe:
 @pytest.fixture
 def probe(monkeypatch):
     found = Probe()
-    monkeypatch.setattr(ledger_cutover, "ResourceClient", found)
+    monkeypatch.setattr(api_client, "ResourceClient", found)
     return found
 
 
@@ -128,6 +128,27 @@ def test_a_ready_successor_authenticates_once_and_records_its_receipt(store, wor
     assert {name: json.loads(value) for name, value in receipts(store).items()} == {worker.name: stamp}
     probe.error = AssertionError("authenticated twice")
     assert ledger_cutover.acknowledge(store, SLUG, who(worker), TOKEN) is True
+
+
+def test_a_client_patched_while_the_module_first_imports_is_not_kept(store, worker, monkeypatch):
+    import importlib
+    import sys
+
+    class Stale:
+        def __init__(self, base, headers):
+            raise AssertionError(f"kept the client patched at import for {base}")
+
+    from scripts import swarm
+
+    monkeypatch.delitem(sys.modules, ledger_cutover.__name__)
+    monkeypatch.setattr(swarm, "ledger_cutover", ledger_cutover)
+    with pytest.MonkeyPatch.context() as earlier:
+        earlier.setattr(api_client, "ResourceClient", Stale)
+        fresh = importlib.import_module(ledger_cutover.__name__)
+    found = Probe()
+    monkeypatch.setattr(api_client, "ResourceClient", found)
+    assert fresh.acknowledge(store, SLUG, who(worker), TOKEN) is True
+    assert [call[0] for call in found.calls] == [DEST]
 
 
 def test_a_receipt_needs_a_pinned_token_a_staged_destination_and_a_fresh_execution(store, worker, probe):
