@@ -78,15 +78,16 @@ def sweep_codex_homes(
     records = []
     for directory in homes(environ, scope):
         try:
-            if snap.now - directory.stat().st_mtime < SETTLE_S or owned(directory, refs):
+            newest, size = walk_stats(directory)
+            if snap.now - newest < SETTLE_S or owned(directory, refs):
                 continue
-            info = {"path": str(directory), "bytes": walk_stats(directory)[1], "action": "would remove"}
+            info = {"path": str(directory), "bytes": size, "action": "would remove"}
             if act:
                 remove_home(directory)
                 if directory.exists():
                     raise OSError("home still present after removal")
                 info["action"] = "removed"
-        except OSError as exc:
+        except (OSError, ValueError) as exc:
             info = {"path": str(directory), "action": "error", "error": str(exc)}
         if info["action"] == "removed":
             with (home / LOG).open("a") as log:

@@ -1,4 +1,5 @@
 import json
+import os
 import shutil
 import socket
 import tempfile
@@ -82,6 +83,28 @@ def test_a_home_younger_than_the_settle_window_is_left_alone(layout):
     assert young.exists()
 
 
+def test_a_recent_write_deep_in_an_old_home_keeps_it(layout):
+    environ, legacy, _, state, proc = layout
+    busy = plant(legacy, "69aede3172ac4d86")
+    stamp = time.time() - codex_homes.SETTLE_S - 60
+    for item in [busy, *busy.rglob("*")]:
+        os.utime(item, (stamp, stamp), follow_symlinks=False)
+    (busy / "codex" / ".tmp" / "plugins" / "cache.bin").write_bytes(b"y")
+    result = codex_homes.sweep_codex_homes(later(seconds=0), state, act=True, proc=proc, environ=environ)
+    assert result == []
+    assert busy.exists()
+
+
+def test_a_malformed_config_is_reported_and_the_sweep_goes_on(layout):
+    environ, legacy, _, state, proc = layout
+    broken = plant(legacy, "a1")
+    (broken / "codex" / "config.toml").write_text("sqlite_home = [\n")
+    good = plant(legacy, "b2")
+    result = codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ)
+    assert [(item["path"], item["action"]) for item in result] == [(str(broken), "error"), (str(good), "removed")]
+    assert broken.exists()
+
+
 @pytest.mark.parametrize("kind", ["cwd", "argv", "fd"])
 def test_a_home_a_live_process_refers_to_is_never_touched(layout, kind):
     environ, legacy, _, state, proc = layout
@@ -131,7 +154,7 @@ def test_scope_limits_the_homes_considered(layout):
 
 def test_symlinked_roots_and_entries_are_skipped(layout, tmp_path):
     environ, legacy, _, state, proc = layout
-    target = plant(tmp_path, "elsewhere")
+    target = plant(tmp_path / "other" / "cx", "elsewhere")
     (legacy / "linked").symlink_to(target)
     (legacy / "file").write_text("x")
     assert codex_homes.sweep_codex_homes(later(), state, act=True, proc=proc, environ=environ) == []
