@@ -1992,15 +1992,15 @@ each inbox connection replay them too. Each record is judged by what the ledger 
 | 409 revision conflict, ops carry `expected_revision`, any other op | Set aside at once: the revision it expected has moved and can never apply. |
 | Any other refusal, or a resource that cannot be read from the record | Set aside at once with the reason. |
 
-Append only ops are `add`, `add_item`, `relay` and `answer`. A write that reached the client before the
-server went down can carry the `expected_revision` the client read then, so a queued comment on a thread
-that has since moved meets this case on the first replay after the thread
-moves.
+Append only ops are `add`, `add_item`, `relay` and `answer`. A write that reached the client before the server
+went down can carry the `expected_revision` the client read then, so a queued comment on a thread that has
+since moved meets this case on the first replay after the thread moves.
 
-A record's resources are the threads, lists or items its ops write: the thread of a comment, the list of a
-new item, the task or phase of a task or phase op, `members` for joins and acknowledgements. A record held
-by a conflict adds its resources to the held set, so a later record that shares any of them also waits,
-and the order of writes to each resource holds. Records for other items, and every inbox record, keep replaying behind it.
+A record's resources are the threads, lists or items its ops write: the thread of a comment, the list of
+a new item, the task or phase of a task or phase op, `members` for joins and acknowledgements. A record
+held by a conflict adds its resources to the held set, so a later record that shares any of them also
+waits, and the order of writes to each resource holds. Records for other items, and every inbox record,
+keep replaying behind it.
 
 | Setting | Default | Behaviour |
 |---|---|---|
@@ -2013,8 +2013,9 @@ agentihooks msg: queued message <id> was refused on replay (the ledger server an
 on <path> since this write was queued, so its expected revision can never apply); kept in <skipped outbox>
 ```
 
-A record set aside after the busy age carries
-`<server answer> for over <busy age> seconds (AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S)`. A set aside write was not applied: read its op in the skipped file and write it again against the current ledger.
+A record set aside after the busy age carries `<server answer> for over <busy age> seconds
+(AGENTIHOOKS_LEDGER_OUTBOX_BUSY_MAX_AGE_S)`. A set aside write was not applied: read its op in the skipped
+file and write it again against the current ledger.
 
 | Symptom | Cause | Action |
 |---|---|---|
