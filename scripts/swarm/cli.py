@@ -255,6 +255,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         return [CONTROLLER_TICKS]
     tick_stop.check()
     ledger = ledger or LedgerClient()
+    health_ledger = ledger
     outbox.flush(InboxStore(store.redis))
     runtime = runtime or routed(herdr=HerdrRuntime())
     held = lease.acquire(store, slug, commands.hive_id())
@@ -284,8 +285,8 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         timing.call(relay.relay, store.redis)
         timing.call(LaunchSlots(store.redis).refresh_reported, now_ms())
         outage.providers(store, slug, runtime, now_ms())
-        if isinstance(ledger, ledger_client.LedgerClient) and not outage.ledger_health(
-            slug, now_ms(), lambda: isinstance(ledger.metadata(slug), dict)
+        if isinstance(health_ledger, ledger_client.LedgerClient) and not outage.ledger_health(
+            slug, now_ms(), lambda: isinstance(health_ledger.metadata(slug), dict)
         ):
             return ["Ledger health probe failed"]
         from scripts.swarm.health import prompt_backlog, spawn_stall, urgent_hold
