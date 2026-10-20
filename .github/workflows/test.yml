@@ -978,6 +978,8 @@ jobs:
             python -m tests.queue_shards --root . --collection "$collection" --version "$version" --reused "$reused" --output queue-plan.txt
             cp .test_durations durations.sha256 "$destination/"
           done
+          # Python 3.11 runs in the dev push run after merge, so the queue sizes runners for 3.12 alone.
+          sed -i 's/^queue_311=.*/queue_311=/' queue-plan.txt
           python -m tests.queue_shards combine --from-output queue-plan.txt --root . --inputs queue-input
           cp queue-input/3.11/.test_durations .test_durations
           cp queue-input/3.11/durations.sha256 durations.sha256
@@ -1091,9 +1093,15 @@ jobs:
       matrix:
         python-version: ["3.11", "3.12"]
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
-        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}
+        include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}
         exclude:
-          - {python-version: &queue-python-311 "${{ github.event_name == 'merge_group' && '3.11' || '' }}", shard: 7}
+          - {python-version: &queue-python-311 "${{ github.event_name == 'merge_group' && '3.11' || '' }}", shard: 1}
+          - {python-version: *queue-python-311, shard: 2}
+          - {python-version: *queue-python-311, shard: 3}
+          - {python-version: *queue-python-311, shard: 4}
+          - {python-version: *queue-python-311, shard: 5}
+          - {python-version: *queue-python-311, shard: 6}
+          - {python-version: *queue-python-311, shard: 7}
           - {python-version: *queue-python-311, shard: 8}
           - {python-version: *queue-python-311, shard: 9}
           - {python-version: *queue-python-311, shard: 10}
@@ -1484,7 +1492,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ${{ fromJSON(github.event_name == 'merge_group' && '["3.12"]' || '["3.11","3.12"]') }}
     steps:
       - uses: actions/checkout@v4
         with:
