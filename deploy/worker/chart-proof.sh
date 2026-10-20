@@ -73,3 +73,22 @@ assert any(o and o.get('kind') == 'PersistentVolumeClaim' and o['metadata']['nam
 print('one time membership survives pod replacement: passed')
 PY
 echo 'missing, shared and reused join material, a per agent memory limit below its request and a fixed pod memory: refused'
+helm template proof "$chart" --set workers.replicas=1 \
+  --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential \
+  --set workers.ssh.enabled=true > "$out/ssh.yaml"
+python3 - "$out/ssh.yaml" <<'PY'
+import sys, yaml
+
+objects = list(yaml.safe_load_all(open(sys.argv[1])))
+worker = next(o for o in objects if o and o.get('kind') == 'Deployment' and o['metadata']['name'].endswith('-worker-hive'))
+pod = worker['spec']['template']['spec']
+container = pod['containers'][0]
+env = {v['name']: v['value'] for v in container['env'] if 'value' in v}
+assert env['HIVE_SSH_AUTHORIZED_KEYS_FILE'] == '/run/hive-join/ssh/authorized_keys'
+assert env['HIVE_SSH_HOST_KEY_FILE'] == '/run/hive-join/ssh/host_key'
+assert env['HIVE_SSH_PORT'] == '2222' and env['HIVE_PROFILE'] == 'engineer'
+assert container['ports'] == [{'name': 'ssh', 'containerPort': 2222}]
+join = next(v for v in pod['volumes'] if v['name'] == 'join')
+assert [i['path'] for i in join['secret']['items']] == ['credential', 'ssh/authorized_keys', 'ssh/host_key']
+print('worker hive sshd keys, host key, port and profile: passed')
+PY

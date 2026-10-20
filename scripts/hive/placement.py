@@ -98,7 +98,7 @@ def choose(
         if headless
         else Wait(f"no live {HEADLESS} takes {role}")
     )
-    if isinstance(picked, Choice) or any(_room(hive) > 0 for hive in headless):
+    if isinstance(picked, Choice):
         return picked
     fallback = _pick(role, harness, slot, route_kind, repo, ui)
     return Choice(fallback.hive, picked.reason) if isinstance(fallback, Choice) else picked

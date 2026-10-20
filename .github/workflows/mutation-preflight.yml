@@ -120,6 +120,7 @@ jobs:
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload planned mutation test selection
@@ -289,6 +290,7 @@ jobs:
         if: strategy.job-total == 1
         env:
           BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
 
       - name: Upload the measured mutation plan
@@ -359,6 +361,7 @@ jobs:
         id: refine
         env:
           BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
 
       - name: Upload the measured mutation plan
