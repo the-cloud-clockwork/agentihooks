@@ -835,7 +835,7 @@ def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(prior
     refusal = "gh: Pull request not in mergeable state"
     run, refused = p.queue.run, [True]
 
-    def unknown(command, **kwargs):
+    def refusing(command, **kwargs):
         if refused[0] and "enqueuePullRequest" in " ".join(command) and "id=P2" in command:
             return subprocess.CompletedProcess(command, 1, "", refusal)
         done = run(command, **kwargs)
@@ -845,7 +845,7 @@ def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(prior
             raw["mergeable"] = "UNKNOWN"
         return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
 
-    monkeypatch.setattr(p.queue, "run", unknown)
+    monkeypatch.setattr(p.queue, "run", refusing)
     monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
     sent = []
     monkeypatch.setattr(
@@ -859,7 +859,8 @@ def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(prior
         "swarm",
         "ci@owner",
         f"Your pull request {URL[:-1]}2 left the merge queue in a priority and could not be queued again: "
-        f"{refusal}. The swarm retries it on every refresh until it is back or stays out for a reason.",
+        f"{refusal}. The swarm retries it at the end of the queue on every refresh until it is back or stays out "
+        "for a reason.",
         {"fyi": True},
     )
     assert sent == [notice]
@@ -887,6 +888,9 @@ def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(prior
         ({"isDraft": False, "headRefOid": "head2", "mergeable": "UNKNOWN"}, ""),
     ],
 )
-def test_an_entry_stays_out_for_its_first_blocker(raw, reason):
-    assert "isDraft mergeable" in merge_queue.FIELDS
+def test_blocker_reports_the_first_reason_an_entry_stays_out(raw, reason):
     assert queue_priority.blocker(raw, "head2") == reason
+
+
+def test_the_state_query_reads_mergeable():
+    assert "isDraft mergeable" in merge_queue.FIELDS

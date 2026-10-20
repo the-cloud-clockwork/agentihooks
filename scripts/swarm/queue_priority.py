@@ -112,7 +112,8 @@ def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: d
                 "swarm",
                 task["claimed_by"],
                 f"Your pull request {pull['url']} left the merge queue in a priority and could not be queued "
-                f"again: {reason}. The swarm retries it on every refresh until it is back or stays out for a reason.",
+                f"again: {reason}. The swarm retries it at the end of the queue on every refresh until it is back "
+                "or stays out for a reason.",
                 fyi=True,
             )
     except InboxError:
