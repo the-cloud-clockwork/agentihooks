@@ -179,6 +179,20 @@ def test_forget_counts_a_missing_ask_item_as_already_forgotten(swarm):
     assert master_retire.forget(store, "sw", master.name) is False
 
 
+def test_forget_survives_an_ask_that_cannot_be_closed(swarm, monkeypatch):
+    from scripts.inbox.store import Contended
+
+    store, _, _, master = swarm
+    master_retire.hold(store, "sw", master, "test", True, 200)
+
+    def contended(*_):
+        raise Contended("changed meanwhile")
+
+    monkeypatch.setattr(InboxStore, "close", contended)
+    assert master_retire.forget(store, "sw", master.name) is True
+    assert master_retire.reason(store, "sw", master.name) == ""
+
+
 def test_an_idle_master_that_hands_off_is_retired_and_not_respawned(swarm):
     store, runtime, ledger, master = swarm
     hours = 6 * 60 * 60 * 1000

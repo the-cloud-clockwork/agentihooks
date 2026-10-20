@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 
@@ -51,12 +52,10 @@ def forget(store: RedisStore, slug: str, name: str) -> bool:
     store.redis.hdel(_key(store, slug), name)
     request = json.loads(raw)
     inbox = InboxStore(store.redis, world=request.get("world"))
-    try:
+    with contextlib.suppress(InboxError):
         item = inbox.get(request["item"])
-    except InboxError:
-        return True
-    if item.state not in CLOSED:
-        inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
+        if item.state not in CLOSED:
+            inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
     return True
 
 
