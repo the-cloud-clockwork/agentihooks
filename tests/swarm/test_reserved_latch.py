@@ -99,3 +99,30 @@ def test_without_a_reachable_store_the_live_reservation_still_closes_the_account
     monkeypatch.setattr(reservation, "_store", lambda environ: None)
 
     assert [(row.state, row.cap) for row in capacity.accounts({}, NOW, refresh=False)] == [("CLOSED", 0)]
+
+
+def test_a_closure_without_a_known_week_reset_is_not_remembered(world):
+    store, rows, masters = world
+    rows.append(_row(reset=None))
+    capacity.accounts({}, NOW, refresh=False)
+    masters["claude"] = ("main", 1)
+
+    assert store.redis.keys(f"{ROOT}:reserved-closed:*") == []
+    assert [row.state for row in capacity.accounts({}, NOW + 60, refresh=False)] == ["OPEN"]
+
+
+def test_a_redis_failure_leaves_the_live_reservation_in_charge(world, monkeypatch):
+    from redis.exceptions import ConnectionError as RedisConnectionError
+
+    store, rows, masters = world
+    rows.append(_row())
+
+    def down(*args, **kwargs):
+        raise RedisConnectionError("down")
+
+    monkeypatch.setattr(store.redis, "set", down)
+    monkeypatch.setattr(store.redis, "get", down)
+
+    assert [row.state for row in capacity.accounts({}, NOW, refresh=False)] == ["CLOSED"]
+    masters["claude"] = ("main", 1)
+    assert [row.state for row in capacity.accounts({}, NOW + 60, refresh=False)] == ["OPEN"]
