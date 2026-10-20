@@ -292,3 +292,28 @@ def test_session_start_kick_waits_for_a_fast_check(tmp_path, monkeypatch):
     monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda *a, **kw: started.append(popen(*a, **kw)) or started[-1])
     assert deps_kick.kick(home=tmp_path) is True
     assert started[0].returncode == 3
+
+
+class _OutlivingCheck:
+    pid = 4242
+
+    def __init__(self):
+        self.waits = []
+
+    def wait(self, timeout=None):
+        self.waits.append(timeout)
+        if len(self.waits) == 1:
+            raise subprocess.TimeoutExpired("agentihooks", timeout)
+        return -signal.SIGKILL
+
+
+def test_session_start_kick_reaps_a_check_that_outlives_the_bounded_wait(tmp_path, monkeypatch):
+    check = _OutlivingCheck()
+    killed = []
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: check)
+    monkeypatch.setattr(deps_kick.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    assert deps_kick.kick(home=tmp_path) is True
+    assert check.waits == [deps_kick.WAIT_SECONDS, None]
+    assert deps_kick.WAIT_SECONDS == 1.0
+    assert killed == [(4242, signal.SIGKILL)]
