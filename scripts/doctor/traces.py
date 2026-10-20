@@ -188,12 +188,17 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
     return found
 
 
+def _live(record):
+    return {binding["agent"] for binding in record.get("active", [])}
+
+
 def gap_agents(record: dict, limits: Limits) -> list[str]:
     newest = {}
     for trace in record["traces"]:
         for _, b in _long_gaps(trace, limits.turn_gap_minutes):
             newest[_agent(trace)] = max(newest.get(_agent(trace), b["start"]), b["start"])
-    return sorted(newest, key=lambda name: (-newest[name], name))
+    live = _live(record)
+    return sorted(newest, key=lambda name: (name not in live, -newest[name], name))
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
@@ -208,6 +213,7 @@ def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
             "not read in budget",
             (
                 "unread: " + ", ".join(unread[:5]),
+                f"live agents unread: {len(_live(record) & set(unread))}",
                 "turn gap findings skip agents whose wait history was not read",
                 "each Doctor scan reads the wait history again within its budget",
             ),
