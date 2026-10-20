@@ -23,6 +23,7 @@ EXCLUDED_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")
 JSON_FIELDS = {"excluded": list, "prefer": dict, "harnesses": list, "slots": list, "interactive": dict, "repos": list}
 INT_FIELDS = ("max_agents", "heartbeat_at")
 LEGACY = "roles"
+LEGACY_FIELDS = (LEGACY, "max_agents")
 UNSET = ("max_agents", "excluded")
 
 
@@ -133,7 +134,7 @@ def _stored(redis: "Redis", hive_id: str) -> dict | None:
     if not stored:
         return None
     if LEGACY in stored:
-        stored = {field: value for field, value in stored.items() if field not in (LEGACY, *UNSET)}
+        stored = {field: value for field, value in stored.items() if field not in LEGACY_FIELDS}
     return {field: _decode(hive_id, field, value) for field, value in stored.items()}
 
 
@@ -146,9 +147,16 @@ def show(redis: "Redis", hive_id: str) -> dict | None:
     return None if stored is None else _settle(hive_id, stored)
 
 
-def seed(pipe: "Pipeline", hive_id: str, legacy: bool) -> None:
-    if legacy:
-        pipe.hdel(key(hive_id), LEGACY, *UNSET)
+def migrate(redis: "Redis", hive_id: str) -> None:
+    def drop(pipe: "Pipeline") -> None:
+        if pipe.hexists(key(hive_id), LEGACY):
+            pipe.multi()
+            pipe.hdel(key(hive_id), *LEGACY_FIELDS)
+
+    redis.transaction(drop, key(hive_id))
+
+
+def seed(pipe: "Pipeline", hive_id: str) -> None:
     for field, value in _default(hive_id).items():
         if field not in UNSET:
             pipe.hsetnx(key(hive_id), field, _encode(field, value))
@@ -166,7 +174,9 @@ def update(redis: "Redis", hive_id: str, pairs: list[str]) -> dict:
         record = _settle(hive_id, {**(_stored(pipe, hive_id) or {}), **fields})
         _check(record)
         pipe.multi()
-        seed(pipe, hive_id, legacy)
+        if legacy:
+            pipe.hdel(key(hive_id), *LEGACY_FIELDS)
+        seed(pipe, hive_id)
         pipe.hset(key(hive_id), mapping={field: _encode(field, value) for field, value in fields.items()})
         if hive_id != scope.member():
             pipe.sadd(INDEX, hive_id)

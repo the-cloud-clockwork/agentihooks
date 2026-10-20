@@ -1,6 +1,6 @@
 import pytest
 
-from scripts.hive.placement import NO_UI_HIVE, Choice, Wait, choose, place
+from scripts.hive.placement import Choice, Wait, choose, place
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 from tests.hive.test_placement import NOW, REPO, hive
@@ -273,7 +273,7 @@ def test_master_fill_spawns_a_refused_seat_two_master_on_the_workstation_herdr_s
     fenced = controller.FencedRuntime(store, "sw", held, routed, "compose")
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 1)
-    assert actions == [f"the workstation hive spawns master work: {NO_UI_HIVE}"]
+    assert actions == ["the workstation hive spawns master work: no live hive takes master"]
     assert herdr.masters == []
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
     actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 2)

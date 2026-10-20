@@ -82,9 +82,7 @@ def test_a_hive_stored_with_roles_reads_under_the_new_rule_before_it_moves(redis
 
 def test_a_heartbeat_moves_a_hive_stored_with_roles_to_the_new_rule(redis):
     redis.hset(registry.key("anton"), mapping={"ui": "no", "roles": '["eng"]', "max_agents": "1", "name": "Anton"})
-    with redis.pipeline() as pipe:
-        registry.seed(pipe, "anton", legacy=True)
-        pipe.execute()
+    registry.migrate(redis, "anton")
     stored = redis.hgetall(registry.key("anton"))
     assert "roles" not in stored and "max_agents" not in stored
     assert stored["name"] == "Anton"
@@ -93,8 +91,9 @@ def test_a_heartbeat_moves_a_hive_stored_with_roles_to_the_new_rule(redis):
 
 def test_a_heartbeat_keeps_an_explicit_max_agents(redis):
     registry.update(redis, "anton", ["ui=no", "max-agents=4"])
+    registry.migrate(redis, "anton")
     with redis.pipeline() as pipe:
-        registry.seed(pipe, "anton", legacy=False)
+        registry.seed(pipe, "anton")
         pipe.execute()
     assert registry.show(redis, "anton")["max_agents"] == 4
 

@@ -173,7 +173,7 @@ class HiveLaunch:
         ]
         selected = placement.place_master("claude", "", config.repo, available, now)
         if isinstance(selected, placement.Wait):
-            return selected if hives else placement.Wait(placement.NO_UI_HIVE)
+            return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
         if selected.route_kind == "interactive":
             account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:

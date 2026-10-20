@@ -754,7 +754,7 @@ in place and moves the master to another hive.
 | hive | The hive's name; hovering shows its id. |
 | state | `live` while the last heartbeat is under ninety seconds old, else `quiet`. |
 | ui, ephemeral | `yes` or `no`, editable. |
-| roles | Comma list, editable. |
+| excluded | Comma list, editable. |
 | prefer | Comma list of `role:rank`, editable. |
 | max agents | Whole number, editable. |
 | agents | Working agents against max agents, such as `1/3`. |
@@ -787,7 +787,7 @@ The page converts what was typed before it sends it:
 
 | Field | Typed | Sent |
 |---|---|---|
-| roles | `eng, ci` | `["eng", "ci"]` |
+| excluded | `master, qa` | `["master", "qa"]` |
 | prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
 | max agents | `4` | `4`; anything other than digits is sent as text and refused |
 

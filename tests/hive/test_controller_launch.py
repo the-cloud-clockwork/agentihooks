@@ -203,7 +203,7 @@ def test_a_local_machine_swarm_with_hive_placement_sends_eng_to_a_joined_hive_an
 
 
 def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setup):
-    from scripts.hive.placement import NO_UI_HIVE, Wait
+    from scripts.hive.placement import Wait
     from scripts.swarm.controller import FencedRuntime
     from scripts.swarm.profile_choice import ProfileDecision
     from scripts.swarm_v2.runtime.base import RuntimeRouter
@@ -215,14 +215,16 @@ def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setu
     pinned = {"id": "master", "hive": "second"}
     assert setup.launcher.select(setup.config, "master", {"id": "master"}).hive == "first"
     assert setup.launcher.select(setup.config, "master", pinned).hive == "second"
-    assert setup.launcher.select(setup.config, "master", {"id": "master", "hive": "gone"}) == Wait(NO_UI_HIVE)
+    assert setup.launcher.select(setup.config, "master", {"id": "master", "hive": "gone"}) == Wait(
+        "no live hive takes master"
+    )
 
     fenced = FencedRuntime(
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.placement_refusal("master", pinned) == ""
     gone = fenced.placement_refusal("master", {"id": "master", "hive": "gone"})
-    assert gone == f"the workstation hive spawns master work: {NO_UI_HIVE}"
+    assert gone == "the workstation hive spawns master work: no live hive takes master"
     fenced.runtime.spawn = Mock(return_value="placed on the hive")
     fenced.runtime.original_runtime = Mock()
     assert fenced.spawn(setup.config, "master", "name", pinned) == "placed on the hive"
