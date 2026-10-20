@@ -86,6 +86,7 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
 def run(connect: Callable[[], "Redis"]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
+    lost = (ConnectionError, TimeoutError)
     local_id = hive_id()
     failures = 0
     while True:
@@ -96,7 +97,7 @@ def run(connect: Callable[[], "Redis"]) -> None:
                 beat(redis, local_id)
                 scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
                 failures = 0
-        except (ConnectionError, TimeoutError):
+        except lost:
             time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
             failures += 1
 
