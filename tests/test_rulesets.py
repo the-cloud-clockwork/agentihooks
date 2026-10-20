@@ -30,7 +30,7 @@ def test_rulesets_enforce_branch_protection(name):
     assert rules["pull_request"]["parameters"]["require_code_owner_review"] is False
 
 
-def test_dev_history_keeps_deletion_force_push_and_linear_history_unbypassable():
+def test_dev_history_keeps_deletion_force_push_linear_history_and_gate_unbypassable():
     history = json.loads((ROOT / ".github" / "rulesets" / "dev-history.json").read_text())
     queue = json.loads((ROOT / ".github" / "rulesets" / "dev-no-delete.json").read_text())
 
