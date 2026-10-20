@@ -569,7 +569,7 @@ class TestProcEnvironReads:
     def test_read_is_refused_with_the_leak_free_alternative(self, command):
         verdict = decide(_bash(command))
         assert verdict is not None
-        assert "reading a process environment file under /proc" in verdict
+        assert verdict.splitlines()[0] == "BLOCKED: reading a process environment file under /proc."
         assert 'test -n "${VAR:-}"' in verdict
         assert ENV_NAMES_SAFE in verdict
 
