@@ -232,6 +232,7 @@ skill. Only a Claude front door takes the claude ai login and Remote Control. A 
   by item id. A match sends the item to that master, so related items reach the same master together. Any
   classifier error, timeout (`MASTER_INBOX_CLASSIFIER_TIMEOUT_S`, default 3 seconds) or low verdict falls back to
   round robin; a classifier fault never holds an item. With the flag off, delivery is plain round robin.
+  [Intent grouping](#intent-grouping) gives every rule.
 
 ### Master inbox pool
 
@@ -293,6 +294,80 @@ return. An item that stays in the pool while masters are live, or a master that 
 pool items, points to the live seat list: check `swarm <id> status` for finished, retiring or retired masters, and the item's
 history, which `msg read <id>` prints for the master that claimed it, for the `claimed from the master pool by <seat>`
 line naming that seat. `msg read` also marks the item read, so run it only as the master taking up the item.
+
+#### Intent grouping
+
+Intent grouping sends a pooled item to the master that recently handled related work, so a run of items about one
+task, pull request or question reaches one master instead of being dealt across all of them. Round robin stays the
+rule for every item the classifier cannot place.
+
+| Setting | Default | Meaning |
+|---|---|---|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | on (unset) | `1`, `true`, `yes` or `on`, in any case and with surrounding spaces, keeps grouping on; any other value, such as `false`, `0` or an empty string, turns it off |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for all of its verdicts. An unreadable value keeps 3 |
+
+Both are read from the environment of the process that hands out the pool: the sender of an item to `master@<id>`
+(an agent's `msg send`, a question or follow up, a tick item) and the inbox redelivery pass. Set them where those
+processes get their environment, such as the profile `env` block or an `.env` file under the AgentiHooks home, so
+every sender agrees. The verdicts come from the [decision classifier](../reference/classifier.md), which needs
+`AGENTIHOOKS_CLASSIFIER_URL` and `AGENTIHOOKS_CLASSIFIER_LITELLM_KEY`.
+
+```bash
+# turn grouping off for this shell and everything it starts
+export MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS=false
+# give the classifier five seconds per pool pass
+export MASTER_INBOX_CLASSIFIER_TIMEOUT_S=5
+```
+
+How an item is placed, on every pool pass (each send into the pool and each redelivery pass):
+
+1. **Recent items.** Each live master keeps the first lines of the last 15 items the pool handed to it, newest first.
+   Every claim adds one, whether intent or round robin chose the master. The list expires 24 hours after its last
+   addition. A master with no recent items is not asked about, so the first items of a new swarm go round robin.
+2. **Every waiting item is compared.** The pass takes every item still waiting in the pool, the new one and older
+   ones alike, and asks one yes or no question per item and master: does the new item continue the same work, task
+   or question as one of that master's recent items. All questions of one pass run in parallel, at most 16 at a time,
+   under one deadline of `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`.
+3. **Match.** A verdict of 0.7 or more is a match. The item goes to the matching master with the highest verdict;
+   equal verdicts go to the seat whose name sorts last. Without a match the item takes its round robin turn.
+4. **Live seats only.** A matched master that is no longer live, or the master that just let the item lapse on
+   redelivery, is passed over and the item takes its round robin turn. Operator items never enter the pool and are
+   never classified.
+
+What one item costs:
+
+| Saving | How |
+|---|---|
+| First lines only | The question carries the item's first line, cut to 120 characters, and the master's recent first lines. The rest of the item never leaves the inbox. |
+| One verdict per master | Each question asks for one probability, never a choice list or a score. |
+| API models only | The question goes to the classifier API models in `AGENTIHOOKS_CLASSIFIER_MODELS` order, trying the next model when one fails. The Haiku and Luna command line fallbacks are not used, so no agent session is started for a verdict. |
+| Cache by item | A verdict is stored per item, master and exact recent list for one hour. A later pass asks again only when that master's recent items changed. A verdict that lands after the deadline is still stored for the next pass. |
+
+With 15 recent lines of 120 characters, one question is estimated at no more than 700 tokens, so an item costs at
+most about 700 tokens per live master that has recent items, once per change of that master's recent list.
+
+Any classifier error, any question unanswered at the deadline, and any verdict under 0.7 leaves the item to round
+robin in the same pass. A slow classifier delays the pass by at most the timeout and never keeps an item in the pool.
+With the flag off no question is asked and no recent items are recorded; delivery is plain round robin.
+
+Inspect grouping in Redis (prefix `AGENTIHOOKS_SWARM_KEY_PREFIX`, default `agentihooks`) and in the classifier decision
+log, where every question is recorded under purpose `master-inbox-intent`:
+
+```bash
+redis-cli LRANGE agentihooks:inbox:pool:<id>:recent:master-2@<id> 0 -1
+redis-cli HGETALL agentihooks:inbox:pool:<id>:intent:<item id>
+agentihooks classifier stats --purpose master-inbox-intent
+```
+
+The `recent` list holds the first lines a master was handed. The `intent` hash holds one field per master and recent
+list, `<seat>|<hash of the recent list>`, whose value is that verdict, and a `tokens` field counting the estimated
+tokens sent for the item over every pass.
+
+| Symptom | Check |
+|---|---|
+| Related items still spread across masters | `classifier stats` shows calls and their sources. Calls with no source mean no model answered: check `AGENTIHOOKS_CLASSIFIER_URL`, the key and the down marker described in the classifier reference. No calls at all means grouping is off in the sending process, fewer than two masters are live, or no master has recent items yet. |
+| Items placed correctly but slowly | Every send into the pool waits up to `MASTER_INBOX_CLASSIFIER_TIMEOUT_S`. Lower it; late verdicts still fill the cache for the next pass. |
+| A master receives unrelated items | Verdicts below 0.7 cannot route; read the item's `intent` hash for the verdicts each master got. A matched master never takes an item it just let lapse. |
 
 ## Commands
 
