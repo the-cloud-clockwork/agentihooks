@@ -67,9 +67,9 @@ spec:
           imagePullPolicy: {{ $workers.image.pullPolicy }}
           {{- include "swarm.containerSecurity" . | nindent 10 }}
           env:
+            {{- if $github.secretName }}
             - name: HIVE_GITHUB_AUTH_MODE
               value: {{ $github.mode | quote }}
-            {{- if $github.secretName }}
             {{- $keys := dict "GITHUB_TOKEN" $github.tokenKey }}
             {{- if eq $github.mode "app" }}
             {{- $keys = dict "GITHUB_APP_ID" $github.appIdKey "GITHUB_APP_INSTALLATION_ID" $github.installationIdKey "GITHUB_APP_PRIVATE_KEY" $github.privateKeyKey }}
