@@ -90,11 +90,11 @@ def local_samples(folder: Path) -> list[dict[str, float]]:
 
 def parser() -> argparse.ArgumentParser:
     arg_parser = argparse.ArgumentParser()
-    parser.add_argument(
+    arg_parser.add_argument(
         "--ci", type=int, default=0, metavar="RUNS", help="take the durations CI kept from its last RUNS runs"
     )
-    parser.add_argument("--ci-run", help="take the durations of the tests this complete CI run measured")
-    parser.add_argument(
+    arg_parser.add_argument("--ci-run", help="take the durations of the tests this complete CI run measured")
+    arg_parser.add_argument(
         "--samples", type=Path, help="read run folders from here instead of GitHub, keeping only the newest RUNS"
     )
     return arg_parser
