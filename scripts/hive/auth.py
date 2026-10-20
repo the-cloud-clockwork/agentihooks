@@ -20,6 +20,26 @@ PREFIX = f"{ROOT}-hive"
 # ACL cannot confine a user to one database, so a hive's Redis serves that hive alone.
 ACL_PATTERNS = (f"{ROOT}:*",)
 ACL_CATEGORIES = ("+@all", "-@admin", "-@dangerous")
+# Outside the member's own keys, what its engineers write for swarm done, ready, park and status.
+WORKER_KEYS = (
+    "swarm:*:agents",
+    "swarm:*:executions",
+    "swarm:*:desired-routes",
+    "swarm:*:state-since",
+    "swarm:*:claim:*",
+    "swarm:*:ready",
+    "swarm:*:restart-causes",
+    "swarm:*:transfers",
+    "swarm:*:handoff:*",
+    "swarm:*:handoff-seat:*",
+    "swarm:*:handoff-envelope:*",
+    "swarm:*:findings",
+    "swarm:*:merge-stall",
+    "swarm:*:merge-stall-notice",
+    "swarm:*:hive-placement-waits",
+    "seat:*:recaps",
+    "seat-of:*:exit",
+)
 INDEX = f"{ROOT}:hives"
 # A Redis started without --aclfile keeps users in memory only; there is nothing to save.
 NO_ACL_FILE = "not configured to use an ACL file"
@@ -111,7 +131,7 @@ def _set_user(client, member_id: str, password: str) -> None:
 
 def _acl_keys(member_id: str) -> tuple[str, ...]:
     own = f"{ROOT}:hive:{member_id}"
-    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*")
+    return (f"%R~{ROOT}:*", f"~{own}", f"~{own}:*", *(f"~{ROOT}:{key}" for key in WORKER_KEYS))
 
 
 def _persist(redis: "Redis") -> None:
