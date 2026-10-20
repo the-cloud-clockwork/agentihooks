@@ -622,8 +622,10 @@ before the change and passed in [the green proof](https://github.com/the-cloud-c
 
 A blocked task reopens for the next engineer, who starts from the task's
 recorded branch. `swarm block` therefore checks that the work it hands over is
-on the remote first, the same way `swarm park` does, and records the branch it
-finds.
+on the remote first, as `swarm park` does, and records the branch it finds.
+The block check is looser than park's: it accepts a remote branch that contains
+the worktree head rather than one at exactly that head, ignores uncommitted
+changes, and passes a worktree with no work beyond `origin/dev`.
 
 The check runs after the dependency check: a dependency that is not `done`
 still turns the block into a checked wait on that task and keeps the claim, and
@@ -661,16 +663,24 @@ git -C <worktree> push -u origin <branch>
 agentihooks swarm <id> block "<the blocker in plain words>"
 ```
 
-The recorded fields match what `swarm publish` and `swarm park` write:
-`branch` is the worktree branch, `branch_repo` its `origin` URL with any
-credential removed, and `repository_branches` maps each repository checkout to
-its branch. They are written before the task turns `blocked`, so the next
-engineer's prepare finds the pushed branch. A worktree on `dev`, `main`,
-`master` or `v1` refuses with `publication requires a task branch outside the
-protected branches`.
+The recorded fields match what `swarm publish` writes: `branch` is the
+worktree branch, `branch_repo` its `origin` URL with any password removed (and
+the user too for an `http` or `https` URL), and `repository_branches` maps each
+repository's primary checkout to its branch. For a task in several
+repositories, `repository_branches` carries every pushed one, while `branch`
+and `branch_repo` name the last repository checked. The fields are written
+before the task turns `blocked`, so the next engineer's prepare finds the
+pushed branch. A task whose recorded branch is `dev`, `main`, `master` or `v1`
+refuses with `publication requires a task branch outside the protected
+branches`.
 
 The check only compares commits. Uncommitted changes in the worktree do not
 refuse a block; commit and push them first if the next engineer needs them.
+It also reads the local clone without fetching: a remote branch that moved to a
+commit this clone has not fetched refuses as if the worktree held unpushed
+commits, and the count beyond `origin/dev` uses the last fetched `origin/dev`.
+Run `git -C <worktree> fetch origin` and block again when the refusal names a
+branch you already pushed.
 
 Delivered by
 [pull request 4053](https://github.com/the-cloud-clockwork/agentihooks/pull/4053):
@@ -704,6 +714,14 @@ fetch <branch> from <branch_repo>` and parks nothing. Check that the checkout's
 `origin` points at the dependency repository and that `git -C <checkout> fetch
 origin` works, then park again.
 
+### Exact branch match
+
+Park's push check reads `git ls-remote --heads origin <branch>` and keeps only
+the line ending in exactly `refs/heads/<branch>`; block filters its remote the
+same way. A proof branch whose name ends with the same text, such as
+`diffcheck/<branch>`, is ignored, so it never makes a pushed task branch look
+unpushed or pushed at the wrong head.
+
 ### The park ledger note
 
 Park comments the ledger task with one note naming the open dependencies by
@@ -722,7 +740,13 @@ Parked on its branch until every open dependency is done. The next engineer rest
 
 The note is written before the issue comment and the task update. If the issue
 comment fails, nothing is parked and park can run again: an agent's later
-comment on the same task amends its earlier one unless someone commented in between, so the task keeps one note.
+comment on the same task amends its earlier one unless someone commented in
+between, so the task keeps one note.
+
+Delivered by
+[pull request 4053](https://github.com/the-cloud-clockwork/agentihooks/pull/4053),
+with the same red and green proofs as
+[Blocking with unpushed commits](#blocking-with-unpushed-commits).
 
 ## Publishing after a successor prepares a branch
 
