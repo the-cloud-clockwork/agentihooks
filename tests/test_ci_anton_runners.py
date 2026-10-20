@@ -44,6 +44,8 @@ MOVED = {
     ("hierarchy-cpu.yml", "grade"): LIGHT,
     ("hierarchy-cpu.yml", "hierarchy"): QUEUED,
     ("hierarchy-cpu.yml", "load"): QUEUED,
+    ("ledger-load.yml", "compare"): QUEUED,
+    ("ledger-load.yml", "compare-grade"): LIGHT,
     ("ledger-load.yml", "load"): QUEUED,
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,

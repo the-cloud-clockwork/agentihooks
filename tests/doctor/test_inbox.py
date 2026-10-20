@@ -40,6 +40,7 @@ def test_planted_fault_an_item_left_open_past_its_window_is_raised():
     planted["history"] = planted["history"][:1]
     sent = planted["created_at"]
     assert inbox.past_window(items, sent + WINDOW - 1, WINDOW) == []
+    assert [f.subject for f in inbox.past_window(items, sent + WINDOW, WINDOW)] == [planted["id"]]
     [found] = inbox.past_window(items, sent + 3 * WINDOW, WINDOW)
     assert found.id == f"inbox-past-window/{planted['id']}"
     assert found.measure == 15
@@ -148,3 +149,13 @@ def test_the_reader_is_the_latest_agent_that_took_delivery_or_read_the_item():
     assert inbox.reader({"history": [pending, took, pending]}) == "engineer@a-0001"
     assert inbox.reader({"history": [pending, took, {"state": "read", "by": "engineer@a-0002"}]}) == "engineer@a-0002"
     assert inbox.reader({"history": [took, {"state": "delivered", "by": "engineer@a-0003"}]}) == "engineer@a-0003"
+
+
+def test_an_informational_item_on_an_emptied_seat_is_never_counted_and_a_work_item_still_is():
+    work = {**_delivered(), "id": "work1", "state": "pending", "fyi": False}
+    fyi = {**copy.deepcopy(work), "id": "fyi1", "fyi": True}
+    waiting = {work["address"]: inbox.Receiver(seat_wait=True)}
+    [found] = inbox.past_window([work, fyi], 11 * MIN, WINDOW, waiting)
+    assert found.id == "inbox-past-window/work1"
+    assert found.summary == "seat wait; sent 10 minutes ago"
+    assert inbox.past_window([fyi], 11 * MIN, WINDOW, {}) == []

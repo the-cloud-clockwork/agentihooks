@@ -33,7 +33,8 @@ agentihooks hive install          # user service that runs agentihooks hive run
   and a Redis URL for the hive's own Redis user. The join URL must be https unless it is loopback.
 - The join endpoint is `agentihooks hive serve`, or the Compose `hive` service started with `--profile join`. It
   always serves TLS from `SWARM_TLS_DIR`.
-- Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys.
+- Each member gets the Redis user `hive-<id>`: it reads the swarm keyspace and writes only its own hive keys;
+  [Member keys](#member-keys) lists what lives there.
   A launch order's receipt and acknowledgement live under those keys. The controller reads the acknowledgement and
   records the execution as working, with the hive's process target, pane, model and effort.
   Invites and credentials sit outside what a member can read.
@@ -47,10 +48,130 @@ agentihooks hive install          # user service that runs agentihooks hive run
 A Kubernetes worker pod joins the same way from its entrypoint; see
 [Worker hives in Kubernetes](#worker-hives-in-kubernetes).
 
+## Member keys
+
+A member's Redis user `hive-<id>` reads every key under the swarm root and writes only the member's own hive key and
+the keys below it. With the default root `agentihooks` (set by `AGENTIHOOKS_SWARM_KEY_PREFIX`), the member
+`lab-vm` gets these key patterns:
+
+```text
+%R~agentihooks:*            read every swarm key
+~agentihooks:hive:lab-vm    write the hive record
+~agentihooks:hive:lab-vm:*  write everything below it
+```
+
+Every other write, including another member's keys, the controller's inbox and the launch slot rows, is refused
+by Redis with `NOPERM`. So every piece of state a member process writes lives below its own hive key:
+
+| State | Where a member keeps it | Who reads it there |
+|---|---|---|
+| Launch order receipt and acknowledgement | `<root>:hive:<id>:...` | The controller, which records the execution as working. |
+| Inbox items, sequence counters, delivery owners, seen marks and the master pool | `<root>:hive:<id>:inbox:...` | The member's own agents; the controller routes sends to the member's agents there and relays mail out of it. |
+| Session readings: heartbeat, prompt, session model, progress, wait, waited, woke, wait history and stop blocks | `<root>:hive:<id>:swarm:...` | The controller's idle and wait checks, and the progress and stop gates, for agents placed on that member. |
+| Sessions report, including the executions it runs | `<root>:hive:<id>:sessions` | The controller's launch slot refresh. |
+
+### Which keys a process uses
+
+A process counts as the member only while it talks Redis as that member: `AGENTIHOOKS_HIVE_ID` is set and the
+Redis URL it resolves is `AGENTIHOOKS_HIVE_REDIS_URL`. `hive join` writes both to `hive.env`; a process resolves the
+hive Redis URL only when `AGENTIHOOKS_DEPLOYMENT` is `compose` or `distributed`. Any other process, the
+controller included, uses the controller keys under the plain root.
+
+The controller finds an agent's member from the agent's execution record: the hive it was placed on, when that hive
+is in the hive index and holds a member record. An agent on any other host, and every agent in local mode, keeps
+its inbox and session readings in the controller keys under the plain root. Those keys are the same as before
+member scoping, so a local install and a single host install see no change.
+
+### Mail across members
+
+- **Into a member.** A controller send to an address that a member runs, by name or by the seat it occupies, is
+  written into that member's inbox keys. The member's agents read and answer it there.
+- **Out of a member.** A member writes mail to any other address, such as `master@<slug>` on the swarm host, in its
+  own inbox keys, where it waits. Every swarm tick relays each waiting item to its address's inbox with the same item
+  id and withdraws the member's copy with the reason `relayed to its address's inbox`. A relay retry after a lost
+  response finds the id already sent and only withdraws the copy.
+- **Refused sender.** The relay withdraws an item whose sender the member does not run, with the reason
+  `refused: the hive member that sent it does not run its sender`. A member cannot send in another agent's name.
+- **Master pool.** A member pools mail across live masters only while every live master's inbox sits in the same
+  keys as the sender's. When their inboxes span the controller and a member, or two members, the item goes to its
+  address unpooled.
+
+The flow for an engineer that a member runs and the master on the swarm host:
+
+```bash
+# On the member: the engineer reports to the master; the item waits in the member's inbox keys
+agentihooks msg send master@rig "the pull request is green and queued"
+
+# On the swarm host, after the next tick relays it
+agentihooks msg inbox              # run as the master: the item shows with the same id
+agentihooks msg reply <id> "thanks, take the next task"
+# The reply is written into the member's inbox keys, where the engineer reads it
+```
+
+### Launch slot rows
+
+Launch slot rows count how many executions hold each account slot. Only the controller writes them; a member never
+touches them. Reserve and acknowledge run in the controller, and every tick the controller refreshes the rows of
+member executions from what each member reports:
+
+1. A launch reserves a row for at most 300 seconds while the launch order is unacknowledged.
+2. The controller reads the member's acknowledgement and marks the row live, kept for 45 seconds.
+3. Every swarm tick reads the sessions report of each live hive, a heartbeat under ninety seconds old, and keeps the
+   live rows of the executions it reports alive for two ticks, 120 seconds at the default tick. Only executions
+   whose agent record places them on that same hive count, so a hive cannot hold a slot for an execution it does not
+   run.
+4. A row whose hive stops reporting the execution, or stops beating, is no longer refreshed. It lapses within two
+   ticks and the slot is free for the next launch.
+
+`AGENTIHOOKS_CONTROLLER_TICK_SECONDS` sets the tick, and with it the refresh lifetime.
+
+### Checking a member's scope
+
+Read the Redis user's key patterns on the swarm Redis, as an admin user:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_SWARM_REDIS_URL" ACL GETUSER hive-lab-vm
+```
+
+The `keys` field lists the three patterns above. On the member, a write outside them fails with `NOPERM`; this
+probe tries to write a key in the controller's inbox, which the member must not reach:
+
+```bash
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SET agentihooks:inbox:probe 1
+# (error) NOPERM ...
+```
+
+The packaged smoke tests check the same scope end to end: `scripts/packaging/hive-join-smoke.sh` joins a member on
+Redis 7 and asserts that the shared inbox, shared session readings and another member's keys are refused, that the
+member's own inbox and readings are allowed, and that the relay refuses a sender the member does not run.
+`scripts/packaging/compose-hive-smoke.sh` relays a member agent's mail to the master and reads the host's reply from
+the member's own keys.
+
+### Limitations
+
+- The controller's wake and escalation pass, exit sweep, swarm status, handoff mailbox and swarm removal read only
+  the controller inbox. Mail held for an agent a member runs gets no wake, escalation or exit settlement, and the
+  controller's seen marks for such agents stay in the controller keys.
+- A member-hosted agent cannot yet complete a life: its agent record writes, such as order consumer binding, take
+  master, done, handoff and seat exits, sit outside its keys and are refused.
+- A member's master pool, filled while every live master sat on that member, drains only on the next send there.
+- The launch slot lifetime of two ticks assumes a tick finishes within one tick interval.
+- The pane cleanup's alias prompt scan reads only the controller's prompt keys.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Mail a member agent sent never reaches the master | No swarm tick has run since the send; the relay runs once per tick. | Check the swarm is started and its controller lease is held: `agentihooks swarm <slug> status`. |
+| A member item closes as `refused: the hive member that sent it does not run its sender` | The sender named on the item is not an agent placed on that member. | Send from the agent's own session on the member; the sender is the session, never an argument. |
+| A member process fails a write with `NOPERM` | The process writes outside its hive key, such as an agent record or a launch slot row. | Expected for agent record writes, see Limitations; anything else is a bug to file with the key named. |
+| The controller shows a member agent idle though it works | The agent's execution record names a hive with no member record, so the controller reads its readings from the controller keys. | Check `agentihooks hive show <id>` lists the hive and that it joined with `hive join`. |
+| A slot stays taken after a member lost an agent | The member still reports the execution. | The row lapses within two ticks once the execution leaves the member's sessions report. |
+
 ## Settings
 
-Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's Hives panel, which writes through
-`PATCH /api/v1/hives/<id>` and needs the operator.
+Set them with `agentihooks hive set <id> key=value ...`, or on the ledger page's
+[Hives panel](#ledger-hives-panel), which writes through `PATCH /api/v1/hives/<id>` and needs the operator.
 
 | Setting | Values | Default | Meaning |
 |---|---|---|---|
@@ -116,6 +237,64 @@ The master is placed in three tiers, each tried in `prefer` order:
 Every tier also needs the hive to be live and to list the repo. With no candidate the master waits with "no live
 hive can run the master with interactive, subscription or api authentication".
 
+### Who writes placement
+
+A member's Redis user reads agent records and placement but never writes them. Only the controller and the ledger
+server write placement; join, refresh and revoke keep the hive index.
+
+| Keys under the swarm root | Member Redis user | Written by |
+|---|---|---|
+| Agent records: `swarm:<slug>:agents`, `swarm:<slug>:executions`, `swarm:<slug>:state-since` | read only | The controller and the ledger server. |
+| Claims, seats, names and placement waits | read only | The controller and the ledger server. |
+| Launch slot rows `launch-slot:*` | read only | The controller, which reserves, acknowledges and refreshes them. |
+| Hive index `hives` | read only | `hive join` and `hive refresh` add the member; `hive revoke` and a failed join remove it. |
+| The member's own hive record and every key below it | read and write | The member's `hive run` beat and the agents it runs. |
+
+The ledger issues an agent token to a member only for an agent whose record names that member as its hive. A member
+that could write agent records could set that field on another hive's seat and take tokens for it; with agent
+records read only, a member holds tokens only for the agents the controller placed on it.
+
+What a member process does differently:
+
+- **Beat.** `hive run` writes the hive record, sessions, quota and execution report under its own hive key. It adds
+  itself to the hive index and refreshes launch slots only when it is not a member. A non-member host, such as the
+  swarm host itself, still does both.
+- **Hive id.** A process uses `AGENTIHOOKS_HIVE_ID` as its hive id while its Redis URL is
+  `AGENTIHOOKS_HIVE_REDIS_URL`, so its heartbeat lands under the member's own keys and matches the id the ledger
+  checks. Otherwise the hive id is `SWARM_HIVE_ID`, then the seeded hive id, then the host name.
+- **Launch orders.** When Redis refuses a write while the order consumer applies a launch order, the consumer writes
+  `failed` with the reason `refused` to the member's own acknowledgement hash and drops the order. The `hive run`
+  service keeps running and takes the next order.
+
+Check a member's scope from the member, with the credentials `hive join` wrote:
+
+```bash
+. ~/.agentihooks/hive.env
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HGETALL agentihooks:swarm:<slug>:agents          # allowed
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" HSET agentihooks:swarm:<slug>:agents forged '{}'  # (error) NOPERM ...
+redis-cli -u "$AGENTIHOOKS_HIVE_REDIS_URL" SADD agentihooks:hives forged                      # (error) NOPERM ...
+```
+
+`scripts/packaging/hive-join-smoke.sh` runs the same check on Redis 7 after a join. The member's writes to agent
+records, executions, another member's keys, the hive index and a launch slot row are refused. Its beat, an agent
+heartbeat and an inbox send succeed, and the member stays in the hive index. `scripts/packaging/compose-hive-smoke.sh`
+also checks that a member stays indexed after a Redis restart and a refresh.
+
+Limitations:
+
+- Code on a member host that writes agent records is refused until it routes through the controller or the ledger:
+  the order consumer's runtime binding, remote take master, done, handoff, claim release and seat exits. A
+  distributed launch onto a member fails as `refused` until then.
+- Redis ACLs scope by key pattern, never by seat or agent name. A member that can write its own agents' keys can
+  also write keys it names for another agent below its own hive key. Token issuance reads only the agent record's
+  hive, which no member can write.
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A launch order on a member acknowledges `failed` with `refused` | The launch wrote a key outside the member's keys, such as an agent record. | Expected for member launches that bind the agent record on the member; see the limitations above. |
+| A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
+| A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
+
 ## Headless fallback
 
 When every UI hive is gone, the master still runs: tier three starts it on a headless hive through the same hive
@@ -129,6 +308,81 @@ Placement runs at every master launch, so the successor after the next handoff g
 is live then. `agentihooks swarm <id> master move --to HIVE` forces that move without waiting: the master hands
 off and its successor starts on the named hive.
 
+## Prompt and workspace transport
+
+A hive launch runs the agent on another machine, which has no copy of the ledger and no task work folder. The
+controller therefore builds everything the agent reads at start and sends it in the launch payload; the hive sends
+the agent's work folder lines back every heartbeat.
+
+### What the launch payload carries
+
+When placement picks a hive, the controller writes the payload to
+`<root>:swarm:<slug>:launch-prompt:<execution id>` (`<root>` is `AGENTIHOOKS_SWARM_KEY_PREFIX`, default
+`agentihooks`). The key expires with the 300 second launch slot reservation. Next to the task fields and the
+profile decision it holds:
+
+| Field | Content |
+|---|---|
+| `hive_opening` | The full opening prompt, built on the controller where the ledger is, for the Claude harness. |
+| `hive_opening_digest` | The sha256 hex digest of `hive_opening`. |
+| `hive_seeds` | The task's work folder files: `steering.md` whole, and the last 65,536 characters of `progress.md` and `proof.md`. Empty when the task has no work folder. |
+
+The opening names the work folder as `~/.agentihooks/swarm/<slug>/tasks/<task id>`, so the same text is correct
+below whichever home the hive runs the agent in.
+
+### What the hive does with it
+
+An order the hive picks up after its 300 seconds is acknowledged as failed with the reason `expired` before the
+payload is read. Otherwise the hive checks the payload and acknowledges the order as failed with the reason `prompt`
+when:
+
+- the payload key is missing;
+- the payload is not JSON, or its task id differs from the order's;
+- `hive_opening` is missing or not text, or `hive_opening_digest` does not match it.
+
+The controller ends the execution, drops the launch order and reports the spawn refused with
+`hive launch failed: <reason>`.
+
+A payload that passes is written below the hive's own home, in `~/.agentihooks/swarm/<slug>/tasks/<task id>`:
+
+- `steering.md` is replaced with the controller's copy on every launch.
+- `progress.md` and `proof.md` are written only when the hive does not hold them yet. On a relaunch of the same task
+  on the same hive, its own lines stay and the controller's copy is not merged in.
+
+The agent then starts with `hive_opening` exactly as carried. The hive does not rebuild the prompt from the task.
+
+### Work folder lines on the ledger page
+
+On every fifteen second heartbeat, each hive writes the work folder lines of the executions it hosts to
+`<root>:hive:<hive id>:workspaces`, expiring after 45 seconds. Each entry holds `latest_progress` and
+`latest_proof`: the last three non-blank lines of `progress.md` and `proof.md`, read from the last 4,096 bytes of
+each. A key is left out when its file has no such line. The copy covers every swarm task whose latest execution,
+the live one or else the one started last, is a worker on that hive. Masters are left out.
+
+When the controller publishes swarm status, each task with a work folder takes its lines from the hive that runs,
+or last ran, its latest execution. A task whose latest execution ran on the controller's own machine is read from
+the local folder. These lines are what the ledger page shows in the task's Contract and proof fold.
+
+### Resume and recovery prompts
+
+The restore prompt after a reboot and the resume prompt after an outage tell the agent to re-read its task folder.
+For an agent on a remote hive both prompts name `~/.agentihooks/swarm/<slug>/tasks/<task id>`, the folder below the
+hive's home, instead of the controller's absolute path.
+
+### Upgrading
+
+A hive refuses a launch payload without `hive_opening` and its digest, so an older controller cannot launch on a
+newer hive. Deploy the controller first, then the hives.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Launches on one hive end with `hive launch failed: prompt` | The controller predates prompt transport and sends no opening and digest. | Upgrade the controller, then the hive. |
+| Launches on one hive end with `hive launch failed: expired` | The hive picked up the launch order more than 300 seconds after the controller sent it. | Check that the hive beats (`agentihooks hive list` shows `live`) and its `agentihooks-hive` service runs. |
+| A remote task's Contract and proof fold is empty | The hive stopped beating for more than 45 seconds, so its synced copy expired, or the agent has not written a line yet. | Check `agentihooks hive list`. The lines come back on the hive's next heartbeat. |
+| A relaunched agent on the same hive does not see proof lines written on another machine | `progress.md` and `proof.md` already on a hive are kept, never merged. | Copy the missing lines into the hive's work folder, or append them from the agent. |
+
 ## Failover timing
 
 | Clock | Value | Effect |
@@ -140,14 +394,96 @@ off and its successor starts on the named hive.
 | Controller lease | three ticks, 180 seconds by default | Another controller takes over at a higher epoch once it lapses. |
 | Worker execution lease | 240 seconds | A Swarm v2 Pod worker keeps its task through a controller handover; see [worker execution lease through a controller rollout](swarm.md#worker-execution-lease-through-a-controller-rollout). |
 | Launch slot reservation | 300 seconds | A started launch order not acknowledged by then is recorded as ambiguous. |
+| Launch slot refresh | two ticks, 120 seconds by default | Each tick keeps the live slot rows a live hive reports; see [Launch slot rows](#launch-slot-rows). |
 
 The master moves when its hive's heartbeat is older than the grace and the runtime does not see the master live,
 so a lost master hive is replaced between five and six minutes after its last beat at the defaults. A hive that
 never beat, or whose record is gone, never moves its master. Set the grace with
 `agentihooks swarm <id> set master-move-grace=SECONDS`.
 
-On the move, the tick writes a recovery handoff that names its unknowns, bumps the master seat generation, fences
-the old execution and starts the successor on the hive master placement picks, or unpinned when none qualifies.
+The steps of the move are in [Automatic failover](#automatic-failover).
+
+## Master failover and master move
+
+The master seat changes hive in two ways: the minute tick moves it off a hive that went quiet, and the operator
+moves it to a hive he names. In both, the successor starts through hive launch in the same master seat. The
+operator move pins it to the named hive; the automatic move pins it when a live hive qualifies.
+
+### Automatic failover
+
+Each tick checks the live master record. It moves the master only when all of these hold:
+
+- The master's hive has beaten at least once and its record still exists.
+- Its last heartbeat is older than `master-move-grace` seconds.
+- The runtime does not see the master's session live.
+
+A stopped swarm is checked only when an operator message is waiting for its master.
+
+Then, in one tick:
+
+1. It stores a recovery handoff for the master seat. The handoff says the master should continue on the swarm,
+   names the hive and how many seconds ago it stopped beating, and marks Done and Stopped at as `unknown`, because
+   the old master left no document. Its Read first list names the master inbox.
+2. It records the transfer with the reason `hive-lost`.
+3. It bumps the master seat generation and fences the old execution on the quiet hive.
+4. It asks master placement for a target among the live hives and records the pending move with that hive.
+5. It marks the old master record finished and logs `moved master <name> off lost hive <hive>` in the tick output.
+
+The next master start reads the recovery handoff, pins the successor to the recorded hive and clears the pending
+move once the successor is placed. When no live hive qualifies, the move records no target and the successor
+starts unpinned on the normal master path.
+
+Tune the grace per swarm:
+
+```bash
+agentihooks swarm rig-grade-swarm set master-move-grace=600
+```
+
+A hive that pauses longer than the grace, such as a laptop asleep, loses its master; a shorter grace replaces a
+lost master sooner. The default is 300 seconds.
+
+### Operator master move
+
+```bash
+agentihooks swarm rig-grade-swarm master move --to vm
+```
+
+The command checks the move before it writes anything, and refuses with these errors:
+
+| Error | Cause |
+|---|---|
+| `no live master to move` | The swarm has no live master record. |
+| `the master already runs on hive vm` | The target is the master's current hive. |
+| `hive vm is not live` | The hive has no record, or its last heartbeat is over ninety seconds old. |
+| `the master cannot move to hive vm: <reason>` | [Master placement](#master-placement) would not give the master that hive; the reason is the placement wait reason. |
+
+On success it sends one durable inbox order from `operator` to the master seat and prints the pending move as
+JSON, with `from`, `to`, `master`, `item` (the order's inbox id) and `state` set to `ordered`. The order tells the
+master to finish its current step, write a Handoff v2 carrying its pending decisions, held messages, claimed task
+needs, audit plan and operator overrides, run `agentihooks swarm <id> handoff <doc> --reason operator` and stop.
+After that handoff, the tick starts the successor on the named hive and closes the order as done.
+
+A second `master move` replaces the first: it cancels the earlier order in the inbox with "the master move was
+replaced" and records the new target.
+
+The successor is pinned only when its transfer follows the master the move named. A master that leaves without a
+handoff, or a different master that takes the seat first, starts on normal placement and the pin is not applied.
+
+The ledger page offers the same order: each live hive row in the Swarm tab's Hives panel carries a **move master**
+button. It is disabled while another swarm control from the page is running, on a hive that is not live and on the
+hive the master already runs on.
+
+### Troubleshooting
+
+- **The master's hive is down and the master did not move.** Check the hive's heartbeat with
+  `agentihooks hive list`. A hive that never beat, or whose record was removed, never moves its master, and the move
+  waits the full grace plus up to one tick. While the runtime still reports the master's session live, the tick
+  leaves it alone.
+- **The successor started on another hive than the one ordered.** The pin applies only to the successor of the
+  master the order named. If that master left without the handoff the order asks for, its successor uses normal
+  placement. Run `master move` again for the new master.
+- **The old hive came back and its master is still running.** A returning hive terminates each fenced execution
+  before its first heartbeat and takes no launch orders while one still runs; see [Fencing](#fencing).
 
 ## Fencing
 
@@ -163,6 +499,16 @@ Fencing stops a superseded agent or controller from acting after its replacement
 - **Ledger source.** Moving a workstation ledger into the hosted service with `--freeze` fences the source: its
   SQLite database refuses writes with "ledger moved to hosted service" and media writes answer 409.
 
+## Hive placement for one swarm on a local machine
+
+A machine in `local` mode spawns every lane in its own herdr panes. `agentihooks swarm <id> set hive-placement=on`
+makes that one swarm's tick place like a `hybrid` controller: eng, ci, plan and dispatch work goes to joined hives
+with the role and room, and the master goes to a UI hive. Every other swarm on the machine, and every ledger client,
+stays local, because `AGENTIHOOKS_DEPLOYMENT` is unchanged. Before turning it on, run the machine itself as a hive
+(`agentihooks hive install`, then `agentihooks hive set <id> ui=yes roles=master,eng,ci,plan,dispatch
+max-agents=N`) so local work and the master keep a hive to land on. `hive-placement=off` rolls back on the next
+tick. On a machine in any other mode the setting changes nothing.
+
 ## Worker hives in Kubernetes
 
 The `agentihooks-swarm` chart runs worker pods from the hive worker image. Each pod:
@@ -177,6 +523,164 @@ home. Credentials come from ExternalSecrets by name. The hive id is the one mint
 replicas that mount the same credential would report the same hive id and agent limit; the chart refuses
 `workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
 credential is installed.
+
+## Ledger Hives panel
+
+The Swarm tab of the ledger page shows a Hives panel after Quota. It reads the hive settings API, edits hive settings
+in place and moves the master to another hive.
+
+### Panel
+
+| Column | Shows |
+|---|---|
+| hive | The hive's name; hovering shows its id. |
+| state | `live` while the last heartbeat is under ninety seconds old, else `quiet`. |
+| ui, ephemeral | `yes` or `no`, editable. |
+| roles | Comma list, editable. |
+| prefer | Comma list of `role:rank`, editable. |
+| max agents | Whole number, editable. |
+| agents | Working agents against max agents, such as `1/3`. |
+| slots | One line per slot: harness, account and the sessions the hive reports on it. |
+| master | The live master running on the hive, from any swarm, or `—`. |
+| (no header) | The move master button, which moves this ledger's master to the hive. |
+
+The agents figure is the placement load: worker sessions the hive reports, without its interactive master
+sessions, plus this runtime's launching, working or suspect non-master agents on the hive that the hive has not
+reported yet. Placement compares the same figure with max agents.
+
+- The header count reads `<live> live · <n> hives`, or `—` when the read failed.
+- The Quota header count ends with each hive's `<name> <agents>/<max agents>`, such as
+  `2 accounts · probed 40s ago · laptop 1/3 · pod-a 0/4`.
+- The panel reads `GET /api/v1/hives` at most every fifteen seconds while the Swarm tab is open. An empty table reads
+  `Reading hives…` before the first answer, `No hives registered.` when the registry is empty, and
+  `Could not read hives.` when the read failed.
+- Swarm tab redraws skip the table while one of its fields holds focus; each fresh read still redraws it.
+- The panel folds and keeps its folded state, its height and its column widths across reloads, like the other Swarm
+  tab panels.
+
+### Editing a hive
+
+Change a field and leave it, or pick a new `yes` or `no`: the page sends that one field as
+`PATCH /api/v1/hives/<id>` with the ledger's credential and its slug. The note line shows the write pending, then
+done, or the server's error message, such as `role qa needs a UI, and this hive has ui=no`. The row then shows the
+hive as the server stored it.
+
+The page converts what was typed before it sends it:
+
+| Field | Typed | Sent |
+|---|---|---|
+| roles | `eng, ci` | `["eng", "ci"]` |
+| prefer | `master:1,qa:2` | `{"master": 1, "qa": 2}` |
+| max agents | `4` | `4`; anything other than digits is sent as text and refused |
+
+Only the operator can edit. An agent's credential gets
+`403 Hive settings need the operator`.
+
+### Move master
+
+The button sends the swarm control `master_move` with the hive id. The server runs
+`agentihooks swarm <slug> master move --to <hive>`, so the move behaves as described in
+[Headless fallback](#headless-fallback) and in the [swarm commands](swarm.md): the live master hands off and its
+successor starts on that hive.
+
+The button is off when:
+
+- the Swarm tab has no swarm status yet, or another swarm control is still pending;
+- the hive is quiet;
+- this ledger's master already runs on that hive.
+
+The command can still refuse a hive the button allows, such as one placement would not give the master; the
+control then answers `502 request_refused` and the note line shows the server's answer.
+
+```bash
+curl -X PUT "http://127.0.0.1:8765/api/v1/ledgers/$SLUG/swarm/controls" \
+  -H "Content-Type: application/json" -H "X-Ledger-Token: $LEDGER_TOKEN" \
+  -d '{"action": "master_move", "hive": "workstation"}'
+```
+
+A hive id must start with a letter or digit and hold only letters, digits, dots, dashes or underscores, at most 63
+characters; any other answers `400 request_refused` with `A master move needs a hive id`. A control from an agent's
+credential answers `403 forbidden` with `swarm controls need the operator`.
+
+### Hive settings API
+
+| Method and path | Who | Answer |
+|---|---|---|
+| `GET /api/v1/hives` | no ledger credential needed | Every registered hive. |
+| `GET /api/v1/hives/<id>` | no ledger credential needed | One hive. |
+| `PATCH /api/v1/hives/<id>` | the operator | The hive after the change. |
+
+Every answer is `{"data": ..., "revision": "<sha256 of data>"}`. A hive carries its stored record (`id`, `name`,
+`ui`, `ephemeral`, `roles`, `prefer`, `max_agents`, `harnesses`, `slots`, `interactive`, `repos`,
+`heartbeat_at`, `version`) and three computed fields:
+
+- `live`: `true` while the heartbeat is under ninety seconds old.
+- `agents`: the placement load described under [Panel](#panel).
+- `master`: `{"slug", "name"}` of the live master on the hive, or `null`.
+
+Each slot also gains `agents`, the sessions the hive reports for that harness and account.
+
+```bash
+curl -s http://127.0.0.1:8765/api/v1/hives/pod-a
+```
+
+```json
+{
+  "data": {
+    "id": "pod-a", "name": "pod-a", "ui": "no", "ephemeral": "yes",
+    "roles": ["eng", "ci"], "prefer": {}, "max_agents": 4, "agents": 1,
+    "live": true, "master": null,
+    "slots": [{"harness": "claude", "account": "work", "kind": "subscription", "cap": 2, "provider": "", "agents": 1}],
+    "...": "..."
+  },
+  "revision": "9f2c..."
+}
+```
+
+The PATCH body takes one or more of these fields and nothing else:
+
+| Field | Type |
+|---|---|
+| `name` | string, 1 to 200 characters |
+| `ui`, `ephemeral` | `"yes"` or `"no"` |
+| `roles` | array of `master`, `qa`, `frontend`, `eng`, `ci`, `plan`, `dispatch` |
+| `prefer` | object of role to whole number rank |
+| `max_agents` | integer, 1 or more |
+
+The server checks the body against that schema, then applies it with the same rules as `agentihooks hive set`, so a
+UI role on a `ui=no` hive, a `prefer` role the hive does not take, or a rank or max agents below 1 is refused. The
+credential is the ledger token in `X-Ledger-Token` and the ledger it belongs to in `X-Ledger-Slug`.
+
+```bash
+curl -X PATCH http://127.0.0.1:8765/api/v1/hives/pod-a \
+  -H "Content-Type: application/json" \
+  -H "X-Ledger-Slug: $SLUG" -H "X-Ledger-Token: $LEDGER_TOKEN" \
+  -d '{"roles": ["eng", "ci", "plan"], "max_agents": 4}'
+```
+
+| Status | Code | When |
+|---|---|---|
+| 400 | `schema_invalid` | The body has no field, an unknown field or a wrong type (`Request does not match the resource schema`), or the hive registry refuses the value and names why. |
+| 403 | `forbidden` | `Missing or wrong ledger credential`: no `X-Ledger-Slug`, an unknown ledger or a wrong token. `Hive settings need the operator`: the credential is an agent's. |
+| 404 | `resource_missing` | `No such hive`. A PATCH never creates a hive; register one with `agentihooks hive join`. |
+| 405 | `method_not_allowed` | Anything but GET on the list, or GET and PATCH on one hive. |
+| 503 | `storage_error` | Redis is unreachable or a hive record is unreadable. |
+
+### Limitations
+
+- Masters do not count in the agents figure, matching max agents.
+- Settings the hive reports itself (`harnesses`, `slots`, `interactive`, `repos`, `heartbeat_at`, `version`)
+  cannot be changed through the API.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Could not read hives.` | The server answered an error, usually 503 with Redis down. | `curl` the list to read the error, then restore Redis. |
+| An edit shows `Hive settings need the operator` | The page was opened with an agent's credential. | Open the ledger with the operator's credential. |
+| An edit shows `prefer names qa, a role this hive does not take` | `prefer` named a role missing from `roles`. | Add the role first, then the rank. |
+| move master stays off | The hive is quiet, the master is already there, or a control is pending. | Wait for the hive's heartbeat or the pending control. |
+| A hive stays `quiet` | `hive run` is not publishing. | `systemctl --user status agentihooks-hive` on that machine. |
 
 ## Related pages
 
