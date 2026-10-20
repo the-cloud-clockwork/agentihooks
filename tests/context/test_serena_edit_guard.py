@@ -395,6 +395,14 @@ def test_the_worktree_root_defaults_to_dev_worktrees_in_home(tmp_path, launch, m
     check(_tool("Bash", launch, command=f"rm {own / 'pkg' / 'mod.py'}"))
 
 
+def test_edits_in_the_sessions_own_worktree_of_another_repo_follow_the_worktree_rule(tmp_path, launch):
+    own = _repo_worktree(tmp_path / "worktrees", "antoncore", "engineer-323133-2196")
+    (own / "README.md").write_text("doc\n")
+    check(_tool("Edit", launch, file_path=str(own / "README.md")))
+    with pytest.raises(BlockAction, match=f"Call mcp__serena__activate_project with {own},"):
+        check(_tool("Edit", launch, file_path=str(own / "pkg" / "mod.py")))
+
+
 @pytest.mark.parametrize(
     ("base", "name"),
     [
