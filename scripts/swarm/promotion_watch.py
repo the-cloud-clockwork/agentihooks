@@ -53,7 +53,7 @@ SHARD_CONSUMERS = (
     "stage-budget",
 )
 REFRESH_JOB = "refresh-durations"
-LOST_SAMPLES = " kept no samples from durations-"
+LOST_SAMPLES_SIGN = "kept no samples from durations-"
 REFRESH_MS = 60_000
 SOURCE = "promotion"
 SENDER = "swarm"
@@ -126,10 +126,10 @@ def runner_lost(job: dict, why: str) -> bool:
     )
 
 
-def starves(cause: tuple[str, str], shards_lost: bool) -> bool:
-    job = cause[0].split(" (")[0]
+def starves(failed: tuple[str, str], shards_lost: bool) -> bool:
+    job = failed[0].split(" (")[0]
     if job == REFRESH_JOB:
-        return LOST_SAMPLES in cause[1]
+        return LOST_SAMPLES_SIGN in failed[1]
     return shards_lost and job in SHARD_CONSUMERS
 
 

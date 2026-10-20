@@ -820,6 +820,7 @@ LOST_SHARDS = [
     "unit (3.12, 4)",
     "unit (3.12, 9)",
 ]
+REFRESHED = [{"name": "Refresh measured durations", "conclusion": "failure"}]
 CONSUMERS = [
     (
         "sonar",
@@ -847,14 +848,13 @@ CONSUMERS = [
     ),
     (
         "refresh-durations",
-        [{"name": "Refresh measured durations", "conclusion": "failure"}],
+        REFRESHED,
         [
             "refresh durations: 3395 of 27833 tests have no stored duration; run 900 kept no samples from "
             "durations-3.11-2, durations-3.11-6"
         ],
     ),
 ]
-REFRESHED = [{"name": "Refresh measured durations", "conclusion": "failure"}]
 FAILED_TESTS = [*RAN[:1], {"name": "Run tests", "conclusion": "failure"}]
 
 
