@@ -20,7 +20,7 @@ def test_an_agent_pod_tick_takes_no_controller_lease_and_never_spawns_or_reaps(m
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert lease.current(store, "sw") is None
     assert (passes, rt.spawned, rt.killed) == ([], [], [])
-    assert actions == [cli.CONTROLLER_TICKS]
+    assert actions == [cli.CONTROLLER_TICKS] == ["the controller tick spawns and reaps agents"]
 
     assert list(controller.run_once(store, ledger=ledger, runtime=rt, messenger=FakeHerdr({}))) == ["sw"]
     assert lease.current(store, "sw").owner == commands.hive_id()
