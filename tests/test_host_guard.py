@@ -39,10 +39,14 @@ def _guard(home: Path, config: dict, comm: str) -> subprocess.CompletedProcess:
 
 
 @NEEDS_HOST
-def test_guard_skips_a_long_lived_tick_and_still_reaps_the_other_old_processes(tmp_path):
+def test_guard_skips_a_long_lived_tick_and_agent_wrapper_and_still_reaps_the_other_old_processes(tmp_path):
     config = {**json.loads((GUARD / "guard-config.json").read_text()), "threshold": 4, "timeout": "0s"}
     comm = f"ahguard{os.getpid() % 100000}"
-    ticks = [_probe(comm, "agentihooks", "swarm", "tick"), _probe(comm, "-m", "scripts.swarm.scheduled_tick")]
+    ticks = [
+        _probe(comm, "agentihooks", "swarm", "tick"),
+        _probe(comm, "-m", "scripts.swarm.scheduled_tick"),
+        _probe(comm, "/home/u/.local/bin/agentihooks", "select-profile", "engineer", "--agent", "claude"),
+    ]
     others = [
         _probe(comm, "agentihooks", "ledger", "watch", "rig-grade-swarm"),
         _probe(comm, "agentihooks", "swarm", "tick-watch"),
@@ -58,7 +62,7 @@ def test_guard_skips_a_long_lived_tick_and_still_reaps_the_other_old_processes(t
         for tick in ticks:
             assert f"SKIPPED pid={tick.pid} name={comm} reason=excluded_command" in log
         for other in others:
-            assert f"KILLED pid={other.pid} name={comm} reason=ghost_detected count=4" in log
+            assert f"KILLED pid={other.pid} name={comm} reason=ghost_detected count=5" in log
     finally:
         for process in [*ticks, *others]:
             process.kill()
