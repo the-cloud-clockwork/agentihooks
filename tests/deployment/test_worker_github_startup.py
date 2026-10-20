@@ -19,7 +19,7 @@ def test_live_worker_start_mints_before_bundle_clone_without_saving_the_app_cred
     root = Path(__file__).resolve().parents[2]
     monkeypatch.setenv("PYTHONPATH", os.pathsep.join((str(fake), str(root), os.environ.get("PYTHONPATH", ""))))
     monkeypatch.setenv("APP_PROOF_PATH", str(marker))
-    monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "app")
+    monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
     monkeypatch.setenv("GITHUB_APP_ID", "123")
     monkeypatch.setenv("GITHUB_APP_INSTALLATION_ID", "456")
     monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "pem")
