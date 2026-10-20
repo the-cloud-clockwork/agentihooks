@@ -118,7 +118,8 @@ def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_
         "turn gap findings skip agents whose wait history was not read",
         "each Doctor scan reads the wait history again within its budget",
     )
-    assert partial in traces.findings({**sample, "sessions": [], "merged": [], "now_ms": 0}, traces.Limits())
+    whole = {**sample, "active": [], "sessions": [], "merged": [], "now_ms": 0}
+    assert partial in traces.findings(whole, traces.Limits())
 
 
 def test_a_whole_wait_read_reports_no_partial_read():
