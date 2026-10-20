@@ -49,6 +49,7 @@ def test_one_crashed_worker_costs_one_test(tmp_path, variant):
     project.mkdir()
     (project / "test_cases.py").write_text(CASES)
     log = tmp_path / "audit.log"
+    (tmp_path / "base" / "b").mkdir(parents=True)
     args = ["-n", "3", "--dist", "loadgroup", "-v", "--tb=line", "-p", "no:cacheprovider"]
     args += ["--cov=.", "--cov-report=", "--cov-context=test", f"--basetemp={tmp_path / 'base' / 'b' / 'b'}"]
     if variant != "no-reruns":
