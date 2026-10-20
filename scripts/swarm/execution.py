@@ -276,21 +276,12 @@ class ExecutionRegistry:
         raise SwarmError("execution history kept changing; pane was not committed")
 
     def reconcile(self, slug: str, runtime: Runtime) -> list[str]:
-        from scripts.hive import reports
-
         recorded = {agent.name for agent in self.agents(slug)}
         live, actions = runtime.live_names(), []
         for agent in self.occupants(slug).values():
             if agent.state != "working" or agent.name in recorded or agent.name in live:
                 continue
-            if runtime.reported(agent):
-                continue
-            remote = reports.host(agent)
-            if remote and reports.Reports(self.redis).read(remote) is None:
-                continue
-            if agent.runtime_backend != "local" and runtime.observe(agent).state != "dead":
-                continue
-            if self.end_orphan(slug, agent):
+            if _process_gone(self.redis, agent, runtime) and self.end_orphan(slug, agent):
                 actions.append(f"ended orphan execution {agent.execution_id} for {agent.name}")
         return actions
 
@@ -365,6 +356,20 @@ def _has_identity(agent):
     return bool(
         agent.execution_id or agent.generation or agent.runtime_backend != "local" or agent.runtime_target or agent.hive
     )
+
+
+def _process_gone(redis: Redis, agent: AgentRecord, runtime: Runtime) -> bool:
+    from scripts.hive import reports
+
+    if runtime.reported(agent):
+        return False
+    remote = reports.host(agent)
+    if remote:
+        report = reports.Reports(redis).read(remote)
+        return report is not None and agent.name not in report["names"]
+    if agent.runtime_backend != "local":
+        return runtime.observe(agent).state == "dead"
+    return True
 
 
 def _write_projection(pipe, store, slug, agent):
