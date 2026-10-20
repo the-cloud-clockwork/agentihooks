@@ -331,7 +331,7 @@ The planner runs from the grader, never from the head, so a pull request cannot 
 
 ### Record
 
-`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twelve `coverage-3.12-1` to `coverage-3.12-12` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. With no record the planner raises the `No test record` notice and every test runs.
+`scripts/ci_test_plan.py` keeps the slice 5 rule and adds one condition: the dev push run must also keep all twenty `coverage-3.12-1` to `coverage-3.12-20` artifacts unexpired, beside its `dep-manifest`. A run missing any of them is skipped and the next older candidate is tried, up to 10. With no record the planner raises the `No test record` notice and every test runs.
 
 Besides `reused`, the planner writes `run` and `commit` to the step output: the dev run that holds the record and the commit its manifest was measured on. `split` passes both to `unit`.
 

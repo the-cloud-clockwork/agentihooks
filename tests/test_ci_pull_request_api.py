@@ -7,6 +7,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from scripts import ci_dev_reuse, ci_test_plan
+from tests import coverage_stability, refresh_durations
+
 pytestmark = pytest.mark.unit
 ROOT = Path(__file__).resolve().parents[1]
 API_CALL = re.compile(r"\b_?gh\b(?!-)|api\.github\.com|GITHUB_API_URL")
@@ -485,10 +488,31 @@ def test_sonar_downloads_this_runs_coverage_after_the_shards():
     assert download["with"] == {"pattern": "coverage-3.12-*", "path": ".coverage-shards"}
     assert steps.index(download) < steps.index(merge)
     assert merge["env"] == {
-        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 12 }}",
+        "SHARDS": "${{ needs.select.outputs.scope == 'selected' && needs.select.outputs.count || 20 }}",
         "SCOPE": "${{ needs.select.outputs.scope }}",
     }
     assert 'bash .github/coverage/combine.sh --downloaded "$SHARDS" ||' in merge["run"]
+
+
+def test_every_reader_of_the_unit_shard_count_matches_the_matrix():
+    jobs = _jobs()
+    shards = jobs["unit"]["strategy"]["matrix"]["shard"]
+    count = len(shards)
+    assert shards == list(range(1, count + 1))
+    run = next(step for step in jobs["unit"]["steps"] if step.get("name") == "Run tests")
+    assert (
+        run["env"]["SHARD"]
+        == f"${{{{ matrix.shard }}}}/${{{{ matrix.python-version == '3.12' && {count} || {count} }}}}"
+    )
+    floor = jobs["unit"]["strategy"]["matrix"]["exclude"]
+    assert [entry["shard"] for entry in floor] == shards[12:]
+    assert ci_test_plan.UNIT_JOBS == {f"unit (3.12, {shard})" for shard in shards}
+    assert ci_test_plan.COVERAGE == {f"coverage-3.12-{shard}" for shard in shards}
+    assert {f"coverage-3.12-{shard}" for shard in shards} <= ci_dev_reuse.artifact_names()
+    assert coverage_stability.SHARDS == refresh_durations.SHARDS == count
+    workflow = (ROOT / ".github/workflows/test.yml").read_text()
+    assert workflow.count(f"--shards {count} \\") == 2
+    assert f"needs.select.outputs.count || {count} }}}}" in workflow
 
 
 @pytest.mark.parametrize("job", ["unit", "shard-check", "test-count", "lint"])

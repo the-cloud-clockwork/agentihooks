@@ -13,7 +13,7 @@ from tests.duration_coverage import collected_tests, validate_coverage
 _ROOT = Path(__file__).parent.parent
 RUNS = 5
 VERSIONS = ("3.12",)
-SHARDS = 12
+SHARDS = 20
 ARTIFACTS = "repos/{owner}/{repo}/actions/artifacts?name=durations-3.12-1&per_page=100"
 
 

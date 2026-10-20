@@ -10,7 +10,7 @@ from scripts import ci_reuse
 
 def artifact_names() -> set[str]:
     names = {f"{kind}-3.12" for kind in ("split", "collected")}
-    for shard in range(1, 13):
+    for shard in range(1, 21):
         names.update(f"{kind}-3.12-{shard}" for kind in ("durations", "flakes", "coverage"))
     return names
 
@@ -50,7 +50,7 @@ def _complete(evidence: Path, run: dict) -> bool:
     folder = evidence / str(run["id"])
     kept = {item["name"] for item in ci_reuse._lines(folder / "artifacts.jsonl") if not item["expired"]}
     jobs = ci_reuse._lines(folder / "jobs.jsonl")
-    expected = {f"unit (3.12, {shard})" for shard in range(1, 13)}
+    expected = {f"unit (3.12, {shard})" for shard in range(1, 21)}
     passed = {job["name"] for job in jobs if job["conclusion"] == "success"}
     if any(name.startswith("reused-tests-") for name in kept):
         return False
