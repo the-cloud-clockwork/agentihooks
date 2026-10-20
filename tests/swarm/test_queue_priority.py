@@ -912,7 +912,11 @@ def test_a_failed_notice_tells_every_claimant_again(priority, monkeypatch):
             raise InboxError("inbox down")
         sent.append(claimant)
 
-    monkeypatch.setattr(queue_priority, "InboxStore", lambda redis: SimpleNamespace(send=send))
+    def inbox(redis):
+        assert redis is p.store.redis
+        return SimpleNamespace(send=send)
+
+    monkeypatch.setattr(queue_priority, "InboxStore", inbox)
     queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
     assert sent == ["eng@5"]
     assert "notified" not in displaced.pulls()[0]
