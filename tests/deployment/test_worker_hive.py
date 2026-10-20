@@ -1,11 +1,16 @@
 import json
 import os
+import ssl
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from scripts.swarm_ledger import ledger_link
+from tests.swarm_ledger import test_ledger_tls
+
 pytestmark = pytest.mark.unit
+cert = test_ledger_tls.cert
 ROOT = Path(__file__).resolve().parents[2]
 START = ROOT / "deploy/worker/start.sh"
 TOKEN = "fixture-github-token-value"
@@ -33,6 +38,7 @@ def startup(tmp_path, *, joined=False, refuse="", ssh=False, sshd_dies=False, bu
         '  touch "$AGENTIHOOKS_HOME/hive.env"\nfi\n'
         'if [[ "$*" == "bundle unlink" ]]; then rm -f "$AGENTIHOOKS_HOME/linked-bundle"; fi\n'
         'if [[ "$1" == init ]]; then\n'
+        '  printf "hosted ledger CA\\n" > "$AGENTIHOOKS_HOME/ledger-ca.pem"\n'
         '  [[ "$*" != "init --bundle "* ]] || printf %s "$3" > "$AGENTIHOOKS_HOME/linked-bundle"\n'
         '  [[ "$REFUSE" != init ]] || exit 7\n'
         '  [[ "$REFUSE" != bundle-init || "$*" == init ]] || exit 7\nfi\n'
@@ -260,3 +266,21 @@ def test_an_emptied_origin_unlinks_the_bundle_a_persistent_home_kept(tmp_path):
     assert result.returncode == 0, result.stderr
     assert f"init --bundle {kept}" not in commands
     assert commands.splitlines()[1:4] == ["bundle unlink", "init", "deps ensure"]
+
+
+def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots_kept(tmp_path, monkeypatch, cert):
+    pem = Path(cert[0]).read_text()
+    monkeypatch.setenv("LEDGER_CA_PEM", pem)
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    placed = (home / "ledger-ca.pem").read_text()
+    assert "hosted ledger CA" not in placed
+    assert placed.endswith(pem.strip() + "\n")
+    assert placed.startswith(Path(ssl.get_default_verify_paths().cafile).read_text())
+    assert ledger_link.transport({"AGENTIHOOKS_HOME": str(home)})["context"].cert_store_stats()["x509_ca"] > 1
+
+
+def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path):
+    result, _, home, _ = startup(tmp_path)
+    assert result.returncode == 0, result.stderr
+    assert (home / "ledger-ca.pem").read_text() == "hosted ledger CA\n"

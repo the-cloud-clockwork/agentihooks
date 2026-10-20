@@ -114,6 +114,22 @@ if (( ! ${#bundle[@]} )); then
   agentihooks bundle unlink
   agentihooks init
 fi
+# init writes the hosted ledger CA; agents read only this file, never the multi-line LEDGER_CA_PEM.
+if [[ -n "${LEDGER_CA_PEM:-}" ]]; then
+  python3 - <<'PY'
+import os, ssl
+from pathlib import Path
+
+from scripts.swarm_ledger import ledger_ca
+
+roots = ssl.get_default_verify_paths().cafile
+if not roots:
+    raise SystemExit('worker-hive: no system CA file to keep beside LEDGER_CA_PEM')
+system = Path(roots).read_text()
+if ledger_ca.place(Path(os.environ['AGENTIHOOKS_HOME']), system.rstrip() + '\n' + os.environ['LEDGER_CA_PEM'].strip() + '\n') is None:
+    raise SystemExit('worker-hive: LEDGER_CA_PEM holds no valid certificate')
+PY
+fi
 agentihooks deps ensure \
   || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
