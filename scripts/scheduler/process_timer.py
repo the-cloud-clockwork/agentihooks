@@ -9,6 +9,8 @@ from scripts.scheduler.core import Scheduler
 if TYPE_CHECKING:
     from redis import Redis
 
+RECHECK_S = 30
+
 
 def blocking_client() -> "Redis":
     from redis import ConnectionPool, Redis
@@ -48,7 +50,8 @@ class Timer:
             raise
 
     def wait(self) -> None:
-        self.redis.blpop(self.key)
+        while self.redis.blpop(self.key, timeout=RECHECK_S) is None:
+            service.ensure_running()
 
     def close(self) -> None:
         if self.closed:

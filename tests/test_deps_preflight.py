@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import contextlib
 import inspect
 import json
+import os
+import signal
+import subprocess
 import sys
 import time
 from pathlib import Path
+from unittest.mock import Mock
 
 import install
 import pytest
@@ -233,8 +238,82 @@ def test_launch_runs_the_preflight_before_taking_the_route_lock():
 def test_session_start_kick_spawns_only_when_stale(tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(deps_kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
-    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: spawned.append(argv))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or Mock())
+    monkeypatch.setattr(deps_kick.os, "killpg", lambda pid, sig: None)
     assert deps_kick.kick(home=tmp_path) is True
     (tmp_path / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     assert deps_kick.kick(home=Path(tmp_path)) is False
     assert spawned == [["/usr/bin/agentihooks", "deps", "ensure", "--quiet"]]
+
+
+def _live_group_members(pgid: int) -> list[str]:
+    members = []
+    for stat in Path("/proc").glob("[0-9]*/stat"):
+        with contextlib.suppress(OSError):
+            fields = stat.read_text().rsplit(")", 1)[1].split()
+            if int(fields[2]) == pgid and fields[0] != "Z":
+                members.append(stat.parent.name)
+    return members
+
+
+@pytest.mark.wall_clock
+@pytest.mark.parametrize("script", ["sleep 30 &\nwait\n", "sleep 30 &\nexit 0\n"], ids=["slow", "leaves-a-child"])
+def test_session_start_kick_leaves_no_check_process_behind(tmp_path, monkeypatch, script):
+    exe = tmp_path / "agentihooks"
+    exe.write_text(f"#!/bin/sh\n{script}")
+    exe.chmod(0o755)
+    started = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: str(exe))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda *a, **kw: started.append(popen(*a, **kw)) or started[-1])
+    began = time.monotonic()
+    try:
+        assert deps_kick.kick(home=tmp_path) is True
+        elapsed = time.monotonic() - began
+        deadline = time.monotonic() + 2
+        while (survivors := _live_group_members(started[0].pid)) and time.monotonic() < deadline:
+            time.sleep(0.05)
+    finally:
+        if started:
+            with contextlib.suppress(ProcessLookupError):
+                os.killpg(started[0].pid, signal.SIGKILL)
+            started[0].wait()
+    assert elapsed < 5
+    assert survivors == [], "the dependency check's process group outlived the session start kick"
+
+
+def test_session_start_kick_waits_for_a_fast_check(tmp_path, monkeypatch):
+    exe = tmp_path / "agentihooks"
+    exe.write_text("#!/bin/sh\nsleep 0.1\nexit 3\n")
+    exe.chmod(0o755)
+    started = []
+    popen = subprocess.Popen
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: str(exe))
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda *a, **kw: started.append(popen(*a, **kw)) or started[-1])
+    assert deps_kick.kick(home=tmp_path) is True
+    assert started[0].returncode == 3
+
+
+class _OutlivingCheck:
+    pid = 4242
+
+    def __init__(self):
+        self.waits = []
+
+    def wait(self, timeout=None):
+        self.waits.append(timeout)
+        if len(self.waits) == 1:
+            raise subprocess.TimeoutExpired("agentihooks", timeout)
+        return -signal.SIGKILL
+
+
+def test_session_start_kick_reaps_a_check_that_outlives_the_bounded_wait(tmp_path, monkeypatch):
+    check = _OutlivingCheck()
+    killed = []
+    monkeypatch.setattr(deps_kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
+    monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: check)
+    monkeypatch.setattr(deps_kick.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    assert deps_kick.kick(home=tmp_path) is True
+    assert check.waits == [deps_kick.WAIT_SECONDS, None]
+    assert deps_kick.WAIT_SECONDS == 1.0
+    assert killed == [(4242, signal.SIGKILL)]
