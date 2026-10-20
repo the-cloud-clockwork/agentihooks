@@ -239,6 +239,7 @@ def test_session_start_kick_spawns_only_when_stale(tmp_path, monkeypatch):
     spawned = []
     monkeypatch.setattr(deps_kick.shutil, "which", lambda name: "/usr/bin/agentihooks")
     monkeypatch.setattr(deps_kick.subprocess, "Popen", lambda argv, **kw: spawned.append(argv) or Mock())
+    monkeypatch.setattr(deps_kick.os, "killpg", lambda pid, sig: None)
     assert deps_kick.kick(home=tmp_path) is True
     (tmp_path / "deps.stamp").write_text(json.dumps({"ok_at": time.time()}))
     assert deps_kick.kick(home=Path(tmp_path)) is False
