@@ -10,6 +10,7 @@ from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
@@ -229,10 +230,8 @@ def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
 
 
 def latch(rows: list[Account], held: "Reservation | None", store: RedisStore | None) -> list[Account]:
-    """Keep the reserved account closed for workers until its week resets, because the live master count dips."""
+    """Keep the reserved account closed for workers until its week resets."""
     from redis.exceptions import RedisError
-
-    from scripts.swarm.keyspace import ROOT
 
     if held is None or store is None:
         return rows
