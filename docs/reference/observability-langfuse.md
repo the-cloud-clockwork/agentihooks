@@ -211,22 +211,23 @@ trace is also found by its `agent:<name>` tag.
 
 ## How the Doctor reads traces
 
-The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings in
-`scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads the
-same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and
-`LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). Reads for that
-hostname connect to the internal ingress `10.10.30.200` instead of the public
-tunnel, sending the hostname as `Host` and TLS server name so the certificate is
-still verified against it; a tunnel outage no longer fails a read, while a 5xx
-or a timeout on the internal path still raises `trace reader unavailable`. The
-swarm tick runs it with the other detectors every `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it
-is the one monitor of trace freshness. Among ticks, only `swarm tick`, the
-command the timer unit runs, and the controller loop run it. A tick another swarm
-command runs inline (`start`, `reopen`, `pause`, `stop`, `set`, `restore`, and so
-`doctor start` and rig doctor) runs every other detector and leaves telemetry to
-the next scheduled pass, because the calling terminal may export keys for another
-project under the same names. `swarm tick` run by hand and `doctor measure` read
-with the caller's keys, so run them where those keys open the swarm's project.
+The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings
+in `scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads
+the same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
+and `LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). Reads for that
+exact default origin connect to the internal ingress `10.10.30.200` instead of
+the public tunnel, sending the hostname as `Host` and TLS server name so the
+certificate is still verified against it; a tunnel outage no longer fails a
+read, while a 5xx or a timeout on the internal path still raises `trace reader
+unavailable`. The swarm tick runs it with the other detectors every
+`AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it is the one monitor of trace
+freshness. Among ticks, only `swarm tick`, the command the timer unit runs, and
+the controller loop run it. A tick another swarm command runs inline (`start`,
+`reopen`, `pause`, `stop`, `set`, `restore`, and so `doctor start` and rig
+doctor) runs every other detector and leaves telemetry to the next scheduled
+pass, because the calling terminal may export keys for another project under the
+same names. `swarm tick` run by hand and `doctor measure` read with the caller's
+keys, so run them where those keys open the swarm's project.
 
 ### Active telemetry
 
