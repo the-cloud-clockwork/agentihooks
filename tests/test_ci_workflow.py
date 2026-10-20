@@ -966,6 +966,32 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
     assert "elapsed.json" in upload["with"]["path"].split()
 
 
+@pytest.mark.parametrize("status", [0, 3])
+def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    (tmp_path / "pytest.py").write_text(
+        f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
+    )
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_ADDOPTS": "", "FILES": "tests/test_a.py", "GITHUB_JOB": "unit-selected"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == status, result.stdout + result.stderr
+    elapsed = json.loads((tmp_path / "elapsed.json").read_text())
+    assert elapsed["job"] == "unit-selected"
+    assert elapsed["seconds"] >= 0
+
+
+def test_selected_legs_upload_elapsed_time_beside_their_durations():
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    upload = next(step for step in steps if step.get("name") == "Upload selected test durations")
+    assert upload["with"]["path"].split() == ["durations.json", "elapsed.json"]
+
+
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
     jobs = _workflow()["jobs"]
     adopt = next(s for s in jobs["split"]["steps"] if s.get("name") == "Adopt latest dev durations")

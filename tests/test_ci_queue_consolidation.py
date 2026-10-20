@@ -52,8 +52,10 @@ exit "$status"
             assert step["if"] == "github.event_name == 'workflow_dispatch'"
         elif step.get("run", "").startswith("bash scripts/packaging/pull-runtime-image.sh "):
             assert "if" not in step
+        elif step.get("id") == "build":
+            assert "if" not in step
         elif "run" in step:
-            assert step["if"] == "${{ !cancelled() }}"
+            assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)
 
 

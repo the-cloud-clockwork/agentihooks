@@ -778,3 +778,166 @@ def test_refresh_keeps_an_entry_it_could_not_requeue(priority, monkeypatch, head
     assert alerts == [
         ("sw", f"merge-priority-requeue:{URL[:-1]}2", f"Could not requeue {URL[:-1]}2: GitHub unavailable")
     ]
+
+
+def test_priority_notifies_the_claimant_of_an_entry_a_conflict_keeps_out(priority, monkeypatch):
+    p = priority
+    refusal = "gh: Pull request has merge conflicts and Pull request not in mergeable state"
+    run = p.queue.run
+
+    def conflicted(command, **kwargs):
+        if "enqueuePullRequest" in " ".join(command) and "id=P2" in command:
+            return subprocess.CompletedProcess(command, 1, "", refusal)
+        done = run(command, **kwargs)
+        response = json.loads(done.stdout)
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
+        if raw and raw.get("id") == "P2":
+            raw["mergeable"] = "CONFLICTING"
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    monkeypatch.setattr(p.queue, "run", conflicted)
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    writes, sent = [], []
+    monkeypatch.setattr(
+        queue_record.Journal, "write", lambda self, *args, **extra: writes.append((self.url, args, extra))
+    )
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
+    )
+    with pytest.raises(SwarmError) as failed:
+        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+    assert str(failed.value) == f"could not restore {URL[:-1]}2: {refusal}"
+    reason = "it has merge conflicts with dev"
+    assert sent == [
+        (
+            "swarm",
+            "ci@owner",
+            f"Your pull request {URL[:-1]}2 left the merge queue in an interrupted priority and stays out "
+            f"because {reason}. Queue it again once its checks pass.",
+            {"fyi": True},
+        )
+    ]
+    assert (
+        URL[:-1] + "2",
+        ("priority-requeue-skipped", URL[:-1] + "2", "head2", None, None),
+        {"reason": reason},
+    ) in writes
+    assert queue_priority.Displaced(p.store, "sw").pulls() == []
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P9", "P3"]
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == []
+    assert p.queue.mutations == [("dequeue", 3), ("dequeue", 2), ("queue", 9), ("queue", 3)]
+
+
+def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(priority, monkeypatch):
+    p = priority
+    refusal = "gh: Pull request not in mergeable state"
+    run, refused = p.queue.run, [True]
+
+    def refusing(command, **kwargs):
+        if refused[0] and "enqueuePullRequest" in " ".join(command) and "id=P2" in command:
+            return subprocess.CompletedProcess(command, 1, "", refusal)
+        done = run(command, **kwargs)
+        response = json.loads(done.stdout)
+        raw = response["data"].get("resource") if command[2] == "graphql" else None
+        if raw and raw.get("id") == "P2":
+            raw["mergeable"] = "UNKNOWN"
+        return subprocess.CompletedProcess(command, 0, json.dumps(response), "")
+
+    monkeypatch.setattr(p.queue, "run", refusing)
+    monkeypatch.setattr(merge_queue, "graphql", lambda query, variables, run: GRAPHQL(query, variables, p.queue.run))
+    sent = []
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append((*args, flags))),
+    )
+    with pytest.raises(SwarmError):
+        queue_priority.apply(p.store, "sw", URL, "master", p.tasks, queue_record.Journal(URL))
+    notice = (
+        "swarm",
+        "ci@owner",
+        f"Your pull request {URL[:-1]}2 left the merge queue in a priority and could not be queued again: "
+        f"{refusal}. The swarm retries it at the end of the queue on every refresh until it is back or stays out "
+        "for a reason.",
+        {"fyi": True},
+    )
+    assert sent == [notice]
+    assert [(pull["url"], pull["notified"]) for pull in queue_priority.Displaced(p.store, "sw").pulls()] == [
+        (URL[:-1] + "2", True)
+    ]
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"could not requeue {URL[:-1]}2 after an interrupted priority: {refusal}"
+    ]
+    assert sent == [notice]
+    refused[0] = False
+    assert queue_priority.refresh(p.store, "sw", p.tasks) == [
+        f"requeued {URL[:-1]}2 left out of the merge queue by an interrupted priority"
+    ]
+    assert [e["pullRequest"]["id"] for e in p.queue.entries] == ["P1", "P9", "P3", "P2"]
+    assert queue_priority.Displaced(p.store, "sw").pulls() == []
+
+
+def test_an_unclaimed_refused_entry_waits_to_tell_a_later_claimant(priority, monkeypatch):
+    p = priority
+    displaced = queue_priority.Displaced(p.store, "sw")
+    displaced.add({"id": "P5", "url": URL[:-1] + "5", "headRefOid": "head5"})
+    sent = []
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append(args[1])),
+    )
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == []
+    assert "notified" not in displaced.pulls()[0]
+    p.tasks.append({"pr_url": URL[:-1] + "5", "claimed_by": "eng@5"})
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == ["eng@5"]
+    assert displaced.pulls()[0]["notified"] is True
+
+
+def test_a_failed_notice_tells_every_claimant_again(priority, monkeypatch):
+    from scripts.inbox.store import InboxError
+
+    p = priority
+    displaced = queue_priority.Displaced(p.store, "sw")
+    displaced.add({"id": "P5", "url": URL[:-1] + "5", "headRefOid": "head5"})
+    p.tasks += [{"pr_url": URL[:-1] + "5", "claimed_by": who} for who in ("eng@5", "eng@6")]
+    sent, refused = [], ["eng@6"]
+
+    def send(sender, claimant, text, **flags):
+        if claimant in refused:
+            raise InboxError("inbox down")
+        sent.append(claimant)
+
+    def inbox(redis):
+        assert redis is p.store.redis
+        return SimpleNamespace(send=send)
+
+    monkeypatch.setattr(queue_priority, "InboxStore", inbox)
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == ["eng@5"]
+    assert "notified" not in displaced.pulls()[0]
+    refused.clear()
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == ["eng@5", "eng@5", "eng@6"]
+    assert displaced.pulls()[0]["notified"] is True
+
+
+@pytest.mark.parametrize(
+    "raw, reason",
+    [
+        ({"isDraft": True, "headRefOid": "moved", "mergeable": "CONFLICTING"}, "it became a draft"),
+        ({"isDraft": False, "headRefOid": "moved", "mergeable": "CONFLICTING"}, "its head moved"),
+        ({"isDraft": False, "headRefOid": "head2", "mergeable": "CONFLICTING"}, "it has merge conflicts with dev"),
+        ({"isDraft": False, "headRefOid": "head2", "mergeable": "UNKNOWN"}, ""),
+    ],
+)
+def test_blocker_reports_the_first_reason_an_entry_stays_out(raw, reason):
+    assert queue_priority.blocker(raw, "head2") == reason
+
+
+def test_the_state_query_reads_mergeable():
+    assert "isDraft mergeable" in merge_queue.FIELDS
