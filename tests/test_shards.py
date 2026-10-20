@@ -150,6 +150,14 @@ def test_one_files_xdist_group_stays_on_one_shard_with_its_summed_time():
     ]
 
 
+def test_a_grouped_file_longer_than_an_even_shard_share_still_splits():
+    from tests.shards import assign_nodes
+
+    durations = {f"tests/test_g.py::test_{n}": 30.0 for n in range(4)}
+    parts = assign_nodes(durations, 2, {"tests/test_g.py": "g"}, 4)
+    assert [len(part) for part in parts] == [2, 2]
+
+
 def test_worker_shards_charge_collection_once_per_file():
     from tests.shards import assign_nodes
 
