@@ -28,7 +28,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--version", required=True)
     parser.add_argument("--durations", type=Path, nargs="+", required=True, help="the durations.json each shard stored")
     parser.add_argument("--collected", type=Path, required=True)
-    parser.add_argument("--plan", type=Path, required=True, help="the test plan whose tests reuse their passed dev result")
+    parser.add_argument(
+        "--plan", type=Path, required=True, help="the test plan whose tests reuse their passed dev result"
+    )
     parser.add_argument("--flakes", type=Path, nargs="*", default=[])
     args = parser.parse_args(argv)
     for line in summary(args.version, args.durations, args.collected, args.plan, args.flakes):
