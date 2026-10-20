@@ -50,7 +50,7 @@ def units(binary):
         "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
         "EnvironmentFile=-%h/.agentihooks/.env\n"
         f'ExecStart="{binary}" swarm waits\n'
-        "TimeoutStartSec=120\n"
+        "TimeoutStartSec=120\nKillMode=process\n"
     )
     wait_timer = (
         "[Unit]\nDescription=agentihooks swarm wait checks every fifteen seconds\n\n"
