@@ -196,7 +196,7 @@ in place and moves the master to another hive.
 | agents | Working agents against max agents, such as `1/3`. |
 | slots | One line per slot: harness, account and the sessions the hive reports on it. |
 | master | The live master running on the hive, from any swarm, or `—`. |
-| move master | Button that moves this ledger's master to the hive. |
+| (no header) | The move master button, which moves this ledger's master to the hive. |
 
 The agents figure is the placement load: worker sessions the hive reports, without its interactive master
 sessions, plus this runtime's launching, working or suspect non-master agents on the hive that the hive has not
@@ -244,7 +244,7 @@ The button is off when:
 - this ledger's master already runs on that hive.
 
 The command can still refuse a hive the button allows, such as one placement would not give the master; the
-control then answers `502 control_failed` and the note line shows the server's answer.
+control then answers `502 request_refused` and the note line shows the server's answer.
 
 ```bash
 curl -X PUT "http://127.0.0.1:8765/api/v1/ledgers/$SLUG/swarm/controls" \
@@ -253,7 +253,8 @@ curl -X PUT "http://127.0.0.1:8765/api/v1/ledgers/$SLUG/swarm/controls" \
 ```
 
 A hive id must start with a letter or digit and hold only letters, digits, dots, dashes or underscores, at most 63
-characters; any other answers `400 schema_invalid`. A control from an agent's credential answers `403 Swarm controls need the operator`.
+characters; any other answers `400 request_refused` with `A master move needs a hive id`. A control from an agent's
+credential answers `403 forbidden` with `swarm controls need the operator`.
 
 ### Hive settings API
 
