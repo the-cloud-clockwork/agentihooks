@@ -1,5 +1,6 @@
 import argparse
 import json
+import re
 import subprocess
 import time
 from pathlib import Path
@@ -42,7 +43,9 @@ def branch_only(head: str, root: Path, include_edits: bool = False) -> list[str]
     ]
 
 
-def lane_problem(block: object) -> str | None:
+def lane_problem(block: object, name: object = None) -> str | None:
+    if isinstance(block, dict) and called_lane(block, name):
+        block = {**block, "group": GROUP, "queue": "max"}
     if not isinstance(block, dict) or " ".join(str(block.get("group")).split()) != GROUP:
         return "has no shared hosted lane concurrency group"
     if block.get("queue") != "max":
@@ -50,6 +53,20 @@ def lane_problem(block: object) -> str | None:
     if block.get("cancel-in-progress") not in (None, False):
         return "may cancel other runs on the shared lane"
     return None
+
+
+def called_lane(block: dict, name: object) -> bool:
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9 ]+", name):
+        return False
+    own = re.fullmatch(
+        r"\$\{\{ github\.workflow == '"
+        + re.escape(name)
+        + r"' && "
+        + re.escape(LANE)
+        + r" \|\| format\('[a-z0-9-]+-\{0\}', github\.run_id\) \}\}",
+        " ".join(str(block.get("group")).split()),
+    )
+    return own is not None and block.get("queue") == f"${{{{ github.workflow == '{name}' && 'max' || 'single' }}}}"
 
 
 def events(workflow: dict) -> list:
@@ -97,7 +114,7 @@ def problems(workflow: object, baseline: object = None) -> list[str]:
             continue
         if trusted and (name in (trusted.get("jobs") or {}) or base_block is not None) and block == base_block:
             continue
-        problem = lane_problem(block)
+        problem = lane_problem(block, workflow.get("name"))
         if problem:
             found.append(f"job {name} {problem}")
     return found

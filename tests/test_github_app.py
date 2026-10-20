@@ -86,15 +86,16 @@ def test_credential_helper_emits_only_for_github_https_and_never_handles_store(m
     mint.assert_called_once_with()
 
 
-def test_token_mode_is_explicit_and_app_failure_never_falls_back(monkeypatch):
+def test_token_mode_is_explicit_and_app_failure_never_falls_back(monkeypatch, tmp_path):
     from scripts import github_app_cli
 
     monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "token")
     monkeypatch.setenv("GITHUB_TOKEN", "fixture")
     assert github_app_cli.token() == "fixture"
     monkeypatch.setenv("HIVE_GITHUB_AUTH_MODE", "app")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
     monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
-    with pytest.raises(KeyError):
+    with pytest.raises(FileNotFoundError):
         github_app_cli.token()
 
 
