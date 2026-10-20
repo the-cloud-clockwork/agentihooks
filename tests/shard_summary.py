@@ -14,13 +14,18 @@ def summary(version: str, durations: list[Path], collected: Path, plan: Path, fl
         for line in path.read_text().splitlines()
         if line.strip()
     )
-    reused: set[str] = set()
+    planned: set[str] = set()
     source = "no plan"
     if plan.is_file():
         recorded = json.loads(plan.read_text())
-        reused = set(recorded["tests"]).intersection(json.loads(collected.read_text()))
+        planned = set(recorded["tests"]).intersection(json.loads(collected.read_text()))
         source = f"dev run {recorded['run']}"
-    return [f"Python {version}: ran {len(counts)}, reused {len(reused)} from {source}, flaky {flaky}"]
+    lines = [f"Python {version}: ran {len(counts)}, reused {len(planned - counts.keys())} from {source}, flaky {flaky}"]
+    for path in durations:
+        ran = run_counts([path])
+        if planned & ran.keys():
+            lines.append(f"{path.parent.name} fell back: ran {len(ran)}, reused 0")
+    return lines
 
 
 def main(argv: list[str] | None = None) -> int:
