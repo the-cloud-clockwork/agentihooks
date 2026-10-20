@@ -19,7 +19,17 @@ export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
 mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT"
 git config --global credential.https://github.com.helper \
-  '!python3 -m scripts.github_app_cli credential'
+  "!$(command -v python3) -m scripts.github_app_cli credential"
+if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then
+  token_file="$AGENTIHOOKS_HOME/github-token"
+  python3 -m scripts.github_app_cli token > "$token_file.next"
+  mv "$token_file.next" "$token_file"
+  (
+    while sleep 1800; do
+      python3 -m scripts.github_app_cli token > "$token_file.next" && mv "$token_file.next" "$token_file"
+    done
+  ) </dev/null >/dev/null 2>&1 &
+fi
 python3 - <<'PY'
 import json, os, re, subprocess
 from pathlib import Path

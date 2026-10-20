@@ -1,6 +1,7 @@
 import argparse
 import os
 import sys
+from pathlib import Path
 from typing import TextIO
 
 import jwt
@@ -9,6 +10,10 @@ import requests
 from scripts.github_app import REFUSED, GitAuthRefused, GitHubAppAuth
 
 _AUTH: GitHubAppAuth | None = None
+
+
+def token_file() -> Path:
+    return Path(os.environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "github-token"
 
 
 def token() -> str:
@@ -21,6 +26,11 @@ def token() -> str:
         return value
     if mode != "app":
         raise ValueError("GitHub authentication mode must be token or app")
+    if "GITHUB_APP_PRIVATE_KEY" not in os.environ:
+        value = token_file().read_text().strip()
+        if not value:
+            raise GitAuthRefused(REFUSED)
+        return value
     if _AUTH is None:
         _AUTH = GitHubAppAuth()
     return _AUTH.get_token()
@@ -40,7 +50,7 @@ def environment() -> dict[str, str]:
     env = {**os.environ, "GH_TOKEN": value, "GITHUB_TOKEN": value, "AGENTIHOOKS_GITHUB_AUTH_READY": "1"}
     env["GIT_TERMINAL_PROMPT"] = "0"
     index = int(env.get("GIT_CONFIG_COUNT", "0"))
-    for offset, value in enumerate(("", "!python3 -m scripts.github_app_cli credential")):
+    for offset, value in enumerate(("", f"!{sys.executable} -m scripts.github_app_cli credential")):
         env[f"GIT_CONFIG_KEY_{index + offset}"] = "credential.https://github.com.helper"
         env[f"GIT_CONFIG_VALUE_{index + offset}"] = value
     env["GIT_CONFIG_COUNT"] = str(index + 2)
@@ -66,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
                 parser.error("exec requires a command")
             os.execvpe(args.command[0], args.command, environment())
         return 0
-    except (KeyError, ValueError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
+    except (OSError, KeyError, ValueError, GitAuthRefused, jwt.PyJWTError, requests.RequestException):
         print(REFUSED, file=sys.stderr)
         return 1
 

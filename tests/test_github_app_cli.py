@@ -10,6 +10,7 @@ pytestmark = pytest.mark.unit
 
 def test_app_mode_defaults_to_the_shared_in_memory_cache(monkeypatch):
     monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
+    monkeypatch.setenv("GITHUB_APP_PRIVATE_KEY", "pem")
     monkeypatch.setattr(github_app_cli, "_AUTH", None)
     auth = Mock()
     auth.get_token.side_effect = ["fixture", "renewed"]
@@ -43,7 +44,7 @@ def test_process_environment_overrides_stored_helpers_and_preserves_existing_git
     assert env["GIT_CONFIG_VALUE_0"] == "false"
     assert env["GIT_CONFIG_KEY_1"] == env["GIT_CONFIG_KEY_2"] == "credential.https://github.com.helper"
     assert env["GIT_CONFIG_VALUE_1"] == ""
-    assert env["GIT_CONFIG_VALUE_2"] == "!python3 -m scripts.github_app_cli credential"
+    assert env["GIT_CONFIG_VALUE_2"] == f"!{github_app_cli.sys.executable} -m scripts.github_app_cli credential"
 
 
 def test_cli_token_prints_only_the_selected_token(monkeypatch, capsys):
@@ -156,3 +157,38 @@ def test_exec_without_a_command_names_the_missing_command(capsys):
     with pytest.raises(SystemExit):
         github_app_cli.main(["exec"])
     assert capsys.readouterr().err.rstrip().endswith("error: exec requires a command")
+
+
+def test_sessions_without_the_app_key_read_the_refreshed_token_file(monkeypatch, tmp_path):
+    monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    factory = Mock()
+    monkeypatch.setattr(github_app_cli, "GitHubAppAuth", factory)
+    (tmp_path / "github-token").write_text("fixture\n")
+    assert github_app_cli.token() == "fixture"
+    factory.assert_not_called()
+
+
+def test_token_file_defaults_to_the_agentihooks_home(monkeypatch, tmp_path):
+    monkeypatch.delenv("AGENTIHOOKS_HOME", raising=False)
+    monkeypatch.setattr(github_app_cli.Path, "home", Mock(return_value=tmp_path))
+    assert github_app_cli.token_file() == tmp_path / ".agentihooks" / "github-token"
+
+
+def test_an_empty_token_file_is_refused(monkeypatch, tmp_path):
+    monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    (tmp_path / "github-token").write_text("\n")
+    with pytest.raises(github_app_cli.GitAuthRefused) as refused:
+        github_app_cli.token()
+    assert str(refused.value) == github_app_cli.REFUSED
+
+
+def test_a_missing_token_file_is_a_quiet_refusal(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("HIVE_GITHUB_AUTH_MODE", raising=False)
+    monkeypatch.delenv("GITHUB_APP_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    assert github_app_cli.main(["token"]) == 1
+    assert capsys.readouterr() == ("", github_app_cli.REFUSED + "\n")
