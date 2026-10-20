@@ -302,7 +302,11 @@ class ExecutionRegistry:
             try:
                 pipe.watch(key, self.store.key(slug, "agents"))
                 current = self.occupants(slug, pipe).get(agent.seat)
-                if current != agent or agent.state != "working" or pipe.hexists(self.store.key(slug, "agents"), agent.name):
+                if (
+                    current != agent
+                    or agent.state != "working"
+                    or pipe.hexists(self.store.key(slug, "agents"), agent.name)
+                ):
                     return False
                 pipe.multi()
                 pipe.hset(key, agent.execution_id, json.dumps(asdict(replace(agent, state="ended"))))
