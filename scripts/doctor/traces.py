@@ -192,12 +192,12 @@ def gap_agents(record: dict, limits: Limits) -> list[str]:
     newest = {}
     for trace in record["traces"]:
         for _, b in _long_gaps(trace, limits.turn_gap_minutes):
-            newest[_agent(trace)] = max(newest.get(_agent(trace), 0), b["start"])
+            newest[_agent(trace)] = max(newest.get(_agent(trace), b["start"]), b["start"])
     return sorted(newest, key=lambda name: (-newest[name], name))
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
-    unread = record.get("waits_unread", [])
+    unread = record.get("waits_unread")
     if not unread:
         return []
     return [

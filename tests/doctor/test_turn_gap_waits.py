@@ -84,9 +84,13 @@ def test_wait_history_is_read_newest_gap_first_then_by_name():
 def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial():
     sample = {**record([]), "slug": "sw", "waits": {}, "waits_unread": ["engineer"]}
     assert traces.turn_gaps(sample, traces.Limits()) == []
+    judged = {**record([])["traces"][0], "name": "ci", "tags": ["agent:ci"], "session_id": "ci-session"}
+    after = traces.turn_gaps({**sample, "traces": [*sample["traces"], judged]}, traces.Limits())
+    assert [f.subject for f in after] == ["ci-session"]
     [partial] = traces.wait_coverage(sample, traces.Limits())
     assert (partial.kind, partial.subject, partial.measure) == ("wait history partial", "sw", 1)
     assert partial.summary == "wait history of 1 agent with turn gaps over 30 minutes not read in budget"
+    assert partial.threshold == "every agent with a turn gap over the limit has its wait history read"
     two = traces.wait_coverage({**sample, "waits_unread": ["engineer", "ci"]}, traces.Limits())[0]
     assert two.summary == "wait history of 2 agents with turn gaps over 30 minutes not read in budget"
     assert two.evidence[0] == "unread: engineer, ci"
