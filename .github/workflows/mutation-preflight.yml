@@ -120,6 +120,7 @@ jobs:
         if: steps.open.outputs.open != 'true' && steps.reuse.outputs.reused != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       - name: Upload planned mutation test selection
@@ -201,6 +202,8 @@ jobs:
     timeout-minutes: 26
     concurrency:
       group: ${{ format('mutation-preflight-job-{0}-stats-{1}', github.run_id, matrix.part) }}
+    outputs:
+      shards: ${{ steps.refine.outputs.shards }}
     strategy:
       fail-fast: false
       matrix:
@@ -274,6 +277,32 @@ jobs:
           retention-days: 1
           overwrite: true
 
+      - name: Restore the tests that killed this branch's earlier mutants
+        if: strategy.job-total == 1
+        uses: actions/cache/restore@v4
+        with:
+          path: .mutation-stats/killers
+          key: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: mutation-killers-v1-${{ runner.os }}-${{ github.ref_name }}-
+
+      - name: Refine mutation shards from measured statistics
+        id: refine
+        if: strategy.job-total == 1
+        env:
+          BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
+
+      - name: Upload the measured mutation plan
+        if: strategy.job-total == 1
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-plan
+          path: .mutation-stats/plan.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+
       - name: Upload stats evidence
         if: failure()
         uses: actions/upload-artifact@v4
@@ -286,7 +315,7 @@ jobs:
 
   refine:
     needs: [plan, stats]
-    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && needs.plan.outputs.stats_parts != '[0]' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
     outputs:
@@ -332,6 +361,7 @@ jobs:
         id: refine
         env:
           BASES: ${{ needs.plan.outputs.bases }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.measured --bases "$BASES" --stats .mutation-stats
 
       - name: Upload the measured mutation plan
@@ -345,7 +375,7 @@ jobs:
 
   mutation-shard:
     needs: [plan, stats, refine]
-    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && needs.refine.result == 'success' }}
+    if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' && needs.plan.outputs.changed != '0' && needs.stats.result == 'success' && (needs.refine.result == 'success' || needs.refine.result == 'skipped' && needs.plan.outputs.stats_parts == '[0]') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     concurrency:
@@ -353,7 +383,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: ${{ fromJSON(needs.refine.outputs.shards) }}
+        shard: ${{ fromJSON(needs.refine.outputs.shards || needs.stats.outputs.shards) }}
     env:
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
@@ -449,7 +479,7 @@ jobs:
 
   # Readers take one report and the check named mutation, so every shard ends here.
   mutation:
-    needs: [plan, refine, mutation-shard]
+    needs: [plan, stats, refine, mutation-shard]
     if: ${{ !cancelled() && needs.plan.outputs.graded == 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 5
@@ -501,7 +531,7 @@ jobs:
 
       - name: Merge the shard reports
         env:
-          SHARDS: ${{ needs.plan.outputs.changed != '0' && needs.refine.outputs.shards || '[]' }}
+          SHARDS: ${{ needs.plan.outputs.changed != '0' && (needs.refine.outputs.shards || needs.stats.outputs.shards) || '[]' }}
         run: python -m scripts.ci_mutation.merge .mutation-shards --shards "$(jq length <<< "$SHARDS")" --output .mutation-gate
 
       - name: Upload complete mutation evidence

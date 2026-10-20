@@ -10,6 +10,7 @@ from scripts import codex_router, quota_state, session_bands
 from scripts.routing import claude_api, codex_api, master_account, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION
 from scripts.swarm import autoscale, freeze, host_budget
+from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import AUTO_SCALING, RedisStore, SwarmConfig
 
 if TYPE_CHECKING:
@@ -210,8 +211,10 @@ def accounts(environ: dict, now: float, refresh: bool = True) -> list[Account]:
     rows = (
         _global(environ, now) if aggregate.enabled(environ) else _claude(environ, now) + _codex(environ, now, refresh)
     )
+    store = reservation._store(environ)
     for harness in LABELS:
-        rows = reserve(rows, reservation.current(harness, environ))
+        held = reservation.current(harness, environ)
+        rows = latch(reserve(rows, held), held, store)
     return rows
 
 
@@ -224,6 +227,34 @@ def reserve(rows: list[Account], held: "Reservation | None") -> list[Account]:
         else row
         for row in rows
     ]
+
+
+def latch(rows: list[Account], held: "Reservation | None", store: RedisStore | None) -> list[Account]:
+    """Keep the reserved account closed for workers until its week resets."""
+    from redis.exceptions import RedisError
+
+    if held is None or store is None:
+        return rows
+    key = f"{ROOT}:reserved-closed:{held.harness}:{held.slug}"
+    index = next(
+        (i for i, row in enumerate(rows) if (row.harness, row.name) == (held.harness, held.slug) and row.kind != API),
+        None,
+    )
+    if index is None:
+        return rows
+    row = rows[index]
+    try:
+        if row.reserved:
+            if row.week_resets_at:
+                store.redis.set(key, row.reserved, exat=row.week_resets_at)
+            return rows
+        reason = store.redis.get(key)
+    except (RedisError, OSError):
+        return rows
+    if not reason:
+        return rows
+    closed = replace(row, state=quota_state.CLOSED, cap=0, reserved=reason, unreserved_cap=row.cap)
+    return [*rows[:index], closed, *rows[index + 1 :]]
 
 
 def unreserved(rows: list[Account]) -> list[Account]:

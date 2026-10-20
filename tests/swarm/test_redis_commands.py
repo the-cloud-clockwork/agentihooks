@@ -297,6 +297,18 @@ def test_cyclic_reexports_nested_dotted_imports_call_receivers_and_unbound_self_
     assert program.units["scripts.c:bound"].reads == {"go"}
 
 
+def test_a_lock_taken_on_a_client_issues_the_commands_the_lock_sends(tmp_path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "scripts/__init__.py").write_text("")
+    (tmp_path / "scripts/guard.py").write_text(
+        "def hold(redis):\n    redis.incr('k')\n    with redis.lock('guard', timeout=1):\n        pass\n"
+    )
+    program = code_reach.Program(code_reach.parse(tmp_path))
+    issued = program.commands(program.reach(("scripts.guard:hold",)))
+    assert {"INCRBY", "SET", "EVALSHA", "SCRIPT LOAD", "GET", "DEL", "PEXPIRE"} <= set(issued)
+    assert issued["EVALSHA"] == {"scripts.guard:hold"}
+
+
 def test_an_entry_point_missing_from_the_code_is_refused(program):
     with pytest.raises(KeyError, match="no function scripts.app:gone, scripts.app:lost under scripts, hooks"):
         program.reach(("scripts.app:main", "scripts.app:gone", "scripts.app:lost"))

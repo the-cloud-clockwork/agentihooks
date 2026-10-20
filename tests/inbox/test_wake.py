@@ -596,3 +596,39 @@ def test_the_raised_master_item_reads_back_from_its_escalation_note():
     assert wake.raised_id({"event": wake.TO_MASTER, "reason": note}) == "abc123def456"
     assert wake.raised_id({"event": wake.WOKEN, "reason": note}) == ""
     assert wake.raised_id({"state": "pending", "reason": note}) == ""
+
+
+def test_an_unread_fyi_is_never_typed_as_a_wake_while_a_work_item_still_is(inbox):
+    fyi = inbox.send(MASTER_NAME, "sw-eng-1", "noted, nothing to do", fyi=True)
+    herdr = FakeHerdr({"p1": "idle"})
+    for n in range(6):
+        run(inbox, herdr, FakeLedger(), sent_at(fyi) + n * W + 1)
+    assert herdr.prompts == [] and events(inbox, fyi.id) == []
+    work = inbox.send(MASTER_NAME, "sw-eng-1", "review my diff")
+    run(inbox, herdr, FakeLedger(), sent_at(work) + 1)
+    assert herdr.prompts == [("p1", wake.WAKE_TEXT)]
+    assert events(inbox, work.id) == ["woken"] and events(inbox, fyi.id) == []
+
+
+def test_a_codex_pane_holding_only_fyi_mail_gets_no_wake(inbox):
+    codex = AgentRecord("sw-eng-2", "eng", "t1", pane_id="p2", harness="codex")
+    fyi = inbox.send(MASTER_NAME, codex.name, "noted, nothing to do", fyi=True)
+    herdr = FakeHerdr({"p2": "idle"})
+    wake.wake_now(inbox, "sw", [codex], herdr, sent_at(fyi) + 1, W)
+    assert herdr.prompts == [] and events(inbox, fyi.id) == []
+
+
+def test_fyi_seat_mail_waits_for_no_successor_and_gets_no_wake_after_binding(inbox):
+    inbox.seats.occupy("eng-1@sw", "sw-eng-gone", at=1)
+    fyi = inbox.send("sw-eng-4", "eng-1@sw", "your pull request merged", fyi=True)
+    work = inbox.send("sw-eng-4", "eng-1@sw", "rebase please")
+    herdr, ledger = FakeHerdr({"p1": "idle"}), FakeLedger()
+    for n in range(1, 6):
+        run(inbox, herdr, ledger, sent_at(fyi) + n * W, SEATED[1:])
+    assert events(inbox, fyi.id) == events(inbox, work.id) == []
+    bound = sent_at(fyi) + 10 * W
+    inbox.seats.occupy("eng-1@sw", "sw-eng-1", at=bound)
+    for n in range(4):
+        run(inbox, herdr, ledger, bound + n * W + 1, SEATED)
+    assert events(inbox, fyi.id) == [] and ledger.followups == []
+    assert events(inbox, work.id)[0] == "woken"

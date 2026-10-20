@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 from hooks.context.shell_commands import _SHELLS, commands
@@ -82,6 +83,8 @@ def opens_pane(tokens: list[str]) -> bool:
 
 def _quota_handoff(tokens: list[str], session_id: str) -> bool:
     if tokens[1:2] != ["init-agent"] or "--handoff" not in tokens or "--prompt-file" not in tokens[:-1]:
+        return False
+    if os.environ.get("AGENTIHOOKS_SWARM"):
         return False
     document = Path(tokens[tokens.index("--prompt-file") + 1])
     if document.name != f"{session_id}.md" or document.parent.name != "handoff":

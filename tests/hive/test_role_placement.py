@@ -114,6 +114,30 @@ def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
     assert fenced.runtime.hive_launch.select(setup.config, "plan", {"id": "task"}).hive == "anton"
 
 
+MASTER_WAIT = "no live hive can run the master with interactive, subscription or api authentication"
+
+
+@pytest.mark.parametrize("lacks", [{"repos": []}, {"slots": []}], ids=["repo", "slot"])
+def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_never_headless(setup, lacks):
+    from scripts.hive.placement import Wait
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    two_hosts(setup)
+    write_hive(setup, id="workstation", ui="yes", roles=ALL_ROLES, max_agents=10, **lacks)
+    write_hive(setup, id="anton", ui="no", roles=ALL_ROLES, max_agents=2)
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    assert setup.launcher.select(setup.config, "master", {"id": "master"}) == Wait(MASTER_WAIT)
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
+    refused = fenced.placement_refusal("master", {"id": "master"})
+    assert refused == f"the workstation hive spawns master work: {MASTER_WAIT}"
+    with pytest.raises(controller.SwarmError, match="the workstation hive spawns master work"):
+        fenced.spawn(setup.config, "master", "master name", {"id": "master"})
+
+
 def test_a_dispatcher_spawn_lands_on_a_headless_hive_and_takes_the_workstation_only_when_none_has_room(setup):
     from scripts.hive import registry
     from scripts.swarm import controller
@@ -155,14 +179,14 @@ FALLBACKS = {
         Choice("ws", "no live headless hive takes eng"),
         "subscription",
     ),
-    "headless without the repo waits": (
+    "headless without the repo falls back": (
         [host("ws", "yes"), host("anton", "no", repos=["other"])],
-        Wait("no headless hive for eng lists the repo agentihooks"),
+        Choice("ws", "no headless hive for eng lists the repo agentihooks"),
         "subscription",
     ),
-    "headless with one free place but without the slot waits": (
+    "headless with one free place but without the slot falls back": (
         [host("ws", "yes"), host("anton", "no", agents=3, slots=[])],
-        Wait("no headless hive for eng advertises the claude slot acct"),
+        Choice("ws", "no headless hive for eng advertises the claude slot acct"),
         "subscription",
     ),
     "the fallback honours prefer among UI hives": (
@@ -179,14 +203,14 @@ FALLBACKS = {
         Wait("no headless hive for eng has room"),
         "interactive",
     ),
-    "headless without the login waits": (
+    "headless without the login falls back": (
         [host("ws", "yes"), host("anton", "no", interactive={"claude": ""})],
-        Wait("no headless hive for eng holds the claude login for acct"),
+        Choice("ws", "no headless hive for eng holds the claude login for acct"),
         "interactive",
     ),
-    "one full and one without the slot waits": (
+    "one full and one without the slot falls back": (
         [host("ws", "yes"), host("anton", "no", agents=4), host("pod", "no", slots=[])],
-        Wait("no headless hive for eng advertises the claude slot acct"),
+        Choice("ws", "no headless hive for eng advertises the claude slot acct"),
         "subscription",
     ),
     "full headless and a full workstation wait": (
@@ -199,7 +223,7 @@ FALLBACKS = {
 
 
 @pytest.mark.parametrize("case", FALLBACKS.values(), ids=FALLBACKS.keys())
-def test_a_non_ui_role_takes_a_ui_hive_only_when_no_headless_hive_has_room(case):
+def test_a_non_ui_role_takes_a_ui_hive_only_when_no_headless_hive_takes_it(case):
     hives, expected, route = case
     assert choose("eng", "claude", "acct", route, REPO, hives, NOW) == expected
 

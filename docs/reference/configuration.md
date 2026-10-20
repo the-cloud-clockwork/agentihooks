@@ -95,7 +95,7 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `REDIS_SESSION_TTL` | `86400` | Session TTL in seconds (24 hours). |
 | `REDIS_POSITION_TTL` | `3600` | Position TTL in seconds (1 hour). |
 | `REDIS_KEY_PREFIX` | `agenticore` | Redis key prefix for all stored keys. |
-| `REDIS_SOCKET_TIMEOUT` | `5.0` | Redis socket timeout in seconds. |
+| `REDIS_SOCKET_TIMEOUT` | `5.0` | Hook runtime Redis socket timeout in seconds. The hive join service does not read it. |
 
 ---
 
@@ -439,6 +439,17 @@ Every agent reports gh as logged out at once:
 | Variable | Integrations affected |
 |----------|-----------------------|
 | `IS_EVALUATION` | S3, DynamoDB, PostgreSQL, Lambda |
+
+---
+
+## Master Inbox Intent Grouping
+
+See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every process that hands out a swarm's master inbox pool.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | `on` | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for its intent verdicts before unanswered items go round robin |
 
 ---
 

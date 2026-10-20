@@ -1,7 +1,9 @@
 import json
 import os
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, replace
+from pathlib import Path
 
 from scripts.hive import orders, placement, placement_waits, registry
 from scripts.hive.orders import Ack, LaunchOrder, Orders
@@ -67,6 +69,32 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
     return caps[0] if caps else fallback
 
 
+def _by_origin(hives: list[dict], repo: str) -> list[dict]:
+    """A hive that lists the origin of the swarm's checkout lists the swarm's repo, whatever path it keeps it at."""
+    from scripts.hive.daemon import origin
+
+    identity = origin(Path(repo))
+    return [
+        {**hive, "repos": [*hive["repos"], repo]} if identity and identity in hive["repos"] else hive for hive in hives
+    ]
+
+
+def _first_choice(
+    candidates: list[capacity.Account], choose: Callable[[str], placement.Choice | placement.Wait]
+) -> tuple[capacity.Account, placement.Choice] | placement.Wait:
+    """An account a hive takes outright wins over an earlier account that only a fallback takes."""
+    reason, fallen = placement.Wait("no advertised Claude account has room"), None
+    for row in sorted(candidates, key=lambda row: (row.sessions, row.name)):
+        choice = choose(row.name)
+        if isinstance(choice, placement.Wait):
+            reason = choice
+        elif not choice.fallback:
+            return row, choice
+        else:
+            fallen = fallen or (row, choice)
+    return fallen or reason
+
+
 class HiveLaunch:
     backend = HIVE
     capabilities = frozenset((Capability.SPAWN,))
@@ -91,6 +119,7 @@ class HiveLaunch:
         decision = self.herdr._profile_decision(config, lane, chosen, task, saved, saved, dict(os.environ))
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
+        hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
         if (
             role in registry.UI_ROLES
@@ -113,17 +142,16 @@ class HiveLaunch:
             if row.harness == "claude" and capacity.free_seats(row) and (not account or row.name == account)
         ]
         route_kind = task.get("route_kind", "subscription")
-        reason = placement.Wait("no advertised Claude account has room")
-        for row in sorted(candidates, key=lambda row: (row.sessions, row.name)):
-            choice = placement.choose(role, "claude", row.name, route_kind, config.repo, hives, now)
-            if isinstance(choice, placement.Choice):
-                fallback = (
-                    f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
-                )
-                selected = Selection(decision, choice.hive, row, route_kind, fallback=fallback)
-                return self._record_wait(lane, task, selected)
-            reason = choice
-        return self._record_wait(lane, task, reason)
+        found = _first_choice(
+            candidates, lambda name: placement.choose(role, "claude", name, route_kind, config.repo, hives, now)
+        )
+        if not isinstance(found, placement.Wait):
+            row, choice = found
+            fallback = (
+                f"the task is pinned to {task['hive']}" if choice.fallback and task.get("hive") else choice.fallback
+            )
+            found = Selection(decision, choice.hive, row, route_kind, fallback=fallback)
+        return self._record_wait(lane, task, found)
 
     def _master_selection(self, config, decision, hives, now, rows):
         accounts = {_key(row.name): row for row in rows if row.harness == "claude" and capacity.free_seats(row)}

@@ -44,13 +44,21 @@ PROMOTION_SKIPS = (
     '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")'
     ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push")',
 )
+WATCHER = "queue-fail-fast"
+WATCHER_LOSS = (
+    f' elif $event == "merge_group" and $job == "{WATCHER}" then'
+    ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
+)
 
 
-QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
+QUEUE_TIER = (
+    """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
   if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
     (.select.outputs.scope // "") as $scope
     | (if $event == "merge_group" then
-      ["durations", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
+      ["durations", "split", "unit", "shard-check", "test-count", \""""
+    + WATCHER
+    + """\"]
     else
       ["durations", "select", "test-count", "lint", "semgrep", "sonar"]
       + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
@@ -68,6 +76,7 @@ QUEUE_TIER = """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_reques
   exit 0
 fi
 """
+)
 
 
 def gate_steps(
@@ -92,17 +101,14 @@ def gate_steps(
         )
     if watcher_loss:
         run = (
-            run.replace(', "queue-fail-fast"]', "]")
+            run.replace(f', "{WATCHER}"]', "]")
             .replace(
                 "and all($required[];",
-                'and ($event != "merge_group" or has("queue-fail-fast"))\n      and all($required[];',
+                f'and ($event != "merge_group" or has("{WATCHER}"))\n      and all($required[];',
             )
             .replace(
                 'then .value.result == "success" else .value.result == "skipped" end)',
-                'then .value.result == "success"'
-                ' elif $event == "merge_group" and $job == "queue-fail-fast" then'
-                ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
-                ' else .value.result == "skipped" end)',
+                f'then .value.result == "success"{WATCHER_LOSS} else .value.result == "skipped" end)',
             )
         )
     if docs:

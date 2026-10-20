@@ -64,6 +64,7 @@ shutil.rmtree(sys.argv[1])
 PY
 }
 trap cleanup EXIT
+trap 'echo "worker proof failed at line $LINENO: $BASH_COMMAND (exit $?)" >&2' ERR
 
 bash "$context/docker/swarm-node/scan.sh" --pull-scanner > "$output/scanner-pull.log" 2>&1 &
 scanner_pid=$!
@@ -109,6 +110,7 @@ if [[ "$proof" != startup ]]; then
     chmod -R a+rX "$probe" "$fixtures"
     (
         probes=()
+        names=()
         for case in positive positive-second rejection recovery rollback noexec; do
             volume=/home/worker:uid=10001,gid=10001,exec
             if [[ "$case" == noexec ]]; then
@@ -141,11 +143,22 @@ PYEXIT
             fi
             ) &
             probes+=("$!")
+            names+=("$case")
         done
         status=0
-        for pid in "${probes[@]}"; do wait "$pid" || status=$?; done
+        for index in "${!probes[@]}"; do
+            wait "${probes[$index]}" || {
+                status=$?
+                echo "worker profile probe ${names[$index]} failed with exit $status" >&2
+                tail -n 40 "$output/profile-${names[$index]}.log" "$output/profile-${names[$index]}.json" >&2
+            }
+        done
         if (( status )); then exit "$status"; fi
-        python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures"
+        python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures" || {
+            status=$?
+            echo "worker profile evidence failed with exit $status" >&2
+            exit "$status"
+        }
     ) &
     profile_pid=$!
 fi
