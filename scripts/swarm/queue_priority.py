@@ -116,9 +116,9 @@ def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: d
                 "or stays out for a reason.",
                 fyi=True,
             )
+            displaced.mark(pull)
     except InboxError:
         return
-    displaced.mark(pull)
 
 
 def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:

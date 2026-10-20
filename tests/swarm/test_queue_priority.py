@@ -879,6 +879,25 @@ def test_priority_tells_the_claimant_once_while_it_retries_a_refused_entry(prior
     assert queue_priority.Displaced(p.store, "sw").pulls() == []
 
 
+def test_an_unclaimed_refused_entry_waits_to_tell_a_later_claimant(priority, monkeypatch):
+    p = priority
+    displaced = queue_priority.Displaced(p.store, "sw")
+    displaced.add({"id": "P5", "url": URL[:-1] + "5", "headRefOid": "head5"})
+    sent = []
+    monkeypatch.setattr(
+        queue_priority,
+        "InboxStore",
+        lambda redis: SimpleNamespace(send=lambda *args, **flags: sent.append(args[1])),
+    )
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == []
+    assert "notified" not in displaced.pulls()[0]
+    p.tasks.append({"pr_url": URL[:-1] + "5", "claimed_by": "eng@5"})
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == ["eng@5"]
+    assert displaced.pulls()[0]["notified"] is True
+
+
 @pytest.mark.parametrize(
     "raw, reason",
     [
