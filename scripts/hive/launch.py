@@ -117,6 +117,7 @@ class HiveLaunch:
         self.orders, self.slots = Orders(store.redis), LaunchSlots(store.redis)
         self.sleep = time.sleep
         self.opening = orders.build_opening
+        self.role = ""
 
     def hives(self) -> list[dict]:
         return loaded_hives(self.store)
@@ -133,7 +134,7 @@ class HiveLaunch:
         hives, now = self.hives(), lease.now_ms(self.store)
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
-        role = ROLE_PROFILES.get(decision.profile, decision.profile)
+        role = self.role = ROLE_PROFILES.get(decision.profile, decision.profile)
         hives = [hive for hive in hives if placement.hosts(lane, hive, (decision.profile,))]
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):

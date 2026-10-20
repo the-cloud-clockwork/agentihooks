@@ -4,6 +4,7 @@ import pytest
 
 from scripts.hive.placement import LOCAL_MACHINE, Choice, Wait, overflow
 from scripts.swarm.store import SwarmError
+from scripts.swarm.tick import SpawnError
 from tests.hive.test_controller_launch import setup as setup
 from tests.hive.test_controller_launch import write_hive
 
@@ -90,9 +91,11 @@ def test_the_local_machine_cap_holds_the_spawn_with_the_reason(setup, monkeypatc
     local_agents(setup, 8)
     task = {"id": "task", "seat": "eng-1@fixture"}
     assert fenced.placement_refusal("eng", task) == CAPPED
-    with pytest.raises(SwarmError, match=f"^{CAPPED}$"):
+    with pytest.raises(SpawnError, match=f"^{CAPPED}$") as raised:
         fenced.spawn(setup.config, "eng", "eng name", task)
+    assert raised.value.status == "unavailable"
     setup.herdr.spawn.assert_not_called()
+    fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
 def test_the_local_machine_cap_is_the_swarm_setting(setup, monkeypatch):
@@ -115,7 +118,7 @@ def test_the_cap_counts_only_live_local_workers_of_every_swarm_but_not_the_task_
     local_agents(setup, 1, slug="other")
     put = setup.store.put_agent
     put(setup.config.slug, AgentRecord("master-1", "master", "master"))
-    put(setup.config.slug, AgentRecord("eng-hive", "eng", "on-hive", hive="anton"))
+    put(setup.config.slug, AgentRecord("eng-hive", "eng", "on-hive", seat="eng-8@fixture", hive="anton"))
     pod = {"pod_namespace": "anton", "pod_name": "eng-pod"}
     put(
         setup.config.slug,
@@ -141,15 +144,18 @@ def test_ui_role_work_keeps_waiting_for_its_ui_host(setup, monkeypatch, profile)
 
     fenced = hybrid(setup, monkeypatch)
     setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
-    task = {"id": "task", "profile_decision": {"profile": profile}}
-    assert fenced.placement_refusal("eng", task) == f"no live hive takes {profile}"
+    assert fenced.placement_refusal("eng", {"id": "task"}) == f"no live hive takes {profile}"
+    with pytest.raises(SwarmError, match=f"^no live hive takes {profile}$"):
+        fenced.spawn(setup.config, "eng", "eng name", {"id": "task"})
     setup.herdr.spawn.assert_not_called()
 
 
-def test_a_task_profile_without_a_decision_keeps_the_ui_host_rule(setup, monkeypatch):
+def test_the_role_comes_from_the_hive_profile_decision_not_the_task_fields(setup, monkeypatch):
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
-    assert fenced.placement_refusal("eng", {"id": "task", "profile": "qa"}) == FULL
+    task = {"id": "task", "profile": "qa", "profile_decision": {"profile": "qa"}}
+    assert fenced.placement_refusal("eng", task) == ""
+    assert fenced.runtime.hive_launch.role == "eng"
 
 
 def test_the_local_spawn_refusal_is_the_exact_overflow_text(setup, monkeypatch):

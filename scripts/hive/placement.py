@@ -14,6 +14,7 @@ HIVE = "hive"
 HEADLESS = "headless hive"
 UI_HIVE = "UI hive"
 LOCAL_MACHINE = "local machine"
+LOCAL_FULL = ", and the local machine runs "
 UNRANKED = math.inf
 
 
@@ -110,7 +111,7 @@ def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choi
     if role in UI_ROLES:
         return waited
     if local_agents >= local_max:
-        return Wait(f"{waited.reason}, and the local machine runs {local_agents} of its {local_max} agents")
+        return Wait(f"{waited.reason}{LOCAL_FULL}{local_agents} of its {local_max} agents")
     return Choice(LOCAL_MACHINE, waited.reason)
 
 

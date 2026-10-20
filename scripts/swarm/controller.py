@@ -9,6 +9,7 @@ from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.hive.placement import LOCAL_FULL
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
@@ -135,9 +136,8 @@ class FencedRuntime:
         from scripts.hive import placement_waits
         from scripts.hive.placement import Choice, overflow
 
-        profile = (task.get("profile_decision") or {}).get("profile") or task.get("profile") or ""
         local_max = self.store.config(self.slug).local_max_agents
-        chosen = overflow(profile, waited, _local_agents(self.store, task["id"]), local_max)
+        chosen = overflow(self.runtime.hive_launch.role, waited, _local_agents(self.store, task["id"]), local_max)
         if not isinstance(chosen, Choice):
             return chosen.reason
         placement_waits.observe(self.store, self.slug, lane, task["id"], "", lease.now_ms(self.store))
@@ -154,6 +154,10 @@ class FencedRuntime:
         task = _master_task(lane, task)
         refused = self._refusal(lane, task)
         workstation = _to_workstation(lane, refused)
+        if LOCAL_FULL in refused:
+            from scripts.swarm.tick import SpawnError
+
+            raise SpawnError(refused, "unavailable")
         if refused and not workstation:
             raise SwarmError(refused)
         with lease.kept(self.store, self.slug, self.held):
