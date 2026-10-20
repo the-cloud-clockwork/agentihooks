@@ -88,6 +88,8 @@ def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
         {"tool_name": "sleepy", "tool_input": {}},
         _bash('text(await tools.exec_command({cmd:"ls -la"}));'),
         _bash('await tools.exec_command({workdir:"/w"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\uZZ"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900'),
         {"tool_name": "Read", "tool_input": {"command": "sleep 900"}},
         {"tool_name": "Edit", "tool_input": {"command": "gh run watch 1"}},
         _bash('text("sleep 55"); await tools.exec_command({cmd:"git status"});'),

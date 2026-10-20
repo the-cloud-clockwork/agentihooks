@@ -16,7 +16,6 @@ byte-identical.
 
 from __future__ import annotations
 
-import contextlib
 import glob
 import json
 import os
@@ -378,8 +377,8 @@ def _codex_answers(resp: Any) -> Any:
 # Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
 _EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
-_JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
-_JS_ONLY_ESCAPE = re.compile(r'\\([^"\\/bfnrtu])')
+_JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"?')
+_JS_ONLY_ESCAPE = re.compile(r'\\([^"\\/bfnrtuvx0-9\n\r])')
 _ROLLOUT_TAIL_BYTES = 1 << 20
 
 
@@ -391,11 +390,18 @@ def _exec_fields(program: str, pos: int) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     while field := _EXEC_FIELD.match(program, pos):
         pos = field.end()
-        if text := _JS_STRING.match(program, pos):
+        if program.startswith('"', pos):
+            text = _JS_STRING.match(program, pos)
             pos = text.end()
-            with contextlib.suppress(ValueError):
-                fields[field.group(1)] = json.loads(_JS_ONLY_ESCAPE.sub(r"\1", text.group()))
+            fields[field.group(1)] = _js_string(text.group())
     return fields
+
+
+def _js_string(literal: str) -> str | None:
+    try:
+        return json.loads(_JS_ONLY_ESCAPE.sub(r"\1", literal))
+    except ValueError:
+        return None
 
 
 def _last_exec_calls(transcript: str) -> list[dict[str, Any]]:
@@ -417,6 +423,8 @@ def _codex_workdir(transcript: str, command: str) -> str:
     try:
         calls = _last_exec_calls(transcript)
     except (OSError, ValueError):
+        return ""
+    if any(None in call.values() for call in calls):
         return ""
     workdirs = {call.get("workdir") for call in calls if call.get("cmd") == command}
     return (workdirs.pop() or "") if len(workdirs) == 1 else ""

@@ -25,7 +25,7 @@ def is_wait(tool_name: str | None, tool_input: dict) -> bool:
 def _nested_commands(program: str) -> list[str]:
     from hooks.targets.normalizer import exec_calls
 
-    return [call["cmd"] for call in exec_calls(program) if "cmd" in call]
+    return [call["cmd"] for call in exec_calls(program) if call.get("cmd")]
 
 
 def declared_wait(slug: str, name: str) -> dict | None:
