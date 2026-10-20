@@ -554,8 +554,7 @@ def check_kubectl_mutation(payload: dict) -> None:
 
     When bypass mode is active (operator said ``disable controls``), the
     guard steps aside — the operator is explicitly authorizing live
-    troubleshooting / experimentation — and logs the pass-through instead
-    of staying silent.
+    troubleshooting / experimentation — and logs the pass-through.
     """
     from hooks.hook_manager import BlockAction
 
