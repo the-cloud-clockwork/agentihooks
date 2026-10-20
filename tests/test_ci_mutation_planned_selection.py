@@ -134,9 +134,7 @@ def test_plan_adds_tests_whose_recorded_coverage_reaches_a_changed_function_thro
         (2, zipfile.BadZipFile("File is not a zip file")),
     ],
 )
-def test_plan_retries_an_unreadable_record_once_then_selects_every_test(
-    tmp_path, monkeypatch, capsys, failures, error
-):
+def test_plan_retries_an_unreadable_record_once_then_selects_every_test(tmp_path, monkeypatch, capsys, failures, error):
     (tmp_path / "scripts").mkdir()
     (tmp_path / "tests/nested").mkdir(parents=True)
     (tmp_path / "scripts/core.py").write_text("def judge(value):\n    return value + 1\n")
