@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, writer-lock, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -246,6 +246,10 @@ jobs:
   brain-smoke:
     if: inputs.proof == 'brain-smoke'
     uses: ./.github/workflows/brain-smoke.yml
+
+  writer-lock:
+    if: inputs.proof == 'writer-lock'
+    uses: ./.github/workflows/writer-lock.yml
 
   helm-kind:
     if: inputs.proof == 'helm-kind'

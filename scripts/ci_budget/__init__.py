@@ -34,6 +34,7 @@ BUDGETS = {
     "semgrep": 120,
     "ledger-load": 240,
     "brain-smoke": 90,
+    "writer-lock": 180,
     "kind-due": 60,
     "helm-kind": 480,
     "gate-required": 60,
