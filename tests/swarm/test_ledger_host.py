@@ -182,7 +182,7 @@ def test_newest_on_dev_reads_the_dev_tip_with_a_timeout_and_keeps_tabs_in_the_su
 
 def test_newest_on_dev_asks_github_for_the_merge_of_the_dev_tip(monkeypatch):
     asked = []
-    monkeypatch.setattr(ledger_host.subprocess, "run", Git("abc123\t1000000000\tMerged\n"))
+    monkeypatch.setattr(ledger_host.subprocess, "run", Git("abc123\torigin/dev@{1000000000}\tMerged\n"))
     monkeypatch.setattr(ledger_host, "merged_at", lambda repo, sha: asked.append((repo, sha)) or 1_000_000_300.0)
     assert ledger_host.newest_on_dev(Path("/repo"), 1_000_000_659) == {"newest": "Merged", "merged_minutes": 5}
     assert asked == [(Path("/repo"), "abc123")]
