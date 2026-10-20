@@ -32,6 +32,111 @@ one Redis, which every ledger server and controller of the swarm share.
 
 Joining machines, roles, placement, failover timing and fencing are on the [Hives](../pillars/hives.md) page.
 
+## Serving a live swarm from a distributed controller
+
+A workstation swarm can run its engineer and CI work on a Kubernetes cluster while its master, planners and
+dispatcher stay on the workstation. The swarm first moves to the hosted ledger, which hands its controller lease to
+the cluster's controller; the chart's controller then serves that swarm and launches only its `eng` and `ci` lanes
+as worker Pods. The Anton deployment runs `rig-grade-swarm` this way.
+
+### Move the swarm to the hosted ledger
+
+Run these from the workstation that holds the swarm's controller lease, in a plain terminal: activation refuses a
+session whose environment names both a swarm and an agent.
+
+```bash
+agentihooks swarm rig-grade-swarm set api-url-pending=https://swarm.homeofanton.com
+agentihooks swarm rig-grade-swarm ledger-ready        # JSON; "ready": true once every successor is staged
+agentihooks swarm rig-grade-swarm pause
+agentihooks swarm rig-grade-swarm set api-url=https://swarm.homeofanton.com
+```
+
+- `api-url-pending` stages the destination and records when it was staged. The active ledger address stays as it
+  was, so the swarm keeps writing its current ledger.
+- `ledger-ready` verifies the caller's staged credential against the hosted metadata API and prints the readiness
+  record: `ready`, `missing` (live agents without a current readiness receipt for the staged address),
+  `missing_masters` (configured master seats with no live master), `pending_url`, `active_url` and `staged_at`.
+- `set api-url` to the staged address activates it: in one Redis transaction it transfers the controller lease to
+  the hosted ledger, clears the workstation's controller ownership, writes `api_url` and clears the staged address.
+  From then on every swarm command, tick and wait for this swarm routes to the hosted ledger. Other swarms on the
+  workstation stay local.
+
+Activation refuses, and changes nothing, with:
+
+| Refusal | Cause |
+|---|---|
+| `the ledger endpoint must be activated separately` | `api-url` was set together with another setting. |
+| `the ledger destination must be staged and ready` | The address differs from `api-url-pending`, or nothing is staged. |
+| `ledger activation requires controller authority` | The command ran inside a swarm agent session. |
+| `the ledger successors are not ready` | `ledger-ready` would still report `"ready": false`. |
+| `the swarm must be paused before ledger activation` | The swarm is running or stopping. |
+| `the swarm tick is still running` | A tick pass holds the tick lock; retry after it ends. |
+| `the source controller ownership changed` | Another hive took the controller lease. |
+| `the ledger activation cohort changed` or `the ledger activation changed before commit` | Agents, executions, seats or the lease changed during activation; run it again. |
+
+### Configure the controller
+
+In the `agentihooks-swarm` chart values, `controller.api.swarm` names the served swarm and `controller.api.proof` is
+absent. A `proof` block marks a scratch proof swarm that the controller removes when its proof ends; a live swarm
+never carries one. The Anton overlay:
+
+```yaml
+deployment: distributed
+controller:
+  api:
+    enabled: true
+    port: 8780
+    swarm: rig-grade-swarm
+    signingKey:
+      keyId: anton-launch-1
+      secretName: agentihooks-swarm-launch-signing
+      secretKey: signing-key
+  workers:
+    apiUrl: http://agentihooks-swarm-controller.agentihooks-swarm.svc:8780
+    imageTag: release
+    profile: general
+    cap: 1
+    projects:
+      - github.com/the-cloud-clockwork/agentihooks
+    brain: swarm
+    podPolicyConfigMap: swarm-pod-policy
+```
+
+- `controller.api.swarm` becomes `AGENTIHOOKS_CONTROL_SWARM`. The controller serves the control API for that swarm
+  only; until the swarm exists in the shared Redis it logs
+  `controller: serves the control API for <swarm>, which does not exist yet; waits for it`.
+- With a hosted ledger (`SWARM_URL` set, or any mode other than `local`), the controller needs
+  `AGENTIHOOKS_CONTROLLER_CREDENTIAL` and refuses to start without it.
+- `controller.workers.apiUrl` turns the Kubernetes runtime on. At start the controller logs
+  `controller: built the Kubernetes runtime for <swarm>: workers in <namespace> run <image>:<tag> with profile <profile>`.
+- The other worker values are in [Configure the worker reading](../pillars/swarm.md#configure-the-worker-reading).
+
+### Which work runs where
+
+The routed runtime places each launch by lane and profile:
+
+| Work | Where it runs |
+|---|---|
+| `eng` and `ci` lanes | A worker Pod on the cluster, at most `controller.workers.cap` at once (`cap: 1` runs one). |
+| A task whose profile decision is `frontend`, on any lane | The workstation. |
+| Master seats, planners (`plan`) and the dispatcher (`dispatch`) | The workstation. |
+
+The swarm's own caps (`max-eng-agents`, `max-ci-agents`) still apply; the launch cap is a second ceiling for the
+cluster. With hive placement on, worker hive Pods take `eng`, `ci`, `plan` and `dispatch` as described on the
+[Hives](../pillars/hives.md#placement) page instead.
+
+### Verify
+
+```bash
+agentihooks swarm rig-grade-swarm status --json      # the Anton engineer appears with its execution and task
+kubectl -n agentihooks-swarm logs deploy/agentihooks-swarm-controller | grep 'controller:'
+kubectl -n agentihooks-swarm-workers get pods -l swarm.agentihooks.io/controller-owner
+```
+
+- `swarm status` lists the cluster engineer next to the workstation agents, with its claimed task.
+- The controller log carries the served swarm and the Kubernetes runtime line above, and no secret values.
+- The hosted ledger shows the engineer's ledger writes on its task.
+
 ## Regulated site recipe
 
 For a site where agents may reach only an approved model endpoint and nothing is exposed to the internet: api

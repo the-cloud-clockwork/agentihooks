@@ -178,6 +178,10 @@ replicas that mount the same credential would report the same hive id and agent 
 `workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
 credential is installed.
 
+A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
+CI work as Pods while its master, planners and dispatcher stay on the workstation; see
+[Serving a live swarm from a distributed controller](../reference/deployment-modes.md#serving-a-live-swarm-from-a-distributed-controller).
+
 ## Related pages
 
 - [Deployment modes](../reference/deployment-modes.md): where the controller, ledger and Redis run, and the
