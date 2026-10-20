@@ -28,6 +28,14 @@ durations-3.12-9 flakes-3.12-9 coverage-3.12-9
 durations-3.12-10 flakes-3.12-10 coverage-3.12-10
 durations-3.12-11 flakes-3.12-11 coverage-3.12-11
 durations-3.12-12 flakes-3.12-12 coverage-3.12-12
+durations-3.12-13 flakes-3.12-13 coverage-3.12-13
+durations-3.12-14 flakes-3.12-14 coverage-3.12-14
+durations-3.12-15 flakes-3.12-15 coverage-3.12-15
+durations-3.12-16 flakes-3.12-16 coverage-3.12-16
+durations-3.12-17 flakes-3.12-17 coverage-3.12-17
+durations-3.12-18 flakes-3.12-18 coverage-3.12-18
+durations-3.12-19 flakes-3.12-19 coverage-3.12-19
+durations-3.12-20 flakes-3.12-20 coverage-3.12-20
 """.split()
 )
 
@@ -66,7 +74,7 @@ def evidence(tmp_path, *, reused=False, run_id=123):
     folder.mkdir()
     attest(folder, record)
     jobs = [{"name": "reuse", "conclusion": "success"}]
-    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 13)]
+    jobs += [{"name": f"unit (3.12, {shard})", "conclusion": "success"} for shard in range(1, 21)]
     (folder / "jobs.jsonl").write_text("".join(json.dumps(job) + "\n" for job in jobs))
     artifacts = [{"name": name, "expired": False} for name in sorted(EXPECTED_ARTIFACTS)]
     (folder / "artifacts.jsonl").write_text("".join(json.dumps(item) + "\n" for item in artifacts))
