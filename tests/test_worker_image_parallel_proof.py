@@ -64,6 +64,7 @@ elif args[0] == 'run':
             (state / 'profile-started').touch()
             wait('rebuild')
         if os.environ['FAILURE'] == 'profile':
+            print(f'probe {args[-1]} traceback', file=sys.stderr)
             sys.exit(18)
         print(json.dumps({'codex_probe': {'registered_at': time.time() -\n              (3 if os.environ['FAILURE'] == 'profile-late' else 0)}}))
         if '--name' in args:
@@ -283,6 +284,23 @@ def test_a_failed_selected_worker_proof_never_reports_success(tmp_path, proof, f
     assert result.returncode == status, result.stderr
     assert not (output / "mode-result.json").exists()
     assert not list(output.glob("context-*"))
+
+
+@pytest.mark.parametrize("proof", ["all", "profiles"])
+def test_a_failed_profile_probe_prints_its_case_and_output(tmp_path, proof):
+    result, calls, state, output = run_proof(tmp_path, "profile", proof)
+    assert result.returncode == 18, result.stderr
+    for case in ("positive", "positive-second", "rejection", "recovery", "rollback", "noexec"):
+        assert f"worker profile probe {case} failed with exit 18" in result.stderr
+        assert f"==> {output}/profile-{case}.log <==" in result.stderr
+    assert "probe noexec traceback" in result.stderr
+
+
+@pytest.mark.parametrize("proof", ["all", "profiles"])
+def test_a_failed_profile_evidence_names_its_step(tmp_path, proof):
+    result, calls, state, output = run_proof(tmp_path, "profile-evidence", proof)
+    assert result.returncode == 19, result.stderr
+    assert "worker profile evidence failed with exit 19" in result.stderr
 
 
 @pytest.mark.parametrize(
