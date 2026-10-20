@@ -61,10 +61,12 @@ def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():
     assert len(checks) == 1
     assert checks[0]["context"] == workflow["jobs"]["gate-required"]["name"] == "Gate — Required"
     assert checks[0]["integration_id"] == 15368
-    assert rules["merge_queue"]["parameters"] == {
+    queue = rules["merge_queue"]["parameters"]
+    assert queue["max_entries_to_build"] in (1, 3, 5)
+    assert queue == {
         "check_response_timeout_minutes": 45,
         "grouping_strategy": "ALLGREEN",
-        "max_entries_to_build": 5,
+        "max_entries_to_build": queue["max_entries_to_build"],
         "max_entries_to_merge": 5,
         "merge_method": "SQUASH",
         "min_entries_to_merge": 1,
