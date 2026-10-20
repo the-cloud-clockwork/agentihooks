@@ -2290,6 +2290,52 @@ agentihooks swarm <id> status --json \
   | jq -r '.agents[] | select(.capabilities.push_inbox | not) | .name'
 ```
 
+### Agents panel cells that overflow
+
+A cell in the Agents panel whose text does not fit its column ends in an
+ellipsis, and hovering it shows the cell's full text after the ledger page's
+one second tooltip delay. The actions cell at the row's end holds buttons, not
+text, and keeps their own hover text.
+
+From a page width of 1024 pixels the table lays out at fixed shares: agent,
+lane, profile, overlays, model, transport, task and state each take a set
+percentage, and age, plus execution and terminal on remote swarms, share the
+rest. Dragging a header edge, or focusing its grip and pressing the arrow keys,
+saves column widths that fix the layout at any page width; Reset layout clears
+them. Below 1024 pixels with no saved widths, columns size to their content,
+nothing clips, and the panel scrolls sideways.
+
+- **Ellipsis.** A cell's text stays on one line. Transport and promoted state
+  labels run inline, so they end in the cell's ellipsis. A detail line under a
+  label, such as a Remote Control detail or an execution's location, sits on
+  its own line and ends in its own ellipsis. An agent name ellipsizes inside a
+  narrowed agent column.
+- **Hover text.** One hover text covers the whole cell, wherever the pointer
+  lands: everything the cell shows, joined by spaces, with transport and
+  promoted state given as their summaries.
+
+| Column | Cell shows | Hover text |
+|---|---|---|
+| transport | `push` `no native terminal`, each with its dot | `push · no native terminal` |
+| transport, under Remote Control | `remote control live`, its detail line, the transport labels | `remote control live Remote session with complete detail push · no native terminal` |
+| state, promoted | `working` `promoted` | `working · promoted` |
+| execution | the observed state, how long ago it was seen, the location line | the same words on one line, location included |
+| terminal | the terminal state and its detail, `behind heartbeat` when the execution's terminal lags | the same words on one line |
+| any other column | its value | its value |
+
+The design record requires this of every ledger table, and the design system
+test enforces it for every agent cell on a remote swarm at 1920 by 1080.
+
+#### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| A cell's text is cut off with no ellipsis | A label inside the cell renders as a block or flex box | Ledger page bug: keep labels in agent cells inline, and give a detail line its own ellipsis |
+| Hovering part of a cell shows only that part's text | The element was added after the agent row renderer wrote the cell's hover text | Ledger page bug: build the cell inside the agent row renderer |
+| A tooltip opens without the one second delay | The element uses a native browser tooltip | Ledger page bug: give it hover text through the ledger tooltip module |
+| Below 1024 pixels a cell still ends in an ellipsis | Saved column widths fix the layout at every width | Reset layout clears the saved widths |
+| Below 1024 pixels the panel scrolls sideways | No saved widths: columns size to their content | Expected; widen the page or narrow a column |
+
 ### Delivered then confirmed
 
 The inbox keeps an item and its history until it is closed. A hook or channel claims a pending item and marks
