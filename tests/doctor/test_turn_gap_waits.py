@@ -81,6 +81,21 @@ def test_wait_history_is_read_newest_gap_first_then_by_name():
     assert traces.gap_agents(sample, traces.Limits(turn_gap_minutes=29)) == ["engineer", "ci", "dev"]
 
 
+def test_live_agents_are_read_before_retired_ones_each_newest_gap_first():
+    sample = {"traces": [_quiet("dev"), _quiet("ci"), record([])["traces"][0]], "active": [{"agent": "dev"}]}
+    assert traces.gap_agents(sample, traces.Limits(turn_gap_minutes=29)) == ["dev", "engineer", "ci"]
+    sample["active"].append({"agent": "engineer"})
+    assert traces.gap_agents(sample, traces.Limits(turn_gap_minutes=29)) == ["engineer", "dev", "ci"]
+
+
+def test_the_partial_read_counts_the_live_agents_left_unread():
+    sample = {**record([]), "slug": "sw", "waits_unread": ["engineer", "ci", "dev"], "active": [{"agent": "ci"}]}
+    [partial] = traces.wait_coverage(sample, traces.Limits())
+    assert partial.evidence[1] == "live agents unread: 1"
+    sample["active"].append({"agent": "dev"})
+    assert traces.wait_coverage(sample, traces.Limits())[0].evidence[1] == "live agents unread: 2"
+
+
 def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial():
     sample = {**record([]), "slug": "sw", "waits": {}, "waits_unread": ["engineer"]}
     assert traces.turn_gaps(sample, traces.Limits()) == []
@@ -98,6 +113,7 @@ def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_
     assert (six.evidence[0], six.measure) == ("unread: a, b, c, d, e", 6)
     assert partial.evidence == (
         "unread: engineer",
+        "live agents unread: 0",
         "turn gap findings skip agents whose wait history was not read",
         "each Doctor scan reads the wait history again within its budget",
     )
