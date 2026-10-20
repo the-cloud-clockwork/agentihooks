@@ -397,7 +397,8 @@ Limitations:
 ## Workstation fallback
 
 When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
-login for the master's harness, the hive controller leaves the master to the workstation herdr server. When the
+login for the master's harness, or the hive runtime is disabled on the controller, the hive controller leaves the
+master to the workstation herdr server. When the
 controller's own herdr server answers, the controller spawns the master there. Otherwise it refuses the launch with
 "the workstation hive spawns master work" followed by the placement reason, and the tick reports that line in its
 actions.

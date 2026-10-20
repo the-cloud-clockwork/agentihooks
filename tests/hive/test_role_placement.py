@@ -207,10 +207,13 @@ def test_a_refused_master_spawns_on_the_workstation_herdr_server(setup, monkeypa
     assert fenced.spawn(setup.config, "master", "master name", {"id": seat}) == "placed on the workstation"
     _, lane, name, task = setup.herdr.spawn.call_args.args
     assert (lane, name, task["id"], task["controller_epoch"]) == ("master", "master name", seat, setup.held.epoch)
+    fenced.spawn(setup.config, "master", "master name", {})
+    assert setup.herdr.spawn.call_args.args[3]["id"] == "master"
+    setup.herdr.spawn.reset_mock()
     monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     with pytest.raises(controller.SwarmError, match=f"the workstation hive spawns master work: {MASTER_WAIT}"):
         fenced.spawn(setup.config, "master", "master name", {"id": seat})
-    assert setup.herdr.spawn.call_count == 1
+    setup.herdr.spawn.assert_not_called()
     fenced.runtime.hive_launch.spawn.assert_not_called()
 
 
@@ -224,6 +227,40 @@ def test_only_master_work_moves_to_the_workstation_herdr_server(setup, monkeypat
     with pytest.raises(controller.SwarmError, match="the workstation hive spawns dispatch work"):
         fenced.spawn(setup.config, "dispatch", "dispatch name", {"id": "dispatch"})
     setup.herdr.spawn.assert_not_called()
+
+
+def test_master_fill_spawns_a_refused_seat_two_master_on_the_workstation_herdr_server(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm import controller, lease
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from scripts.swarm_v2 import master_fill
+    from scripts.swarm_v2.masters import MasterSeats
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+    from tests.swarm.test_tick import FakeRuntime
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=1))
+    MasterSeats(store.redis).set_count("sw", 2)
+    herdr = FakeRuntime()
+    herdr._profile_decision = lambda *args: ProfileDecision("master", "lane", "master")
+    herdr._quota_accounts = []
+    held = lease.acquire(store, "sw", "controller")
+    routed = RoutedRuntime(herdr, RuntimeRouter([LocalHerdrRuntime(herdr)]))
+    fenced = controller.FencedRuntime(store, "sw", held, routed, "compose")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
+    actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 1)
+    assert actions == [f"the workstation hive spawns master work: {NO_UI_HIVE}"]
+    assert herdr.masters == []
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    actions = master_fill.run("sw", store.config("sw"), store, fenced, {}, 2)
+    assert len(actions) == 1 and actions[0].startswith("spawned master ")
+    [(_, task)] = herdr.masters
+    assert (task["id"], task["controller_epoch"]) == ("master-2", held.epoch)
+    assert actions[0].endswith("in seat master-2@sw")
 
 
 def host(hive_id: str, ui: str, **fields) -> dict:

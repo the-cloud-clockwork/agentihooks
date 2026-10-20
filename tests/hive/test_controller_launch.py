@@ -940,7 +940,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    monkeypatch.setattr(controller, "_workstation_herdr", lambda: disabled == ["hive"])
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     task = {"id": "master-2"}
     refused = (
         DISABLED.format(backend="hive")
@@ -952,6 +952,8 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     with pytest.raises(SwarmError, match=refused):
         fenced.spawn(setup.config, "master", "master name", task)
     backend.spawn.assert_not_called()
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
+    assert fenced.placement_refusal("master", task) == ""
 
 
 def test_controller_reports_a_placement_wait_for_a_worker_without_a_ui_hive(setup):

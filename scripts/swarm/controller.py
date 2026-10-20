@@ -127,6 +127,7 @@ class FencedRuntime:
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
+        task = {"id": "master", **task} if lane == "master" else task
         refused = self._refusal(lane, task)
         workstation = _to_workstation(lane, refused)
         if refused and not workstation:
@@ -151,7 +152,8 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
 
 
 def _to_workstation(lane: str, refused: str) -> bool:
-    return lane == "master" and refused.startswith(WORKSTATION.format(lane=lane)) and _workstation_herdr()
+    left = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
+    return lane == "master" and left and _workstation_herdr()
 
 
 def _workstation_herdr() -> bool:
