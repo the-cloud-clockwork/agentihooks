@@ -119,19 +119,19 @@ session with an empty `AGENTIHOOKS_SWARM_TASK` still classifies its changes and
 queues a task with no dependency.
 
 Change evidence is the diff from an evidence base to the head: the source task's
-`branch` when the task records one, otherwise the checkout's HEAD. The checkout
+`branch` when the task records one that resolves, otherwise the checkout's HEAD. The checkout
 is the session's worktree, or the primary repository checkout when that
 worktree no longer exists. The evidence base starts at the merge base of the
 SessionStart baseline and the head, then moves past `origin/dev` commits that
-reached the checkout by a pull or fast forward:
+reached the checkout by a pull or fast forward. The first matching row applies:
 
-| Checkout state at SessionEnd | Evidence base |
+| Condition at SessionEnd | Evidence base |
 | --- | --- |
 | No `origin/dev` ref in the repository | SessionStart baseline |
-| The merge base of `origin/dev` and head is at or before the baseline | SessionStart baseline |
+| The merge base of `origin/dev` and head is the baseline or one of its ancestors | SessionStart baseline |
 | `origin/dev` commits after the baseline were pulled or fast forwarded in, and none has a `commit` entry in the checkout's HEAD reflog | Merge base of `origin/dev` and head |
 | `origin/dev` commits after the baseline include one with a `commit` entry in the checkout's HEAD reflog | SessionStart baseline |
-| The baseline holds branch commits not on `origin/dev`, and newer `origin/dev` was merged into the head afterwards | Merge base of `origin/dev` and head |
+| Neither the baseline nor the merge base of `origin/dev` and head contains the other, for example after merging newer `origin/dev` into a branch | Merge base of `origin/dev` and head |
 
 A reflog entry counts when its subject starts with `commit`, which covers
 `commit`, `commit (amend)` and `commit (merge)`. The reflog decides only the
