@@ -537,6 +537,10 @@ PROC_ENVIRON_READS = [
     "cd /proc/1 && cat e*",
     "cd /proc/1; cat *",
     "pushd /proc/self && cat env*",
+    "cat /p*c/1/environ",
+    "cat /pr?c/self/environ",
+    "cat /pr[o]c/1/environ",
+    "P=/pro; cat ${P}c/1/environ",
 ]
 
 PROC_ALLOWED = [
@@ -578,5 +582,6 @@ class TestProcEnvironReads:
         assert verdict is not None
         assert ENV_NAMES_SAFE in verdict
 
-    def test_read_tool_on_an_environ_file_elsewhere_passes(self):
-        assert decide({"tool_name": "Read", "tool_input": {"file_path": "docs/environ"}}) is None
+    @pytest.mark.parametrize("path", ["docs/environ", "proc/1/environ"])
+    def test_read_tool_on_an_environ_file_elsewhere_passes(self, path):
+        assert decide({"tool_name": "Read", "tool_input": {"file_path": path}}) is None

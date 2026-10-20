@@ -76,7 +76,7 @@ def sensitive_kind(token):
         return KIND_CREDENTIAL
     if base == "credentials" and ".aws" in token:
         return KIND_CREDENTIAL
-    if base == "environ" and PROC_DIR.match("/" + token.lstrip("/")):
+    if base == "environ" and token.startswith("/") and PROC_DIR.match("/" + token.lstrip("/")):
         return KIND_ENVIRONMENT
     return None
 
@@ -102,7 +102,6 @@ SECRETISH_NAME = re.compile(
 
 QUOTING = re.compile(r"[\"'\\]")
 PROC_DIR = re.compile(r"/proc\b")
-PROC_FILE = re.compile(r"/proc/[^/\s]+/\S+")
 CD_PROC = re.compile(r"\b(?:cd|pushd)\s+/+proc\b")
 BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
@@ -472,14 +471,18 @@ def env_dump_verdict(command):
 def proc_environ_verdict(command, cwd=""):
     flat = QUOTING.sub("", command)
     in_proc = bool(PROC_DIR.match(cwd) or CD_PROC.search(flat))
-    if not (in_proc or PROC_DIR.search(flat)):
-        return None
-    leaves = [path.rsplit("/", 1)[-1] for path in PROC_FILE.findall(flat)]
-    if in_proc:
-        leaves += flat.split()
-    if BARE_ENVIRON.search(flat) or any(leaf_names_environ(leaf) for leaf in leaves):
+    words = flat.split()
+    named = any(path_reads_environ(w) for w in words) or (in_proc and any(leaf_names_environ(w) for w in words))
+    if named or ((in_proc or PROC_DIR.search(flat)) and BARE_ENVIRON.search(flat)):
         return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
     return None
+
+
+def path_reads_environ(word):
+    *dirs, leaf = word.split("/")
+    if any(fnmatch.fnmatchcase("proc", d) for d in dirs[:-1]):
+        return leaf_names_environ(leaf)
+    return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
 
 
 def leaf_names_environ(leaf):
