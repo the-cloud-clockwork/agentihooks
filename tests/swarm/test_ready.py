@@ -1863,6 +1863,8 @@ def test_a_planted_unmergeable_entry_leaves_the_queue_within_two_full_ticks(env,
     dequeued = []
 
     def graphql(query, values, run):
+        if query == ready.queue_record.GROUPS:
+            raise SwarmError("queue unreadable in this fixture")
         if query == ready.merge_queue.DEQUEUE:
             assert values == {"id": "pull"}
             dequeued.append(values["id"])
@@ -1874,6 +1876,7 @@ def test_a_planted_unmergeable_entry_leaves_the_queue_within_two_full_ticks(env,
 
     monkeypatch.setattr(ready.merge_queue, "graphql", graphql)
     monkeypatch.setattr(cli.ledger_events, "views", lambda urls, cache=None: {url: ledger.pulls[url] for url in urls})
+    monkeypatch.setattr(cli.ledger_events, "view", lambda url, *args, **kwargs: ledger.pulls.get(url))
     monkeypatch.setattr(stack, "shell", Shell())
     for tick_number in (1, 2):
         monkeypatch.setattr(cli, "now_ms", lambda: NOW + tick_number * 60_000)
