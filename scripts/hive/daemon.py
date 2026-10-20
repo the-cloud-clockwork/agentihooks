@@ -24,6 +24,7 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
+RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
@@ -82,12 +83,22 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def run(redis: "Redis") -> None:
+def run(connect: Callable[[], "Redis"]) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
     local_id = hive_id()
+    failures = 0
     while True:
-        started = time.monotonic()
-        beat(redis, local_id)
-        scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+        try:
+            redis = connect()
+            while True:
+                started = time.monotonic()
+                beat(redis, local_id)
+                failures = 0
+                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+        except (ConnectionError, TimeoutError):
+            time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
+            failures += 1
 
 
 def unit(binary: str) -> str:
