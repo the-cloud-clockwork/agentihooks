@@ -16,7 +16,7 @@ WAIT_SECONDS = 1.0
 
 
 def kick(home: Path | None = None) -> bool:
-    """Run `agentihooks deps ensure` when the last full check is stale for up to WAIT_SECONDS, then kill its process group."""
+    """Run a stale `agentihooks deps ensure` for up to WAIT_SECONDS, then kill its process group."""
     try:
         ok_at = json.loads(((home or _home()) / "deps.stamp").read_text()).get("ok_at", 0)
     except (OSError, ValueError):
