@@ -89,9 +89,44 @@ guard, so a free seat takes any claimable urgent, high or normal task first.
 Below delegate the rank order alone does this. The dispatcher never proposes
 such a task for a higher rank or puts it at the head of the queue. An open
 documentation follow-up with no rank, such as one generated before tasks carried
-rank low, sorts as low too. The task depends on its source task only when that
-id is a task on the ledger; a session bound to a seat name such as master queues
-it with no dependency.
+rank low, sorts as low too. The task depends on its source task, which must be
+a task on the ledger.
+
+## Sessions that file no documentation task
+
+A swarm session's source task comes from `AGENTIHOOKS_SWARM_TASK`. When that
+value names no task on the ledger, such as the `master` seat or a task removed
+since the session started, the request completes with the verdict
+`no ledger task` and size `none`. No classifier call runs and no task add
+reaches the ledger, so the ledger raises no refused-add sync alert. A bound
+session with an empty `AGENTIHOOKS_SWARM_TASK` still classifies its changes and
+queues a task with no dependency.
+
+Delivered changes are counted only from commits the session authored. When
+`origin/dev` advanced past the SessionStart baseline, the evidence base moves to
+the merge base of `origin/dev` and the session's head, unless the checkout's HEAD
+reflog holds a `commit` entry for one of those `origin/dev` commits. A fast
+forward or pull of the checkout therefore contributes no changes; commits on the
+session's branch that are not on `origin/dev` still count.
+
+| Session state at SessionEnd | Evidence base |
+| --- | --- |
+| No `origin/dev` ref in the repository | SessionStart baseline |
+| Baseline already ahead of `origin/dev` | SessionStart baseline |
+| `origin/dev` pulled or fast forwarded in after the baseline | Merge base of `origin/dev` and head |
+| The session committed changes that are now on `origin/dev` | SessionStart baseline |
+| Branch diverged from `origin/dev` | Merge base of `origin/dev` and head |
+
+A session with no source task and no changes left after this records the
+`no changes` verdict without a model call.
+
+### Troubleshooting
+
+| Symptom | Cause and check |
+| --- | --- |
+| A master or seat session left no documentation task | Expected. Its request record under `~/.agentihooks/documentation/`, named by the SHA-256 of the session id, has status `complete` and verdict source `no ledger task`. |
+| A session that only pulled `dev` reported no changes | Expected. Pulled commits are not delivered work; only commits in the HEAD reflog with a `commit` subject count. |
+| Delivered commits were missed | The commits were created outside this checkout, for example in another worktree, so this checkout's reflog holds no `commit` entry for them. Document the change from its own task. |
 
 Classifier or ledger failures retain a pending request. Later bound session
 completions retry a bounded number of requests from the same swarm, oldest
