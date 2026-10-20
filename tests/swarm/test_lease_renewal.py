@@ -145,14 +145,28 @@ def test_a_tick_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_i
     held = lease.acquire(store, "sw", "home")
     seen = []
     ledger = controller.FencedLedger(
-        store, "sw", held, SimpleNamespace(update_task=lambda *args, **kwargs: seen.append(lease.EPOCH.get()))
+        store,
+        "sw",
+        held,
+        SimpleNamespace(
+            update_task=lambda *args, **kwargs: seen.append((args, kwargs, lease.EPOCH.get())),
+            read=lambda: seen.append(((), {}, lease.EPOCH.get())),
+        ),
     )
     ledger.update_task("sw", "t", {})
     ledger.update_task(slug="sw", task_id="t", fields={})
     ledger.update_task("peer", "t", {})
     ledger.update_task(slug="peer", task_id="t", fields={})
     ledger.update_task("idle", "t", {})
-    assert seen == [held.epoch, held.epoch, peer.epoch, peer.epoch, None]
+    ledger.read()
+    assert seen == [
+        (("sw", "t", {}), {}, held.epoch),
+        ((), {"slug": "sw", "task_id": "t", "fields": {}}, held.epoch),
+        (("peer", "t", {}), {}, peer.epoch),
+        ((), {"slug": "peer", "task_id": "t", "fields": {}}, peer.epoch),
+        (("idle", "t", {}), {}, None),
+        ((), {}, held.epoch),
+    ]
     assert held.epoch != peer.epoch
     assert lease.EPOCH.get() is None
 
