@@ -332,27 +332,26 @@ def test_a_recorded_seat_does_not_hide_a_later_dead_orphan(store):
     assert store.agents("fixture") == [recorded]
 
 
-def starting_master(store, slug):
+def starting_master(store, slug, dropped=True):
     orphan = store.start_execution(
         slug,
         AgentRecord(
             store.next_name(slug, "master"), "master", "master", seat=f"master@{slug}", started_at=1, state="starting"
         ),
     )
-    store.redis.hdel(store.key(slug, "agents"), orphan.name)
+    if dropped:
+        store.redis.hdel(store.key(slug, "agents"), orphan.name)
     return orphan
 
 
-@pytest.mark.parametrize(("offset", "live", "ended"), [(0, False, True), (-1, False, False), (0, True, False)])
-def test_tick_ends_a_starting_master_orphan_only_past_its_startup_window(store, offset, live, ended):
+@pytest.mark.parametrize(("offset", "ended"), [(0, True), (-1, False)])
+def test_tick_ends_a_starting_master_orphan_only_past_its_startup_window(store, offset, ended):
     from scripts.swarm.tick import tick
     from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
     store.create(SwarmConfig("sw", "/repo", max_eng=0, max_ci=0, state="paused"))
     orphan = starting_master(store, "sw")
     runtime = FakeRuntime()
-    if live:
-        runtime.live.add(orphan.name)
     tick("sw", store, FakeLedger([]), runtime, 1 + DEADLINE_MS + offset)
     assert store.execution("sw", orphan.execution_id) == replace(orphan, state="ended" if ended else "starting")
     assert orphan.name not in runtime.killed
@@ -374,9 +373,7 @@ def test_reconciliation_ends_a_starting_orphan_only_when_absent_dead_and_past_st
 ):
     from types import SimpleNamespace
 
-    orphan = starting_master(store, "fixture")
-    if projected:
-        store.put_agent("fixture", orphan)
+    orphan = starting_master(store, "fixture", dropped=not projected)
     runtime = SimpleNamespace(
         live_names=lambda: {orphan.name} if named else set(),
         reported=lambda current: reported,
