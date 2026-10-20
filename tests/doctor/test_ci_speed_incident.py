@@ -152,6 +152,36 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
         assert len(texts) == 1
 
 
+def test_judged_runs_do_not_notify_again_in_the_next_window(store, monkeypatch):  # noqa: F811
+    status(monkeypatch)
+    records = []
+    for identity in (1, 2):
+        run = waiting(identity, "2026-10-19T16:40:00Z")
+        run.update(event="merge_group", status="completed", conclusion="success")
+        run["jobs"][0].update(
+            started_at="2026-10-19T16:59:00Z",
+            completed_at="2026-10-19T17:00:00Z",
+            status="completed",
+            runner_name="runner",
+        )
+        records.append(run)
+    monkeypatch.setattr(
+        ci_speed_read,
+        "read",
+        lambda *args, **kwargs: snapshot(records, complete=False, error="pagination pending"),
+    )
+    store.redis.set(store.key(DOCTOR, "ci-speed"), json.dumps({"last": AFTER - 60000}))
+    loop.speed(store, DOCTOR, WATCHED, AFTER)
+    judgments = loop.verdicts(store, DOCTOR)
+    for finding in details(store):
+        if finding["kind"] in ("ci runner wait", "ci tier wall time"):
+            judgments.judge(finding["id"], "established", "already investigated", "reader", AFTER)
+    assert all(len(texts) == 1 for texts in items(store).values())
+    loop.speed(store, DOCTOR, WATCHED, AFTER + 600000)
+    for texts in items(store).values():
+        assert len(texts) == 1
+
+
 def test_a_status_page_read_failure_never_holds_findings(store, monkeypatch):  # noqa: F811
     status(monkeypatch, down=True)
     runs(monkeypatch, [waiting(n, "2026-10-19T15:51:00Z") for n in range(1, 3)])
