@@ -1677,8 +1677,8 @@ survives `remove` and a swarm created again under the same id reads it.
 
 A hook knows a session belongs to a swarm from its environment: `AGENTIHOOKS_AGENT_NAME` names a swarm lane and
 `AGENTIHOOKS_SWARM` (or the slug inside the name) names the swarm. A session can lose those variables partway
-through its life. When the launch wrapper dies, the agent is reparented and the swarm pin strips the identity from
-its later hooks. Without a pin, those hooks treat the session as an ordinary one: no preparation directive, no
+through its life. When the launch wrapper dies, the agent is reparented and `swarm_pin.unpin` strips those variables from
+its later hooks. Without the session pin described below, those hooks treat the session as an ordinary one: no preparation directive, no
 hard gate and no marker, however large the context grows. One tick spawned master reached 930 thousand tokens this
 way before the operator shut it down.
 
