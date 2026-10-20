@@ -951,8 +951,8 @@ recorded pull request: the first entry of `split_pulls` when the task is split,
 otherwise its `pr_url`. Later calls read it back under a file lock, so two
 reviews racing on a fresh pull request agree on which one is first. The first
 pull request is the one the first review sees: when `swarm pr` records one
-pull request and then another before any review, the second one counts as
-`rounds` and the first one gets its own hashed counter.
+pull request and then another before any review, the second one is the first
+pull request and counts as `rounds`; the replaced one spends no rounds.
 
 Rounds spent before a pull request exists therefore never count against the
 first pull request recorded later. A worker who runs three review rounds, then
