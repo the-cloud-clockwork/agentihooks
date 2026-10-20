@@ -106,11 +106,12 @@ def _patch_deletions(tool_input: dict, cwd: Path) -> set[Path]:
 
 
 def _own_worktree(root: Path) -> bool:
-    base = Path(os.environ.get("WORKTREE_ROOT", Path.home() / "dev" / "worktrees")).resolve()
-    if root.parent.parent != base:
+    base = Path(os.environ.get("WORKTREE_ROOT") or Path.home() / "dev" / "worktrees").resolve()
+    tmp = root.parent.name == "_tmp"
+    if (root.parent.parent.parent if tmp else root.parent.parent) != base:
         return False
     try:
-        return naming.is_worktree(root.name, os.environ)
+        return naming.is_worktree(root.name, os.environ, tmp=tmp)
     except naming.NamingError:
         return False
 
