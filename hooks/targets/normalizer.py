@@ -16,6 +16,7 @@ byte-identical.
 
 from __future__ import annotations
 
+import contextlib
 import glob
 import json
 import os
@@ -377,26 +378,23 @@ def _codex_answers(resp: Any) -> Any:
 # Codex 0.162.1 shell hooks omit workdir; it sits in the rollout's latest exec program.
 _EXEC_CALL = re.compile(r"exec_command\(\s*\{")
 _EXEC_FIELD = re.compile(r"[\s,]*(\w+)\s*:\s*(?:[^\"\s,}][^,}]*)?")
+_JS_STRING = re.compile(r'"(?:[^"\\]|\\.)*"')
+_JS_ONLY_ESCAPE = re.compile(r'\\([^"\\/bfnrtu])')
 _ROLLOUT_TAIL_BYTES = 1 << 20
 
 
 def exec_calls(program: str) -> list[dict[str, Any]]:
-    decoder = json.JSONDecoder()
-    calls = []
-    for start in _EXEC_CALL.finditer(program):
-        try:
-            calls.append(_exec_fields(program, start.end(), decoder))
-        except ValueError:
-            continue
-    return calls
+    return [_exec_fields(program, start.end()) for start in _EXEC_CALL.finditer(program)]
 
 
-def _exec_fields(program: str, pos: int, decoder: json.JSONDecoder) -> dict[str, Any]:
+def _exec_fields(program: str, pos: int) -> dict[str, Any]:
     fields: dict[str, Any] = {}
     while field := _EXEC_FIELD.match(program, pos):
         pos = field.end()
-        if program.startswith('"', pos):
-            fields[field.group(1)], pos = decoder.raw_decode(program, pos)
+        if text := _JS_STRING.match(program, pos):
+            pos = text.end()
+            with contextlib.suppress(ValueError):
+                fields[field.group(1)] = json.loads(_JS_ONLY_ESCAPE.sub(r"\1", text.group()))
     return fields
 
 
