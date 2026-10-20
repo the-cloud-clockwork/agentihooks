@@ -47,7 +47,7 @@ class Budget:
 def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) -> Callable[[str, dict], dict]:
     host = (environ.get("LANGFUSE_HOST") or DEFAULT_HOST).rstrip("/")
     auth = (environ.get("LANGFUSE_PUBLIC_KEY", ""), environ.get("LANGFUSE_SECRET_KEY", ""))
-    send = _through_ingress if httpx.URL(host).host == httpx.URL(DEFAULT_HOST).host else httpx.get
+    send = _through_ingress if host == DEFAULT_HOST else httpx.get
 
     def get(path: str, params: dict) -> dict:
         if not all(auth):

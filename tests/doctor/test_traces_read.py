@@ -509,6 +509,15 @@ def test_reads_reach_langfuse_through_the_internal_ingress_while_the_public_tunn
     assert request.extensions["timeout"]["read"] == traces_read.Budget.request_seconds
 
 
+@pytest.mark.parametrize("host", ["http://langfuse.homeofanton.com", "https://langfuse.homeofanton.com:8443"])
+def test_only_the_verified_default_origin_is_sent_to_the_internal_ingress(monkeypatch, host):
+    sent = _routes(monkeypatch, lambda request: httpx.Response(200, json={"data": []}))
+    env = {"LANGFUSE_HOST": host, "LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"}
+    with pytest.raises(httpx.HTTPStatusError):
+        traces_read.client(env)("traces", {})
+    assert [str(request.url) for request in sent] == [f"{host}/api/public/traces"]
+
+
 @pytest.mark.parametrize("failure", ["backend 503", "internal timeout"])
 def test_a_real_backend_failure_on_the_internal_path_still_raises_the_reader_finding(monkeypatch, tmp_path, failure):
     def internal(request):
