@@ -109,6 +109,7 @@ if [[ "$proof" != startup ]]; then
     chmod -R a+rX "$probe" "$fixtures"
     (
         probes=()
+        names=()
         for case in positive positive-second rejection recovery rollback noexec; do
             volume=/home/worker:uid=10001,gid=10001,exec
             if [[ "$case" == noexec ]]; then
@@ -145,9 +146,11 @@ PYEXIT
         done
         status=0
         for index in "${!probes[@]}"; do
-            wait "${probes[$index]}" && continue || status=$?
-            echo "worker profile probe ${names[$index]} failed with exit $status" >&2
-            tail -n 40 "$output/profile-${names[$index]}.log" "$output/profile-${names[$index]}.json" >&2
+            wait "${probes[$index]}" || {
+                status=$?
+                echo "worker profile probe ${names[$index]} failed with exit $status" >&2
+                tail -n 40 "$output/profile-${names[$index]}.log" "$output/profile-${names[$index]}.json" >&2
+            }
         done
         if (( status )); then exit "$status"; fi
         python3 "$probe/profile_evidence.py" "$output" "$fixture" "$revision" "$fixtures" || {
