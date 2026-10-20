@@ -71,6 +71,40 @@ def test_a_job_off_the_lane_is_refused_with_its_reason(block, problem):
     assert lanes.lane_problem(block) == problem
 
 
+CALLED = {
+    "group": "${{ github.workflow == 'Replay' && " + lanes.LANE + " || format('replay-{0}', github.run_id) }}",
+    "queue": "${{ github.workflow == 'Replay' && 'max' || 'single' }}",
+}
+
+
+def test_a_callable_workflow_takes_the_lane_on_its_own_runs_and_a_run_group_under_a_caller():
+    assert lanes.problems(_workflow(CALLED)) == []
+    loaded = yaml.safe_load((ROOT / lanes.WORKFLOWS / "ledger-load.yml").read_text())
+    assert lanes.problems({**loaded, "on": {"workflow_dispatch": None}}) == []
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"group": CALLED["group"].replace("'Replay'", "'Other'")},
+        {"queue": CALLED["queue"].replace("'Replay'", "'Other'")},
+        {"queue": "${{ github.workflow == 'Replay' && 'single' || 'max' }}"},
+        {"queue": "max"},
+        {"group": CALLED["group"].replace("github.run_id", "github.ref")},
+        {"group": CALLED["group"].replace("'Replay' &&", "'Replay' ||")},
+        {"cancel-in-progress": True},
+    ],
+)
+def test_a_callable_lane_that_another_name_or_group_could_escape_is_refused(change):
+    assert lanes.problems(_workflow({**CALLED, **change})) != []
+
+
+def test_a_callable_lane_must_name_its_own_workflow():
+    workflow = _workflow(CALLED)
+    workflow["name"] = "Other"
+    assert lanes.problems(workflow) == ["job replay has no shared hosted lane concurrency group"]
+
+
 def test_a_workflow_level_lane_covers_every_job():
     assert lanes.problems(_workflow(LANED, a={}, b={})) == []
 

@@ -1,10 +1,35 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ -z "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
+  if [[ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]]; then
+    HIVE_GITHUB_AUTH_MODE=app
+  elif [[ -n "${GITHUB_TOKEN:-}" ]]; then
+    HIVE_GITHUB_AUTH_MODE=token
+  fi
+fi
+if [[ -n "${HIVE_GITHUB_AUTH_MODE:-}" ]]; then
+  export HIVE_GITHUB_AUTH_MODE
+  if [[ "${AGENTIHOOKS_GITHUB_AUTH_READY:-}" != 1 ]]; then
+    exec python3 -m scripts.github_app_cli exec bash "$0" "$@"
+  fi
+fi
 umask 077
 export AGENTIHOOKS_HOME="${AGENTIHOOKS_HOME:-$HOME/.agentihooks}"
 export HIVE_REPO_ROOT="${HIVE_REPO_ROOT:-$HOME/dev}"
 mkdir -p "$AGENTIHOOKS_HOME" "$HIVE_REPO_ROOT"
+git config --global credential.https://github.com.helper \
+  "!$(command -v python3) -m scripts.github_app_cli credential"
+if [[ "${HIVE_GITHUB_AUTH_MODE:-}" == app ]]; then
+  token_file="$AGENTIHOOKS_HOME/github-token"
+  python3 -m scripts.github_app_cli token > "$token_file.next"
+  mv "$token_file.next" "$token_file"
+  (
+    while sleep 1800; do
+      python3 -m scripts.github_app_cli token > "$token_file.next" && mv "$token_file.next" "$token_file"
+    done
+  ) </dev/null >/dev/null 2>&1 &
+fi
 python3 - <<'PY'
 import json, os, re, subprocess
 from pathlib import Path
@@ -18,6 +43,11 @@ for repo in json.loads(os.environ.get('HIVE_REPOSITORIES', '[]')):
     if not (target / '.git').is_dir():
         subprocess.run(['git', 'clone', '--branch', repo.get('ref', 'dev'), '--', repo['url'], str(target)], check=True)
 PY
+bundle_dir="$HIVE_REPO_ROOT/agentihooks-bundle"
+if [[ -n "${HIVE_BUNDLE_URL:-}" && ! -d "$bundle_dir/.git" ]]; then
+  git clone --branch "${HIVE_BUNDLE_REF:-dev}" -- "$HIVE_BUNDLE_URL" "$bundle_dir" \
+    || echo "worker-hive: bundle clone failed; init runs on the package roles alone" >&2
+fi
 
 if [[ -n "${HIVE_CREDENTIAL_FILE:-}" ]]; then
   install -m 0600 "$HIVE_CREDENTIAL_FILE" "$AGENTIHOOKS_HOME/hive.env"
@@ -70,7 +100,7 @@ AllowAgentForwarding no
 GatewayPorts no
 PermitTunnel no
 PermitUserEnvironment no
-SetEnv PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin AGENTIHOOKS_HOME=$AGENTIHOOKS_HOME
+SetEnv PATH=$HOME/.local/bin:/opt/venv/bin:/usr/local/bin:/usr/bin:/bin NPM_CONFIG_PREFIX=$HOME/.local AGENTIHOOKS_HOME=$AGENTIHOOKS_HOME
 LogLevel VERBOSE
 EOF
   "$sshd" -t -f "$ssh_state/sshd_config"
@@ -80,8 +110,17 @@ EOF
   kill -0 "$sshd_pid"
 fi
 bundle=()
-[[ -d "$HIVE_REPO_ROOT/agentihooks-bundle" ]] && bundle=(--bundle "$HIVE_REPO_ROOT/agentihooks-bundle")
-agentihooks init "${bundle[@]}" --profile "${HIVE_PROFILE:-engineer}"
+[[ -n "${HIVE_BUNDLE_URL:-}" && -d "$bundle_dir/.git" ]] && bundle=(--bundle "$bundle_dir")
+if (( ${#bundle[@]} )) && ! agentihooks init "${bundle[@]}"; then
+  echo "worker-hive: agentihooks init with the bundle failed; init runs on the package roles alone" >&2
+  bundle=()
+fi
+if (( ! ${#bundle[@]} )); then
+  agentihooks bundle unlink
+  agentihooks init
+fi
+agentihooks deps ensure \
+  || echo "worker-hive: agentihooks deps ensure failed; each launch retries the bundle dependencies" >&2
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
   "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"

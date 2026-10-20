@@ -1058,10 +1058,12 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "graphql",
                 "-f",
                 "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft body "
+                "timelineItems(last:1,itemTypes:[REOPENED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT])"
+                "{nodes{...on ReopenedEvent{createdAt} ...on AddedToMergeQueueEvent{createdAt}}} "
                 "commits(last:1){nodes{commit{id oid committedDate "
                 'file(path:".github/workflows"){object{...on Tree{entries{name object{...on Blob{text}}}}}} '
                 "statusCheckRollup{contexts(first:100){"
-                "nodes{...on CheckRun{databaseId name conclusion completedAt isRequired(pullRequestNumber:7) "
+                "nodes{...on CheckRun{databaseId name conclusion startedAt completedAt isRequired(pullRequestNumber:7) "
                 "checkSuite{app{databaseId} workflowRun{databaseId event workflow{id name resourcePath}}}} "
                 "...on StatusContext{context state createdAt isRequired(pullRequestNumber:7)}} "
                 "pageInfo{hasNextPage endCursor}}} checkSuites(first:100){"

@@ -86,11 +86,11 @@ container = pod['containers'][0]
 env = {v['name']: v['value'] for v in container['env'] if 'value' in v}
 assert env['HIVE_SSH_AUTHORIZED_KEYS_FILE'] == '/run/hive-join/ssh/authorized_keys'
 assert env['HIVE_SSH_HOST_KEY_FILE'] == '/run/hive-join/ssh/host_key'
-assert env['HIVE_SSH_PORT'] == '2222' and env['HIVE_PROFILE'] == 'engineer'
+assert env['HIVE_SSH_PORT'] == '2222' and 'HIVE_PROFILE' not in env
 assert container['ports'] == [{'name': 'ssh', 'containerPort': 2222}]
 join = next(v for v in pod['volumes'] if v['name'] == 'join')
 assert [i['path'] for i in join['secret']['items']] == ['credential', 'ssh/authorized_keys', 'ssh/host_key']
-print('worker hive sshd keys, host key, port and profile: passed')
+print('worker hive sshd keys, host key and port, with no profile flag: passed')
 PY
 if helm template proof "$chart" --set workers.replicas=1 \
   --set workers.credentialSecret.name=member --set workers.credentialSecret.key=credential \
