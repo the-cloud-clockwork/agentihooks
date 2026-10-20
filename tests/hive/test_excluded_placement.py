@@ -138,11 +138,10 @@ def test_a_ui_role_falls_back_to_a_headless_hive_when_no_headed_hive_is_live():
 
 
 def test_a_profile_or_lane_in_the_excluded_list_keeps_the_agent_off_that_hive():
-    hives = [headless(heartbeat_at=NOW, excluded=["frontend"]), headed(heartbeat_at=NOW, excluded=["eng"])]
-    assert placement.place("eng", "claude", "acct", "subscription", REPO, hives, NOW, ("eng", "frontend")) == (
-        placement.Wait("no live hive takes eng")
-    )
-    assert placement.place("eng", "claude", "acct", "subscription", REPO, hives, NOW, ("eng", "engineer")) == "anton"
+    assert not placement.hosts("frontend", headless(excluded=["frontend"]), ("eng", "frontend"))
+    assert not placement.hosts("eng", headed(excluded=["eng"]), ("eng", "engineer"))
+    assert not placement.hosts("frontend", headed(excluded=["eng"]), ("eng", "frontend"))
+    assert placement.hosts("eng", headless(excluded=["frontend"]), ("eng", "engineer"))
 
 
 def test_a_hive_never_takes_an_agent_past_max_agents():

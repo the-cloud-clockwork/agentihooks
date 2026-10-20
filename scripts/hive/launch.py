@@ -134,6 +134,7 @@ class HiveLaunch:
         hives = [hive for hive in hives if hive["id"] == task["hive"]] if task.get("hive") else hives
         hives = _by_origin(hives, config.repo)
         role = ROLE_PROFILES.get(decision.profile, decision.profile)
+        hives = [hive for hive in hives if placement.hosts(role, hive, (lane, decision.profile))]
         harness = saved.get("harness") or chosen.get("agent") or "claude"
         if harness not in ("claude", "auto"):
             return self._record_wait(lane, task, placement.Wait("Codex hive placement is not enabled"))
@@ -150,10 +151,7 @@ class HiveLaunch:
         ]
         route_kind = task.get("route_kind", "subscription")
         found = _first_choice(
-            candidates,
-            lambda name: placement.choose(
-                role, "claude", name, route_kind, config.repo, hives, now, (lane, decision.profile)
-            ),
+            candidates, lambda name: placement.choose(role, "claude", name, route_kind, config.repo, hives, now)
         )
         if not isinstance(found, placement.Wait):
             row, choice = found

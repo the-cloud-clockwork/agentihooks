@@ -80,16 +80,9 @@ def _pick(
 
 
 def choose(
-    role: str,
-    harness: str,
-    slot: str,
-    route_kind: str,
-    repo: str,
-    hives: list[dict],
-    now: int,
-    aliases: tuple[str, ...] = (),
+    role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int
 ) -> Choice | Wait:
-    candidates = [hive for hive in hives if live(hive, now) and hosts(role, hive, aliases)]
+    candidates = [hive for hive in hives if live(hive, now) and hosts(role, hive)]
     if not candidates:
         return Wait(f"no live hive takes {role}")
     ui_first = role in UI_ROLES
@@ -107,17 +100,8 @@ def choose(
     return Choice(fallback.hive, picked.reason) if isinstance(fallback, Choice) else picked
 
 
-def place(
-    role: str,
-    harness: str,
-    slot: str,
-    route_kind: str,
-    repo: str,
-    hives: list[dict],
-    now: int,
-    aliases: tuple[str, ...] = (),
-) -> str | Wait:
-    chosen = choose(role, harness, slot, route_kind, repo, hives, now, aliases)
+def place(role: str, harness: str, slot: str, route_kind: str, repo: str, hives: list[dict], now: int) -> str | Wait:
+    chosen = choose(role, harness, slot, route_kind, repo, hives, now)
     return chosen.hive if isinstance(chosen, Choice) else chosen
 
 
