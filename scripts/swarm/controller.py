@@ -3,24 +3,30 @@ import json
 import os
 import sys
 import uuid
+from collections.abc import Mapping
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
-from scripts.swarm.store import RedisStore, SwarmError, connect
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.control_service import ControlService
 
-LOCAL, DISTRIBUTED = "local", "distributed"
+LOCAL, HYBRID, DISTRIBUTED = "local", "hybrid", "distributed"
 NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
+
+
+def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
+    machine = environ.get("AGENTIHOOKS_DEPLOYMENT", LOCAL)
+    return HYBRID if machine == LOCAL and config.hive_placement else machine
 
 
 class FencedLedger:
