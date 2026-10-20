@@ -285,7 +285,8 @@ def test_the_mounted_ledger_ca_replaces_the_one_init_wrote_with_the_system_roots
     assert ledger_link.transport({"AGENTIHOOKS_HOME": str(home)})["context"].cert_store_stats()["x509_ca"] > 1
 
 
-def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path):
+def test_without_a_mounted_ledger_ca_the_one_init_wrote_stays(tmp_path, monkeypatch):
+    monkeypatch.delenv("LEDGER_CA_PEM", raising=False)
     result, _, home, _ = startup(tmp_path)
     assert result.returncode == 0, result.stderr
     assert (home / "ledger-ca.pem").read_text() == "hosted ledger CA\n"

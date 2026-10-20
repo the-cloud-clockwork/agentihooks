@@ -301,7 +301,9 @@ def test_merge_group_runs_unit_shards_on_python_312_only():
     workflow = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())
     legs = workflow["jobs"]["unit"]["strategy"]["matrix"]
     assert legs["python-version"] == ["3.12"]
-    assert "exclude" not in legs
+    queue_only = "${{ github.event_name == 'merge_group' && '3.12' || '' }}"
+    assert {entry["python-version"] for entry in legs["exclude"]} == {queue_only}
+    assert [entry["shard"] for entry in legs["exclude"]] == legs["shard"][12:]
     shard_check = workflow["jobs"]["shard-check"]["strategy"]["matrix"]["python-version"]
     assert shard_check == ["3.12"]
 
