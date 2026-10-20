@@ -104,21 +104,22 @@ def leave_out(store: RedisStore, tasks: list[dict], url: str, head: str, reason:
 
 
 def retrying(store: RedisStore, tasks: list[dict], displaced: Displaced, pull: dict, reason: str) -> None:
-    if pull.get("notified"):
+    claimants = [task["claimed_by"] for task in owners(tasks, [pull["url"]])]
+    if pull.get("notified") or not claimants:
         return
     try:
-        for task in owners(tasks, [pull["url"]]):
+        for claimant in claimants:
             InboxStore(store.redis).send(
                 "swarm",
-                task["claimed_by"],
+                claimant,
                 f"Your pull request {pull['url']} left the merge queue in a priority and could not be queued "
                 f"again: {reason}. The swarm retries it at the end of the queue on every refresh until it is back "
                 "or stays out for a reason.",
                 fyi=True,
             )
-            displaced.mark(pull)
     except InboxError:
         return
+    displaced.mark(pull)
 
 
 def requeue(store: RedisStore, slug: str, tasks: list[dict], ledger=None) -> list[str]:

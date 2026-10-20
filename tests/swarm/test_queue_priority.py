@@ -898,6 +898,30 @@ def test_an_unclaimed_refused_entry_waits_to_tell_a_later_claimant(priority, mon
     assert displaced.pulls()[0]["notified"] is True
 
 
+def test_a_failed_notice_tells_every_claimant_again(priority, monkeypatch):
+    from scripts.inbox.store import InboxError
+
+    p = priority
+    displaced = queue_priority.Displaced(p.store, "sw")
+    displaced.add({"id": "P5", "url": URL[:-1] + "5", "headRefOid": "head5"})
+    p.tasks += [{"pr_url": URL[:-1] + "5", "claimed_by": who} for who in ("eng@5", "eng@6")]
+    sent, refused = [], ["eng@6"]
+
+    def send(sender, claimant, text, **flags):
+        if claimant in refused:
+            raise InboxError("inbox down")
+        sent.append(claimant)
+
+    monkeypatch.setattr(queue_priority, "InboxStore", lambda redis: SimpleNamespace(send=send))
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == ["eng@5"]
+    assert "notified" not in displaced.pulls()[0]
+    refused.clear()
+    queue_priority.retrying(p.store, p.tasks, displaced, displaced.pulls()[0], "refused")
+    assert sent == ["eng@5", "eng@5", "eng@6"]
+    assert displaced.pulls()[0]["notified"] is True
+
+
 @pytest.mark.parametrize(
     "raw, reason",
     [
