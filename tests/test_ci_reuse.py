@@ -981,7 +981,7 @@ def test_queue_watcher_loss_never_masks_a_graded_failure(job, status):
     assert result.returncode != 0, result.stdout + result.stderr
 
 
-def _mutation_gate(event, inline, stats="success", mutation="skipped"):
+def _mutation_gate(event, inline, stats, mutation):
     from scripts import ci_reuse
 
     needs = {name: {"result": "success"} for name in ("test-count", "lint", "semgrep", "sonar")}
@@ -990,8 +990,9 @@ def _mutation_gate(event, inline, stats="success", mutation="skipped"):
     needs["mutation-stats"] = {"result": stats}
     needs["mutation"] = {"result": mutation}
     [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, consolidated=True))
-    env = dict(os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT=event, REUSED="false")
-    env["INLINE"] = inline or ""
+    env = dict(
+        os.environ, NEEDS=json.dumps(needs), MUTATION="true", KIND="false", EVENT=event, REUSED="false", INLINE=inline or ""
+    )
     return subprocess.run(["bash", "-e", "-c", step["run"]], env=env, capture_output=True, text=True)
 
 
