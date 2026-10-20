@@ -180,6 +180,14 @@ def test_measure_reads_the_run_value_at_now(monkeypatch):
     assert next(ci_measure.measure(finding, ci_measure.target(finding), (NOW - HOUR_MS, NOW), NOW)) == f"{finding} 700"
 
 
+def test_the_command_measures_an_unfinished_run_at_its_clock(actions, monkeypatch, capsys):
+    capsys.readouterr()
+    monkeypatch.setattr("scripts.doctor.ci_speed_read.attempt", lambda *args: ACTIVE)
+    finding = 'ci-queue-age-unconfirmed/26-1-["anton-oss"]'
+    assert doctor.main([WATCHED, "measure", finding]) == 0
+    assert lines(capsys)[0] == f"{finding} 700"
+
+
 def test_window_times_print_in_utc_whatever_the_local_zone(monkeypatch):
     monkeypatch.setenv("TZ", "Asia/Kolkata")
     time.tzset()
