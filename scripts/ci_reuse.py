@@ -50,6 +50,17 @@ WATCHER_LOSS = (
     ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
 )
 
+INLINE_REQUIRED = (
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)',
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats"]'
+    ' + (if $inline == "true" then [] else ["mutation"] end) else [] end)',
+)
+INLINE_SKIP = (
+    '.value.result == "skipped" and $mutation == "false")',
+    '.value.result == "skipped" and $mutation == "false")'
+    ' or (.key == "mutation" and .value.result == "skipped" and $inline == "true")',
+)
+
 
 QUEUE_TIER = (
     """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
@@ -87,6 +98,7 @@ def gate_steps(
     summary: bool = False,
     docs: bool = False,
     watcher_loss: bool = False,
+    inline_mutation: bool = False,
 ) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
     if selected or queue_tier:
@@ -113,19 +125,21 @@ def gate_steps(
         )
     if docs:
         run = run.replace('"lint", "semgrep"', '"lint", "docs", "semgrep"')
-    return [
-        {
-            "name": "Require every gate to succeed",
-            "env": {
-                "NEEDS": "${{ toJSON(needs) }}",
-                "MUTATION": "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
-                "KIND": "${{ needs.kind-due.outputs.due }}",
-                "EVENT": "${{ github.event_name }}",
-                "REUSED": "${{ needs.reuse.outputs.reused }}",
-            },
-            "run": run,
-        }
-    ] + (summary_steps() if summary else [])
+    env = {
+        "NEEDS": "${{ toJSON(needs) }}",
+        "MUTATION": "${{ (github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch' }}",
+        "KIND": "${{ needs.kind-due.outputs.due }}",
+        "EVENT": "${{ github.event_name }}",
+        "REUSED": "${{ needs.reuse.outputs.reused }}",
+    }
+    if inline_mutation:
+        run = (
+            run.replace('--arg mutation "$MUTATION"', '--arg mutation "$MUTATION" --arg inline "${INLINE:-}"')
+            .replace(*INLINE_REQUIRED)
+            .replace(*INLINE_SKIP)
+        )
+        env["INLINE"] = "${{ needs.mutation-plan.outputs.inline }}"
+    return [{"name": "Require every gate to succeed", "env": env, "run": run}] + (summary_steps() if summary else [])
 
 
 def summary_steps() -> list[dict]:
