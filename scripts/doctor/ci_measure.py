@@ -87,7 +87,7 @@ def _at(ms):
 
 
 def line(kind: str, scope: str, values: list[int], window: tuple[int, int]) -> str:
-    threshold = ci_speed.WALL_MS if kind == WALL else ci_speed.SHORT_WAIT_MS
+    threshold = {WALL: ci_speed.WALL_MS, RUNNER_WAIT: ci_speed.SHORT_WAIT_MS}.get(kind, ci_speed.UNCONFIRMED_WAIT_MS)
     text = (
         f"{kind} {scope}, window {_at(window[0])} to {_at(window[1])}: "
         f"{sum(v > threshold for v in values)} of {len(values)} runs over {threshold // 1000} seconds"

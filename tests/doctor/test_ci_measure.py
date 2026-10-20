@@ -303,5 +303,5 @@ def test_the_class_reads_active_jobs_up_to_now_not_the_window_end(monkeypatch):
     goal = ci_measure.Target("ci-queue-age-unconfirmed")
     assert list(ci_measure.measure("ci-queue-age-unconfirmed", goal, (0, NOW - HOUR_MS), NOW)) == [
         "ci-queue-age-unconfirmed anton-oss, window 1970-01-01T00:00:00Z to 2026-10-17T21:00:00Z: "
-        "1 of 1 runs over 300 seconds, median 4000 seconds, worst 4000 seconds"
+        "1 of 1 runs over 900 seconds, median 4000 seconds, worst 4000 seconds"
     ]
