@@ -179,22 +179,17 @@ def test_forget_counts_a_missing_ask_item_as_already_forgotten(swarm):
     assert master_retire.forget(store, "sw", master.name) is False
 
 
-def test_a_contended_close_keeps_the_request_for_the_next_forget(swarm, monkeypatch):
+def test_a_contended_close_still_clears_the_request(swarm, monkeypatch):
     store, _, _, master = swarm
     master_retire.hold(store, "sw", master, "test", True, 200)
-    (ask,) = asks(store, master.name)
-    close = InboxStore.close
 
     def contended(*_):
         raise Contended("changed meanwhile")
 
     monkeypatch.setattr(InboxStore, "close", contended)
     assert master_retire.forget(store, "sw", master.name) is True
-    assert master_retire.reason(store, "sw", master.name) == "test"
-    monkeypatch.setattr(InboxStore, "close", close)
-    assert master_retire.forget(store, "sw", master.name) is True
-    assert InboxStore(store.redis).get(ask.id).state == "done"
     assert master_retire.reason(store, "sw", master.name) == ""
+    assert master_retire.forget(store, "sw", master.name) is False
 
 
 def test_an_idle_master_that_hands_off_is_retired_and_not_respawned(swarm):

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 
 from scripts.inbox import exits
-from scripts.inbox.store import CLOSED, Contended, InboxError, InboxStore
+from scripts.inbox.store import CLOSED, InboxError, InboxStore
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore
 
 MINUTES = "AGENTIHOOKS_MASTER_RETIRE_HANDOFF_MINUTES"
@@ -48,17 +49,13 @@ def forget(store: RedisStore, slug: str, name: str) -> bool:
     raw = store.redis.hget(_key(store, slug), name)
     if raw is None:
         return False
+    store.redis.hdel(_key(store, slug), name)
     request = json.loads(raw)
     inbox = InboxStore(store.redis, world=request.get("world"))
-    try:
+    with contextlib.suppress(InboxError):
         item = inbox.get(request["item"])
         if item.state not in CLOSED:
             inbox.close(item.id, exits.BY, "done", "the master handed off or was retired")
-    except Contended:
-        return True
-    except InboxError:
-        pass
-    store.redis.hdel(_key(store, slug), name)
     return True
 
 
