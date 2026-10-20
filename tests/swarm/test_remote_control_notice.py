@@ -5,14 +5,12 @@ from scripts.swarm import execution, remote_control
 from scripts.swarm.store import RedisStore
 from tests.swarm.test_cli import env as env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 MASTER_ENV = {
     "AGENTIHOOKS_SWARM": "proof",
     "AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001",
     "AGENTIHOOKS_SWARM_LANE": "master",
 }
-ON = {"state": "on", "detail": "master · sw"}
+ON = {"state": "on", "detail": "master 1 · sw"}
 
 
 @pytest.fixture
@@ -167,13 +165,13 @@ def test_status_text_and_json_show_the_master_remote_control_line(env, capsys):
     rt.live = {master.name, engineer.name}
     shown = {a["name"]: a["remote_control"] for a in status.status_report(store, "sw", {"tasks": []}, rt)["agents"]}
     assert shown == {master.name: ON, engineer.name: {}}
-    assert cli._remote_control_text([master, engineer]) == "Remote Control: on (master · sw)\n"
+    assert cli._remote_control_text([master, engineer]) == "Remote Control: on (master 1 · sw)\n"
     second = AgentRecord("m2", "master", "master", remote_control={"state": "off", "detail": "flag"})
     assert cli._remote_control_text([master, second]) == (
-        "Remote Control: on (master · sw)\nRemote Control: off (flag)\n"
+        "Remote Control: on (master 1 · sw)\nRemote Control: off (flag)\n"
     )
     capsys.readouterr()
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     lines = capsys.readouterr().out.splitlines()
-    at = lines.index("Remote Control: on (master · sw)")
+    at = lines.index("Remote Control: on (master 1 · sw)")
     assert lines[at - 1].startswith("master affinity") and lines[at + 1] != ""

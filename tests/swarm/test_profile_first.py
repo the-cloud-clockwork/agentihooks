@@ -6,8 +6,6 @@ import pytest
 from scripts.swarm import profile_choice, profile_first
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PLACED = SimpleNamespace(router=SimpleNamespace(placement=object()))
 DECISION = profile_choice.ProfileDecision("frontend", "classifier", "frontend", "m1", 0.9, True, ("task:t1",))
 ENGINEER = profile_choice.ProfileDecision("engineer", "classifier", "engineer", "m1", 0.8, True)
@@ -148,17 +146,18 @@ def refusing_frontend(lane, task):
 
 
 @pytest.mark.parametrize(
-    ("room", "taken", "seen"),
+    ("room", "taken", "seen", "waits"),
     [
-        (0, [], []),
-        (1, ["e1"], ["f1", "e1"]),
-        (2, ["e1", "e2"], ["f1", "e1", "e2"]),
-        (5, ["e1", "e2"], ["f1", "e1", "e2"]),
+        (0, [], [], []),
+        (1, ["e1"], ["f1", "e1"], ["task f1 waits: the workstation hive spawns eng work"]),
+        (2, ["e1", "e2"], ["f1", "e1", "e2"], ["task f1 waits: the workstation hive spawns eng work"]),
+        (5, ["e1", "e2"], ["f1", "e1", "e2"], ["task f1 waits: the workstation hive spawns eng work"]),
     ],
 )
-def test_placeable_decides_ready_tasks_only_until_the_free_slots_fill(store, asked, room, taken, seen):
+def test_placeable_decides_ready_tasks_only_until_the_free_slots_fill(store, asked, room, taken, seen, waits):
     runtime = SimpleNamespace(router=SimpleNamespace(placement=object()), placement_refusal=refusing_frontend)
     ready = [{"id": "f1"}, {"id": "e1"}, {"id": "e2"}]
-    found = profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", ready, room)
+    found, waited = profile_first.placeable("sw", store.config("sw"), store, runtime, "eng", ready, room)
     assert [task["id"] for task in found] == taken
+    assert waited == waits
     assert [task_id for _, task_id, _ in asked] == seen

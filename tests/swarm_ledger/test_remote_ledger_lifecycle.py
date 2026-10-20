@@ -19,7 +19,6 @@ from tests.swarm_ledger.test_ledger_authority import live as authority_live
 from tests.swarm_ledger.test_remote_ledger_client import CREDENTIAL
 from tests.swarm_ledger.test_remote_ledger_client import hive as remote_hive
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 hive = remote_hive
 live = authority_live
 
@@ -173,7 +172,7 @@ def test_remote_lifecycle_outages_use_swarm_errors(live, status):
 def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
     before = bin_storage.entries()
     with pytest.raises(APIError) as caught:
-        admin.lifecycle(server, "", SLUG, payload)
+        admin.lifecycle(server.api_services(), "", SLUG, payload)
     assert caught.value.status == 400
     status, _, _ = send(
         live,
@@ -189,15 +188,15 @@ def test_lifecycle_schema_refusals_leave_storage_unchanged(live, payload):
 def test_lifecycle_action_results_and_authority(live):
     bin_storage.restore(SLUG)
     payload = {"action": "bin_closed", "closed_at": core.now_ms() + 1}
-    assert admin.lifecycle(server, "", SLUG, payload) == {"data": True}
-    assert admin.lifecycle(server, "", SLUG, payload) == {"data": False}
-    assert admin.lifecycle(server, WORKER, SLUG, {"action": "binned"}) == {"data": True}
-    assert admin.lifecycle(server, WORKER, SLUG, {"action": "restore"}) == {"data": True}
-    assert admin.lifecycle(server, "", SLUG, {"action": "restore"}) == {"data": False}
-    assert admin.lifecycle(server, "", SLUG, {"action": "binned"}) == {"data": False}
-    assert admin.lifecycle(server, "", SLUG, {"action": "bin_closed", "closed_at": 1}) == {"data": False}
+    assert admin.lifecycle(server.api_services(), "", SLUG, payload) == {"data": True}
+    assert admin.lifecycle(server.api_services(), "", SLUG, payload) == {"data": False}
+    assert admin.lifecycle(server.api_services(), WORKER, SLUG, {"action": "binned"}) == {"data": True}
+    assert admin.lifecycle(server.api_services(), WORKER, SLUG, {"action": "restore"}) == {"data": True}
+    assert admin.lifecycle(server.api_services(), "", SLUG, {"action": "restore"}) == {"data": False}
+    assert admin.lifecycle(server.api_services(), "", SLUG, {"action": "binned"}) == {"data": False}
+    assert admin.lifecycle(server.api_services(), "", SLUG, {"action": "bin_closed", "closed_at": 1}) == {"data": False}
     with pytest.raises(APIError) as caught:
-        admin.lifecycle(server, WORKER, SLUG, payload)
+        admin.lifecycle(server.api_services(), WORKER, SLUG, payload)
     assert caught.value.status == 403
     assert caught.value.envelope() == {
         "error": {
@@ -213,13 +212,13 @@ def test_lifecycle_controller_epoch_is_checked_before_storage(live, action):
     if action == "bin_closed":
         payload["closed_at"] = 1
     with patch.object(server.authority, "fence") as fence:
-        admin.lifecycle(server, "", SLUG, payload)
+        admin.lifecycle(server.api_services(), "", SLUG, payload)
     fence.assert_called_once_with(SLUG, 1)
     with (
         patch.object(server.authority, "fence", side_effect=SwarmError("stale controller")),
         patch.object(bin_storage, "_transaction", side_effect=AssertionError("stale controller reached storage")),
         pytest.raises(APIError) as caught,
     ):
-        admin.lifecycle(server, "", SLUG, payload)
+        admin.lifecycle(server.api_services(), "", SLUG, payload)
     assert caught.value.status == 409
     assert caught.value.envelope() == {"error": {"code": "stale_controller", "message": "stale controller"}}

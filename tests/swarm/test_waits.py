@@ -15,7 +15,6 @@ from tests.swarm.test_ledger_events import APP_SUITE, QUEUED_TESTS, SKIPPED_ONLY
 
 REAL_REQUIRED_GREEN = waits.required_green
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 ME = "engineer@a1b2c3-0001"
 URL = "https://github.com/o/r/pull/7"
@@ -1024,7 +1023,7 @@ def test_the_probe_requests_the_head_with_its_check_rollup():
                 "api",
                 "graphql",
                 "-f",
-                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft "
+                "query=query($url:URI!){resource(url:$url){...on PullRequest{state mergedAt headRefOid mergeQueueEntry{id state} mergeable isDraft body "
                 "timelineItems(last:1,itemTypes:[REOPENED_EVENT,ADDED_TO_MERGE_QUEUE_EVENT])"
                 "{nodes{...on ReopenedEvent{createdAt} ...on AddedToMergeQueueEvent{createdAt}}} "
                 "commits(last:1){nodes{commit{id oid committedDate "

@@ -9,7 +9,7 @@ from scripts.swarm.health import standing
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 NOW = 1_791_700_000_000
 
 

@@ -24,9 +24,11 @@ def test_container_proofs_share_one_runner_without_losing_commands():
             """docker build -t local/agentihooks-swarm:clients-check --output type=image,compression=uncompressed . &
 build=$!
 status=0
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7 &
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7 &&
+  docker tag public.ecr.aws/docker/library/redis:7 mirror.gcr.io/library/redis:7 &
 redis=$!
-bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine || status=$?
+bash scripts/packaging/pull-runtime-image.sh public.ecr.aws/docker/library/redis:7-alpine &&
+  docker tag public.ecr.aws/docker/library/redis:7-alpine mirror.gcr.io/library/redis:7-alpine || status=$?
 wait "$redis" || status=$?
 wait "$build" || status=$?
 exit "$status"
@@ -50,8 +52,10 @@ exit "$status"
             assert step["if"] == "github.event_name == 'workflow_dispatch'"
         elif step.get("run", "").startswith("bash scripts/packaging/pull-runtime-image.sh "):
             assert "if" not in step
+        elif step.get("id") == "build":
+            assert "if" not in step
         elif "run" in step:
-            assert step["if"] == "${{ !cancelled() }}"
+            assert step["if"] == "${{ !cancelled() && steps.build.outcome == 'success' }}"
         assert not step.get("continue-on-error", False)
 
 

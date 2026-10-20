@@ -17,6 +17,9 @@ request never lands. A failing entry leaves the queue and the entries behind
 it rebuild without it. Merge groups run on the `anton-oss-queue` pool, which
 serves only merge queue runs. The queue builds two entries at a time, and a
 check that has not reported within 25 minutes fails the entry.
+An entry ejected only because a unit shard lost its runner is requeued once by
+the Queue retry workflow; see
+[Lost runner requeue](../../docs/reference/delivery-tiers.md#lost-runner-requeue).
 Main keeps its existing branch match and rules; only its bypass list changes.
 
 The antoncore `Organization secrets and dev rulesets` workflow applies

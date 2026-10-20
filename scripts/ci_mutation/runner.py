@@ -173,6 +173,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
+        "deploy/helm/agentihooks-swarm/ci",
     ):
         source = root / name
         if source.is_dir():
@@ -207,6 +208,7 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
             "observability/",
             "docker/swarm-node/",
             ".agentihooks/conditions/",
+            "deploy/helm/agentihooks-swarm/ci/",
             *root_files,
             *(f"{name}/" for name in sorted({Path(path).parts[0] for path in extra_files})),
         ],
@@ -214,6 +216,18 @@ def prepare_workspace(root: Path, work: Path, paths: list[str], tests: list[str]
         "pytest_add_cli_args": pytest_args,
     }
     (work / "pyproject.toml").write_text(tomlkit.dumps(project))
+
+
+def seed_measured_shard(stats: SharedStats, key: str, work: Path) -> str:
+    plan_path = stats.folder.parent / "plan.json"
+    if plan_path.is_file():
+        plan = json.loads(plan_path.read_text())
+        if plan["head"] != stats.head or key not in plan["keys"]:
+            return "measured mutation plan stale for this commit or selection"
+        shutil.copy(plan_path, work / "shard-plan.json")
+    if (killers := stats.folder.parent / "killers").is_dir():
+        shutil.copytree(killers, work / "killers")
+    return ""
 
 
 def mutate_files(
@@ -241,12 +255,8 @@ def mutate_files(
             results, reason = load_parts(stats.folder, key)
             if reason:
                 return {}, reason
-            plan_path = stats.folder.parent / "plan.json"
-            if plan_path.is_file():
-                plan = json.loads(plan_path.read_text())
-                if plan["head"] != stats.head or key not in plan["keys"]:
-                    return {}, "measured mutation plan stale for this commit or selection"
-                shutil.copy(plan_path, work / "shard-plan.json")
+            if reason := seed_measured_shard(stats, key, work):
+                return {}, reason
             (work / "shared-stats.json").write_text(json.dumps(results))
             stats_args = ["reuse", str(work / "shared-stats.json")]
     status = run_process(

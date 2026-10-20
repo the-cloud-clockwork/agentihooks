@@ -16,7 +16,6 @@ from scripts.swarm_ledger import ledger_server
 from tests.gates.test_runtime import SLUG, SWARM_ENV, Stub
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 STUB_ENV = "AGENTIHOOKS_GATE_STUB"
 
 

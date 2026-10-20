@@ -62,8 +62,8 @@ run when the operator uses one of their trigger phrases.
 |---|---|---|
 | `get-agents-quota` | Show quota left for every agent harness (each Claude account and Codex) and name this session's routed Claude account. | `$get-agents-quota` or "which agent has quota left?" |
 | `terminate-agent` | List or terminate a Claude Code or Codex session by exact name, UUID, or PID. It must dry-run and validate the process group before termination. | `$terminate-agent engineer-a`; list with `$terminate-agent --list --type any` |
-| `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model, only on the operator's typed `open pane`. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
-| `run-in-terminal` | Run any command in a directory in a new herdr tab or terminal tab, only on the operator's typed `open pane`. | `$run-in-terminal "npm test" --dir ~/dev/project` |
+| `init-agent` | Open a quota-routed Claude Code session in a new terminal, optionally naming, resuming, or selecting its model. | `$init-agent --dir ~/dev/project --name engineer-a -- --model opus` |
+| `run-in-terminal` | Run any command in a directory in a new herdr tab or terminal tab. | `$run-in-terminal "npm test" --dir ~/dev/project` |
 | `take-master` | Make this session, Claude or Codex, the master of a swarm ledger and read the master priming it prints. | `$take-master <slug>` or "you are the master of ledger <slug>" |
 
 The deterministic CLI primitives behind these skills are respectively
@@ -72,14 +72,10 @@ The deterministic CLI primitives behind these skills are respectively
 `SKILL.md`; do not reconstruct its process manually.
 
 `init-agent`, `run-in-terminal`, `swarm <slug> master up`, `swarm <slug>
-<profile> up` and every herdr pane split, pane run, tab or workspace creation
-run only when the operator's own prompt this turn, typed
-in your terminal, says `open pane` (or `open a pane`, `open the pane`); a
-PreToolUse guard denies them otherwise; the quota handoff directive's own
-`init-agent --handoff` with its handoff document passes only while the quota
-policy has that handoff due. A step only the operator can do goes to
-Priorities in a swarm or ledger session, or is written in your own terminal as
-a command for him to run. Reading, listing and closing panes stay allowed.
+<profile> up` and herdr pane, tab and workspace commands run without any typed
+phrase: there is no pane guard. Run `init-agent --handoff` only as the quota
+handoff directive's own command while that handoff is due, and never in a swarm
+session, which hands off through its seat; no hook checks this.
 
 ## Swarm, small ledger or nothing
 

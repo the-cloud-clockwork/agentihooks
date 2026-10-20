@@ -3,8 +3,6 @@ import pytest
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_intent_cli import started  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 FIRST = "https://github.com/o/r/pull/9"
 SECOND = "https://github.com/o/r/pull/10"
 

@@ -76,6 +76,8 @@ def sensitive_kind(token):
         return KIND_CREDENTIAL
     if base == "credentials" and ".aws" in token:
         return KIND_CREDENTIAL
+    if base == "environ" and token.startswith("/") and PROC_DIR.match("/" + token.lstrip("/")):
+        return KIND_ENVIRONMENT
     return None
 
 
@@ -97,6 +99,12 @@ SECRETISH_NAME = re.compile(
     r"(?i)(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|APIKEY|CREDENTIAL"
     r"|PRIVATE_?KEY|ACCESS_?KEY|SESSION_?KEY|AUTH)"
 )
+
+QUOTING = re.compile(r"[\"'\\]")
+PROC_DIR = re.compile(r"/proc\b")
+SHELL_WORD_BREAK = re.compile(r"[\s;|&()<>]+")
+CD_OPERAND = re.compile(r"\b(?:cd|pushd)(?:\s+-\S*)*\s+(\S+)")
+BARE_ENVIRON = re.compile(r"(?<![\w.])environ\b")
 
 # --- bash lexing --------------------------------------------------------------
 
@@ -461,6 +469,28 @@ def env_dump_verdict(command):
     )
 
 
+def proc_environ_verdict(command, cwd):
+    flat = QUOTING.sub("", command)
+    entered = [op.lstrip("/").split("/")[0] for op in CD_OPERAND.findall(flat)]
+    in_proc = bool(PROC_DIR.match(cwd)) or any(fnmatch.fnmatchcase("proc", top) for top in entered)
+    words = SHELL_WORD_BREAK.split(flat)
+    named = any(path_reads_environ(w) for w in words) or (in_proc and any(leaf_names_environ(w) for w in words))
+    if named or ((in_proc or PROC_DIR.search(flat)) and BARE_ENVIRON.search(flat)):
+        return block("reading a process environment file under /proc", KIND_ENVIRONMENT)
+    return None
+
+
+def path_reads_environ(word):
+    *dirs, leaf = word.split("/")
+    if any(fnmatch.fnmatchcase("proc", d) for d in dirs[:-1]):
+        return leaf_names_environ(leaf)
+    return any("$" in d for d in dirs) and fnmatch.fnmatchcase("environ", leaf)
+
+
+def leaf_names_environ(leaf):
+    return "$" in leaf or "`" in leaf or fnmatch.fnmatchcase("environ", leaf)
+
+
 def echo_secret_verdict(command):
     if not re.search(r"\b(echo|printf)\b", command):
         return None
@@ -813,6 +843,9 @@ def decide_bash(tool_input, ctx=None):
     if not command:
         return ALLOW
     ctx = ctx or Context()
+    reason = proc_environ_verdict(command, ctx.cwd)
+    if reason:
+        return Verdict(block=reason)
     command, heredocs = mask_heredocs(command)
     parts = split_outside_quotes(SEGMENT_DELIM, command)
     changed = False

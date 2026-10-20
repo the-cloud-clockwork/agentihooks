@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts import codex_router, select_profile
+from scripts import codex_router, profile_telemetry, select_profile
 from scripts.codex_session import supervisor
 from scripts.codex_session.binding import BindingError
 from scripts.routing import codex_api, envs
@@ -114,6 +114,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     model, effort, server_args = server_options(flags)
     environ.update(profile_env)
     account, placement, child = route_account(environ, route, args.exclude)
+    child.update(profile_telemetry.agentihooks_langfuse_keys())
     codex_router._report(args.report, status="routed", account=account.name, placement=placement)
     agent = AgentRecord(
         name,

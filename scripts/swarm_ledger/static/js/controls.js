@@ -4,11 +4,11 @@ import { setChatTo, showChat } from "./chat.js";
 import { capDraft, doctorOn, overlayChanges, pending, renderSwarm, saveRouting, swarm, swarmControl, toggleOverlay } from "./swarm.js";
 import { wireHives } from "./hives.js";
 import { lifecycleBody, sendLifecycle, unresolved } from "./lifecycle.js";
+import { meta } from "./sync.js";
 
 const GATE_MODES = ["enforce", "observe", "off"];
 const GATE_LABELS = { enforce: "deny", observe: "log only", off: "skip" };
-const STEPS = { eng: ["max_eng", 1, 0, 50], ci: ["max_ci", 1, 0, 50], plan: ["max_plan", 1, 0, 50], masters: ["masters_step", 1, 0, 50, "masters step"], compact: ["compact_limit", 50, 100, 1000, "compact limit"] };
-const EFFORTS = ["low", "medium", "high", "xhigh", "max"];
+const STEPS = { eng: ["max_eng", 1], ci: ["max_ci", 1], plan: ["max_plan", 1], masters: ["masters_step", 1, "masters step"], compact: ["compact_limit", 50, "compact limit"] };
 const EFFORT_CAPS = { effort_min: "effort floor", effort_max: "effort ceiling" };
 const MASTER_AGENTS = ["claude", "codex"];
 
@@ -19,7 +19,7 @@ let applied = null;
 async function loadModels() {
   try {
     const response = await readModels();
-    models = response.ok ? await response.json() : {};
+    models = (response.ok && (await response.json()).data) || {};
   } catch {
     models = {};
   }
@@ -64,29 +64,34 @@ function capValues(sw) {
   return { ...sw.config, compact_limit: sw.compact_limit, master_agent: affinityValue(sw) };
 }
 
-function capStep(values, lane, up) {
+function pageLimits() {
+  const limits = meta.limits || {};
+  return { capacity: limits.capacity || {}, efforts: limits.efforts || [] };
+}
+
+function capStep(values, lane, up, limits) {
+  const efforts = limits.efforts;
   if (lane in EFFORT_CAPS) {
-    const [low, high] = lane === "effort_min" ? [0, EFFORTS.indexOf(values.effort_max)] : [EFFORTS.indexOf(values.effort_min), EFFORTS.length - 1];
-    return { [lane]: EFFORTS[Math.min(high, Math.max(low, EFFORTS.indexOf(values[lane]) + (up ? 1 : -1)))] };
+    return { [lane]: efforts[Math.min(efforts.length - 1, Math.max(0, efforts.indexOf(values[lane]) + (up ? 1 : -1)))] };
   }
-  const [key, step, low, high] = STEPS[lane];
+  const [key, step] = STEPS[lane], [low, high] = limits.capacity[key] || [];
   return { [key]: Math.min(high, Math.max(low, (Number(values[key]) || 0) + (up ? step : -step))) };
 }
 
-function capChanges(values, draft, catalog = {}) {
-  const body = { action: "set" }, bad = [];
-  for (const [lane, [key, , low, high, name]] of Object.entries(STEPS)) {
+function capChanges(values, draft, limits, catalog = {}) {
+  const body = { action: "set" }, bad = [], efforts = limits.efforts;
+  for (const [lane, [key, , name]] of Object.entries(STEPS)) {
     if (!(key in draft)) continue;
+    const [low, high] = limits.capacity[key] || [];
     const text = String(draft[key]).trim();
     const value = /^\d+$/.test(text) ? Number(text) : NaN;
     if (!(value >= low && value <= high)) bad.push(`${name || lane} must be a whole number from ${low} to ${high}`);
     else if (value !== Number(values[key])) body[key] = value;
   }
-  const range = { ...values, ...draft };
   for (const [key, name] of Object.entries(EFFORT_CAPS)) {
     if (!(key in draft)) continue;
     const value = String(draft[key]).trim();
-    if (!EFFORTS.includes(value)) bad.push(`${name} must be one of ${EFFORTS.join(", ")}`);
+    if (!efforts.includes(value)) bad.push(`${name} must be one of ${efforts.join(", ")}`);
     else if (value !== values[key]) body[key] = value;
   }
   for (const harness of ["claude", "codex"]) {
@@ -99,8 +104,6 @@ function capChanges(values, draft, catalog = {}) {
     if (!MASTER_AGENTS.includes(draft.master_agent)) bad.push("master affinity must be Claude or Codex");
     else if (draft.master_agent !== values.master_agent) body.master_agent = draft.master_agent;
   }
-  const [floor, ceiling] = [range.effort_min, range.effort_max].map((v) => EFFORTS.indexOf(String(v).trim()));
-  if (floor >= 0 && ceiling >= 0 && floor > ceiling) bad.push("effort floor must not be above the effort ceiling");
   return { body, bad };
 }
 
@@ -108,14 +111,17 @@ function capCurrent() {
   return { ...capValues(swarm), ...capDraft };
 }
 
-function capBounds(values) {
-  const off = {};
-  for (const [lane, [key, , low, high]] of Object.entries(STEPS)) {
+function capBounds(values, limits) {
+  const off = {}, efforts = limits.efforts;
+  for (const [lane, [key]] of Object.entries(STEPS)) {
+    const [low, high] = limits.capacity[key] || [];
     off[`${lane}_down`] = !(Number(values[key]) > low);
     off[`${lane}_up`] = !(Number(values[key]) < high);
   }
-  const low = EFFORTS.indexOf(values.effort_min), high = EFFORTS.indexOf(values.effort_max);
-  Object.assign(off, { effort_min_down: !(low > 0), effort_min_up: !(low >= 0 && low < high), effort_max_down: !(high > low && low >= 0), effort_max_up: !(high >= 0 && high < EFFORTS.length - 1) });
+  for (const key of Object.keys(EFFORT_CAPS)) {
+    const at = efforts.indexOf(values[key]);
+    Object.assign(off, { [`${key}_down`]: !(at > 0), [`${key}_up`]: !(at >= 0 && at < efforts.length - 1) });
+  }
   return off;
 }
 
@@ -138,8 +144,8 @@ export function showNote(phase, action, error) {
 
 export function renderControls() {
   const config = swarm ? swarm.config : {};
-  const changes = swarm ? capChanges(capValues(swarm), capDraft, models) : { body: {}, bad: [] };
-  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
+  const changes = swarm ? capChanges(capValues(swarm), capDraft, pageLimits(), models) : { body: {}, bad: [] };
+  const off = swarm ? { ...swarmControls(config.state), ...capBounds(capCurrent(), pageLimits()), apply: !unsent(changes.body) && !changes.bad.length } : swarmControls("");
   for (const btn of [...$("swarm-box").querySelectorAll("button[data-swarm]"), ...$("closed-banner").querySelectorAll("button[data-swarm]")]) {
     const action = btn.dataset.swarm;
     btn.hidden = (action === "doctor_start" && doctorOn(swarm)) || (action === "doctor_stop" && !doctorOn(swarm));
@@ -155,7 +161,7 @@ export function renderControls() {
   if (swarm) renderModels(capCurrent());
   for (const input of $("capacity-box").querySelectorAll("[data-cap]")) {
     if (swarm && !(input.dataset.cap in capDraft)) input.value = capValues(swarm)[input.dataset.cap] ?? "";
-    input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, models).bad.length));
+    input.setAttribute("aria-invalid", String(input.dataset.cap in capDraft && !!capChanges({}, { [input.dataset.cap]: capDraft[input.dataset.cap] }, pageLimits(), models).bad.length));
     input.disabled = !swarm || pending === "apply";
   }
   const command = swarm && (swarm.commands || []).at(-1);
@@ -225,7 +231,7 @@ function unsent(body) {
 }
 
 function applyCaps() {
-  const { body, bad } = capChanges(capValues(swarm), capDraft, models);
+  const { body, bad } = capChanges(capValues(swarm), capDraft, pageLimits(), models);
   if (bad.length) return showNote("error", "apply", bad.join("; "));
   if (unsent(body)) swarmControl(body, "apply");
 }
@@ -278,7 +284,7 @@ export function wireSwarm() {
     const action = btn.dataset.swarm;
     const step = action.match(/^(eng|ci|plan|masters|compact|effort_min|effort_max)_(up|down)$/);
     if (step) {
-      const change = capStep(capCurrent(), step[1], step[2] === "up");
+      const change = capStep(capCurrent(), step[1], step[2] === "up", pageLimits());
       Object.assign(capDraft, change);
       $("cap-" + step[1]).value = Object.values(change)[0];
       return renderControls();

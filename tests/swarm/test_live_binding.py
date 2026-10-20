@@ -7,8 +7,6 @@ import pytest
 from scripts.swarm import live_binding
 from scripts.swarm.store import AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 EVENTS = (
     "SessionStart",
     "SessionEnd",

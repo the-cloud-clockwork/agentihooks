@@ -14,8 +14,8 @@ from scripts.swarm.store import AgentRecord
 from scripts.swarm.tick import Placed, placed_record
 from tests.swarm.test_runtime import _passed, _resuming, validated
 
-RC = ["--remote-control", "master · proof", "--remote-control-session-name-prefix", "hive-a"]
-ON = {"state": "on", "detail": "master · proof"}
+RC = ["--remote-control", "master 1 · proof", "--remote-control-session-name-prefix", "hive-a"]
+ON = {"state": "on", "detail": "master 1 · proof"}
 
 
 @pytest.fixture(autouse=True)
@@ -67,10 +67,10 @@ def test_a_master_with_the_login_on_spawns_on_its_own_route_with_remote_control(
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api"])
-def test_a_master_order_on_an_explicit_route_keeps_it_with_the_login_on(tmp_path, kind):
+def test_a_front_door_order_on_an_explicit_route_takes_the_login_and_remote_control(tmp_path, kind):
     passed, placed = _spawn(tmp_path, "master", "claude", kind)
-    assert "master-login" not in passed and "--settings" not in passed and _rc(passed) == []
-    assert placed.route_kind == kind
+    assert passed[:6] == ["--route", "master-login", *RC]
+    assert (placed.route_kind, placed.remote_control) == ("interactive", ON)
 
 
 @pytest.mark.parametrize(("kind", "route"), [("interactive", ["--route", "interactive"]), ("subscription", [])])
@@ -179,10 +179,10 @@ def test_other_resumes_keep_their_route_and_carry_no_remote_control(tmp_path, la
     assert placed.remote_control == decided
 
 
-def test_an_on_decision_names_the_master_seat_role_and_the_slug():
+def test_an_on_decision_names_the_front_door_seat_number_and_the_slug():
     assert remote_control.decision("master", "claude", "interactive", "rig", True) == {
         "state": "on",
-        "detail": "master · rig",
+        "detail": "master 1 · rig",
     }
 
 
@@ -208,7 +208,7 @@ def test_only_an_on_decision_produces_launch_arguments():
 @pytest.mark.parametrize(
     ("decided", "text"),
     [
-        (ON, "Remote Control: on (master · proof)"),
+        (ON, "Remote Control: on (master 1 · proof)"),
         ({"state": "off", "detail": "fallback auth"}, "Remote Control: off (fallback auth)"),
         ({}, ""),
         (None, ""),
@@ -310,5 +310,5 @@ def test_a_master_launch_with_remote_control_still_marks_its_folder_trusted(monk
     )
     out = capsys.readouterr().out
     assert rc == 0 and "trust=marked" in out
-    assert f"--remote-control {shlex.quote('master · proof')}" in out
+    assert f"--remote-control {shlex.quote('master 1 · proof')}" in out
     assert json.loads((tmp_path / ".claude.json").read_text())["projects"][str(project)]["hasTrustDialogAccepted"]

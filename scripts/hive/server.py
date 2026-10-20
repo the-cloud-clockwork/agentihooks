@@ -20,6 +20,8 @@ MAX_BODY = 4096
 REQUEST_TIMEOUT_S = 10
 MAX_HANDLERS = 32
 REQUEST_DEADLINE_S = 30
+REDIS_TIMEOUT_S = 5
+REDIS_STALLED = "the hive Redis did not answer; try again"
 REFRESH_PATH = "/hive/refresh"
 BAD_BODY = "the body must be a JSON object with a string code"
 BAD_REFRESH_BODY = "the body must be a JSON object with a string ledger_credential"
@@ -54,7 +56,9 @@ class _TLSHandler(BaseHTTPRequestHandler):
                 pass
 
 
-def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> type[BaseHTTPRequestHandler]:
+def _handler(
+    redis: "Redis", redis_url: str, context: ssl.SSLContext | None, ledger_ca: str | None = None
+) -> type[BaseHTTPRequestHandler]:
     class Join(_TLSHandler):
         timeout = REQUEST_TIMEOUT_S
         tls = context
@@ -66,10 +70,18 @@ def _handler(redis: "Redis", redis_url: str, context: ssl.SSLContext | None) -> 
             value = self._field(field)
             if value is None:
                 return self._answer(400, {"error": bad_body})
+            from redis.exceptions import ConnectionError as Unreachable
+            from redis.exceptions import TimeoutError as Stalled
+
             try:
-                return self._answer(200, getattr(auth, operation)(redis, value, redis_url))
+                grant = getattr(auth, operation)(redis, value, redis_url)
+                return self._answer(200, {**grant, "ledger_ca": ledger_ca} if ledger_ca else grant)
             except auth.HiveError as exc:
-                return self._answer(403, {"error": str(exc)})
+                if not isinstance(exc.__cause__, (Stalled, Unreachable)):
+                    return self._answer(403, {"error": str(exc)})
+            except (Stalled, Unreachable):
+                pass
+            return self._answer(503, {"error": REDIS_STALLED})
 
         def _field(self, field):
             try:
@@ -160,7 +172,12 @@ def is_loopback(host: str | None) -> bool:
 
 
 def make_server(
-    redis: "Redis", redis_url: str, host: str, port: int, tls: tuple[str, str] | None = None
+    redis: "Redis",
+    redis_url: str,
+    host: str,
+    port: int,
+    tls: tuple[str, str] | None = None,
+    ledger_ca: str | None = None,
 ) -> ThreadingHTTPServer:
     if tls is None and not is_loopback(host):
         raise auth.HiveError("a join endpoint off loopback hands out credentials, so it needs --tls-cert and --tls-key")
@@ -171,4 +188,14 @@ def make_server(
             context.load_cert_chain(*tls)
         except (OSError, ssl.SSLError) as exc:
             raise auth.HiveError(f"the TLS certificate or key cannot be loaded ({exc})") from exc
-    return JoinServer((host, port), _handler(redis, redis_url, context))
+    return JoinServer((host, port), _handler(bounded(redis), redis_url, context, ledger_ca))
+
+
+def bounded(redis: "Redis") -> "Redis":
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    redis.get_connection_kwargs()["socket_timeout"] = REDIS_TIMEOUT_S
+    redis.set_retry(Retry(NoBackoff(), 0))
+    redis.connection_pool.reset()
+    return redis

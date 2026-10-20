@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_cron_coalesces_downtime_and_continues_with_distinct_occurrences():

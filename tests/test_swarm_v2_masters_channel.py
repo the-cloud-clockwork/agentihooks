@@ -7,7 +7,7 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters_channel import MastersChannel, Post
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 LEAD, SECOND, ENG = f"master@{SLUG}", f"master-2@{SLUG}", f"eng-1@{SLUG}"

@@ -8,6 +8,13 @@ from pathlib import Path
 INTEGRATION = "refs/remotes/origin/dev"
 PREFLIGHT = "actions/workflows/mutation-preflight.yml/runs"
 TESTS = "actions/workflows/test.yml/runs"
+SHARDS = (
+    '.jobs[] | if (.name | startswith("mutation (")) then .conclusion'
+    ' elif (.name | startswith("mutation-stats")) then (.conclusion as $job | .steps[]?'
+    ' | select(.name == "Mutate the only shard in the statistics job" and .conclusion != "skipped")'
+    ' | if $job == "success" then .conclusion else $job end)'
+    " else empty end"
+)
 
 
 def changed_lines(diff: str) -> set[int]:
@@ -46,9 +53,8 @@ def graded_green(sha: str) -> bool:
         return True
     # An open pull request skips the push preflight, so its own mutation shards grade the head.
     runs = api(TESTS, "-f", f"head_sha={sha}", "-f", "event=pull_request", "--jq", ".workflow_runs[].id")
-    shards = '.jobs[] | select(.name | startswith("mutation (")) | .conclusion'
     for run in runs.split():
-        found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards).split()
+        found = api(f"actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", SHARDS).split()
         if found and all(conclusion == "success" for conclusion in found):
             return True
     return False
@@ -194,3 +200,12 @@ def select_tests(root: Path, source: Path) -> list[str]:
             break
         reaching |= added
     return [path.relative_to(root).as_posix() for path in modules if path in reaching and path.name.startswith("test_")]
+
+
+def test_file(entry: str) -> str:
+    return entry.partition("::")[0]
+
+
+def selects(entry: str, test: str) -> bool:
+    test = re.sub(r"@[^\[\]]*$", "", test)
+    return test == entry or test.startswith((f"{entry}::", f"{entry}["))

@@ -1,7 +1,19 @@
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from scripts.swarm_ledger import models
+
 from .errors import APIError
+
+
+def checkbox_path() -> str:
+    groups = {}
+    for name, model in models.MODELS.items():
+        if boxes := models.checkboxes(model):
+            groups.setdefault(boxes, []).append(name)
+    paths = (f"({'|'.join(names)})/[^/]+/({'|'.join(boxes)})" for boxes, names in groups.items())
+    return f"^({'|'.join(paths)})$"
+
 
 MUTATION = {
     "type": "object",
@@ -20,10 +32,7 @@ MUTATION = {
                 "required": ["path", "value"],
                 "additionalProperties": False,
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "pattern": "^((phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)|plans/[^/]+/out_of_scope)$",
-                    },
+                    "path": {"type": "string", "pattern": checkbox_path()},
                     "base": {"type": "boolean"},
                     "value": {"type": "boolean"},
                 },
@@ -63,7 +72,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator",
+    "add_item": "by list text needs_operator hive task",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",

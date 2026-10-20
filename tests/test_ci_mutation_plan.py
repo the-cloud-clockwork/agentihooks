@@ -1,4 +1,6 @@
 import json
+import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -109,6 +111,98 @@ def test_measured_costs_merge_mappings_keep_slowest_durations_and_cover_missing_
     ]
     assert measured_costs(names, results) == pytest.approx({names[0]: 18.4125, names[1]: 80.6, names[2]: 5.9125})
     assert measured_costs([names[1]], []) == {names[1]: 80.6}
+
+
+def test_a_mutant_with_a_recorded_killer_costs_that_test_and_one_without_keeps_its_traced_sum(tmp_path):
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation.killers import KillMemory
+    from scripts.ci_mutation.measured import measured_costs
+
+    memory = KillMemory(tmp_path / "killers")
+    killers = {"x_f": "fast", "x_gone": "dropped", "x_new": "unmeasured"}
+    for function, killer in killers.items():
+        memory.mutant = f"scripts.sample.{function}__mutmut_1"
+        memory.pytest_runtest_logreport(SimpleNamespace(failed=True, nodeid=killer))
+    names = [
+        "scripts.sample.x_f__mutmut_2",
+        "scripts.sample.x_g__mutmut_1",
+        "scripts.sample.x_gone__mutmut_3",
+        "scripts.sample.x_new__mutmut_2",
+    ]
+    results = [
+        {
+            "tests": {
+                "scripts.sample.x_f": ["fast", "slow"],
+                "scripts.sample.x_g": ["fast", "slow"],
+                "scripts.sample.x_gone": ["fast", "slow"],
+                "scripts.sample.x_new": ["fast", "unmeasured"],
+            },
+            "durations": {"fast": 2.0, "slow": 200.0},
+        }
+    ]
+    traced = 5.6 + 1.25 * 202.0
+    # A killer the stats never timed costs as much as the slowest timed test.
+    unmeasured = 5.6 + 1.25 * 200.0
+    assert measured_costs(names, results, memory) == pytest.approx(
+        {names[0]: 8.1, names[1]: traced, names[2]: traced, names[3]: unmeasured}
+    )
+    assert measured_costs(names, results) == pytest.approx(
+        {**dict.fromkeys(names[:3], traced), names[3]: 5.6 + 1.25 * 202.0}
+    )
+
+
+def test_refinement_prices_mutants_from_killers_kept_beside_the_shared_stats(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from scripts.ci_mutation import measured
+    from scripts.ci_mutation.killers import KillMemory
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    _project(tmp_path, {})
+    (tmp_path / "sample.py").write_text("def outer(value):\n    return value + 1\n")
+    selected = {"sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    key = stats_key(stats.head, selected)
+    results = [{"tests": {"sample.x_outer": ["fast", "slow"]}, "durations": {"fast": 2.0, "slow": 100.0}}]
+    write_part(stats.group(0).folder / "part-0.json", key, (0, 1), results)
+    traced = measured.refine_plan(tmp_path, selected, stats)["costs"]
+    memory = KillMemory(stats.folder / "killers")
+    memory.mutant = next(iter(traced))
+    memory.pytest_runtest_logreport(SimpleNamespace(failed=True, nodeid="fast"))
+    killed = measured.refine_plan(tmp_path, selected, stats)["costs"]
+    assert traced
+    assert set(killed) == set(traced)
+    assert list(traced.values()) == pytest.approx([5.6 + 1.25 * 102.0] * len(traced))
+    assert list(killed.values()) == pytest.approx([8.1] * len(killed))
+
+
+def test_measured_costs_price_tests_by_the_cpu_their_contended_walls_took():
+    from scripts.ci_mutation.measured import measured_costs, measured_splits
+
+    name = "scripts.sample.x_f__mutmut_1"
+    tests = {"scripts.sample.x_f": ["a", "b"]}
+    contended = 5.6 + 1.25 * (30.0 + 40.0) / 3
+    results = [
+        {"tests": tests, "durations": {"a": 30.0}, "cpu": 10.0},
+        {"tests": {}, "durations": {"b": 40.0}, "cpu": 10.0},
+        {"tests": {}, "durations": {"c": 20.0}, "cpu": 10.0},
+    ]
+    assert measured_costs([name], results) == pytest.approx({name: contended})
+    cached = [{**result, "cpu": cpu} for result, cpu in zip(results, (15.0, 5.0, 5.0), strict=True)]
+    cached += [{"tests": {}, "durations": {"c": 2.0}, "cpu": 5.0}, {"tests": {}, "durations": {}, "cpu": 4.0}]
+    assert measured_costs([name], cached) == pytest.approx({name: contended})
+    uncontended = [{"tests": tests, "durations": {"a": 3.0, "b": 4.0}, "cpu": 10.0}]
+    assert measured_costs([name], uncontended) == pytest.approx({name: 5.6 + 1.25 * 7.0})
+    quick = [{"tests": tests, "durations": {"a": 0.3, "b": 0.3}, "cpu": 0.2}]
+    assert measured_costs([name], quick) == pytest.approx({name: 5.6 + 1.25 * 0.2})
+    untimed = [{"tests": tests, "durations": {"a": 30.0, "b": 40.0}}]
+    assert measured_costs([name], untimed) == pytest.approx({name: 5.6 + 1.25 * 70.0})
+    long = [{"tests": tests, "durations": {"a": 300.0, "b": 300.0}, "cpu": 200.0}]
+    assert measured_splits([name], long) == {}
+    assert measured_splits([name], [{**long[0], "cpu": 600.0}])["scripts.sample.x_f"]["head"] == ["a"]
 
 
 def test_expensive_mutants_are_balanced_before_cheap_names_and_totals_are_preserved():
@@ -304,6 +398,13 @@ def test_refinement_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch)
         measured.refine_plan(tmp_path, selected, stats)
 
 
+def _git(root, *args):
+    return subprocess.check_output(
+        ["git", "-C", str(root), "-c", "user.name=Test", "-c", "user.email=test@example.invalid", *args],
+        text=True,
+    ).strip()
+
+
 @pytest.mark.parametrize("stale", [False, True])
 def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_path, monkeypatch, capsys, stale):
     from scripts.ci_mutation import measured
@@ -312,26 +413,24 @@ def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_p
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr("mutmut.configuration._config", None)
     _project(tmp_path, {})
+    _git(tmp_path, "init", "-q")
+    _git(tmp_path, "add", "scripts", "tests", "pyproject.toml", ".test_durations")
+    _git(tmp_path, "commit", "-qm", "base")
+    _git(tmp_path, "branch", "base")
+    _git(tmp_path, "branch", "earlier")
+    path = tmp_path / "scripts/sample.py"
+    path.write_text(path.read_text().replace("return a - b", "return a + b"))
+    _git(tmp_path, "add", "scripts/sample.py")
+    _git(tmp_path, "commit", "-qm", "change")
+    head = _git(tmp_path, "rev-parse", "HEAD")
     selected = {"scripts/sample.py": ({2}, ["tests/test_sample.py"])}
     folder = tmp_path / "stats"
-    key = stats_key("other" if stale else "head", selected)
+    key = stats_key("other" if stale else head, selected)
     write_part(
         folder / "group-0/part-0.json",
         key,
         (0, 1),
         [{"tests": {"scripts.sample.x_f": ["test"]}, "durations": {"test": 40.0}}],
-    )
-    monkeypatch.setattr(
-        measured,
-        "discover_changes",
-        lambda root, bases, head: (
-            {"scripts/sample.py": {2}} if (root, bases, head) == (tmp_path, ["base", "earlier"], "HEAD") else {}
-        ),
-    )
-    monkeypatch.setattr(
-        measured.subprocess,
-        "check_output",
-        lambda args, text: "head\n" if args == ["git", "rev-parse", "HEAD"] and text else "wrong",
     )
     output = tmp_path / "github-output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
@@ -339,19 +438,21 @@ def test_measured_cli_refines_complete_statistics_and_rejects_another_head(tmp_p
     if stale:
         with pytest.raises(ValueError, match="stats stale"):
             measured.main()
+        assert not (folder / "plan.json").exists()
+        assert not output.exists()
     else:
         assert measured.main() == 0
-        plan = json.loads((folder / "plan.json").read_text())
-        assert plan["head"] == "head"
-        assert plan["keys"] == [key]
-        assert plan["assignments"]
-        assert all(name.startswith("scripts.sample.x_f__mutmut_") for name in plan["assignments"])
-        assert set(plan["costs"].values()) == {55.6}
-        assert plan["units"] == "worker seconds"
+        result = json.loads((folder / "plan.json").read_text())
+        assert result["head"] == head
+        assert result["keys"] == [key]
+        assert result["assignments"]
+        assert all(name.startswith("scripts.sample.x_f__mutmut_") for name in result["assignments"])
+        assert set(result["costs"].values()) == {55.6}
+        assert result["units"] == "worker seconds"
         assert output.read_text() == "shards=[0]\n"
         text = capsys.readouterr().out
         assert "Measured mutation worker seconds:" in text
-        assert f"Measured mutation shards: 1; assigned mutants: {len(plan['assignments'])}" in text
+        assert f"Measured mutation shards: 1; assigned mutants: {len(result['assignments'])}" in text
 
 
 def test_every_consumer_uses_the_same_measured_assignment(tmp_path, monkeypatch):
@@ -448,6 +549,37 @@ def test_shard_count_fills_each_shard_to_its_target_and_stays_within_the_limit(s
     assert plan.shard_count(seconds, mutants, 240, 10) == expected
 
 
+@pytest.mark.parametrize(("quota", "workers"), [("3", 3), ("4", 4)])
+def test_shards_are_sized_by_the_workers_the_batch_runner_quota_starts(tmp_path, monkeypatch, quota, workers):
+    from scripts.ci_mutation.measured import plan_shards
+
+    monkeypatch.setenv("MUTATION_SHARD_CPU_QUOTA", quota)
+    assert plan.shard_count(workers * 240 * 4, 500, 240, 10) == 4
+    tests = _timed_tests(tmp_path, {name: 10 for name in "abcdefghijkl"})
+    assert plan.slowest_bucket(tmp_path, tests, 1) == pytest.approx(120 / workers, abs=0.1)
+    assert plan_shards({"scripts.sample.x__mutmut_1": 1.0})["workers"] == workers
+
+
+def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
+    import yaml
+
+    planners = (
+        "scripts.ci_mutation.plan ",
+        "scripts.ci_mutation.measured ",
+        "scripts.ci_mutation.replay prepare",
+        "python .refinement-proof/run.py",
+    )
+    steps = {
+        f"{path.name}/{name}/{index}": step
+        for path in sorted((Path(__file__).parents[1] / ".github/workflows").glob("*.yml"))
+        for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items()
+        for index, step in enumerate(job.get("steps", []))
+        if any(planner in step.get("run", "") for planner in planners)
+    }
+    assert len(steps) >= 6
+    assert [key for key, step in steps.items() if step.get("env", {}).get("MUTATION_SHARD_CPU_QUOTA") != "3"] == []
+
+
 def _timed_tests(tmp_path, seconds, marks=None):
     (tmp_path / "tests").mkdir(exist_ok=True)
     for name in seconds:
@@ -534,54 +666,50 @@ def test_estimate_names_the_file_whose_pragma_is_broken(tmp_path, monkeypatch):
         plan.estimate(tmp_path, {"scripts/broken.py": {3}})
 
 
+def _budget_project(tmp_path, monkeypatch, seconds, timed):
+    _project(tmp_path, {})
+    tests = _timed_tests(tmp_path, timed)
+    source = "".join(f"def f{index}():\n    return {index}\n\n" for index in range(40))
+    (tmp_path / "scripts/budget.py").write_text(source)
+    for path in tests:
+        with (tmp_path / path).open("a") as stream:
+            stream.write("from scripts.budget import f0\n")
+    lines = set(range(1, len(source.splitlines()) + 1))
+    monkeypatch.setattr(plan, "MUTANT_SECONDS", seconds / 40)
+    return {"scripts/budget.py": lines} if seconds else {}, tests
+
+
 def test_main_writes_one_matrix_entry_per_shard(tmp_path, monkeypatch, capsys):
-    (tmp_path / "tests").mkdir()
-    (tmp_path / "tests/test_sample.py").write_text("")
-    output = tmp_path / "github-output"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    changes, tests = _budget_project(tmp_path, monkeypatch, 1601.4, {f"t{n}": 120.6 for n in range(9)})
+    output = tmp_path / "github-output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
-    monkeypatch.setattr("sys.argv", ["plan", "--base", "base", "--target", "100", "--limit", "4"])
+    monkeypatch.setattr(
+        "sys.argv", ["plan", "--base", "base", "--target", "100", "--limit", "4", "--stats-target", "100"]
+    )
     calls = []
 
-    def discover(root, base, head):
+    def bases(root, base, head, *args):
         calls.append((root, base, head))
-        return {"scripts/sample.py": {2}}
+        return ["earlier", "merged"]
 
-    monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
-    monkeypatch.setattr(
-        "scripts.ci_mutation.plan.own_bases",
-        lambda root, base, head, graded: (
-            ["earlier", "merged"]
-            if (root, base, head, graded) == (tmp_path, "base", "HEAD", plan.graded_green)
-            else None
-        ),
-    )
-    monkeypatch.setattr(
-        "scripts.ci_mutation.plan.estimate",
-        lambda root, changes, selection, manifest: (
-            (1601.4, 50, ["tests/test_sample.py"])
-            if (root, changes) == (tmp_path, {"scripts/sample.py": {2}})
-            else None
-        ),
-    )
-    monkeypatch.setattr(
-        "scripts.ci_mutation.plan.stats_part_count",
-        lambda root, tests, target, limit: (
-            (3, 120.6) if (root, tests, target, limit) == (tmp_path, ["tests/test_sample.py"], 100, 4) else None
-        ),
-    )
-    monkeypatch.setattr("scripts.ci_mutation.plan.needs_browser", lambda root, tests: False)
-    monkeypatch.setattr("sys.argv", [*__import__("sys").argv, "--stats-target", "100"])
+    def discover(root, bases, head):
+        calls.append((root, bases, head))
+        return changes
+
+    monkeypatch.setattr(plan, "own_bases", bases)
+    monkeypatch.setattr(plan, "discover_changes", discover)
     assert plan.main() == 0
-    assert calls == [(tmp_path, ["earlier", "merged"], "HEAD")]
+    assert calls == [(tmp_path, "base", "HEAD"), (tmp_path, ["earlier", "merged"], "HEAD")]
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == {"scripts/budget.py": tests}
     assert output.read_text() == (
         "shards=[0, 1, 2, 3]\nstats_parts=[0, 1, 2]\nbases=earlier,merged\nchanged=1\nbrowser=false\n"
     )
-    assert capsys.readouterr().out == (
-        "Mutation bases: earlier merged\n"
-        "Changed line mutants: 50\nEstimated mutation seconds: 1601, slowest stats bucket: 121\n"
-        "Mutation shards: 4\nStats parts: 3\n"
-    )
+    text = capsys.readouterr().out
+    assert "Mutation bases: earlier merged\nChanged line mutants: 40\n" in text
+    assert "Estimated mutation seconds: 1601, slowest stats bucket: 121\n" in text
+    assert "Mutation shards: 4\nStats parts: 3\n" in text
 
 
 @pytest.mark.parametrize("source, matched", [("sample", False), ("sample", True), ("plain", False)])
@@ -659,37 +787,39 @@ def test_planning_follows_selected_test_package_imports(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("estimated", "shards", "parts"),
+    ("seconds", "timed", "shards", "parts"),
     [
-        ((0, 0, {}), "[0]", "[0]"),
-        ((962, 500, dict.fromkeys("abcde", 15.24)), "[0, 1, 2]", "[0, 1]"),
-        ((480, 500, {}), "[0]", "[0]"),
-        ((481, 500, {}), "[0, 1]", "[0]"),
-        ((10**6, 10**4, {f"t{n}": 30 for n in range(40)}), json.dumps(list(range(10))), json.dumps(list(range(10)))),
+        (0, {}, "[0]", "[0]"),
+        (962, dict.fromkeys("abcde", 15.24), "[0, 1, 2]", "[0, 1]"),
+        (480, {"a": 1}, "[0]", "[0]"),
+        (481, {"a": 1}, "[0, 1]", "[0]"),
+        (10**6, {f"t{n}": 30 for n in range(40)}, json.dumps(list(range(10))), json.dumps(list(range(10)))),
     ],
 )
 def test_main_defaults_to_origin_dev_a_two_minute_target_a_half_minute_stats_bucket_and_ten_shards(
-    tmp_path, monkeypatch, estimated, shards, parts
+    tmp_path, monkeypatch, seconds, timed, shards, parts
 ):
-    seconds, mutants, timed = estimated
-    estimated = (seconds, mutants, _timed_tests(tmp_path, timed))
-    output = tmp_path / "github-output"
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("mutmut.configuration._config", None)
+    changes, tests = _budget_project(tmp_path, monkeypatch, seconds, timed)
+    output = tmp_path / "github-output"
     monkeypatch.setenv("GITHUB_OUTPUT", str(output))
     monkeypatch.setattr("sys.argv", ["plan"])
     calls = []
 
-    def discover(root, base, head):
+    def bases(root, base, head, *args):
         calls.append((root, base, head))
-        return {}
+        return ["base"]
 
-    monkeypatch.setattr("scripts.ci_mutation.plan.discover_changes", discover)
-    monkeypatch.setattr("scripts.ci_mutation.plan.own_bases", lambda root, base, head, graded: [f"{base}@{head}"])
-    monkeypatch.setattr("scripts.ci_mutation.plan.estimate", lambda root, changes, selection, manifest: estimated)
+    monkeypatch.setattr(plan, "own_bases", bases)
+    monkeypatch.setattr(plan, "discover_changes", lambda *args: changes)
     assert plan.main() == 0
-    assert calls == [(tmp_path, ["origin/dev@HEAD"], "HEAD")]
+    assert calls == [(tmp_path, "origin/dev", "HEAD")]
+    assert json.loads((tmp_path / ".mutation-selection.json").read_text()) == (
+        {"scripts/budget.py": tests} if seconds else {}
+    )
     assert output.read_text() == (
-        f"shards={shards}\nstats_parts={parts}\nbases=origin/dev@HEAD\nchanged=0\nbrowser=false\n"
+        f"shards={shards}\nstats_parts={parts}\nbases=base\nchanged={int(bool(seconds))}\nbrowser=false\n"
     )
 
 

@@ -4,8 +4,6 @@ from hooks.context import master_coding, operator_words
 from scripts.swarm_ledger import ledger_relay
 from tests.swarm_ledger.test_ledger_relay import _cli, core, make_ledger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def doctor(monkeypatch):

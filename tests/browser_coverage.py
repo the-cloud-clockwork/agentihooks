@@ -1,6 +1,7 @@
 """Record the page scripts every Chromium page a test opens ran, for the JavaScript coverage report.
 
-Loaded with `-p tests.browser_coverage`; idle unless JS_COVERAGE_DIR names the capture folder.
+Loaded with `-p tests.browser_coverage`; idle unless JS_COVERAGE_DIR names the capture folder, except that it keeps
+xdist workers from erasing the other workers' Python coverage data.
 """
 
 import functools
@@ -124,6 +125,15 @@ def track_greenlets(config, path: Path) -> None:
 @pytest.hookimpl(tryfirst=True)
 def pytest_runtest_protocol(item, nextitem):
     track_greenlets(item.config, item.path)
+
+
+@pytest.hookimpl(wrapper=True)
+def pytest_load_initial_conftests(early_config, parser, args):
+    # xdist starts each worker with the controller's -n, so pytest-cov starts a controller there that erases every
+    # .coverage.* file as it starts; a worker that replaces a crashed one would delete the live workers' data.
+    if os.environ.get("PYTEST_XDIST_WORKER"):
+        early_config.known_args_namespace.cov_append = True
+    return (yield)
 
 
 def pytest_configure(config):

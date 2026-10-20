@@ -5,7 +5,6 @@ import pytest
 from scripts.swarm import cli, publish, stack
 from tests.swarm.test_cli import env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 _fixture = env
 AGENT = "engineer@a1b2c3-0001"
 BRANCH = "engineer-a1b2c3-0001"

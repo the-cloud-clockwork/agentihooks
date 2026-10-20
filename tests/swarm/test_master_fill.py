@@ -8,8 +8,6 @@ from scripts.swarm_v2 import master_fill, master_seat_alarm
 from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeRuntime, masters, tasks
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

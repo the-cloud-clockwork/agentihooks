@@ -2,24 +2,32 @@ import argparse
 import json
 import os
 import sys
-import time
 import uuid
+from collections.abc import Mapping
 from dataclasses import replace
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
-from scripts.swarm.store import RedisStore, SwarmError, connect
+from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
+from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
 if TYPE_CHECKING:
     from scripts.swarm_v2.control_service import ControlService
 
-LOCAL, DISTRIBUTED = "local", "distributed"
+LOCAL, HYBRID, DISTRIBUTED = "local", "hybrid", "distributed"
 NO_SPAWNING = "controller spawning is disabled in this deployment mode"
 NO_KUBERNETES = "the distributed controller spawns only through its Kubernetes runtime"
 WORKSTATION = "the workstation hive spawns {lane} work"
 DISABLED = "the {backend} runtime is disabled on this controller"
+
+
+def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
+    machine = environ.get("AGENTIHOOKS_DEPLOYMENT", LOCAL)
+    return HYBRID if machine == LOCAL and config.hive_placement else machine
 
 
 class FencedLedger:
@@ -50,7 +58,9 @@ class FencedRuntime:
             and callable(getattr(runtime.herdr_runtime, "_profile_decision", None))
         ):
             runtime = hive_controller(runtime, store, slug, held)
-            runtime.router.placement = replace(runtime.router.placement, master_seats=lambda: frozenset(("master",)))
+            runtime.router.placement = replace(
+                runtime.router.placement, master_seats=partial(_master_seats, store, slug)
+            )
         self.runtime, self.deployment = runtime, deployment
 
     def __getattr__(self, name):
@@ -77,7 +87,11 @@ class FencedRuntime:
         return "" if getattr(router, "placement", None) is not None else NO_KUBERNETES
 
     def placement_refusal(self, lane: str, task: dict) -> str:
-        task = {"id": "master", **task} if lane == "master" else task
+        refused = self._refusal(lane, task)
+        return "" if _to_workstation(lane, refused) else refused
+
+    def _refusal(self, lane: str, task: dict) -> str:
+        task = _master_task(lane, task)
         if refused := self._mode_refusal():
             return refused
         if self.deployment == LOCAL:
@@ -97,7 +111,9 @@ class FencedRuntime:
             from scripts.hive.placement import Wait
 
             selected = self.runtime.hive_launch.select(self.store.config(self.slug), lane, task)
-            return selected.reason if isinstance(selected, Wait) else ""
+            if not isinstance(selected, Wait):
+                return ""
+            return f"{WORKSTATION.format(lane=lane)}: {selected.reason}" if lane == "master" else selected.reason
         wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
@@ -111,17 +127,43 @@ class FencedRuntime:
 
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
-        if refused := self.placement_refusal(lane, task):
+        task = _master_task(lane, task)
+        refused = self._refusal(lane, task)
+        workstation = _to_workstation(lane, refused)
+        if refused and not workstation:
             raise SwarmError(refused)
         with lease.kept(self.store, self.slug, self.held):
             runtime = self.runtime
-            if not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
+            if workstation:
+                runtime = runtime.herdr_runtime
+            elif not _hive_lane(lane, task) and getattr(runtime, "hive_launch", None) is not None:
                 runtime = runtime.original_runtime
             return runtime.spawn(config, lane, name, {**task, "controller_epoch": self.held.epoch})
 
 
 def _hive_lane(lane: str, task: dict) -> bool:
-    return lane in ("eng", "ci") or (lane == "master" and task.get("id") == "master") or bool(task.get("hive"))
+    return lane in HIVE_LANES or lane == "master" or bool(task.get("hive"))
+
+
+def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
+    from scripts.swarm_v2 import masters
+
+    return frozenset(masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
+
+
+def _to_workstation(lane: str, refused: str) -> bool:
+    fallback_refusal = refused.startswith(WORKSTATION.format(lane=lane)) or refused == DISABLED.format(backend="hive")
+    return lane == "master" and fallback_refusal and _workstation_herdr()
+
+
+def _master_task(lane: str, task: dict) -> dict:
+    return {"id": "master", **task} if lane == "master" else task
+
+
+def _workstation_herdr() -> bool:
+    from scripts import herdr_host
+
+    return herdr_host.server_running(dict(os.environ))
 
 
 def _read(path: str) -> str:
@@ -272,7 +314,7 @@ def main(argv: list[str]) -> int:
             proof_swarm.run(os.environ, store, service.controller.require if service is not None else None)
             if args.once:
                 return 0
-            time.sleep(lease.tick_ms() / 1000)
+            scheduled_wait(lease.tick_ms() / 1000)
     except SwarmError as exc:
         print(f"controller: {exc}", file=sys.stderr)
         return 1

@@ -10,8 +10,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 NOW = 1_800_000_000_000
 ON = {"AGENTIHOOKS_METRICS_URL": "http://ch:8123", "AGENTIHOOKS_METRICS_USER": "writer"}
 

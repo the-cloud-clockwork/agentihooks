@@ -10,9 +10,12 @@ from time import process_time
 
 from mutmut.utils.format_utils import get_mutant_name
 
+from scripts.ci_cpu_quota import quota_cpus
+from scripts.ci_cpu_quota import worker_count as quota_workers
 from scripts.ci_mutation.killers import KillMemory
 from scripts.ci_mutation.mutant_shards import shard_names, shard_tests
 from scripts.ci_mutation.report import mutation_lines
+from scripts.ci_mutation.scope import selects, test_file
 from scripts.ci_mutation.stats import write_part
 
 GROUP = re.compile(r"xdist_group\(\s*(?:name\s*=\s*)?[\"']([^\"']+)[\"']")
@@ -76,7 +79,7 @@ def keep_selected_tests(stats: dict[str, set[str]], tests_by_prefix: dict[str, s
     kept = set()
     for function, tests in stats.items():
         allowed = tests_by_prefix.get(function.rpartition(".")[0] + ".", set())
-        stats[function] = {test for test in tests if test.partition("::")[0] in allowed}
+        stats[function] = {test for test in tests if any(selects(entry, test) for entry in allowed)}
         kept |= stats[function]
     return kept
 
@@ -85,9 +88,13 @@ def file_seconds(root: Path, files: list[str]) -> dict[str, float]:
     durations = root / ".test_durations"
     durations = json.loads(durations.read_text()) if durations.exists() else {}
     seconds = dict.fromkeys(files, 0.01)
+    by_file = {}
+    for entry in files:
+        by_file.setdefault(test_file(entry), []).append(entry)
     for nodeid, duration in durations.items():
-        if (path := nodeid.partition("::")[0]) in seconds:
-            seconds[path] += duration
+        for entry in by_file.get(test_file(nodeid), ()):
+            if selects(entry, nodeid):
+                seconds[entry] += duration
     return seconds
 
 
@@ -106,8 +113,8 @@ def stats_shards(root: Path, files: list[str], count: int) -> list[list[str]]:
     # Files that share an xdist group never run concurrently in CI, so they share a shard here.
     units = []
     for path in files:
-        groups = set(GROUP.findall((root / path).read_text())) - IMPORT_GROUPS
-        keys = {f"group {group}" for group in groups} or {path}
+        groups = set(GROUP.findall((root / test_file(path)).read_text())) - IMPORT_GROUPS
+        keys = {f"group {group}" for group in groups} or {test_file(path)}
         members = [path]
         for unit in [unit for unit in units if unit[0] & keys]:
             units.remove(unit)
@@ -186,7 +193,7 @@ def collect_parallel_stats(runner, test_runner, shards: list[list[str]], work: P
 
 
 def worker_count(requested: int) -> int:
-    return requested if os.environ.get("CI") else min(requested, 2)
+    return quota_workers(requested, quota_cpus()) if os.environ.get("CI") else min(requested, 2)
 
 
 def shard_collector(collect, shard: tuple[int, int]):

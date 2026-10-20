@@ -9,8 +9,6 @@ from scripts.swarm.store import AgentRecord, RedisStore
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_quota_view import DECISION, MINUTE, row
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "s"
 FRESH_AT = (1_000_000 + 60 * MINUTE) / 1000
 

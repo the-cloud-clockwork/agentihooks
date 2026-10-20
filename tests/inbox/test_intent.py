@@ -8,7 +8,7 @@ from scripts.inbox import intent, pool
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 FRONT = "master@sw"
@@ -140,7 +140,7 @@ def test_an_unreadable_timeout_setting_keeps_the_default_deadline(swarm, inbox, 
 
 
 def test_flag_off_asks_no_classifier_and_keeps_no_history(swarm, inbox, monkeypatch):
-    monkeypatch.delenv(intent.FLAG, raising=False)
+    monkeypatch.setenv(intent.FLAG, "false")
     calls = _decider(monkeypatch, _same_topic)
     assert _addresses(inbox, ["deploy one", "deploy two", "deploy three"]) == [FRONT, SECOND, FRONT]
     assert calls == []
@@ -148,13 +148,13 @@ def test_flag_off_asks_no_classifier_and_keeps_no_history(swarm, inbox, monkeypa
 
 
 @pytest.mark.parametrize(("off", "on"), [("", "1"), ("0", " true "), ("false", "YES"), ("off", " On "), ("no", "on")])
-def test_only_a_true_flag_turns_grouping_on(monkeypatch, off, on):
+def test_grouping_is_on_unless_the_flag_says_otherwise(monkeypatch, off, on):
     monkeypatch.setenv(intent.FLAG, off)
     assert intent.enabled() is False
     monkeypatch.setenv(intent.FLAG, on)
     assert intent.enabled() is True
     monkeypatch.delenv(intent.FLAG)
-    assert intent.enabled() is False
+    assert intent.enabled() is True
 
 
 def _cache(swarm, item_id):

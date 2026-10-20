@@ -10,6 +10,8 @@ import ledger_comments
 import ledger_core as core
 import ledger_media as media
 
+from scripts.swarm_ledger import ports
+
 OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 TRASH = "artifact_trash"
 KEEP_DAYS = 30
@@ -159,7 +161,7 @@ def operator_asked(doc, entry_id):
 
 
 def refusal(doc: dict, op: dict, members: dict) -> str:
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     member = members.get(op["by"], {})
     if op["by"] not in members:
@@ -182,7 +184,7 @@ def _add(doc, op, ctx):
         if reason == REFUSED:
             ctx.refused.append(reason)
         return False
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     if (
         op["task"] == "master"

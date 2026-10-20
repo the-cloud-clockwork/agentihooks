@@ -25,13 +25,81 @@ For heartbeat handling, reconnect examples and the live replay regression, see
 | Concern | How it works now |
 |---|---|
 | Page load | Every page is a static shell of about 22 KB: `shell.html` for a ledger, `home.html` for HOME and BIN. A shell carries the page version, slug and token in meta tags and links its CSS and JS under `/static/<page version>/`, served with an immutable cache; it holds no ledger record and no inline script or style. Serving it never writes the record. Every HTML response carries an enforced Content-Security-Policy: scripts, styles, images and connections from the same origin only. |
-| Page rendering | The ledger page reads its metadata from `GET /api/v1/ledgers/{slug}` and its state from the event stream snapshot, then renders only what is visible: closed sections, folded comment threads, the Contract and proof fold and hidden panels render nothing until opened, lists show 50 items per page and threads the latest 50. Proof bodies load from `GET /api/v1/ledgers/{slug}/tasks/{id}/workspace` when their fold opens. A deep link `#item-<list>-<id>` opens the section and page that hold its target. HOME and BIN render their rows from `GET /api/v1/ledgers` and `/api/v1/bin`. `template.html` is only the format of the ledger HTML files the import reads. |
+| Page rendering | The ledger page reads its metadata from `GET /api/v1/ledgers/{slug}` and its state from the event stream snapshot, then renders only what is visible: closed sections, folded comment dropdowns, the Contract and proof fold and hidden panels render nothing until opened, lists show 50 items per page, the operator notes list and question answers the latest 50, and every comment dropdown its newest eight ([Comment list paging](#comment-list-paging)). Proof bodies load from `GET /api/v1/ledgers/{slug}/tasks/{id}/workspace` when their fold opens. A deep link `#item-<list>-<id>` opens the section and page that hold its target. HOME and BIN render their rows from `GET /api/v1/ledgers` and `/api/v1/bin`. A ledger HTML file left from the old format is read only for its seed and token on import. |
 | Page code | Native ES modules under `static/js/` for the ledger page and `static/home/home.js` for HOME and BIN; stylesheets under `static/css/` beside `palette.css`. |
 | Operator write | The page sends `PUT /api/<slug>` with `{changes, ops}` and an `X-Ledger-Token`. The server answers with a bounded acknowledgment (applied and rejected ids, rev, warnings); the page takes the new state from the event stream. `GET /api/<slug>` is retired and answers 410. |
 | Agent write | The `agentihooks ledger` CLI sends schema checked operations to `POST /api/v1/ledgers/{slug}/operations`. `agentihooks ledger --slug <slug> show` prints the whole ledger for an agent to read. `watch_ledger` follows the event stream: one snapshot, then patches. |
 | Live refresh | Server push: each tab holds one `GET /api/v1/ledgers/{slug}/events` stream (fetch streaming, token in a header). It receives one snapshot of the ledger and the swarm status, then patches of them as they change, and a heartbeat every 5 s. The server samples swarm status once per ledger while a stream is open. Quota refresh keeps its own five minute cadence. |
 | State | `ledgers.sqlite3` in the ledger folder is the record, behind `LedgerRepository`: one row per JSON value of each ledger (fields, collection items, threads), an append only event table, the page token and a summary row per ledger, and the bin and restore registries. No ledger JSON or HTML file is written. Hooks and gates read only the parts they need through a read only connection. Swarm, inbox and health live in Redis. `localStorage` keeps only per-viewer folds, layout and caches. |
 | Concurrency | One `BEGIN IMMEDIATE` transaction per mutation applies the ops, derived priorities, notifications and alerts, the revision and its events, then writes only the rows whose values changed. WAL lets readers run beside the writer; the in process lock only orders the server's own threads. A generation number per ledger tells each process when its cached copy is stale. |
+
+## Comment list paging
+
+Every comment dropdown on the ledger page opens on its newest eight comments:
+the comments under a task, a phase, a follow up, a question and the comments
+on an operator note. A **Show N older comments · M left** control sits under
+the list. Each click adds the next ten older comments above the ones already
+shown; the last click shows what remains and the control disappears. The
+summary line reads **Comments**, followed by **· N** once the item has
+comments, where N counts every comment that is not deleted.
+
+| Comments on the item | Shown on open | Control |
+|---|---|---|
+| 8 or fewer | All of them | None |
+| 25 | Newest 8 | `Show 10 older comments · 17 left` |
+| 25, after one click | Newest 18 | `Show 7 older comments · 7 left` |
+| 25, after two clicks | All 25 | None |
+
+The ledger server appends each new comment to the end of its thread, so
+comments render oldest at the top and newest at the bottom, above the
+**Add comment** button.
+
+### Behaviour while the page is open
+
+- The count of shown comments is kept per list. Opening more on one task
+  leaves every other dropdown at eight.
+- A comment arriving from the event stream keeps that count: the list still
+  shows the same number of comments, now ending at the new one, and **M left**
+  grows by one.
+- Folding a dropdown and opening it again keeps its count. Reloading the page
+  or opening it in another tab starts every list at eight again; only the
+  open or folded choice of each dropdown is remembered per viewer.
+- Deleted comments are not shown and are not counted.
+
+### Show all comments and Hide all comments
+
+The per section **Show all comments** and **Hide all comments** toggles, and
+the page wide one, only open or fold the dropdowns. They do not change how
+many comments each list shows: an opened dropdown still starts at its newest
+eight.
+
+### Other lists
+
+The same pager drives every list on the page with a different page shape.
+Sections and the outline show 50 items per page with **Show 50 more …** under
+the list. The operator notes list and question answers show the latest 50
+with **Show 50 older …** above the entries. A deep link `#item-<list>-<id>`
+pages its target in.
+
+| Shape | First page | Per click | Control |
+|---|---|---|---|
+| `COMMENT_PAGE` | 8 newest | 10 older | below the comments |
+| `FULL_PAGE` (threads) | 50 newest | 50 older | above the entries |
+| `FULL_PAGE` (lists) | 50 first | 50 next | below the items |
+
+Both shapes live in `static/js/pages.js`. `commentsView` in
+`static/js/threads.js` passes `COMMENT_PAGE` to `threadView`, so every
+comment dropdown pages through one helper. The sizes are constants in the
+page code, not settings: changing them is a code change through a pull request.
+
+### Troubleshooting
+
+| Report | Cause and check |
+|---|---|
+| A dropdown shows eight comments while its summary counts more | Expected: press **Show N older comments** under the list. |
+| The control vanished before the oldest comment | It disappears only when every comment that is not deleted is shown. Compare the summary count with the comments shown; deleted comments are not counted. |
+| A list went back to eight comments | The page was reloaded or opened in a new tab, where every list starts at eight. |
+| **Show all comments** did not show older comments | That toggle only opens the dropdowns; use **Show N older comments** inside each one. |
 
 ## What limits it
 

@@ -1,3 +1,5 @@
+import json
+
 from playwright.sync_api import expect
 
 from tests.swarm_ledger import test_swarm_layout as layout
@@ -16,7 +18,7 @@ def model_page(open_page, catalog=CATALOG):
     payload["config"].update(claude_model="opus", codex_model="gpt-6.1-sol")
     page = open_page(payload, width=1920)
     page.tab.set_viewport_size({"width": 1920, "height": 1080})
-    page.context.route("**/api/swarm/*/models", lambda route: route.fulfill(json=catalog))
+    page.context.route("**/swarm/models", lambda route: route.fulfill(json={"data": catalog}))
     page.tab.reload()
     expect(page.tab.locator("#cap-claude_model")).to_have_value("opus")
     return page
@@ -42,7 +44,7 @@ def test_empty_catalog_shows_only_current_value(open_page):
 def test_populated_catalog_does_not_add_an_absent_current_model(open_page):
     page = model_page(open_page)
     page.context.route(
-        "**/api/swarm/*/models", lambda route: route.fulfill(json={"claude": CATALOG["claude"][1:], "codex": []})
+        "**/swarm/models", lambda route: route.fulfill(json={"data": {"claude": CATALOG["claude"][1:], "codex": []}})
     )
     page.tab.reload()
     expect(page.tab.locator("#cap-claude_model option")).to_have_count(1)
@@ -153,11 +155,17 @@ def test_the_panel_keeps_the_sent_values_until_the_acknowledging_tick_published(
 
 def test_a_typed_cap_settles_on_the_number_it_sent(open_page):
     page = model_page(open_page)
+
+    def applied(route):
+        page.puts.append(json.loads(route.request.post_data))
+        page.payload["config"]["max_ci"] = 2
+        page.payload["commands"] = [
+            {"id": "new", "command": "swarm", "argv": ["set", "max-ci-agents=2"], "state": "pending"}
+        ]
+        route.fulfill(json=page.payload)
+
+    page.context.route("**/swarm/controls", applied)
     page.tab.locator("#cap-ci").fill("02")
-    page.payload["config"]["max_ci"] = 2
-    page.payload["commands"] = [
-        {"id": "new", "command": "swarm", "argv": ["set", "max-ci-agents=2"], "state": "pending"}
-    ]
     page.tab.get_by_role("button", name="Apply capacity").click()
     for _ in range(100):
         if page.puts:

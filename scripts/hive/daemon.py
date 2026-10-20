@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 import subprocess
 import time
@@ -10,8 +11,9 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions, broadcast
 from scripts import claude_quota_balancer as balancer
 from scripts import codex_router, session_bands
-from scripts.hive import registry
+from scripts.hive import quota_refresh, registry
 from scripts.routing import claude_api, codex_api
+from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm.commands import hive_id
 
 if TYPE_CHECKING:
@@ -22,7 +24,10 @@ if TYPE_CHECKING:
 
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
+RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
 UNIT = "agentihooks-hive.service"
+ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
+REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
 
 
 def beat(redis: "Redis", local_id: str) -> None:
@@ -35,6 +40,7 @@ def beat(redis: "Redis", local_id: str) -> None:
     processes = account_sessions.local_processes()
     executions = _executions(redis, local_id, processes)
     report = observe(processes=processes)
+    adopt_caps(redis, report)
     if executions:
         report["sessions"]["_executions"] = executions
     key = registry.key(local_id)
@@ -56,8 +62,38 @@ def beat(redis: "Redis", local_id: str) -> None:
     if not fenced:
         consumer.poll()
     consumer.poll_commands()
+    consumer.sync_workspaces(TTL_SECONDS)
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
+    publish_config(redis, local_id, report["repos"])
+
+
+def adopt_caps(redis: "Redis", report: dict) -> None:
+    """A subscription slot takes the cap of a newer reading another live hive published, since quota is per account."""
+    now = int(time.time() * 1000)
+    for hive in registry.hives(redis):
+        if not registry.live(hive, now):
+            continue
+        quotas = json.loads(redis.get(f"{registry.key(hive['id'])}:quota") or "{}")
+        caps = {f"{slot['harness']}:{slot['account']}": slot["cap"] for slot in hive["slots"] if "cap" in slot}
+        for slot in report["slots"]:
+            name = f"{slot['harness']}:{slot['account']}"
+            reading = quotas.get(name)
+            if slot["kind"] == "subscription" and name in caps and _newer(reading, report["quota"][name]):
+                slot["cap"] = caps[name]
+                report["quota"][name] = reading
+
+
+def _newer(reading: dict | None, mine: dict) -> bool:
+    if reading is None or reading["observed_at"] is None:
+        return False
+    return mine["observed_at"] is None or reading["observed_at"] > mine["observed_at"]
+
+
+def publish_config(redis: "Redis", local_id: str, repos: list[str]) -> None:
+    from scripts.hive import config
+
+    config.publish(redis, local_id, repos)
 
 
 def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
@@ -77,12 +113,26 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def run(redis: "Redis") -> None:
+def run(connect: Callable[[], "Redis"]) -> None:
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    lost = (ConnectionError, TimeoutError)
     local_id = hive_id()
+    quota_refresh.refresh(os.environ)
+    worker, attempted_at = None, time.time()
+    failures = 0
     while True:
-        started = time.monotonic()
-        beat(redis, local_id)
-        time.sleep(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+        try:
+            redis = connect()
+            while True:
+                started = time.monotonic()
+                worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
+                beat(redis, local_id)
+                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+                failures = 0
+        except lost:
+            time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
+            failures += 1
 
 
 def unit(binary: str) -> str:
@@ -203,6 +253,17 @@ def _subscriptions(environ, counts: dict, now: float) -> tuple[list, dict]:
 
 
 def repositories() -> list[str]:
+    checkouts = _checkouts()
+    identities = {origin(path) for path in checkouts} - {""}
+    return sorted(identities | {str(path) for path in checkouts})
+
+
+def local_checkout(repo: str) -> str:
+    matches = sorted(str(path) for path in _checkouts() if origin(path) == repo)
+    return matches[0] if matches else repo
+
+
+def _checkouts() -> list[Path]:
     root = Path(os.environ.get("HIVE_REPO_ROOT") or Path.home() / "dev").expanduser()
     if not root.is_dir():
         return []
@@ -213,7 +274,26 @@ def repositories() -> list[str]:
         if parent.is_dir() and not (parent / ".git").exists()
         for child in parent.iterdir()
     ]
-    return sorted(str(path) for path in candidates + nested if (path / ".git").exists())
+    return [path for path in candidates + nested if (path / ".git").exists()]
+
+
+def origin(checkout: Path) -> str:
+    """The checkout's origin remote as a lowercase host/owner/name, the name a hosted swarm gives its repo."""
+    try:
+        found = ORIGIN.search((_common_gitdir(checkout) / "config").read_text())
+    except OSError:
+        return ""
+    remote = found and REMOTE.fullmatch(found.group(1).strip())
+    return f"{remote.group(1)}/{remote.group(2)}".lower() if remote else ""
+
+
+def _common_gitdir(checkout: Path) -> Path:
+    git = checkout / ".git"
+    if git.is_file():
+        git = checkout / git.read_text().removeprefix("gitdir:").strip()
+        if (git / "commondir").is_file():
+            git = git / (git / "commondir").read_text().strip()
+    return git
 
 
 def observe(processes: dict[str, dict[int, str]] | None = None) -> dict:

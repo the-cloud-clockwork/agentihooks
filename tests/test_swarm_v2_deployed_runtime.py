@@ -30,7 +30,7 @@ from scripts.swarm_v2.runtime.base import LOCAL, SpawnRequest
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 from tests import sv2_hdr03_cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "control-fixture"
 SEAT = f"eng-1@{SLUG}"

@@ -10,8 +10,6 @@ from scripts.swarm_v2.runtime import codex
 from scripts.swarm_v2.runtime.base import LOCAL, Outcome, Status
 from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def storage(tmp_path, monkeypatch):

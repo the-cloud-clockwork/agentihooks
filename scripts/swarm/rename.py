@@ -1,8 +1,7 @@
 import json
-import uuid
 from dataclasses import asdict, replace
 
-from scripts.swarm import live_binding, naming
+from scripts.swarm import commands, controller, lease, live_binding, naming
 from scripts.swarm.runtime import herdr_target
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -10,8 +9,11 @@ LOCK_MS = 600_000
 
 
 def rename_swarm(store, slug, ledger, runtime, at):
-    lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
-    if not store.redis.set(lock, token, nx=True, px=LOCK_MS):
+    held = lease.acquire(store, slug, commands.hive_id())
+    if held is None:
+        raise SwarmError(f"swarm {slug}: belongs to another hive")
+    token = controller.take_tick_lock(store, slug, held, LOCK_MS)
+    if token is None:
         raise SwarmError(f"swarm {slug}: another tick or rename is running")
     try:
         config = store.ensure_code(slug)
@@ -43,8 +45,7 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 actions.append(f"renamed space {workspace['workspace_id']} to {label}")
         return actions
     finally:
-        if store.redis.get(lock) == token:
-            store.redis.delete(lock)
+        controller.release_tick_lock(store, slug, token)
 
 
 def _name_session(store, slug, runtime, pane_id, new):

@@ -266,7 +266,7 @@ export function startLayout() {
   wireStats();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
   readLayout()
-    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((resp) => (resp.ok ? resp.json().then((reply) => reply.data) : null))
     .then((saved) => {
       if (saved && !layoutSave) { applyLayout(saved); mirrorLayout(); }
     })

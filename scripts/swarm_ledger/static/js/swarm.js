@@ -9,6 +9,8 @@ import { doc, queue } from "./sync.js";
 import { snowflake, targetText } from "./freezes.js";
 import { agentActions, reconcile, settle, titlePause } from "./lifecycle.js";
 import { quotaCount, renderHives } from "./hives.js";
+import { agentCellTips } from "./agent_cells.js";
+import { capacityShown, liveAgents, renderRoles } from "./roles.js";
 
 const LIVE_LANES = [["eng", "max_eng"], ["ci", "max_ci"], ["plan", "max_plan"]];
 const ROLES = ["master", "engineer", "planner", "qa", "cicd", "documentation"];
@@ -100,7 +102,7 @@ function openFindings(sw) {
 }
 
 function liveCaps(sw) {
-  const live = (lane) => (sw.agents || []).filter((a) => a.lane === lane && a.state !== "finished").length;
+  const live = (lane) => liveAgents(sw).filter((a) => a.lane === lane).length;
   return LIVE_LANES.map(([lane, key]) => `${lane} ${live(lane)}/${sw.config[key] ?? 0}`);
 }
 
@@ -146,13 +148,13 @@ function agentRows(sw, now) {
 }
 
 function agentRow(a, remote) {
-  return withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
-    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), label("promoted")) : label(a.state),
-    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`);
+  return agentCellTips(withId(cells(idCell(a.name), a.lane, a.profile, a.overlays, a.model, a.remoteControl ? h("span", { "data-tip": `Remote Control: ${a.remoteControl.state} (${a.remoteControl.detail})` }, label(`remote control ${a.remoteControl.state}`, a.remoteControl.state), h("span", { class: "sw-sub", text: a.remoteControl.detail }), ...(a.transport ? [transportCell(a.transport)] : [])) : transportCell(a.transport), a.task ? h("a", { href: `#item-tasks-${a.task}`, text: a.task }) : "—",
+    a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, label(a.state), " ", label("promoted")) : label(a.state),
+    ...(remote ? [executionCell(a.execution), terminalCell(a.terminal, a.execution)] : []), a.age, a.finished ? h("span") : agentActions(a, pending, swarmReadError)), `agent-${a.name}`));
 }
 
 const transportCell = (c) => c ? h("span", { class: "sw-transport", "data-tip": `${c.push_inbox ? "push" : "no push"} · ${c.native_terminal_attach ? "native terminal" : "no native terminal"}` },
-  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
+  label(c.push_inbox ? "push" : "no push", c.push_inbox ? "on" : "off"), " ", label(c.native_terminal_attach ? "native terminal" : "no native terminal", c.native_terminal_attach ? "on" : "off")) : "—";
 
 function executionCell(e) {
   return e ? h("span", {}, label(e.shown, e.tone), ` ${e.seen}`, h("span", { class: "sw-sub", text: e.where })) : "—";
@@ -312,6 +314,8 @@ export function renderSwarm(sw) {
     sw && (openFindings(sw).length || sw.tasks.blocked) ? h("span", { class: "attention-dot", "aria-label": "Needs attention" }) : null].filter(Boolean));
   renderGates(sw);
   renderControls();
+  capacityShown(sw, swarmReadError);
+  renderRoles(sw);
   titlePause(sw);
   if ($("swarm").hidden) return renderStats();
   renderFreezes();

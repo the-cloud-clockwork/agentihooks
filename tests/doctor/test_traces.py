@@ -101,6 +101,25 @@ def test_recorded_turns_follow_each_other_and_a_planted_long_gap_is_found():
     assert any(line.startswith("turn 3 to turn 4: ") for line in found.evidence)
 
 
+PARTIAL = "observations read only up to where the read stopped"
+
+
+def test_findings_on_a_trace_read_in_part_say_so_and_whole_traces_do_not():
+    record = load("traces")
+    for o in _trace(record, ENG11)["observations"]:
+        if o["turn"] in (4, 5):
+            o["start"] += 3_600_000
+            o["end"] += 3_600_000
+    for tool in [o for o in _trace(record, ENG5)["observations"] if o["type"] == "TOOL"][:30]:
+        tool["error"] = True
+    [gap], [errors] = traces.turn_gaps(record, LIMITS), traces.tool_errors(record, LIMITS)
+    assert PARTIAL not in gap.evidence and PARTIAL not in errors.evidence
+    _trace(record, ENG11)["complete"] = False
+    _trace(record, ENG5)["complete"] = False
+    [gap], [errors] = traces.turn_gaps(record, LIMITS), traces.tool_errors(record, LIMITS)
+    assert PARTIAL in gap.evidence and PARTIAL in errors.evidence
+
+
 def test_recorded_untraced_sessions_are_named_and_a_planted_trace_clears_one():
     record = load("traces")
     found = {f.subject: f for f in traces.untraced(record, LIMITS)}

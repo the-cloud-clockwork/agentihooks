@@ -119,6 +119,9 @@ class NoOrders:
     def poll_commands(self):
         return 0
 
+    def sync_workspaces(self, ttl):
+        return None
+
 
 orders.Consumer.local = classmethod(lambda cls, redis, hive: NoOrders())
 daemon.execution_report = lambda redis, local_id, herdr: {"names": [], "panes": {}, "executions": {}}

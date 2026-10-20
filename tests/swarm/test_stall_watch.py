@@ -14,8 +14,6 @@ from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeLedger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 URL = "https://github.com/o/r/pull/7"
 OWNER = "engineer@abc-0001"
@@ -275,6 +273,19 @@ def test_a_released_dependency_wait_does_not_hide_another_stalled_pull_request()
     swarm.tick(START + 30 * MINUTE)
     assert swarm.ledger.rows["t1"]["state"] == "pr"
     assert swarm.ledger.rows["t2"]["state"] == "open"
+
+
+@pytest.mark.parametrize("kind, held", [("recover", True), ("merge", False)])
+def test_a_transient_unmergeable_requeue_backoff_holds_the_dropped_queue_reopen(kind, held):
+    swarm = Swarm(QUEUED, task={"awaiting": ready.AWAITING}, live=False)
+    found = ready.held_record(URL, "h", "", OWNER, START)
+    found["on"] = {"kind": kind, "target": URL, "head": "h"}
+    ready.save(swarm.store, SLUG, "t1", found)
+    swarm.tick(START)
+    swarm.pulls[URL] = GREEN
+    swarm.tick(START + MINUTE)
+    swarm.tick(START + 30 * MINUTE)
+    assert (swarm.ledger.rows["t1"]["state"] == "pr") is held
 
 
 @pytest.mark.parametrize("pull", [GREEN, RUNNING])

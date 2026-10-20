@@ -9,8 +9,6 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 LAUNCH = 1_000_000
 LAUNCH_CHECKED = True
 

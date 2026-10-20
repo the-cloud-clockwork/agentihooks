@@ -24,7 +24,7 @@ connector-specific companion environment files.
 
 ## Install & Automation
 
-These variables control how `agentihooks init` installs and configures Claude Code. They are read at install time, not at hook runtime.
+These variables control how `agentihooks init` installs and configures Claude Code and Codex. Harness-specific variables apply only to their named client. They are read at install time, not at hook runtime.
 
 | Variable | Default | Description |
 |----------|---------|-------------|
@@ -95,7 +95,7 @@ load time. See [MCP Transport](../hooks/mcp-transport.md) for the full setup.
 | `REDIS_SESSION_TTL` | `86400` | Session TTL in seconds (24 hours). |
 | `REDIS_POSITION_TTL` | `3600` | Position TTL in seconds (1 hour). |
 | `REDIS_KEY_PREFIX` | `agenticore` | Redis key prefix for all stored keys. |
-| `REDIS_SOCKET_TIMEOUT` | `5.0` | Redis socket timeout in seconds. |
+| `REDIS_SOCKET_TIMEOUT` | `5.0` | Hook runtime Redis socket timeout in seconds. The hive join service does not read it. |
 
 ---
 
@@ -242,13 +242,26 @@ See [Claude Account Load Balancing](../pillars/load-balancing.md).
 
 ---
 
+## Hook Injection Budget
+
+Claude hook context uses a shared event budget, independently of compression.
+See [Hook Injection Budget](../hooks/injection-budget.md) for priority order,
+examples, inbox exceptions and size diagnostics. Codex and Copilot retain their
+own limits and arrival order.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `HOOK_INJECTION_MAX_CHARS` | `9000` | Claude event budget in UTF-16 code units. Keep positive and below 10,000; zero or negative disables fitting and priority sorting. |
+
+---
+
 ## Tool Memory
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `AGENTICORE_TOOL_MEMORY_PATH` | `~/.agenticore_tool_memory.ndjson` | Path to the tool error memory file. |
 | `AGENTICORE_TOOL_MEMORY_MAX` | `100` | Maximum number of error entries to store. |
-| `AGENTICORE_TOOL_MEMORY_SHOW` | `15` | Number of entries to inject per `PreToolUse` event. |
+| `AGENTICORE_TOOL_MEMORY_SHOW` | `5` | Maximum selected entries per `PreToolUse` event, each limited to 160 characters before event budget fitting. |
 
 ---
 
@@ -426,6 +439,28 @@ Every agent reports gh as logged out at once:
 | Variable | Integrations affected |
 |----------|-----------------------|
 | `IS_EVALUATION` | S3, DynamoDB, PostgreSQL, Lambda |
+
+---
+
+## Master Inbox Intent Grouping
+
+See [Intent grouping](../pillars/swarm.md#intent-grouping). Read by every process that hands out a swarm's master inbox pool.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` | `on` | `1`, `true`, `yes` or `on` keep grouping on; any other value turns it off and the pool deals items round robin |
+| `MASTER_INBOX_CLASSIFIER_TIMEOUT_S` | `3` | Seconds one pool pass waits for its intent verdicts before unanswered items go round robin |
+
+---
+
+## Swarm Grafana Alerts
+
+See [Grafana bottleneck alerts](grafana-bottleneck-alerts.md). The swarm tick reads alert state through the gateway with these; no listener, token or secret path of its own.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `MCP_KEY_GATEWAY` | — | LiteLLM gateway key; its LiteLLM unit must reach the `grafana` MCP server. Unset → the tick reads no alerts |
+| `LANGFUSE_MCP_URL` | — | Gateway MCP endpoint, shared with the Langfuse summary pass. Unset → the tick reads no alerts |
 
 ---
 

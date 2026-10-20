@@ -151,6 +151,12 @@ def pane_target(agent):
     return agent.pane_id or herdr_target(agent.name)
 
 
+def _titled(slug, lane, seat):
+    from scripts.swarm_v2 import masters
+
+    return ["--title", masters.title(slug, seat)] if lane == MASTER else []
+
+
 def _launch_records(name):
     from scripts import herdr_panes
 
@@ -538,7 +544,9 @@ class HerdrRuntime:
             return self._saved_choice(saved, profile, quota_transfer, environ)
         return self._rotation(requested, environ, _prefer(profile, avoid))
 
-    def _route_kind(self, lane, harness, task):
+    def _route_kind(self, lane, harness, task, slug):
+        if master_claude_login.enabled(slug, task.get("seat", ""), lane, harness or "claude"):
+            return "interactive"
         explicit = task.get("route_kind")
         if explicit or lane != MASTER or harness not in ("", "claude"):
             return explicit or "subscription"
@@ -559,7 +567,7 @@ class HerdrRuntime:
         if want and plugins.claude_only(profile) and want != "claude":
             kind = "master affinity" if lane == MASTER else "lane harness"
             raise SpawnError(f"{kind} {want} cannot mount the claude only profile {profile}", "unsupported")
-        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task)
+        route_kind = self._route_kind(lane, want or requested or saved.get("harness", ""), task, config.slug)
         quota_transfer = (task.get("handoff_envelope") or {}).get("reason") == "quota"
         saved = (
             self._quota_transfer(saved, profile, environ, lane, want, self._planned_slot(task["id"]))
@@ -603,6 +611,7 @@ class HerdrRuntime:
         )
         timing.call(priming_trace.write, self.home, config.slug, name, task)
         argv = self._argv(config, name, agent, text, f"{name}.md", profile, decision.overlays)
+        argv += _titled(config.slug, lane, task.get("seat", ""))
         argv += codex.arguments(config, agent, task)
         argv += _pinned(decision.overlays, decision.bundle_revision)
         if saved.get("model"):
@@ -628,9 +637,7 @@ class HerdrRuntime:
         picked = replace(picked, effort=saved["effort"]) if saved else picked
         mode = [] if lane != "plan" else PLAN_MODE if agent == "claude" else codex_plan_mode(environ)
         front = front_door.holds(config.slug, task.get("seat", ""))
-        login = task.get("route_kind", "interactive") == "interactive" and master_claude_login.enabled(
-            config.slug, task.get("seat", ""), lane, agent
-        )
+        login = master_claude_login.enabled(config.slug, task.get("seat", ""), lane, agent)
         route_kind = "interactive" if login else route_kind
         route = master_claude_login.route(login) or (
             ["--route", "interactive"]
@@ -704,6 +711,7 @@ class HerdrRuntime:
             agent.overlays,
         )
         argv += _pinned(agent.overlays, agent.profile_decision.get("bundle_revision"))
+        argv += _titled(config.slug, agent.lane, agent.seat)
         defaults = _lane_default(agent.lane, agent.harness, config.lanes.get(agent.lane, {}), config)
         picked = model_pick.ModelPick(
             agent.model or defaults.model,
@@ -766,6 +774,8 @@ class HerdrRuntime:
         return False
 
     def _argv(self, config, name, agent, text, prompt_name, profile, worn=()):
+        from scripts.hive import daemon
+
         path = self.home / config.slug / "prompts" / prompt_name
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(text, encoding="utf-8")
@@ -778,7 +788,7 @@ class HerdrRuntime:
             "--workspace",
             naming.space(config.repo, config.code, config.slug),
             "--dir",
-            config.repo,
+            daemon.local_checkout(config.repo),
         ]
         argv += [
             "--name",

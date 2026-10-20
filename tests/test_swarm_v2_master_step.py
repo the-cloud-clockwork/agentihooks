@@ -9,7 +9,7 @@ from scripts.swarm_ledger import ledger_server
 from scripts.swarm_v2 import master_scale, masters
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "step-sw"
 LEAD, SECOND, THIRD = masters.seats(SLUG, 3)

@@ -14,6 +14,10 @@ GITHUB = re.compile(r"/actions/(?:runs/\d+/)?artifacts/")
 SED_RANGE = re.compile(r"\s*sed\s+-n\s+(['\"]?)([1-9][0-9]*),([1-9][0-9]*)p\1\s+(\S+)\s*")
 FIELDS = {"Read": ("file_path",), "Grep": ("path", "glob"), "Bash": ("command",), "WebFetch": ("url",)}
 COMMAND = "agentihooks plan read"
+MIGRATIONS = {
+    "scripts.swarm_ledger.storage_migration.hosted": (("--freeze",), ("--source", "--url", "--slug")),
+    "scripts.swarm_ledger.storage_migration.shared": (("--dry-run", "--unfence"), ("--source",)),
+}
 WRITERS = {"echo", "printf"}
 SINKS = WRITERS | {"cat", "tee"}
 SEPARATOR = re.compile(r"[<>]*[;&|()\n][;&|()<>\n]*")
@@ -132,17 +136,17 @@ def _segments(command: str) -> list[list[str]]:
 
 
 def _migration(words: list[str]) -> bool:
-    module = "scripts.swarm_ledger.storage_migration.hosted"
     if len(words) < 3 or not re.fullmatch(r"python(?:3(?:\.[0-9]+)?)?", PurePath(words[0]).name):
         return False
-    if words[1:3] != ["-m", module]:
+    if words[1] != "-m" or words[2] not in MIGRATIONS:
         return False
+    flags, valued = MIGRATIONS[words[2]]
     position = 3
     while position < len(words):
         option = words[position]
-        if option == "--freeze":
+        if option in flags:
             position += 1
-        elif option in ("--source", "--url", "--slug") and position + 1 < len(words):
+        elif option in valued and position + 1 < len(words):
             position += 2
         elif option in (">", ">>") and position + 2 == len(words):
             return True
@@ -184,7 +188,7 @@ def _names_folder(text: str, root: Path) -> bool:
 
 
 def _plans(env, slug: str):
-    from scripts.swarm_ledger.repository.sqlite import read_ledger, read_ledgers
+    from scripts.swarm_ledger.storage import read_ledger, read_ledgers
 
     root, task_id = _ledger_dir(env), env.get("AGENTIHOOKS_SWARM_TASK")
     doc = read_ledger(root, slug, "artifacts", "phases", *([f"tasks/{task_id}"] if task_id else []))

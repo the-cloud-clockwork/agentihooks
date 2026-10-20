@@ -1,4 +1,6 @@
 import json
+import logging
+import os
 import socket
 import time
 import uuid
@@ -13,6 +15,8 @@ from scripts.scheduler.slots import CallableSlot, Slot, restore
 if TYPE_CHECKING:
     from redis import Redis
     from redis.lock import Lock
+
+_log = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -109,6 +113,12 @@ class Scheduler:
         self.machine = machine or socket.gethostname()
 
     def key(self, suffix: str) -> str:
+        if os.environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local":
+            from scripts.swarm.keyspace import ROOT
+
+            if member := os.environ.get("AGENTIHOOKS_HIVE_ID"):
+                return f"{ROOT}:hive:{member}:scheduler:{self.machine}:{suffix}"
+            return f"{ROOT}:scheduler:{self.machine}:{suffix}"
         return redis_key("scheduler", f"{self.machine}:{suffix}")
 
     def get(self, entry_id: str) -> Entry:
@@ -236,6 +246,7 @@ class Scheduler:
             "scheduled_at": pending["scheduled_at"],
             "fired_at": pending["fired_at"],
         }
+        failed = []
         for connection in pending["slots"]:
             if self.get(entry_id).state != "pending":
                 return
@@ -245,14 +256,20 @@ class Scheduler:
             slot = dict(connection)
             connection_id = slot.pop("id")
             slot.pop("signal")
-            restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.redis)
+            try:
+                restore(slot).deliver(event, f"{pending['id']}:{connection_id}", self.redis)
+            except Exception as exc:
+                failed.append(connection_id)
+                _log.warning("scheduler slot delivery failed: entry %s slot %s error %r", entry_id, slot, exc)
+                continue
 
             def acknowledge(current):
                 if current["state"] == "pending":
                     current["pending"]["delivered"].append(connection_id)
 
             self.update(entry_id, acknowledge, lease=lease)
-        self.update(entry_id, lambda current: self._finish(current, now), lease=lease)
+        if not failed:
+            self.update(entry_id, lambda current: self._finish(current, now), lease=lease)
 
     @staticmethod
     def _finish(entry: dict, now: float) -> None:
@@ -267,6 +284,19 @@ class Scheduler:
             entry["due"] = now + entry["delay"]
         entry.pop("pending")
 
+    def retire(self, entry_id: str, wake_key: str) -> None:
+        self.get(entry_id).cancel()
+        self.redis.hset(self.key("retired"), entry_id, wake_key)
+
+    def _reap(self, lease: "Lock") -> None:
+        for entry_id, wake_key in self.redis.hgetall(self.key("retired")).items():
+            verify_lease(self.redis, lease)
+            with self.redis.pipeline() as pipe:
+                pipe.hdel(self.key("entries"), entry_id)
+                pipe.delete(wake_key)
+                pipe.hdel(self.key("retired"), entry_id)
+                pipe.execute()
+
     def run_due(self, *, now: float | None = None) -> int:
         now = time.time() if now is None else now
         with dispatch_lock(self.redis, self.key("dispatch-lock")) as lease:
@@ -278,4 +308,5 @@ class Scheduler:
                 entry = self.get(entry_id).record
                 if entry["state"] == "pending":
                     self._deliver(entry_id, now, lease)
+            self._reap(lease)
             return fired

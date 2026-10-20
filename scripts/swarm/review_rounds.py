@@ -16,7 +16,7 @@ CLOSED = (
 
 def _counter(budget, task, pr_url, first_pr):
     if not pr_url:
-        return "rounds"
+        return "rounds-before-pr"
     path = budget.path(task, "first-pr")
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a+") as held:

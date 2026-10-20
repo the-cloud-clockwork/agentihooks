@@ -135,6 +135,8 @@ def _waiting(watch, task, rows):
     if any(dep != tid and rows.get(dep, {}).get("state") != "done" for dep in task.get("depends_on") or []):
         return True
     found = ready.record(watch.store, watch.slug, tid) if ready.awaiting(task) else None
+    if (found or {}).get("on", {}).get("kind") == ready.RECOVER:
+        return True
     declared = idle.wait(watch.store.redis, watch.slug, owner) if owner else None
     held = ((found or {}).get("dependency"), (declared or {}).get("on"))
     return any(on and waits.dependency(on, task, rows, watch.view) for on in held)

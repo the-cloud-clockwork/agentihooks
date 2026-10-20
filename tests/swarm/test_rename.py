@@ -9,7 +9,7 @@ from scripts.swarm.naming import NamingError
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
 from scripts.terminate_agent import Session, resolve
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

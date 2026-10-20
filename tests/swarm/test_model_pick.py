@@ -8,8 +8,6 @@ from scripts.swarm.model_pick import ModelPick
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_runtime import _launched
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 AUTO = {"model": "auto", "effort": "auto"}
 SONNET_XHIGH, OPUS_MEDIUM, OPUS_HIGH, OPUS_XHIGH = (
     ("sonnet", "xhigh"),

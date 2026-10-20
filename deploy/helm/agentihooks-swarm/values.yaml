@@ -51,6 +51,8 @@ ledger:
     size: 1Gi
     storageClassName: ""
   env: {}
+  # Secret env only the ledger container reads, such as the shared database URL workers must never hold.
+  secretEnv: []
   resources:
     requests:
       cpu: 50m
@@ -187,7 +189,7 @@ controller:
 workers:
   replicas: 0
   maxAgents: 1
-  roles: [eng, ci, plan]
+  roles: [eng, ci, plan, dispatch]
   image:
     repository: ghcr.io/the-cloud-clockwork/agentihooks-hive-worker
     tag: dev
@@ -204,16 +206,23 @@ workers:
     name: ""
     key: ""
   envFromSecrets: []
+  profile: engineer
+  # Operator keys and the stable host key come from credentialSecret; publish the port outside this chart.
+  ssh:
+    enabled: false
+    port: 2222
   persistence:
     size: 1Gi
     storageClassName: ""
+  # Memory in MiB per agent, multiplied by maxAgents into the pod's memory request and limit.
+  memoryPerAgentMi:
+    request: 700
+    limit: 2048
   resources:
     requests:
       cpu: 100m
-      memory: 256Mi
       ephemeral-storage: 1Gi
     limits:
-      memory: 2Gi
       ephemeral-storage: 10Gi
 
 worker:

@@ -9,8 +9,6 @@ from scripts.doctor import master_launches, spawn_read
 from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ERROR = "unsupported transfer: saved effort is outside the current swarm range"
 COOLDOWN_MS = 60 * 60_000
 INTERVAL_MS = 10 * 60_000

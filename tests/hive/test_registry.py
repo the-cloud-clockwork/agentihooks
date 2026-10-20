@@ -9,8 +9,6 @@ from scripts.swarm import commands, lease
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.keyspace import installation
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DEFAULT = {
     "id": "box",
     "name": "box",
@@ -49,13 +47,13 @@ def test_a_member_updates_its_settings_without_writing_the_controller_index(redi
     monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "box")
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://localhost:6379/15")
     monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://localhost:6379/15")
-    assert registry.update(redis, "box", ["ui=no", "ephemeral=yes", "roles=eng,ci,plan"]) == {
+    assert registry.update(redis, "box", ["ui=no", "ephemeral=yes", "roles=eng,ci,plan,dispatch"]) == {
         **DEFAULT,
         "ui": "no",
         "ephemeral": "yes",
-        "roles": ["eng", "ci", "plan"],
+        "roles": ["eng", "ci", "plan", "dispatch"],
     }
-    assert registry.show(redis, "box")["roles"] == ["eng", "ci", "plan"]
+    assert registry.show(redis, "box")["roles"] == ["eng", "ci", "plan", "dispatch"]
     assert not redis.exists(registry.INDEX)
 
 
@@ -166,7 +164,7 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
         (["ui=maybe"], "ui must be yes or no, not 'maybe'"),
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
-        (["roles=eng,cook"], "unknown role cook; roles are master, qa, frontend, eng, ci, plan"),
+        (["roles=eng,cook"], "unknown role cook; roles are master, qa, frontend, eng, ci, plan, dispatch"),
         (["max-agents=0"], "max-agents must be a positive whole number, not '0'"),
         (["max-agents=two"], "max-agents must be a positive whole number, not 'two'"),
         (["max-agents=-1"], "max-agents must be a positive whole number, not '-1'"),

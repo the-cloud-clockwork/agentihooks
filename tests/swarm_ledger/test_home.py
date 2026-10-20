@@ -30,7 +30,7 @@ class Home(unittest.TestCase):
                 "questions": [],
                 "followups": [],
             }
-            html_path, _ = core.paths(slug)
+            html_path, _ = legacy_page.paths(slug, core)
             html_path.write_text(legacy_page.render(new_ledger.build_doc(content), slug, 8765), encoding="utf-8")
         cls.browsers = contextlib.ExitStack()
         cls.browser = cls.browsers.enter_context(chromium())

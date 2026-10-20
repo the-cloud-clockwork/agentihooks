@@ -9,7 +9,6 @@ from tests.swarm.test_tick import FakeLedger, FakeRuntime
 from tests.swarm_ledger.test_caps_columns import browser
 from tests.swarm_ledger.test_remote_control_process import remote_server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 __all__ = ["browser", "remote_server"]
 
 

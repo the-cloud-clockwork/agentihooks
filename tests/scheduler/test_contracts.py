@@ -1,9 +1,10 @@
+import logging
 import re
 from types import SimpleNamespace
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -113,8 +114,7 @@ def test_inbox_retry_after_transport_acceptance_keeps_one_item(monkeypatch, sche
 
     with monkeypatch.context() as fault:
         fault.setattr(InboxSlot, "deliver", crash)
-        with pytest.raises(RuntimeError, match="^transport accepted before crash$"):
-            scheduler.run_due(now=101)
+        assert scheduler.run_due(now=101) == 1
     inbox = InboxStore(scheduler.redis)
     first = inbox.pending_items("proof-session")
     assert len(first) == 1
@@ -140,8 +140,7 @@ def test_retry_continues_after_an_already_acknowledged_slot(monkeypatch, schedul
 
     with monkeypatch.context() as fault:
         fault.setattr(InboxSlot, "deliver", crash_second)
-        with pytest.raises(RuntimeError, match="^second slot unavailable$"):
-            scheduler.run_due(now=101)
+        assert scheduler.run_due(now=101) == 1
     inbox = InboxStore(scheduler.redis)
     assert len(inbox.pending_items("first-session")) == 1
     assert inbox.pending_items("second-session") == []
@@ -150,6 +149,40 @@ def test_retry_continues_after_an_already_acknowledged_slot(monkeypatch, schedul
     assert len(inbox.pending_items("first-session")) == 1
     assert [item.text for item in inbox.pending_items("second-session")] == ["both"]
     assert timer.state == "fired"
+
+
+def test_a_failing_slot_is_logged_unacknowledged_and_other_entries_still_run(caplog, scheduler):
+    from scripts.inbox.store import InboxStore
+    from scripts.scheduler.slots import CallableSlot, InboxSlot
+
+    reference = "scripts.scheduler.absent_slot_module:deliver"
+    broken = scheduler.timer(owner="operator", payload="broken", delay=1, now=100)
+    broken.timeout.connect(CallableSlot(reference))
+    sibling = broken.timeout.connect(InboxSlot("same-entry-session"))
+    broken.start(now=100)
+    healthy = scheduler.timer(owner="operator", payload="healthy", delay=1, now=100)
+    healthy.timeout.connect(InboxSlot("proof-session"))
+    healthy.start(now=100)
+    with caplog.at_level(logging.WARNING, logger="scripts.scheduler.core"):
+        assert scheduler.run_due(now=101) == 2
+    inbox = InboxStore(scheduler.redis)
+    assert [item.text for item in inbox.pending_items("proof-session")] == ["healthy"]
+    assert healthy.state == "fired"
+    assert [item.text for item in inbox.pending_items("same-entry-session")] == ["broken"]
+    assert broken.state == "pending"
+    assert broken.record["pending"]["delivered"] == [sibling]
+    assert scheduler.redis.smembers(scheduler.key("pending")) == {broken.id}
+    assert [record.getMessage() for record in caplog.records] == [
+        f"scheduler slot delivery failed: entry {broken.id} slot {{'kind': 'callable', 'reference': '{reference}'}}"
+        " error ModuleNotFoundError(\"No module named 'scripts.scheduler.absent_slot_module'\")"
+    ]
+    caplog.clear()
+    with caplog.at_level(logging.WARNING, logger="scripts.scheduler.core"):
+        assert scheduler.run_due(now=110) == 0
+    assert broken.state == "pending"
+    assert broken.record["pending"]["delivered"] == [sibling]
+    assert len(inbox.pending_items("same-entry-session")) == 1
+    assert len(caplog.records) == 1
 
 
 def test_dispatch_lock_refuses_a_competing_drain_without_losing_work(scheduler):

@@ -13,16 +13,13 @@ export const PAGE = (document.querySelector('meta[name="ledger-page"]') || {}).c
 export const QUOTA_REFRESH_MS = 300000;
 export const RETRY_MS = [1000, 2000, 5000, 10000, 30000];
 export const ACTIVE_MS = 2 * 3600 * 1000;
-export const SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 export const DAY = 24 * 3600 * 1000;
-export const ARTIFACT_KEEP_DAYS = 30;
 
 export const OFFLINE = "saved in this browser only — ledger server offline";
 export const NOUN = { comments: "comment", answers: "answer", notes: "note" };
-export const MEDIA_API = API.replace(`/api/${SLUG}`, `/api/media/${SLUG}`);
 export const API_V1 = API.replace(`/api/${SLUG}`, `/api/v1/ledgers/${SLUG}`);
 export const EVENTS_API = `${API_V1}/events`;
-export const LAYOUT_API = API.replace(`/api/${SLUG}`, "/api/layout");
+export const LAYOUT_API = API.replace(`/api/${SLUG}`, "/api/v1/layout");
 export const ROUTING_API = API.replace(`/api/${SLUG}`, "/api/v1/routing/settings");
 export const HIVES_API = API.replace(`/api/${SLUG}`, "/api/v1/hives");
 export const LAYOUT_KEY = "plan-ledger:swarm-layout";

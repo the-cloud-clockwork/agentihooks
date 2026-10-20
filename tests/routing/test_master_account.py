@@ -6,8 +6,6 @@ from scripts.routing.master_account import MasterAccount
 from scripts.routing.settings import FileSettings, RedisSettings
 from scripts.routing.slots import INTERACTIVE, SUBSCRIPTION
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ENV = {"AH_CC_TOKEN_luna": "t", "AH_CX_TOKEN_work": "t"}
 
 

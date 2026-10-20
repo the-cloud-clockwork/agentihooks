@@ -3,8 +3,6 @@ import pytest
 from scripts.swarm import cli, prompt
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 KINDS = ("code", "ci", "ops", "troubleshoot", "tune", "research")
 
 

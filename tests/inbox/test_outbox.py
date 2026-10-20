@@ -7,8 +7,6 @@ from hooks import config
 from scripts.inbox import cli, outbox
 from scripts.inbox.store import Contended, DuplicateItem, InboxStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def lost(text):
     import redis

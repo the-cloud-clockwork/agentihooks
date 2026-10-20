@@ -9,8 +9,6 @@ from scripts.swarm.ledger_client import LedgerGone, LedgerRefused
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 FACTS = {"cpu": 182.0, "started_minutes": 74, "newest": "Run the cheap CI gates before every push", "merged_minutes": 9}
 
 

@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.observability.agent_trace import TRIGGER_ENV
+from scripts.scheduler.process_timer import wait as scheduled_wait
 
 POLL_SEC = 1.0
 
@@ -258,6 +259,7 @@ def supervise(
     clock: Callable[[], float] = time.monotonic,
     sleep: Callable[[float], None] = time.sleep,
     is_alive: Callable[[Owner], bool] = alive,
+    timer_wait: Callable[[float], None] = scheduled_wait,
 ) -> str:
     limits = limits or budget()
     handle = _lock(session_id, limits.attempts * limits.attempt_timeout + limits.interval, clock, sleep)
@@ -272,7 +274,7 @@ def supervise(
             owner_alive = is_alive(_owner(record, "owner_"))
             fresh = record.get("at") != seen
             if (failing or not fresh) and owner_alive and clock() < due:
-                sleep(POLL_SEC)
+                timer_wait(POLL_SEC)
                 continue
             seen = record.get("at")
             trigger = "final" if not owner_alive else f"request:{record.get('reason', '')}" if fresh else "interval"

@@ -9,24 +9,19 @@ from scripts.swarm.store import AgentRecord
 CAPTURE = Path("tests/fixtures/swarm/codex-content-refusal.txt").read_text()
 
 
-from scripts.inbox import wake
-from scripts.inbox.store import InboxStore
-from scripts.swarm import idle, outage
-from tests.swarm.test_tick import FakeLedger, FakeRuntime
-from tests.swarm.test_tick import store as store
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from dataclasses import replace
 
 from hooks.context import swarm_heartbeat
 from scripts.handoff import transfers
-from scripts.swarm import content_refusal, pane
+from scripts.inbox import wake
+from scripts.inbox.store import InboxStore
+from scripts.swarm import content_refusal, idle, outage, pane
 from scripts.swarm.store import SwarmConfig
 from scripts.swarm.tick import _watch_idle, tick
 from tests.swarm.test_outage_resume import three_owners
 from tests.swarm.test_outage_seat_release import executing
+from tests.swarm.test_tick import FakeLedger, FakeRuntime
+from tests.swarm.test_tick import store as store
 
 
 @pytest.mark.parametrize("component", [HerdrRuntime, HerdrMessenger])

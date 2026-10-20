@@ -96,16 +96,16 @@ def test_runner_wait_crosses_only_above_five_minutes(wait, count):
 
 
 def test_a_still_queued_job_uses_now_and_remains_visible_after_its_creation_window():
-    [finding] = ci_speed.findings([record([job(0, queued=True, created=-301)])], NOW - 60000, NOW)
-    assert finding.kind == "ci runner wait" and finding.measure == 301
+    [finding] = ci_speed.findings([record([job(0, queued=True, created=-901)])], NOW - 60000, NOW)
+    assert finding.kind == "ci queue age unconfirmed" and finding.measure == 901
 
 
 @pytest.mark.parametrize("status", ["queued", "pending", "waiting"])
 def test_unstarted_jobs_ignore_placeholder_start_timestamps(status):
-    waiting = job(0, queued=True, created=-301)
+    waiting = job(0, queued=True, created=-901)
     waiting.update(status=status, started_at=waiting["created_at"])
     [finding] = ci_speed.findings([record([waiting])], NOW - 60000, NOW)
-    assert finding.measure == 301
+    assert finding.measure == 901
 
 
 def test_a_previously_started_job_outside_the_pass_window_is_not_counted_again():
@@ -118,7 +118,8 @@ def test_tier_wall_includes_runner_wait_and_crosses_only_above_fifteen_minutes(e
     first = job(0, created=-elapsed)
     gate = job(0, created=-10, name="Gate — Required", identity=12)
     gate.update(status="completed", completed_at=stamp(0))
-    found = ci_speed.findings([record([first, gate], event, status="completed")], NOW - 2000000, NOW)
+    run = record([first, gate], event, status="completed", conclusion="success")
+    found = ci_speed.findings([run], NOW - 2000000, NOW)
     assert len(found) == count
     if count:
         assert found[0].kind == "ci tier wall time" and found[0].measure == 901
@@ -155,7 +156,7 @@ def test_tier_wall_uses_the_exact_millisecond_boundary(elapsed, count):
     assert len(found) == count
     if count:
         assert found[0].measure == 900
-        assert found[0].evidence == ("run 7, tier merge_group, wall time 900 seconds",)
+        assert found[0].evidence == ("run 7, tier merge_group, conclusion in_progress, wall time 900 seconds",)
 
 
 @pytest.mark.parametrize("attempt", [None, 3])
@@ -187,8 +188,8 @@ def test_a_job_starting_at_the_window_boundary_is_included():
 
 
 def test_a_queued_job_remains_visible_when_the_cursor_is_after_now():
-    [finding] = ci_speed.findings([record([job(0, queued=True, created=-301)])], NOW + 1, NOW)
-    assert finding.measure == 301
+    [finding] = ci_speed.findings([record([job(0, queued=True, created=-901)])], NOW + 1, NOW)
+    assert finding.measure == 901
 
 
 def test_unrelated_pull_request_workflows_have_no_tier_budget():
@@ -205,15 +206,16 @@ def test_a_completed_run_without_a_gate_stops_at_the_last_job(elapsed, count):
     first.update(status="completed", completed_at=stamp(-600))
     last = job(0, created=-1100, identity=12)
     last.update(status="completed", completed_at=stamp(elapsed - 1200))
-    run = record([last, job(0, created=-1000), first], "merge_group", status="completed")
+    run = record([last, job(0, created=-1000), first], "merge_group", status="completed", conclusion="failure")
     found = ci_speed.findings([run], NOW - 2000000, NOW)
     assert len(found) == count
     if count:
         assert found[0].measure == 901
 
 
-def test_a_completed_run_without_any_completion_has_no_invented_wall_time():
-    run = record([job(0, created=-901)], "merge_group", status="completed")
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+def test_a_completed_run_without_any_completion_has_no_invented_wall_time(conclusion):
+    run = record([job(0, created=-901)], "merge_group", status="completed", conclusion=conclusion)
     assert ci_speed.findings([run], NOW - 2000000, NOW) == []
 
 
@@ -222,5 +224,43 @@ def test_a_completed_gate_stops_wall_time_before_later_jobs_finish():
     first.update(status="completed", completed_at=stamp(0))
     gate = job(0, created=-400, name="Gate — Required", identity=12)
     gate.update(status="completed", completed_at=stamp(-300))
-    run = record([first, gate], "pull_request", status="completed")
+    run = record([first, gate], "pull_request", status="completed", conclusion="success")
+    assert ci_speed.findings([run], NOW - 2000000, NOW) == []
+
+
+@pytest.mark.parametrize("event", ["pull_request", "merge_group"])
+@pytest.mark.parametrize(
+    "conclusion,count",
+    [
+        ("success", 1),
+        ("failure", 1),
+        ("cancelled", 0),
+        ("skipped", 0),
+        ("neutral", 0),
+        ("timed_out", 0),
+        ("startup_failure", 0),
+        ("action_required", 0),
+        ("stale", 0),
+        (None, 0),
+    ],
+)
+def test_a_finished_tier_counts_only_success_or_failure_and_names_its_conclusion(event, conclusion, count):
+    first = job(0, created=-918)
+    first.update(status="completed", completed_at=stamp(0))
+    run = record([first], event, status="completed", conclusion=conclusion)
+    found = ci_speed.findings([run], NOW - 2000000, NOW)
+    assert len(found) == count
+    if count:
+        assert found[0].evidence == (f"run 7, tier {event}, conclusion {conclusion}, wall time 918 seconds",)
+
+
+def test_a_superseded_pull_request_run_cancelled_mid_gate_raises_no_tier_wall_time():
+    shards = []
+    for identity in range(22):
+        shard = job(0, created=-918, identity=identity)
+        shard.update(status="completed", completed_at=stamp(0))
+        shards.append(shard)
+    gate = job(0, created=-918, name="Gate — Required", identity=99)
+    gate.update(status="completed", completed_at=stamp(0))
+    run = record(shards + [gate], "pull_request", status="completed", conclusion="cancelled")
     assert ci_speed.findings([run], NOW - 2000000, NOW) == []

@@ -1,11 +1,10 @@
+import hashlib
 import json
 from dataclasses import replace
 from types import SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture
@@ -39,6 +38,7 @@ def setup():
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]
     herdr.planned_account.return_value = None
     launcher = launch.HiveLaunch(store, config.slug, held, herdr)
+    launcher.opening = lambda request: f"opening for {request.name}"
     return SimpleNamespace(store=store, config=config, held=held, hive=hive, herdr=herdr, launcher=launcher)
 
 
@@ -121,10 +121,24 @@ def test_publishes_fenced_order_after_host_admission(setup):
     assert outcome.value.execution.state == "working"
     assert runtime.spawn.call_count == 1
     order = setup.launcher.orders_for(task["id"])
-    assert orders.ack(order) == Ack("live", outcome.value.execution.runtime_target)
+    assert orders.ack(order) == Ack(
+        "live",
+        outcome.value.execution.runtime_target,
+        "",
+        {
+            "pane_id": "pane",
+            "model": "selected-model",
+            "effort": "high",
+            "profile_decision": {"validation": {"pid": 12}},
+        },
+    )
+    assert order.hive == "remote"
     assert json.loads(store.redis.get(order.prompt_ref)) == {
         **task,
         "profile_decision": setup.herdr._profile_decision.return_value.record(),
+        "hive_opening": f"opening for {name}",
+        "hive_opening_digest": hashlib.sha256(f"opening for {name}".encode()).hexdigest(),
+        "hive_seeds": {},
     }
     assert order.prompt_ref == store.key(slug, f"launch-prompt:{order.execution_id}")
     assert 0 < store.redis.pttl(order.prompt_ref) <= 300000
@@ -165,7 +179,26 @@ def test_nonlocal_controller_routes_worker_lanes_through_hives(setup, deployment
     assert fenced.router.placement.backend == "hive"
     assert fenced.has_capacity(setup.config)
     assert fenced.placement_refusal("eng", {"id": "task"}) == ""
-    assert fenced.placement_refusal("master", {}) == ""
+    assert fenced.placement_refusal("master", {}).startswith("the workstation hive spawns master work: ")
+    setup.herdr.spawn.assert_not_called()
+
+
+def test_a_local_machine_swarm_with_hive_placement_sends_eng_to_a_joined_hive_and_the_master_home(setup):
+    from scripts.swarm import controller
+    from scripts.swarm.profile_choice import ProfileDecision
+    from scripts.swarm_v2.runtime.base import RuntimeRouter
+    from scripts.swarm_v2.runtime.routed import RoutedRuntime
+
+    write_hive(setup, id="workstation", ui="yes", roles=["master", "plan", "dispatch"])
+    config = setup.store.update(setup.config.slug, hive_placement=True)
+    deployment = controller.deployment_for(config, {"AGENTIHOOKS_DEPLOYMENT": "local"})
+    routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
+    fenced = controller.FencedRuntime(setup.store, config.slug, setup.held, routed, deployment)
+    assert fenced.router.placement.backend == "hive"
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.runtime.hive_launch.select(config, "eng", {"id": "task"}).hive == "remote"
+    setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
+    assert fenced.runtime.hive_launch.select(config, "master", {"id": "master"}).hive == "workstation"
     setup.herdr.spawn.assert_not_called()
 
 
@@ -188,7 +221,8 @@ def test_a_master_pinned_to_a_hive_is_placed_there_through_the_hive_runtime(setu
         setup.store, setup.config.slug, setup.held, RoutedRuntime(setup.herdr, RuntimeRouter([])), "compose"
     )
     assert fenced.placement_refusal("master", pinned) == ""
-    assert fenced.placement_refusal("master", {"id": "master", "hive": "gone"}) == NO_UI_HIVE
+    gone = fenced.placement_refusal("master", {"id": "master", "hive": "gone"})
+    assert gone == f"the workstation hive spawns master work: {NO_UI_HIVE}"
     fenced.runtime.spawn = Mock(return_value="placed on the hive")
     fenced.runtime.original_runtime = Mock()
     assert fenced.spawn(setup.config, "master", "name", pinned) == "placed on the hive"
@@ -210,7 +244,13 @@ def request_for(setup, name=None, lane="eng", route="subscription"):
         setup.config,
         lane,
         name,
-        {"id": "task", "seat": record.seat, "controller_epoch": setup.held.epoch, "route_kind": route},
+        {
+            "id": "task",
+            "title": "Launch on a hive",
+            "seat": record.seat,
+            "controller_epoch": setup.held.epoch,
+            "route_kind": route,
+        },
     )
 
 
@@ -231,6 +271,7 @@ def order_for(setup, request, selected):
         "prompt",
         setup.held.epoch,
         0,
+        selected.hive,
     )
 
 
@@ -392,7 +433,7 @@ def write_hive(setup, **changes):
 
 
 def live_order(setup, route="subscription"):
-    from scripts.hive.orders import Consumer
+    from scripts.hive.orders import Consumer, carried
     from scripts.swarm import lease
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -402,7 +443,7 @@ def live_order(setup, route="subscription"):
     request = request_for(setup, route=route)
     selected = setup.launcher.select(setup.config, "eng", request.task)
     order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
-    setup.store.redis.set("prompt", json.dumps(request.task))
+    setup.store.redis.set("prompt", json.dumps(carried("fixture", request.task, "opening")))
     setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
     setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
     runtime = Mock()
@@ -435,8 +476,8 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     _, order, ack = live_order(setup, route)
-    live = setup.store.execution_registry.get("fixture", order.execution_id)
     result = setup.launcher.complete(order, ack)
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
     assert result == Outcome(
         "spawn",
         Status.OK,
@@ -455,7 +496,9 @@ def test_acknowledgement_preserves_the_complete_launch_metadata(setup, route):
     )
 
 
-@pytest.mark.parametrize("bad", ["target", "generation", "state", "missing occupant", "replaced occupant"])
+@pytest.mark.parametrize(
+    "bad", ["target", "pane", "host", "generation", "state", "missing occupant", "replaced occupant"]
+)
 def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad):
     from unittest.mock import patch
 
@@ -465,11 +508,17 @@ def test_live_acknowledgement_refuses_inconsistent_execution_identity(setup, bad
     live = setup.store.execution_registry.get("fixture", order.execution_id)
     current = setup.store.execution_occupants("fixture")
     if bad == "target":
+        setup.launcher.complete(order, ack)
         ack = replace(ack, target={**ack.target, "pid": 99})
+    elif bad == "pane":
+        setup.launcher.complete(order, ack)
+        ack = replace(ack, execution={**ack.execution, "pane_id": "other"})
+    elif bad == "host":
+        ack = replace(ack, target={**ack.target, "host_id": "elsewhere"})
     elif bad == "generation":
         order = replace(order, generation=order.generation + 1)
     elif bad == "state":
-        setup.store.execution_registry.update("fixture", replace(live, state="launching"))
+        setup.store.execution_registry.update("fixture", replace(live, state="suspect"))
     elif bad == "missing occupant":
         current = {}
     else:
@@ -804,7 +853,22 @@ def test_old_controller_cannot_admit_after_lease_takeover(setup):
         setup.launcher.admit(request, selected)
 
 
-@pytest.mark.parametrize("lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("eng", "frontend")])
+def test_old_controller_cannot_record_an_acknowledgement_after_lease_takeover(setup):
+    from scripts.swarm import lease
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    admitted = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert lease.release(setup.store, "fixture", setup.held)
+    lease.acquire(setup.store, "fixture", "next controller")
+    with pytest.raises(SwarmError):
+        setup.launcher.record(admitted, order, ack)
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+
+
+@pytest.mark.parametrize(
+    "lane,profile", [("eng", "engineer"), ("ci", "cicd"), ("eng", "frontend"), ("dispatch", "dispatcher")]
+)
 def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lane, profile):
     from scripts.hive.orders import Consumer
     from scripts.swarm.controller import FencedRuntime
@@ -815,7 +879,7 @@ def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lan
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
     setup.herdr._profile_decision.return_value = ProfileDecision(profile, "task", profile)
-    write_hive(setup, ui="yes", roles=["eng", "ci", "frontend"])
+    write_hive(setup, ui="yes", roles=["eng", "ci", "frontend", "dispatch"])
     request = request_for(setup, lane=lane)
     request.task["profile_decision"] = setup.herdr._profile_decision.return_value.record()
     local = LocalHerdrRuntime(setup.herdr)
@@ -861,13 +925,16 @@ def test_controller_spawn_uses_the_remote_backend_for_worker_profiles(setup, lan
     setup.herdr.spawn.assert_not_called()
 
 
-@pytest.mark.parametrize("disabled", [[], ["hive"]])
-def test_original_remote_master_placement_is_kept_when_worker_hive_routing_is_disabled(setup, disabled):
-    from scripts.swarm.controller import FencedRuntime
+@pytest.mark.parametrize("disabled", [[], ["hive"], ["kubernetes"]])
+def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead(setup, monkeypatch, disabled):
+    from scripts.swarm import controller
+    from scripts.swarm.controller import DISABLED, FencedRuntime, SwarmError
     from scripts.swarm.tick import Placed
+    from scripts.swarm_v2.masters import MasterSeats
     from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, Status
     from scripts.swarm_v2.runtime.routed import RoutedRuntime
 
+    MasterSeats(setup.store.redis).set_count("fixture", 2)
     backend = Mock()
     backend.backend = "kubernetes"
     backend.capabilities = frozenset((Capability.SPAWN,))
@@ -875,23 +942,20 @@ def test_original_remote_master_placement_is_kept_when_worker_hive_routing_is_di
     placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
     original = RoutedRuntime(setup.herdr, RuntimeRouter([backend], disabled=disabled, placement=placement))
     fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: False)
     task = {"id": "master-2"}
+    refused = (
+        DISABLED.format(backend="hive")
+        if disabled == ["hive"]
+        else "the workstation hive spawns master work: no live hive can run the master with interactive, "
+        "subscription or api authentication"
+    )
+    assert fenced.placement_refusal("master", task) == refused
+    with pytest.raises(SwarmError, match=refused):
+        fenced.spawn(setup.config, "master", "master name", task)
+    backend.spawn.assert_not_called()
+    monkeypatch.setattr(controller, "_workstation_herdr", lambda: True)
     assert fenced.placement_refusal("master", task) == ""
-    assert fenced.spawn(setup.config, "master", "master name", task) == Placed("master pane", "claude")
-    request = backend.spawn.call_args.args[0]
-    assert request.lane == "master"
-    assert request.task == {**task, "controller_epoch": setup.held.epoch}
-
-
-def test_original_master_backend_refuses_its_own_disabled_runtime(setup):
-    from scripts.swarm.controller import FencedRuntime
-    from scripts.swarm_v2.runtime.base import Placement, RuntimeRouter
-    from scripts.swarm_v2.runtime.routed import RoutedRuntime
-
-    placement = Placement("kubernetes", master_seats=lambda: frozenset(("master-2",)))
-    original = RoutedRuntime(setup.herdr, RuntimeRouter([], disabled=["kubernetes"], placement=placement))
-    fenced = FencedRuntime(setup.store, "fixture", setup.held, original, "distributed")
-    assert fenced.placement_refusal("master", {"id": "master-2"}) == "the workstation hive spawns master work"
 
 
 def test_controller_reports_a_placement_wait_for_a_worker_without_a_ui_hive(setup):
@@ -1101,3 +1165,45 @@ def test_unsupported_harness_wait_records_its_lane(setup):
     config = replace(setup.config, lanes={"ci": {"agent": "codex"}})
     assert setup.launcher.select(config, "ci", {"id": "task"}) == Wait("Codex hive placement is not enabled")
     assert placement_waits.read(setup.store, setup.config.slug)["task"]["lane"] == "ci"
+
+
+def test_controller_records_the_execution_a_joined_hive_acknowledged(setup):
+    from scripts.hive.orders import Ack
+    from scripts.swarm import lease
+
+    request = request_for(setup)
+    selected = setup.launcher.select(setup.config, "eng", request.task)
+    order = replace(order_for(setup, request, selected), expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    setup.launcher.slots.reserve("claude:account", order.execution_id, 6, 300000)
+    target = {"host_id": "remote", "process_namespace": "namespace", "pid": 12, "pid_start": 34}
+    metadata = {"pane_id": "pane", "model": "selected-model", "effort": "high", "profile_decision": {"pid": 12}}
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", target, "", metadata))
+    result = setup.launcher.wait(order)
+    assert result.ok
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert live.state == "working"
+    assert live.runtime_target == target
+    assert (live.pane_id, live.model, live.effort) == ("pane", "selected-model", "high")
+    assert live.profile_decision == {"pid": 12}
+    assert result.value.execution == live
+
+
+def test_an_acknowledgement_without_metadata_keeps_the_admitted_fields(setup):
+    from scripts.hive.orders import Ack
+
+    _, order, ack = live_order(setup)
+    admitted = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert setup.launcher.complete(order, Ack("live", ack.target)).ok
+    live = setup.store.execution_registry.get("fixture", order.execution_id)
+    assert live == replace(admitted, runtime_target=ack.target, state="working", profile_decision={})
+
+
+def test_a_malformed_profile_decision_is_refused_before_recording(setup):
+    from scripts.swarm.store import SwarmError
+
+    _, order, ack = live_order(setup)
+    with pytest.raises(SwarmError) as error:
+        setup.launcher.complete(order, replace(ack, execution={**ack.execution, "profile_decision": []}))
+    assert str(error.value) == "hive launch acknowledgement does not match the live execution"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"

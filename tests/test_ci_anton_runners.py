@@ -28,6 +28,7 @@ def pool(label):
 
 
 MOVED = {
+    ("mutation-line-selection-proof.yml", "compare"): BATCH,
     ("test.yml", "docs"): QUEUED,
     ("mutation-refinement-proof.yml", "planning"): LIGHT,
     ("access-audit.yml", "audit"): LIGHT,
@@ -40,7 +41,11 @@ MOVED = {
     ("coverage-stability.yml", "compare"): BATCH,
     ("equivalence.yml", "ledger-equivalence"): STANDARD,
     ("helm-kind.yml", "kind"): QUEUED,
+    ("hierarchy-cpu.yml", "grade"): LIGHT,
     ("hierarchy-cpu.yml", "hierarchy"): QUEUED,
+    ("hierarchy-cpu.yml", "load"): QUEUED,
+    ("ledger-load.yml", "compare"): QUEUED,
+    ("ledger-load.yml", "compare-grade"): LIGHT,
     ("ledger-load.yml", "load"): QUEUED,
     ("ledger-row-memory.yml", "replay"): BATCH,
     ("mutation-preflight.yml", "mutation"): LIGHT,
@@ -94,6 +99,8 @@ MOVED = {
     ("test.yml", "unit-selected"): STANDARD,
     ("worker-resources.yml", "measure"): BATCH,
 }
+if (WORKFLOWS / "actions-storage.yml").exists():
+    MOVED[("actions-storage.yml", "prune")] = LIGHT
 
 # These exchange a GitHub OIDC token, which the Anton runners have timed out fetching.
 OIDC = {("pages.yml", "deploy"), ("publish-pypi.yml", "publish")}
@@ -114,6 +121,7 @@ CLASSED = {
     ("release.yml", "release"),
     ("github-access-audit.yml", "read-back"),
     ("queue-retry.yml", "retry"),
+    ("lost-runner.yml", "watch"),
 }
 
 HOSTED = OIDC | PROTECTED | TARGET | CLASSED

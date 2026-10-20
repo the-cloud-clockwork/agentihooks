@@ -30,7 +30,9 @@ def days_left(deleted_at, now):
 
 
 def delete(slug, now=None):
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.delete(slug, now)
 
@@ -44,7 +46,9 @@ def require_local(slug: str) -> None:
 
 def restore(slug, now=None):
     require_local(slug)
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.restore(slug, now)
 

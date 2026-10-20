@@ -12,8 +12,6 @@ from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import AgentRecord, RedisStore
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG, ME = "demo", "engineer@100001-0001"
 URL = "https://github.com/o/r/pull/7"
 WHO = Who(name=ME, swarm=SLUG, lane="eng", task="t1")

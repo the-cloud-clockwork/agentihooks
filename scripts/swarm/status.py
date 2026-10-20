@@ -41,6 +41,7 @@ from scripts.swarm.health import (
     activity,
     checks,
     merge_stall,
+    night_watch,
     prompt_backlog,
     spawn_stall,
     standing,
@@ -135,6 +136,7 @@ def findings(store, slug, config, tasks, events, view=None):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + night_watch.findings(store, slug)
         + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
         + urgent_hold.findings(store, slug)

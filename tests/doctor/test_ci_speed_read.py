@@ -36,7 +36,7 @@ def test_repository_runs_and_all_job_pages_are_discovered_with_full_counts():
 
     records = [{"id": n, "status": "in_progress", "event": "push"} for n in range(101)]
     run, calls = api(records, [{"id": n} for n in range(101)])
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=300)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(300, 25))
     assert result["complete"] is True
     assert len(result["runs"]) == result["discovered_runs"] == 101
     assert sum(len(r["jobs"]) for r in result["runs"]) == 10201
@@ -67,7 +67,7 @@ def test_request_budget_exhaustion_reports_an_incomplete_pass():
     from scripts.doctor import ci_speed_read
 
     run, calls = api([{"id": n} for n in range(101)])
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=1)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(1, 25))
     assert result["complete"] is False
     assert "budget" in result["error"] and result["api_calls"] == len(calls) == 1
 
@@ -98,8 +98,8 @@ def test_api_requests_use_the_exact_repository_window_and_safe_subprocess_option
 
     monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: 100)
     run, calls = api()
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_seconds=max_seconds)
-    assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0}
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(60, max_seconds))
+    assert result == {"complete": True, "runs": [], "api_calls": 6, "discovered_runs": 0, "unverified": 0}
     first_args, _ = calls[0]
     assert first_args[:2] == ["gh", "api"]
     assert urlsplit(first_args[2]).path == "repos/the-cloud-clockwork/agentihooks/actions/runs"
@@ -151,7 +151,7 @@ def test_pagination_accepts_growing_totals_and_deduplicates_ids(target):
         field = "workflow_runs" if target == "runs" else "jobs"
         return SimpleNamespace(stdout=json.dumps({"total_count": 101 if page == 1 else 103, field: rows}))
 
-    result = ci_speed_read.read(NOW - 60000, NOW, run=run, max_calls=300)
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run, budget=(300, 25))
     assert result["complete"] is True
     rows = result["runs"] if target == "runs" else result["runs"][0]["jobs"]
     assert sorted(row["id"] for row in rows) == list(range(101))
@@ -217,6 +217,105 @@ def test_duplicate_rows_do_not_hide_a_persistently_incomplete_list(target):
     )
 
 
+@pytest.mark.parametrize("stale,complete", [(1, True), (2, True), (5, True), (6, False)])
+def test_a_status_count_still_holding_a_run_that_left_it_completes_once_the_count_settles(monkeypatch, stale, complete):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, reads = [], []
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+    queued = [{"id": n, "status": "queued", "event": "push"} for n in range(1, 7)]
+    finished = [{"id": 7, "status": "completed", "event": "pull_request"}]
+
+    def run(args, **kwargs):
+        query = parse_qs(urlsplit(args[2]).query)
+        if "/jobs" in args[2]:
+            body = {"total_count": 0, "jobs": []}
+        elif "created" in query:
+            body = {"total_count": 7, "workflow_runs": queued + finished}
+        elif query.get("status") == ["queued"]:
+            reads.append(query["page"])
+            body = {"total_count": 7 if len(reads) <= stale else 6, "workflow_runs": queued}
+        else:
+            body = {"total_count": 0, "workflow_runs": []}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert result["complete"] is complete
+    assert reads == [["1"]] * min(stale + 1, 6)
+    assert sleeps == [1] * min(stale - 1, ci_speed_read.SETTLE_READS)
+    if complete:
+        assert sorted(r["id"] for r in result["runs"]) == list(range(1, 8))
+    else:
+        assert result["error"] == (
+            "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+            "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?status=queued; page=1; rows=6; total=7"
+        )
+
+
+@pytest.mark.parametrize("elapsed,settles", [(22.5, 4), (23, 0)])
+def test_settling_reads_stop_when_the_time_budget_cannot_cover_another(monkeypatch, elapsed, settles):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, times = [], iter([100])
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+    monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: next(times, 100 + elapsed))
+
+    def run(args, **kwargs):
+        stale = parse_qs(urlsplit(args[2]).query).get("status") == ["queued"]
+        return SimpleNamespace(stdout=json.dumps({"total_count": int(stale), "workflow_runs": []}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert sleeps == [1] * settles
+    assert result["api_calls"] == 3 + settles
+    assert result["error"] == (
+        "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?status=queued; page=1; rows=0; total=1"
+    )
+
+
+def test_a_short_multi_page_status_list_is_not_settled(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, pages = [], []
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+
+    def run(args, **kwargs):
+        query = parse_qs(urlsplit(args[2]).query)
+        if query.get("status") != ["queued"]:
+            return SimpleNamespace(stdout=json.dumps({"total_count": 0, "workflow_runs": []}))
+        page = int(query["page"][0])
+        pages.append(page)
+        rows = [{"id": n} for n in range(100)] if page == 1 else [{"id": 100}]
+        return SimpleNamespace(stdout=json.dumps({"total_count": 102, "workflow_runs": rows}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert pages == [1, 2, 1, 2] and sleeps == []
+    assert result["error"] == (
+        "Actions API read failed: RuntimeError: Actions API pagination ended before the full count: "
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs?status=queued; page=2; rows=101; total=102"
+    )
+
+
+def test_a_short_single_page_job_list_is_not_settled(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    sleeps, reads = [], []
+    monkeypatch.setattr(ci_speed_read.time, "sleep", sleeps.append)
+    fallback, _ = api([{"id": 5, "status": "completed", "event": "push"}])
+
+    def run(args, **kwargs):
+        if "/jobs" not in args[2]:
+            return fallback(args, **kwargs)
+        reads.append(args[2])
+        return SimpleNamespace(stdout=json.dumps({"total_count": 2, "jobs": [{"id": 1}]}))
+
+    result = ci_speed_read.read(NOW - 60000, NOW, run=run)
+    assert len(reads) == 2 and sleeps == []
+    assert result["error"].endswith(
+        "endpoint=repos/the-cloud-clockwork/agentihooks/actions/runs/5/jobs?filter=latest; page=1; rows=1; total=2"
+    )
+
+
 @pytest.mark.parametrize("elapsed,complete", [(24.5, True), (25, False), (25.5, False)])
 def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, elapsed, complete):
     from scripts.doctor import ci_speed_read
@@ -231,6 +330,67 @@ def test_the_default_time_budget_allows_work_until_its_deadline(monkeypatch, ela
     else:
         assert calls == []
         assert result["error"] == "Actions API read failed: RuntimeError: Actions API request or time budget exhausted"
+
+
+def test_one_run_attempt_reads_that_attempt_and_every_job_page():
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api(jobs=[{"id": n} for n in range(150)])
+    record = ci_speed_read.attempt(42, 2, run=run)
+    assert record == {"id": 2, "status": "completed", "event": "push", "jobs": [{"id": n} for n in range(150)]}
+    root = "repos/the-cloud-clockwork/agentihooks/actions/runs/42/attempts/2"
+    assert [args[2] for args, _ in calls] == [
+        root,
+        f"{root}/jobs?per_page=100&page=1",
+        f"{root}/jobs?per_page=100&page=2",
+    ]
+
+
+def test_one_run_attempt_raises_when_the_api_fails():
+    from scripts.doctor import ci_speed_read
+
+    run, _ = api(fail=True)
+    with pytest.raises(subprocess.CalledProcessError):
+        ci_speed_read.attempt(42, 1, run=run)
+
+
+@pytest.mark.parametrize("jobs, complete", [(1900, True), (1901, False)])
+def test_one_run_attempt_allows_twenty_requests_by_default(jobs, complete):
+    from scripts.doctor import ci_speed_read
+
+    run, calls = api(jobs=[{"id": n} for n in range(jobs)])
+    if complete:
+        assert len(ci_speed_read.attempt(42, 1, run=run)["jobs"]) == jobs
+    else:
+        with pytest.raises(RuntimeError, match="budget exhausted"):
+            ci_speed_read.attempt(42, 1, run=run)
+    assert len(calls) == 20
+
+
+def test_one_run_attempt_allows_sixty_seconds_by_default(monkeypatch):
+    from scripts.doctor import ci_speed_read
+
+    clock = iter([0, 59.5])
+    monkeypatch.setattr(ci_speed_read.time, "monotonic", lambda: next(clock, 60))
+    run, calls = api()
+    with pytest.raises(RuntimeError, match="budget exhausted"):
+        ci_speed_read.attempt(42, 1, run=run)
+    assert [kwargs["timeout"] for _, kwargs in calls] == [0.5]
+
+
+def test_one_run_attempt_reads_a_short_job_list_twice_without_settling():
+    from scripts.doctor import ci_speed_read
+
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args[2])
+        body = {"total_count": 5, "jobs": [{"id": 1}]} if "/jobs" in args[2] else {"id": 1}
+        return SimpleNamespace(stdout=json.dumps(body))
+
+    with pytest.raises(RuntimeError, match="pagination ended before the full count"):
+        ci_speed_read.attempt(42, 1, run=run)
+    assert len(calls) == 3
 
 
 def test_the_default_request_budget_stops_after_sixty_calls():

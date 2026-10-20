@@ -118,6 +118,7 @@ def previous_install(installer: ModuleType, state: dict, target: str) -> dict:
 
 def run_init(args: Namespace, installer: ModuleType) -> None:
     from scripts.herdr_setup import init_step
+    from scripts.swarm_ledger import ledger_ca
 
     args.profile = args.init_profile
     args.settings_profile = args.init_settings_profile or ""
@@ -156,3 +157,4 @@ def run_init(args: Namespace, installer: ModuleType) -> None:
         )
     with capture_details(args.verbose):
         init_step(args.init_herdr, sys.stdin.isatty())
+        print(ledger_ca.install())

@@ -7,8 +7,6 @@ from scripts.swarm import stack
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, Placed, SpawnError, tick
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def check_update_guards(if_state, if_match):
     import sys
@@ -251,6 +249,18 @@ def test_a_second_tick_does_not_overspawn(store):
     tick("sw", store, ledger, runtime, now_ms=1_000)
     tick("sw", store, ledger, runtime, now_ms=2_000)
     assert len(runtime.spawned) == 2
+
+
+class RefusingRuntime(FakeRuntime):
+    def placement_refusal(self, lane, task):
+        return "no headless hive for eng lists the repo /repo" if task.get("id") == "t1" else ""
+
+
+def test_a_placement_wait_is_logged_in_the_tick_output(store):
+    ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), RefusingRuntime()
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
+    assert "task t1 waits: no headless hive for eng lists the repo /repo" in actions
+    assert [task for _, _, task in runtime.spawned] == ["t2", "t3"]
 
 
 @pytest.mark.parametrize("lost_ledger", ["missing", "retained", False])

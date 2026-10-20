@@ -109,7 +109,7 @@ takes the claude ai login and Remote Control.
   not read. Post when an item arrived without its context or another master
   holds a fact you need. The front door answers the operator about the
   backend masters from what the channel carries.
-- `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` on (off by default) groups related
+- `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` (on by default) groups related
   items: an item matching a master's last 15 items by intent goes to that
   master; a classifier error, timeout or low verdict falls back to round
   robin.
@@ -165,6 +165,20 @@ Review each slice against its phase intent, then
   false-positive, early-real, insufficient-evidence, resolved.
 - A seat whose resume failed waits for you:
   `agentihooks swarm <slug> restore-decision <agent> resume` or `fresh`.
+
+## Scaling
+
+- Every new swarm starts with automatic scaling, and a master keeps automatic
+  scaling on: each tick the lane ceilings follow free quota seats, host room
+  and ready work, so spare quota becomes agents instead of waiting behind
+  fixed caps.
+- Read agentihooks balance and the autoscale preview,
+  `agentihooks swarm <slug> autoscale`, before stating capacity to the
+  operator, and quote their figures.
+- Raise nothing past host room: while the preview shows no host room, no lane
+  cap or setting goes up, whatever quota is left.
+- Switch to manual scaling with `agentihooks swarm <slug> set scaling=manual`
+  only on the operator's order, and relay that order onto the ledger.
 
 ## Waits and blocks
 

@@ -156,6 +156,42 @@ def test_rehome_refuses_and_marks_an_invalid_execution_copy(tmp_path, persona, s
     assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
 
 
+def _rendered(home, text, profile="engineer"):
+    home.mkdir(parents=True)
+    (home / "AGENTS.md").write_text(binding.persona(text))
+    (home.parent / "codex.sources.json").write_text("[]")
+    binding.write(home, profile, "codex")
+
+
+def test_a_shared_rehome_takes_the_execution_home_canary(tmp_path):
+    shared, launch = tmp_path / "shared" / "codex", tmp_path / "launch" / "codex"
+    _rendered(shared, "Live instructions.\n")
+    _rendered(launch, "Engineer instructions.\n")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", launch)
+    launched = json.loads(report.read_text())
+
+    binding.rehome(report, shared, shared=True)
+
+    rendered = binding.inspect(shared, "engineer", "codex")
+    assert rendered["canary"] != launched["rendered"]["canary"]
+    assert json.loads(report.read_text()) == {**launched, "rendered": rendered}
+
+
+def test_a_shared_rehome_still_refuses_a_home_of_another_profile(tmp_path):
+    shared, launch = tmp_path / "shared" / "codex", tmp_path / "launch" / "codex"
+    _rendered(shared, "Engineer instructions.\n", "master")
+    _rendered(launch, "Engineer instructions.\n")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", launch)
+    launched = json.loads(report.read_text())
+
+    with pytest.raises(ValueError, match="^profile mismatch in rendered binding$"):
+        binding.rehome(report, shared, shared=True)
+    reason = "profile mismatch in rendered binding"
+    assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
+
+
 @pytest.mark.parametrize(
     ("source", "target", "message"),
     [

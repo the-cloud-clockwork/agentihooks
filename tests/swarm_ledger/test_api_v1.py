@@ -8,9 +8,6 @@ RELAY = server.relay_to_inbox
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
 authority_live = _authority_live
@@ -27,7 +24,7 @@ def live(authority_live):
 
     content = {"title": "Authority", "phases": [{"title": "Proof", "description": "word " * 101}]}
     page = legacy_page.render(new_ledger.build_doc(content), SLUG, authority_live["port"])
-    html, document = core.paths(SLUG)
+    html, document = legacy_page.paths(SLUG, core)
     html.write_text(page)
     document.unlink(missing_ok=True)
     server.ledger_bin.restore(SLUG)

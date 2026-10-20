@@ -1,4 +1,4 @@
-import { API, API_V1, EVENTS_API, HIVES_API, LAYOUT_API, MEDIA_API, ROUTING_API, SLUG, TOKEN } from "./config.js";
+import { API_V1, EVENTS_API, HIVES_API, LAYOUT_API, ROUTING_API, SLUG, TOKEN } from "./config.js";
 
 export function openEvents(cursor) {
   const headers = { Accept: "text/event-stream", "X-Ledger-Token": TOKEN };
@@ -7,20 +7,20 @@ export function openEvents(cursor) {
 }
 
 export function writeLedger(body, unloading) {
-  return fetch(API, { method: "PUT", keepalive: unloading && body.length < 60000,
+  return fetch(`${API_V1}/saves`, { method: "PUT", keepalive: unloading && body.length < 60000,
     headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body });
 }
 
 export function writeSwarm(body) {
-  return fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}`), { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
+  return fetch(`${API_V1}/swarm/controls`, { method: "PUT", headers: { "Content-Type": "application/json", "X-Ledger-Token": TOKEN }, body: JSON.stringify(body) });
 }
 
 export function readModels() {
-  return fetch(API.replace(`/api/${SLUG}`, `/api/swarm/${SLUG}/models`), { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
+  return fetch(`${API_V1}/swarm/models`, { cache: "no-store", headers: { "X-Ledger-Token": TOKEN } });
 }
 
 export function uploadImage(file) {
-  return fetch(MEDIA_API, { method: "POST", headers: { "X-Ledger-Token": TOKEN }, body: file });
+  return fetch(`${API_V1}/uploads/media`, { method: "POST", headers: { "Content-Type": "application/octet-stream", "X-Ledger-Token": TOKEN }, body: file });
 }
 
 export function readMetadata() {
@@ -68,9 +68,9 @@ export function writeLayout(layout) {
 }
 
 export function mediaUrl(id) {
-  return `${API.replace(`/api/${SLUG}`, `/media/${SLUG}`)}/${id}`;
+  return `${API_V1}/files/media/${id}`;
 }
 
 export function artifactUrl(id) {
-  return `${API.replace(`/api/${SLUG}`, `/artifacts/${SLUG}`)}/${id}`;
+  return `${API_V1}/files/artifacts/${id}`;
 }

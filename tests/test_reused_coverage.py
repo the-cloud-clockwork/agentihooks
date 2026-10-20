@@ -5,7 +5,7 @@ from pathlib import Path
 import yaml
 from coverage import CoverageData
 
-from tests import reused_coverage
+from tests import coverage_check, reused_coverage
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "test.yml"
@@ -82,6 +82,86 @@ def test_the_command_remaps_files_changed_since_the_dev_commit(tmp_path):
     args += ["--captures", str(tmp_path / "none"), "--captures-out", str(tmp_path / "js")]
     assert reused_coverage.main([*args, "--out", str(out)]) == 0
     assert _arcs(out) == {"hooks/a.py": {(-4, 5), (5, -4)}}
+
+
+def _truncate(path: Path) -> None:
+    data = path.read_bytes()
+    path.write_bytes(data[: len(data) // 2])
+
+
+def test_a_malformed_dev_coverage_drops_the_reuse_plan_so_the_shard_runs_its_tests(tmp_path, monkeypatch, capsys):
+    source = tmp_path / "dev.coverage"
+    _record(source, {"tests/test_a.py::one|run": {"hooks/a.py": [(-1, 2), (2, -1)]}})
+    _truncate(source)
+    reused = tmp_path / "reused.json"
+    reused.write_text(json.dumps({"tests": ["tests/test_a.py::one"], "files": []}))
+    monkeypatch.setenv("ARTIFACT", "coverage-3.12-9")
+    args = ["--coverage", str(source), "--commit", "HEAD", "--reused", str(reused), "--repo", str(ROOT)]
+    args += ["--captures", str(tmp_path / "none"), "--captures-out", str(tmp_path / "js")]
+    assert reused_coverage.main([*args, "--out", str(tmp_path / "out" / ".coverage")]) == 0
+    assert not reused.exists()
+    assert not (tmp_path / "out" / ".coverage").exists()
+    warnings = [line for line in capsys.readouterr().out.splitlines() if line.startswith("::warning::")]
+    assert len(warnings) == 1 and "coverage-3.12-9" in warnings[0]
+
+
+def test_the_check_names_a_truncated_or_tableless_database_and_passes_a_recorded_one(tmp_path):
+    good = tmp_path / "good.coverage"
+    _record(good, {"tests/test_a.py::one|run": {"hooks/a.py": [(-1, 2), (2, -1)]}})
+    assert coverage_check.problem(good) is None
+    bad = tmp_path / "bad.coverage"
+    _record(bad, {"tests/test_a.py::one|run": {"hooks/a.py": [(-1, 2), (2, -1)]}})
+    _truncate(bad)
+    assert coverage_check.problem(bad)
+    empty = tmp_path / "empty.coverage"
+    empty.write_bytes(b"")
+    assert "arc" in coverage_check.problem(empty)
+    assert coverage_check.problem(tmp_path / "absent.coverage") == "missing"
+    assert coverage_check.main([str(good)]) == 0
+    assert coverage_check.main([str(good), str(bad)]) == 1
+
+
+def test_the_unit_job_checks_its_coverage_database_before_uploading_it():
+    steps = _steps("unit")
+    names = list(steps)
+    check = steps["Check the coverage database"]
+    assert check["if"] == steps["Upload coverage"]["if"]
+    assert "databases=(.coverage)" in check["run"]
+    assert "databases+=(reused-coverage/.coverage)" in check["run"]
+    assert 'python -m tests.coverage_check "${databases[@]}"' in check["run"]
+    assert names.index("Run tests") < names.index("Check the coverage database") < names.index("Upload coverage")
+    kept = steps["Keep the reused tests' dev coverage"]
+    assert kept["env"]["ARTIFACT"] == "coverage-${{ matrix.python-version }}-${{ matrix.shard }}"
+
+
+def test_a_partial_clone_fetches_every_changed_file_old_text_in_one_batch(tmp_path, monkeypatch):
+    origin = tmp_path / "origin"
+    origin.mkdir()
+    git = ["-c", "user.name=t", "-c", "user.email=t@t"]
+    subprocess.run(["git", "-C", str(origin), *git, "init", "-q"], check=True)
+    subprocess.run(["git", "-C", str(origin), "config", "uploadpack.allowFilter", "true"], check=True)
+    subprocess.run(["git", "-C", str(origin), "config", "uploadpack.allowAnySHA1InWant", "true"], check=True)
+    names = [f"hooks/m{index}.py" for index in range(3)]
+    (origin / "hooks").mkdir()
+    for index, name in enumerate(names):
+        (origin / name).write_text(f"{OLD}# {index}\n")
+    subprocess.run(["git", "-C", str(origin), *git, "add", "."], check=True)
+    subprocess.run(["git", "-C", str(origin), *git, "commit", "-qm", "dev"], check=True)
+    commit = subprocess.run(
+        ["git", "-C", str(origin), "rev-parse", "HEAD"], check=True, capture_output=True, text=True
+    ).stdout.strip()
+    for index, name in enumerate(names):
+        (origin / name).write_text(f"{NEW}# {index}\n")
+    subprocess.run(["git", "-C", str(origin), *git, "commit", "-qam", "head"], check=True)
+    clone = tmp_path / "clone"
+    subprocess.run(["git", "clone", "-q", "--filter=blob:none", origin.as_uri(), str(clone)], check=True)
+    trace = tmp_path / "trace.json"
+    monkeypatch.setenv("GIT_TRACE2_EVENT", str(trace))
+    moved = reused_coverage.moved_lines(clone, commit, "HEAD")
+    assert moved == {name: reused_coverage.line_map(f"{OLD}# 0\n", f"{NEW}# 0\n") for name in names}
+    events = [json.loads(line) for line in trace.read_text().splitlines()]
+    fetches = [e for e in events if e.get("event") == "child_start" and "fetch" in e.get("argv", [])]
+    assert len(fetches) == 1
 
 
 def test_pull_requests_into_dev_plan_reuse_from_the_protected_dev_grader():

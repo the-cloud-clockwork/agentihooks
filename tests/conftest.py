@@ -134,7 +134,6 @@ def _shard_files(config) -> frozenset[str]:
 
 def pytest_configure(config):
     _reused(config)
-    mutation_trace.trace_browser_deadlines()
     config.args.sort(key=lambda arg: (Path(arg.split("::", 1)[0]).parent.parts, arg))
     workers = getattr(config.option, "numprocesses", None)
     if not config.getoption("shard") or not workers or hasattr(config, "workerinput") or not hasattr(os, "fork"):
@@ -144,6 +143,17 @@ def pytest_configure(config):
     NodeManager.setup_nodes = setup_nodes_in_parallel
     modules = [path.removesuffix(".py").replace("/", ".") for path in sorted(_shard_files(config))]
     config.stash[WARM_PIDS] = warm_imports(modules, workers)
+
+
+# Importing Playwright here would put it in every test's import closure, so the browser check would turn on greenlet
+# tracing for the whole coverage run. Deadlines are traced after each fixture once Playwright is loaded, so a fixture
+# that imports it lazily is covered before the next fixture opens a page; a fixture or test that imports it and sets a
+# deadline in its own body sets that deadline unscaled.
+@pytest.hookimpl(hookwrapper=True)
+def pytest_fixture_setup(fixturedef, request):
+    yield
+    if "playwright.sync_api" in sys.modules:
+        mutation_trace.trace_browser_deadlines(sys.modules["playwright.sync_api"])
 
 
 def pytest_unconfigure(config):
@@ -194,6 +204,7 @@ def _isolate_real_user_paths(tmp_path, monkeypatch, request):
 
     monkeypatch.setenv("HOME", str(fake_home))
     monkeypatch.setenv("LIFECYCLE_GC_ENABLED", "false")
+    monkeypatch.setenv("MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS", "false")
     # Every swarm tick sweeps the launch run folder and the herdr server.
     monkeypatch.setenv("XDG_RUNTIME_DIR", str(tmp_path / "_run"))
     monkeypatch.setenv("HERDR_SOCKET_PATH", str(tmp_path / "_run" / "herdr.sock"))
@@ -445,6 +456,22 @@ def _swarm_tick_leaves_user_units_alone(monkeypatch):
 
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
     monkeypatch.setattr(timer, "schedule", lambda: True)
+    monkeypatch.setattr(timer, "undelivered", lambda: "")
+    monkeypatch.setattr(timer, "guard", lambda binary: True)
+
+
+@pytest.fixture(autouse=True)
+def _swarm_tick_reaps_no_real_process(tmp_path, monkeypatch):
+    from scripts.swarm import tick_reaper
+
+    monkeypatch.setattr(tick_reaper, "PROC", tmp_path / "no-proc")
+
+
+@pytest.fixture(autouse=True)
+def _tool_deps_never_read_the_real_checkout(tmp_path, monkeypatch):
+    from scripts import tool_deps
+
+    monkeypatch.setattr(tool_deps, "SOURCE", tmp_path / "tool-source")
 
 
 @pytest.fixture(autouse=True)
@@ -464,6 +491,14 @@ def _ci_speed_offline(request, monkeypatch):
 
     if not getattr(request.module, "CI_SPEED_READ", False):
         monkeypatch.setattr(ci_speed, "read_runs", lambda *args, **kwargs: [])
+
+
+@pytest.fixture(autouse=True)
+def _github_status_offline(request, monkeypatch):
+    from scripts.doctor import github_status
+
+    if not getattr(request.module, "GITHUB_STATUS_READ", False):
+        monkeypatch.setattr(github_status, "_fetch", lambda url: b'{"incidents": []}')
 
 
 @pytest.fixture(autouse=True)

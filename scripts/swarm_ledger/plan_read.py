@@ -7,9 +7,13 @@ The task defaults to AGENTIHOOKS_SWARM_TASK and the ledger to AGENTIHOOKS_SWARM.
 """
 
 import argparse
+import functools
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
+from collections.abc import Callable
 from importlib import import_module
 
 from scripts.swarm_ledger import HERE
@@ -155,16 +159,18 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
-def _stored(doc: dict, phase: dict, task: dict) -> str:
+def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
     ref = phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
     if not ref:
         raise ValueError(f"phase {phase.get('id')} has no plan range")
-    return _ledger("plan_ranges").stored_text(ref, doc)
+    return _ledger("plan_ranges").stored_text(ref, doc, load)
 
 
-def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
+def read(
+    doc: dict, slug: str, task_id: str | None, phase_id: str | None, load: Callable[[str, str], bytes] | None = None
+) -> str:
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
@@ -173,7 +179,7 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     packaged = _packaged(phase, task)
-    source = _ledger("plan_packages").text() if packaged else _stored(doc, phase, task)
+    source = _ledger("plan_packages").text() if packaged else _stored(doc, phase, task, load)
     lines = task.get("plan_lines") or phase["plan_ref"]["lines"]
     if task.get("plan_slice"):
         lines = _ledger("plan_ranges").slice_lines(source, task["plan_slice"], f"1-{len(source.splitlines())}")
@@ -198,6 +204,30 @@ def _without(source: str, lines: str, own: str | None) -> str:
     )
 
 
+def _hosted(slug: str, keys: tuple) -> dict | None:
+    from scripts.swarm_ledger import ledger
+
+    try:
+        return {key: ledger.resource(slug, key, collection=True) for key in keys}
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        return None
+
+
+def _served(env, slug: str, file_id: str) -> bytes:
+    from scripts.swarm_ledger import ledger, ledger_link
+
+    request = urllib.request.Request(f"{ledger_link.base(env)}/artifacts/{slug}/{file_id}")
+    try:
+        with ledger_link.urlopen(request, ledger.REQUEST_TIMEOUT, env) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        raise ValueError(f"no stored artifact {file_id}") from None
+
+
 def main(argv=None, environ=None) -> int:
     env = os.environ if environ is None else environ
     parser = argparse.ArgumentParser(prog="agentihooks plan", description=__doc__)
@@ -213,13 +243,16 @@ def main(argv=None, environ=None) -> int:
     task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_ledger.storage import read_ledger
 
-    doc = read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, "tasks", "phases", "artifacts")
+    hosted = ledger_link.remote(env)
+    keys = ("tasks", "phases", "artifacts")
+    doc = _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
     if doc is None:
         raise SystemExit(f"no ledger {slug}")
     try:
-        sys.stdout.write(read(doc, slug, task_id, args.phase))
+        sys.stdout.write(read(doc, slug, task_id, args.phase, functools.partial(_served, env) if hosted else None))
     except ValueError as error:
         raise SystemExit(str(error)) from None
     return 0

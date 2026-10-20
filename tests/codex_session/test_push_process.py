@@ -8,10 +8,6 @@ from dataclasses import asdict
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def serve_thread(ws, messages, thread_id):
     resumed = False

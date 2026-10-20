@@ -26,7 +26,63 @@ elif [[ ! -f "$AGENTIHOOKS_HOME/hive.env" ]]; then
   agentihooks hive join "${HIVE_JOIN_URL:?the hive join URL is required}" "$code"
   unset code
 fi
+python3 - <<'PY'
+import os, re, shlex, sys
+from pathlib import Path
+
+keep = re.compile(r'^(AH_|AGENTIHOOKS_|HIVE_|SWARM_|SSL_CERT_FILE)')
+tick_only = {'SWARM_SECRET', 'AGENTIHOOKS_LEDGER_AGENT_TOKEN'}
+kept = {k: v for k, v in sorted(os.environ.items()) if keep.match(k) and k not in tick_only and '\n' not in v}
+for k in [k for k, v in kept.items() if "'" in v or '\\' in v]:
+    print(f'worker-hive: {k} holds a quote or backslash, which python-dotenv cannot read back; left out', file=sys.stderr)
+    del kept[k]
+lines = [f'{k}={shlex.quote(v)}' for k, v in kept.items()]
+target = Path(os.environ['AGENTIHOOKS_HOME']) / 'hive-container.env'
+target.write_text('\n'.join(lines) + '\n')
+target.chmod(0o600)
+PY
+if [[ -n "${HIVE_SSH_AUTHORIZED_KEYS_FILE:-}" ]]; then
+  sshd="${HIVE_SSHD:-/usr/sbin/sshd}"
+  ssh_state="$AGENTIHOOKS_HOME/ssh"
+  mkdir -p "$ssh_state"
+  if [[ -n "${HIVE_SSH_HOST_KEY_FILE:-}" ]]; then
+    install -m 0600 "$HIVE_SSH_HOST_KEY_FILE" "$ssh_state/host_key"
+  elif [[ ! -f "$ssh_state/host_key" ]]; then
+    ssh-keygen -q -t ed25519 -N '' -f "$ssh_state/host_key"
+  fi
+  # StrictModes off: the keys come from a read-only Secret mount the worker cannot write.
+  cat > "$ssh_state/sshd_config" <<EOF
+Port ${HIVE_SSH_PORT:-2222}
+ListenAddress 0.0.0.0
+HostKey $ssh_state/host_key
+PidFile none
+AuthorizedKeysFile $HIVE_SSH_AUTHORIZED_KEYS_FILE
+AllowUsers $(id -un)
+PubkeyAuthentication yes
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+UsePAM no
+StrictModes no
+PermitRootLogin no
+X11Forwarding no
+AllowTcpForwarding no
+AllowAgentForwarding no
+GatewayPorts no
+PermitTunnel no
+PermitUserEnvironment no
+SetEnv PATH=/opt/venv/bin:/usr/local/bin:/usr/bin:/bin AGENTIHOOKS_HOME=$AGENTIHOOKS_HOME
+LogLevel VERBOSE
+EOF
+  "$sshd" -t -f "$ssh_state/sshd_config"
+  "$sshd" -D -e -f "$ssh_state/sshd_config" &
+  sshd_pid=$!
+  sleep 1
+  kill -0 "$sshd_pid"
+fi
+bundle=()
+[[ -d "$HIVE_REPO_ROOT/agentihooks-bundle" ]] && bundle=(--bundle "$HIVE_REPO_ROOT/agentihooks-bundle")
+agentihooks init "${bundle[@]}" --profile "${HIVE_PROFILE:-engineer}"
 member="$(python3 -c 'import hooks.config; from scripts.swarm.commands import hive_id; print(hive_id())')"
 agentihooks hive set "$member" ui=no ephemeral=yes \
-  "roles=${HIVE_ROLES:-eng,ci,plan}" "max-agents=${HIVE_MAX_AGENTS:-1}"
+  "roles=${HIVE_ROLES:-eng,ci,plan,dispatch}" "max-agents=${HIVE_MAX_AGENTS:-1}"
 exec agentihooks hive run

@@ -14,7 +14,7 @@ from scripts.swarm import ledger_read, profile_choice, prompt
 from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger, ledger_close, ledger_server
 from scripts.swarm_ledger.api.client import ResourceClient
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from scripts.swarm_v2.auth_context import GrantRefused
 from tests.test_swarm_v2_control_service import (
     LEDGER_TASK,
@@ -29,7 +29,9 @@ from tests.test_swarm_v2_control_service import (
     _store,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+repository = default_repository()
+
+pytestmark = pytest.mark.unit
 
 PINNED = {"AGENTIHOOKS_SWARM": "rig-grade-swarm", "AGENTIHOOKS_AGENT_NAME": "engineer@323133-0400"}
 MASTER = "master@323133-0001"
@@ -629,8 +631,7 @@ def test_the_hosted_read_returns_every_phase_past_the_first_page(controller_read
 
 def test_a_local_host_reads_intent_from_its_ledger_folder(hosted, tmp_path):
     _hold("engineer@323133-0300", tmp_path)
-    with patch.dict(os.environ):
-        os.environ.pop("AGENTIHOOKS_DEPLOYMENT")
+    with patch.dict(os.environ, {"AGENTIHOOKS_DEPLOYMENT": "local"}):
         read = ledger_read.parts(SLUG, "overview", "phases")
         absent = ledger_read.parts("absent-ledger", "overview")
 

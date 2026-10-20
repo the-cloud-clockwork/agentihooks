@@ -4,8 +4,6 @@ from scripts.swarm import commands
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server as server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store(monkeypatch):

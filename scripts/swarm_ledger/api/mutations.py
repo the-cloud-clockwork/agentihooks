@@ -1,13 +1,12 @@
-from types import ModuleType
-
-from scripts.swarm_ledger import ledger_task_duplicates
+from scripts.swarm_ledger import ledger_task_duplicates, ports
 
 from . import resources, schemas
 from .errors import APIError
+from .services import LedgerCore, Services
 
 
 class GuardedOperations:
-    def __init__(self, payload: dict, budget: object, core: ModuleType, fence=None, slug: str = "") -> None:
+    def __init__(self, payload: dict, budget: object, core: LedgerCore, fence=None, slug: str = "") -> None:
         self.payload = payload
         self.budget = budget
         self.core = core
@@ -44,7 +43,7 @@ class GuardedOperations:
         self.checked = True
 
     def check_controller(self, op: dict) -> None:
-        from scripts.swarm.store import SwarmError
+        SwarmError = ports.swarm().store.SwarmError
 
         if "controller_epoch" in op:
             try:
@@ -76,10 +75,10 @@ class GuardedOperations:
         return accepted
 
 
-def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
-    doc = server.repository.current(slug).state
-    operations = schemas.check_operations(payload, server.core, tuple(t["id"] for t in doc.get("tasks", [])))
-    refusals = [reason for op in operations if (reason := server.authority.refusal(principal, op))]
+def apply(services: Services, slug: str, principal: str, payload: dict) -> dict:
+    doc = services.repository.current(slug).state
+    operations = schemas.check_operations(payload, services.ledger.core, tuple(t["id"] for t in doc.get("tasks", [])))
+    refusals = [reason for op in operations if (reason := services.ledger.authority.refusal(principal, op))]
     if principal and payload.get("changes"):
         raise APIError(403, "forbidden", "Checkbox changes need the operator")
     payload = {**payload, "ops": operations}
@@ -89,19 +88,21 @@ def apply(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
             "_meta": {"warnings": [*doc["_meta"].get("warnings", [])[:10], *refusals]},
         }
         raise APIError(403, "forbidden", "Caller cannot perform this operation as its author", details)
-    server.ledger_media.resolve(slug, operations)
-    server.ledger_artifacts.resolve(slug, operations)
+    services.media.resolve_media(slug, operations)
+    services.media.resolve_artifacts(slug, operations)
     screen = ledger_task_duplicates.screen(doc, operations)
-    fence = server.write_gate(slug)
+    fence = services.ledger.write_gate(slug)
     gate = ledger_task_duplicates.Gate(
         screen,
-        GuardedOperations(payload, fence, server.core, lambda epoch: server.authority.fence(slug, epoch), slug),
+        GuardedOperations(
+            payload, fence, services.ledger.core, lambda epoch: services.ledger.authority.fence(slug, epoch), slug
+        ),
     )
-    state, rejected = server.repository.apply_ops(slug, ops=operations, gate=gate, copy_state=False)
+    state, rejected = services.repository.apply_ops(slug, ops=operations, gate=gate, copy_state=False)
     fence.publish(rejected)
-    server.relay_to_inbox(slug, state)
-    server.doctor_phrase(slug, state)
-    server.deliver_alerts(slug, state)
+    services.ledger.relay_to_inbox(slug, state)
+    services.swarm.doctor_phrase(slug, state)
+    services.ledger.deliver_alerts(slug, state)
     tasks = {op["item"].split("/")[1] for op in operations if op["op"] == "task_update"}
     rows = [resources.project(row) for row in state.get("tasks", []) if row["id"] in tasks]
     reply = {

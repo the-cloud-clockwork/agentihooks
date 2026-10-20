@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, registry, server
+from scripts.swarm_ledger import ledger_ca
 
 LOCK_FILE = "hive.lock"
 
@@ -47,6 +48,7 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
         )
     grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh")
     auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
+    ledger_ca.place(registry.home(environ), grant.get("ledger_ca"), environ)
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
     return grant["id"]
 
@@ -98,7 +100,9 @@ def _serve(args: argparse.Namespace) -> int:
     if bool(args.tls_cert) != bool(args.tls_key):
         raise auth.HiveError("--tls-cert and --tls-key go together")
     tls = (args.tls_cert, args.tls_key) if args.tls_cert else None
-    httpd = server.make_server(redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls)
+    httpd = server.make_server(
+        redis_client(), args.redis_url or redis_url(os.environ), args.host, args.port, tls, ledger_ca=ledger_ca.served()
+    )
     scheme = "https" if tls else "http"
     print(f"hive join endpoint on {scheme}://{args.host}:{httpd.server_address[1]}{server.JOIN_PATH}", flush=True)
     httpd.serve_forever()
@@ -130,6 +134,8 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("list", help="One line per hive with its liveness")
     sub.add_parser("run", help="Publish hive telemetry every fifteen seconds")
     sub.add_parser("install", help="Write and enable the hive user service")
+    compare = sub.add_parser("compare", help="List each live hive's configuration against a base hive's")
+    compare.add_argument("--base", help="The base hive id; defaults to this machine's hive")
     return parser
 
 
@@ -156,9 +162,39 @@ def _registry(args: argparse.Namespace) -> None:
 def _daemon(command: str) -> int:
     from scripts.hive import daemon
 
-    actions = {"run": lambda: daemon.run(redis_client()), "install": daemon.install}
+    actions = {"run": lambda: daemon.run(redis_client), "install": daemon.install}
     result = actions[command]()
     return 1 if result is False else 0
+
+
+def _compare(base_id: str | None) -> int:
+    from scripts.hive import config
+    from scripts.swarm import commands
+
+    redis, now = redis_client(), now_ms()
+    base_id = base_id or commands.hive_id()
+    found = {
+        record["id"]: config.read(redis, record["id"]) for record in registry.hives(redis) if registry.live(record, now)
+    }
+    base = found.pop(base_id, None)
+    if base is None:
+        raise auth.HiveError(f"live hive {base_id} published no configuration")
+    print(f"{base_id}\tbase\t{config.summary(base)}")
+    differing = [hive_id for hive_id, other in sorted(found.items()) if _report(hive_id, base, other)]
+    return 1 if differing else 0
+
+
+def _report(hive_id: str, base: dict, other: dict | None) -> bool:
+    from scripts.hive import config
+
+    if other is None:
+        print(f"{hive_id}\tno configuration published")
+        return True
+    lines = config.differences(base, other)
+    print(f"{hive_id}\t{'differs' if lines else 'equal'}\t{config.summary(other)}")
+    for line in lines:
+        print(f"  {line}")
+    return bool(lines)
 
 
 def main(argv: list[str]) -> int:
@@ -169,7 +205,11 @@ def main(argv: list[str]) -> int:
         elif args.command == "join":
             grant = _join(args.url, args.code)
             path = auth.write_env(registry.home(), args.url, grant)
-            print(f"joined the hive as {grant['id']}; credentials are in {path}")
+            ca = ledger_ca.place(registry.home(), grant.get("ledger_ca"))
+            print(
+                f"joined the hive as {grant['id']}; credentials are in {path}"
+                + (f"; the ledger CA is in {ca}" if ca else "")
+            )
         elif args.command == "refresh":
             with refresh_lock(os.environ):
                 member_id = refresh_env(os.environ)
@@ -181,6 +221,8 @@ def main(argv: list[str]) -> int:
             print(f"revoked {args.id}")
         elif args.command in ("run", "install"):
             return _daemon(args.command)
+        elif args.command == "compare":
+            return _compare(args.base)
         elif args.command == "controller":
             path = auth.write_controller_env(registry.home(), auth.issue_controller(redis_client()))
             print(f"issued a controller credential; it is in {path}")

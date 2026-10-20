@@ -8,7 +8,7 @@ from hooks.context.prepush_guard import check_prepush
 from hooks.hook_manager import BlockAction
 from scripts.swarm.store import AgentRecord
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def git(root, *args):
@@ -953,6 +953,8 @@ def test_cli_prepares_and_publishes_from_the_primary_checkout(publication, monke
         names=SimpleNamespace(resolve=lambda name: name, swarm_slug=lambda slug: slug),
         agents=lambda slug: {"swarm": [agent]}[slug],
         config=lambda slug: {"swarm": SimpleNamespace(repo=str(publication.repo))}[slug],
+        redis=SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
     )
     monkeypatch.chdir(publication.repo)
     monkeypatch.setattr(cli, "connect", lambda: store)

@@ -7,6 +7,7 @@ STUBS = """
 const h = (tag, attrs, ...kids) => ({tag, attrs, kids});
 const label = (text, tone) => ({label: text, tone});
 const cells = (...values) => values;
+const agentCellTips = (row) => row;
 const withId = (row) => row;
 const idCell = (text) => text;
 const transportCell = (c) => c ? "transport" : "—";
@@ -28,7 +29,7 @@ def _run(script):
 
 def test_only_a_master_with_a_recorded_decision_gets_the_remote_control_cell():
     cells = _run("""
-const on = {state: 'on', detail: 'master · sw'};
+const on = {state: 'on', detail: 'master 1 · sw'};
 const raw = {agents: [
   {name: 'm', lane: 'master', remote_control: on, capabilities: {push_inbox: true}},
   {name: 'e', lane: 'eng', remote_control: on},
@@ -39,10 +40,10 @@ console.log(JSON.stringify(agentRows(raw, 0).map((r) => agentRow(r, false)[5])))
     assert cells == [
         {
             "tag": "span",
-            "attrs": {"data-tip": "Remote Control: on (master · sw)"},
+            "attrs": {"data-tip": "Remote Control: on (master 1 · sw)"},
             "kids": [
                 {"label": "remote control on", "tone": "on"},
-                {"tag": "span", "attrs": {"class": "sw-sub", "text": "master · sw"}, "kids": []},
+                {"tag": "span", "attrs": {"class": "sw-sub", "text": "master 1 · sw"}, "kids": []},
                 "transport",
             ],
         },

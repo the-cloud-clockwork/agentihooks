@@ -5,8 +5,6 @@ import pytest
 
 from scripts.routing import reservation
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def clock(monkeypatch):

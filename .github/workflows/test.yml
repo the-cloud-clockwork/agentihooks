@@ -1050,12 +1050,12 @@ jobs:
         shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
         include: ${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}
         exclude:
-          - {python-version: "3.11", shard: 7}
-          - {python-version: "3.11", shard: 8}
-          - {python-version: "3.11", shard: 9}
-          - {python-version: "3.11", shard: 10}
-          - {python-version: "3.11", shard: 11}
-          - {python-version: "3.11", shard: 12}
+          - {python-version: &queue-python-311 "${{ github.event_name == 'merge_group' && '3.11' || '' }}", shard: 7}
+          - {python-version: *queue-python-311, shard: 8}
+          - {python-version: *queue-python-311, shard: 9}
+          - {python-version: *queue-python-311, shard: 10}
+          - {python-version: *queue-python-311, shard: 11}
+          - {python-version: *queue-python-311, shard: 12}
     steps:
       # The action retries git fetch but not the lazy blob fetch inside git checkout; a silent connection there held a shard ten minutes.
       - name: Check out the graded commit
@@ -1155,6 +1155,7 @@ jobs:
       - name: Keep the reused tests' dev coverage
         if: *reused-coverage
         env:
+          ARTIFACT: coverage-${{ matrix.python-version }}-${{ matrix.shard }}
           COMMIT: ${{ needs.split.outputs.commit }}
           GRADER: ${{ github.event_name == 'pull_request' && 'origin/dev' || github.sha }}
         run: |
@@ -1188,7 +1189,7 @@ jobs:
           PYTEST_ADDOPTS: ${{ matrix.python-version == '3.12' && format('--cov=hooks --cov=scripts --cov-report= --cov-config={0}/.github/coverage/coverage.ini --cov-context=test -p tests.browser_coverage -p tests.dep_inputs', github.workspace) || '-p no:pytest_cov' }}
           DEP_INPUTS_DIR: ${{ matrix.python-version == '3.12' && format('{0}/dep-inputs', github.workspace) || '' }}
           PLAYWRIGHT_BROWSERS_PATH: ${{ matrix.python-version == '3.12' && format('{0}/.playwright', github.workspace) || '' }}
-          SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 12 || 6 }}
+          SHARD: ${{ matrix.shard }}/${{ matrix.python-version == '3.12' && 12 || 12 }}
           QUEUE_SHARDS: ${{ matrix.total }}
           NODE_OPTIONS: ${{ matrix.python-version == '3.12' && format('--require {0}/tests/node_capture.cjs', github.workspace) || '' }}
           CI_FLAKES: ${{ github.workspace }}/flakes.jsonl
@@ -1259,6 +1260,13 @@ jobs:
           path: flakes.jsonl
           if-no-files-found: error
           retention-days: 14
+
+      - name: Check the coverage database
+        if: matrix.python-version == '3.12'
+        run: |
+          databases=(.coverage)
+          if [[ -f reused-coverage/.coverage ]]; then databases+=(reused-coverage/.coverage); fi
+          python -m tests.coverage_check "${databases[@]}"
 
       - name: Upload coverage
         if: matrix.python-version == '3.12'
@@ -1375,7 +1383,11 @@ jobs:
           JS_COVERAGE_DIR: ${{ matrix.python-version == '3.12' && format('{0}/js-coverage', github.workspace) || '' }}
         run: |
           read -ra files <<< "$FILES"
-          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml
+          start=$SECONDS
+          status=0
+          python -c 'import os, shlex, sys, pytest; sys.exit(pytest.main(shlex.split(os.environ.pop("PYTEST_ADDOPTS", "")) + sys.argv[1:]))' "${files[@]}" -v -n auto --dist loadgroup -p tests.flake_ledger --reruns 2 --tb=short -o faulthandler_timeout=60 --store-durations --durations-path durations.json -p no:anyio -p no:xdist.looponfail -p no:legacypath -p no:doctest -p no:pastebin -p no:junitxml || status=$?
+          echo "{\"seconds\":$((SECONDS - start)),\"job\":\"$GITHUB_JOB\"}" > elapsed.json
+          exit "$status"
 
       - name: Record flaky tests
         if: ${{ !cancelled() }}
@@ -1404,7 +1416,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: durations-${{ matrix.python-version }}-${{ matrix.leg }}
-          path: durations.json
+          path: |
+            durations.json
+            elapsed.json
           retention-days: 14
           overwrite: true
 
@@ -1488,26 +1502,19 @@ jobs:
 
       - name: Summarize reused, ran and flaky tests
         if: ${{ !cancelled() && github.event.pull_request.base.ref != 'main' }}
+        shell: bash
         env:
           PYTHON_VERSION: ${{ matrix.python-version }}
           PLAN: reused-plan/reused-tests.json
         run: |
-          ran=$(jq -s '[.[] | keys[] | sub("@[^\\[\\]]*$"; "")] | unique | length' shard-durations/*/durations.json)
-          flaky=$(cat shard-flakes/*/flakes.jsonl 2> /dev/null | jq -s '[.[] | select(.outcome == "flaky")] | length')
-          reused=0
-          source="no plan"
-          if [[ -f "$PLAN" ]]; then
-            reused=$(jq -n --slurpfile plan "$PLAN" --slurpfile collected collected-data/collected.json \
-              '($collected[0] | map({(.): true}) | add // {}) as $set | [$plan[0].tests[] | select($set[.])] | length')
-            source="dev run $(jq -r .run "$PLAN")"
-          fi
-          echo "Python $PYTHON_VERSION: ran $ran, reused $reused from $source, flaky $flaky" | tee -a "$GITHUB_STEP_SUMMARY"
+          python -m tests.shard_summary --version "$PYTHON_VERSION" --durations shard-durations/*/durations.json \
+            --collected collected-data/collected.json --plan "$PLAN" --flakes shard-flakes/*/flakes.jsonl | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Check release shards with legacy collection
         if: github.event.pull_request.base.ref == 'main'
         run: python -m tests.shard_check shard-durations/*/durations.json
 
-      - name: Check every shard's test time fits the fifteen minute budget
+      - name: Check every shard's test time fits the Run tests deadline
         if: github.event_name != 'merge_group'
         env:
           REPORT: ${{ github.event_name == 'push' && '--report' || '' }}
@@ -1867,6 +1874,16 @@ jobs:
           cache: pip
           cache-dependency-path: pyproject.toml
 
+      # The dashboard query step waits on both status files, so its setup overlaps the lint steps before it.
+      - name: Prepare the dashboard query checker in the background
+        env:
+          CLICKHOUSE: swarm-columns-${{ github.run_id }}-${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+          # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
+          (python -m venv "$RUNNER_TEMP/columns" && "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0; echo $? > "$RUNNER_TEMP/columns-venv.status") > "$RUNNER_TEMP/columns-venv.log" 2>&1 < /dev/null &
+          (docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine; echo $? > "$RUNNER_TEMP/clickhouse.status") > "$RUNNER_TEMP/clickhouse.log" 2>&1 < /dev/null &
+
       - name: Install ruff
         run: python -m pip install ruff==0.15.12
 
@@ -1989,13 +2006,15 @@ jobs:
           CLICKHOUSE: swarm-columns-${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
-          [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
-          # The checker's own environment carries antoncore's job pins without changing the lint interpreter.
-          python -m venv "$RUNNER_TEMP/columns"
-          "$RUNNER_TEMP/columns/bin/python" -m pip install --quiet PyYAML==6.0.3 jsonschema==4.25.1 orjson==3.13.0
-          git -C .antoncore rev-parse HEAD
-          docker run -d --rm --name "$CLICKHOUSE" clickhouse/clickhouse-server:24.1-alpine
           trap 'docker rm -f "$CLICKHOUSE" >/dev/null 2>&1 || true' EXIT
+          [[ -f .antoncore/scripts/swarm_dashboard_columns.py ]] || { echo "::error::The antoncore dashboard column checker could not be checked out."; exit 1; }
+          git -C .antoncore rev-parse HEAD
+          for _ in $(seq 180); do
+            [[ -s "$RUNNER_TEMP/columns-venv.status" && -s "$RUNNER_TEMP/clickhouse.status" ]] && break
+            sleep 1
+          done
+          [[ "$(cat "$RUNNER_TEMP/columns-venv.status" 2>/dev/null)" == 0 ]] || { cat "$RUNNER_TEMP/columns-venv.log" || true; echo "::error::The dashboard checker environment did not install."; exit 1; }
+          [[ "$(cat "$RUNNER_TEMP/clickhouse.status" 2>/dev/null)" == 0 ]] || { cat "$RUNNER_TEMP/clickhouse.log" || true; echo "::error::The ClickHouse container did not start."; exit 1; }
           for _ in $(seq 60); do
             docker exec "$CLICKHOUSE" clickhouse-client -q 'SELECT 1' >/dev/null 2>&1 && break
             sleep 1
@@ -2006,7 +2025,7 @@ jobs:
           cat "$RUNNER_TEMP/columns.err" >&2
           if (( status )); then
             missing=$(grep -oP "No module named '\K[^']+" "$RUNNER_TEMP/columns.err" | sort -u | paste -sd, - || true)
-            [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on this step's pip install line."
+            [[ -z "$missing" ]] || echo "::error::The dashboard column checker imports $missing, which its environment lacks; pin it on the pip install line of the step that prepares the checker in the background."
             exit 1
           fi
 
@@ -2213,6 +2232,8 @@ jobs:
         run: python3 -m scripts.ci_budget --run "$RUNNER_TEMP/run.json" --jobs "$RUNNER_TEMP/jobs.jsonl"
 
   queue-fail-fast:
+    outputs:
+      failed: ${{ steps.watch.outputs.failed }}
     if: ${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && github.event_name != 'pull_request' }}
     needs: [reuse, admission]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
@@ -2297,22 +2318,24 @@ jobs:
           KIND: ${{ needs.kind-due.outputs.due }}
           EVENT: ${{ github.event_name }}
           REUSED: ${{ needs.reuse.outputs.reused }}
+          INLINE: ${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}
         run: |
           if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
-            if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
+            if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" '
               (.select.outputs.scope // "") as $scope
               | (if $event == "merge_group" then
-                ["select", "split", "unit", "shard-check", "test-count", "queue-fail-fast"]
+                ["select", "split", "unit", "shard-check", "test-count"]
               else
                 ["select", "test-count", "lint", "docs", "semgrep", "sonar"]
                 + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
-                + (if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)
+                + (if $mutation == "true" then ["mutation-plan", "mutation-stats"] + (if $inline == "true" then [] else ["mutation"] end) else [] end)
               end) as $required
               | . as $jobs
               | ($event == "merge_group" or (($mutation == "true" or $mutation == "false") and ($scope == "full" or $scope == "selected" or $scope == "none")))
+                and ($event != "merge_group" or has("queue-fail-fast"))
                 and all($required[]; . as $job | $jobs[$job].result == "success")
                 and all(to_entries[]; .key as $job |
-                  if $required | index($job) then .value.result == "success" else .value.result == "skipped" end)
+                  if $required | index($job) then .value.result == "success" elif $event == "merge_group" and $job == "queue-fail-fast" then (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == "" else .value.result == "skipped" end)
             ' <<< "$NEEDS"; then
               echo "::error::Every gate required for this event must succeed and other gates must be skipped."
               exit 1
@@ -2324,7 +2347,7 @@ jobs:
             echo "::error::A push or dispatch run never reuses a queue result."
             exit 1
           fi
-          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
+          if ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg inline "${INLINE:-}" --arg kind "${KIND:-}" '(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected" or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "mutation" and .value.result == "skipped" and $inline == "true") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group") or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push") or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet") and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none")) or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none")))' <<< "$NEEDS"; then
             echo "::error::Every required gate must succeed."
             exit 1
           fi
@@ -2395,7 +2418,7 @@ jobs:
       - name: Refresh measured durations
         run: |
           python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5
-          test -s .test_durations
+          test -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }
 
       - name: Publish merged durations
         uses: actions/upload-artifact@v4
@@ -2615,6 +2638,7 @@ jobs:
         env:
           BASE: ${{ inputs.base || 'origin/dev' }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          MUTATION_SHARD_CPU_QUOTA: "3"
         run: python -m scripts.ci_mutation.plan --base "$BASE" --repository "$GITHUB_REPOSITORY"
 
       # The workflow comes from the merge ref, so a head whose planner predates the selection writes none.
@@ -2739,9 +2763,26 @@ jobs:
           retention-days: 7
           overwrite: true
 
+      - name: Mutate the only shard in the statistics job
+        id: mutate
+        if: needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && needs.mutation-plan.outputs.forwarded != 'true'
+        env:
+          BASES: ${{ needs.mutation-plan.outputs.bases }}
+          PYTHONUNBUFFERED: "1"
+        run: python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats
+
+      - name: Upload complete inline mutation evidence
+        if: always() && steps.mutate.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: mutation-report-0
+          path: ${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}
+          include-hidden-files: true
+          retention-days: 7
+
   mutation:
     needs: [mutation-plan, mutation-stats, admission]
-    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
+    if: ${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
     timeout-minutes: 26
     strategy:

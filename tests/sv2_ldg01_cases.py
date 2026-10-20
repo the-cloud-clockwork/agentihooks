@@ -10,9 +10,11 @@ from unittest.mock import patch
 import pytest
 
 from scripts.swarm_ledger import ledger
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger.test_ledger_authority import OTHER, SLUG, WORKER, admin_put, operation
 from tests.swarm_ledger.test_remote_ledger_client import CREDENTIAL
+
+repository = default_repository()
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = Path(__file__).parent / "fixtures/swarm_v2/remote-worker-home.json"

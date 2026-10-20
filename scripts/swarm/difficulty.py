@@ -16,7 +16,6 @@ PAGE_FOLDER = "scripts/swarm_ledger/static"
 PAGE_FILES = (
     "scripts/swarm_ledger/home.html",
     "scripts/swarm_ledger/shell.html",
-    "scripts/swarm_ledger/template.html",
     "scripts/swarm_ledger/palette.css",
     "scripts/swarm_ledger/tooltips.js",
 )

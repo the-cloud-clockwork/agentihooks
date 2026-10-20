@@ -7,8 +7,6 @@ from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 STALE = Finding("stale claim", "watch-eng-1", "no change for 40 minutes", ("task t1",), "30 minutes", 40)
 
 
@@ -322,3 +320,23 @@ def test_a_pass_without_telemetry_drops_only_the_trace_reader():
     every = set(detect.readers(store, None, "sw", 1_000, environ={}))
     assert "trace" in every
     assert set(detect.readers(store, None, "sw", 1_000, environ={}, telemetry=False)) == every - {"trace"}
+
+
+def test_the_dev_workflow_reader_judges_the_watched_repo_dev_pushes(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    path = ".github/workflows/hive-worker.yml"
+    runs = [
+        {"id": n, "name": "Worker hive pod", "path": path, "conclusion": "failure", "created_at": "t", "html_url": "u"}
+        for n in range(10, 15)
+    ]
+    record = {"runs": runs, "green": {}, "jobs": {}}
+    monkeypatch.setattr(detect.ci_read, "dev_pushes", {"/repo": record}.get)
+    reader = detect.readers(store, None, "sw", 1, environ={}).get("dev workflow", lambda: [])
+    assert [f.id for f in reader()] == ["red-dev-workflow/hive-worker.yml"]
+    record["runs"].insert(0, {**runs[0], "id": 15, "conclusion": "success"})
+    assert reader() == []

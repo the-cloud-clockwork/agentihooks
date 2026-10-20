@@ -6,7 +6,7 @@ from pathlib import Path
 import ledger_comments
 import ledger_kinds
 
-from scripts.swarm_ledger import ledger_plans, ledger_rank, task_dependencies
+from scripts.swarm_ledger import ledger_plans, ledger_rank, ports, task_dependencies
 
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 ID_RE = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")
@@ -391,7 +391,7 @@ def _add(doc, op, ctx):
 
 
 def add_refusal(tasks, op, appended):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     by, lane = op["by"], lane_of(op["by"])
     if lane in WORKER_LANES:
@@ -433,7 +433,7 @@ def unsliced_refusal(doc: dict, task: dict, by: str) -> str:
 
 
 def rank_refusal(by, field="rank"):
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     lane = lane_of(by)
     if field == "rank":
@@ -537,7 +537,7 @@ def _update_fields(task: dict, fields: dict) -> dict:
 
 
 def _block_author(by: str) -> bool:
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     return by == "operator" or lane_of(by) == "master"
 
@@ -561,32 +561,25 @@ def _record_timing(task, changed, op, ctx):
         ctx.record(op["by"], "task parked" if changed["parked_on"] else "task unparked", op["item"])
 
 
-def _update(doc, op, ctx):
-    task_id = op["item"].split("/")[1]
-    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
-    others = [t for t in doc["tasks"] if t["id"] != task_id]
-    if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
-        return False
-    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
-        return True
-    if refusal := update_refusal(doc, op, ctx.meta):
-        ctx.refused.append(refusal)
-        return False
+def _normalized(op):
     if "rank" in op["fields"]:
         op = {**op, "fields": {**op["fields"], "rank": ledger_rank.canonical(op["fields"]["rank"])}}
     if "difficulty" in op["fields"]:
         op = {**op, "fields": sized(op["fields"])}
-    fields = _update_fields(task, op["fields"])
-    after = {**task, **fields}
-    check_lane(after)
-    if after.get("state") == "done" and ledger_kinds.unmet(after):
-        ctx.refused.append(f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}")
-        return False
-    if after.get("state") == "done" and ledger_kinds.kind(after) == "plan":
-        if refusal := slice_refusal(op["item"], after, doc):
-            ctx.refused.append(refusal)
-            return False
-    changed = _changed(task, fields, op, ctx)
+    return op
+
+
+def _done_refusal(doc, op, after):
+    if after.get("state") != "done":
+        return None
+    if ledger_kinds.unmet(after):
+        return f"{op['item']} cannot be done without its proof: {', '.join(ledger_kinds.unmet(after))}"
+    if ledger_kinds.kind(after) == "plan":
+        return slice_refusal(op["item"], after, doc)
+    return None
+
+
+def _apply_update(task, after, changed, op, ctx):
     if "kind" in changed and after.get("workspace"):
         from scripts.swarm_ledger import ledger_workspace
 
@@ -600,6 +593,33 @@ def _update(doc, op, ctx):
     for key in changed:
         ctx.stamp(f"{op['item']}/{key}", op["by"])
     ctx.dirty = ctx.dirty or bool(changed)
+
+
+def _gated(doc, op, ctx, task):
+    others = [t for t in doc["tasks"] if t["id"] != op["item"].split("/")[1]]
+    if task is None or not _known(others, op["fields"].get("depends_on", []) + op["fields"].get("parked_on", [])):
+        return False
+    if _held_block(task, op, ctx) or _guarded(task, op) or task_dependencies.held(task, op, doc["tasks"]):
+        return True
+    if refusal := update_refusal(doc, op, ctx.meta):
+        ctx.refused.append(refusal)
+        return False
+    return None
+
+
+def _update(doc, op, ctx):
+    task_id = op["item"].split("/")[1]
+    task = next((t for t in doc.get("tasks", []) if t["id"] == task_id), None)
+    if (gated := _gated(doc, op, ctx, task)) is not None:
+        return gated
+    op = _normalized(op)
+    fields = _update_fields(task, op["fields"])
+    after = {**task, **fields}
+    check_lane(after)
+    if refusal := _done_refusal(doc, op, after):
+        ctx.refused.append(refusal)
+        return False
+    _apply_update(task, after, _changed(task, fields, op, ctx), op, ctx)
     return True
 
 

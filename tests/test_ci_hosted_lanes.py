@@ -30,12 +30,14 @@ DIRECT = {
 }
 LANE_USERS = {
     "hierarchy-cpu.yml",
+    "mutation-line-selection-proof.yml",
     "mutation-refinement-proof.yml",
     "test.yml",
     "proofs.yml",
     "test-leaks.yml",
     "swarm-node-image.yml",
     "hive-worker.yml",
+    "lost-runner.yml",
     *DIRECT,
 }
 LEGS = {"mutation-preflight.yml:stats": "stats", "mutation-preflight.yml:mutation-shard": "shard"}
@@ -58,6 +60,8 @@ REFS = ("refs/heads/dev", "refs/heads/main", "refs/heads/diffcheck/plant", "refs
 
 if (_WORKFLOWS / "count-record.yml").is_file():
     LANE_USERS = LANE_USERS | {"count-record.yml"}
+if (_WORKFLOWS / "actions-storage.yml").is_file():
+    LANE_USERS = LANE_USERS | {"actions-storage.yml"}
 
 
 class _Context(dict):

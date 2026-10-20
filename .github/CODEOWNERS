@@ -20,6 +20,7 @@
 /tests/coverage_*.py @nestorcolt
 /tests/dep_inputs.py @nestorcolt
 /tests/dep_manifest.py @nestorcolt
+/tests/mutation_line_selection_proof.py @nestorcolt
 /tests/reused_coverage.py @nestorcolt
 /tests/test_coverage_*.py @nestorcolt
 /tests/dev_durations.py @nestorcolt
@@ -28,6 +29,7 @@
 /tests/refresh_durations.py @nestorcolt
 /tests/shard_budget.py @nestorcolt
 /tests/shard_check.py @nestorcolt
+/tests/shard_summary.py @nestorcolt
 /tests/shards.py @nestorcolt
 /tests/queue_shards.py @nestorcolt
 /tests/test_ci_*.py @nestorcolt
@@ -43,6 +45,7 @@
 /tests/test_github_access.py @nestorcolt
 /tests/test_shard_budget.py @nestorcolt
 /tests/test_shard_check.py @nestorcolt
+/tests/test_shard_summary.py @nestorcolt
 /tests/test_shards.py @nestorcolt
 /tests/test_queue_shards.py @nestorcolt
 /tests/test_size_limits.py @nestorcolt

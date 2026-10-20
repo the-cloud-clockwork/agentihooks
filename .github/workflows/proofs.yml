@@ -311,4 +311,4 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           read -r -a paths <<< "$TEST_PATHS"
-          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup --tb=short
+          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short

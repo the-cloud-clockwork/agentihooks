@@ -1,6 +1,8 @@
 import argparse
 import json
+import os
 import shlex
+import subprocess
 import sys
 
 import pytest
@@ -25,7 +27,7 @@ def launched(tmp_path, spec, prompt="Open the task."):
         tmp_path, "engineer@abc-0001", prompt, ["-m", "gpt-6.1-sol"], {"XDG_RUNTIME_DIR": str(tmp_path)}, spec
     )
     line = next(line for line in launcher.read_text().splitlines() if line.startswith("setsid -f "))
-    server, _, _ = shlex.split(line)[4].partition("; rm -f ")
+    server, _, _ = shlex.split(line)[4].removeprefix(init_agent.LAUNCHER_PIN).partition("; rm -f ")
     return launcher, prompt_file, shlex.split(server)
 
 
@@ -48,6 +50,18 @@ def test_the_app_server_branch_runs_the_supervisor_with_the_opening_prompt_file(
     assert argv[-2:] == ["-m", "gpt-6.1-sol"]
     assert split < len(argv) - 2
     assert "--no-daemon" not in argv
+
+
+def test_the_detached_server_shell_is_the_swarm_launcher_of_the_app_server(tmp_path):
+    probe = "sh -c 'echo \"$AGENTIHOOKS_SWARM_LAUNCHER $PPID\"'"
+    inputs = [str(tmp_path / "input")]
+    line = init_agent._viewer_lines(probe, tmp_path / "x.sh", "engineer@abc-0001", {"AGENTIHOOKS_SWARM": "sw"}, inputs)
+    script = shlex.split(line.splitlines()[0])[4]
+    environ = {**os.environ, "AGENTIHOOKS_SWARM_LAUNCHER": "1"}
+    launcher, parent = subprocess.run(
+        ["sh", "-c", script], env=environ, capture_output=True, text=True, check=True
+    ).stdout.split()
+    assert launcher == parent
 
 
 def test_the_app_server_branch_never_hands_the_prompt_to_the_pane(tmp_path):

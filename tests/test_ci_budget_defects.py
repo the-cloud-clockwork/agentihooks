@@ -11,8 +11,6 @@ from scripts.swarm.health import standing
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CI_SPEED_READ = True
 NOW_MS = 1_791_540_000_000
 URL = "https://github.com/o/r/actions/runs/{}/job/9"

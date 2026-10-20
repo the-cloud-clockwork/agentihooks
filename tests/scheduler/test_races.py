@@ -2,7 +2,7 @@ from unittest.mock import Mock
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -17,7 +17,7 @@ def scheduler():
 def test_child_can_acquire_supervisor_ownership_before_spawn_returns(monkeypatch, tmp_path):
     from scripts.scheduler import service
 
-    monkeypatch.setattr(service, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(service, "runtime_dir", lambda *_args: tmp_path)
     accepted = []
 
     def spawn(*args, **kwargs):
@@ -80,8 +80,7 @@ def test_cancel_or_stop_discards_a_claimed_but_undelivered_signal(monkeypatch, s
 
     with monkeypatch.context() as fault:
         fault.setattr(InboxSlot, "deliver", crash)
-        with pytest.raises(RuntimeError, match="^crash before transport$"):
-            scheduler.run_due(now=101)
+        assert scheduler.run_due(now=101) == 1
     assert scheduler.redis.zcard(scheduler.key("due")) == 0
     assert scheduler.redis.smembers(scheduler.key("pending")) == {entry.id}
     if kind == "timer":

@@ -48,6 +48,7 @@ COPY --from=build /opt/package/ /opt/venv/
 COPY --from=herdr /usr/local/bin/herdr /usr/local/bin/herdr
 COPY media/agentihooks-logo.png /opt/venv/lib/python3.12/site-packages/media/agentihooks-logo.png
 COPY docs/swarm-v2/schemas/ /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/schemas/
+COPY docs/swarm-v2/architecture.json /opt/venv/lib/python3.12/site-packages/docs/swarm-v2/architecture.json
 USER 10001:10001
 VOLUME /data
 EXPOSE 8765

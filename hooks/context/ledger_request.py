@@ -6,7 +6,7 @@ import os
 
 def _ledger(env):
     from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     slug, task_id = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_SWARM_TASK")
     if not slug:

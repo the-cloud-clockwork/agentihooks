@@ -11,6 +11,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from scripts.swarm_ledger import ledger_route
+
 START = "agentihooks ledger serve --ensure"
 LOOPBACK = ("127.0.0.1", "localhost")
 USER_AGENT = "agentihooks-swarm"
@@ -22,15 +24,17 @@ CREDENTIAL_HEADERS = (
     "X-Ledger-Tick",
     "X-Ledger-Migration",
 )
-TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM"
+TLS_CERT_ENV, TLS_KEY_ENV, CA_ENV, CA_FILE_ENV = "LEDGER_TLS_CERT", "LEDGER_TLS_KEY", "LEDGER_CA_PEM", "LEDGER_CA_FILE"
 
 
 class Cleartext(SystemExit):
     pass
 
 
-def base(environ=os.environ) -> str:
-    if remote(environ):
+def base(environ=os.environ, slug="") -> str:
+    if selected := ledger_route.url(slug):
+        return selected
+    if remote(environ, slug):
         url = environ.get("SWARM_URL") or environ.get("LEDGER_URL")
         if not url:
             raise SystemExit("a remote ledger client needs SWARM_URL, the address of the hosted ledger server")
@@ -81,7 +85,25 @@ def guard(url: str, headers: dict) -> None:
 
 def transport(environ=os.environ) -> dict:
     pem = environ.get(CA_ENV, "").strip()
-    return {"context": ssl.create_default_context(cadata=pem)} if pem else {}
+    if pem:
+        return {"context": ssl.create_default_context(cadata=pem)}
+    found = ca_file(environ)
+    if not found.is_file():
+        if environ.get(CA_FILE_ENV):
+            raise SystemExit(f"{CA_FILE_ENV} names no file: {found}")
+        return {}
+    context = ssl.create_default_context()
+    try:
+        context.load_verify_locations(cafile=str(found))
+    except ssl.SSLError as error:
+        raise SystemExit(f"the ledger CA file {found} holds no valid certificate: {error.reason}") from error
+    return {"context": context}
+
+
+def ca_file(environ=os.environ) -> Path:
+    if environ.get(CA_FILE_ENV):
+        return Path(environ[CA_FILE_ENV]).expanduser()
+    return Path(environ.get("AGENTIHOOKS_HOME") or Path.home() / ".agentihooks") / "ledger-ca.pem"
 
 
 def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ):
@@ -91,8 +113,12 @@ def urlopen(request: urllib.request.Request, timeout: float, environ=os.environ)
     return urllib.request.urlopen(request, timeout=timeout, **transport(environ))
 
 
-def remote(environ=os.environ) -> bool:
-    return bool(environ.get("SWARM_URL")) or environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local"
+def remote(environ=os.environ, slug="") -> bool:
+    mode = environ.get("AGENTIHOOKS_DEPLOYMENT")
+    return bool(
+        ledger_route.url(slug)
+        or (environ.get("SWARM_URL") if not slug or environ.get("AGENTIHOOKS_SWARM", slug) == slug else "")
+    ) or (bool(environ.get("LEDGER_URL")) if mode is None else mode != "local")
 
 
 def access_headers(environ=os.environ) -> dict:
@@ -142,7 +168,7 @@ def allowed_origins(environ=os.environ) -> set[str]:
 
 
 def page_url(slug):
-    return f"{base()}/{slug}"
+    return f"{base(slug=slug)}/{slug}"
 
 
 def folder(environ=os.environ) -> Path:

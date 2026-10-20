@@ -14,19 +14,15 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 
+from scripts.swarm_ledger import storage
 from scripts.swarm_ledger.api.errors import APIError
-from scripts.swarm_ledger.repository.sqlite import DATABASE, SQLiteLedgerRepository, read_only
+from scripts.swarm_ledger.api.services import Services
+from scripts.swarm_ledger.repository import LedgerRepository
 
 LIFETIME = 900
 MAX_COMPRESSED = 64 << 20
 MAX_EXPANDED = 256 << 20
 FILE_ID = re.compile(r"[0-9a-f]{64}\.[a-z0-9]+\Z")
-TABLE_ID = re.compile(r"[a-z_]+\Z")
-FENCES = "CREATE TABLE IF NOT EXISTS hosted_fences (slug TEXT PRIMARY KEY, destination TEXT NOT NULL)"
-FENCED = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*')"
-FENCE_DESTINATIONS = "SELECT destination FROM hosted_fences WHERE slug IN (?, '*') OR ?='*'"
-CATALOG = "SELECT slug FROM ledgers ORDER BY slug"
-REGISTRIES = "SELECT slug,path,value FROM registry WHERE path=? ORDER BY slug,path"
 TOKEN_MESSAGE = "ledger-import:{slug}:{expires}"
 
 
@@ -64,49 +60,23 @@ def media_lock(directory: Path) -> Iterator[None]:
 
 @contextmanager
 def media_mutation(directory: Path, slug: str) -> Iterator[bool]:
-    with media_lock(directory), read_only(directory) as connection:
-        exists = (
-            connection is not None
-            and connection.execute("SELECT 1 FROM sqlite_master WHERE name='hosted_fences'").fetchone()
-        )
-        yield not (exists and connection.execute(FENCED, (slug,)).fetchone())
+    with media_lock(directory):
+        yield not storage.fenced(directory, slug)
 
 
-def fence(repo: SQLiteLedgerRepository, slug: str, destination: str) -> None:
-    with repo.domain.LOCK, repo.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
-        connection.execute(FENCES)
-        previous = connection.execute(FENCE_DESTINATIONS, (slug, slug)).fetchall()
-        if any(row[0] != destination for row in previous):
-            raise ValueError("ledger already has a different hosted destination")
-        if slug != "*" and not connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone():
-            raise ValueError("no such ledger")
-        tables = connection.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()
-        for (table,) in tables:
-            if table == "hosted_fences" or not TABLE_ID.fullmatch(table):
-                continue
-            columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
-            if "slug" not in columns:
-                continue
-            column = "path" if table == "registry" else "slug"
-            for action, reference in (("INSERT", "NEW"), ("UPDATE", "OLD"), ("DELETE", "OLD")):
-                connection.execute(
-                    f"CREATE TRIGGER IF NOT EXISTS hosted_{table}_{action} BEFORE {action} ON {table} "
-                    f"WHEN EXISTS(SELECT 1 FROM hosted_fences WHERE slug IN ({reference}.{column}, '*')) "
-                    "BEGIN SELECT RAISE(ABORT,'ledger moved to hosted service'); END"
-                )
+def fence(repo: LedgerRepository, slug: str, destination: str) -> None:
+    with repo.transaction() as transaction:
+        transaction.prepare_fence(slug, destination)
         with media_lock(repo.directory):
-            connection.execute("INSERT OR IGNORE INTO hosted_fences VALUES (?,?)", (slug, destination))
-            connection.commit()
+            transaction.fence(slug, destination)
 
 
-def capture(repo: SQLiteLedgerRepository, slug: str) -> dict:
-    with read_only(repo.directory) as connection:
-        if connection is None:
+def capture(repo: LedgerRepository, slug: str) -> dict:
+    with repo.snapshot() as snapshot:
+        if snapshot is None:
             raise ValueError("no ledger database")
-        connection.execute("BEGIN")
-        state = repo._export(connection, slug)
-        registries = [list(row) for row in connection.execute(REGISTRIES, (slug,))]
+        state = snapshot.export(slug)
+        registries = snapshot.registries(slug)
         folder = repo.directory / f"{slug}.media"
         files = {}
         if folder.is_dir():
@@ -158,37 +128,39 @@ def write_files(folder: Path, files: dict) -> None:
             temporary.replace(path)
 
 
-def restore(repo: SQLiteLedgerRepository, snapshot: dict) -> dict:
+def unseeded(state: dict) -> tuple[dict, dict | None]:
+    stored = json.loads(encode(state))
+    seeds = stored["_meta"].get("seeds")
+    if seeds is not None:
+        stored["_meta"]["seeds"] = {}
+    return stored, seeds
+
+
+def restore(repo: LedgerRepository, snapshot: dict) -> dict:
     slug, state = snapshot["slug"], snapshot["state"]
     if snapshot["version"] != 1 or not repo.domain.SLUG_RE.fullmatch(slug):
         raise ValueError("invalid migration identity")
     files = file_bytes(snapshot["files"])
     if any(path != slug for _, path, _ in snapshot["registries"]):
         raise ValueError("invalid migration registry")
-    with repo.domain.LOCK, repo.connect() as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
-        exists = connection.execute("SELECT 1 FROM ledgers WHERE slug=?", (slug,)).fetchone()
-        if exists:
+    with repo.transaction() as transaction:
+        if transaction.exists(slug):
             if capture(repo, slug) != snapshot:
                 raise ValueError("hosted ledger conflict")
             return manifest(snapshot)
         write_files(repo.directory / f"{slug}.media", files)
-        stored = json.loads(encode(state))
-        seeds = stored["_meta"].get("seeds")
-        if seeds is not None:
-            stored["_meta"]["seeds"] = {}
+        stored, seeds = unseeded(state)
         import secrets
 
-        repo._insert(connection, slug, stored, secrets.token_urlsafe(), seeds)
-        for registry, path, value in snapshot["registries"]:
-            connection.execute("INSERT INTO registry VALUES (?,?,?)", (registry, path, value))
-        if repo._export(connection, slug) != state:
+        transaction.insert(slug, stored, seeds, secrets.token_urlsafe())
+        transaction.add_registries(snapshot["registries"])
+        if transaction.export(slug) != state:
             raise ValueError("imported history differs from source")
     return manifest(capture(repo, slug))
 
 
-def route(handler: object, server: object, parts: list) -> dict:
-    if len(parts) != 2 or not server.core.SLUG_RE.fullmatch(parts[1]):
+def route(handler: object, services: Services, parts: list) -> dict:
+    if len(parts) != 2 or not services.ledger.core.SLUG_RE.fullmatch(parts[1]):
         raise APIError(404, "resource_missing", "No such migration")
     slug = parts[1]
     if not authorize(
@@ -196,7 +168,7 @@ def route(handler: object, server: object, parts: list) -> dict:
     ):
         raise APIError(403, "forbidden", "Missing or expired migration credential")
     if handler.command == "GET":
-        return {"data": manifest(capture(server.repository, slug))}
+        return {"data": manifest(capture(services.repository, slug))}
     if handler.command != "POST":
         raise APIError(405, "method_not_allowed", "Use GET or POST for migration")
     if handler.headers.get("Content-Type") != "application/gzip":
@@ -212,7 +184,7 @@ def route(handler: object, server: object, parts: list) -> dict:
         snapshot = json.loads(data)
         if snapshot["slug"] != slug:
             raise ValueError("migration slug differs from route")
-        result = restore(server.repository, snapshot)
+        result = restore(services.repository, snapshot)
     except (ValueError, KeyError, TypeError, EOFError, OSError) as error:
         raise APIError(400, "migration_invalid", "Migration refused: invalid data or existing conflict") from error
     return {"data": result}
@@ -263,7 +235,10 @@ def server_secret() -> str:
 
 
 def main() -> None:
-    from hooks import config  # noqa: F401
+    from scripts.swarm_ledger import ports
+
+    # Loading the hooks config reads the agentihooks env files this migration's settings come from.
+    ports.hooks().config  # noqa: B018
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=Path, required=True)
@@ -280,12 +255,13 @@ def main() -> None:
     secret = server_secret() if args.url else None
     from scripts.swarm_ledger import ledger_server
 
-    repo = SQLiteLedgerRepository(args.source / DATABASE, ledger_server.core)
-    with read_only(args.source) as connection:
-        slugs = args.slug or [row[0] for row in connection.execute(CATALOG)]
-        if args.freeze and not args.slug:
-            fence(repo, "*", args.url)
-            slugs = [row[0] for row in connection.execute(CATALOG)]
+    repo = storage.build(args.source / storage.DATABASE, ledger_server.core)
+    with repo.snapshot() as snapshot:
+        slugs = args.slug or snapshot.slugs()
+    if args.freeze and not args.slug:
+        fence(repo, "*", args.url)
+        with repo.snapshot() as snapshot:
+            slugs = snapshot.slugs()
     for slug in slugs:
         if args.freeze:
             fence(repo, slug, args.url)
@@ -295,4 +271,7 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

@@ -3,6 +3,7 @@
 import contextvars
 import os
 import re
+import time
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict
 from functools import cache
@@ -21,6 +22,7 @@ from scripts.doctor import (
     runtime,
     spawn_read,
     spawns,
+    tick_delivery,
     traces,
     traces_read,
 )
@@ -49,12 +51,16 @@ def _inbox(store, mail, slug, now_ms, env, items):
 
 
 def _traces(store, tasks, slug, now_ms, env):
+    started = time.monotonic()
+    limits = traces.Limits.from_env(env)
     record = traces_read.record(slug, tasks, [asdict(a) for a in store.agents(slug)], now_ms, traces_read.client(env))
-    record["waits"] = {
-        name: idle.wait_history(store.redis, slug, name)
-        for name in {traces._agent(trace) for trace in record["traces"]}
-    }
-    return traces.findings(record, traces.Limits.from_env(env))
+    record["waits"], record["waits_unread"] = traces_read.waits(
+        lambda name: idle.wait_history(store.redis, slug, name),
+        traces.gap_agents(record, limits),
+        started,
+        traces_read.Budget(),
+    )
+    return traces.findings(record, limits)
 
 
 def _overruns(store, slug):
@@ -91,6 +97,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
 
     found = {
         "runtime storage": lambda: runtime.findings(now_ms, env),
+        "scheduled tick": lambda: tick_delivery.read(),
         "health": lambda: health.findings(
             read.health_records(store.redis, slug), now_ms, reported=reported(store, ledger, slug)
         ),
@@ -103,6 +110,7 @@ def readers(store, ledger, slug, now_ms, environ=None, home=SWARM_HOME, telemetr
         ),
         "context overrun": lambda: _overruns(store, slug),
         "ci": lambda: _ci(store, tasks(), now_ms),
+        "dev workflow": lambda: ci.red_dev_workflows(ci_read.dev_pushes(store.config(slug).repo)),
         "trace": lambda: _traces(store, tasks(), slug, now_ms, env),
     }
     return found if telemetry else {name: read for name, read in found.items() if name != "trace"}

@@ -242,6 +242,38 @@ def test_prepare_checks_the_login_of_an_interactive_route_and_opens_nothing_with
     assert (spec.account_type, spec.opening, spec.agent.effort) == ("chatgpt", "", "")
 
 
+def _serve_with(tmp_path, monkeypatch, inherited):
+    monkeypatch.setattr(serve.select_profile, "prepare", lambda *_: ({"CODEX_HOME": str(tmp_path)}, []))
+    account = codex_router.CodexAccount("t", "AH_CX_TOKEN_t")
+    monkeypatch.setattr(serve, "route_account", lambda environ, route, exclude: (account, "open", dict(environ)))
+    args = serve._parser().parse_args(["serve", "--cwd", str(tmp_path), "--profile", "engineer", "--seat", "eng-1@sw"])
+    return serve.prepare(args, [], {**SWARM_ENV, **inherited})
+
+
+def test_prepare_pins_the_agentihooks_langfuse_keys_over_inherited_ones(tmp_path, monkeypatch):
+    home = tmp_path / "agentihooks"
+    home.mkdir()
+    (home / "langfuse.env").write_text("LANGFUSE_PUBLIC_KEY=public-swarm\nLANGFUSE_SECRET_KEY=secret-swarm\n")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(home))
+    inherited = {
+        "LANGFUSE_PUBLIC_KEY": "public-other",
+        "LANGFUSE_SECRET_KEY": "secret-other",
+        "OTEL_LANGFUSE_PUBLIC_KEY": "public-stale",
+    }
+    spec = _serve_with(tmp_path, monkeypatch, inherited)
+    assert (spec.environ["OTEL_LANGFUSE_PUBLIC_KEY"], spec.environ["OTEL_LANGFUSE_SECRET_KEY"]) == (
+        "public-swarm",
+        "secret-swarm",
+    )
+
+
+def test_prepare_keeps_inherited_langfuse_keys_without_agentihooks_ones(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "absent"))
+    spec = _serve_with(tmp_path, monkeypatch, {"OTEL_LANGFUSE_PUBLIC_KEY": "public-own"})
+    assert spec.environ["OTEL_LANGFUSE_PUBLIC_KEY"] == "public-own"
+    assert "OTEL_LANGFUSE_SECRET_KEY" not in spec.environ
+
+
 def test_the_opening_prompt_reads_as_utf8_text_with_every_line_ending_as_a_newline(tmp_path):
     prompt = tmp_path / "opening"
     prompt.write_bytes("café\r\nline\rlast\n".encode())

@@ -75,7 +75,7 @@ function start() {
   document.querySelector(".col").addEventListener("toggle", (ev) => {
     if (!sectionBoxes().includes(ev.target)) return;
     rememberUnanimous("sections", sectionBoxes());
-    if (ev.target.open) render();
+    if (ev.target.open) render(null, true);
     else markToggles();
   }, true);
   $("outline").addEventListener("toggle", (ev) => {

@@ -375,6 +375,15 @@ def _repo_slug(cwd: str) -> str:
 def render(d: Decision, session_id: str, cwd: str) -> str:
     account = d.account or "this login"
     head = f"{_trigger_text(d)} on {account}."
+    swarm = os.environ.get("AGENTIHOOKS_SWARM")
+    if d.action == "handoff" and d.target and swarm:
+        return (
+            f"QUOTA HANDOFF REQUIRED — {head}\n"
+            f"Policy decision (deterministic): hand this seat to a successor on another account now.\n"
+            f"1. Write your Handoff v2 with the handoff skill.\n"
+            f"2. Run: agentihooks swarm {swarm} handoff DOC --reason quota\n"
+            f"3. Stop. The tick keeps your seat and task and routes the successor to an account with room."
+        )
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60

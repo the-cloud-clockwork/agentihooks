@@ -7,7 +7,7 @@ nav_order: 1
 # Pillar 1: Identity
 {: .no_toc }
 
-**One command transforms your agent's entire identity.**
+Profiles define identity for **Claude Code and Codex**. Claude Code uses `CLAUDE.md`; Codex uses `AGENTS.md` and native TOML settings. See the [Codex reference](../reference/CODEX-COMPAT.md) for asset mapping and limits.
 
 > A profile is not just a config file — it is the complete persona, permissions, and toolset your agent carries into every session. Swap it in seconds. Layer them for precision.
 

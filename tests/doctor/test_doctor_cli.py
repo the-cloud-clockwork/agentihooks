@@ -21,7 +21,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 PR = "https://github.com/o/r/pull/9"
 
@@ -42,7 +41,9 @@ class FileLedger(LedgerClient):
 
     def _resource(self, slug, path, collection=False):
         from scripts.swarm_ledger.api.resources import hierarchy_read, value
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         if path.startswith("hierarchy"):
             rows, query = [], {"limit": 100}
@@ -580,8 +581,10 @@ def test_a_doctor_start_leaves_the_first_telemetry_pass_to_the_scheduled_tick(en
         "startup",
         "context overrun",
         "ci",
+        "dev workflow",
         "trace",
         "runtime storage",
+        "scheduled tick",
     }
     assert doctor.main([WATCHED, "start"]) == 0
     assert reads == [] and passes == [every - {"trace"}]
@@ -675,7 +678,7 @@ def test_failed_spawn_measure_uses_only_the_spawn_reader(env, monkeypatch, capsy
         (
             "health/f1",
             ["--since", "2026-10-07T09:00Z", "--until", "2026-10-07T12:00Z"],
-            "journal bounds are only supported for failed-spawn findings and master-launch-missed",
+            "journal bounds are only supported for failed-spawn and CI speed findings and master-launch-missed",
         ),
     ],
 )

@@ -21,8 +21,6 @@ from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import FakeRuntime as TickRuntime
 from tests.test_swarm_v2_runtime import REMOTE, herdr_runtime, local_fake, remote_fake, request
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ANTON = "boot-anton/pid:[4026531836]"
 WORKER = "boot-aws-worker/pid:[4026532001]"
 PID, STARTED = 4321, 777

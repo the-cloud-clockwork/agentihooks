@@ -1,13 +1,9 @@
 import json
 
-import pytest
-
 from scripts.gates.claims import refusal
 from scripts.swarm import dispatcher
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, store  # noqa: F401
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 class CommentingLedger(FakeLedger):

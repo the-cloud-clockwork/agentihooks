@@ -10,7 +10,7 @@ import pytest
 from scripts.swarm import cli, controller, lease, tick_stop, timer, timing
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture(autouse=True)
@@ -291,11 +291,17 @@ def test_a_stopped_tick_skips_the_herdr_sweep(monkeypatch):
     monkeypatch.setattr(timer, "reconcile", lambda binary: True)
     monkeypatch.setattr(operator_env, "fill", lambda environ: None)
     monkeypatch.setattr(operator_env, "classifier", lambda environ: None)
-    monkeypatch.setattr(herdr_gc, "run", lambda *args: swept.append(args) or [])
+    monkeypatch.setattr(herdr_gc, "run", lambda *args, **kwargs: swept.append(args) or [])
     monkeypatch.setattr(cli, "run_tick", lambda store, slug, scheduled: tick_stop.STOP.wait(10) and [])
     monkeypatch.setattr(tick_stop, "DEADLINE_S", 0.2)
     monkeypatch.setattr(cli, "_tickable", lambda slug: True)
-    cli.cmd_tick(types.SimpleNamespace(slugs=lambda: ["sw"]), None)
+    store = types.SimpleNamespace(
+        slugs=lambda: ["sw"],
+        config=lambda slug: types.SimpleNamespace(api_url="", pending_api_url=""),
+        redis=types.SimpleNamespace(hget=lambda *_: None),
+        key=lambda slug, tail: f"{slug}:{tail}",
+    )
+    cli.cmd_tick(store, None)
     assert swept == []
 
 

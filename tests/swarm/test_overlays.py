@@ -10,8 +10,6 @@ from scripts.swarm import cli, overlays, profile_choice, runtime, status, store,
 from tests.swarm.profile_fixture import validated
 from tests.swarm.test_cli import env  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def bundle(tmp_path, monkeypatch):

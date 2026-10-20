@@ -1,10 +1,19 @@
+import json
+
 import pytest
 
 from scripts.doctor import traces_read
 
 
-def _page(rows, page, total):
-    return {"data": rows, "meta": {"page": page, "totalPages": total}}
+def _at(raiser, line=1):
+    return f" at {raiser.__code__.co_filename}:{raiser.__code__.co_firstlineno + line}"
+
+
+def _page(rows, page, total, items=None):
+    return {
+        "data": rows,
+        "meta": {"page": page, "totalPages": total, "totalItems": len(rows) if items is None else items},
+    }
 
 
 def test_reader_walks_every_page_of_traces_and_observations_and_keeps_no_text(tmp_path):
@@ -37,7 +46,10 @@ def test_reader_walks_every_page_of_traces_and_observations_and_keeps_no_text(tm
     assert calls[0] == ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100})
     assert ("observations", {"traceId": "t1", "page": 2, "limit": traces_read.OBSERVATION_PAGE}) in calls
     assert traces_read.OBSERVATION_PAGE == 50
-    assert (coverage, failures) == ({"listed": True, "traces": 1, "covered": 1, "complete": True, "unreadable": []}, [])
+    assert (coverage, failures) == (
+        {"listed": True, "unlisted": 0, "traces": 1, "covered": 1, "capped": 0, "complete": True, "unreadable": []},
+        [],
+    )
     assert read["tags"] == ["swarm:s", "task:a"]
     assert read["session_id"] == "c1"
     assert read["observations"] == [
@@ -104,14 +116,15 @@ def _trace_row(trace_id, updated):
 
 
 class Langfuse:
-    def __init__(self, traces, pages=1):
-        self.traces, self.pages, self.calls = traces, pages, []
+    def __init__(self, traces, pages=1, items=None):
+        self.traces, self.pages, self.items, self.calls = traces, pages, items, []
 
     def __call__(self, path, params):
         self.calls.append((path, dict(params)))
         if path == "traces":
             assert sum(1 for call in self.calls if call[0] == "traces") <= traces_read.Budget().trace_pages * 3
-            return _page(self.traces if params["page"] == 1 else [], params["page"], self.pages)
+            rows = self.traces if params["page"] == 1 else []
+            return _page(rows, params["page"], self.pages, len(self.traces) if self.items is None else self.items)
         row = {"type": "TOOL", "name": params["traceId"], "startTime": "2026-10-05T15:00:00Z"}
         return _page([row], params["page"], 1)
 
@@ -141,7 +154,15 @@ def test_the_history_budget_leaves_the_rest_for_a_later_scan_and_says_so(tmp_pat
     langfuse = Langfuse([_trace_row(f"t{n}", "u") for n in range(4)])
     budget = traces_read.Budget(history_seconds=2)
     rows, coverage, failures = traces_read.history("s", langfuse, tmp_path, budget, clock=_ticks(1))
-    assert coverage == {"listed": True, "traces": 4, "covered": 1, "complete": False, "unreadable": []}
+    assert coverage == {
+        "listed": True,
+        "unlisted": 0,
+        "traces": 4,
+        "covered": 1,
+        "capped": 0,
+        "complete": False,
+        "unreadable": [],
+    }
     assert failures == []
     assert [len(r["observations"]) for r in rows] == [1, 0, 0, 0]
     rows, coverage, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget())
@@ -169,7 +190,15 @@ def test_a_single_trace_stops_at_the_budget_without_caching_partial_history(tmp_
     assert now[0] == 10
     assert row["complete"] is False
     assert len(row["observations"]) == 2
-    assert coverage == {"listed": True, "traces": 1, "covered": 0, "complete": False, "unreadable": []}
+    assert coverage == {
+        "listed": True,
+        "unlisted": 0,
+        "traces": 1,
+        "covered": 0,
+        "capped": 0,
+        "complete": False,
+        "unreadable": [],
+    }
     assert failures == []
     assert list(tmp_path.rglob("*.json")) == []
 
@@ -196,7 +225,7 @@ def test_the_trace_listing_stops_at_its_page_cap(tmp_path):
     langfuse = Langfuse([_trace_row("a", "u")], pages=50)
     _, coverage, failures = traces_read.history("s", langfuse, tmp_path, traces_read.Budget(trace_pages=3))
     assert [c[1]["page"] for c in langfuse.calls if c[0] == "traces"] == [1, 2, 3]
-    assert coverage["listed"] is False and coverage["complete"] is False
+    assert coverage["listed"] is False and coverage["complete"] is True
     assert failures == []
 
 
@@ -217,7 +246,7 @@ def test_a_failed_listing_is_a_failure_and_not_an_empty_swarm(tmp_path):
 
     rows, coverage, failures = traces_read.history("s", down, tmp_path, traces_read.Budget())
     assert rows == [] and coverage["listed"] is False
-    assert failures == ["trace listing failed: TimeoutError: read timed out"]
+    assert failures == [f"trace listing failed: TimeoutError: read timed out{_at(down)}"]
 
 
 def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(tmp_path):
@@ -236,7 +265,7 @@ def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(
     rows, coverage, failures = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
     assert failures == []
     assert asked == ["a"]
-    assert coverage["unreadable"] == ["trace a unreadable: TimeoutError: read timed out"]
+    assert coverage["unreadable"] == [f"trace a unreadable: TimeoutError: read timed out{_at(get, 5)}"]
     assert coverage["covered"] == 0 and [len(r["observations"]) for r in rows] == [0, 0, 0]
     asked.clear()
     rows, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
@@ -245,13 +274,140 @@ def test_an_unreadable_trace_is_a_coverage_gap_retried_after_every_unread_trace(
     asked.clear()
     _, coverage, _ = traces_read.history("s", get, tmp_path, traces_read.Budget())
     assert asked == ["c", "a"]
-    assert coverage == {"listed": True, "traces": 3, "covered": 3, "complete": True, "unreadable": []}
+    assert coverage == {
+        "listed": True,
+        "unlisted": 0,
+        "traces": 3,
+        "covered": 3,
+        "capped": 0,
+        "complete": True,
+        "unreadable": [],
+    }
 
 
-def test_a_capped_listing_still_backfills_what_it_listed(tmp_path):
-    langfuse = Langfuse([_trace_row("a", "u")], pages=50)
+def test_a_capped_listing_is_judged_within_its_window_and_counts_the_traces_past_the_cap(tmp_path):
+    langfuse = Langfuse([_trace_row("a", "u")], pages=50, items=3430)
     _, coverage, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget(trace_pages=1))
-    assert coverage == {"listed": False, "traces": 1, "covered": 1, "complete": False, "unreadable": []}
+    assert coverage == {
+        "listed": False,
+        "unlisted": 3429,
+        "traces": 1,
+        "covered": 1,
+        "capped": 0,
+        "complete": True,
+        "unreadable": [],
+    }
+
+
+def _deep(path, params):
+    if path == "traces":
+        return _page([_trace_row("a", "u")], 1, 1)
+    return _page([{"id": f"o{params['page']}", "type": "TOOL", "startTime": "2026-10-05T15:00:00Z"}], params["page"], 9)
+
+
+def test_a_trace_past_the_observation_page_cap_is_kept_as_capped_and_not_read_again(tmp_path):
+    budget = traces_read.Budget(observation_pages=2)
+    [row], coverage, _ = traces_read.history("s", _deep, tmp_path, budget)
+    assert (row["complete"], len(row["observations"])) == (False, 2)
+    assert (coverage["covered"], coverage["capped"], coverage["complete"]) == (0, 1, True)
+    asked = []
+    traces_read.history("s", lambda path, params: asked.append(path) or _deep(path, params), tmp_path, budget)
+    assert asked == ["traces"]
+
+
+def test_a_trace_stopped_by_the_budget_before_its_page_cap_is_not_capped(tmp_path):
+    budget = traces_read.Budget(observation_pages=5, history_seconds=3)
+    _, coverage, _ = traces_read.history("s", _deep, tmp_path, budget, clock=_ticks(1))
+    assert (coverage["capped"], coverage["complete"]) == (0, False)
+    assert list(tmp_path.rglob("*.json")) == []
+
+
+def test_a_listing_stopped_by_the_budget_counts_what_it_did_not_reach(tmp_path):
+    def get(path, params):
+        if path == "traces":
+            return _page([_trace_row(f"p{params['page']}", "u")], params["page"], 9, items=9)
+        return _page([], 1, 1)
+
+    budget = traces_read.Budget(history_seconds=1)
+    _, coverage, _ = traces_read.history("s", get, tmp_path, budget, clock=_ticks(1))
+    assert (coverage["listed"], coverage["unlisted"], coverage["traces"]) == (False, 8, 1)
+
+
+@pytest.mark.parametrize("items,unlisted", [(3, 2), (1, 0)])
+def test_traces_past_the_cap_count_a_trace_repeated_across_pages_once(tmp_path, items, unlisted):
+    def get(path, params):
+        if path == "traces":
+            return _page([_trace_row("a", "u")], params["page"], 3, items=items)
+        return _page([], 1, 1)
+
+    _, coverage, _ = traces_read.history("s", get, tmp_path, traces_read.Budget(trace_pages=2))
+    assert (coverage["traces"], coverage["unlisted"]) == (1, unlisted)
+
+
+def test_a_failed_listing_counts_no_traces_past_a_cap(tmp_path):
+    def down(path, params):
+        raise TimeoutError("read timed out")
+
+    _, coverage, _ = traces_read.history("s", down, tmp_path, traces_read.Budget())
+    assert (coverage["listed"], coverage["unlisted"], coverage["complete"]) == (False, 0, False)
+
+
+def _legacy(tmp_path, trace_id, entry):
+    path = tmp_path / f"{trace_id}.json"
+    path.write_text(json.dumps(entry))
+    return path
+
+
+OBSERVED = {"type": "TOOL", "name": "Bash", "start": 1, "end": 2, "turn": 1, "error": False, "tokens": 0}
+OTHER = {**OBSERVED, "name": "Read"}
+
+
+def test_a_whole_cache_entry_written_before_the_deduplicated_flag_is_upgraded_without_a_read(tmp_path):
+    path = _legacy(tmp_path, "a", {"updated_at": "u", "whole": True, "observations": [OBSERVED, OTHER]})
+    langfuse = Langfuse([_trace_row("a", "u")])
+    [row], coverage, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget(history_seconds=0))
+    assert [c for c in langfuse.calls if c[0] == "observations"] == []
+    assert row["observations"] == [OBSERVED, OTHER] and row["complete"] is True
+    assert (coverage["covered"], coverage["complete"]) == (1, True)
+    assert json.loads(path.read_text()) == {
+        "updated_at": "u",
+        "whole": True,
+        "observations": [OBSERVED, OTHER],
+        "deduplicated": True,
+    }
+
+
+def test_an_old_cache_entry_holding_a_repeated_observation_is_read_again(tmp_path):
+    path = _legacy(tmp_path, "a", {"updated_at": "u", "whole": True, "observations": [OBSERVED, OTHER, OBSERVED]})
+    langfuse = Langfuse([_trace_row("a", "u")])
+    [row], _, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget())
+    assert [c[1]["traceId"] for c in langfuse.calls if c[0] == "observations"] == ["a"]
+    assert [o["name"] for o in row["observations"]] == ["a"]
+    assert json.loads(path.read_text())["observations"] == row["observations"]
+
+
+def test_a_failed_cache_entry_written_before_the_flag_keeps_its_failure_and_is_retried(tmp_path):
+    _legacy(tmp_path, "a", {"updated_at": "u", "failed": "TimeoutError"})
+    langfuse = Langfuse([_trace_row("a", "u")])
+    _, coverage, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget())
+    assert [c[1]["traceId"] for c in langfuse.calls if c[0] == "observations"] == ["a"]
+    assert coverage["complete"] is True
+
+
+def test_a_changed_trace_is_read_again_whatever_its_old_entry_held(tmp_path):
+    _legacy(tmp_path, "a", {"updated_at": "old", "whole": True, "observations": [OBSERVED]})
+    langfuse = Langfuse([_trace_row("a", "new")])
+    [row], _, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget())
+    assert [c[1]["traceId"] for c in langfuse.calls if c[0] == "observations"] == ["a"]
+    assert row["observations"][0]["name"] == "a"
+
+
+def test_a_cache_entry_without_its_whole_history_is_read_again(tmp_path):
+    _legacy(tmp_path, "a", {"updated_at": "u", "whole": False, "observations": [OBSERVED], "deduplicated": True})
+    langfuse = Langfuse([_trace_row("a", "u")])
+    [row], coverage, _ = traces_read.history("s", langfuse, tmp_path, traces_read.Budget())
+    assert [c[1]["traceId"] for c in langfuse.calls if c[0] == "observations"] == ["a"]
+    assert row["complete"] is True and coverage["complete"] is True
 
 
 def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(tmp_path, monkeypatch):
@@ -264,8 +420,8 @@ def test_record_carries_active_bindings_coverage_and_a_persistent_outage_start(t
     assert first["reader"]["down_since"] == 1000
     assert first["reader"]["active"] == {"bindings": 1, "read": 0}
     assert first["reader"]["failures"] == [
-        "active read of s-eng-1 failed: ConnectionError: refused",
-        "trace listing failed: ConnectionError: refused",
+        f"active read of s-eng-1 failed: ConnectionError: refused{_at(down)}",
+        f"trace listing failed: ConnectionError: refused{_at(down)}",
     ]
     assert first["active"][0]["read"] is False
     second = traces_read.record("s", [], agents, 2000, down, home=tmp_path)
@@ -304,6 +460,22 @@ def test_the_client_names_the_missing_keys_and_calls_langfuse_with_auth_params_a
         ("https://lf/api/public/traces", {"params": {"page": 1}, "auth": ("pk", "sk"), "timeout": 3}),
         "checked",
     ]
+
+
+def test_each_request_is_capped_under_half_the_active_read_budget(monkeypatch):
+    budget, timeouts = traces_read.Budget(), []
+
+    class Response:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"data": []}
+
+    monkeypatch.setattr(traces_read.httpx, "get", lambda url, **kw: timeouts.append(kw["timeout"]) or Response())
+    traces_read.client({"LANGFUSE_PUBLIC_KEY": "pk", "LANGFUSE_SECRET_KEY": "sk"})("traces", {})
+    assert timeouts == [budget.request_seconds]
+    assert budget.request_seconds < budget.active_seconds / 2
 
 
 def test_the_listing_keeps_every_page_and_stops_when_the_budget_is_spent(tmp_path):
@@ -349,7 +521,7 @@ def test_record_reads_active_bindings_and_history_side_by_side(tmp_path, monkeyp
     import threading
 
     met = threading.Barrier(2, timeout=5)
-    whole = {"listed": True, "traces": 0, "covered": 0, "complete": True, "unreadable": []}
+    whole = {"listed": True, "unlisted": 0, "traces": 0, "covered": 0, "complete": True, "unreadable": []}
 
     def active(slug, agents, get, state, seconds, page, clock):
         met.wait()
@@ -480,7 +652,7 @@ def test_a_failed_listing_with_accepted_exports_is_one_listing_failure(tmp_path,
         return Project("antoncore")(path, params)
 
     data = traces_read.record("s", [], WORKING[:1], 10**9, listing_down, home=tmp_path)
-    assert data["reader"]["failures"] == ["trace listing failed: ConnectionError: refused"]
+    assert data["reader"]["failures"] == [f"trace listing failed: ConnectionError: refused{_at(listing_down, 2)}"]
 
 
 def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(tmp_path, monkeypatch):
@@ -491,3 +663,43 @@ def test_a_binding_trace_missing_from_an_empty_listing_is_not_an_empty_project(t
     data = traces_read.record("s", [], WORKING[:1], 10**9, project, home=tmp_path)
     assert data["reader"]["failures"] == []
     assert data["active"][0]["read"] is True
+
+
+def test_wait_reads_stop_at_their_budget_and_name_the_agents_left_unread():
+    now = [0.0]
+    read = []
+
+    def history(name):
+        read.append(name)
+        now[0] += 4
+        return [{"at": 1, "until": 2, "who": name}]
+
+    budget = traces_read.Budget(wait_seconds=8)
+    found, unread = traces_read.waits(history, ["a", "b", "c", "d"], 0.0, budget, clock=lambda: now[0])
+    assert read == ["a", "b"]
+    assert found == {"a": [{"at": 1, "until": 2, "who": "a"}], "b": [{"at": 1, "until": 2, "who": "b"}]}
+    assert unread == ["c", "d"]
+
+
+def test_wait_reads_inside_budget_read_every_agent():
+    found, unread = traces_read.waits(lambda name: [name], ["a", "b"], 0.0, traces_read.Budget(), clock=lambda: 0.0)
+    assert (found, unread) == ({"a": ["a"], "b": ["b"]}, [])
+    assert (traces_read.Budget().wait_seconds, traces_read.Budget().step_seconds) == (15.0, 55.0)
+
+
+@pytest.mark.parametrize(
+    "history_end, expected", [(0.0, ["a", "b"]), (50.0, ["a", "b"]), (51.0, ["a"]), (55.0, []), (60.0, [])]
+)
+def test_wait_reads_share_the_step_deadline_with_the_trace_reads_before_them(history_end, expected):
+    now = [history_end]
+    read = []
+
+    def history(name):
+        read.append(name)
+        now[0] += 4.5
+        return []
+
+    budget = traces_read.Budget(wait_seconds=8)
+    found, unread = traces_read.waits(history, ["a", "b", "c"], 0.0, budget, clock=lambda: now[0])
+    assert read == expected
+    assert unread == ["a", "b", "c"][len(expected) :]

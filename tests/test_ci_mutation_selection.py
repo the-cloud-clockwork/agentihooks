@@ -168,6 +168,7 @@ def test_selection_passes_exact_lines_before_generation_and_reloads_source_packa
     (project / "pyproject.toml").write_text('[tool.mutmut]\nsource_paths = ["hooks/"]\n')
     monkeypatch.setattr("os.cpu_count", lambda: 6)
     monkeypatch.setattr("os.sched_getaffinity", lambda pid: set(range(6)) if pid == 0 else set())
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: None)
     selection = tmp_path / "lines.json"
     selection.write_text(
         json.dumps(
@@ -548,6 +549,55 @@ def test_stats_shards_balance_by_duration_and_keep_xdist_groups_together(tmp_pat
     ]
 
 
+def test_selected_test_ids_take_their_own_durations_share_their_file_shard_and_bound_kept_tests(tmp_path):
+    from scripts.ci_mutation.selection import file_seconds, keep_selected_tests, stats_shards
+
+    (tmp_path / "tests").mkdir()
+    for name in "abc":
+        (tmp_path / f"tests/test_{name}.py").write_text("def test_x():\n    pass\n")
+    (tmp_path / "tests/test_b.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    (tmp_path / "tests/test_d.py").write_text('import pytest\n\npytestmark = pytest.mark.xdist_group("port")\n')
+    durations = {"tests/test_c.py::t1": 2, "tests/test_c.py::t1[p]@port": 1, "tests/test_c.py::t1x": 4}
+    durations |= {"tests/test_c.py::t2": 8, "tests/test_a.py::TestK::test_x": 5, "tests/test_b.py::t": 6}
+    (tmp_path / ".test_durations").write_text(json.dumps(durations))
+    entries = [
+        "tests/test_a.py",
+        "tests/test_b.py::t",
+        "tests/test_c.py::t1",
+        "tests/test_c.py::t1x",
+        "tests/test_d.py",
+    ]
+    seconds = file_seconds(tmp_path, entries)
+    assert seconds == pytest.approx(
+        {
+            "tests/test_a.py": 5.01,
+            "tests/test_b.py::t": 6.01,
+            "tests/test_c.py::t1": 3.01,
+            "tests/test_c.py::t1x": 4.01,
+            "tests/test_d.py": 0.01,
+        }
+    )
+    assert stats_shards(tmp_path, entries, 3) == [
+        ["tests/test_c.py::t1", "tests/test_c.py::t1x"],
+        ["tests/test_b.py::t", "tests/test_d.py"],
+        ["tests/test_a.py"],
+    ]
+    reached = {
+        "tests/test_c.py::t1[p]",
+        "tests/test_c.py::t1x",
+        "tests/test_c.py::t2",
+        "tests/test_a.py::TestK::test_x",
+        "tests/test_e.py::t",
+    }
+    stats = {"scripts.sample.x_f": set(reached), "scripts.other.x_g": set(reached)}
+    allowed = {"scripts.sample.": {"tests/test_c.py::t1", "tests/test_a.py"}}
+    assert keep_selected_tests(stats, allowed) == {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"}
+    assert stats == {
+        "scripts.sample.x_f": {"tests/test_c.py::t1[p]", "tests/test_a.py::TestK::test_x"},
+        "scripts.other.x_g": set(),
+    }
+
+
 @pytest.mark.parametrize("total", [1, 2, 3, 6])
 def test_stats_parts_split_files_by_duration_across_runners_even_inside_an_xdist_group(tmp_path, total):
     from scripts.ci_mutation.selection import part_files
@@ -918,12 +968,25 @@ def test_clean_and_fault_controls_skip_tests_that_reach_no_selected_mutant(tmp_p
 
 
 @pytest.mark.parametrize(
-    ("ci", "requested", "expected"),
-    [(None, 1, 1), (None, 2, 2), (None, 20, 2), ("", 20, 2), ("true", 1, 1), ("true", 2, 2), ("true", 20, 20)],
+    ("ci", "requested", "quota", "expected"),
+    [
+        (None, 1, None, 1),
+        (None, 2, None, 2),
+        (None, 20, None, 2),
+        ("", 20, None, 2),
+        ("true", 1, None, 1),
+        ("true", 2, None, 2),
+        ("true", 20, None, 20),
+        ("true", 16, 3.0, 3),
+        ("true", 16, 2.5, 2),
+        ("true", 2, 3.0, 2),
+        ("true", 16, 0.5, 1),
+    ],
 )
-def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, expected, capsys):
+def test_local_selection_caps_mutation_and_stats_workers(tmp_path, monkeypatch, ci, requested, quota, expected, capsys):
     from scripts.ci_mutation.selection import run_selected
 
+    monkeypatch.setattr("scripts.ci_mutation.selection.quota_cpus", lambda: quota)
     if ci is None:
         monkeypatch.delenv("CI", raising=False)
     else:

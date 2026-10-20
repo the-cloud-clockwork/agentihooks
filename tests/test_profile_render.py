@@ -124,9 +124,20 @@ def test_claude_render_tree(world, capsys):
     assert render.binding.inspect(out, "rb-role", "claude")["profile"] == "rb-role"
 
 
-@pytest.mark.parametrize("role", ["engineer", "cicd", "planner", "master", "qa", "frontend"])
-@pytest.mark.parametrize("target", ["claude", "codex"])
-def test_swarm_roles_render_only_the_task_browser(world, role, target):
+@pytest.mark.parametrize(
+    ("role", "browser"),
+    [
+        ("engineer", False),
+        ("cicd", False),
+        ("planner", False),
+        ("master", True),
+        ("qa", True),
+        ("frontend", True),
+        ("documentation", True),
+    ],
+)
+@pytest.mark.parametrize("target", ["claude", "codex", "copilot"])
+def test_swarm_roles_render_only_the_task_browser(world, role, browser, target):
     from scripts.profiles import render
 
     root = world["bundle"] / "profiles" / role
@@ -146,13 +157,22 @@ def test_swarm_roles_render_only_the_task_browser(world, role, target):
     out = render.render(target, role)
     if target == "claude":
         servers = json.loads((out / ".claude.json").read_text())["mcpServers"]
+    elif target == "codex":
+        servers = tomllib.loads((out / "config.toml").read_text()).get("mcp_servers", {})
     else:
-        servers = tomllib.loads((out / "config.toml").read_text())["mcp_servers"]
+        servers = json.loads((out / "mcp-config.json").read_text())["mcpServers"]
     browsers = {k: v for k, v in servers.items() if "playwright" in k}
-    assert list(browsers) == ["playwright-cmd"]
-    assert browsers["playwright-cmd"]["command"] == str(world["python"])
-    assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
-    assert render.stamp(role)["browser"] == browsers["playwright-cmd"]
+    if browser:
+        assert list(browsers) == ["playwright-cmd"]
+        assert browsers["playwright-cmd"]["command"] == str(world["python"])
+        assert browsers["playwright-cmd"]["args"] == ["-I", "-m", "scripts.profiles.browser"]
+        assert render.stamp(role)["browser"] == {
+            "command": str(world["python"]),
+            "args": ["-I", "-m", "scripts.profiles.browser"],
+        }
+    else:
+        assert browsers == {}
+        assert "browser" not in render.stamp(role)
     settings = json.loads((render.rendered_root() / role / "claude" / "settings.json").read_text())
     assert not settings["enabledPlugins"].get("playwright@claude-plugins-official", False)
 
@@ -201,7 +221,7 @@ def test_a_role_overlay_keeps_the_logged_in_extension_browser(world, target):
     master = browsers("master")
     assert sorted(master) == ["playwright-cmd", "playwright-ext-nestorcolt-gmail"]
     assert "--extension" in master["playwright-ext-nestorcolt-gmail"]["args"]
-    assert list(browsers("engineer")) == ["playwright-cmd"]
+    assert browsers("engineer") == {}
 
 
 def test_operator_profile_keeps_its_browser(world):
@@ -843,6 +863,10 @@ def test_the_package_prefix_names_the_same_role(world, tmp_path, monkeypatch):
     out = render.render_claude("package:master")
 
     assert json.loads((out / "settings.json").read_text())["enabledPlugins"] == {}
+    assert json.loads((out / ".claude.json").read_text())["mcpServers"]["playwright-cmd"] == {
+        "command": str(world["python"]),
+        "args": ["-I", "-m", "scripts.profiles.browser"],
+    }
 
 
 def test_claude_render_keeps_a_home_without_brain_off_the_brain_channel(world):

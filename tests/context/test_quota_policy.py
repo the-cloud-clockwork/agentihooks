@@ -245,6 +245,18 @@ def test_handoff_directive_names_the_command_and_the_document():
     assert "beta has 60% left" in text
 
 
+def test_a_swarm_session_hands_off_through_its_seat(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    d = _decide(10, 98.5, [_c("beta", 10, 40)])
+
+    text = qp.render(d, "sess-1", "/home/u/dev/repo")
+
+    assert text.startswith("QUOTA HANDOFF REQUIRED")
+    assert "Run: agentihooks swarm demo handoff DOC --reason quota\n" in text
+    assert "init-agent" not in text
+    assert "keeps your seat and task" in text
+
+
 def test_wait_directive_carries_a_cron_for_the_reset():
     d = _decide(99.2, 50, [])
 

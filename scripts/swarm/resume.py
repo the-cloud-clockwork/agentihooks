@@ -58,7 +58,7 @@ def blocker(agent, worktree, exists=os.path.isdir, has_quota=account_quota):
 def restored_text(slug, agent, ledger):
     sources = f"the ledger, printed by {ledger}"
     if agent.lane != MASTER:
-        folder = ledger_workspace.folder(slug, agent.task)
+        folder = ledger_workspace.named(slug, agent)
         sources = f"your task folder {folder} (steering.md, progress.md, proof.md) and {sources}"
     return RESTORED.format(slug=slug, name=agent.name, task=agent.task, sources=sources)
 
@@ -316,7 +316,7 @@ def _recovery_current(store, slug, agent, context):
 
 
 def _recovery_text(slug, agent, task):
-    folder = task.get("workspace") or str(ledger_workspace.folder(slug, agent.task))
+    folder = ledger_workspace.named(slug, agent, task.get("workspace"))
     return (
         f"Service is back after the outage. As {agent.name}, re-read your task folder {folder} "
         f"(steering.md, progress.md, proof.md), then run agentihooks msg inbox and continue your own task {agent.task}. "

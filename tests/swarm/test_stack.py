@@ -16,7 +16,6 @@ from scripts.swarm.store import SwarmError
 from scripts.swarm_ledger import ledger_comments
 from tests.swarm.test_cli import HANDOFF, env
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 _fixture = env
 AGENT = "engineer@a1b2c3-0001"
 HEAD = "a" * 40
@@ -853,6 +852,17 @@ def test_restack_registers_the_successor_branch_before_returning(stacked_repo):
     assert task["branch_repo"] == str(repo.parent / "origin.git")
     assert task["repository_branches"] == {"/other/repository": "keep-other", str(repo): "finisher"}
     assert task["parked_on"] == []
+
+
+def test_restack_finds_a_parked_branch_kept_only_in_the_local_checkout(stacked_repo):
+    _, ledger, repo, _ = stacked_repo
+    _git(repo, "push", "origin", "--delete", "parked")
+    assert _git(repo, "ls-remote", "origin", "refs/heads/parked") == ""
+    assert _git(repo, "for-each-ref", "refs/remotes/origin/parked") == ""
+    assert restack() == 0
+    assert _git(repo, "log", "--format=%s", "origin/dev..HEAD") == "Task work"
+    assert _git(repo, "rev-parse", "HEAD^") == _git(repo, "rev-parse", "origin/dev")
+    assert ledger.rows["t1"]["parked_on"] == []
 
 
 def test_restack_refuses_when_the_remote_predecessor_has_work_missing_locally(stacked_repo, capsys):

@@ -14,7 +14,7 @@ from scripts.codex_session.binding import CONNECTED, ENDPOINTS, EXITED, FAILED, 
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.codex_session.fakes import FIRST_PID, OWN_START, SERVER_START, Clock, Process, Server, hooks
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 SEAT = f"eng-1@{SLUG}"

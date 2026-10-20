@@ -1,5 +1,6 @@
 import contextlib
 import json
+import re
 import threading
 from http.server import ThreadingHTTPServer
 from pathlib import Path
@@ -22,6 +23,7 @@ ORDER = (
     "media",
     "artifacts",
     "threads",
+    "render_cycle",
     "render",
     "edits",
     "notices",
@@ -32,6 +34,8 @@ ORDER += (
     "layout",
     "chat",
     "lifecycle",
+    "roles",
+    "agent_cells",
     "swarm",
     "hives",
     "architecture",
@@ -68,8 +72,17 @@ def ledger_state(doc, rev=1):
 
 
 def snapshot_body(ledger=None, swarm=None):
-    data = {"ledger": ledger, "swarm": swarm}
+    data = {"ledger": served_ledger(ledger), "swarm": swarm}
     return f"id: c0\nevent: snapshot\ndata: {json.dumps(data)}\n\n"
+
+
+def served_ledger(ledger):
+    if not isinstance(ledger, dict):
+        return ledger
+    from scripts.swarm_ledger import ledger_server
+
+    meta = {"limits": ledger_server.PAGE_LIMITS, **ledger.get("_meta", {})}
+    return {"marks": {"frozen": [], "held": []}, **ledger, "_meta": meta}
 
 
 def is_events(url):
@@ -136,6 +149,11 @@ def reload_after_folds(tab, selector):
     loaded(tab)
 
 
+def worker_modules(name):
+    source = (MODULES / name).read_text(encoding="utf-8")
+    return re.findall(r"new\s+Worker\(\s*new\s+URL\(\s*[\"'](?:\./)?(\w+\.js)[\"']", source)
+
+
 def page_source():
     """The ledger page as one text for text checks: shell markup, stylesheets and every module inlined."""
     from scripts.swarm_ledger import ledger_core
@@ -155,6 +173,10 @@ def page_source():
             f'<link rel="stylesheet" href="/static/__LEDGER_PAGE__/{name}">', f"<style>\n{text}</style>"
         )
         page = page.replace(f'<script src="/static/__LEDGER_PAGE__/{name}"></script>', f"<script>{text}</script>")
+    workers = {worker for name in ORDER for worker in worker_modules(f"{name}.js")}
+    for worker in sorted(workers):
+        source = (MODULES / worker).read_text(encoding="utf-8")
+        page += f'<script type="text/worker">{source}</script>\n'
     return page
 
 

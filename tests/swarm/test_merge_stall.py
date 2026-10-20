@@ -4,8 +4,6 @@ from datetime import datetime, timezone
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 AT = 1_800_000_000_000
 HOUR = 3_600_000
 REPO = "owner/repo"
@@ -330,9 +328,13 @@ def test_observation_of_a_queue_without_a_stall_skips_workflow_requests(rig, len
         "queue": expected_length,
         "merged": expected_merged,
         "failed": "none observed",
+        "streak": 2 if length else 0,
+        "head": 11 if length else 0,
         "at": AT,
     }
-    assert len(state["calls"]) == 2
+    runs = [command for command, _ in state["calls"] if "/actions/runs?" in command[-1]]
+    assert len(runs) == (1 if length else 0)
+    assert not any("/jobs?" in command[-1] for command, _ in state["calls"])
 
 
 def test_most_common_failed_check_wins_over_alphabetical_order(monkeypatch):
@@ -462,7 +464,7 @@ def test_positive_remaining_merge_budget_can_finish_a_refresh(rig, monkeypatch):
     store.redis.set(store.key("proof", "merge-stall"), json.dumps(cached))
     state["at"] += merge_stall.CACHE_MS
     clock, original = [100.0], subprocess.run
-    durations = iter((8, 1, 0.4, 0.2, 0.2))
+    durations = iter((8, 1, 0.4, 0.2, 0.2, 0.1))
     monkeypatch.setattr(time, "monotonic", lambda: clock[0])
 
     def run(command, **kwargs):
@@ -488,5 +490,5 @@ def test_merge_observation_records_github_read_wall_time(rig, capsys):
         timing.SWARM.reset(token)
     events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
     finished = [row for row in events if row.get("phase") == "finished"]
-    assert len(finished) == 5
+    assert len(finished) == 6
     assert all(row["step"] == "scripts.swarm.health.merge_stall.github_read" and row["wall_s"] >= 0 for row in finished)

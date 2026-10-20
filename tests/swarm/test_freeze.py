@@ -7,7 +7,7 @@ from scripts.swarm.tick import tick
 from scripts.swarm_ledger.repository import hierarchy
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, workers
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 PLANS = [{"id": "a", "title": "Swarm v2"}, {"id": "b", "title": "Ledger polish"}]
 PHASES = [

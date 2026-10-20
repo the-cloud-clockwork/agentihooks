@@ -26,7 +26,7 @@ def hierarchy_ledger(tmp_path, monkeypatch):
         "sources": [],
         "phases": [{"title": "Build"}, {"title": "Ship"}],
     }
-    html, json_path = core.paths(SLUG)
+    html, json_path = legacy_page.paths(SLUG, core)
     json_path.unlink(missing_ok=True)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     core.sync(SLUG)

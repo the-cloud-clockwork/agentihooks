@@ -2,8 +2,6 @@ from types import SimpleNamespace
 
 import pytest
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("quota_handoff", [False, True])
 @pytest.mark.parametrize("lane", ["master", "eng"])

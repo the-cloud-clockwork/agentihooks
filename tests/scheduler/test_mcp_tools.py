@@ -5,7 +5,7 @@ import pytest
 from hooks.mcp import scheduler as scheduler_tools
 from scripts.scheduler import commands
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 NOW = 1000.0
 SID = "sid-caller"

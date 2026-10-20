@@ -14,7 +14,6 @@ from scripts.swarm import cli, status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 from tests.gates.test_runtime import SID, Stub
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG, ME, TASK = "sw", "engineer@1-1", "t1"
 WHO = Who(name=ME, swarm=SLUG, task=TASK)
 HOUR_MS = lift.LIFT_SECONDS * 1000

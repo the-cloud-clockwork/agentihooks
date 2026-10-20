@@ -765,6 +765,34 @@ def test_a_head_adding_the_reviewed_summary_is_green(form, summary):
     assert _grade({"test.yml": head}, base={"test.yml": base}) == []
 
 
+@pytest.mark.parametrize("form", _FORMS)
+@pytest.mark.parametrize("summary", [False, True])
+def test_a_head_taking_the_inline_mutation_form_is_green(form, summary):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(**form)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.inline_mutation(ci_reuse.gate_steps(**form, summary=summary))
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == []
+
+
+@pytest.mark.parametrize("weaken", ["trusted output", "no skip guard"])
+def test_a_head_weakening_the_inline_mutation_form_is_red(weaken):
+    from scripts import ci_reuse
+
+    base, head = _aggregators()
+    base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=True)
+    [step] = ci_reuse.inline_mutation(ci_reuse.gate_steps(queue_tier=True, promotion=True))
+    if weaken == "trusted output":
+        step["env"]["INLINE"] = "${{ needs.mutation-plan.outputs.inline }}"
+    else:
+        step["run"] = step["run"].replace(' and $inline == "true")', ")")
+    head["jobs"]["gate-required"]["steps"] = [step]
+    assert _grade({"test.yml": head}, base={"test.yml": base}) == [
+        "The head's Gate — Required changes its steps; the protected branch grades with its own."
+    ]
+
+
 @pytest.mark.parametrize("change", ["extra", "before", "reordered", "altered", "partial"])
 def test_a_head_changing_the_summary_steps_is_red(change):
     from scripts import ci_reuse
@@ -786,14 +814,17 @@ def test_a_head_changing_the_summary_steps_is_red(change):
 
 @pytest.mark.parametrize("promotion", [False, True])
 @pytest.mark.parametrize("weakened", [False, True])
-def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion):
+@pytest.mark.parametrize("watcher_loss", [False, True])
+def test_the_promotion_gate_form_is_an_allowed_transition(weakened, promotion, watcher_loss):
     from scripts import ci_reuse
 
     base = _workflow()
     base["jobs"]["gate-required"] = base["jobs"].pop("gate")
     base["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps()
     head = copy.deepcopy(base)
-    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(queue_tier=True, promotion=promotion)
+    head["jobs"]["gate-required"]["steps"] = ci_reuse.gate_steps(
+        queue_tier=True, promotion=promotion, watcher_loss=watcher_loss
+    )
     if weakened:
         head["jobs"]["gate-required"]["steps"][0]["run"] += "true\n"
     problems = gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, {}, _TODAY)

@@ -22,7 +22,6 @@ import new_ledger  # noqa: E402
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "swarm-panel-2026-01-01"
 STATUS = {
     "config": {"slug": "s", "max_eng": 2, "max_ci": 1, "state": "running"},
@@ -55,7 +54,7 @@ class SwarmPanel(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-        html_path, json_path = core.paths(SLUG)
+        html_path, json_path = legacy_page.paths(SLUG, core)
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         json_path.unlink(missing_ok=True)
@@ -421,7 +420,7 @@ class SwarmPanel(unittest.TestCase):
         for mode in ("manual", "assist", "delegate", "full"):
             self.assertIn(f'data-autonomy="{mode}"', page)
         self.assertIn('method: "PUT"', page)
-        self.assertIn("/api/swarm/", page)
+        self.assertIn("/swarm/controls", page)
 
     def test_operational_blocks_render_inside_the_swarm_tab(self):
         page = page_source()
@@ -449,12 +448,13 @@ class SwarmPanel(unittest.TestCase):
         self.assertIn("html, body { height: 100%; overflow: hidden; }", page)
 
     def run_js(self, names, expr):
+        from scripts.swarm_ledger import ledger_server
+
         page = page_source()
-        consts = "".join(
-            m + "\n" for m in re.findall(r"^  const (?:STEPS|LIVE_LANES|EFFORTS|EFFORT_CAPS) = .*;$", page, re.M)
-        )
+        consts = "".join(m + "\n" for m in re.findall(r"^  const (?:STEPS|LIVE_LANES|EFFORT_CAPS) = .*;$", page, re.M))
         script = (
-            consts
+            f"const LIMITS = {json.dumps(ledger_server.PAGE_LIMITS)};\n"
+            + consts
             + "".join(function_source(n) + "\n" for n in names)
             + f"process.stdout.write(JSON.stringify({expr}));"
         )
@@ -500,7 +500,9 @@ class SwarmPanel(unittest.TestCase):
         ]
         out = self.run_js(
             ["capStep"],
-            "[" + ",".join(f"capStep({json.dumps(values)}, '{lane}', {str(up).lower()})" for lane, up in steps) + "]",
+            "["
+            + ",".join(f"capStep({json.dumps(values)}, '{lane}', {str(up).lower()}, LIMITS)" for lane, up in steps)
+            + "]",
         )
         self.assertEqual(
             out,
@@ -521,7 +523,9 @@ class SwarmPanel(unittest.TestCase):
             {"max_eng": "-1", "max_plan": "", "compact_limit": "650.5"},
             {},
         ]
-        out = self.run_js(["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d))")
+        out = self.run_js(
+            ["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d, LIMITS))"
+        )
         self.assertEqual(
             out,
             [
@@ -540,7 +544,7 @@ class SwarmPanel(unittest.TestCase):
 
     def test_step_buttons_at_a_bound_are_disabled(self):
         low = {"max_eng": 0, "max_ci": 50, "max_plan": 1, "masters_step": 12, "compact_limit": 100}
-        out = self.run_js(["capBounds"], f"capBounds({json.dumps(low)})")
+        out = self.run_js(["capBounds"], f"capBounds({json.dumps(low)}, LIMITS)")
         self.assertEqual(
             out,
             {
@@ -561,21 +565,23 @@ class SwarmPanel(unittest.TestCase):
             },
         )
 
-    def test_effort_steps_move_one_level_and_never_cross(self):
+    def test_effort_steps_move_one_level_within_the_published_ladder(self):
         values = {"effort_min": "medium", "effort_max": "high"}
         steps = [("effort_min", False), ("effort_min", True), ("effort_max", True), ("effort_max", False)]
         out = self.run_js(
             ["capStep"],
-            "[" + ",".join(f"capStep({json.dumps(values)}, '{key}', {str(up).lower()})" for key, up in steps) + "]",
+            "["
+            + ",".join(f"capStep({json.dumps(values)}, '{key}', {str(up).lower()}, LIMITS)" for key, up in steps)
+            + "]",
         )
         self.assertEqual(
             out, [{"effort_min": "low"}, {"effort_min": "high"}, {"effort_max": "xhigh"}, {"effort_max": "medium"}]
         )
         meet = {"effort_min": "high", "effort_max": "high"}
-        out = self.run_js(["capStep"], f"[capStep({json.dumps(meet)}, 'effort_min', true)]")
-        self.assertEqual(out, [{"effort_min": "high"}])
+        out = self.run_js(["capStep"], f"[capStep({json.dumps(meet)}, 'effort_min', true, LIMITS)]")
+        self.assertEqual(out, [{"effort_min": "xhigh"}])
         edges = {"effort_min": "low", "effort_max": "max"}
-        out = self.run_js(["capBounds"], f"capBounds({json.dumps(edges)})")
+        out = self.run_js(["capBounds"], f"capBounds({json.dumps(edges)}, LIMITS)")
         self.assertEqual(
             {k: v for k, v in out.items() if k.startswith("effort")},
             {"effort_min_down": True, "effort_min_up": False, "effort_max_down": False, "effort_max_up": True},
@@ -589,16 +595,15 @@ class SwarmPanel(unittest.TestCase):
             {"effort_min": "max"},
             {"effort_max": "high"},
         ]
-        out = self.run_js(["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d))")
+        out = self.run_js(
+            ["capChanges"], f"{json.dumps(drafts)}.map((d) => capChanges({json.dumps(values)}, d, LIMITS))"
+        )
         self.assertEqual(
             out,
             [
                 {"body": {"action": "set", "effort_min": "low", "effort_max": "max"}, "bad": []},
                 {"body": {"action": "set"}, "bad": ["effort floor must be one of low, medium, high, xhigh, max"]},
-                {
-                    "body": {"action": "set", "effort_min": "max"},
-                    "bad": ["effort floor must not be above the effort ceiling"],
-                },
+                {"body": {"action": "set", "effort_min": "max"}, "bad": []},
                 {"body": {"action": "set"}, "bad": []},
             ],
         )
@@ -632,7 +637,9 @@ class SwarmPanel(unittest.TestCase):
             "config": {"max_eng": 3, "max_ci": 1, "max_plan": 1},
             "agents": [{"lane": "eng"}, {"lane": "eng", "state": "finished"}, {"lane": "ci"}, {"lane": "master"}],
         }
-        self.assertEqual(self.run_js(["liveCaps"], f"liveCaps({json.dumps(sw)})"), ["eng 1/3", "ci 1/1", "plan 0/1"])
+        self.assertEqual(
+            self.run_js(["liveAgents", "liveCaps"], f"liveCaps({json.dumps(sw)})"), ["eng 1/3", "ci 1/1", "plan 0/1"]
+        )
 
     def test_seat_names_read_as_lane_and_number_and_the_master_seat_stays_whole(self):
         out = self.run_js(["seatText"], '["master@rig", "eng-2@rig", "ci-1@rig"].map(seatText)')
@@ -673,6 +680,18 @@ def test_a_quota_probe_failure_names_its_cause():
             patch.object(server.subprocess, "run", **effect),
         ):
             assert command_runner.run(["quota"], {}) == expected
+
+
+def test_a_refused_swarm_read_answers_nothing_more():
+    handler = server.Handler.__new__(server.Handler)
+    handler.exists = lambda slug: True
+    handler.refused = lambda slug: True
+    handler.send = lambda *args: pytest.fail("refused already answered the request")
+    with patch.object(server, "swarm_status") as status, patch.object(server, "swarm_models") as models:
+        assert handler.get_swarm(SLUG, "") is None
+        assert handler.get_swarm(SLUG, "models") is None
+    status.assert_not_called()
+    models.assert_not_called()
 
 
 if __name__ == "__main__":

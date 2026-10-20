@@ -5,6 +5,7 @@ import pytest
 
 from scripts import master_claude_login as login
 from scripts import openbao_kv
+from scripts.profiles import binding
 from scripts.swarm.runtime import HerdrRuntime
 from tests.swarm.test_runtime import _passed, validated
 
@@ -105,6 +106,52 @@ def test_a_launch_beside_a_live_master_keeps_the_home_it_runs_on(ah, tmp_path, r
         login.claim("agentihooks claude login", os.getpid() + 1, lambda pid: True, alone=True)
 
 
+def _render(rendered, text):
+    (rendered / "CLAUDE.md").write_text(binding.persona(text))
+    (rendered.parent / "claude.sources.json").write_text("[]")
+    binding.write(rendered, "master", "claude")
+
+
+def _live_doctor_home(rendered):
+    import os
+
+    _render(rendered, "Doctor master.\n")
+    home = login.build(rendered)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "r"}}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    login.claim("master@doctor-1", os.getppid())
+    _render(rendered, "Rig master.\n")
+    return home
+
+
+def test_a_second_front_door_binds_its_report_to_the_shared_home(ah, tmp_path, rendered, monkeypatch):
+    home = _live_doctor_home(rendered)
+    report = tmp_path / "report.json"
+    binding.request(report, "master", "claude", rendered)
+    launched = json.loads(report.read_text())
+
+    target, _ = login.prepare({**_environ(rendered, "rig"), binding.REPORT: str(report)}, tmp_path)
+
+    shared = binding.inspect(home, "master", "claude")
+    assert target == home
+    assert shared["canary"] != launched["rendered"]["canary"]
+    assert json.loads(report.read_text()) == {**launched, "rendered": shared}
+    env = {"AGENTIHOOKS_PROFILE": "master", "CLAUDE_CONFIG_DIR": str(target), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, "claude", env, "default"))
+    assert binding.validate(shared["canary"])["home"] == str(home.resolve())
+
+
+def test_a_second_front_door_of_another_profile_is_refused(ah, tmp_path, rendered):
+    _live_doctor_home(rendered)
+    binding.write(rendered, "engineer", "claude")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "claude", rendered)
+
+    with pytest.raises(ValueError, match="^profile mismatch in rendered binding$"):
+        login.prepare({**_environ(rendered, "rig"), binding.REPORT: str(report)}, tmp_path)
+    assert json.loads(report.read_text())["state"] == "failed"
+
+
 def test_a_launch_waits_out_a_running_login_command(ah, tmp_path, rendered):
     import os
 
@@ -147,5 +194,5 @@ def test_a_pool_master_and_an_engineer_stay_on_their_routes(tmp_path, lane, seat
 
 
 @pytest.mark.parametrize("kind", ["subscription", "api"])
-def test_a_master_order_on_an_explicit_route_keeps_it(tmp_path, kind):
-    assert "master-login" not in _spawn(tmp_path, "master", "master@proof", kind)
+def test_a_front_door_order_on_an_explicit_route_takes_the_master_login(tmp_path, kind):
+    assert _spawn(tmp_path, "master", "master@proof", kind)[:2] == ["--route", "master-login"]

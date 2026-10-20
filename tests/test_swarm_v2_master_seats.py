@@ -9,7 +9,7 @@ from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger.watch_ledger import line
 from scripts.swarm_v2 import masters
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-MST-01"
 SLUG = "sw"

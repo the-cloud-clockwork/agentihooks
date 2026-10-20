@@ -247,6 +247,27 @@ def test_an_incomplete_trace_listing_raises_no_untraced_session():
     assert "trace listing stopped at its page cap" in found.evidence
 
 
+def test_partial_coverage_names_the_traces_past_the_listing_cap_apart_from_the_unread():
+    historical = {"listed": False, "unlisted": 1430, "traces": 2000, "covered": 1990, "complete": False}
+    [found] = traces.findings(_record(historical=historical), LIMITS)
+    assert found.summary == "observations of 10 traces not read yet"
+    assert found.measure == 10
+    assert "1430 traces past where the listing stopped not counted" in found.evidence
+
+
+def test_traces_read_up_to_the_observation_page_cap_are_named_and_not_counted_unread():
+    historical = {"traces": 100, "covered": 90, "capped": 4, "complete": False}
+    [found] = traces.findings(_record(historical=historical), LIMITS)
+    assert found.summary == "observations of 6 traces not read yet"
+    assert found.measure == 6
+    assert "4 traces read up to the observation page cap" in found.evidence
+
+
+def test_complete_coverage_within_a_capped_listing_raises_no_coverage_finding():
+    historical = {"listed": False, "unlisted": 1430, "traces": 2000, "covered": 2000, "complete": True}
+    assert traces.reader(_record(historical=historical), LIMITS) == []
+
+
 def test_measures_report_each_active_binding_and_the_coverage():
     stuck = _binding(local=_local(generated_bytes=5000, oldest_unaccepted=NOW - 90_000))
     found = traces.measures(_record(stuck, historical={"traces": 3, "covered": 2, "complete": False}))

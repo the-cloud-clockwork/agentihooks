@@ -1,5 +1,138 @@
 # Tests workflow timing
 
+## Helm kind registration to readiness
+
+The promotion Helm chart proof checks recovery as well as initial readiness.
+Its measured interval starts at `ledger and swarm kind-proof registered, no
+lease bound` and ends at `controller readiness probe passed`. This includes a
+deliberate controller freeze, liveness restart and release upgrade enabling the
+control API. Image preparation, cluster creation and subsequent worker and
+terminal proofs are outside the interval.
+
+### Preserved checks and reduced waiting
+
+After the initial release installation and chart tests, a background job
+prepares the signing Secret, controller service account and RBAC, worker pod
+policy ConfigMap and terminal CA Secrets. Setup overlaps the controller lease
+and recovery checks. The proof waits for setup to succeed before the upgrade;
+an error still fails the proof.
+
+One Python process in the ledger Pod watches the lease every 0.2 seconds.
+Acquisition requires the deployment's `SWARM_HIVE_ID` as owner; renewal requires
+the same owner with a later `expires_at`. Each wait has a 180 second deadline.
+Previously each read started a cold `kubectl exec` process, with a one second
+sleep between reads. The separate post restart lease retake loop is unchanged.
+
+The proof retains this sequence:
+
+1. Restart the controller after registration and wait for rollout.
+2. Require lease acquisition, renewal and zero controller restarts.
+3. Freeze the controller in the isolated kind node, require exactly one
+   liveness restart and verify lease retake.
+4. Require successful background setup, upgrade with control API and worker
+   settings, wait for rollout and require the Kubernetes runtime build log.
+5. Verify startup and liveness are wired to `agentihooks controller live` and
+   readiness to `agentihooks controller ready`. Execute all three commands in
+   parallel, wait for every process and fail if any command fails.
+6. Require the Pod's Kubernetes Ready condition and zero restarts on the
+   upgraded controller before continuing with the remaining chart proofs.
+
+Probe results print in startup, liveness, readiness order after all commands
+finish. Printed order is not execution order. A passed readiness command alone
+does not establish the subsequent Ready assertion or completion of the proof.
+
+### Kind configuration
+
+The checked in `deploy/helm/agentihooks-swarm/ci/kind-values.yaml` supplies this
+controller timing excerpt to both release operations:
+
+```yaml
+controller:
+  startupProbe:
+    periodSeconds: 1
+  readinessProbe:
+    periodSeconds: 1
+  livenessProbe:
+    initialDelaySeconds: 5
+    periodSeconds: 1
+    timeoutSeconds: 5
+    failureThreshold: 2
+  terminationGracePeriodSeconds: 1
+  env:
+    AGENTIHOOKS_CONTROLLER_TICK_SECONDS: "2"
+```
+
+Liveness initial delay fell from ten to five seconds and its period from two
+to one second. The startup probe already gates liveness with the same live
+command. These are kind overrides: chart default liveness settings remain a
+sixty second initial delay, ten second period, eight second timeout and failure
+threshold three. This excerpt is not a complete cluster configuration.
+
+There is no new flag or environment setting for the 0.2 second lease watch or
+parallel execution. Change those through reviewed proof code; change fixture
+probe cadence through kind values. This optimization requires no production
+configuration change.
+
+### Run and inspect in CI
+
+Push the branch and dispatch the chart proof on that revision:
+
+```bash
+gh workflow run proofs.yml \
+  --ref <branch> \
+  -f proof=helm-kind
+gh run list \
+  --workflow proofs.yml \
+  --branch <branch> \
+  --limit 5
+gh run view <run-id> \
+  --log
+```
+
+The standalone workflow also accepts a dispatch:
+
+```bash
+gh workflow run helm-kind.yml \
+  --ref <branch>
+```
+
+Both routes use the declared Helm input key. Inspect `Key the declared inputs`
+first: a cache hit skips chart execution and supplies no new timing sample.
+See [Helm kind proof input keys](reference/ci-result-cache.md#helm-kind-proof-input-keys)
+for cache scope and due decisions. Run proofs in CI, not on the shared host.
+
+For a fresh execution, subtract the registration marker timestamp from the
+`controller readiness probe passed` timestamp in the raw Actions job log. Keep
+the run link and revision. Separately require the later `controller with the
+control API on is Ready under the health probes, restarts: 0` and final `Helm
+chart kind proof passed` markers. Queue time and whole job duration measure
+different intervals.
+
+| Failure | Inspection |
+|---|---|
+| Lease acquisition or renewal times out | Read the last lease diagnostic, compare owner with `SWARM_HIVE_ID` and check whether expiry advanced. |
+| Frozen controller does not restart exactly once | Inspect liveness settings, restart count and previous controller logs from failure cleanup. |
+| Setup objects were not created | Inspect the earlier background setup command error; upgrade is refused on setup failure. |
+| Runtime build log is absent | Inspect controller startup and worker settings after upgrade; rollout alone does not establish runtime construction. |
+| Probe fails or uses an unexpected command | Inspect the named diagnostic and deployed probe wiring; all three commands remain mandatory. |
+| Ready times out or restarts are nonzero | Inspect Pod state and controller logs; retain these assertions even when the explicit readiness command passed. |
+
+### Delivery measurements
+
+[Pull request #4391](https://github.com/the-cloud-clockwork/agentihooks/pull/4391)
+and its [source issue](https://github.com/the-cloud-clockwork/agentihooks/issues/4389)
+record intervals of 25.86 and 26.79 seconds before the change. The delivered
+revision is `57c433590b7c82d7a45174eabbd8c6ec3aa5c05f`. After the change:
+
+| Branch proof | Registration to readiness | Recorded result |
+|---|---|---|
+| [39099421881](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099421881) | 20.41 seconds | Every check passed |
+| [39099734177](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099734177) | 21.05 seconds | Every check passed |
+
+These branch samples demonstrate the delivered reduction. They are not a fixed
+runtime guarantee or a post merge promotion measurement; runner load and later
+proof changes can affect the interval.
+
 ## Delivery tiers
 
 Pull request checks run once on the current head: lint, format, size, static analysis, changed-line coverage and mutation, and touched tests. The `dev` merge queue runs the full unit suite and test count checks on the merge group; it does not repeat the pull request checks. Shard time budgets do not hold the queue.
@@ -415,6 +548,123 @@ A shard listed with `success` stalled once and recovered; one listed with `failu
 | Both checkouts failed, shard-check reports missing tests | the stall or a GitHub outage persisted past the retry | read both step logs; rerun the failed jobs once GitHub serves fetches again |
 | A checkout step runs for minutes with no abort | the low speed settings were removed from that step | restore the `env` block; `tests/test_ci_workflow.py` fails without it |
 | A checkout fails within seconds on both attempts | the error is not a stall: a bad ref, permissions or a missing commit | read the first error in the step log; a retry does not fix it |
+
+## Worker hive pod image build
+
+The Worker hive pod workflow (`hive-worker.yml`) runs `deploy/worker/kind-proof.sh` in its `kind` job. The script builds the image `local/agentihooks-hive-worker:dev` while a kind cluster starts, loads it into the cluster and proves that a worker Pod registers with the hive and acknowledges an order. The image has two parts:
+
+| Part | Dockerfile | Contents |
+|---|---|---|
+| Worker base | `docker/swarm-node/Dockerfile` | the tools: Claude CLI, Codex CLI, herdr, git and the rest of the swarm worker toolchain |
+| Hive layer | `deploy/worker/Dockerfile` | a wheel of the checked out agentihooks source, installed over the base, the `wt.sh` link and the worker start script |
+
+The hive layer's `WORKER_IMAGE` build argument defaults to the published base, `ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which the Swarm worker image workflow (`swarm-node-image.yml`) publishes on pushes to `dev`. The proof reuses that base and builds only the hive layer, unless the base's inputs changed since it was published. Before this change every run rebuilt the base and reinstalled every tool, and the build took 133 to 137 seconds; on the published base it takes 58 to 76 seconds (see [Measurements](#measurements)).
+
+### How the base is chosen
+
+Before building, the script runs `deploy/worker/base-current.sh ghcr.io/the-cloud-clockwork/agentihooks-worker:dev`, which:
+
+1. pulls the published base for `linux/amd64` and reads `source_revision`, the commit the base was built from, out of `/opt/swarm-node/manifest.json` in the image;
+2. fetches that commit from `origin` at depth one;
+3. compares it with `HEAD` over the base inputs: `docker/swarm-node`, `scripts/swarm_v2/worker_image.py`, `profiles` and `docs/swarm-v2/schemas`.
+
+| Exit | Meaning | Output | Build |
+|---|---|---|---|
+| 0 | no base input differs from the published base's revision | none | hive layer only, on the published base the check already pulled |
+| 1 | at least one base input changed | `the worker base inputs changed since <revision>` in the step log | base as `local/worker-base:dev`, then the hive layer with `--build-arg WORKER_IMAGE=local/worker-base:dev` |
+| 2 | the comparison could not be made | a `Worker hive base` warning annotation naming the reason, ending `; rebuilding the worker base` | the same rebuild as exit 1 |
+
+The three warning reasons are `the published worker base revision cannot be read` (the pull or the manifest read failed), `the published worker base revision <revision> cannot be fetched` and `the worker base inputs cannot be compared with revision <revision>`. Every failure to decide falls back to the rebuild, so a missing or unreadable base slows the run but does not fail it.
+
+On a `dev` push that changes a base input, the Worker hive pod run and the same push's Swarm worker image run start independently. When the check pulls the base before that run publishes it, the base is rebuilt; when it pulls after, the base is current and only the hive layer is built.
+
+The base inputs are the sources the base Dockerfile copies that the hive layer does not replace: the hive layer's wheel reinstalls `pyproject.toml`, `README.md`, `hooks/` and `scripts/`, so changes there need no base rebuild, except `scripts/swarm_v2/worker_image.py`, which the base build runs to write its manifest. `tests/deployment/test_worker_hive_image.py` reads the `COPY` sources of `docker/swarm-node/Dockerfile` and fails when one of them is neither replaced by the wheel nor covered by the input list.
+
+### Changing the base
+
+Change these together in one pull request; `tests/deployment/test_worker_hive_image.py` pins each:
+
+| Setting | Where |
+|---|---|
+| Published base image | the `base-current.sh` argument in `kind-proof.sh`, the `ARG WORKER_IMAGE=` default in `deploy/worker/Dockerfile` and the test's `BASE` |
+| Base inputs | the `git diff` paths in `base-current.sh` and the test's `INPUTS`; add a path when the base Dockerfile starts copying a new source |
+
+Limits: the check pulls and compares only the `linux/amd64` base, the kind node is pinned to `mirror.gcr.io/kindest/node:v1.37.0`, and the script needs `docker`, `git`, `python3`, `kind`, `kubectl`, `helm` and `openssl` on the runner and writes its output under `$HOME/scratchpad/worker-hive-proof`.
+
+The rest of the proof is unchanged: the same smoke check inside the image (`claude`, `codex`, `herdr` and `git --version`, `wt.sh root` and `agentihooks hive --help`), Pod registration and order acknowledgement, and on a `dev` push the same image is retained and published by the `publish` job.
+
+### Reading the result
+
+The build step prints, and saves to `build.txt` in the `worker-hive-proof` artifact:
+
+```text
+worker_hive_image_build_seconds=58
+worker_base=published
+```
+
+`worker_base` is `published` when only the hive layer was built and `rebuilt` when the base was built too. `worker_hive_image_build_seconds` covers the base check and both builds.
+
+Read both lines from a run's log, substituting the run id:
+
+```bash
+gh run view <run id> --log \
+  | grep -E 'worker_hive_image_build_seconds=|worker_base=|Worker hive base|worker base inputs changed'
+```
+
+Or download the artifact:
+
+```bash
+gh run download <run id> \
+  --name worker-hive-proof \
+  --dir worker-hive-proof
+```
+
+Read the revision the published base was built from:
+
+```bash
+docker run --rm --entrypoint python \
+  ghcr.io/the-cloud-clockwork/agentihooks-worker:dev \
+  -c 'import json; print(json.load(open("/opt/swarm-node/manifest.json"))["source_revision"])'
+```
+
+Run the full proof on a branch without waiting for a `dev` push:
+
+```bash
+gh workflow run hive-worker.yml \
+  --ref <branch>
+```
+
+Run only the chart proof; `contracts_only=true` skips the `kind` job:
+
+```bash
+gh workflow run hive-worker.yml \
+  --ref <branch> \
+  -f contracts_only=true
+```
+
+### Measurements
+
+Build seconds from the step log; `kind` job seconds from the Actions jobs API, `started_at` to `completed_at`.
+
+| Run | When | `worker_base` | Build | `kind` job |
+|---|---|---|---|---|
+| [39100438484](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39100438484) | before [#4400](https://github.com/the-cloud-clockwork/agentihooks/pull/4400) | base always built | 133 s | 259 s |
+| [39213689135](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39213689135) | after | published | 60 s | not measured |
+| [39214709671](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39214709671) | after | published | 76 s | not measured |
+| [39215504493](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39215504493) | after | published | 58 s | 158 s |
+| [39210694361](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39210694361) | after, base inputs changed since `d7b3ce163` | rebuilt | 226 s | 340 s |
+
+Runs [39100700634](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39100700634) and [39099280946](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39099280946) before the change printed 134 and 137 seconds. A run that reuses the published base still pulls it, so its build time depends on the runner's image cache and registry speed.
+
+### Troubleshooting
+
+| Symptom | Cause | Action |
+|---|---|---|
+| `worker_base=rebuilt` with `the worker base inputs changed since <revision>` | a base input changed since the published base was built, or this push's Swarm worker image run has not published yet | none; the run proves the Pod on the base it built. Check that the Swarm worker image run on `dev` published |
+| `worker_base=rebuilt` with a `Worker hive base` warning | the base could not be pulled or read, or its revision could not be fetched or compared | read the warning's reason; pull the base by hand or check that its revision still exists on `origin` |
+| `worker_base=published` but the Pod lacks a base change | a path the base copies is missing from the base inputs | add the path to `base-current.sh` and the test's `INPUTS`; `test_base_inputs_cover_every_base_source_the_wheel_does_not_replace` should fail first |
+| `pod did not register a live hive`, `pod did not acquire hive membership` or `scratch order not acknowledged` | the worker Pod started but failed the hive proof; the build choice does not cause this | read `pods.txt`, `failed-worker.txt`, `previous-worker.txt`, `join.txt` and `previous-join.txt` in the `worker-hive-proof` artifact, written when the script fails |
+| `test_worker_hive_image.py` fails on the build lines | `kind-proof.sh` no longer has one hive-only build and a base plus hive rebuild branch | restore that shape; the tests pin both branches and the `WORKER_IMAGE` default |
 
 ## Historical measurements
 

@@ -20,8 +20,15 @@ Claude and Codex masters follow this pool identically, except that only a Claude
 - With two or more live masters, items for the master seat from agents and the tick wait in one pool per swarm, first in first out. Each item is claimed by exactly one live master, in round robin seat order, skipping a master that is gone or being retired by the tick; a backend master asked to hand off by a shrink keeps taking items until it leaves. An item you never confirm returns to the pool after the redelivery window and goes to the next master with the same id. Items from the operator bypass the pool and go to the front door. Answer every item that reaches you; never pass it on because another master could take it.
 - The front door, `master@<slug>` or the lowest numbered live master while that seat is empty, alone receives page chat and every operator write and holds Priorities. With `AGENTIHOOKS_MASTER_CLAUDE_LOGIN` on, a Claude front door also takes the claude ai login and Remote Control; Codex masters take neither. A backend master never writes page chat and never takes the login: the operator reaches it through its herdr pane, or through the front door.
 - Masters sync over the private masters channel with `agentihooks swarm <slug> masters-channel say "<text>"` and `agentihooks swarm <slug> masters-channel read`; only master seats send and read. Use it for an item that arrived without context or a fact another master holds. A backend master that needs the operator asks the front door there; the front door answers the operator about the backend masters from it.
-- With `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` on (off by default), the pool sends an item whose intent matches a master's last 15 items to that master, so related items reach one master together. Any classifier error, timeout or low verdict falls back to round robin. With it off, delivery is plain round robin.
+- With `MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS` on (the default), the pool sends an item whose intent matches a master's last 15 items to that master, so related items reach one master together. Any classifier error, timeout or low verdict falls back to round robin. With it off, delivery is plain round robin.
 - A swarm below one step behaves exactly as a single master swarm: one master, unchanged delivery and the duties above.
+
+## Scaling
+
+- Every new swarm starts with automatic scaling, and a master keeps automatic scaling on: each tick the lane ceilings follow free quota seats, host room and ready work, so spare quota becomes agents instead of waiting behind fixed caps.
+- Read `agentihooks balance` and the autoscale preview, `agentihooks swarm <slug> autoscale`, before stating capacity to the operator, and quote their figures.
+- Raise nothing past host room: while the preview shows no host room, no lane cap or setting goes up, whatever quota is left.
+- Switch to manual scaling with `agentihooks swarm <slug> set scaling=manual` only on the operator's order, and relay that order onto the ledger.
 
 ## Plans versus standalone tasks
 

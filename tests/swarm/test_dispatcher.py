@@ -9,8 +9,6 @@ from scripts.swarm import capacity, dispatcher, grouping, metrics, priority_swee
 from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.store import MASTER, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 MASTER_NAME = "master@abcdef-0001"
@@ -557,7 +555,7 @@ def spawned(store, config, ledger, found):
     from tests.swarm.test_tick import FakeRuntime
 
     return [
-        (lane, t["id"]) for lane, t in tick._spawn_order(SLUG, config, store, [], ledger.rows, found, FakeRuntime())
+        (lane, t["id"]) for lane, t in tick._spawn_order(SLUG, config, store, [], ledger.rows, found, FakeRuntime())[0]
     ]
 
 
@@ -576,7 +574,7 @@ def test_a_busy_seat_leaves_three_claims_from_the_top_of_the_queue(store):
     config, ledger, found = queue_ledger(store, "delegate")
     ledger.rows["x"] = {"id": "x", "state": "claimed", "lane": "eng", "depends_on": []}
     busy = [AgentRecord("engineer@abcdef-0001", "eng", "x", state="working")]
-    claims = tick._spawn_order(SLUG, config, store, busy, ledger.rows, found, FakeRuntime())
+    claims, _ = tick._spawn_order(SLUG, config, store, busy, ledger.rows, found, FakeRuntime())
     assert [(lane, t["id"]) for lane, t in claims] == [("eng", t) for t in ("l4", "h1", "s")]
 
 

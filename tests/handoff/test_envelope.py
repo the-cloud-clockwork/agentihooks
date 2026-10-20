@@ -8,8 +8,6 @@ from scripts.handoff.envelope import REASONS, build, reclaim
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 WORKTREE = "/wt/repo/engineer-a1b2c3-0001"
 PR = "https://github.com/o/r/pull/9"
 HEAD = "4f2a9c0e1b7d3a5c6e8f0a1b2c3d4e5f6a7b8c9d"

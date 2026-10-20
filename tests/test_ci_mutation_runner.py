@@ -211,11 +211,11 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
+        "deploy/helm/agentihooks-swarm/ci",
     ):
         (root / name).mkdir(parents=True)
         (root / name / "asset.txt").write_text(name)
     (root / "Swarm-v2.md").write_text("# plan\n")
-    (root / "deploy").mkdir()
     (root / "deploy" / "fixture.yaml").write_text("fixture")
     (root / "tests" / "test_sample.py").write_text('FIXTURE = "deploy/fixture.yaml"\n')
     (root / "hooks" / "__pycache__").mkdir()
@@ -238,6 +238,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "observability/",
         "docker/swarm-node/",
         ".agentihooks/conditions/",
+        "deploy/helm/agentihooks-swarm/ci/",
         ".test_durations",
         "Swarm-v2.md",
     ]
@@ -268,6 +269,7 @@ def test_workspace_scopes_mutmut_and_preserves_the_pytest_config(tmp_path):
         "observability",
         "docker/swarm-node",
         ".agentihooks/conditions",
+        "deploy/helm/agentihooks-swarm/ci",
     ):
         assert (work / name / "asset.txt").read_text() == name
     assert (work / "Swarm-v2.md").read_text() == "# plan\n"
@@ -938,6 +940,24 @@ def test_shards_reuse_exact_measured_plan_and_refuse_independently_stale_inputs(
         assert rows == {"hooks/sample.py": [{"status": "killed"}]}
         assert json.loads((tmp_path / "work/shard-plan.json").read_text()) == plan
         assert commands[0][-4:] == ["2", "4", "reuse", str(tmp_path / "work/shared-stats.json")]
+
+
+@pytest.mark.parametrize("kept", [True, False])
+def test_shards_start_from_the_killing_tests_kept_beside_the_shared_stats(tmp_path, monkeypatch, kept):
+    from scripts.ci_mutation.runner import mutate_files
+    from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+    _stats_run(tmp_path, monkeypatch, [0, 0])
+    selected = {"hooks/sample.py": ({2}, ["tests/test_sample.py"])}
+    stats = SharedStats(tmp_path / "stats", "head")
+    write_part(stats.group(0).folder / "part-0.json", stats_key(stats.head, selected), (0, 1), [])
+    if kept:
+        (stats.folder / "killers").mkdir()
+        (stats.folder / "killers/digest").write_text("tests/test_sample.py::t")
+    rows, reason = mutate_files(tmp_path, tmp_path / "work", selected, 20, (0, 1), stats.group(0))
+    assert reason == ""
+    seeded = {path.name: path.read_text() for path in (tmp_path / "work").glob("killers/*")}
+    assert seeded == ({"digest": "tests/test_sample.py::t"} if kept else {})
 
 
 @pytest.mark.parametrize(

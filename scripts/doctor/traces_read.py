@@ -35,7 +35,9 @@ CACHE_DIR = "doctor-traces"
 class Budget:
     active_seconds: float = 15.0
     history_seconds: float = 45.0
-    request_seconds: float = 10.0
+    wait_seconds: float = 15.0
+    step_seconds: float = 55.0
+    request_seconds: float = 7.0
     trace_pages: int = 20
     observation_pages: int = 20
     active_page: int = 10
@@ -56,14 +58,14 @@ def client(environ: Mapping[str, str], timeout: float = Budget.request_seconds) 
 
 
 def _pages(get, path, params, cap, deadline, clock):
-    rows, page = [], 1
+    rows, page = {}, 1
     while True:
         body = get(path, {**params, "page": page, "limit": OBSERVATION_PAGE})
-        rows += body["data"]
+        rows.update({row.get("id", (page, index)): row for index, row in enumerate(body["data"])})
         if page >= body["meta"]["totalPages"]:
-            return rows, True
+            return list(rows.values()), True, False
         if page >= cap or clock() >= deadline:
-            return rows, False
+            return list(rows.values()), False, page >= cap
         page += 1
 
 
@@ -92,9 +94,20 @@ def _cache_path(cache: Path, trace_id: str) -> Path:
 
 
 def _cached(cache: Path, trace: dict) -> dict:
-    entry = registry.load(_cache_path(cache, trace["id"]))
-    usable = "observations" in entry or "failed" in entry
-    return entry if usable and entry.get("updated_at") == trace.get("updatedAt") else {}
+    path = _cache_path(cache, trace["id"])
+    entry = registry.load(path)
+    if entry.get("updated_at") != trace.get("updatedAt") or not _settled(entry):
+        return {}
+    return entry if entry.get("deduplicated") else _upgraded(path, entry)
+
+
+def _upgraded(path: Path, entry: dict) -> dict:
+    observations = [json.dumps(o) for o in entry.get("observations", ())]
+    if len(set(observations)) < len(observations):
+        return {}
+    entry = {**entry, "deduplicated": True}
+    registry.save(path, entry)
+    return entry
 
 
 def _listing(slug, get, budget, deadline, clock):
@@ -104,23 +117,32 @@ def _listing(slug, get, budget, deadline, clock):
             body = get("traces", {"tags": f"swarm:{slug}", "fields": "core", "page": page, "limit": PAGE})
             rows += body["data"]
             if page >= body["meta"]["totalPages"]:
-                return rows, True, []
+                return rows, True, 0, []
             if page >= budget.trace_pages or clock() >= deadline:
-                return rows, False, []
+                return rows, False, max(body["meta"]["totalItems"] - len({row["id"] for row in rows}), 0), []
             page += 1
     except Exception as exc:  # noqa: BLE001
-        return rows, False, [f"trace listing failed: {type(exc).__name__}: {exc}"]
+        return rows, False, 0, [f"trace listing failed: {registry.failure(exc)}"]
 
 
 def _backfill(get, cache, trace, budget, deadline, clock):
     try:
-        rows, whole = _pages(get, "observations", {"traceId": trace["id"]}, budget.observation_pages, deadline, clock)
+        rows, whole, capped = _pages(
+            get, "observations", {"traceId": trace["id"]}, budget.observation_pages, deadline, clock
+        )
         entry = {"updated_at": trace.get("updatedAt"), "whole": whole, "observations": [_observation(o) for o in rows]}
+        if capped:
+            entry["capped"] = True
     except Exception as exc:  # noqa: BLE001
-        entry = {"updated_at": trace.get("updatedAt"), "failed": f"{type(exc).__name__}: {exc}"}
-    if entry.get("whole") or entry.get("failed"):
+        entry = {"updated_at": trace.get("updatedAt"), "failed": registry.failure(exc)}
+    entry["deduplicated"] = True
+    if _settled(entry):
         registry.save(_cache_path(cache, trace["id"]), entry)
     return entry
+
+
+def _settled(entry: dict) -> bool:
+    return bool(entry.get("whole") or entry.get("capped") or "failed" in entry)
 
 
 def history(
@@ -136,7 +158,8 @@ def history(
     reader failure.
     """
     deadline = clock() + budget.history_seconds
-    listed, complete_listing, failures = _listing(slug, get, budget, deadline, clock)
+    listed, complete_listing, unlisted, failures = _listing(slug, get, budget, deadline, clock)
+    listed = list({trace["id"]: trace for trace in listed}.values())
     entries = {t["id"]: _cached(cache, t) for t in listed}
     unread = [t for t in listed if not entries[t["id"]]]
     retried = [t for t in listed if entries[t["id"]].get("failed")]
@@ -156,14 +179,35 @@ def history(
         for trace in listed
     ]
     covered = sum(1 for entry in entries.values() if entry.get("whole"))
+    capped = sum(1 for entry in entries.values() if entry.get("capped"))
     coverage = {
         "listed": complete_listing,
+        "unlisted": unlisted,
         "traces": len(listed),
         "covered": covered,
-        "complete": complete_listing and covered == len(listed),
+        "capped": capped,
+        "complete": not failures and covered + capped == len(listed),
         "unreadable": [f"trace {key} unreadable: {e['failed']}" for key, e in entries.items() if e.get("failed")],
     }
     return found, coverage, failures
+
+
+def waits(
+    read: Callable[[str], list[dict]],
+    names: list[str],
+    started: float,
+    budget: Budget,
+    clock: Callable[[], float] = time.monotonic,
+) -> tuple[dict[str, list[dict]], list[str]]:
+    """Each named agent's wait history until the wait budget or the step that started at `started` is spent;
+    the agents left unread are returned as a list."""
+    deadline = min(started + budget.step_seconds, clock() + budget.wait_seconds)
+    found = {}
+    for name in names:
+        if clock() >= deadline:
+            break
+        found[name] = read(name)
+    return found, names[len(found) :]
 
 
 def sessions(tasks: list[dict], agents: list[dict]) -> list[dict]:

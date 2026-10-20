@@ -9,7 +9,7 @@ from scripts.swarm_v2 import quota
 from scripts.swarm_v2.kubernetes import approved
 from scripts.swarm_v2.kubernetes.client import ApiRefused
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "accounts-fixture"
 NOW_MS = 1_800_000_000_000

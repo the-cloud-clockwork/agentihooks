@@ -10,7 +10,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MASTER, ENGINEER, PLANNER, STRANGER = (
     "master@a1b2c3-0001",

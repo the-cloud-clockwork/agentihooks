@@ -12,8 +12,6 @@ from tests.swarm_ledger.test_api_v1 import authority_live as _authority_live
 from tests.swarm_ledger.test_api_v1 import live as _live
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, ledger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 authority_live = _authority_live
 live = _live
 

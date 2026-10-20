@@ -1,12 +1,8 @@
 import subprocess
 from dataclasses import asdict
 
-import pytest
-
 from scripts.doctor import spawn_read, spawns
 from tests.doctor.recorded import load
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):

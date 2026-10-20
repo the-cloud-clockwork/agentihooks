@@ -13,7 +13,7 @@ from scripts.inbox.store import InboxStore, owner_key, owner_ttl_s
 from scripts.swarm.execution import ExecutionRegistry
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 ME = "engineer@abc-0001"

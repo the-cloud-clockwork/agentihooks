@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SCHEDULED = "[OK] Lifecycle sweep scheduled hourly on the agentihooks scheduler (0 * * * *)"
 REMOVED_UNITS = "[OK] Removed the systemd agentihooks-gc.timer"

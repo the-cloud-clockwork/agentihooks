@@ -12,8 +12,6 @@ from scripts.swarm import store as swarm_store
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 MINUTE = 60_000
 SNAPSHOT_SPAWN = True
 

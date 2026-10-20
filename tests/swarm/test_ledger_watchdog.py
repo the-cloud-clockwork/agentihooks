@@ -14,8 +14,6 @@ from scripts.swarm_ledger import server_code
 from tests.swarm.test_ledger_probe import Clock, ProbedLedger
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PID = 4242
 PYTHON = "/venv/bin/python3"
 REASON = "its code changed on disk"

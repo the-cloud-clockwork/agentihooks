@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_stopwatch_elapsed_and_limit_survive_restart():

@@ -1,6 +1,6 @@
 import pytest
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 def test_an_interval_emits_one_interval_after_each_dispatch_and_coalesces_downtime():

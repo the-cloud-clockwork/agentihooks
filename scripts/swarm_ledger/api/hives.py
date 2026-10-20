@@ -1,17 +1,17 @@
 import json
 import time
-from collections.abc import Callable
-from types import ModuleType
 
 from redis import RedisError
 
-from scripts.hive import registry
-from scripts.hive.auth import HiveError
-from scripts.swarm.store import SwarmError
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
 from .routing import _principal
+from .services import BodyReader, Services
+
+registry, HiveError = ports.hive().registry, ports.hive().auth.HiveError
+SwarmError = ports.swarm().store.SwarmError
 
 FLAG = {"enum": ["yes", "no"]}
 PATCH = {
@@ -42,7 +42,7 @@ def pairs(payload: dict) -> list[str]:
 
 
 def masters(store: object) -> dict[str, dict]:
-    from scripts.swarm import affinity
+    affinity = ports.swarm().affinity
 
     found = {}
     for slug in store.slugs():
@@ -53,8 +53,7 @@ def masters(store: object) -> dict[str, dict]:
 
 
 def view(store: object, now_ms: int) -> list[dict]:
-    from scripts.hive.launch import loaded_hives
-
+    loaded_hives = ports.hive().launch.loaded_hives
     leads = masters(store)
     hives = loaded_hives(store)
     for hive in hives:
@@ -74,8 +73,8 @@ def one(store: object, hive_id: str, now_ms: int) -> dict:
     return found
 
 
-def _write(handler: object, server: ModuleType, store: object, hive_id: str, payload: dict) -> None:
-    principal = _principal(handler, server)
+def _write(handler: object, services: Services, store: object, hive_id: str, payload: dict) -> None:
+    principal = _principal(handler, services)
     if principal is None:
         raise APIError(403, "forbidden", "Missing or wrong ledger credential")
     if principal:
@@ -89,15 +88,15 @@ def _write(handler: object, server: ModuleType, store: object, hive_id: str, pay
         raise APIError(400, "schema_invalid", str(exc)) from None
 
 
-def route(handler: object, server: ModuleType, parts: list, read_body: Callable[[object, ModuleType], dict]) -> dict:
+def route(handler: object, services: Services, parts: list, read_body: BodyReader) -> dict:
     if len(parts) > 2:
         raise APIError(404, MISSING, "No such resource")
     if handler.command not in (("GET", "PATCH") if len(parts) == 2 else ("GET",)):
         raise APIError(405, "method_not_allowed", "Use GET, or PATCH on one hive")
     try:
-        store, now_ms = server.swarm_store(), int(time.time() * 1000)
+        store, now_ms = services.swarm.store(), int(time.time() * 1000)
         if handler.command == "PATCH":
-            _write(handler, server, store, parts[1], read_body(handler, server))
+            _write(handler, services, store, parts[1], read_body(handler, services))
         data = one(store, parts[1], now_ms) if len(parts) == 2 else view(store, now_ms)
     except (SwarmError, HiveError) as exc:
         raise APIError(503, "storage_error", str(exc)) from None

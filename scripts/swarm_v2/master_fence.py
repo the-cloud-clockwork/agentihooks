@@ -113,7 +113,7 @@ def check_send(inbox, sender: str, address: str) -> None:
     slug = master_of(inbox.names.resolve(address), inbox.names).partition("@")[2]
     try:
         seats = Seats(slug, RedisStore(inbox.redis), {})
-        if len(seats.live) < 2:
+        if len(seats.live) < 2 or _doctor_master_send(inbox, seats, sender, address):
             return
         seats.doc = _ledger_state(slug)
         owner, _ = seats.owner(f"{TASKS}{task}", {})
@@ -124,6 +124,18 @@ def check_send(inbox, sender: str, address: str) -> None:
     if writer != owner:
         inbox.redis.hincrby(seats.table.key(slug), REFUSALS)
         raise InboxError(send_refusal(slug, task, owner, writer))
+
+
+def _doctor_master_send(inbox, seats, sender: str, address: str) -> bool:
+    from scripts.swarm.store import RedisStore
+
+    if seats.writer(inbox.names.resolve(address)) not in seats.live:
+        return False
+    store = RedisStore(inbox.redis)
+    doctor = inbox.names.slug_of(sender)
+    if store.peer(seats.slug) != doctor or store.peer(doctor) != seats.slug:
+        return False
+    return sender in masters.held(inbox.redis, doctor, store.agents(doctor)).values()
 
 
 class Seats:

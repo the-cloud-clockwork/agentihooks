@@ -3,7 +3,7 @@ import pytest
 from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope
 from tests import sv2_hdr03_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 FX = cases.fixture()
 HOST_KEY = cases.HOST_KEY
 SWARMS = ("hive-a", "hive-b")

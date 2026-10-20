@@ -45,7 +45,10 @@ def invite(redis: "Redis", name: str) -> str:
 def exchange(redis: "Redis", code: str, redis_url: str) -> dict:
     from redis.exceptions import RedisError
 
-    name = redis.getdel(f"{PREFIX}:invite:{_digest(code)}")
+    try:
+        name = redis.getdel(f"{PREFIX}:invite:{_digest(code)}")
+    except RedisError as exc:
+        raise HiveError(f"Redis refused the invite ({exc})") from exc
     if name is None:
         raise HiveError("invite code is invalid, expired or already used")
     member_id = secrets.token_hex(8)

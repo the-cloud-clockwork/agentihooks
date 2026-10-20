@@ -77,7 +77,8 @@ def test_dry_run_preserves_claude_flags_and_keeps_prompt_out_of_launcher(monkeyp
     launcher_text = launcher.read_text()
     route_report = launcher.with_suffix(".route")
     assert (
-        f"/usr/bin/agentihooks select-profile engineer --agent claude -- --agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
+        f"/usr/bin/agentihooks select-profile engineer --home={profile_env['CLAUDE_CONFIG_DIR']} --agent claude -- "
+        f"--agentihooks-fallback-bare --agentihooks-report {route_report} --name quota-test"
     ) in launcher_text
     assert "--resume session-id --fork-session --model fable" in launcher_text
     assert prompt not in launcher_text
@@ -373,7 +374,11 @@ def test_handoff_excludes_this_account_and_never_falls_back_to_bare(monkeypatch,
     assert rc == 0
     launcher = next((tmp_path / "runtime" / "agentihooks-claude-terminal").glob("*.sh"))
     text = launcher.read_text()
-    assert "select-profile engineer --agent claude -- --agentihooks-exclude alpha --agentihooks-report" in text
+    home = tmp_path / "engineer" / "claude"
+    assert (
+        f"select-profile engineer --home={home} --agent claude -- --agentihooks-exclude alpha --agentihooks-report"
+        in text
+    )
     assert "--agentihooks-fallback-bare" not in text
 
 
@@ -1107,7 +1112,9 @@ def test_herdr_names_the_agent_and_a_codex_session_by_its_raw_name(monkeypatch, 
     monkeypatch.setattr(
         init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append((pane, environ, changes))
     )
-    assert init_agent._name_in_herdr("w1:p2", "engineer@abc-0001", agent, {"K": "v"}, "", 12.5) == named
+    assert (
+        init_agent._name_in_herdr("w1:p2", init_agent.Names("engineer@abc-0001"), agent, {"K": "v"}, "", 12.5) == named
+    )
     expected = [("agent", "w1:p2", "engineer@abc-0001", {"K": "v"})]
     if agent == "codex" and detected:
         expected.append(("ready", "w1:p2", {"K": "v"}, init_agent.CODEX_READY_S))
@@ -1125,7 +1132,9 @@ def test_an_app_server_viewer_gets_no_typed_rename_because_its_server_names_the_
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited on a served viewer"))
     monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("typed a rename"))
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda *args, **changes: pytest.fail("marked a session name"))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0, served=True) == ["agent_name=eng-a"]
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", 0.0, served=True) == [
+        "agent_name=eng-a"
+    ]
 
 
 def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch):
@@ -1134,7 +1143,7 @@ def test_a_codex_session_that_never_reads_ready_is_recorded_unnamed(monkeypatch)
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: False)
     monkeypatch.setattr(init_agent.herdr_host, "name_session", lambda *args: pytest.fail("renamed while not ready"))
     monkeypatch.setattr(init_agent.herdr_panes, "mark", lambda pane, environ, **changes: marked.append(changes))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == [
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", 0.0) == [
         "agent_name=eng-a",
         "session_name=unset",
         "session_name_error=not-ready",
@@ -1156,7 +1165,7 @@ def test_the_opening_prompt_follows_the_names(monkeypatch, sent, said):
     calls = []
     _ready_codex(monkeypatch, calls)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or sent)
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {"K": "v"}, "Start.", 0.0)
+    named = init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {"K": "v"}, "Start.", 0.0)
     assert named == ["agent_name=eng-a", "session_name=eng-a", f"opening_prompt={said}"]
     assert calls == [
         "agent",
@@ -1173,7 +1182,7 @@ def test_an_opening_prompt_is_held_from_a_busy_pane(monkeypatch, ready, busy, sa
     calls = []
     _ready_codex(monkeypatch, calls, ready, busy)
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: pytest.fail("prompted a busy pane"))
-    named = init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0)
+    named = init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "Start.", 0.0)
     assert named[-1] == f"opening_prompt={said}"
     assert [call for call in calls if call[0] == "busy"] == ([("busy", "w1:p2", {})] if ready else [])
 
@@ -1204,7 +1213,7 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: calls.append(("ready", *args)) or True)
     monkeypatch.setattr(init_agent.herdr_host, "busy", lambda *args: "")
     monkeypatch.setattr(init_agent.herdr_host, "prompt", lambda *args: calls.append(("prompt", *args)) or True)
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "Start.", 0.0) == [
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "Start.", 0.0) == [
         "agent_name=unset",
         "opening_prompt=sent",
     ]
@@ -1218,7 +1227,7 @@ def test_an_undetected_agent_still_gets_its_opening_prompt_after_the_ready_wait(
 def test_an_undetected_codex_agent_without_a_prompt_waits_for_nothing(monkeypatch):
     monkeypatch.setattr(init_agent.herdr_host, "rename_agent", lambda *args: False)
     monkeypatch.setattr(init_agent.herdr_host, "wait_ready", lambda *args: pytest.fail("waited"))
-    assert init_agent._name_in_herdr("w1:p2", "eng-a", "codex", {}, "", 0.0) == ["agent_name=unset"]
+    assert init_agent._name_in_herdr("w1:p2", init_agent.Names("eng-a"), "codex", {}, "", 0.0) == ["agent_name=unset"]
 
 
 @pytest.mark.parametrize(("held", "argv"), [("1", "<a b>\n"), ("", "<a b><Start the task.>\n")])
@@ -1481,7 +1490,11 @@ def test_a_codex_handoff_resumes_the_conversation_on_another_codex_account(monke
     assert "agent=codex\n" in report and "agent_reason=handoff\n" in report
     launcher = next(line.split("=", 1)[1] for line in report.splitlines() if line.startswith("launcher="))
     command = Path(launcher).read_text()
-    assert "select-profile engineer --agent codex -- --agentihooks-exclude alpha --agentihooks-report" in command
+    home = profile_env["CODEX_HOME"]
+    assert (
+        f"select-profile engineer --home={home} --agent codex -- --agentihooks-exclude alpha --agentihooks-report"
+        in command
+    )
     assert " resume thread-1 " in command
     assert "-m gpt-6.1-sol" in command
 

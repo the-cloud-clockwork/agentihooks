@@ -25,8 +25,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm.naming import plain
 from scripts.swarm.store import RedisStore, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG, ME = "demo", "engineer@100001-0001"
 BRANCH = "engineer-100001-0001"
 WHO = Who(name=ME, swarm=SLUG, lane="eng", task="t1")

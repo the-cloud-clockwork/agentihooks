@@ -26,7 +26,7 @@ def make_ledger(claims=()):
         "sources": [],
         "phases": [{"title": "one", "description": "d"}, {"title": "two", "description": "d"}],
     }
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     for n, (lane, state, by) in enumerate(claims):

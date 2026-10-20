@@ -22,6 +22,7 @@ MAX_TABLES = 32
 MAX_COLUMNS = 24
 STATS = "stats"
 MAX_STATS = 32
+LISTS = (COLUMNS, STATS)
 
 
 def path():

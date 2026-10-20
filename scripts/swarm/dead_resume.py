@@ -77,7 +77,6 @@ def reopen(slug: str, store: RedisStore, ledger: Ledger, runtime: Runtime, agent
                 replace(
                     agent,
                     pane_id=placed.pane_id,
-                    started_at=agent.started_at if agent.execution_id else at,
                     launched_at=placed.launched_at or at,
                     idle_ticks=0,
                     account=placed.account or agent.account,

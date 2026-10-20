@@ -304,6 +304,10 @@
         "body": "Only the Ledger tab's sections below Overview, the Swarm tab panels below Capacity, the outline categories and comment dropdowns fold. Nothing else does."
       },
       {
+        "name": "The Overview Cap Rule",
+        "body": "The page shows at most the first 200 words of the overview, cut at a word boundary and ending with an ellipsis. Nothing folds or expands, and the stored overview and the editor keep the full text. tests/swarm_ledger/test_overview_page.py fails on an uncapped overview."
+      },
+      {
         "name": "The Scroll Gutter Rule",
         "body": "Scrolling content keeps max(.5%, 12px) between itself and its scrollbar."
       },

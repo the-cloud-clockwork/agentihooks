@@ -186,6 +186,7 @@ def codex_rows(
                 five_hour_resets_at=quota.five_hour.resets_at if quota else None,
                 observed_at=quota.observed_at if quota else None,
                 cap=cap,
+                kind=account.kind,
                 routing_left=week if account.signed_in else None,
                 identity=(identities or {}).get(account.name, ""),
             )

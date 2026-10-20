@@ -15,8 +15,6 @@ from scripts.swarm_ledger.api import client as api_client
 from tests.swarm_ledger import legacy_page
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, new_ledger
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CREDENTIALS = [
     {"X-Controller-Credential": "controller"},
     {"X-Hive-Credential": "hive", "X-Ledger-Agent": "engineer@323133-0256"},
@@ -168,7 +166,7 @@ def tls_ledger(cert):
     httpd = ledger_server.ThreadingHTTPServer(("127.0.0.1", 0), handler)
     port = httpd.server_address[1]
     page = legacy_page.render(new_ledger.build_doc({"title": "TLS", "phases": [{"title": "Proof"}]}), SLUG, port)
-    core.paths(SLUG)[0].write_text(page)
+    legacy_page.paths(SLUG, core)[0].write_text(page)
     thread = threading.Thread(target=httpd.serve_forever, kwargs={"poll_interval": 0.01}, daemon=True)
     with (
         patch("hooks._redis.get_redis", return_value=None),

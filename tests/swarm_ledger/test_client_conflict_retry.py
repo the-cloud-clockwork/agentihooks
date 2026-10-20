@@ -10,8 +10,6 @@ from tests.mutation_trace import traced
 from tests.swarm_ledger.test_api_v1 import authority_live, live  # noqa: F401
 from tests.swarm_ledger.test_ledger_authority import SLUG
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CONFLICT = b'{"error": {"code": "revision_conflict", "message": "Resource changed since the expected revision"}}'
 
 

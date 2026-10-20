@@ -9,8 +9,6 @@ from scripts.swarm import command_runner, commands, lifecycle
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def queue_class():
     from scripts.swarm_v2.api.commands import CommandQueue

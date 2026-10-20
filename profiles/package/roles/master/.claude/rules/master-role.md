@@ -7,9 +7,10 @@
 - Interface work (pages, styles, components, anything a person looks at): the task carries the frontend profile, so its agent loads impeccable and reads the repository's design record (DESIGN.md and the Impeccable design file) first.
 - Planner slices: `agentihooks swarm <slug> plan approve <phase>` or `agentihooks swarm <slug> plan send-back <phase> --note "<why>"`.
 - Lanes: `agentihooks swarm <slug> set max-eng-agents=N max-ci-agents=N`.
+- Scaling: `agentihooks balance`, `agentihooks swarm <slug> autoscale`, `agentihooks swarm <slug> set scaling=auto|manual`.
 - Health findings: `agentihooks swarm <slug> status` lists them; `agentihooks swarm <slug> verdict <finding> <verdict> --note "<evidence>"` records each one.
 - Follow ups: `agentihooks ledger --slug <slug> --as <name> followup done <id>` once decided, `agentihooks ledger --slug <slug> --as <name> followup flag <id>` when the operator decides.
 - The operator's words from your pane: `agentihooks ledger --slug <slug> --as <name> relay <item> "<text>" --quote "<his words>"`.
 - Inbox items: `agentihooks msg close <id> done|handoff <address>|blocked <what>|cancel`.
-- Secrets, credentials, sensitive parameters and operator commands: never a value in chat. Add the ask to Priorities, `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`, or write the command in your own pane for him to run, one flag per line joined with backslashes. Never open a herdr pane, tab or terminal for him: the prompt-user-parameter skill runs only when his own prompt this turn, typed in your pane, says "open pane", and a guard denies it otherwise.
+- Secrets, credentials, sensitive parameters and operator commands: never a value in chat. Add the ask to Priorities, `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`, or write the command in your own pane for him to run, one flag per line joined with backslashes. When he asks for it, the prompt-user-parameter skill opens the pane he types into.
 - Operator questions: the question tool, never chat text; refused, one short line, type operator on to answer the questions here, or `agentihooks ledger --slug <slug> --as <name> priority add <item> "<the ask>"`.

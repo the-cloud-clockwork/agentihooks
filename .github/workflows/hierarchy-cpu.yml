@@ -22,7 +22,7 @@ jobs:
     timeout-minutes: 20
     services:
       redis:
-        image: mirror.gcr.io/library/redis:7-alpine
+        image: public.ecr.aws/docker/library/redis:7-alpine
         ports:
           - 6379:6379
         options: >-
@@ -83,45 +83,114 @@ jobs:
           }, indent=2))
           assert head['mean_cpu_seconds'] <= base['mean_cpu_seconds'] / 2, 'Hierarchy CPU did not halve'
           PY
-      - name: Run paired ledger load and server memory on the hierarchy proof runner
-        env:
-          BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
-        run: |
-          set -o pipefail
-          database=1
-          failed=""
-          for round in 1 2; do
-            for side in base head; do
-              ( cd "$side" && REDIS_URL="redis://127.0.0.1:6379/$database" \
-                AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
-                python -m tests.ledger_load.memory \
-                --folder "$GITHUB_WORKSPACE/hierarchy-evidence/load-$side-$round" \
-                --base "$BASE" 2>&1 | tee "$GITHUB_WORKSPACE/hierarchy-evidence/load-$side-$round.log" ) || failed="$failed $side-$round"
-              database=$((database + 1))
-            done
-          done
-          [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
-      - name: Compare paired write latency and CPU and report server peak memory
-        if: ${{ always() }}
-        run: |
-          cd head
-          python -m tests.ledger_load.paired \
-            --base ../hierarchy-evidence/load-base-1.log ../hierarchy-evidence/load-base-2.log \
-            --head ../hierarchy-evidence/load-head-1.log ../hierarchy-evidence/load-head-2.log
-          python - <<'PY'
-          import json
-          from pathlib import Path
-          for path in sorted(Path('../hierarchy-evidence').glob('load-*.log')):
-              rows = [json.loads(line) for line in path.read_text().splitlines() if line.startswith('{')]
-              print(json.dumps({'run': path.stem, 'server_peak_rss_kib': [row['server_peak_rss_kib'] for row in rows if 'server_peak_rss_kib' in row]}))
-          PY
       - name: Preserve hierarchy profiles and exact response bodies
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: hierarchy-cpu
-          path: |
-            hierarchy-evidence/*.json
-            hierarchy-evidence/*.log
-            hierarchy-evidence/*/server.log
+          path: hierarchy-evidence/*.json
           if-no-files-found: error
+
+  load:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        pair: [1, 2, 3, 4, 5]
+    services:
+      redis:
+        image: public.ecr.aws/docker/library/redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-retries 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
+          path: base
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - name: Install dependencies shared by both revisions
+        working-directory: head
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Prepare the same load harness for base and head
+        run: |
+          mkdir load-evidence
+          cp head/tests/ledger_load/gate.py base/tests/ledger_load/gate.py
+          cp head/tests/ledger_load/memory.py base/tests/ledger_load/memory.py
+          git -C head fetch --depth=1 origin "$BASE"
+        env:
+          BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
+      - name: Run one base and head pair of load gates on this runner, base first on odd pairs
+        env:
+          BASE: ${{ inputs.base || '726353637ab44da81bdbd374ec393db275856e22' }}
+          PAIR: ${{ matrix.pair }}
+        run: |
+          set -o pipefail
+          order=(base head)
+          [[ "$PAIR" == [135] ]] || order=(head base)
+          database=1
+          failed=""
+          for side in "${order[@]}"; do
+            ( cd "$side" && REDIS_URL="redis://127.0.0.1:6379/$database" \
+              AGENTIHOOKS_SWARM_REDIS_URL="redis://127.0.0.1:6379/$database" \
+              python -m tests.ledger_load.memory \
+              --folder "$GITHUB_WORKSPACE/load-evidence/$side" \
+              --base "$BASE" 2>&1 | tee "$GITHUB_WORKSPACE/load-evidence/$side.log" ) || failed="$failed $side"
+            database=$((database + 1))
+          done
+          [[ -z "$failed" ]] || { echo "::error::load gate failed on$failed"; exit 1; }
+      - name: Preserve the pair's load measurements and server logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: load-pair-${{ matrix.pair }}
+          path: |
+            load-evidence/*.log
+            load-evidence/*/server.log
+          if-no-files-found: error
+
+  grade:
+    needs: load
+    if: ${{ !cancelled() }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 5
+    env:
+      SAME_CODE_MARGIN: '1.25'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: load-pair-*
+          path: load-evidence
+      - name: Fail when the median head over base pair ratio exceeds the margin set from recorded same code pairs
+        run: |
+          python -m tests.ledger_load.paired \
+            --base load-evidence/load-pair-{1,2,3,4,5}/base.log \
+            --head load-evidence/load-pair-{1,2,3,4,5}/head.log \
+            --margin "$SAME_CODE_MARGIN" --same-code tests/ledger_load/same_code_pairs.json
+      - name: Report server peak memory
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          for path in sorted(Path('load-evidence').glob('load-pair-*/*.log')):
+              rows = [json.loads(line) for line in path.read_text().splitlines() if line.startswith('{')]
+              print(json.dumps({'run': f'{path.parent.name}/{path.stem}', 'server_peak_rss_kib': [row['server_peak_rss_kib'] for row in rows if 'server_peak_rss_kib' in row]}))
+          PY

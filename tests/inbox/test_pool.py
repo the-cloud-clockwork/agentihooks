@@ -14,7 +14,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import masters
 from scripts.swarm_v2.masters import MasterSeats
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 FRONT = "master@sw"
@@ -374,6 +374,181 @@ def test_an_item_of_a_gone_holder_returns_to_the_pool_for_the_last_live_master(s
     moved = inbox.get(second.id)
     assert (moved.address, moved.reason) == (FRONT, claimed(FRONT))
     assert inbox.get(first.id).address == FRONT
+
+
+@pytest.mark.parametrize("state", ["delivered", "confirmed", "read"])
+def test_unsettled_pool_mail_of_a_gone_master_returns_with_its_id(swarm, inbox, state):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    if state == "confirmed":
+        inbox.confirm(item.id, "sw-master-1")
+    elif state == "read":
+        inbox.read(item.id, "sw-master-1")
+    operator = inbox.send("operator", FRONT, "operator work")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    inbox.pool.distribute_all()
+    moved = inbox.get(item.id)
+    assert (moved.id, moved.address, moved.state) == (item.id, SECOND, "pending")
+    assert moved.delivery_session == ""
+    assert inbox.get(operator.id).address == FRONT
+    assert item.id not in swarm.redis.zrange(inbox.key("delivered"), 0, -1)
+    assert [entry["state"] for entry in inbox.history(item.id)][-2:] == ["pending", "pending"]
+
+
+@pytest.mark.parametrize("exit_text", ["handed off its seat", "retired after the swarm idle limit"])
+def test_master_exit_returns_confirmed_pool_mail_but_keeps_operator_mail(swarm, inbox, exit_text):
+    from scripts.inbox import exits
+    from scripts.swarm.naming import NameRegistry
+
+    _masters(swarm, 2)
+    names = NameRegistry(swarm.redis)
+    swarm.redis.hset(names.key("name", "sw-master-1"), mapping={"type": "master"})
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    operator = inbox.send("operator", FRONT, "operator work")
+    inbox.deliver(operator.id, "sw-master-1")
+    inbox.confirm(operator.id, "sw-master-1")
+    exits.settle(inbox, "sw-master-1", FRONT, exit_text)
+    returned = inbox.get(item.id)
+    assert (returned.state, returned.reason, returned.delivery_session) == ("pending", RECLAIMED, "")
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (SECOND, "pending")
+    assert (inbox.get(operator.id).address, inbox.get(operator.id).state) == (FRONT, "confirmed")
+
+
+def test_a_stale_master_exit_leaves_pool_work_taken_by_its_successor(swarm, inbox):
+    from scripts.inbox import exits
+    from scripts.swarm.naming import NameRegistry
+
+    _masters(swarm, 2)
+    names = NameRegistry(swarm.redis)
+    swarm.redis.hset(names.key("name", "sw-master-1"), mapping={"type": "master"})
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.seats.occupy(FRONT, "successor", at=2)
+    inbox.read(item.id, "successor")
+    exits.settle(inbox, "sw-master-1", FRONT, "handed off its seat")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "read")
+
+
+def test_a_stale_master_exit_cannot_return_a_retiring_successors_work(swarm, inbox):
+    from scripts.inbox import exits
+    from scripts.swarm.naming import NameRegistry
+
+    _masters(swarm, 2)
+    names = NameRegistry(swarm.redis)
+    swarm.redis.hset(names.key("name", "sw-master-1"), mapping={"type": "master"})
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.seats.occupy(FRONT, "successor", at=2)
+    inbox.read(item.id, "successor")
+    swarm.put_agent(SLUG, AgentRecord("successor", "master", "master", seat=FRONT, state="retiring"))
+    exits.settle(inbox, "sw-master-1", FRONT, "handed off its seat")
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "read")
+
+
+def test_a_closed_pool_item_is_not_reopened_when_its_holder_leaves(swarm, inbox):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.close(item.id, "sw-master-1", "done", "answered")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "done")
+
+
+def test_a_contended_return_stays_discoverable_for_the_next_pool_pass(swarm, inbox, monkeypatch):
+    from redis.exceptions import WatchError
+
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    original = inbox._stage_pool_return
+    attempts = []
+
+    def contend_once(*args):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise WatchError
+        return original(*args)
+
+    monkeypatch.setattr(inbox, "_stage_pool_return", contend_once)
+    inbox.pool.distribute_all()
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (SECOND, "pending")
+
+
+def test_a_successor_receiving_during_reclaim_keeps_its_work(swarm, inbox, monkeypatch):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    original = inbox.return_to_pool
+
+    def successor_takes(item_id, holder):
+        swarm.seats.occupy(FRONT, "successor", at=2)
+        inbox.read(item.id, "successor")
+        return original(item_id, holder)
+
+    monkeypatch.setattr(inbox, "return_to_pool", successor_takes)
+    inbox.pool.distribute_all()
+    assert (inbox.get(item.id).address, inbox.get(item.id).state) == (FRONT, "read")
+
+
+def test_returning_settled_or_missing_pool_work_leaves_it_unchanged(swarm, inbox):
+    _masters(swarm, 2)
+    assert inbox.return_to_pool("missing", FRONT) is None
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.close(item.id, "sw-master-1", "done", "answered")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    assert inbox.return_to_pool(item.id, FRONT) is None
+    assert inbox.get(item.id).state == "done"
+
+
+@pytest.mark.parametrize("receiver", ["sw-master-1", "XXXX"])
+def test_pool_return_requires_a_recorded_receipt_for_the_departing_receiver(swarm, inbox, receiver):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    assert inbox.return_to_pool(item.id, FRONT, receiver) is None
+    assert inbox.get(item.id).state == "pending"
+
+
+def test_occupying_a_seat_during_pool_return_aborts_the_return(swarm, inbox, monkeypatch):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    inbox.deliver(item.id, "sw-master-1")
+    inbox.confirm(item.id, "sw-master-1")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+    original = inbox._stage_pool_return
+
+    def occupy_during_return(*args):
+        swarm.seats.occupy(FRONT, "successor", at=2)
+        return original(*args)
+
+    monkeypatch.setattr(inbox, "_stage_pool_return", occupy_during_return)
+    assert inbox.return_to_pool(item.id, FRONT) is None
+    assert inbox.get(item.id).state == "confirmed"
+
+
+def test_a_contended_return_that_loses_ownership_drops_the_old_holder(swarm, inbox, monkeypatch):
+    _masters(swarm, 2)
+    item = inbox.send("swarm", FRONT, "work")
+    swarm.put_agent(SLUG, AgentRecord("sw-master-1", "master", "master", seat=FRONT, state="finished"))
+
+    def redirect_during_return(item_id, holder):
+        inbox.redirect(item_id, "swarm", "eng-1@sw", "assigned to engineer", holder)
+        return None
+
+    monkeypatch.setattr(inbox, "return_to_pool", redirect_during_return)
+    inbox.pool.distribute_all()
+    assert inbox.get(item.id).address == "eng-1@sw"
+    assert FRONT not in swarm.redis.smembers(inbox.pool.key(SLUG, "holders"))
 
 
 def test_a_redirected_item_stays_where_it_was_sent(swarm, inbox):

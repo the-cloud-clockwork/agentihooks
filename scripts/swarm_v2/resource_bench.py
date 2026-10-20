@@ -218,7 +218,9 @@ def _parser() -> argparse.ArgumentParser:
 
 
 def _reviewer(slug: str) -> profiles.Principal | None:
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     who = Who.from_env()
     slug = slug or who.swarm

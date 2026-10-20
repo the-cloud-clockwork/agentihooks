@@ -99,6 +99,8 @@ import urllib.request
 import uuid
 from pathlib import Path
 
+from scripts.swarm_ledger import ledger_route
+
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import ledger_authority as authority  # noqa: E402
@@ -114,8 +116,9 @@ import watch_ledger  # noqa: E402
 
 from scripts.gates.base import Who
 from scripts.inbox import outbox
-from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import ledger_phases, ledger_plans, ledger_task_duplicates, ports, storage
+
+repository = storage.default()
 
 BASE = "" if ledger_link.remote() else ledger_link.base()
 REMOTE_READ_ATTEMPTS = 3
@@ -135,15 +138,15 @@ OBJECT_FORMS = {
 }
 
 
-def base():
-    return BASE or ledger_link.base()
+def base(slug=""):
+    return ledger_route.url(slug) or BASE or ledger_link.base(slug=slug)
 
 
 def credentials(slug, service=False):
     from scripts.swarm_ledger.authority_context import tick_headers
 
     who = Who.from_env()
-    if ledger_link.remote():
+    if ledger_link.remote(slug=slug):
         tick = tick_headers(slug)
         if tick:
             return tick
@@ -171,7 +174,7 @@ def local_credentials(slug, agent, service):
 def replay(slug, ops, agent, service):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    return ResourceClient(base(), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
+    return ResourceClient(base(slug), local_credentials(slug, agent, service), REQUEST_TIMEOUT).mutate(slug, ops)
 
 
 def derived_token(slug, name):
@@ -190,7 +193,7 @@ def launch_token(slug, name):
             "a remote ledger client needs AGENTIHOOKS_LEDGER_AGENT_TOKEN or the hive credential "
             "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL from agentihooks hive join"
         )
-    client = ResourceClient(base(), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
+    client = ResourceClient(base(slug), {"X-Hive-Credential": credential, "X-Ledger-Agent": name}, REQUEST_TIMEOUT)
     try:
         return client.request(slug, "agent-token", {})["data"]["token"]
     except urllib.error.HTTPError as exc:
@@ -202,7 +205,7 @@ def launch_token(slug, name):
 def request(slug, ops=None, service=False, timeout=REQUEST_TIMEOUT):
     from scripts.swarm_ledger.api.client import ResourceClient
 
-    client = ResourceClient(base(), credentials(slug, service), timeout)
+    client = ResourceClient(base(slug), credentials(slug, service), timeout)
     return client.snapshot(slug) if ops is None else client.mutate(slug, ops)
 
 
@@ -212,19 +215,21 @@ def resource(
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        client = ResourceClient(base(), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
+        client = ResourceClient(base(slug), credentials(slug, service) if headers is None else headers, REQUEST_TIMEOUT)
         return client.collection(slug, path) if collection else client.request(slug, path)["data"]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
 
 
 def export(slug: str, service: bool = False) -> dict:
     from scripts.swarm_ledger.api.client import ResourceClient
 
     def read():
-        return ResourceClient(base(), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})["data"]
+        return ResourceClient(base(slug), credentials(slug, service), REQUEST_TIMEOUT).request(slug, "export", {})[
+            "data"
+        ]
 
-    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote() else read()
+    return retried(read, REMOTE_READ_ATTEMPTS) if ledger_link.remote(slug=slug) else read()
 
 
 class Missing(SystemExit):
@@ -245,7 +250,7 @@ def ledger_remote_auth_failures_total() -> int:
 
 
 def call(slug, ops=None, service=False):
-    if ledger_link.remote():
+    if ledger_link.remote(slug=slug):
         return remote_call(slug, ops, service)
     talking = talk(ops)
     if outbox.waiting("ledger"):
@@ -610,6 +615,7 @@ def cmd_followup(args):
             text=args.value,
             **({"needs_operator": True} if args.needs_operator else {}),
             **hive_fields(args),
+            **({"task": task} if (task := os.environ.get("AGENTIHOOKS_SWARM_TASK")) else {}),
         )
     elif args.action in ("flag", "unflag"):
         send(args, "set", path=f"followups/{args.value}/needs_operator", value=args.action == "flag")
@@ -666,7 +672,7 @@ def cmd_relay(args):
 
 
 def swarm_autonomy(slug):
-    from scripts.swarm.store import SwarmError, connect
+    SwarmError, connect = ports.swarm().store.SwarmError, ports.swarm().store.connect
 
     try:
         return connect().config(slug).autonomy
@@ -789,47 +795,39 @@ def _add_task(args, title, fields):
     return {}
 
 
-def cmd_task(args):
-    refuse_unset_quote(args)
-    if args.action == "add":
-        if args.id == "-":
-            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
-        title = " ".join(args.values)
-        lists = {
-            k: comma_list(v)
-            for k, v in (
-                ("depends_on", args.depends_on),
-                ("territory", args.territory),
-                ("overlays", args.overlays),
-                ("repositories", args.repositories),
-            )
-            if v
-        }
-        if args.gain is not None:
-            lists["gain"] = args.gain
-        contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
-        if contract:
-            lists["contract"] = contract
-        lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
-        options = (
-            ("kind", args.kind),
-            ("profile", args.profile),
-            ("rank", args.rank),
-            ("difficulty", args.difficulty),
-            ("plan_url", args.plan),
-            ("not_duplicate", args.not_duplicate),
-            ("plan_slice", args.plan_slice),
+def _task_add_fields(args):
+    lists = {
+        k: comma_list(v)
+        for k, v in (
+            ("depends_on", args.depends_on),
+            ("territory", args.territory),
+            ("overlays", args.overlays),
+            ("repositories", args.repositories),
         )
-        lists.update((key, value) for key, value in options if value)
-        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
-        return
-    if args.action in TASK_LISTS:
-        kind, field, shown = TASK_LISTS[args.action]
-        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
-        print(json.dumps({"task": args.id, shown: args.values}))
-        return
-    fields = dict(value.split("=", 1) for value in args.values if "=" in value)
-    if len(fields) != len(args.values):
+        if v
+    }
+    if args.gain is not None:
+        lists["gain"] = args.gain
+    contract = {k: getattr(args, k) for k in ("must", "check", "judge", "push") if getattr(args, k)}
+    if contract:
+        lists["contract"] = contract
+    lists.update((key, True) for key in ("artifact", "follow_up") if getattr(args, key))
+    options = (
+        ("kind", args.kind),
+        ("profile", args.profile),
+        ("rank", args.rank),
+        ("difficulty", args.difficulty),
+        ("plan_url", args.plan),
+        ("not_duplicate", args.not_duplicate),
+        ("plan_slice", args.plan_slice),
+    )
+    lists.update((key, value) for key, value in options if value)
+    return lists
+
+
+def _task_set_fields(values):
+    fields = dict(value.split("=", 1) for value in values if "=" in value)
+    if len(fields) != len(values):
         sys.exit("task set takes FIELD=VALUE pairs")
     for key in ("depends_on", "territory", "overlays", "repositories", "split_pulls"):
         if key in fields:
@@ -848,6 +846,24 @@ def cmd_task(args):
         if not isinstance(fields.get(name, {}), dict):
             sys.exit(f"task set takes {name}=VALUE or {name}.KEY=VALUE pairs, not both")
         fields.setdefault(name, {})[sub] = fields.pop(dotted)
+    return fields
+
+
+def cmd_task(args):
+    refuse_unset_quote(args)
+    if args.action == "add":
+        if args.id == "-":
+            args.id = ledger_tasks.next_id(resource(args.slug, "tasks", collection=True))
+        title = " ".join(args.values)
+        lists = _task_add_fields(args)
+        print(json.dumps({"task": args.id, "added": title, **_add_task(args, title, lists)}))
+        return
+    if args.action in TASK_LISTS:
+        kind, field, shown = TASK_LISTS[args.action]
+        send(args, kind, item=f"tasks/{args.id}", **{field: args.values})
+        print(json.dumps({"task": args.id, shown: args.values}))
+        return
+    fields = _task_set_fields(args.values)
     refuse_plain_objects(fields)
     quote = vars(args).get("quote")
     send(args, "task_update", item=f"tasks/{args.id}", fields=fields, **({"quote": quote} if quote else {}))
@@ -1035,7 +1051,8 @@ def build_parser():
 def main():
     from scripts.gates import Who
     from scripts.gates.identity import refusal
-    from scripts.swarm.naming import resolve_name
+
+    resolve_name = ports.swarm().naming.resolve_name
 
     args = build_parser().parse_args()
     if text := refusal(args.name, Who.from_env()):
@@ -1043,8 +1060,12 @@ def main():
     args.name = resolve_name(args.name) if args.name else args.name
     if not args.slug or not (args.name or args.command in ("url", "show", "tree", "hierarchy")):
         sys.exit("--slug and --as are required")
-    globals()[f"cmd_{args.command.replace('-', '_')}"](args)
+    with ledger_route.session(args.slug):
+        globals()[f"cmd_{args.command.replace('-', '_')}"](args)
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

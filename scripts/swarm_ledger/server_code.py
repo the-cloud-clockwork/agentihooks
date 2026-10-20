@@ -9,7 +9,7 @@ CODE_DIRS = (
     CODE_DIR,
     *(
         ROOT / "scripts" / name
-        for name in ("inbox", "swarm", "swarm_v2", "handoff", "doctor", "gates", "hive", "codex_session")
+        for name in ("inbox", "swarm", "swarm_v2", "handoff", "doctor", "gates", "hive", "codex_session", "scheduler")
     ),
     ROOT / "hooks",
 )

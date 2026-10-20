@@ -2,12 +2,10 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 from tests.swarm_ledger.test_flat_buttons import css_rules, declarations
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 PROSE_CELLS = {".sw-table .sw-empty td", "#health-table td:nth-child(3)"}
 FAKE_DOM = """
 const document = { createElement: (tag) => ({ tag, attrs: {}, kids: [],

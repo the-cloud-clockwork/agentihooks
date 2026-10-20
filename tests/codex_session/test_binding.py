@@ -18,7 +18,7 @@ from scripts.codex_session.binding import (
 )
 from scripts.swarm.store import RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 EXACT = {

@@ -10,7 +10,7 @@ from scripts.codex_session.binding import CONNECTED, BindingStore, TransportReco
 from scripts.swarm import idle, live_binding, runtime
 from scripts.swarm.store import APP_SERVER_TRANSPORT, AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "managed"
 
 

@@ -5,6 +5,7 @@ from collections import Counter
 from dataclasses import dataclass, fields
 from statistics import median
 
+from scripts.doctor.words import plural
 from scripts.swarm.health.findings import Finding
 
 MINUTE_MS = 60_000
@@ -55,6 +56,10 @@ def _gaps(trace):
     return [(a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS) for a, b in zip(turns, turns[1:])]
 
 
+def _partial(trace):
+    return () if trace.get("complete", True) else ("observations read only up to where the read stopped",)
+
+
 def tool_errors(record: dict, limits: Limits) -> list[Finding]:
     found = []
     for trace in record["traces"]:
@@ -73,6 +78,7 @@ def tool_errors(record: dict, limits: Limits) -> list[Finding]:
                     f"{errors}/{len(tools)} tool calls failed",
                     "failed tools: " + ", ".join(f"{name} {n}" for name, n in failed.most_common()),
                     f"trace {trace['id']}",
+                    *_partial(trace),
                 ),
                 f"over {limits.tool_error_pct}% of at least {limits.tool_error_min_calls} tool calls",
                 round(errors * 100 / len(tools)),
@@ -115,6 +121,11 @@ def task_cost(record: dict, limits: Limits) -> list[Finding]:
                     f"traced sessions {cost['sessions']}",
                     f"uncached tokens {cost['tokens']}, median of the other merged tasks {round(median(others))}",
                     "uncached tokens are input, cache writes and output; cache reads are left out",
+                    *(
+                        ("comparison set truncated: trace listing incomplete",)
+                        if not record.get("reader", {}).get("historical", {}).get("listed", True)
+                        else ()
+                    ),
                 ),
                 f"over {limits.task_cost_ratio} times the median uncached tokens of the other merged tasks",
                 cost["tokens"],
@@ -134,18 +145,25 @@ def _wait_covers(waits, start, end):
     return False
 
 
-def _uncovered_gaps(trace, waits, limit):
+def _long_gaps(trace, limit):
     turns = _turns(trace)
+    return [(a, b) for a, b in zip(turns, turns[1:]) if (b["start"] - a["end"]) // MINUTE_MS > limit]
+
+
+def _uncovered_gaps(trace, waits, limit):
     return [
         (a["turn"], b["turn"], (b["start"] - a["end"]) // MINUTE_MS, a["end"], b["start"])
-        for a, b in zip(turns, turns[1:])
-        if (b["start"] - a["end"]) // MINUTE_MS > limit and not _wait_covers(waits, a["end"], b["start"])
+        for a, b in _long_gaps(trace, limit)
+        if not _wait_covers(waits, a["end"], b["start"])
     ]
 
 
 def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
     found = []
+    unread = set(record.get("waits_unread", []))
     for trace in record["traces"]:
+        if _agent(trace) in unread:
+            continue
         waits = record.get("waits", {}).get(_agent(trace), [])
         long = _uncovered_gaps(trace, waits, limits.turn_gap_minutes)
         if not long:
@@ -161,12 +179,42 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
                         f"turn {a} to turn {b}: {m} minutes; gap {start} to {end}; no declared wait covered it"
                         for a, b, m, start, end in long
                     ),
+                    *_partial(trace),
                 ),
                 f"over {limits.turn_gap_minutes} minutes between turns",
                 max(gap[2] for gap in long),
             )
         )
     return found
+
+
+def gap_agents(record: dict, limits: Limits) -> list[str]:
+    newest = {}
+    for trace in record["traces"]:
+        for _, b in _long_gaps(trace, limits.turn_gap_minutes):
+            newest[_agent(trace)] = max(newest.get(_agent(trace), b["start"]), b["start"])
+    return sorted(newest, key=lambda name: (-newest[name], name))
+
+
+def wait_coverage(record: dict, limits: Limits) -> list[Finding]:
+    unread = record.get("waits_unread")
+    if not unread:
+        return []
+    return [
+        Finding(
+            "wait history partial",
+            record["slug"],
+            f"wait history of {plural(len(unread), 'agent')} with turn gaps over {limits.turn_gap_minutes} minutes "
+            "not read in budget",
+            (
+                "unread: " + ", ".join(unread[:5]),
+                "turn gap findings skip agents whose wait history was not read",
+                "each Doctor scan reads the wait history again within its budget",
+            ),
+            "every agent with a turn gap over the limit has its wait history read",
+            len(unread),
+        )
+    ]
 
 
 def untraced(record: dict, limits: Limits) -> list[Finding]:
@@ -335,6 +383,18 @@ def active(record: dict, limits: Limits) -> list[Finding]:
     return [f for binding in record.get("active", []) for f in _active_binding(binding, record, limits)]
 
 
+def _caps(historical: dict) -> tuple:
+    return (
+        *(() if historical.get("listed", True) else ("trace listing stopped at its page cap",)),
+        *(
+            (f"{historical['unlisted']} traces past where the listing stopped not counted",)
+            if historical.get("unlisted")
+            else ()
+        ),
+        *((f"{historical['capped']} traces read up to the observation page cap",) if historical.get("capped") else ()),
+    )
+
+
 def reader(record: dict, limits: Limits) -> list[Finding]:
     state = record.get("reader")
     if not state:
@@ -357,7 +417,7 @@ def reader(record: dict, limits: Limits) -> list[Finding]:
             )
         )
     if not historical["complete"] and not state["failures"]:
-        missing = historical["traces"] - historical["covered"]
+        missing = historical["traces"] - historical["covered"] - historical.get("capped", 0)
         found.append(
             Finding(
                 "trace coverage partial",
@@ -365,7 +425,7 @@ def reader(record: dict, limits: Limits) -> list[Finding]:
                 f"observations of {missing} traces not read yet",
                 (
                     coverage[1],
-                    *(() if historical.get("listed", True) else ("trace listing stopped at its page cap",)),
+                    *_caps(historical),
                     *historical.get("unreadable", [])[:3],
                     "tool error, task cost and turn gap findings cover only the read traces",
                     "each Doctor scan reads more within its read budget",
@@ -417,6 +477,7 @@ def findings(record: dict, limits: Limits) -> list[Finding]:
         *tool_errors(record, limits),
         *task_cost(record, limits),
         *turn_gaps(record, limits),
+        *wait_coverage(record, limits),
         *untraced(record, limits),
         *active(record, limits),
         *reader(record, limits),

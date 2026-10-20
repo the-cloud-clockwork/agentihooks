@@ -11,8 +11,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import naming
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ROOT = Path(__file__).resolve().parents[2]
 HERDR_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 

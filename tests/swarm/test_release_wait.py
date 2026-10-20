@@ -6,8 +6,6 @@ from scripts.swarm import release_wait
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm.tick import _claimable
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def task(task_id, **fields):
     return {

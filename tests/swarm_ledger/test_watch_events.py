@@ -132,7 +132,7 @@ def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkey
     opened = []
     body = stream.frame("snapshot", {"é": 1}, "c0") + stream.frame("heartbeat", {})
 
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         opened.append((request.full_url, dict(request.header_items()), timeout))
         return io.BytesIO(body)
 
@@ -153,7 +153,7 @@ def test_stream_opens_the_request_with_the_read_timeout_and_parses_frames(monkey
 
 @pytest.mark.parametrize(("code", "raised"), [(410, Expired), (403, urllib.error.HTTPError)])
 def test_stream_turns_only_a_410_into_expired(monkeypatch, code, raised):
-    def urlopen(request, timeout):
+    def urlopen(request, timeout, **options):
         raise urllib.error.HTTPError(request.full_url, code, "no", {}, None)
 
     monkeypatch.setattr(watch_ledger.urllib.request, "urlopen", urlopen)
@@ -176,7 +176,7 @@ def test_alive_creates_the_beat_folder_and_touches_the_file(tmp_path):
 @pytest.fixture
 def ledger_file():
     content = {"title": "Demo", "overview": "o", "sources": [], "phases": [], "questions": [], "followups": []}
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
     core.sync(SLUG)

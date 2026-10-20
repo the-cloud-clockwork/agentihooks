@@ -1,8 +1,10 @@
+import json
 import subprocess
 from pathlib import Path
 
 import pytest
 
+from hooks.targets.normalizer import normalize_payload
 from scripts.gates import Call, Gate, Who, entry
 from scripts.gates.one_push import OnePush, actions, destinations, open_refusal, push_refusal, queue_refusal
 from scripts.gates.subagents import SubagentBudget
@@ -126,6 +128,143 @@ def test_an_open_before_both_reviews_is_refused(tree, tmp_path):
 def test_an_open_after_both_reviews_with_the_work_on_origin_passes(tree, tmp_path):
     reviewed(tmp_path, "standards-reader", "spec-reader")
     assert gate().decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed
+
+
+@pytest.mark.parametrize("folder", ["cd", "workdir", "relative-workdir", "workdir-cd"])
+@pytest.mark.parametrize("unpushed_command", [False, True])
+def test_ready_counts_the_command_checkout_instead_of_the_session_checkout(tree, tmp_path, folder, unpushed_command):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    changed = work if unpushed_command else tree
+    (changed / "a.txt").write_text("unpublished\n")
+    git(changed, "commit", "-q", "-am", "unpublished")
+    tool_input = {"command": "gh pr ready 1"}
+    if folder == "cd":
+        tool_input["command"] = f"cd {work} && gh pr ready 1"
+    elif folder == "workdir-cd":
+        tool_input["workdir"] = str(tmp_path)
+        tool_input["command"] = "cd command && gh pr ready 1"
+    else:
+        tool_input["workdir"] = "../command" if folder == "relative-workdir" else str(work)
+    call = Call.from_payload({"tool_name": "Bash", "tool_input": tool_input, "cwd": str(tree)})
+    decision = gate(target="codex").decide(call, ME, state(tmp_path))
+    assert decision.allowed is not unpushed_command, decision.reason
+    if unpushed_command:
+        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
+def test_ready_without_a_command_folder_counts_the_session_checkout(tree, tmp_path):
+    (tree / "a.txt").write_text("unpublished\n")
+    git(tree, "commit", "-q", "-am", "unpublished")
+    decision = gate(target="codex").decide(bash("gh pr ready 1", tree), ME, state(tmp_path))
+    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
+def codex_rollout(tmp_path, *programs, filler=0):
+    rollout = tmp_path / "rollout.jsonl"
+    lines = []
+    for program in programs:
+        item = {"type": "custom_tool_call", "status": "completed", "name": "exec", "input": program}
+        lines.append(json.dumps({"type": "response_item", "payload": item}))
+    if filler:
+        lines.append(json.dumps({"type": "event_msg", "payload": {"type": "agent_message", "text": "x" * filler}}))
+    lines += [
+        "not json",
+        "{}",
+        "[]",
+        '{"payload": "x"}',
+        json.dumps({"type": "turn_context", "payload": {"cwd": "/elsewhere"}}),
+    ]
+    rollout.write_text("\n".join(lines) + "\n")
+    return rollout
+
+
+def exec_command(command, workdir=None):
+    fields = f"cmd:{json.dumps(command)}"
+    if workdir is not None:
+        fields += f",workdir:{json.dumps(str(workdir))}"
+    return f"text(await tools.exec_command({{{fields},max_output_tokens:2000}}));\n"
+
+
+def codex_call(monkeypatch, rollout, command, cwd, **tool_input):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    payload = {
+        "session_id": "01a15435-ba42-7c60-a0ac-3d9c038cf8c9",
+        "turn_id": "01a15435-ba79-7630-9eff-1ef0d95d96a4",
+        "transcript_path": str(rollout),
+        "cwd": str(cwd),
+        "hook_event_name": "PreToolUse",
+        "model": "gpt-6.1-sol",
+        "permission_mode": "bypassPermissions",
+        "tool_name": "Bash",
+        "tool_input": {"command": command, **tool_input},
+        "tool_use_id": "exec-b11bb50c-5652-4d33-85b1-d73603859b3c",
+    }
+    return Call.from_payload(normalize_payload(payload))
+
+
+@pytest.mark.parametrize("unpushed_command", [False, True])
+def test_ready_counts_the_codex_exec_workdir_from_the_rollout(monkeypatch, tree, tmp_path, unpushed_command):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    changed = work if unpushed_command else tree
+    (changed / "a.txt").write_text("unpublished\n")
+    git(changed, "commit", "-q", "-am", "unpublished")
+    command = "git status -sb\ngh pr ready 1"
+    rollout = codex_rollout(tmp_path, exec_command("agentihooks msg read 1") + exec_command(command, work))
+    decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, command, tree), ME, state(tmp_path))
+    assert decision.allowed is not unpushed_command, decision.reason
+    if unpushed_command:
+        assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
+def test_ready_reads_the_latest_codex_exec_program(monkeypatch, tree, tmp_path):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    (tree / "a.txt").write_text("unpublished\n")
+    git(tree, "commit", "-q", "-am", "unpublished")
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", tree), exec_command("gh pr ready 1", work))
+    decision = gate(target="codex").decide(codex_call(monkeypatch, rollout, "gh pr ready 1", tree), ME, state(tmp_path))
+    assert decision.allowed, decision.reason
+
+
+@pytest.mark.parametrize(
+    "program", ["no-workdir", "other-command", "two-workdirs", "malformed", "beyond-tail", "no-rollout"]
+)
+def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypatch, tree, tmp_path, program):
+    work = tmp_path / "command"
+    git(tree, "worktree", "add", "--detach", str(work), "HEAD")
+    (tree / "a.txt").write_text("unpublished\n")
+    git(tree, "commit", "-q", "-am", "unpublished")
+    earlier = exec_command("gh pr ready 1", work)
+    rollouts = {
+        "no-workdir": lambda: codex_rollout(tmp_path, earlier, exec_command("gh pr ready 1")),
+        "other-command": lambda: codex_rollout(tmp_path, earlier, exec_command("gh pr ready 2", work)),
+        "two-workdirs": lambda: codex_rollout(
+            tmp_path, earlier, exec_command("gh pr ready 1", work) + exec_command("gh pr ready 1", tree)
+        ),
+        "malformed": lambda: codex_rollout(tmp_path, earlier + 'exec_command({cmd:"gh pr ready 2",workdir:"open'),
+        "beyond-tail": lambda: codex_rollout(tmp_path, earlier, filler=1 << 20),
+        "no-rollout": lambda: tmp_path / "missing.jsonl",
+    }
+    call = codex_call(monkeypatch, rollouts[program](), "gh pr ready 1", tree)
+    assert "workdir" not in call.tool_input
+    decision = gate(target="codex").decide(call, ME, state(tmp_path))
+    assert decision.reason == open_refusal("demo", [], "commits not on origin")
+
+
+def test_a_codex_payload_workdir_wins_over_the_rollout(monkeypatch, tree, tmp_path):
+    work = tmp_path / "command"
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", tree))
+    call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree, workdir=str(work))
+    assert call.tool_input["workdir"] == str(work)
+
+
+def test_a_claude_payload_never_reads_a_codex_rollout(monkeypatch, tree, tmp_path):
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", tmp_path))
+    payload = {"transcript_path": str(rollout), "tool_name": "Bash", "tool_input": {"command": "gh pr ready 1"}}
+    assert normalize_payload(payload)["tool_input"] == {"command": "gh pr ready 1"}
 
 
 def test_a_reader_named_by_its_sub_agent_type_counts(tree, tmp_path):
@@ -298,3 +437,34 @@ def test_the_harness_comes_from_the_environment_and_defaults_to_claude(tree, tmp
     found = OnePush(ledger=lambda: Ledger(), github=lambda url: None)
     assert found.target() == environ.get("AGENTIHOOKS_TARGET", "claude")
     assert found.decide(bash("gh pr create --base dev", tree), ME, state(tmp_path)).allowed is allowed
+
+
+def test_a_codex_payload_without_a_transcript_path_finds_its_rollout(monkeypatch, tree, tmp_path):
+    work = tmp_path / "command"
+    day = tmp_path / "codex" / "sessions" / "2026" / "10" / "19"
+    day.mkdir(parents=True)
+    rollout = codex_rollout(tmp_path, exec_command("gh pr ready 1", work))
+    rollout.rename(day / "rollout-2026-10-19T14-49-29-01a15435-ba42-7c60-a0ac-3d9c038cf8c9.jsonl")
+    monkeypatch.setenv("CODEX_HOME", str(tmp_path / "codex"))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    payload = {
+        "session_id": "01a15435-ba42-7c60-a0ac-3d9c038cf8c9",
+        "cwd": str(tree),
+        "hook_event_name": "PreToolUse",
+        "tool_name": "Bash",
+        "tool_input": {"command": "gh pr ready 1"},
+    }
+    assert normalize_payload(payload)["tool_input"]["workdir"] == str(work)
+
+
+@pytest.mark.parametrize("shift", [0, 4])
+def test_the_rollout_tail_holds_a_whole_exec_program(monkeypatch, tree, tmp_path, shift):
+    work = tmp_path / "command"
+    item = {"type": "custom_tool_call", "name": "exec", "input": exec_command("gh pr ready 1", work)}
+    program = (json.dumps({"type": "response_item", "payload": item}) + "\n").encode()
+    head = ('{"text": "' + "\u00e9" * (1 << 20) + '"}\n').encode()
+    rest = (1 << 20) - shift - len(program)
+    rollout = tmp_path / "rollout.jsonl"
+    rollout.write_bytes(head + program + b" " * (rest - 1) + b"\n")
+    call = codex_call(monkeypatch, rollout, "gh pr ready 1", tree)
+    assert call.tool_input["workdir"] == str(work)

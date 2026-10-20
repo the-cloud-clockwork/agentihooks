@@ -12,7 +12,7 @@ from tests.swarm.test_bottleneck_remedy import FakeLedger, fire, home, shipped  
 from tests.swarm.test_dispatch_seat import NOW, doc, held, swarm
 from tests.swarm.test_tick import FakeLedger as TickLedger
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 MASTER, ENGINEER, DISPATCHER = "master@c4d5e6-0001", "engineer@c4d5e6-0002", "dispatcher@c4d5e6-0003"

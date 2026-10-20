@@ -1,24 +1,10 @@
 import json
 
+from scripts.swarm_ledger import models
+
 FIELDS, RESOURCES, THREADS = TABLES = ("fields", "resources", "threads")
-COLLECTIONS = frozenset(
-    (
-        "phases",
-        "tasks",
-        "questions",
-        "followups",
-        "notes",
-        "chat",
-        "artifacts",
-        "artifact_trash",
-        "priorities",
-        "notifications",
-        "alerts",
-        "plans",
-        "slices",
-        "freezes",
-    )
-)
+COLLECTIONS = models.RECORD_COLLECTIONS
+THREAD_NAMES = models.THREAD_NAMES
 
 
 ENCODER = json.JSONEncoder(ensure_ascii=False, separators=(",", ":"), allow_nan=False)
@@ -32,7 +18,7 @@ def children(item, parts, table):
     """(child, parts, key, position, table) of a container, in the path scheme flatten stores."""
     if isinstance(item, dict):
         for index, (name, child) in enumerate(item.items()):
-            bucket = THREADS if name in ("comments", "answers") else table
+            bucket = THREADS if name in THREAD_NAMES else table
             if not parts and name in COLLECTIONS:
                 bucket = RESOURCES
             yield child, [*parts, name], name, index, bucket
@@ -87,7 +73,7 @@ def _walk_dictionary(left, right, parts, table, walk, after):
     for index, (name, child) in enumerate(right.items()):
         if index < len(left) and left[name] is child and type(child) is not float:
             continue
-        bucket = THREADS if name in ("comments", "answers") else table
+        bucket = THREADS if name in THREAD_NAMES else table
         if not parts and name in COLLECTIONS:
             bucket = RESOURCES
         child_parts = [*parts, name]
@@ -165,12 +151,17 @@ def changes(before: dict, after: dict) -> dict:
 
 
 def write_rows(connection, slug: str, before: dict, after: dict) -> None:
+    deletes, upserts = {}, {}
     for path, row in changes(before, after).items():
         old = before.get(path)
         if old and (row is None or old[0] != row[0]):
-            connection.execute(f"DELETE FROM {old[0]} WHERE slug=? AND path=?", (slug, path))
+            deletes.setdefault(old[0], []).append((slug, path))
         if row is not None:
-            connection.execute(
-                f"INSERT INTO {row[0]} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
-                (slug, path, *row[1:]),
-            )
+            upserts.setdefault(row[0], []).append((slug, path, *row[1:]))
+    for table, rows in deletes.items():
+        connection.executemany(f"DELETE FROM {table} WHERE slug=? AND path=?", rows)
+    for table, rows in upserts.items():
+        connection.executemany(
+            f"INSERT INTO {table} VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(slug,path) DO UPDATE SET parent=excluded.parent,key=excluded.key,position=excluded.position,kind=excluded.kind,value=excluded.value",
+            rows,
+        )

@@ -267,14 +267,18 @@ def test_app_bounds_idle_sessions():
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
 
 
-async def _listed_over_http(router, path: str) -> set[str]:
+async def _listed_over_http(router, path: str, monkeypatch) -> set[str]:
     import json
 
     import httpx
 
-    from hooks.serena_router.app import build_app
+    from hooks.serena_router import app as router_app
 
-    app = build_app(*router)
+    async def wait(_delay):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(router_app, "scheduled_wait", wait)
+    app = router_app.build_app(*router)
     headers = {"Accept": "application/json, text/event-stream"}
     init = {
         "jsonrpc": "2.0",
@@ -301,15 +305,17 @@ async def test_default_listing_hides_the_opt_in_tools(router):
     assert not names & OPT_IN
 
 
-async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router):
-    names = await _listed_over_http(router, "/mcp")
+async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router, monkeypatch):
+    names = await _listed_over_http(router, "/mcp", monkeypatch)
     assert "find_symbol" in names
     assert not names & OPT_IN
 
 
-async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router):
-    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern") >= OPT_IN | {"find_symbol"}
-    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file") == {"search_for_pattern"}
+async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router, monkeypatch):
+    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern", monkeypatch) >= OPT_IN | {
+        "find_symbol"
+    }
+    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file", monkeypatch) == {"search_for_pattern"}
 
 
 def test_listed_ignores_names_outside_the_opt_in_set():
@@ -327,3 +333,72 @@ def test_fake_backend_imports_only_the_standard_library():
     modules = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     modules |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
     assert {m.split(".")[0] for m in modules} <= sys.stdlib_module_names
+
+
+async def test_eviction_runs_only_after_a_scheduler_signal(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hooks.serena_router import app
+
+    calls = []
+    pool = type("Pool", (), {"evict_idle": AsyncMock(side_effect=lambda: calls.append("evict"))})()
+
+    async def wait(delay):
+        calls.append(delay)
+        if len(calls) > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(app, "scheduled_wait", wait)
+    with pytest.raises(asyncio.CancelledError):
+        await app._evict_forever(pool)
+    assert calls == [app.EVICT_EVERY_SECONDS, "evict", app.EVICT_EVERY_SECONDS]
+    pool.evict_idle.assert_awaited_once_with()
+
+
+async def test_app_shutdown_awaits_eviction_cleanup_before_closing_the_pool(monkeypatch):
+    from hooks.serena_router import app as router_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
+    started, finished = asyncio.Event(), asyncio.Event()
+
+    async def evict(_pool):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.set()
+
+    async def close():
+        assert finished.is_set()
+
+    pool = Pool(BackendConfig(command=(sys.executable, str(FAKE))))
+    monkeypatch.setattr(router_app, "_evict_forever", evict)
+    monkeypatch.setattr(pool, "close", close)
+    app = router_app.build_app(pool, [])
+    async with app.router.lifespan_context(app):
+        await asyncio.wait_for(started.wait(), timeout=1)
+    assert finished.is_set()
+
+
+async def test_app_shutdown_closes_the_pool_when_eviction_failed(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hooks.serena_router import app as router_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
+    started = asyncio.Event()
+
+    async def evict(_pool):
+        started.set()
+        raise RuntimeError("eviction failed")
+
+    pool = Pool(BackendConfig(command=(sys.executable, str(FAKE))))
+    close = AsyncMock()
+    monkeypatch.setattr(router_app, "_evict_forever", evict)
+    monkeypatch.setattr(pool, "close", close)
+    app = router_app.build_app(pool, [])
+    with pytest.raises(ExceptionGroup) as caught:
+        async with app.router.lifespan_context(app):
+            await asyncio.wait_for(started.wait(), timeout=1)
+    close.assert_awaited_once_with()
+    assert caught.value.exceptions[0].args == ("eviction failed",)

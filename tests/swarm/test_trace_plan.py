@@ -10,8 +10,6 @@ from scripts.gates import Who
 from scripts.gates import log as gate_log
 from scripts.swarm import trace_plan
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DOGHOUSE = (
     "# Plan\n\n"
     "Pieces of the doghouse task.\n"

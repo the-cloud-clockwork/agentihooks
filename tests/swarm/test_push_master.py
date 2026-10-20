@@ -18,7 +18,7 @@ from scripts.swarm.store import (
     SwarmError,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 WAIT = "agentihooks swarm sw wait --inbox"
 
 

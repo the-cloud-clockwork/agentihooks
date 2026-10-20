@@ -29,6 +29,7 @@ else
   docker build -f deploy/worker/Dockerfile --build-arg WORKER_IMAGE=local/worker-base:dev -t "$image" .
 fi
 printf 'worker_hive_image_build_seconds=%s\nworker_base=%s\n' "$((SECONDS - build_started))" "$worker_base" | tee "$out/build.txt"
+docker run --rm --tmpfs /home/worker:uid=10001,gid=10001 --entrypoint bash "$image" -c 'agentihooks init --profile engineer && grep -qx "<!-- profile: engineer -->" "$HOME/.claude/CLAUDE.md"' > "$out/init.txt"
 wait "$cluster_pid"
 kind load docker-image "$image" --name "$cluster"
 docker run --rm --entrypoint bash "$image" -c 'claude --version && codex --version && herdr --version && git --version && bash /usr/local/bin/wt.sh root && agentihooks hive --help' > "$out/tools.txt"
@@ -126,7 +127,7 @@ for _ in range(60):
     time.sleep(1)
 assert record and registry.live(record, int(time.time() * 1000)), 'pod did not register a live hive'
 assert record['ui'] == 'no' and record['ephemeral'] == 'yes'
-assert record['roles'] == ['eng', 'ci', 'plan'] and record['max_agents'] == 1
+assert record['roles'] == ['eng', 'ci', 'plan', 'dispatch'] and record['max_agents'] == 1
 print('pod registered a live worker hive with configured roles and capacity')
 orders = Orders(redis)
 order = CommandOrder('scratch-reap', 'reap', name='scratch-absent')

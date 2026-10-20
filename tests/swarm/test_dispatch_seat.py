@@ -12,8 +12,6 @@ from scripts.swarm.templates import DEFAULT_PROFILES
 from scripts.swarm.tick import tick
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 MINUTE = 60_000
@@ -384,6 +382,20 @@ def test_a_distributed_controller_leaves_the_seat_to_the_workstation_hive():
     runtime = controller.FencedRuntime(store, SLUG, lease.acquire(store, SLUG, "anton"), inner, "distributed")
     assert run(store, runtime, doc(priority())) == [f"the workstation hive spawns {dispatch_seat.LANE} work"]
     assert inner.spawned == [] and seats(store) == []
+
+
+def test_placement_reads_the_seat_as_the_task_it_refuses():
+    asked = []
+
+    class Refusing(FakeRuntime):
+        def placement_refusal(self, lane, task):
+            asked.append((lane, task))
+            return "no headless hive for dispatch has room"
+
+    store, runtime = swarm(), Refusing()
+    assert run(store, runtime, doc(priority())) == ["no headless hive for dispatch has room"]
+    assert asked == [(dispatch_seat.LANE, {"id": dispatch_seat.SEAT})]
+    assert runtime.spawned == [] and seats(store) == []
 
 
 def test_a_full_host_holds_the_seat_spawn():

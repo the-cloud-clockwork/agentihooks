@@ -1,6 +1,7 @@
 """Master seats of one swarm and the phases each owns. Seat one is the lead, at the single master swarm's address."""
 
 import json
+import re
 from collections.abc import Callable
 
 from scripts.inbox.seats import SeatRegistry, seat_address
@@ -14,6 +15,7 @@ RETIRED = "retired"
 GONE = ("finished", "retiring")
 HIVE_KEY = "hive."
 HIVE_PAIR = f"a hive owner is set as {HIVE_KEY}<hive id>=<master seat>"
+TITLE = re.compile(rf"{MASTER} \d+ · \S+")
 
 
 class MasterError(SwarmError):
@@ -22,6 +24,16 @@ class MasterError(SwarmError):
 
 def seat(index: int) -> str:
     return MASTER if index == 1 else f"{MASTER}-{index}"
+
+
+def title(slug: str, address: str) -> str:
+    """The name a master shows in Claude.ai, herdr and Remote Control: its seat number, then its swarm."""
+    number = 1 if address in ("", seat_address(slug, MASTER)) else _number(slug, address)
+    return f"{MASTER} {number} · {slug}"
+
+
+def is_title(text: str) -> bool:
+    return TITLE.fullmatch(text) is not None
 
 
 def is_lead(slug: str, agent) -> bool:
@@ -120,8 +132,12 @@ def owner_of(target: str, doc: dict, owners: dict[str, str]) -> str:
     if kind == HIVES:
         return owners.get(f"{HIVES}/{item}", "")
     if kind in ("questions", "followups"):
-        hive = next((row.get("hive") for row in doc.get(kind, []) if row.get("id") == item), None)
-        return owners.get(f"{HIVES}/{hive}", "") if hive else ""
+        row = next((row for row in doc.get(kind, []) if row.get("id") == item), {})
+        if row.get("hive"):
+            return owners.get(f"{HIVES}/{row['hive']}", "")
+        if not row.get("task"):
+            return ""
+        kind, item = "tasks", row["task"]
     if kind == "tasks":
         item = {t.get("id"): t.get("phase") for t in doc.get("tasks", [])}.get(item)
     elif kind != "phases":

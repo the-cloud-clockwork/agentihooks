@@ -17,16 +17,19 @@ def placed(runtime: object) -> bool:
 
 def placeable(
     slug: str, config: SwarmConfig, store: RedisStore, runtime: object, lane: str, ready: list[dict], room: int
-) -> list[dict]:
-    """The first ready tasks this hive places, at most room; a task is decided only when a free slot reaches it."""
-    found = []
+) -> tuple[list[dict], list[str]]:
+    """The first ready tasks this hive places, at most room, and why each refused task before them waits; a task is
+    decided only when a free slot reaches it."""
+    found, waits = [], []
     for task in ready:
         if len(found) == room:
             break
         decided(slug, config, store, runtime, lane, task)
-        if not seat_spawn.placed_elsewhere(runtime, lane, task):
+        if refused := seat_spawn.placed_elsewhere(runtime, lane, task):
+            waits.append(f"task {task['id']} waits: {refused}")
+        else:
             found.append(task)
-    return found
+    return found, waits
 
 
 def decided(slug: str, config: SwarmConfig, store: RedisStore, runtime: object, lane: str, task: dict) -> dict:

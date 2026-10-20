@@ -287,7 +287,7 @@ def test_unit_matrix_runs_one_shard_per_split():
         assert [shard for shard in matrix["shard"] if (version, shard) not in excluded] == list(
             range(1, counts[version] + 1)
         )
-    assert coverage_shards > plain_shards > 1
+    assert coverage_shards >= plain_shards > 1
     merge = next(step for step in workflow["jobs"]["sonar"]["steps"] if step.get("name") == "Merge shard coverage")
     assert 'combine.sh --downloaded "$SHARDS" ' in merge["run"]
     assert merge["env"]["SHARDS"] == (
@@ -797,7 +797,7 @@ def test_dev_push_refreshes_stored_durations_unless_the_run_was_cancelled():
     assert download["with"] == {"pattern": "durations-3.*", "path": "~/durations-samples/${{ github.run_id }}"}
     assert (
         refresh["run"]
-        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations\n'
+        == 'python -m tests.refresh_durations --samples ~/durations-samples --ci-run "$GITHUB_RUN_ID" --ci 5\ntest -s .test_durations || { echo "::error::refresh durations: wrote no .test_durations"; exit 1; }\n'
     )
     assert "env" not in refresh
     assert save["uses"].startswith("actions/cache/save@")
@@ -862,6 +862,13 @@ def test_samples_refresh_refuses_a_run_that_kept_no_durations(tmp_path, monkeypa
     monkeypatch.setattr(refresh_durations, "collected_tests", lambda root: ["t.py::a"])
     with pytest.raises(SystemExit, match="run 12 kept no durations"):
         refresh_durations.main(["--samples", str(samples), "--ci-run", "12", "--ci", "5"])
+
+
+def test_refresh_durations_names_missing_shards_from_the_push_unit_matrix():
+    workflow = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())
+    matrix = workflow["jobs"]["unit"]["strategy"]["matrix"]
+    assert matrix["python-version"] == list(refresh_durations.VERSIONS)
+    assert matrix["shard"] == list(range(1, refresh_durations.SHARDS + 1))
 
 
 def test_samples_refresh_keeps_earlier_durations_for_the_tests_of_a_failed_shard(tmp_path, monkeypatch):
@@ -964,6 +971,32 @@ def test_unit_shards_upload_elapsed_time_after_failed_pytest():
     _, upload = _unit_step_index(lambda step: step.get("name") == "Upload durations")
     assert upload["if"] == "${{ !cancelled() && hashFiles('durations.json') != '' }}"
     assert "elapsed.json" in upload["with"]["path"].split()
+
+
+@pytest.mark.parametrize("status", [0, 3])
+def test_selected_legs_record_elapsed_time_and_their_job_and_preserve_pytest_status(tmp_path, status):
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    step = next(item for item in steps if item.get("name") == "Run the selected tests")
+    (tmp_path / "pytest.py").write_text(
+        f"def main(args):\n    open('durations.json', 'w').write('{{}}')\n    return {status}\n"
+    )
+    result = subprocess.run(
+        ["bash", "-e", "-c", step["run"]],
+        cwd=tmp_path,
+        env={**os.environ, "PYTEST_ADDOPTS": "", "FILES": "tests/test_a.py", "GITHUB_JOB": "unit-selected"},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == status, result.stdout + result.stderr
+    elapsed = json.loads((tmp_path / "elapsed.json").read_text())
+    assert elapsed["job"] == "unit-selected"
+    assert elapsed["seconds"] >= 0
+
+
+def test_selected_legs_upload_elapsed_time_beside_their_durations():
+    steps = _workflow()["jobs"]["unit-selected"]["steps"]
+    upload = next(step for step in steps if step.get("name") == "Upload selected test durations")
+    assert upload["with"]["path"].split() == ["durations.json", "elapsed.json"]
 
 
 def test_every_shard_records_the_hash_of_the_durations_it_splits_on():
@@ -1184,7 +1217,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
         ),
         (
             "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
         ),
     )
     assert (
@@ -1196,6 +1229,7 @@ def test_mutation_shards_come_from_a_plan_sized_on_stored_timings():
     assert step["env"] == {
         "BASE": "${{ inputs.base || 'origin/dev' }}",
         "GH_TOKEN": "${{ steps.app-token.outputs.token }}",
+        "MUTATION_SHARD_CPU_QUOTA": "3",
     }
     names = [item.get("id") for item in plan["steps"]]
     mint = plan["steps"][names.index("app-token")]
@@ -1249,7 +1283,7 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         ),
         (
             "${{ !cancelled() && needs.mutation-plan.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
-            "${{ !cancelled() && needs.mutation-plan.result == 'success' && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
+            "${{ !cancelled() && needs.mutation-plan.result == 'success' && (needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]') && needs.mutation-stats.result == 'success' && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && ((github.event_name == 'pull_request' && github.base_ref == 'dev') || github.event_name == 'workflow_dispatch') }}",
         ),
     )
     assert stats["strategy"] == {
@@ -1259,8 +1293,18 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     setup = [step for step in mutation["steps"] if not str(step.get("name", "")).startswith(("Mutate", "Upload"))]
     downloads = ("Download the shared mutation stats", "Download the reused preflight report")
     setup = [step for step in setup if step.get("name") not in downloads]
-    assert stats["steps"][: len(setup)] == setup
-    collect = stats["steps"][len(setup)]
+    stats_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") != ".mutation-stats-cache"]
+    assert stats_steps[: len(setup)] == setup
+    collect = stats_steps[len(setup)]
+    cache_steps = [step for step in stats["steps"] if step.get("with", {}).get("path") == ".mutation-stats-cache"]
+    if cache_steps:
+        restore, save = cache_steps
+        assert restore["uses"] == "actions/cache/restore@v4"
+        assert save["uses"] == "actions/cache/save@v4"
+        assert restore["with"]["key"] == save["with"]["key"]
+        assert restore["if"] == save["if"] == "needs.mutation-plan.outputs.forwarded != 'true'"
+        assert stats["steps"].index(restore) < stats["steps"].index(collect) < stats["steps"].index(save)
+        assert stats["env"]["MUTATION_STATS_CACHE"] == "${{ github.workspace }}/.mutation-stats-cache"
     assert collect["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
     assert collect["env"]["PART"] == "${{ matrix.part }}"
     assert collect["env"]["PARTS"] == "${{ strategy.job-total }}"
@@ -1268,14 +1312,14 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
         'mkdir -p .mutation-stats && touch ".mutation-stats/collected-$PART" && python -m scripts.ci_mutation'
         ' --bases "$BASES" --budget 1080 --stats .mutation-stats --stats-part "$PART" --stats-parts "$PARTS"'
     )
-    upload = stats["steps"][len(setup) + 1]
+    upload = stats_steps[len(setup) + 1]
     assert upload["uses"] == "actions/upload-artifact@v4"
     assert upload["with"]["name"] == "mutation-stats-${{ matrix.part }}"
     assert upload["with"]["path"] == ".mutation-stats/"
     assert upload["with"]["include-hidden-files"] is True
     assert upload["with"]["if-no-files-found"] == "error"
     assert upload["with"]["overwrite"] is True
-    evidence = stats["steps"][len(setup) + 2]
+    evidence = stats_steps[len(setup) + 2]
     assert evidence["if"] == "failure()"
     assert evidence["with"]["name"] == "mutation-evidence-stats-${{ matrix.part }}"
     assert evidence["with"]["overwrite"] is True
@@ -1284,6 +1328,33 @@ def test_mutation_shards_reuse_stats_collected_once_in_planned_parts():
     assert names.index("Download the shared mutation stats") < names.index("Mutate changed Python files")
     assert download["uses"] == "actions/download-artifact@v4"
     assert download["with"] == {"pattern": "mutation-stats-*", "path": ".mutation-stats", "merge-multiple": True}
+
+
+def test_a_one_part_one_shard_plan_mutates_inside_the_statistics_job():
+    jobs = _mutation_workflow()["jobs"]
+    stats, mutation = jobs["mutation-stats"], jobs["mutation"]
+    single = "needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]'"
+    assert (
+        "(needs.mutation-plan.outputs.shards != '[0]' || needs.mutation-plan.outputs.stats_parts != '[0]')"
+        in mutation["if"]
+    )
+    assert jobs["gate-required"]["steps"][0]["env"]["INLINE"] == "${{ " + single + " }}"
+    names = [step.get("name") for step in stats["steps"]]
+    mutate = stats["steps"][names.index("Mutate the only shard in the statistics job")]
+    assert mutate["id"] == "mutate"
+    assert mutate["if"] == f"{single} && needs.mutation-plan.outputs.forwarded != 'true'"
+    assert mutate["env"]["BASES"] == "${{ needs.mutation-plan.outputs.bases }}"
+    assert mutate["run"] == (
+        'python -m scripts.ci_mutation --bases "$BASES" --budget 1080 --shard 0 --shards 1 --stats .mutation-stats'
+    )
+    assert names.index("Upload mutation stats part") < names.index(mutate["name"])
+    report = stats["steps"][names.index("Upload complete inline mutation evidence")]
+    assert report["if"] == "always() && steps.mutate.outcome != 'skipped'"
+    assert report["with"]["name"] == "mutation-report-0"
+    assert (
+        report["with"]["path"] == "${{ job.status == 'success' && '.mutation-gate/report.json' || '.mutation-gate/' }}"
+    )
+    assert names.index(mutate["name"]) < names.index(report["name"])
 
 
 def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_protected_grader():
@@ -1335,6 +1406,8 @@ def test_pull_request_mutation_reuses_the_preflight_of_its_exact_head_from_the_p
         f"github.event_name == 'workflow_dispatch' && {skipped}",
         f"always() && {skipped}",
         f"{skipped} && needs.mutation-plan.outputs.selection == 'true'",
+        f"needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' && {skipped}",
+        "always() && steps.mutate.outcome != 'skipped'",
     )
     for job in (stats, mutation):
         assert all(step["if"] == skipped or step["if"] in unguarded for step in job["steps"])

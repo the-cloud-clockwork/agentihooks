@@ -50,7 +50,7 @@ def typed_wake(inbox, agent):
 def decide(item, pane, history, now_ms, window, slug, since=0):
     """pane is the receiver's herdr status, None when it sits outside herdr; the window clock skips the swarm's
     outage time since the item's last step, and starts no earlier than since. since None holds the item."""
-    if item.state != "pending" or since is None:
+    if item.state != "pending" or item.fyi or since is None:
         return None
     steps = [e.get("event") for e in history]
     if TO_OPERATOR in steps:
@@ -62,9 +62,7 @@ def decide(item, pane, history, now_ms, window, slug, since=0):
     wakes = steps.count(WOKEN)
     if pane in READY and wakes < MAX_WAKES and (wakes == 0 or due):
         return WOKEN
-    return (
-        TO_MASTER if due and not item.ref.startswith(("inbox-escalation:", "spawn-stall:")) and not item.fyi else None
-    )
+    return TO_MASTER if due and not item.ref.startswith(("inbox-escalation:", "spawn-stall:")) else None
 
 
 def raised_note(master: str, raised_id: str) -> str:

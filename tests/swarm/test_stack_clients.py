@@ -6,8 +6,6 @@ import pytest
 
 from scripts.swarm import stack_env, stack_init
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis_source(monkeypatch):
@@ -81,7 +79,7 @@ def test_prepare_clients_keeps_the_live_store_and_legacy_clients(
     if source_kind != "default":
         environ["AGENTIHOOKS_SWARM_REDIS_URL"] = urllib.parse.urlunsplit((scheme, address, "/0", query, ""))
     redis_source.set("test-stage:inbox:retained", "pending")
-    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 0, out.getvalue()
+    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out, "") == 0, out.getvalue()
     loaded = operator_env.values(environ)
     endpoint = urllib.parse.urlsplit(loaded["AGENTIHOOKS_SWARM_REDIS_URL"])
     assert (
@@ -106,7 +104,7 @@ def test_prepare_clients_keeps_the_live_store_and_legacy_clients(
         == "Named Redis clients activated on the existing store; services, data and ports are unchanged.\n"
     )
     refreshed = {**environ, **loaded}
-    assert stack_init.init(["--prepare-clients"], refreshed, no_docker, no_docker, out) == 0, out.getvalue()
+    assert stack_init.init(["--prepare-clients"], refreshed, no_docker, no_docker, out, "") == 0, out.getvalue()
     assert operator_env.values(environ)["AGENTIHOOKS_SWARM_REDIS_URL"] == loaded["AGENTIHOOKS_SWARM_REDIS_URL"]
 
 
@@ -148,7 +146,7 @@ def test_failed_preparation_preserves_previous_activation(prepared, redis_source
         monkeypatch.setattr(type(redis_source), "acl_getuser", passwordless)
     else:
         redis_source.acl_deluser("swarm")
-    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 1
+    assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out, "") == 1
     assert out.getvalue() == message
     assert target.read_text() == "PREVIOUS=kept\n"
     assert bundle["SWARM_REDIS_PASSWORD"] not in out.getvalue()
@@ -163,7 +161,7 @@ def test_failed_atomic_publication_preserves_previous_activation(prepared):
     target = home / "swarm-client.env"
     stack_env.write_private(target, "PREVIOUS=kept\n")
     with patch.object(stack_clients.os, "replace", side_effect=OSError):
-        assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out) == 1
+        assert stack_init.init(["--prepare-clients"], environ, no_docker, no_docker, out, "") == 1
     assert out.getvalue() == "Client preparation failed (OSError); existing client settings are unchanged.\n"
     assert target.read_text() == "PREVIOUS=kept\n"
     assert stat.S_IMODE((home / "swarm-client.env.next").stat().st_mode) == 0o600

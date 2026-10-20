@@ -9,6 +9,7 @@ from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import hierarchy, legacy
 from scripts.swarm_ledger.repository import sqlite as store
+from tests.swarm_ledger.api_fakes import as_services
 
 SLUG = "hierarchy-reads"
 STATE = {
@@ -139,7 +140,7 @@ def test_cycles_in_parents_and_dependencies_end(tmp_path):
 
 
 def server(repo):
-    return SimpleNamespace(repository=repo)
+    return as_services(SimpleNamespace(repository=repo))
 
 
 def test_the_hierarchy_resource_reads_the_ledger_tree_with_states(repo):

@@ -16,9 +16,6 @@ SWARM = {"AGENTIHOOKS_SWARM": "demo", "AGENTIHOOKS_AGENT_NAME": "master@a1-1"}
 WINDOW = operator_mode.WINDOW_SEC
 
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 @pytest.fixture(autouse=True)
 def ledgers(tmp_path, monkeypatch):
     import fakeredis

@@ -13,7 +13,7 @@ from scripts.swarm_v2 import master_scale, masters
 from scripts.swarm_v2.masters_channel import MastersChannel
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 FIXTURE = json.loads((Path(__file__).parent / "fixtures" / "swarm_v2" / "master-scaling.json").read_text())
 SLUG = FIXTURE["slug"]

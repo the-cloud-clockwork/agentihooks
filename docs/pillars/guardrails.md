@@ -10,7 +10,7 @@ permalink: /docs/pillars/guardrails/
 
 **What keeps them safe.**
 
-Claude Code agents are powerful. Without boundaries, they can push to production branches, bump versions without a release workflow, leak credentials into tool calls, loop infinitely on broken commands, or quietly bloat their own instruction files. Guardrails close all of these gaps — automatically, at the hook layer, before any damage reaches your codebase.
+Guardrails apply to Claude Code and Codex. Both harnesses can run powerful tools. Without boundaries, they can push to production branches, bump versions without a release workflow, leak credentials into tool calls, loop infinitely on broken commands, or quietly bloat their own instruction files. Guardrails close all of these gaps — automatically, at the hook layer, before any damage reaches your codebase.
 
 > Your fleet operates within boundaries you set.
 

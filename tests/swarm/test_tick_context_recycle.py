@@ -7,8 +7,6 @@ from scripts.swarm import tick as tick_module
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():

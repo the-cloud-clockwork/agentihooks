@@ -1,7 +1,6 @@
 # CODEX-COMPAT — OpenAI Codex CLI as an AgentiHooks target
 
-Reference for the `codex` install target, and the companion to
-[COPILOT-COMPAT.md](COPILOT-COMPAT.md).
+Reference for Codex, one of the two supported harnesses alongside Claude Code.
 
 **Provenance.** This page was reconstructed from the adapter implementation
 (`scripts/targets/codex_target.py`, `hooks/targets/`) and its test suite after
@@ -67,17 +66,16 @@ re-renders when the operator `hooks.json` changes.
 Codex parses hook stdout as exactly one JSON object, unlike Claude Code which
 concatenates every raw stdout line. Handlers buffer through
 `hooks/targets/emitter.py` and flush once at process exit. The predicate is
-`buffers_single_envelope()` — copilot shares the property, so it is a target
-capability rather than a codex identity check.
+`buffers_single_envelope()` expresses this as a target capability.
 
 ### §2.4 Permission channel
 
-| | claude | codex | copilot |
-|---|---|---|---|
-| `permissionDecision` | allow/deny/ask | **deny only** | allow/deny/ask |
-| `additionalContext` size before spilling | uncapped | **~2,500 tokens unless `additionalContextLimit` says otherwise** | uncapped |
-| `additionalContext` on PreToolUse | yes | **no** | yes |
-| `modifiedArgs` | no | no | yes |
+| | claude | codex |
+|---|---|---|
+| `permissionDecision` | allow/deny/ask | **deny only** |
+| `additionalContext` size before spilling | uncapped | **~2,500 tokens unless `additionalContextLimit` says otherwise** |
+| `additionalContext` on PreToolUse | yes | **no** |
+| `modifiedArgs` | no | no |
 
 Encoded in `hooks/targets/capabilities.py`. Blocking via exit code 2 + stderr
 works on every codex event, same as Claude — which is why
@@ -141,7 +139,7 @@ for the transcript-driven events (`SessionEnd`, `Stop`, `SubagentStop`,
 exactly-one-installed-target recall → interactive TTY prompt → non-interactive
 multi-target warning + default → `DEFAULT_TARGET` (`claude`).
 
-Target-neutral helpers shared with the copilot adapter live in
+Target-neutral helpers live in
 `scripts/targets/_common.py` — notably `build_persona()` and `write_persona()`,
 so the identity preamble and the operator-tail preservation rules cannot drift
 between targets.
@@ -259,8 +257,7 @@ scanning.
 - http → `{url, http_headers}`, codex infers the type from the url alone
 
 **SSE is skipped with a warning** — codex has no SSE client. Expose a
-streamable-HTTP endpoint and re-run init. (Copilot diverges here: it ships an SSE
-client, so its adapter must not copy this branch.)
+streamable-HTTP endpoint and re-run init.
 
 **Header placeholders.** Claude Code expands `${VAR}` in header values at connect
 time; codex sends them **literally** (verified: gateway 401 on the raw

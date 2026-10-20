@@ -8,8 +8,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import ledger_events, priority_sweep
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 MINUTE = 60_000
 ANSWERS = Path(__file__).resolve().parents[1] / "fixtures" / "github_pr"
 GATE = "Gate — Required"

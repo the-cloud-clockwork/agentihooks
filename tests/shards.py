@@ -1,6 +1,7 @@
 import ast
 import importlib
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -60,13 +61,25 @@ def assign_nodes(
     workers: int,
     sizes: dict[str, int] | None = None,
 ) -> list[list[str]]:
-    serial = {node: seconds if node.split("::", 1)[0] in grouped else 0.0 for node, seconds in durations.items()}
-    serial_groups = (
-        {node: grouped.get(node.split("::", 1)[0], "") for node in durations} if isinstance(grouped, dict) else None
-    )
-    files = {node: node.split("::", 1)[0] for node in durations}
-    collection = {node: (sizes or {}).get(path, 0) * SECONDS_PER_SOURCE_BYTE for node, path in files.items()}
-    return _assign_work(durations, serial, collection, shards, workers, serial_groups, files)
+    # A named group's tests in one file reuse what its first test built, which another shard would build again; a
+    # group longer than an even shard share still splits, since one shard cannot hold it.
+    share = sum(durations.values()) / shards
+    file_seconds: dict[str, float] = {}
+    for node, duration in durations.items():
+        path = node.split("::", 1)[0]
+        file_seconds[path] = file_seconds.get(path, 0.0) + duration
+    units: dict[str, list[str]] = {}
+    for node in durations:
+        path = node.split("::", 1)[0]
+        together = isinstance(grouped, dict) and path in grouped and file_seconds[path] <= share
+        units.setdefault(path if together else node, []).append(node)
+    seconds = {unit: sum(durations[node] for node in nodes) for unit, nodes in units.items()}
+    files = {unit: unit.split("::", 1)[0] for unit in units}
+    serial = {unit: seconds[unit] if path in grouped else 0.0 for unit, path in files.items()}
+    serial_groups = {unit: grouped.get(path, "") for unit, path in files.items()} if isinstance(grouped, dict) else None
+    collection = {unit: (sizes or {}).get(path, 0) * SECONDS_PER_SOURCE_BYTE for unit, path in files.items()}
+    parts = _assign_work(seconds, serial, collection, shards, workers, serial_groups, files)
+    return [[node for unit in part for node in units[unit]] for part in parts]
 
 
 def _assign_work(
@@ -109,7 +122,13 @@ def _assign_work(
 
 
 def slowest_first(nodeids: list[str], durations: dict[str, float], floor: float) -> list[str]:
-    seconds = {nodeid: durations.get(nodeid.split("@", 1)[0], 0.0) for nodeid in nodeids}
+    seconds = {nodeid: durations.get(re.sub(r"@[^\[\]]*$", "", nodeid), 0.0) for nodeid in nodeids}
+    # A group's later tests reuse what its first test built, so the group keeps collection order at its slowest place.
+    groups = {nodeid: match[1] for nodeid in nodeids if (match := re.search(r"@([^\[\]]*)$", nodeid))}
+    slowest = {}
+    for nodeid, group in groups.items():
+        slowest[group] = max(slowest.get(group, 0.0), seconds[nodeid])
+    seconds.update({nodeid: slowest[group] for nodeid, group in groups.items()})
     slow = sorted((nodeid for nodeid in nodeids if seconds[nodeid] >= floor), key=lambda nodeid: -seconds[nodeid])
     return slow + [nodeid for nodeid in nodeids if seconds[nodeid] < floor]
 

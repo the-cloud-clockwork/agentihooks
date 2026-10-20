@@ -15,6 +15,8 @@ parent: Getting Started
 
 ---
 
+For the packaged service stack, use the [Docker Compose bundle quick start](compose-quick-start.md). The native installation below configures **Claude Code and Codex** on an agent host. Plain `agentihooks init` installs both; `--target claude` or `--target codex` selects one. Claude-specific paths below describe its native configuration; Codex uses `config.toml`, `hooks.json` and `AGENTS.md` as detailed in the [Codex reference](../reference/CODEX-COMPAT.md).
+
 ## 1. Install uv
 
 AgentiHooks uses [uv](https://github.com/astral-sh/uv) for dependency management.
@@ -133,7 +135,7 @@ Confirm the MCP server is registered:
 cat ~/.claude.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(list(d.get('mcpServers',{}).keys()))"
 ```
 
-Start a Claude Code session and verify by asking:
+Start a Claude Code or Codex session and verify by asking:
 
 ```
 What MCP tools do you have available?

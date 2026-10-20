@@ -1,29 +1,50 @@
 import argparse
 import asyncio
 import fcntl
+import hashlib
+import json
 import os
 import signal
 import subprocess
 import sys
+import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from threading import Event
+from typing import TextIO
+from urllib.parse import urlsplit
 
 from scripts.scheduler.core import Scheduler
+
+ROOT = Path(__file__).resolve().parents[2]
+RECORD = "supervisor.json"
+DRAIN_S = 30
 
 
 class AlreadyRunning(RuntimeError):
     pass
 
 
-def runtime_dir() -> Path:
-    return Path.home() / ".cache" / "agentihooks" / "scheduler"
+def runtime_dir(environ: Mapping[str, str] | None = None) -> Path:
+    from scripts.swarm.keyspace import ROOT
+    from scripts.swarm.store import redis_url
+
+    env = os.environ if environ is None else environ
+    url = urlsplit(redis_url(env))
+    endpoint = (url.scheme, url.hostname, url.port or 6379, url.path or "/0")
+    member = env.get("AGENTIHOOKS_HIVE_ID") if env.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local" else ""
+    directory = Path.home() / ".cache" / "agentihooks" / "scheduler"
+    if endpoint == ("redis", "127.0.0.1", 6379, "/0") and not member:
+        return directory
+    namespace = f"{ROOT}:hive:{member}" if member else ""
+    identity = json.dumps((endpoint, namespace)).encode()
+    return directory / hashlib.sha256(identity).hexdigest()
 
 
 @contextmanager
-def machine_lock(name: str) -> Iterator[None]:
-    directory = runtime_dir()
+def machine_lock(name: str, *, environ: Mapping[str, str] | None = None) -> Iterator[TextIO]:
+    directory = runtime_dir(environ) if environ is not None else runtime_dir()
     directory.mkdir(parents=True, exist_ok=True)
     with (directory / f"{name}.lock").open("a+") as handle:
         try:
@@ -35,13 +56,13 @@ def machine_lock(name: str) -> Iterator[None]:
             handle.truncate()
             handle.write(str(os.getpid()))
             handle.flush()
-            yield
+            yield handle
         finally:
             fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
-    stopped = stop if stop is not None else asyncio.Event()
+    stopped = stop if stop is not None else _on_signals()
     with machine_lock("runner"):
         while not stopped.is_set():
             await asyncio.to_thread(scheduler.run_due)
@@ -51,13 +72,23 @@ async def run(scheduler: Scheduler, stop: asyncio.Event | None = None) -> None:
                 pass
 
 
+def _on_signals() -> asyncio.Event:
+    stopped = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        loop.add_signal_handler(sig, stopped.set)
+    return stopped
+
+
 def _command(mode: str) -> list[str]:
     return [sys.executable, "-m", "scripts.scheduler.service", mode]
 
 
 def supervise(stop: Event | None = None) -> None:
     stopped = stop if stop is not None else Event()
+    loaded = revision(ROOT)
     with machine_lock("supervisor"):
+        _identify(loaded)
         while not stopped.is_set():
             child = subprocess.Popen(_command("run"), cwd=Path(__file__).resolve().parents[2])
             while child.poll() is None:
@@ -69,6 +100,54 @@ def supervise(stop: Event | None = None) -> None:
                 return
 
 
+def _identify(loaded: str) -> None:
+    record = {"pid": os.getpid(), "root": str(ROOT), "revision": loaded, "started": time.time()}
+    (runtime_dir() / RECORD).write_text(json.dumps(record))
+
+
+def revision(root: Path | str) -> str:
+    try:
+        shown = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"], capture_output=True, text=True, timeout=10
+        )
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    return shown.stdout.strip() if shown.returncode == 0 else ""
+
+
+def holder(environ: Mapping[str, str]) -> dict | None:
+    try:
+        with machine_lock("supervisor", environ=environ):
+            return None
+    except AlreadyRunning:
+        pass
+    directory = runtime_dir(environ)
+    try:
+        pid = int((directory / "supervisor.lock").read_text())
+    except (OSError, ValueError):
+        pid = 0
+    try:
+        record = json.loads((directory / RECORD).read_text())
+    except (OSError, ValueError):
+        return {"pid": pid}
+    return record if isinstance(record, dict) and record.get("pid") == pid else {"pid": pid}
+
+
+def drain(pid: int, environ: Mapping[str, str]) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass
+    deadline = time.monotonic() + DRAIN_S
+    while holder(environ) is not None:
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(1)
+    return True
+
+
 def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     active = dict(os.environ if environ is None else environ)
     if not (
@@ -76,10 +155,10 @@ def ensure_running(environ: Mapping[str, str] | None = None) -> bool:
     ):
         return False
     try:
-        with machine_lock("startup"):
-            with machine_lock("supervisor"):
+        with machine_lock("startup", environ=active):
+            with machine_lock("supervisor", environ=active):
                 pass
-            with (runtime_dir() / "scheduler.log").open("ab") as log:
+            with (runtime_dir(active) / "scheduler.log").open("ab") as log:
                 subprocess.Popen(
                     _command("supervise"),
                     cwd=Path(__file__).resolve().parents[2],

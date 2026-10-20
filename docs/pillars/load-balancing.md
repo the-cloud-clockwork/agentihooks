@@ -27,8 +27,8 @@ export AH_CC_TOKEN_personal=...  # account "personal"
 
 `agenti` (alias of `agentihooks claude`) and `agentihooks init-agent` launch
 Claude on one of them. The launched session keeps only its own
-`AH_CC_TOKEN_<slug>`; that variable name is how every tool below tells which
-account a session runs on. Token values are never printed or logged.
+`AH_CC_TOKEN_<slug>`; that variable carries the token every tool below uses to
+tell which account a session runs on. Token values are never printed or logged.
 
 ### Loading accounts from OpenBao
 
@@ -229,11 +229,13 @@ A Claude launch also sets `AGENTIHOOKS_ROUTE_ACCOUNT` to the account it chose
 
 ## Route markers
 
-Attribution reads variable names only, never values. A process whose
-environment holds `AH_ROUTE_API` counts on the account `api`; otherwise it counts
-on the one `AH_CC_TOKEN_<slug>` (Claude) or `AH_CX_TOKEN_<slug>` (Codex) it holds,
-and on `unrouted` (Claude) or `default` (Codex) with none or several. The launch
-line names the side:
+Attribution reads variable names, plus a Claude token's SHA-256 to merge
+renamed accounts ([Renamed account variables](#renamed-account-variables));
+values are never printed. A process whose environment holds `AH_ROUTE_API`
+counts on the account `api`; otherwise it counts on the one
+`AH_CC_TOKEN_<slug>` (Claude) or `AH_CX_TOKEN_<slug>` (Codex) it holds, and on
+`unrouted` (Claude) or `default` (Codex) with none or several. The launch line
+names the side:
 
 ```text
 [agenti] account=api kind=api sessions=1/1000000 source=cached
@@ -315,11 +317,121 @@ still use that account. A second master lowers the ceiling to 60%, so the same
 it at 50% used. When the count drops, the next reservation reading uses the
 corresponding ceiling; with no live master the reservation disappears.
 
+A master placed on a token route sees the declared account with its original
+session cap and quota state. With one live master, the declared account at 72%
+of the week used with five hour room left, and every other account spent, a
+worker is refused, while a new or handed off master on fallback auth is placed
+on the declared account.
+
 The account report includes the reason, for example
 `reserved for 2 live masters: workers stop at 60% of the week`. Use
 `agentihooks balance` and `agentihooks quota` to inspect the declaration and
 reservation. See [Interactive masters and Remote Control](swarm.md#interactive-masters-and-remote-control)
 for launch authentication, fallback and phone access.
+
+### Quota readings for an interactive master account
+
+A Claude master account declared with no `AH_CC_TOKEN_<slug>` variable is an
+interactive login: the balancer has no token to probe, so the router cache
+holds no reading for it. Swarm capacity reads its quota from the master's own
+sessions instead:
+
+1. The status line writes each session's snapshot to
+   `~/.agentihooks/quota_usage/<session id>.json` (see
+   [Quota usage banner](#quota-usage-banner)). When the session's environment
+   holds exactly one non empty `AH_ROUTE_INTERACTIVE_<slug>` variable, the
+   snapshot also records `"account": "<slug>"`. A session holding none,
+   several, an empty value or the bare prefix records no account.
+2. For the declared Claude master account of kind interactive, swarm capacity
+   takes the freshest snapshot naming that slug that is no older than
+   `QUOTA_USAGE_STALE_SEC`. Unreadable and malformed files are skipped.
+3. That snapshot becomes the account's reading: the master row carries its
+   5-hour left, week left, both reset times and the time the snapshot was
+   written. A snapshot missing one window reads that window as unknown.
+
+Only swarm capacity reads these snapshots; `agentihooks balance` does not, and
+lists a tokenless master account with unknown windows.
+
+A snapshot written by an interactive master session:
+
+```json
+{
+  "updated_at": 1792469429.3,
+  "rate_limits": {
+    "five_hour": {"used_percentage": 30.0, "resets_at": 1792476000},
+    "seven_day": {"used_percentage": 60.0, "resets_at": 1792890000}
+  },
+  "account": "home"
+}
+```
+
+With `home` declared as the Claude master account, the swarm quota view shows
+`home` with 70% of its 5-hour window and 40% of its week left. The cap stays
+unknown and the state `UNKNOWN`, so the swarm offers no worker seats on the
+account; the row exists to carry the week left that the
+[reservation](#master-accounts-and-reserved-headroom) is judged against. With
+one live master and 60% of the week used the reservation does not close the
+row; at 70% used it does.
+
+The reading never applies to:
+
+- an account that holds a token (it is probed like any other account);
+- a Codex declaration, an undeclared account, or a declaration the routing
+  settings store cannot load;
+- a snapshot older than `QUOTA_USAGE_STALE_SEC`. The row then stays `UNKNOWN`
+  with no windows, and the reservation cannot close it until a fresh
+  snapshot arrives.
+
+The row appears only while the swarm counts a live session on the account.
+Interactive sessions count under their `AH_ROUTE_INTERACTIVE_<slug>` name. A
+Codex master on the native login needs no snapshot: a Codex process holding
+`AH_ROUTE_INTERACTIVE_default` counts under `default`, and that account's
+rollout logs already supply its quota.
+
+### Reserved rows in `agentihooks balance`
+
+`agentihooks balance` applies the rule the swarm quota view applies to Claude
+and Codex rows, so a row with the same reading closes in both. A row closes
+when all of these hold:
+
+- its harness and account match the declared master account of that harness;
+- it is not an api row;
+- its week left is known; a week whose reset time has passed counts as reset;
+- the week used reaches the ceiling for the live master count.
+
+A closed row shows state `CLOSED`, cap `0` and `(reserved)` after the account
+name and its `MASTER <tier>` mark. One line per closed row under the table
+names the harness, the account and the reason:
+
+```text
+$ agentihooks balance
+#  HARNESS  ACCOUNT                        KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET  AGE
+-  -------  -----------------------------  ------------  ------  --------  ------  ---  ------------  -------  --------  -------  --------  ---
+1  claude   home MASTER Max (reserved)     subscription  CLOSED  2/0       -       0    -             90%      -         30%      -         -
+2  codex    default MASTER Pro (reserved)  subscription  CLOSED  1/0       -       0    -             90%      -         20%      -         -
+3  codex    spare                          subscription  NORMAL  0/6       -       6    -             90%      -         80%      -         -
+claude home: reserved for 2 live masters: workers stop at 60% of the week
+codex default: reserved for 1 live master: workers stop at 70% of the week
+```
+
+With `--fable` the table lists Claude rows only, so only the Claude line
+appears. Rows from `agentihooks quota --json` carry a `reserved` key; only
+`balance` applies the reservation, so `quota` leaves it empty.
+
+If a reserved account still shows as open:
+
+- The week left is `-`: there is no fresh reading, so no reservation can close
+  the row. `balance` reads only probed and cached token readings, so a
+  tokenless interactive Claude master always shows `-` there and stays open;
+  its reservation is visible in the swarm quota view. For that view, check
+  that a live master session holds exactly one non empty
+  `AH_ROUTE_INTERACTIVE_<slug>` and that its snapshot is younger than
+  `QUOTA_USAGE_STALE_SEC`.
+- The account name differs from the declaration: check
+  `agentihooks balance settings` for `master-account-claude` or
+  `master-account-codex`.
+- No master is live on the account: with zero live masters there is no
+  reservation.
 
 ## Skill evaluations
 
@@ -354,8 +466,10 @@ environment unchanged.
 ## Counting sessions
 
 Live sessions are counted from `/proc`: every interactive `claude` process (not
-`claude -p`) is attributed to `api` when it holds `AH_ROUTE_API`, else to the one
-`AH_CC_TOKEN_<slug>` name in its environment, or to `unrouted` when it has none.
+`claude -p`) is attributed to `api` when it holds `AH_ROUTE_API`, else to the
+account its one `AH_CC_TOKEN_<slug>` value belongs to (see
+[Renamed account variables](#renamed-account-variables)), or to `unrouted`
+when it has none or several.
 A session that handed its work off (below) no longer holds a slot.
 
 ```text
@@ -370,6 +484,56 @@ $ agentihooks balance
 `agentihooks balance --current` marks the account this session runs on. The
 session registry (`~/.agentihooks/active-sessions.json`) also records each
 session's real Claude PID and account at SessionStart.
+
+### Renamed account variables
+
+Renaming a Claude account's variable, for example from `AH_CC_TOKEN_work` to
+`AH_CC_TOKEN_work_example_com`, leaves sessions started before the rename
+carrying the old name. The counter matches each session to an account by its
+token value, so those sessions still count against the one account:
+
+- The configured tokens are the non empty `AH_CC_TOKEN_<slug>` names in the
+  environment plus the managed token block, `api` excluded. Each token counts
+  once, under the name chosen by the dedupe rule shared by every account list
+  (see [Codex accounts](#codex-accounts)); that name is the slug the balancer
+  routes the token under.
+- A session holding exactly one `AH_CC_TOKEN_<slug>` name is matched to a
+  configured token by a SHA-256 of its value, computed in process. A match
+  counts the session under the routed slug, whatever name it carries; no match
+  counts it under its own name. A session holding none or several names stays
+  `unrouted`, and one holding `AH_ROUTE_API` stays `api`.
+- `agentihooks balance`, `agentihooks quota`, the quota policy and the swarm
+  capacity step read this count, so on one host one token shows as one row
+  with the summed sessions and one cap. Distinct tokens stay separate rows.
+- The token value and its SHA-256 never leave the counter: no command, tool
+  or log prints them.
+- Only Claude subscription tokens are matched. Codex sessions still count by
+  their `AH_CX_TOKEN_<slug>` name.
+
+With six sessions started under `AH_CC_TOKEN_work` and both names holding the
+same token, `balance` shows one row instead of `work` at six sessions beside
+an empty `work_example_com` row whose cap the swarm would offer as free seats:
+
+```text
+$ agentihooks balance
+#  ACCOUNT            KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET
+-  -----------------  ------------  ------  --------  ------  ---  ------------  -------  --------  -------  --------
+1  work_example_com   subscription  NORMAL  6/6       -       6    54%           81%      30m       54%      5d10h
+```
+
+If the old name still shows as its own row:
+
+- The reading host has the old token but not the new name: neither its
+  environment nor its managed token block holds `AH_CC_TOKEN_<new slug>`, so
+  the old name is the only configured name for that token. Add the new name to
+  that host's token block (`agentihooks claude login`, or the OpenBao load) and
+  the rows merge on the next read.
+- Sessions are counted across [hives](hives.md): each hive daemon matches its
+  own sessions with its own configured tokens and publishes per account name.
+  A hive still configured with the old name publishes it as a separate row with
+  its own cap until every publishing hive holds the new name.
+- The old name holds a token that was since replaced: it matches nothing and
+  keeps its old name until those sessions end.
 
 ## Quota policy
 
@@ -399,7 +563,7 @@ waits or stops.
 
 | Directive | What the agent does | Enforcement |
 |---|---|---|
-| `QUOTA HANDOFF REQUIRED` | Writes a handoff document, runs `agentihooks init-agent --handoff`, reports where the work moved, stops | Injected on every tool call until done |
+| `QUOTA HANDOFF REQUIRED` | Writes a handoff document, runs `agentihooks init-agent --handoff`, reports where the work moved, stops; a swarm session instead writes its Handoff v2, runs `agentihooks swarm <slug> handoff DOC --reason quota` and stops, keeping its seat | Injected on every tool call until done |
 | `QUOTA WAIT` | Creates a one-shot `CronCreate` job for the 5h reset, tells the operator, stops | Every tool except `CronCreate` / `CronList` / `CronDelete` is blocked |
 | `QUOTA STOP` | Tells the operator to add another account or say "keep pushing" | Every tool is blocked |
 | `QUOTA PUSH` | Continues on this account until 100% | The operator typed "keep pushing" (or "push to 100") this session |
@@ -594,7 +758,9 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   idle account keeps its seats; a 7-day window that has reset in the meantime
   reads 100% left. `agentihooks quota` shows `STALE` only past that age, and
   judges a reading older than fifteen minutes on its week alone, without its old
-  five-hour window.
+  five-hour window. A `STALE` row whose 7-day window has reset since its reading
+  shows `-` for `7D LEFT` and `ROUTING LEFT`: the old reading says nothing about
+  the new week, so it is unknown rather than a full 100%.
   `--route` forces one. `init-agent --agent
   codex` and the swarm tick launch through it, and the route report names the
   account for the swarm panel.
@@ -602,7 +768,9 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   `AH_CC_TOKEN_*`, and runs `codex --no-daemon` with the token in
   `CODEX_ACCESS_TOKEN`. Codex keeps one app-server daemon per Codex home and that
   daemon answers with its own login, so a token session must not attach to it.
-  The Codex home, config and hooks stay the shared ones.
+  The Codex home, config and hooks stay the shared ones; each account's quota
+  readings come from its own sessions folder (see
+  [Account identity and own sessions folders](#account-identity-and-own-sessions-folders)).
 - The default account runs plain `codex` with no token variables. With no
   `AH_CX_TOKEN_*` set, every launch takes this path without checking the login.
 - Live sessions are counted per account from `/proc`: a Codex process with
@@ -616,6 +784,7 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   is a Codex process belongs to that session. A run started through a shell,
   even inside a Codex session, holds its own slot.
   Quota per account is the newest of the usage read and the rate-limit event in
+  that account's own sessions folder, or, while the folder holds no reading, in
   the session logs the session registry attributes to it; a token with neither
   shows no quota and still routes.
 - `agentihooks balance` and `agentihooks quota` print one table for every Claude
@@ -623,9 +792,18 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   LEFT 5H LEFT 5H RESET 7D LEFT 7D RESET`, Claude rows first, then Codex, each
   harness sorted by routing left, subscription rows numbered 1..N across the
   whole table (api and interactive rows unnumbered), `-` for any missing value.
+  A Codex row's `KIND` comes from the same Codex account routing offers, so the
+  table, `balance`, `quota --json` and the ledger page Quota panel agree with
+  the slot kinds in [Slots](#slots): the default `codex login` reads
+  `interactive` and each `AH_CX_TOKEN_<slug>` account reads `subscription`.
+  Like the Claude interactive row, the default login row carries no number and
+  sorts after every Codex token row.
   Codex routing left is its week left whenever the week is known. A signed-out
   default login shows `SIGNED_OUT` and a cancelled token `EXPIRED` with `-`
-  values. `balance --current` marks this session's account `(current)`. Sessions on
+  values. Each Codex row carries its account fingerprint, `#<8 hex>`, after the
+  name, and lines under the table name every refused duplicate and whether the
+  default login is a distinct ChatGPT account. `balance --current` marks this
+  session's account `(current)`. Sessions on
   names that are not listed accounts are counted in one last line,
   `+N sessions on unlisted account names`, only when there are any. `quota
   --json` gives the same fields per row with `harness`. `balance --fable` prints
@@ -639,6 +817,68 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   list (`balance`, `quota`, the tick, routing) counts a token value once: when
   several names hold the same token, the block's name is kept, else the first
   name in sort order.
+
+### Account identity and own sessions folders
+
+Two credentials can sign in the same ChatGPT account: a token exported under two
+slugs from one workspace, or a token account that is also the default `codex
+login`. Routing both would count one quota twice. The router compares accounts
+by identity, never by token value.
+
+- **Identity.** An account's identity is the `chatgpt_account_id` claim inside
+  its credential: the `AH_CX_TOKEN_<slug>` value for a token account, the access
+  token in the default login's `auth.json` for `default`. An api slot has none.
+  The claim is never printed. Output shows only its fingerprint, the first 8 hex
+  characters of its SHA-256, so two rows with the same fingerprint are the same
+  ChatGPT account.
+- **Duplicates.** When a token account repeats the identity of a token account
+  earlier in name order, the later one leaves the routing pool: no automatic
+  placement and no swarm seat. It gets a balance row only while live sessions
+  still run on it, with `-` for `CAP` and `ROUTING LEFT`. Every
+  `agentihooks codex` launch prints one line
+  per duplicate on stderr:
+
+  ```text
+  agentihooks codex: warning: AH_CX_TOKEN_ncgma_b is the same ChatGPT account as ncgma; it is not routed
+  ```
+
+  The fix is to remove one of the two exports from the managed token block, or
+  to log the second slug in with another workspace.
+- **Default login.** Once any token account exists, `default` leaves the pool
+  (see above), so it is never routed beside a token of the same account. The
+  balance table still names whether it is the same account as one of them.
+- **Own sessions folder.** Codex writes every rollout under
+  `CODEX_HOME/sessions`, and every account shares one `CODEX_HOME`. At each Stop
+  of a Codex session the hook hard links that session's rollout into
+  `CODEX_HOME/accounts/<account>/sessions` at the same relative path, with the
+  account taken from the token variable of the Codex process itself. The
+  router's `codex exec` quota probe links its thread the same way. A rollout
+  outside `CODEX_HOME/sessions` is not linked, and a failed link is logged and
+  never blocks the Stop.
+- **Reading quota.** An account whose folder exists reads its rate-limit events
+  from that folder alone, so one account's reading can never land on another.
+  An account with no reading there yet falls back to the session registry's
+  attribution, and the default login's fallback skips every session already
+  linked into a token account's folder. Sessions that predate the folders keep
+  their readings this way until their next Stop links them.
+
+`agentihooks balance` shows the fingerprints and the verdicts:
+
+```text
+$ agentihooks balance
+#  HARNESS  ACCOUNT           KIND          STATE   SESSIONS  WEIGHT  CAP  ROUTING LEFT  5H LEFT  5H RESET  7D LEFT  7D RESET
+1  codex    team_a #5f0e9a71  subscription  NORMAL  0/6       -       6    88%           -        -         88%      4d02h
+2  codex    ncgma #ab12cd34   subscription  NORMAL  2/6       -       6    71%           90%      3h10m     71%      2d15h
+AH_CX_TOKEN_ncgma_b is the same ChatGPT account as ncgma; it is not routed
+codex default login #ab12cd34: same ChatGPT account as ncgma
+```
+
+A default login that matches no token account reads
+`codex default login #<fingerprint>: distinct from ncgma, team_a`, listing every
+token account. A default login whose credential carries no claim, such as one
+signed out or signed in with an API key, reads `codex default login: identity
+unknown`. With no token account set, no verdict line is printed. `balance
+--fable` prints neither the warning nor the verdict.
 
 ### Logging in an account
 

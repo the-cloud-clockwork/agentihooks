@@ -8,7 +8,6 @@ from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from scripts.swarm_ledger import ledger_comments, ledger_kinds
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 WATCHED, DOCTOR = "watch", "watch-doctor"
 T0 = 1_000 * MINUTE_MS
 TASK_ID = re.compile(r"^[A-Za-z0-9][\w.-]{0,63}$")

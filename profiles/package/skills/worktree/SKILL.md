@@ -31,7 +31,7 @@ DEST="$("$WT" new --repo <repo-dir>)"
 
 Completion criterion: `$DEST` exists, `git -C "$DEST" rev-parse --abbrev-ref HEAD` prints `<name>`.
 
-`new` refuses when free space (the smaller of the worktree filesystem and, on WSL, `/mnt/c`) is below `WT_MIN_FREE_GB` (50) or the repo already has `WT_MAX_PER_REPO` (60) worktrees. Answer a refusal by finishing worktrees (`done`) and running `agentihooks gc`, never by raising the limit. `new` records the calling session as owner (`agentihooks lease`), so the hourly lifecycle sweep never removes a worktree whose session is alive.
+`new` refuses when free space (the smaller of the worktree filesystem and, on WSL, `/mnt/c`) is below `WT_MIN_FREE_GB` (50) or the repo already has `WT_MAX_PER_REPO` (60) worktrees. Answer a refusal by finishing worktrees (`done`) and running `agentihooks gc`, never by raising the limit. `new` records the calling agent session as owner (`agentihooks lease`) when one is found among its parent processes, so the hourly lifecycle sweep never removes a worktree whose session is alive. Once every session recorded as its owner has ended, a clean worktree whose head is on a remote is removed by the next hourly sweep, without the 2 h idle wait; unpushed or uncommitted work is never removed that way.
 
 ## Throwaway checkouts
 

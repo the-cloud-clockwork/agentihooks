@@ -63,15 +63,16 @@ names and every source path exists.
 
 <!-- DETERMINISTIC: validate limits, types and sources, store the ledger record -->
 ```bash
-agentihooks ledger new --content <content.json> --plan <plan-file> [--size small|swarm] [--as <name>]
+agentihooks ledger new --content <content.json> --plan <plan-file> [--as <name>]
 ```
 
 A ledger is small (the default) or swarm. A small ledger is one session's work
 without a swarm, created only when the operator asks for one. The session that
 creates it joins it as its worker through
 `--as <name>` (default `$AGENTIHOOKS_AGENT_NAME`; refused without one) and
-records its steps and findings there. A plan a swarm works takes `--size swarm`;
-`agentihooks swarm <slug> create` marks its ledger swarm. HOME shows each size.
+records its steps and findings there. A swarm ledger is created with its swarm by one command,
+`agentihooks swarm init <name> --plan <plan-file> --repo <dir>` (the init-swarm skill); `ledger new --size swarm`
+is refused except for proof and demo ledgers named by code. HOME shows each size.
 A small ledger moves itself to the bin once every phase, follow-up and task is
 done and every question answered, or after 7 days with no change; the bin
 deletes it 30 days later. A restored one stays on HOME until it changes again or
@@ -234,9 +235,10 @@ per agent life. Redis holds claims and the agent registry; an agentihooks schedu
 every minute, which retires finished agents, frees the tasks of dead ones and spawns up to the caps. No
 process runs between ticks.
 
-1. Tasks: put them in the content's `tasks` list (`title`, `description`, `phase`, `lane` eng or ci), or add
+1. `agentihooks swarm init <name> --plan <plan-file> --content <content.json> --repo <dir>` creates the swarm
+   and its ledger under the name, paused; `agentihooks swarm names check <name>` checks a name first.
+2. Tasks: put them in the content's `tasks` list (`title`, `description`, `phase`, `lane` eng or ci), or add
    them later with `agentihooks ledger --slug <slug> --as <name> task add <id> <title> --lane eng --phase p1`.
-2. `agentihooks swarm <slug> create --repo <dir> --max-eng-agents 2 --max-ci-agents 1` (created paused).
 3. `agentihooks swarm <slug> start`: scales up at once; `pause` stops new spawns, `stop` drains, `stop --now`
    kills every agent and reopens its task. Change caps with `agentihooks swarm <slug> max-eng-agents=3`.
 4. `agentihooks swarm <slug> status` and `agentihooks swarm list` show agents, tasks and state.
@@ -248,7 +250,7 @@ The session that started the swarm stays out of the work and speaks for the oper
 
 ## Page design (operator rules)
 
-Every change to `template.html` keeps these:
+Every change to the ledger page (`shell.html` and `static/`) keeps these:
 
 - Minimal. Messages (comments, answers, notes) are plain rows: author and time
   on one line, the text under it, faint Edit and Delete on the right. No cards,
@@ -361,4 +363,4 @@ In agentihooks `scripts/swarm_ledger/`; `agentihooks ledger` dispatches to them 
 | `chat_ledger.py` | Post a chat message as an agent through the running server | No (each call adds a message) |
 | `ledger_core.py` | Validation, flatten, checkbox merge, the `sync` facade over the repository | — (library) |
 | `repository/` | `SQLiteLedgerRepository`: row diff writes, events, summaries, token, bin registry, legacy import | — (library) |
-| `template.html` | The page: HTML + CSS + vanilla JS, no external requests | — |
+| `shell.html`, `static/` | The page: a static shell plus its CSS and ES modules, no external requests | — |

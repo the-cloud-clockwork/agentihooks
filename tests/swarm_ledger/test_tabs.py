@@ -40,7 +40,7 @@ def tab(browser):
     def route(request):
         if is_events(request.request.url):
             fulfill_events(request, ledger_state(DOC), SWARM)
-        elif "/api/swarm/" in request.request.url:
+        elif "/swarm/" in request.request.url:
             request.fulfill(json=SWARM)
         elif request.request.url.startswith(URL):
             request.fulfill(body=html, content_type="text/html")

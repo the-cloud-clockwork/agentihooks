@@ -280,7 +280,7 @@ spec:
             - name: AGENTIHOOKS_TERMINAL_JUMP_STATE
               value: /run/jump/state
             {{- end }}
-            {{- include "swarm.controllerSecretEnv" . | nindent 12 }}
+            {{- include "swarm.secretKeyEnv" .Values.controller.secretEnv | nindent 12 }}
             {{- include "swarm.extraEnv" .Values.controller.env | nindent 12 }}
           {{- include "swarm.envFrom" . | nindent 10 }}
           resources:

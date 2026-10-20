@@ -263,7 +263,7 @@ class Recovery:
         session = fence["native_session"] if recovery == restoring.NATIVE else ""
         directive = restoring.Directive(decision.checkpoint, recovery, session, fence["archive_watermark"])
         self.controller.require()
-        self.store.redis.hsetnx(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
+        self.store.redis.hset(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
 
     def _requested(self) -> None:
         for execution_id, choice in sorted(self.store.redis.hgetall(self._key(REQUESTS)).items()):

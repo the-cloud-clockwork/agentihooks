@@ -2,8 +2,8 @@
 
 title: AgentiHooks
 description: >-
-  Hook system and MCP tool server for Claude Code agents.
-  Event-driven hooks, 26 MCP tools across 8 categories, profile-based configuration.
+  Profiles, lifecycle guardrails and swarm coordination for Claude Code and Codex.
+  Start with the Docker Compose bundle quick start.
 url: "https://the-cloud-clockwork.github.io"
 baseurl: "/agentihooks"
 
@@ -45,6 +45,7 @@ defaults:
       layout: "default"
 
 exclude:
+  - docs/reference/COPILOT-COMPAT.md
   - hooks/
   - tests/
   - scripts/

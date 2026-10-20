@@ -49,9 +49,4 @@ def consume(store: RedisStore, slug: str) -> list[str]:
 
 
 def publish(store: RedisStore, slug: str, ledger: dict) -> None:
-    tails = {
-        task["id"]: ledger_workspace.tails(slug, task["id"])
-        for task in ledger.get("tasks", [])
-        if task.get("workspace")
-    }
-    commands.publish(store, slug, status_report(store, slug, ledger), tails)
+    commands.publish(store, slug, status_report(store, slug, ledger), ledger_workspace.published(store, slug, ledger))

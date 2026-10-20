@@ -17,7 +17,6 @@ from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.inbox.test_wake import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 ROOT = Path(__file__).resolve().parents[2]
 BOOT = """
 import json, shutil, sys, threading, time

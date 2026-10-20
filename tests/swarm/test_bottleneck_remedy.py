@@ -10,8 +10,6 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import ASSIST, MANUAL_SCALING, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 HOUR = 3_600_000

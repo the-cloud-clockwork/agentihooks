@@ -154,7 +154,7 @@ def _agent_record(slug: str, name: str) -> dict:
 
 def _ledger_task(slug: str, task: str) -> dict:
     from scripts.swarm_ledger.repository.folder import ledger_folder
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger.storage import read_ledger
 
     return ((read_ledger(ledger_folder(os.environ), slug, f"tasks/{task}") or {}).get("tasks") or [{}])[0]
 

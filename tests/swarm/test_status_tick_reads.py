@@ -7,8 +7,6 @@ import pytest
 from scripts.swarm import ledger_events, status
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize(
     "results,pending,passing",

@@ -17,7 +17,6 @@ from tests.swarm_ledger.test_caps_columns import browser as chromium_browser
 
 browser = chromium_browser
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 URL = "http://ledger.test/layout"
 NOW_MS = 1_791_300_000_000
 NOW_S = NOW_MS // 1000
@@ -146,7 +145,7 @@ class Page:
         request = route.request
         if is_events(request.url):
             fulfill_events(route, ledger_state(DOC), self.payload)
-        elif "/api/swarm/" in request.url:
+        elif "/swarm/" in request.url:
             if request.method == "PUT":
                 self.puts.append(json.loads(request.post_data))
             route.fulfill(json=self.payload)

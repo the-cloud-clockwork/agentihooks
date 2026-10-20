@@ -15,8 +15,6 @@ from scripts.swarm_v2.runtime import process
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import taker  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 HIVE = "hive-ledger-credential"
 HIVE_ID = "member-1"
 CARRIED = "s-261013-101500"

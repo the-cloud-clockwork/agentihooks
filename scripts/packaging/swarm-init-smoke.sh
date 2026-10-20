@@ -20,7 +20,7 @@ fi
 SETUPTOOLS_SCM_PRETEND_VERSION=0.0.0 "$work/venv/bin/pip" install --quiet .
 cd "$work"
 for run in first second; do
-  "$work/venv/bin/agentihooks" swarm init | tee "$work/$run.log"
+  "$work/venv/bin/agentihooks" swarm init smoke-swarm --operator-asked "run the swarm init smoke" | tee "$work/$run.log"
   grep -qx 'Swarm stack ready: redis, swarm and controller are healthy.' "$work/$run.log"
 done
 first="$(sed -n 's/^  1\. Open the ledger: //p' "$work/first.log")"
