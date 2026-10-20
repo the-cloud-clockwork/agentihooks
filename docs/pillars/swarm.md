@@ -35,8 +35,9 @@ Run `agentihooks swarm rename` to rename every live registered swarm's agents an
 `agentihooks swarm <id> rename` for one swarm. Running it again makes no changes. Running sessions retain
 their launch names; durable aliases keep inbox delivery, crew ownership, terminate selection, waits and
 heartbeats working under either name. Herdr uses dashes where canonical names use an at sign, as approved
-by the operator. A rename holds the swarm's tick lock while it runs, so no tick runs beside it, and refuses a swarm
-whose tick is running or that another hive controls; a rename killed mid run never holds up the next tick (see
+by the operator. For each swarm with agents, a rename takes the swarm's tick lock for up to ten minutes, so no tick
+runs beside it, and fails for a swarm whose tick is running or that another hive controls. A rename killed mid run on
+the same machine does not hold up the next tick (see
 [Tick lock holder record](#tick-lock-holder-record)).
 
 Every swarm agent is named `<type>@<code>-<number>`: `master@a1b2c3-0001`, `engineer@a1b2c3-0002`,
@@ -1466,8 +1467,9 @@ are refused. The tick lock prevents two ticks in the same epoch and lets a highe
 
 ### Tick lock holder record
 
-The tick lock is the Redis key `tick-lock` of the swarm, set for ten minutes. Its value is a holder record, a JSON
-object written by whoever takes the lock:
+The tick lock is the Redis key `tick-lock` of the swarm, set for ten minutes. A running tick extends it to ten
+minutes again before every step; a rename does not extend it, so a rename that runs past ten minutes loses the lock.
+Its value is a holder record, a JSON object written by whoever takes the lock:
 
 ```json
 {"epoch": 7, "token": "4f1c...", "host": "<boot id>:pid:[4026531836]", "pid": 41237, "start": "8812345"}
@@ -1477,24 +1479,29 @@ object written by whoever takes the lock:
 taker's process namespace, and `pid` and `start` name the process and its start time from `/proc`. Only the holder
 whose record matches exactly can extend or release the lock, so a holder that lost its lock never deletes another's.
 
-A take succeeds when the key is empty, holds a record from another lease epoch, or holds a record whose holder is dead. A holder is dead
-only when its `host` equals the taker's and its process is gone, a zombie, or a different process with a reused
-pid (another start time). A record from another host or pid namespace, a record missing `pid` or `start`, and a
-bare token that is not a JSON record are never judged dead; they block until the ten minute expiry. A take that
-races another write on the key or on the controller lease fails rather than overwrite it.
+A take succeeds when the key is empty, holds a record from another lease epoch, or holds a record of the same epoch
+whose holder is dead. A holder is dead only when its `host` equals the taker's and its process is gone, a zombie, or a
+different process with a reused pid (another start time). In the same epoch, a record from another host or pid
+namespace, a record missing `pid` or `start`, and a bare token that is not a JSON record are never judged dead; they
+block until the key expires, ten minutes after the holder's last extension. A take that races another write on the
+key gets no lock; one that races a change of the controller lease fails with `the controller lease is stale`.
 
 `agentihooks swarm tick` and `agentihooks swarm rename` take the lock the same way. Each first acquires the
-controller lease for this hive (`SWARM_HIVE_ID`, falling back to the hostname), then takes the tick lock with its own
-holder record, and releases it with its own token when it ends. A tick or rename killed mid run, by `kill -9`, a
-closed terminal or an out of memory kill, therefore costs no wait: the next tick on the same machine sees the dead
-holder and takes the lock at once.
+controller lease for this hive (the hive id from `scripts.swarm.commands.hive_id`: the hive membership, else
+`SWARM_HIVE_ID`, else the seeded registry id, else the hostname), then takes the tick lock with its own holder record,
+and releases it with its own token when it ends. The same hive gets the same lease epoch back, so a tick or rename
+killed mid run, by `kill -9`, a closed terminal or an out of memory kill, costs no wait: the next tick of this hive on
+the same machine sees the dead holder and takes the lock at once.
 
-| Situation at take | `swarm tick` | `swarm rename` |
+A tick prints its outcome as an action line and exits normally; a rename fails with the error, which
+`agentihooks swarm rename` prints after the swarm id (`<id>: swarm <id>: another tick or rename is running`).
+
+| Situation at take | `swarm tick` action | `swarm rename` error |
 |---|---|---|
 | Another hive holds the controller lease | `the swarm belongs to another hive` | `swarm <id>: belongs to another hive` |
 | A live tick or rename holds the lock in this epoch | `another tick is running` | `swarm <id>: another tick or rename is running` |
-| A killed tick or rename left the lock on this machine | takes it at once | takes it at once |
-| A holder on another machine, or a bare token, holds it | waits for the ten minute expiry | refused until the expiry |
+| A killed tick or rename of this hive left the lock on this machine | takes it at once | takes it at once |
+| A holder on another machine, or a bare token, holds it in this epoch | `another tick is running` until the key expires | `swarm <id>: another tick or rename is running` until the key expires |
 
 ### Tick heartbeat and stale watcher
 
