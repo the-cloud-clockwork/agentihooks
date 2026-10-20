@@ -682,6 +682,12 @@ it by name, so every Codex seat the tick offers is one `agentihooks codex
   LEFT 5H LEFT 5H RESET 7D LEFT 7D RESET`, Claude rows first, then Codex, each
   harness sorted by routing left, subscription rows numbered 1..N across the
   whole table (api and interactive rows unnumbered), `-` for any missing value.
+  A Codex row's `KIND` comes from the same Codex account routing offers, so the
+  table, `balance`, `quota --json` and the ledger page Quota panel agree with
+  the slot kinds in [Slots](#slots): the default `codex login` reads
+  `interactive` and each `AH_CX_TOKEN_<slug>` account reads `subscription`.
+  Like the Claude interactive row, the default login row carries no number and
+  sorts after every Codex token row.
   Codex routing left is its week left whenever the week is known. A signed-out
   default login shows `SIGNED_OUT` and a cancelled token `EXPIRED` with `-`
   values. Each Codex row carries its account fingerprint, `#<8 hex>`, after the

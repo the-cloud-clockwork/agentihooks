@@ -329,7 +329,8 @@ a free session under its quota band`.
 ## `agentihooks balance`
 
 Probe and rank every Claude account, plus the api row when an endpoint is
-configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `api`), `STATE`,
+configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `interactive`,
+`api`; the Codex default login reads `interactive`, as routing offers it), `STATE`,
 `SESSIONS` (live/cap), `WEIGHT` (api rows), `CAP`, `ROUTING LEFT` and the five
 hour and weekly windows (`n/a` on an api row).
 
