@@ -185,7 +185,13 @@ def turn_gaps(record: dict, limits: Limits) -> list[Finding]:
 
 
 def gap_agents(record: dict, limits: Limits) -> list[str]:
-    return sorted({_agent(t) for t in record["traces"] if any(m > limits.turn_gap_minutes for _, _, m in _gaps(t))})
+    newest = {}
+    for trace in record["traces"]:
+        turns = _turns(trace)
+        for a, b in zip(turns, turns[1:]):
+            if (b["start"] - a["end"]) // MINUTE_MS > limits.turn_gap_minutes:
+                newest[_agent(trace)] = max(newest.get(_agent(trace), 0), b["start"])
+    return sorted(newest, key=lambda name: (-newest[name], name))
 
 
 def wait_coverage(record: dict, limits: Limits) -> list[Finding]:

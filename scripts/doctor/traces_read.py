@@ -36,6 +36,7 @@ class Budget:
     active_seconds: float = 15.0
     history_seconds: float = 45.0
     wait_seconds: float = 15.0
+    step_seconds: float = 55.0
     request_seconds: float = 7.0
     trace_pages: int = 20
     observation_pages: int = 20
@@ -194,11 +195,13 @@ def history(
 def waits(
     read: Callable[[str], list[dict]],
     names: list[str],
-    seconds: float,
+    started: float,
+    budget: Budget,
     clock: Callable[[], float] = time.monotonic,
 ) -> tuple[dict[str, list[dict]], list[str]]:
-    """Each named agent's wait history until the budget is spent; the agents left unread are returned as a list."""
-    deadline = clock() + seconds
+    """Each named agent's wait history until the wait budget or the step that started at `started` is spent;
+    the agents left unread are returned as a list."""
+    deadline = min(started + budget.step_seconds, clock() + budget.wait_seconds)
     found = {}
     for name in names:
         if clock() >= deadline:

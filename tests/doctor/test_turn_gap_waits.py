@@ -73,7 +73,12 @@ def test_only_agents_with_a_gap_over_the_limit_need_their_wait_history():
     sample = record([])
     sample["traces"] += [_quiet("ci"), {**_quiet("engineer"), "session_id": "again"}]
     assert traces.gap_agents(sample, traces.Limits()) == ["engineer"]
-    assert traces.gap_agents(sample, traces.Limits(turn_gap_minutes=29)) == ["ci", "engineer"]
+    assert traces.gap_agents(sample, traces.Limits(turn_gap_minutes=29)) == ["engineer", "ci"]
+
+
+def test_wait_history_is_read_newest_gap_first_then_by_name():
+    sample = {"traces": [_quiet("dev"), _quiet("ci"), record([])["traces"][0]]}
+    assert traces.gap_agents(sample, traces.Limits(turn_gap_minutes=29)) == ["engineer", "ci", "dev"]
 
 
 def test_an_agent_whose_wait_history_was_not_read_is_not_judged_and_the_read_is_partial():
