@@ -39,7 +39,13 @@ def test_dev_history_keeps_deletion_force_push_and_linear_history_unbypassable()
     assert history["enforcement"] == "active"
     assert history["conditions"] == queue["conditions"]
     assert history["bypass_actors"] == []
-    assert [rule["type"] for rule in history["rules"]] == ["deletion", "non_fast_forward", "required_linear_history"]
+    gate = next(rule for rule in queue["rules"] if rule["type"] == "required_status_checks")
+    assert history["rules"] == [
+        {"type": "deletion"},
+        {"type": "non_fast_forward"},
+        {"type": "required_linear_history"},
+        gate,
+    ]
 
 
 def test_dev_merges_through_a_queue_that_runs_the_workflow_gate():

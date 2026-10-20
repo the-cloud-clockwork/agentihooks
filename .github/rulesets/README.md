@@ -9,10 +9,10 @@ admin role (`RepositoryRole` 5) and the agenticore GitHub App (`Integration`,
 its app id from the OpenBao `k8s/agenticore` field `GITHUB_APP_ID`), because
 GitHub honours a merge queue jump only for a bypass actor of the ruleset that
 holds the `merge_queue` rule. Pull request mode still lets those actors bypass
-linear history on a pull request merge, so `dev-history.json` repeats deletion,
-force push and linear history on dev with no bypass actors. The required
-check and the queue stay in `dev-no-delete`, so those two actors can still
-merge a pull request without waiting for `Gate — Required`.
+linear history and the required check on a pull request merge, so
+`dev-history.json` repeats deletion, force push, linear history and the
+`Gate — Required` check on dev with no bypass actors. A jump moves a pull
+request ahead in the queue; it still lands only on a passing gate.
 Dev requires the exact `Gate — Required` check from the Tests workflow and
 allows squash merges with zero required approvals. Instead of requiring each
 branch to be up to date, dev merges through a merge queue: the Tests workflow
