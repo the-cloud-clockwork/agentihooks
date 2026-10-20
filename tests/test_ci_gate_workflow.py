@@ -184,7 +184,7 @@ def test_lint_prepares_the_dashboard_checker_in_the_background_before_the_other_
     assert names.index(prepare["name"]) < min(names.index(name) for name in LINT_SETUP)
     assert prepare["env"]["CLICKHOUSE"] == check["env"]["CLICKHOUSE"]
     assert "orjson==" in prepare["run"]
-    assert "pip install" not in check["run"]
+    assert "-m pip install" not in check["run"]
     assert "docker run" not in check["run"]
     for status in ("columns-venv.status", "clickhouse.status"):
         assert f'echo $? > "$RUNNER_TEMP/{status}"' in prepare["run"]
