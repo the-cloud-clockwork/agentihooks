@@ -813,7 +813,9 @@ def test_a_head_changing_the_summary_steps_is_red(change):
 
 
 @pytest.mark.parametrize("separate", [False, True])
-def test_the_reviewed_summary_may_run_outside_required_grading(separate):
+@pytest.mark.parametrize("declared", [False, True])
+@pytest.mark.parametrize("runner", ["ubuntu-latest", _anton()])
+def test_the_reviewed_summary_may_run_outside_required_grading(separate, declared, runner):
     from scripts import ci_reuse
 
     base, head = _aggregators()
@@ -824,14 +826,20 @@ def test_the_reviewed_summary_may_run_outside_required_grading(separate):
         head["jobs"]["test-summary"] = {
             "needs": ["unit", "unit-selected"],
             "if": "${{ always() }}",
-            "runs-on": "ubuntu-latest",
+            "runs-on": runner,
             "timeout-minutes": 5,
             "steps": yaml.safe_load(_REVIEWED_SUMMARY),
         }
         head["jobs"]["unit-selected"] = {"runs-on": "ubuntu-latest"}
         head["jobs"]["gate-required"]["needs"].append("unit-selected")
-        config = {"not_gates": {"test.yml/test-summary": _entry()}}
-    assert _grade({"test.yml": head}, base={"test.yml": base}, head_config=config) == []
+        if declared:
+            config = {"not_gates": {"test.yml/test-summary": _entry()}}
+    expected = (
+        []
+        if not separate or declared
+        else ["test.yml/test-summary runs on pull requests but is not a need of Gate — Required."]
+    )
+    assert gate_protected.grade({"test.yml": base}, {}, {"test.yml": head}, config, _TODAY, _POLICY) == expected
 
 
 @pytest.mark.parametrize("change", ["steps", "needs", "if", "runs-on", "timeout-minutes", "env"])
