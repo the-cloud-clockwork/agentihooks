@@ -8,9 +8,9 @@ import subprocess
 import sys
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 from scripts import agent_choice, claude_trust, gh_config, herdr_host, herdr_panes, operator_env
 from scripts.swarm import effort_range
@@ -101,6 +101,40 @@ class AgentSpec:
 class Names(NamedTuple):
     agent: str
     title: str = ""
+
+
+class LaunchDeadline:
+    """The launch waits share one deadline so a swarm spawn returns inside its own timeout."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = seconds
+        self.ends = time.monotonic() + seconds
+        self.cut = ""
+        self.spent: dict[str, float] = {}
+
+    def run(self, wait: str, limit: float, waiter: Callable[[float], Any]) -> Any:
+        began = time.monotonic()
+        granted = max(0.0, min(limit, self.ends - began))
+        self.cut = self.cut or (wait if granted < limit else "")
+        try:
+            result = waiter(granted)
+        except ValueError as exc:
+            self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
+            if granted < limit:
+                raise ValueError(f"{self._overrun()}: {exc}") from exc
+            raise
+        self.spent[wait] = self.spent.get(wait, 0.0) + time.monotonic() - began
+        return result
+
+    def _overrun(self) -> str:
+        spent = ", ".join(f"{wait} {seconds:.0f}s" for wait, seconds in self.spent.items())
+        return f"the {self.seconds:g}s launch deadline ran out in the {self.cut} wait after {spent}"
+
+
+@dataclass(frozen=True)
+class Launch:
+    since: float
+    deadline: LaunchDeadline = field(default_factory=lambda: LaunchDeadline(float("inf")))
 
 
 APP_SERVER = "app_server"
@@ -215,6 +249,7 @@ STARTED_ROUTES = ("routed", "bare", "direct")
 PROMPT_AFTER_START = "AGENTIHOOKS_PROMPT_AFTER_START"
 CODEX_READY_S = 120.0
 CANARY_TIMEOUT_S = {"claude": 120.0, "codex": 90.0}
+LAUNCH_DEADLINE_S = 270.0
 
 
 def _flag_value(args: list[str], names: tuple[str, ...]) -> str:
@@ -830,7 +865,7 @@ def _name_in_herdr(
     agent: str,
     environ: dict[str, str],
     opening: str,
-    since: float,
+    launch: Launch,
     served: bool = False,
 ) -> list[str]:
     """A served viewer's thread is named by its server before the first turn."""
@@ -838,17 +873,27 @@ def _name_in_herdr(
     named = [f"agent_name={herdr_host.agent_name(names.agent)}"] if detected else ["agent_name=unset"]
     if served:
         return named
-    ready = agent == "codex" and (detected or bool(opening)) and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    ready = (
+        agent == "codex"
+        and (detected or bool(opening))
+        and launch.deadline.run(
+            "Codex ready", CODEX_READY_S, lambda seconds: herdr_host.wait_ready(pane, environ, seconds)
+        )
+    )
     if detected and agent == "codex":
-        named += _name_codex_session(pane, names.title or names.agent, environ, since, ready)
+        named += _name_codex_session(pane, names.title or names.agent, environ, launch.since, ready)
     if opening:
-        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready)}")
+        named.append(f"opening_prompt={_send_opening(pane, opening, environ, ready, launch.deadline)}")
     return named
 
 
-def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool) -> str:
+def _send_opening(pane: str, opening: str, environ: dict[str, str], ready: bool, deadline: LaunchDeadline) -> str:
     """Codex can read busy again right after its rename."""
-    ready = ready and herdr_host.wait_ready(pane, environ, CODEX_READY_S)
+    ready = ready and deadline.run(
+        "Codex ready for the opening prompt",
+        CODEX_READY_S,
+        lambda seconds: herdr_host.wait_ready(pane, environ, seconds),
+    )
     why = herdr_host.busy(pane, environ) if ready else "not-ready"
     if why:
         return f"held:{why}"
@@ -890,6 +935,7 @@ def _codex_named(environ: dict[str, str], name: str, since: float) -> Callable[[
 
 def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    launch = LaunchDeadline(LAUNCH_DEADLINE_S)
     active_env = dict(os.environ if environ is None else environ)
     active_env.pop("AGENTIHOOKS_PROFILE_REPORT", None)
     operator_env.fill(active_env)
@@ -1049,7 +1095,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
             agent,
             active_env,
             _held_prompt(launcher, agent),
-            launcher_at / 1000,
+            Launch(launcher_at / 1000, deadline=launch),
             served=args.codex_transport == APP_SERVER,
         )
         if channel:
@@ -1063,7 +1109,7 @@ def main(argv: list[str] | None = None, environ: dict[str, str] | None = None) -
     try:
         _route_reported(active_env, args.route_timeout, route)
         canary = CANARY_TIMEOUT_S[agent] if args.canary_timeout is None else args.canary_timeout
-        report += _binding_result(active_env, canary, route)
+        report += launch.run("profile canary", canary, lambda seconds: _binding_result(active_env, seconds, route))
     except (OSError, ValueError) as exc:
         print("\n".join([*report, "profile_validation=failed"]))
         print(f"agentihooks init-agent: {exc}", file=sys.stderr)

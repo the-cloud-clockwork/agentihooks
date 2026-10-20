@@ -229,7 +229,8 @@ def test_ready_reads_the_latest_codex_exec_program(monkeypatch, tree, tmp_path):
 
 
 @pytest.mark.parametrize(
-    "program", ["no-workdir", "other-command", "two-workdirs", "malformed", "beyond-tail", "no-rollout"]
+    "program",
+    ["no-workdir", "other-command", "two-workdirs", "malformed", "undecodable", "beyond-tail", "no-rollout"],
 )
 def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypatch, tree, tmp_path, program):
     work = tmp_path / "command"
@@ -244,6 +245,7 @@ def test_ready_without_a_codex_exec_workdir_counts_the_session_checkout(monkeypa
             tmp_path, earlier, exec_command("gh pr ready 1", work) + exec_command("gh pr ready 1", tree)
         ),
         "malformed": lambda: codex_rollout(tmp_path, earlier + 'exec_command({cmd:"gh pr ready 2",workdir:"open'),
+        "undecodable": lambda: codex_rollout(tmp_path, 'exec_command({cmd:"gh pr ready 1",workdir:"/x\\x2"});'),
         "beyond-tail": lambda: codex_rollout(tmp_path, earlier, filler=1 << 20),
         "no-rollout": lambda: tmp_path / "missing.jsonl",
     }

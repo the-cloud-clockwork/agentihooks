@@ -79,8 +79,7 @@ def test_unit_shards_measure_no_coverage():
     include = _workflow()["jobs"]["unit"]["strategy"]["matrix"].get("include", [])
     assert include in (
         [],
-        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0},{1}]', "
-        "needs.split.outputs.queue_311, needs.split.outputs.queue_312) || '[]') }}",
+        "${{ fromJSON(github.event_name == 'merge_group' && format('[{0}]', needs.split.outputs.queue_312) || '[]') }}",
     )
     _, step = _unit_step_index(lambda s: s.get("name") == "Run tests")
     assert "COVERAGE_CORE" not in step.get("env", {})

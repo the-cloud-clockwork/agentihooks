@@ -111,12 +111,8 @@ def main(argv: list[str] | None = None) -> int:
     unusable = coverage_check.problem(args.coverage)
     if unusable:
         artifact = os.environ.get("ARTIFACT", str(args.coverage))
-        print(
-            f"::warning::The dev coverage {artifact} from {args.commit} is unusable ({unusable});"
-            " this shard runs its reused tests"
-        )
-        args.reused.unlink()
-        return 0
+        print(f"::error::The dev coverage {artifact} from {args.commit} is unusable ({unusable})")
+        return 1
     tests = set(json.loads(args.reused.read_text())["tests"])
     moved = moved_lines(args.repo, args.commit, args.head)
     count = keep(args.coverage, args.out, tests, moved)
