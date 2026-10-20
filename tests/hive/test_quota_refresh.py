@@ -94,6 +94,14 @@ def test_refresh_skips_the_probe_while_readings_are_fresh(cached, monkeypatch):
     collect.assert_not_called()
 
 
+def test_refresh_probes_only_the_stale_accounts(cached, monkeypatch):
+    cached.return_value = [(NOW, _result("one"))]
+    collect = Mock(return_value=([], "live"))
+    monkeypatch.setattr(balancer, "collect_results", collect)
+    assert quota_refresh.refresh(ENVIRON, NOW) is True
+    assert [credential.account for credential in collect.call_args.args[0]] == ["two"]
+
+
 def test_start_runs_a_due_refresh_in_the_background(monkeypatch):
     calls, done = [], threading.Event()
     monkeypatch.setattr(quota_refresh, "due", lambda environ, now: True)
@@ -103,8 +111,9 @@ def test_start_runs_a_due_refresh_in_the_background(monkeypatch):
         done.set()
 
     monkeypatch.setattr(quota_refresh, "refresh", refresh)
-    worker = quota_refresh.start(ENVIRON, None, NOW)
+    worker, attempted_at = quota_refresh.start(ENVIRON, None, NOW - quota_refresh.RETRY_SECONDS, NOW)
     assert worker.daemon is True
+    assert attempted_at == NOW
     assert done.wait(5)
     worker.join(5)
     assert calls == [(ENVIRON, NOW)]
@@ -113,13 +122,27 @@ def test_start_runs_a_due_refresh_in_the_background(monkeypatch):
 def test_start_keeps_a_running_refresh(monkeypatch):
     monkeypatch.setattr(quota_refresh, "due", lambda environ, now: True)
     running = Mock(is_alive=Mock(return_value=True))
-    assert quota_refresh.start(ENVIRON, running, NOW) is running
+    assert quota_refresh.start(ENVIRON, running, 0, NOW) == (running, 0)
 
 
 @pytest.mark.parametrize("worker", [None, Mock(is_alive=Mock(return_value=False))])
 def test_start_leaves_fresh_readings_alone(monkeypatch, worker):
     monkeypatch.setattr(quota_refresh, "due", lambda environ, now: False)
-    assert quota_refresh.start(ENVIRON, worker, NOW) is worker
+    assert quota_refresh.start(ENVIRON, worker, 0, NOW) == (worker, 0)
+
+
+def test_start_waits_out_the_retry_window_after_an_attempt(monkeypatch):
+    due = Mock(return_value=True)
+    monkeypatch.setattr(quota_refresh, "due", due)
+    attempted_at = NOW - quota_refresh.RETRY_SECONDS + 1
+    assert quota_refresh.start(ENVIRON, None, attempted_at, NOW) == (None, attempted_at)
+    due.assert_not_called()
+
+
+def test_start_uses_the_clock_when_no_time_is_given(monkeypatch):
+    monkeypatch.setattr(quota_refresh, "due", lambda environ, now: False)
+    monkeypatch.setattr(quota_refresh.time, "time", lambda: NOW)
+    assert quota_refresh.start(ENVIRON, None, NOW - 1) == (None, NOW - 1)
 
 
 def test_a_hive_planted_without_a_cache_reports_a_nonzero_cap_after_start(monkeypatch, tmp_path):

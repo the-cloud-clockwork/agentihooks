@@ -90,9 +90,14 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     connection = object()
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: events.append((redis, hive)))
     monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: events.append("refresh"))
-    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker: events.append(("start", worker)))
+    monkeypatch.setattr(
+        daemon.quota_refresh,
+        "start",
+        lambda environ, worker, attempted_at: events.append(("start", worker, attempted_at)) or (None, attempted_at),
+    )
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(daemon.time, "time", lambda: 50)
 
     def sleep(seconds):
         events.append(seconds)
@@ -101,14 +106,14 @@ def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
     monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
         daemon.run(connection)
-    assert events == ["refresh", ("start", None), (connection, "local"), 15]
+    assert events == ["refresh", ("start", None, 50), (connection, "local"), 15]
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
     monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
-    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
     timestamps = iter([100, 103])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
@@ -356,7 +361,7 @@ def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
     monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
-    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
     timestamps = iter([100, 116])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)

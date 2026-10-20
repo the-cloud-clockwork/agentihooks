@@ -85,10 +85,10 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
 def run(redis: "Redis") -> None:
     local_id = hive_id()
     quota_refresh.refresh(os.environ)
-    worker = None
+    worker, attempted_at = None, time.time()
     while True:
         started = time.monotonic()
-        worker = quota_refresh.start(os.environ, worker)
+        worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
         beat(redis, local_id)
         scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
 
