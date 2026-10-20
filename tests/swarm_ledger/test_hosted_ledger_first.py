@@ -16,8 +16,9 @@ HIVE = {"AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL": "hive-credential"}
 
 
 @pytest.fixture(autouse=True)
-def fresh_probes(monkeypatch):
+def fresh_probes(monkeypatch, tmp_path):
     monkeypatch.setattr(ledger_link, "_answers", {})
+    monkeypatch.setattr(ledger_link, "probe_file", lambda environ=None: tmp_path / "hosted-ledger-probe.json")
 
 
 @pytest.fixture
@@ -147,3 +148,22 @@ def test_a_hive_launch_without_a_hosted_ledger_hands_only_the_swarm_api(monkeypa
     [spawned] = world.runtime.requests
 
     assert ledger_link.HOSTED_ENV not in spawned.task["endpoints"]
+
+
+def test_a_later_command_reuses_a_fresh_probe_answer_instead_of_waiting_on_a_silent_ledger(
+    silent, tmp_path, monkeypatch
+):
+    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: silent})
+    assert ledger_link.base(environ) == WORKSTATION
+    monkeypatch.setattr(ledger_link, "_answers", {})
+    monkeypatch.setattr(ledger_link, "serving", lambda *args: pytest.fail("probed again inside the cache window"))
+
+    assert ledger_link.base(environ) == WORKSTATION
+
+
+def test_a_stale_probe_answer_is_checked_again(answering, tmp_path, monkeypatch):
+    environ = workstation(**TOKEN, **{ledger_link.HOSTED_ENV: answering})
+    stale = {"url": answering, "at": 0, "answers": False}
+    (tmp_path / "hosted-ledger-probe.json").write_text(json.dumps(stale))
+
+    assert ledger_link.base(environ) == answering

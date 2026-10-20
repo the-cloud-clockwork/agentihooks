@@ -1,7 +1,6 @@
 """The capacity and registry given here must authorize with LaunchAuthority.verify, never register."""
 
 import json
-import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -115,7 +114,7 @@ def quota_predecessor(task: dict) -> tuple[str, str] | None:
 
 
 def hosted_ledger() -> dict[str, str]:
-    url = os.environ.get(ledger_link.HOSTED_ENV, "").strip().rstrip("/")
+    url = ledger_link.hosted_address()
     return {ledger_link.HOSTED_ENV: url} if url else {}
 
 

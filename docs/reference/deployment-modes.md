@@ -165,18 +165,19 @@ The first rule that matches decides:
 
 A hub address with no mode is remote because it is the safe default: a worker handed the hub's `LEDGER_URL` and
 nothing else must not fall back to a local client that reads a local ledger credential. Local mode needs either no
-hub address at all or an explicit `AGENTIHOOKS_DEPLOYMENT=local`.
+hub address at all or an explicit `AGENTIHOOKS_DEPLOYMENT=local`, and rule 2 still sends a session with a hosted
+credential to an answering hosted ledger in local mode.
 
 A remote client sends to `SWARM_URL`, else `LEDGER_URL`, with any trailing slash removed.
 
 ### Hosted ledger first
 
 `AGENTIHOOKS_HOSTED_LEDGER_URL` names the hosted ledger every agent tries first. A process checks it once, with a
-2 second `/healthz` request; any HTTP answer counts, a refused, reset or timed out connection does not. When it does
-not answer, the process falls through to rule 3 onwards: a workstation agent reaches its workstation ledger server, a
-hive agent its `SWARM_URL` or `LEDGER_URL`. Each `agentihooks` command is a new process, so the next command checks
-again. A session without a hosted credential never takes rule 2, so it keeps the workstation server and its page
-credential.
+2 second `/healthz` request; any HTTP answer counts, a refused, reset or timed out connection does not. The answer is
+kept for 30 seconds in `hosted-ledger-probe.json` under the agentihooks home, so hooks and commands inside that
+window reuse it instead of waiting on a silent ledger. When it does not answer, the process falls through to rule 3
+onwards: a workstation agent reaches its workstation ledger server, a hive agent its `SWARM_URL` or `LEDGER_URL`. A command after the window checks again. A session without a hosted
+credential never takes rule 2, so it keeps the workstation server and its page credential.
 
 The launch settings carry the address and the credential:
 
