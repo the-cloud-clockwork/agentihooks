@@ -646,7 +646,7 @@ def test_agents_table_lists_live_agents_first_and_pages_the_finished_ones_newest
     payload["agents"] = finished[:60] + payload["agents"] + finished[60:]
     page = open_page(payload, width=1920)
     rows = page.table("swarm-agents")
-    assert [row[0] for row in rows[:2]] == ["master-1", "eng-58"]
+    assert [row[0] for row in rows[:2]] == ["master-1\nluna", "eng-58"]
     assert [row[0] for row in rows[2:52]] == [f"done-{i}" for i in range(119, 69, -1)]
     assert all(row[7] == "FINISHED" and row[9] == "" for row in rows[2:52])
     assert [cell.lower() for cell in rows[52]] == ["show 50 more finished agents · 70 left"]
