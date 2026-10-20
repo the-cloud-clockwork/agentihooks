@@ -229,9 +229,7 @@ def _covered(finding, identity, verdict):
 def unjudged(found: list[Finding], records: dict, now_ms: int, cooldown_ms: int) -> list[Finding]:
     judgments = {identity: json.loads(raw)["verdict"] for identity, raw in records.items()}
     recent = {
-        identity: verdict
-        for identity, verdict in judgments.items()
-        if verdict and now_ms < verdict["at"] + cooldown_ms
+        identity: verdict for identity, verdict in judgments.items() if verdict and now_ms < verdict["at"] + cooldown_ms
     }
     return [
         finding
