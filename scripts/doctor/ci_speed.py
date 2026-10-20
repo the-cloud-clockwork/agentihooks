@@ -8,6 +8,7 @@ GATE = "Gate — Required"
 TIERS = {"pull_request": "pull request", "merge_group": "queue"}
 COUNTED = {"success", "failure"}
 SHORT_WAIT_MS = 300000
+UNCONFIRMED_WAIT_MS = SHORT_WAIT_MS + 600000
 JOB_FIELDS = ("id", "name", "status", "labels", "created_at", "started_at", "completed_at", "runner_name")
 SUMMARIES = {
     "ci runner wait": "{text} runners waited up to {minutes} minutes for {count} jobs",
@@ -15,7 +16,7 @@ SUMMARIES = {
 }
 THRESHOLDS = {
     "ci runner wait": "runner queue wait over 5 minutes",
-    "ci queue age unconfirmed": "unconfirmed queue age over 5 minutes",
+    "ci queue age unconfirmed": "unconfirmed queue age over 15 minutes",
 }
 
 
@@ -36,7 +37,7 @@ def _wait(run, jobs, since_ms, now_ms):
         created = iso_ms(job["created_at"])
         began = iso_ms(job["started_at"]) if started(job) else now_ms
         elapsed = began - created
-        if elapsed <= SHORT_WAIT_MS:
+        if elapsed <= (SHORT_WAIT_MS if started(job) else UNCONFIRMED_WAIT_MS):
             continue
         kind = "ci runner wait" if started(job) else "ci queue age unconfirmed"
         key = (kind, tuple(sorted(set(job["labels"]))))
@@ -45,7 +46,7 @@ def _wait(run, jobs, since_ms, now_ms):
             active.add(key)
     found = []
     for (kind, labels), waits in groups.items():
-        if (kind, labels) not in active:
+        if (kind, labels) not in active or (kind != "ci runner wait" and ("ci runner wait", labels) in groups):
             continue
         longest = max(waits) // 1000
         typical = median(waits) / 1000
@@ -70,14 +71,12 @@ def cleared(records: list[dict]) -> list[str]:
     for run in records:
         for job in run["jobs"]:
             subject = _subject(run, job["labels"])
-            began, short = groups.get(subject, (True, True))
-            groups[subject] = (
-                began and started(job),
-                short and started(job) and iso_ms(job["started_at"]) - iso_ms(job["created_at"]) <= SHORT_WAIT_MS,
-            )
+            short, waited = groups.get(subject, (True, False))
+            quick = started(job) and iso_ms(job["started_at"]) - iso_ms(job["created_at"]) <= SHORT_WAIT_MS
+            groups[subject] = (short and quick, waited or (started(job) and not quick))
     gone = []
-    for subject, (began, short) in groups.items():
-        kinds = [kind for kind in SUMMARIES if short or (began and kind != "ci runner wait")]
+    for subject, (short, waited) in groups.items():
+        kinds = [kind for kind in SUMMARIES if short or (waited and kind != "ci runner wait")]
         gone.extend(f"{kind.replace(' ', '-')}/{subject}" for kind in kinds)
     return gone
 

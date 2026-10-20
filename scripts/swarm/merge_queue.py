@@ -9,7 +9,7 @@ FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
     repository { nameWithOwner }
     baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts requiredStatusChecks { context app { databaseId } } } }
 } } }"""
-FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft mergeable reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }

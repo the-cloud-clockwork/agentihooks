@@ -59,7 +59,8 @@ It also adds an `agenti` alias to `~/.bashrc`. Running it again is safe.
 ### 2. Start the local swarm stack with Docker Compose
 
 ```bash
-agentihooks swarm init
+agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo \
+  --operator-asked "start a swarm for my plan"
 ```
 
 This copies the Compose files packaged with AgentiHooks into
@@ -73,16 +74,18 @@ This copies the Compose files packaged with AgentiHooks into
 
 The first run writes `.env` there with a random Redis password, free ledger and
 Redis ports and the released swarm image. Later runs keep them, so running it
-again keeps your data. When every service is healthy it prints the ledger
-address and the next steps:
+again keeps your data. When every service is healthy and the ledger page
+answers, it creates the swarm `my-swarm` and its ledger, paused, and prints the
+ledger address and the next steps:
 
 ```bash
 set -a; . ~/.agentihooks/swarm-stack/client.env; set +a   # point this shell at the stack
-agentihooks swarm my-swarm create --repo ~/dev/my-repo      # register a swarm, paused
 agentihooks swarm my-swarm start                            # run it
 ```
 
-`swarm init` never creates or starts a swarm by itself.
+`swarm init` never starts a swarm by itself. A missing Docker, daemon or
+Compose plugin, or an unhealthy service, is named with its fix. Details:
+[Docker Compose quick start](docs/getting-started/compose-quick-start.md).
 
 ## What ships
 
@@ -201,11 +204,11 @@ Docs: [Account load balancing](https://the-cloud-clockwork.github.io/agentihooks
 guards, profile, brain feed and quota routing. No ledger, Redis or Docker is
 needed.
 
-**As a swarm.** Start the stack with `agentihooks swarm init`, create a swarm on
-a repository and start it. The master takes your requests in its pane or on the
-ledger page chat, and the tick staffs the tasks. You steer it with
-`agentihooks swarm <id> start|pause|stop` and `set` for the lane caps, or the
-same controls on the Swarm tab.
+**As a swarm.** Run `agentihooks swarm init <name>` to start the stack and
+create a paused swarm on a repository, then start it. The master takes your
+requests in its pane or on the ledger page chat, and the tick staffs the
+tasks. You steer it with `agentihooks swarm <id> start|pause|stop` and `set`
+for the lane caps, or the same controls on the Swarm tab.
 
 ## Where it runs
 

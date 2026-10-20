@@ -137,18 +137,6 @@ Claude process must remain running and have network access. According to the
   trust before launch; an untrusted noninteractive launch cannot answer the
   native trust prompt.
 
-Outside the explicitly enabled private login route, a Claude master tries its
-valid interactive login first. If that is unavailable, it falls back to normal
-subscription token placement and configured API capacity under the
-[live share rules](load-balancing.md#live-share-weight). With the default API
-weight of zero, the order is interactive login, token pool, then API overflow;
-a nonzero weight can select API capacity earlier. If no permitted account has
-room, launch fails. A fallback master may use the headroom reserved against
-workers, but cannot bypass a spent or otherwise ineligible account. Its desired
-interactive route is retained: the next handoff or recycle checks login again
-and returns to it when available, rather than changing credentials in the
-running process.
-
 Inspect `agentihooks swarm <id> status` and the ledger master card for the
 recorded launch decision:
 
@@ -163,6 +151,67 @@ recorded launch decision:
 
 Codex masters have no Claude Remote Control decision. These findings report
 lost access; they do not stop the master or change its authentication.
+
+#### Auth fallback and move back
+
+This behavior covers one host: the login probe, the placement and the recorded
+route all belong to the machine running the swarm tick. It applies outside the
+explicitly enabled private login route.
+
+| Master | Tries the login first | Records the desired interactive route |
+|---|---|---|
+| Front door Claude master (seat `master@<id>`, or no seat) with no ordered route | Yes | Yes |
+| Pool Claude master (`master-2@<id>` and later) with no ordered route | Yes | No |
+| Any master whose task orders a route (`route_kind`) | No: the ordered route is used | No |
+| Codex master, or the successor of a Codex master | No | No |
+
+A master with no harness set takes the login on Claude. A master whose
+predecessor ran on Codex stays on Codex, unless its profile is Claude only.
+
+A login is valid when `claude auth status --text` exits zero and prints
+`Login method: Claude account`. The probe runs without the routed credentials:
+`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_AUTH_TOKEN`, `ANTHROPIC_API_KEY`,
+`ANTHROPIC_BASE_URL`, every `AH_CC_TOKEN_<slug>` and every `CLAUDE_CODE_USE_*`
+variable are removed. It runs when the route is chosen at every master spawn,
+including a handoff, a quota handoff and a recycle. A failed, timed out or
+expired check at that point sends the master to fallback placement. A master
+routed to the login is checked once more just before launch; a failure there
+refuses that launch as unavailable, and the
+[master outage](#master-outage-and-promotion) rules bring a master back.
+
+On fallback the master is placed with normal subscription token placement and
+configured API capacity under the
+[live share rules](load-balancing.md#live-share-weight). With the default API
+weight of zero, the order is interactive login, token pool, then API overflow;
+a nonzero weight can select API capacity earlier. The master may use room
+[reserved from workers](load-balancing.md#master-accounts-and-reserved-headroom),
+even when the declared master account is the only account with room. It cannot
+bypass a spent or otherwise ineligible account; if no permitted account has
+room, launch fails.
+
+A quota handoff whose successor finds a valid login skips the quota transfer to
+another token account and launches on the login. Without a valid login, the
+quota handoff moves to another account as for any agent.
+
+The desired route is stored per agent in the swarm's `desired-routes` record,
+outside the agent projection, and in the execution record. A resumed master
+keeps it, each new placement sets it again and dropping the agent removes it.
+The running master never changes credentials: the next handoff or recycle
+checks the login again and returns to it when it is valid, with no operator
+action. That successor launch clears `master-fallback-auth/<seat>`.
+
+Restore phone access after a fallback, in a shell with none of the routed
+credential variables above set:
+
+```bash
+claude auth status --text                 # must print: Login method: Claude account
+claude auth login                         # renew the native login if it is expired
+agentihooks swarm <id> status             # master-fallback-auth/<seat> stays until the next master launch
+```
+
+With `AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true`, renew the private login with
+`agentihooks claude login --master` instead; see
+[Master claude ai login](../reference/account-login.md#master-claude-ai-login).
 
 ### Master outage and promotion
 
@@ -597,7 +646,7 @@ Agent commands take the agent name from `--as` or `AGENTIHOOKS_AGENT_NAME`:
 |---|---|
 | `agentihooks swarm <id> issue URL` | Record the task's GitHub issue, where the repo has issues; without them the ledger task is the spec. |
 | `agentihooks swarm <id> pr URL` | Record the task's pull request, its head branch and that branch's repository (`branch_repo`); the task moves to `pr`. |
-| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the newest `pull_request` run of the Tests workflow on the current head and refuses unless that run passed (`the current pull request head must pass Tests before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. It goes through `gh api graphql`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
+| `agentihooks swarm <id> merge queue\|dequeue\|state URL` | Queue a pull request into `dev` on the merge queue at its current head, take it out of the queue, or report its state, head and queue entry as JSON. `queue` reads the required checks of the pull request's own repository from its `dev` branch rules and protection and refuses unless every one passed on the current head (`required checks on the current pull request head must pass before queueing`); it then enqueues that exact head with `expectedHeadOid`. It never compares the branch with `dev`, merges `dev` into it or updates it, whatever changed on `dev` since the checks ran: the merge group runs the unit suite on the head merged with the newest `dev` ([Delivery tiers](../reference/delivery-tiers.md#entering-the-merge-queue)). A repository with no merge queue on `dev` gets a squash merge instead, only for a ready pull request with green checks and a review decision of none or approved. A pull request already in the queue returns its state without another check or enqueue. The pull request can live in any repository the caller's `gh` reaches, such as agentibrain-kernel, and joins that repository's own queue ([Pull requests in other repositories](../reference/delivery-tiers.md#pull-requests-in-other-repositories)). It goes through `gh api graphql` and `gh api`, so any `gh` with `gh api` works; queue and dequeue run only for a swarm worker on its task's recorded pull request, never the master, and refuse a pull request into any other base. |
 | `agentihooks swarm <id> prepare` | Set `--repositories /absolute/repo,/absolute/other` when adding a task, or `task set <task> repositories=/absolute/repo`. Use that explicit `repositories` list of local repository paths; without it, report that the swarm repository is the default. Prose repository names do not select repositories. Create or reuse one worktree per repository from its own `dev`, with a recorded continuation branch scoped to that repository. Return each worktree and branch. |
 | `agentihooks swarm <id> publish --message TEXT -- FILE...` | Use the repository of the current task worktree; from a primary checkout, resolve the sole task repository or require a worktree selection when several are declared. Stage only explicit repository relative files, commit, run that repository’s `scripts.ci_prepush` gate, then push and retain its branch separately from other task repositories. The result names the gate. A repository without that module uses the named [AgentiHooks touched Python fallback](#fallback-gate-for-repositories-without-their-own): lint and format on changed lines, size and complexity on touched functions and changed files, in changed Python files since its own `origin/dev` merge base, without agentihooks baseline files or local tests. Unrelated tracked changes are refused before staging; unrelated untracked files are preserved. A failed stage stops publication and names the next command. Repeat the command after fixing a failure; an already committed head is graded again without an empty commit. Protected branches and tasks owned by another agent are refused. Tests run only in CI. |
 | `agentihooks swarm <id> branch` | Record the current worktree branch on the task once it is on origin, with its repository (`branch_repo`, the origin remote without credentials), so dependent tasks can start from it. |
