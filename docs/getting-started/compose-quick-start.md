@@ -22,10 +22,11 @@ Agent hosts separately need Claude Code or Codex, authenticated accounts or API 
 ## Start the services
 
 ```bash
-agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo
+agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo \
+  --operator-asked "start a swarm for my plan"
 ```
 
-`swarm init` takes the swarm name first. The name is one or two lowercase words joined by a dash and ending in `swarm`, such as `my-swarm` or `rig-grade-swarm`; it names both the swarm and its ledger. A missing or invalid name is refused before Docker is touched, with the rule and two suggestions built from the plan title.
+`swarm init` takes the swarm name first. The name is one or two lowercase words joined by a dash and ending in `swarm`, such as `my-swarm` or `rig-grade-swarm`; it names both the swarm and its ledger. Unless `--no-start` or `--prepare-clients` is given, a missing or invalid name is refused before Docker is touched, with the rule and two suggestions built from the plan title.
 
 One run does the following, in order:
 
@@ -46,11 +47,11 @@ One run does the following, in order:
 | `--timeout SECONDS` | How long to wait for every service to be healthy; default 300 |
 | `--no-start` | Check Docker and Compose, write the stack files, `.env` and `client.env`, then stop. No name is needed and no service, swarm or ledger starts |
 
-In the shared ledger folder only a master seat or the operator may create a swarm.
+In the shared ledger folder only a master seat or the operator may create a swarm, and a ledger with fewer than three phases or tasks needs `--operator-asked`. The single automatic phase counts as one, so the example passes it. These refusals come after the stack is up.
 
 ### Output
 
-On a terminal the ready line is green, the ledger address cyan and a failure red. When output is piped, or `NO_COLOR` is set to any value, the same text prints without colour. A successful first run prints:
+On a terminal the ready line is green, the `Open the ledger` address cyan and a failure red. When output is piped, or `NO_COLOR` is set to a non-empty value, the same text prints without colour. A successful first run prints:
 
 ```text
 Starting the swarm stack; the first run pulls its images.
@@ -66,11 +67,13 @@ Swarm my-swarm is paused; start it only when you want it: agentihooks swarm my-s
 
 A JSON line describing the new swarm prints before the `Ledger page:` line. The ports in the addresses are the ones written to `.env`.
 
+The stack block prints as soon as the services are healthy, before the swarm is created. When creation is then refused, the run ends with a red `Swarm not created:` line and exits 1; the stack stays up and the next run reuses it.
+
 `swarm init` never starts a swarm. The swarm stays paused, and no agent launches, until you run `agentihooks swarm <name> start`.
 
 ### Running it again
 
-A second run is safe. It keeps `.env`, so the Redis password, both ports and the data volumes stay the same, and `client.env` keeps pointing at the same addresses. Compose leaves healthy services running. For a swarm that already exists the run prints its ledger page and changes nothing. A name already held by a swarm working another repository, or by a ledger that is not a swarm's, is refused with the rule and suggestions.
+A second run is safe. It keeps `.env`, so the Redis password, both ports and the data volumes stay the same, and `client.env` keeps pointing at the same addresses. Compose leaves healthy services running. For a swarm that already exists the run prints a JSON line with `"created": false`, its ledger page and the closing `is paused` line, whatever the swarm's state, and changes nothing. A name held by a ledger that is not a swarm's is refused with the rule and suggestions, and so is a name held by a swarm on another repository when `--repo` names a different one.
 
 `SWARM_COMPOSE_PROJECT` in `.env` names the Compose project (default `agentihooks-swarm`). A second stack home under another `AGENTIHOOKS_HOME`, with its own project name, never touches the first.
 
@@ -88,7 +91,7 @@ Use the printed location if `AGENTIHOOKS_HOME` overrides the default. Source thi
 
 ## Choose standalone or swarm work
 
-A standalone Claude Code or Codex session uses profiles and hooks without a swarm. A swarm adds a shared task ledger, a master and coordinated workers. Initialization creates no swarm and launches no agents. Connect an admitted execution host before starting swarm work; Compose services alone do not provision workers. Use the [swarm guide](../pillars/swarm.md) for creation, host setup and deployment controls.
+A standalone Claude Code or Codex session uses profiles and hooks without a swarm. A swarm adds a shared task ledger, a master and coordinated workers. Initialization creates the paused swarm and its ledger, and launches no agents. Connect an admitted execution host before starting swarm work; Compose services alone do not provision workers. Use the [swarm guide](../pillars/swarm.md) for creation, host setup and deployment controls.
 
 ## Adopt an existing workstation ledger
 
@@ -162,11 +165,12 @@ Swarm stack not ready: redis is created.
 | `the Docker daemon is not reachable` | Start Docker, or add your user to the `docker` group |
 | `the Docker Compose plugin is missing` | Install Docker Compose v2, the `docker compose` plugin |
 | `redis is <state>` | Read its logs; if the Redis port is in use, set `SWARM_REDIS_PORT` in `.env` to a free port and keep the original password |
-| `swarm is <state>` | Read its logs; the ledger server needs Redis healthy, and if the ledger port is in use, set `SWARM_PORT` in `.env` to a free port. With adoption recorded, stop the legacy ledger container by its id first |
+| `swarm is <state>` | Read its logs; the ledger server needs Redis healthy, and if the ledger port is in use, set `SWARM_PORT` in `.env` to a free port. With adoption recorded (see [Adopt an existing workstation ledger](#adopt-an-existing-workstation-ledger)), stop the legacy ledger container by its id first |
 | `controller is <state>` | Read its logs; fix Redis and the ledger server first, since the controller starts after both are healthy |
+| `no prepared swarm Redis client to adopt` | Run `agentihooks swarm init --prepare-clients`, then `agentihooks swarm init --adopt` |
 | `the ledger page does not answer` | Read the ledger logs; the message names the route that did not answer or did not serve the ledger home page |
 
-`<state>` is the service's health or container state, such as `unhealthy`, `exited` or `created`; `not created` when Compose never made it and `in an unknown state` when `docker compose ps` itself failed. Every fix ends by running `agentihooks swarm init` again. A refused swarm name or creation prints `Swarm not created:` with the reason instead. The logs and `down` commands work from any directory because they name the Compose project. `down` keeps named volumes; avoid `--volumes` when retaining ledger and Redis data. Keep service ports on loopback for local use; remote host admission and TLS require separate setup.
+`<state>` is the service's health or container state, such as `unhealthy`, `exited` or `created`; `not created` when Compose never made it and `in an unknown state` when `docker compose ps` itself failed. Every fix except the adoption one ends by running `agentihooks swarm init` again. A refused swarm name or creation prints `Swarm not created:` with the reason instead. The `Logs:` command init prints names the Compose project, so it works from any directory. `down` keeps named volumes; avoid `--volumes` when retaining ledger and Redis data. Keep service ports on loopback for local use; remote host admission and TLS require separate setup.
 
 ## Share one database across hosts
 

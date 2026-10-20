@@ -59,7 +59,8 @@ It also adds an `agenti` alias to `~/.bashrc`. Running it again is safe.
 ### 2. Start the local swarm stack with Docker Compose
 
 ```bash
-agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo
+agentihooks swarm init my-swarm --plan ~/plans/my-plan.md --repo ~/dev/my-repo \
+  --operator-asked "start a swarm for my plan"
 ```
 
 This copies the Compose files packaged with AgentiHooks into
@@ -203,9 +204,9 @@ Docs: [Account load balancing](https://the-cloud-clockwork.github.io/agentihooks
 guards, profile, brain feed and quota routing. No ledger, Redis or Docker is
 needed.
 
-**As a swarm.** Run `agentihooks swarm init <name>` to start the stack and create
-a paused swarm on a repository, then start it. The master takes your requests in its pane or on the
-ledger page chat, and the tick staffs the tasks. You steer it with
+**As a swarm.** Run `agentihooks swarm init <name>` to start the stack and
+create a paused swarm on a repository, then start it. The master takes your
+requests in its pane or on the ledger page chat, and the tick staffs the tasks. You steer it with
 `agentihooks swarm <id> start|pause|stop` and `set` for the lane caps, or the
 same controls on the Swarm tab.
 
