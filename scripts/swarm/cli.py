@@ -229,6 +229,25 @@ def _publish_tick_status(store, slug, doc):
             raise
 
 
+def _phase_steps(inbox, store, slug, doc, ledger):
+    actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
+    if actions:
+        doc = timing.call(ledger.state, slug)
+    ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
+    actions += ticked
+    if ticked:
+        actions += skip_refused(
+            phase_planning.planning_pass,
+            inbox,
+            store,
+            slug,
+            timing.call(ledger.state, slug),
+            ledger,
+            store.config(slug),
+        )
+    return actions
+
+
 def _bin_stop(store, slug, ledger, runtime):
     store.redis.set(store.key(slug, "ledger-binned"), 1)
     _, left = stop_now(store, slug, runtime, ledger)
@@ -318,21 +337,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
                 )
             store.redis.delete(*(store.key(slug, mark) for mark in tick_heartbeat.HALTS))
             timing.call(urgent_hold.observe, store, slug, doc, now_ms())
-            actions = skip_refused(phase_planning.planning_pass, inbox, store, slug, doc, ledger, store.config(slug))
-            if actions:
-                doc = timing.call(ledger.state, slug)
-            ticked = skip_refused(phases.phase_pass, inbox, store, slug, doc, ledger)
-            actions += ticked
-            if ticked:
-                actions += skip_refused(
-                    phase_planning.planning_pass,
-                    inbox,
-                    store,
-                    slug,
-                    timing.call(ledger.state, slug),
-                    ledger,
-                    store.config(slug),
-                )
+            actions = _phase_steps(inbox, store, slug, doc, ledger)
             doc, config = timing.call(ledger.state, slug), store.config(slug)
             view = timing.call(ledger_events.tick_view, inbox, store, slug, doc)
             mail, mode = ledger_events.Mail(inbox, store, slug), intent.mode_of(config)
