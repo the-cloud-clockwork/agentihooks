@@ -570,10 +570,10 @@ def test_every_mutation_planning_step_reads_the_batch_runner_cpu_quota():
         "python .refinement-proof/run.py",
     )
     steps = {
-        f"{path.name}/{name}/{step.get('name', step['run'])}": step
+        f"{path.name}/{name}/{index}": step
         for path in sorted((Path(__file__).parents[1] / ".github/workflows").glob("*.yml"))
         for name, job in (yaml.safe_load(path.read_text())["jobs"] or {}).items()
-        for step in job.get("steps", [])
+        for index, step in enumerate(job.get("steps", []))
         if any(planner in step.get("run", "") for planner in planners)
     }
     assert len(steps) >= 6
