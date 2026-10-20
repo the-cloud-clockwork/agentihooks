@@ -95,6 +95,7 @@ MOVED = {
     ("test.yml", "split"): QUEUED,
     ("test.yml", "stage-budget"): LIGHT,
     ("test.yml", "test-count"): QUEUED,
+    ("test.yml", "test-summary"): LIGHT,
     ("test.yml", "unit"): QUEUED,
     ("test.yml", "unit-selected"): STANDARD,
     ("test.yml", "writer-lock"): QUEUED,
