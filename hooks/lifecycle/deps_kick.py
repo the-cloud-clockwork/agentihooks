@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -30,9 +31,9 @@ def kick(home: Path | None = None) -> bool:
         stderr=subprocess.DEVNULL,
         start_new_session=True,
     )
-    try:
+    with contextlib.suppress(subprocess.TimeoutExpired):
         process.wait(timeout=WAIT_SECONDS)
-    except subprocess.TimeoutExpired:
+    with contextlib.suppress(ProcessLookupError):
         os.killpg(process.pid, signal.SIGKILL)
-        process.wait()
+    process.wait()
     return True
