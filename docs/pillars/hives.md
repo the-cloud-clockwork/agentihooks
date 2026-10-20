@@ -313,9 +313,9 @@ hive over an ephemeral one, then the hive id.
 the headless hives first and takes the UI hive only when no headless hive taking the role has room or none is live.
 A headless hive with room that lacks the account slot, the repo or the login makes the launch wait instead. The
 agent record carries the fallback reason as `placement_fallback` in its profile decision; a task pinned to a UI
-hive records the pin as its reason. UI roles take only UI hives; the master keeps its headless fallback below. The
-engineer, cicd, planner and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa
-profile on any lane places as its UI role.
+hive records the pin as its reason. UI roles, the master included, take only UI hives. The engineer, cicd, planner
+and dispatcher profiles place as `eng`, `ci`, `plan` and `dispatch`; a frontend or qa profile on any lane places as
+its UI role.
 
 When no live hive takes the role:
 
@@ -327,14 +327,13 @@ A hive counts as live while its last heartbeat is under ninety seconds old. Code
 
 ### Master placement
 
-The master is placed in three tiers, each tried in `prefer` order:
+The master follows the same host rule as role placement: it runs only on a live UI hive with the `master` role
+that lists the repo. It is placed in two tiers, each tried in `prefer` order:
 
 1. A UI hive with the `master` role that holds the native interactive login for the master's harness.
 2. A UI hive with the `master` role and a subscription or api slot for that harness.
-3. A headless hive, `ui=no`, with a subscription or api slot, whatever its roles.
 
-Every tier also needs the hive to be live and to list the repo. With no candidate the master waits with "no live
-hive can run the master with interactive, subscription or api authentication".
+A headless hive never runs the master, whatever its roles.
 
 ### Who writes placement
 
@@ -394,14 +393,16 @@ Limitations:
 | A member is missing from `agentihooks hive list` | The hive index no longer holds it, and a member's beat never adds itself back. | Run `agentihooks hive refresh` on the member; refresh adds it to the index again. |
 | A member is refused an agent token | The agent's record names another hive, or no hive. | Read the agent's `hive` field with `HGET agentihooks:swarm:<slug>:agents <name>`; only the controller places an agent. |
 
-## Headless fallback
+## Workstation fallback
 
-When every UI hive is gone, the master still runs: tier three starts it on a headless hive through the same hive
-launch, on a subscription or api slot. Two health findings mark the state until it ends:
+When no UI hive fits, because none is live, or the live ones lack the repo, or lack both a slot and the interactive
+login for the master's harness, the hive controller leaves the master to the workstation herdr server. It refuses
+the launch with "the workstation hive spawns master work" followed by the placement reason, and the tick reports
+that line in its actions.
 
-- `master-headless`: the master runs on a headless hive.
-- `master-fallback-auth`: the master wanted its interactive login and runs on another route, so phone access
-  through Remote Control is lost.
+The `master-headless` health finding marks a master record placed on a headless hive before this rule. The
+`master-fallback-auth` finding marks a master that wanted its interactive login and runs on another route, so phone
+access through Remote Control is lost.
 
 Placement runs at every master launch, so the successor after the next handoff goes back to the best UI hive that
 is live then. `agentihooks swarm <id> master move --to HIVE` forces that move without waiting: the master hands
@@ -622,6 +623,12 @@ home. Credentials come from ExternalSecrets by name. The hive id is the one mint
 replicas that mount the same credential would report the same hive id and agent limit; the chart refuses
 `workers.replicas` above 1. Scale by installing one release per hive credential; the pod name is used only when no
 credential is installed.
+
+The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
+2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
+places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
+below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
+network, so it schedules on any node.
 
 ## Ledger Hives panel
 

@@ -20,7 +20,7 @@ one Redis, which every ledger server and controller of the swarm share.
 | Mode | Set up with | Controller | Ledger and Redis | Where agents launch |
 |---|---|---|---|---|
 | `local` (default) | `agentihooks controller run` on the workstation | On the workstation | Local ledger server; Redis from `AGENTIHOOKS_SWARM_REDIS_URL`, default `redis://127.0.0.1:6379/0` | On the workstation, in herdr panes, inside its host capacity. |
-| `compose` | `compose.yaml`: services `swarm`, `controller`, `redis`, and `hive` under `--profile join` | The `controller` service | The `swarm` service on `SWARM_BIND:SWARM_PORT` (default `127.0.0.1:8765`); the stack Redis with per hive ACL users | On joined [hives](../pillars/hives.md): engineer, CI and master work, and any task pinned to a hive. Other lanes are refused with "the workstation hive spawns" that lane's work. With no hive placement the controller reconciles without spawning. |
+| `compose` | `compose.yaml`: services `swarm`, `controller`, `redis`, and `hive` under `--profile join` | The `controller` service | The `swarm` service on `SWARM_BIND:SWARM_PORT` (default `127.0.0.1:8765`); the stack Redis with per hive ACL users | On joined [hives](../pillars/hives.md): engineer and CI work, master work on UI hives only, and any task pinned to a hive. Other lanes are refused with "the workstation hive spawns" that lane's work. With no hive placement the controller reconciles without spawning. |
 | `distributed` | The `agentihooks-swarm` Helm chart (`deployment: distributed`) | The chart's controller | One ledger replica and the chart Redis, or the hosted ledger through `SWARM_URL` | On hives as in `compose`, including worker hive pods; without hive placement, only through the Kubernetes runtime. |
 
 - In any mode other than `local`, `AGENTIHOOKS_HIVE_REDIS_URL` wins over the swarm Redis URL, and the workstation
@@ -142,8 +142,8 @@ ANTHROPIC_AUTH_TOKEN=<delivered by your secret store, never committed>
 
 A base URL on a host other than `api.anthropic.com` with a token makes the slot a `gateway` api slot. With no
 `AH_CC_TOKEN_<slug>` subscription on the hive, the api slot is the only route placement can pick. Cap it with
-`agentihooks balance set claude-api-max-sessions=N`. A master on such a hive runs through tier two or three of
-[master placement](../pillars/hives.md#master-placement).
+`agentihooks balance set claude-api-max-sessions=N`. A master on such a hive needs `ui=yes` and runs through tier two
+of [master placement](../pillars/hives.md#master-placement).
 
 ### Compose on a private network
 

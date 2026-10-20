@@ -98,7 +98,10 @@ Claude masters prefer a valid native claude.ai login at launch and handoff;
 workers retain their token and API routing. Declare the master account and
 optional tier with `agentihooks balance master-account` as described under
 [reserved headroom](load-balancing.md#master-accounts-and-reserved-headroom).
-The declaration alone neither signs in nor enables Remote Control.
+The declaration alone neither signs in nor enables Remote Control. A master on
+an interactive login has no token to probe; its quota reading comes from its
+own sessions, as described under
+[Quota readings for an interactive master account](load-balancing.md#quota-readings-for-an-interactive-master-account).
 
 For the lead Claude master to appear in the Claude app, the operator enables
 the optional master login and signs in from their own terminal:
