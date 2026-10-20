@@ -20,7 +20,7 @@ Harness capabilities differ. See the [Codex reference](../reference/CODEX-COMPAT
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
 - Claude Code CLI or Codex CLI for native agent sessions; Docker with the Compose plugin for the service quick start
 

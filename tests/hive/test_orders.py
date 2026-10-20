@@ -9,11 +9,11 @@ pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
-def setup():
+def setup(monkeypatch):
     import fakeredis
 
     from scripts.hive.orders import Consumer, LaunchOrder, Orders, carried
-    from scripts.swarm import lease
+    from scripts.swarm import launch_check, lease
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
     from scripts.swarm.tick import Placed
     from scripts.swarm_v2.runtime.base import Outcome, Status
@@ -61,7 +61,11 @@ def setup():
         effort="high",
         profile="engineer",
         profile_decision={"validation": {"pid": 12}},
+        launched_at=1234,
+        overlays=["tuner"],
+        launch_timings={"harness_at": 1300},
     )
+    monkeypatch.setattr(launch_check, "declared", lambda profile, worn=(): [f"{profile}-host", *worn])
     runtime = Mock()
     runtime.spawn.return_value = Outcome("spawn", Status.OK, "local", placed)
     runtime.namespace.return_value = "namespace"
@@ -92,7 +96,10 @@ def test_order_ack_and_live_execution(setup):
         "pane_id": placed.pane_id,
         "model": placed.model,
         "effort": placed.effort,
-        "profile_decision": placed.profile_decision,
+        "profile_decision": {**placed.profile_decision, "host_overlays": ["engineer-host", "tuner"]},
+        "launched_at": 1234,
+        "launch_timings": {"harness_at": 1300},
+        "overlays": ["tuner"],
     }
     request = setup.runtime.spawn.call_args.args[0]
     assert request.name == setup.agent.name
@@ -558,7 +565,10 @@ def test_a_joined_hive_applies_a_launch_order_writing_only_its_own_keys(setup):
         "pane_id": "pane",
         "model": "selected-model",
         "effort": "high",
-        "profile_decision": {"validation": {"pid": 12}},
+        "profile_decision": {"validation": {"pid": 12}, "host_overlays": ["engineer-host", "tuner"]},
+        "launched_at": 1234,
+        "launch_timings": {"harness_at": 1300},
+        "overlays": ["tuner"],
     }
 
 

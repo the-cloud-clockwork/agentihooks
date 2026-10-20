@@ -15,6 +15,7 @@ from scripts.swarm.store import AgentRecord, RedisStore
 
 DEADLINE_MS = 60 * 1000
 STAMP = ".agentihooks-render.json"
+HOST_OVERLAYS = "host_overlays"
 SETTINGS = ("hooks", "model", "effort")
 WORDS = {
     "joined": "joining the ledger and holding its seat",
@@ -72,6 +73,11 @@ def declared(profile: str, overlays: Sequence[str] = ()) -> list[str]:
     from scripts.profiles import render
 
     return list(dict.fromkeys([*render.declared(profile), *overlays]))
+
+
+def expected(agent: AgentRecord) -> list[str]:
+    host = agent.profile_decision.get(HOST_OVERLAYS)
+    return declared(agent.profile, agent.overlays) if host is None else list(host)
 
 
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:

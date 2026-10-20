@@ -223,6 +223,15 @@ workers:
       ephemeral-storage: 1Gi
     limits:
       ephemeral-storage: 10Gi
+  # Volume source of /home/worker, which holds the repo clones, worktrees and scratchpad; any kind other
+  # than emptyDir (a hostPath or persistentVolumeClaim) rolls out by Recreate so two hives never share it.
+  homeVolume:
+    emptyDir: {}
+  # Free GB wt.sh new requires on the home volume, passed to agents as WT_MIN_FREE_GB.
+  worktreeMinFreeGb: 50
+  nodeSelector: {}
+  affinity: {}
+  tolerations: []
 
 worker:
   enabled: false

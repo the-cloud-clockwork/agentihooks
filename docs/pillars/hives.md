@@ -739,8 +739,16 @@ pod with `agentihooks hive add` from the UI hive; the pod name is used only when
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default
 2048), in MiB, are multiplied by `workers.maxAgents` into the container's memory request and limit, so the scheduler
 places the pod only on a node with room for every agent it may run. The chart refuses a request below one or a limit
-below the request, and memory set under `workers.resources`. The pod carries no node selector, affinity or host
-network, so it schedules on any node.
+below the request, and memory set under `workers.resources`. `workers.nodeSelector`, `workers.affinity` and
+`workers.tolerations` place the pod; by default it schedules on any node and never uses the host network.
+
+`workers.homeVolume` is the volume source of `/home/worker`, which holds the repo clones, worktrees and scratchpad. It
+defaults to an emptyDir on the node root disk; a `hostPath` of type `Directory` on a data disk, or a
+`persistentVolumeClaim` (set `emptyDir: null` beside it; the chart refuses more or fewer than one source) keeps them on
+a larger disk. A hostPath of type `Directory` starts the pod only where the path exists, so create it only on the
+mounted data disk. Any source other than an emptyDir rolls the pod out by
+Recreate so two hives never share it. `workers.worktreeMinFreeGb` (default 50) reaches agents as `WT_MIN_FREE_GB`,
+the free space `wt.sh new` requires.
 
 A distributed controller can also serve a workstation swarm without worker hives, launching that swarm's engineer and
 CI work as Pods while its master, planners and dispatcher stay on the workstation; see
