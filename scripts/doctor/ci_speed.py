@@ -1,6 +1,7 @@
 import json
 from statistics import median
 
+from scripts.doctor.words import plural
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.ledger_events import iso_ms
 
@@ -19,9 +20,9 @@ THRESHOLDS = {
     "ci tier wall time": "tier wall time over 15 minutes",
 }
 GROUPED = {
-    "ci runner wait": "{text} runners waited up to {minutes} minutes in {count} runs",
-    "ci queue age unconfirmed": "{text} jobs read as queued up to {minutes} minutes in {count} runs",
-    "ci tier wall time": "{text} tier took up to {minutes} minutes in {count} runs",
+    "ci runner wait": "{text} runners waited up to {minutes} minutes in {count}",
+    "ci queue age unconfirmed": "{text} jobs read as queued up to {minutes} minutes in {count}",
+    "ci tier wall time": "{text} tier took up to {minutes} minutes in {count}",
 }
 
 
@@ -154,7 +155,7 @@ def _member(groups, finding, scope, text, window_ms, run, during):
 
 
 def group(
-    groups: dict, records: list[dict], since_ms: int, now_ms: int, window_ms: int, incidents: list[tuple] = ()
+    groups: dict, records: list[dict], since_ms: int, now_ms: int, window_ms: int, incidents: list[tuple]
 ) -> dict:
     """Adds each run's crossings to one group per class and label set or tier in the pass window."""
     for run in records:
@@ -185,7 +186,7 @@ def grouped(groups: dict) -> list[Finding]:
         members = sorted(entry["members"].values(), key=lambda member: member["order"])
         measures = [member["measure"] for member in members]
         evidence = [
-            f"{len(members)} runs, {entry['text']}, worst {max(measures)} seconds, "
+            f"{plural(len(members), 'run')}, {entry['text']}, worst {max(measures)} seconds, "
             f"median {median(measures)} seconds, runs {', '.join(member['run'] for member in members)}"
         ]
         during = [member for member in members if member["during"]]
@@ -199,7 +200,7 @@ def grouped(groups: dict) -> list[Finding]:
                 entry["kind"],
                 entry["subject"],
                 GROUPED[entry["kind"]].format(
-                    text=entry["text"], minutes=f"{max(measures) / 60:.2f}", count=len(members)
+                    text=entry["text"], minutes=f"{max(measures) / 60:.2f}", count=plural(len(members), "run")
                 ),
                 (*evidence, *(member["evidence"] for member in members)),
                 THRESHOLDS[entry["kind"]],

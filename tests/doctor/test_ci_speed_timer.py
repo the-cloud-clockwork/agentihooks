@@ -43,7 +43,7 @@ def test_later_waiting_jobs_grow_one_finding_without_another_notice(store, monke
     details = store.redis.hgetall(store.key(DOCTOR, "doctor-details"))
     assert len(details) == 1
     finding = json.loads(next(iter(details.values())))
-    assert "1 runs" in finding["summary"]
+    assert finding["summary"].endswith("in 1 run")
     assert "2 jobs" in finding["evidence"][1]
     assert "longest 460 seconds" in finding["evidence"][1]
     assert "median 410.5 seconds" in finding["evidence"][1]

@@ -129,7 +129,7 @@ def test_groups_keep_label_sets_and_tiers_apart_and_grow_without_another_notice(
         "ci tier wall time",
     ]
     [tier] = [finding for finding in details(store) if finding["kind"] == "ci tier wall time"]
-    assert tier["summary"] == "queue tier took up to 20.00 minutes in 1 runs"
+    assert tier["summary"] == "queue tier took up to 20.00 minutes in 1 run"
     runs(monkeypatch, [waiting(2, "2026-10-19T16:52:00Z")])
     cli.timer(store, DOCTOR, AFTER + 60000, False)
     [grown] = [f for f in details(store) if "anton-oss" in f["summary"]]

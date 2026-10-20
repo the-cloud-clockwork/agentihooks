@@ -103,6 +103,13 @@ def retract(store, doctor, watched, cleared, now_ms):
     return gone
 
 
+def _incidents(state, now_ms):
+    """The tracked GitHub incidents and the open Actions ones holding findings; an unread status page holds none."""
+    current = github_status.unresolved()
+    incidents = github_status.track(state.get("incidents", {}), current, now_ms)
+    return incidents, [incident for incident in incidents.values() if current and incident["end"] is None]
+
+
 def _crossings(state, runs, span, incidents, held):
     """This pass window's grouped CI speed findings, none while an incident holds them, and the superseded ids."""
     since, now_ms = span
@@ -127,7 +134,7 @@ def _hold(mail, watched, doctor, held):
         text = (
             f"Doctor CI speed findings on the swarm {watched} are held: GitHub reports an unresolved incident "
             f"affecting Actions, {incident['name']}, since {began}. {incident['link']} "
-            "Runs are still read and recorded; findings resume when it resolves, and runs with jobs created "
+            "Runs are still read and counted; findings resume when it resolves, and runs with jobs created "
             "during it are labelled."
         )
         for slug in (watched, doctor):
@@ -143,9 +150,7 @@ def speed(store: RedisStore, doctor: str, watched: str, now_ms: int) -> list[str
     snapshot = ci_speed_read.read(
         since, end, pending=state.get("pending"), known=state.get("known"), active=end == now_ms
     )
-    current = github_status.unresolved()
-    incidents = github_status.track(state.get("incidents", {}), current, now_ms)
-    held = [incident for incident in incidents.values() if current and incident["end"] is None]
+    incidents, held = _incidents(state, now_ms)
     found, gone = _crossings(state, snapshot["runs"], (since, now_ms), incidents, held)
     report = {
         "complete": snapshot["complete"] and end == now_ms,
