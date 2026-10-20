@@ -983,8 +983,7 @@ def test_a_master_seat_owning_a_kubernetes_hive_follows_the_ui_host_rule_instead
     refused = (
         DISABLED.format(backend="hive")
         if disabled == ["hive"]
-        else "the workstation hive spawns master work: no live hive can run the master with interactive, "
-        "subscription or api authentication"
+        else "the workstation hive spawns master work: no live hive takes master"
     )
     assert fenced.placement_refusal("master", task) == refused
     with pytest.raises(SwarmError, match=refused):
@@ -1063,9 +1062,10 @@ def test_placement_wait_records_original_start_and_clears_on_selection(setup):
 
     decision = setup.herdr._profile_decision.return_value
     setup.herdr._profile_decision.return_value = replace(decision, profile="frontend")
+    write_hive(setup, excluded=["frontend"])
     setup.launcher.select(setup.config, "eng", {"id": "task"})
     first = placement_waits.read(setup.store, setup.config.slug)
-    assert first["task"]["reason"] == "no UI hive live"
+    assert first["task"]["reason"] == "no live hive takes frontend"
     assert first["task"]["lane"] == "eng"
     assert first["task"]["started_at"] > 0
     setup.launcher.select(setup.config, "eng", {"id": "task"})
