@@ -161,10 +161,10 @@ class Connection:
     def lock(self) -> object:
         """The writer lock, asked for again after each wait the server ends at its lock timeout."""
         psycopg2 = errors()
-        if self.raw.get_transaction_status() != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
-            raise sqlite3.OperationalError("cannot start a transaction within a transaction")
         lost = psycopg2.errors.LockNotAvailable
         with mapped():
+            if self.raw.get_transaction_status() != psycopg2.extensions.TRANSACTION_STATUS_IDLE:
+                raise sqlite3.OperationalError("cannot start a transaction within a transaction")
             for _ in range(LOCK_TRIES):
                 cursor = self.raw.cursor()
                 try:
