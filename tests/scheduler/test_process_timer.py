@@ -1,5 +1,5 @@
 import json
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -51,8 +51,6 @@ def test_wait_is_released_by_the_scheduler_signal(redis, monkeypatch):
 
 
 def test_a_wait_with_no_wake_by_its_recheck_starts_the_scheduler_again(monkeypatch):
-    from unittest.mock import call
-
     ensure = Mock()
     monkeypatch.setattr(process_timer.service, "ensure_running", ensure)
     timer = process_timer.Timer.__new__(process_timer.Timer)
