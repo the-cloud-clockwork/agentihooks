@@ -72,7 +72,7 @@ def actions(env, monkeypatch):  # noqa: F811
         return next(r for r in WINDOW if r["id"] == identity and r["run_attempt"] == number)
 
     monkeypatch.setattr("scripts.doctor.ci_speed_read.read", read)
-    monkeypatch.setattr("scripts.doctor.ci_speed_read.attempt", attempt, raising=False)
+    monkeypatch.setattr("scripts.doctor.ci_speed_read.attempt", attempt)
     monkeypatch.setattr(doctor.detect, "readers", lambda *args, **kwargs: {})
     return calls
 
@@ -142,9 +142,42 @@ def test_an_old_subject_without_labels_takes_the_longest_wait_of_the_run():
 
 def test_waits_split_started_jobs_from_jobs_that_never_started():
     queued = run(21, [job(-700, None), job(-900, -500), job(-2000, None, completed=-1000)])
-    assert ci_measure.waits(queued, "ci-runner-wait", NOW) == {("anton-oss",): 400}
-    assert ci_measure.waits(queued, "ci-queue-age-unconfirmed", NOW) == {("anton-oss",): 1000}
-    assert ci_measure.waits(queued, "ci-queue-age-unconfirmed", NOW + 3600000) == {("anton-oss",): 4300}
+    assert ci_measure.waits(queued, "ci-runner-wait", NOW) == {("anton-oss",): 400000}
+    assert ci_measure.waits(queued, "ci-queue-age-unconfirmed", NOW) == {("anton-oss",): 1000000}
+    assert ci_measure.waits(queued, "ci-queue-age-unconfirmed", NOW + 3600000) == {("anton-oss",): 4300000}
+
+
+def test_waits_group_by_the_sorted_distinct_label_set():
+    mixed = run(23, [job(-900, -500, ("b", "a", "b")), job(-900, -700, ("a", "b"))])
+    assert ci_measure.waits(mixed, "ci-runner-wait", NOW) == {("a", "b"): 400000}
+
+
+def test_class_counts_compare_milliseconds_with_the_detector_threshold_and_take_the_low_median():
+    values = [900000, 900500, 400000, 1200000]
+    assert ci_measure.line("ci-tier-wall-time", "queue", values, (NOW - HOUR_MS, NOW)) == (
+        "ci-tier-wall-time queue, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: "
+        "2 of 4 runs over 900 seconds, median 900 seconds, worst 1200 seconds"
+    )
+    assert ci_measure.line("ci-runner-wait", "a", [300000, 300001], (NOW - HOUR_MS, NOW)).endswith(
+        "1 of 2 runs over 300 seconds, median 300 seconds, worst 300 seconds"
+    )
+    assert ci_measure.line("ci-runner-wait", "a", [100000, 700000], (NOW - HOUR_MS, NOW)).endswith(
+        "median 100 seconds, worst 700 seconds"
+    )
+
+
+def test_a_run_scope_absent_from_the_window_prints_zero_runs(actions, monkeypatch, capsys):
+    capsys.readouterr()
+    monkeypatch.setattr(
+        "scripts.doctor.ci_speed_read.read",
+        lambda *args, **kwargs: {"complete": True, "runs": [wall(13, 2000, "merge_group")]},
+    )
+    assert doctor.main([WATCHED, "measure", "ci-tier-wall-time/10-1"]) == 0
+    assert lines(capsys) == [
+        "ci-tier-wall-time/10-1 952",
+        "ci-tier-wall-time pull request, window 2026-10-17T21:00:00Z to 2026-10-17T22:00:00Z: "
+        "0 of 0 runs over 900 seconds",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -170,7 +203,7 @@ def test_unassigned_jobs_are_named_and_unrated_runs_are_skipped():
     other = {**wall(30, 1000), "event": "push"}
     empty = run(31, [job(-400, -50, ())])
     assert ci_measure.samples("ci-tier-wall-time", [other, empty], NOW) == {}
-    assert ci_measure.samples("ci-runner-wait", [empty], NOW) == {"unassigned": [350]}
+    assert ci_measure.samples("ci-runner-wait", [empty], NOW) == {"unassigned": [350000]}
 
 
 def test_an_unreadable_run_is_refused(monkeypatch):

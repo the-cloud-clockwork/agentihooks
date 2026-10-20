@@ -50,8 +50,8 @@ def waits(run: dict, kind: str, now_ms: int) -> dict[tuple, int]:
             continue
         end = job["started_at"] if began else job.get("completed_at")
         labels = tuple(sorted(set(job["labels"])))
-        seconds = ((iso_ms(end) if end else now_ms) - iso_ms(job["created_at"])) // 1000
-        longest[labels] = max(longest.get(labels, 0), seconds)
+        elapsed = (iso_ms(end) if end else now_ms) - iso_ms(job["created_at"])
+        longest[labels] = max(longest.get(labels, 0), elapsed)
     return longest
 
 
@@ -61,10 +61,10 @@ def samples(kind: str, runs: list[dict], now_ms: int) -> dict[str, list[int]]:
         if kind == WALL:
             elapsed = ci_speed.wall_ms(run, now_ms)
             if elapsed is not None:
-                found.setdefault(ci_speed.TIERS[run["event"]], []).append(elapsed // 1000)
+                found.setdefault(ci_speed.TIERS[run["event"]], []).append(elapsed)
             continue
-        for labels, seconds in waits(run, kind, now_ms).items():
-            found.setdefault(_scope(labels), []).append(seconds)
+        for labels, elapsed in waits(run, kind, now_ms).items():
+            found.setdefault(_scope(labels), []).append(elapsed)
     return found
 
 
@@ -76,10 +76,10 @@ def value(goal: Target, run: dict, now_ms: int) -> tuple[int, str | None]:
         return elapsed // 1000, ci_speed.TIERS[run["event"]]
     found = waits(run, goal.kind, now_ms)
     if goal.labels is None and found:
-        return max(found.values()), None
+        return max(found.values()) // 1000, None
     if goal.labels not in found:
         raise SwarmError(f"run {goal.run} attempt {goal.attempt} has no job on runner labels {json.dumps(goal.labels)}")
-    return found[goal.labels], _scope(goal.labels)
+    return found[goal.labels] // 1000, _scope(goal.labels)
 
 
 def _at(ms):
@@ -87,12 +87,14 @@ def _at(ms):
 
 
 def line(kind: str, scope: str, values: list[int], window: tuple[int, int]) -> str:
-    threshold = (ci_speed.WALL_MS if kind == WALL else ci_speed.SHORT_WAIT_MS) // 1000
+    threshold = ci_speed.WALL_MS if kind == WALL else ci_speed.SHORT_WAIT_MS
     text = (
         f"{kind} {scope}, window {_at(window[0])} to {_at(window[1])}: "
-        f"{sum(v > threshold for v in values)} of {len(values)} runs over {threshold} seconds"
+        f"{sum(v > threshold for v in values)} of {len(values)} runs over {threshold // 1000} seconds"
     )
-    return f"{text}, median {median_low(values)} seconds, worst {max(values)} seconds" if values else text
+    if not values:
+        return text
+    return f"{text}, median {median_low(values) // 1000} seconds, worst {max(values) // 1000} seconds"
 
 
 def measure(finding: str, goal: Target, window: tuple[int, int], now_ms: int) -> Iterator[str]:
