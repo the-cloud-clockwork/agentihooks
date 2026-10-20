@@ -41,10 +41,16 @@ class FencedLedger:
 
         def call(*args, **kwargs):
             lease.renew(self.store, self.slug, self.held)
-            with lease.fencing(self.held.epoch):
+            with lease.fencing(self._epoch(args[0] if args else kwargs.get("slug", self.slug))):
                 return value(*args, **kwargs)
 
         return call
+
+    def _epoch(self, slug: str) -> int | None:
+        if slug == self.slug:
+            return self.held.epoch
+        owner = lease.current(self.store, slug)
+        return owner.epoch if owner else None
 
 
 class FencedRuntime:
