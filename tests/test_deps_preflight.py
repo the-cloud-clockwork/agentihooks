@@ -282,7 +282,7 @@ def test_session_start_kick_leaves_no_check_process_behind(tmp_path, monkeypatch
 
 def test_session_start_kick_waits_for_a_fast_check(tmp_path, monkeypatch):
     exe = tmp_path / "agentihooks"
-    exe.write_text("#!/bin/sh\nsleep 0.2\nexit 3\n")
+    exe.write_text("#!/bin/sh\nsleep 0.1\nexit 3\n")
     exe.chmod(0o755)
     started = []
     popen = subprocess.Popen
