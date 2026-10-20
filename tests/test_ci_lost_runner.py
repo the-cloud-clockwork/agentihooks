@@ -189,7 +189,7 @@ def test_a_second_loss_is_cancelled_only():
 def test_stop_returns_once_a_cancel_ends_the_run(monkeypatch, no_sleep):
     api = Api({RUNS: [json.dumps(RUN), json.dumps({**RUN, "status": "completed"})]})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
-    assert ci_lost_runner.stop("o/r", 7)["status"] == "completed"
+    assert ci_lost_runner.stop("o/r", 7, {})["status"] == "completed"
     assert api.posts() == [post(f"{RUNS}/cancel")]
     assert no_sleep == [ci_lost_runner.POLL_SECONDS] * 2
 
@@ -199,7 +199,7 @@ def test_stop_force_cancels_when_a_cancel_does_not_end_the_run(monkeypatch, no_s
     states = [json.dumps(RUN)] * 3 + [json.dumps({**RUN, "status": "completed"})]
     api = Api({RUNS: states})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
-    assert ci_lost_runner.stop("o/r", 7)["status"] == "completed"
+    assert ci_lost_runner.stop("o/r", 7, {})["status"] == "completed"
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
     assert len(no_sleep) == 4
 
@@ -208,7 +208,7 @@ def test_stop_returns_the_last_state_when_nothing_ends_the_run(monkeypatch, no_s
     monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
     api = Api({RUNS: [json.dumps(RUN), json.dumps({**RUN, "status": "in_progress"})]})
     monkeypatch.setattr(ci_lost_runner, "_api", api)
-    assert ci_lost_runner.stop("o/r", 7)["status"] == "in_progress"
+    assert ci_lost_runner.stop("o/r", 7, {})["status"] == "in_progress"
     assert api.posts() == [post(f"{RUNS}/cancel"), post(f"{RUNS}/force-cancel")]
 
 
@@ -271,7 +271,7 @@ def test_recovery_records_each_cancel_and_observed_completion(monkeypatch, no_sl
 
 def test_a_stalled_first_attempt_is_cancelled_then_rerun_once(monkeypatch, no_sleep):
     api, report = watched(monkeypatch, RUN, stalled_run(), [RUN, {**RUN, "status": "completed"}])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 1,
         "action": "rerun",
@@ -284,7 +284,7 @@ def test_a_stalled_first_attempt_is_cancelled_then_rerun_once(monkeypatch, no_sl
 def test_a_second_loss_is_cancelled_and_files_nothing(monkeypatch, no_sleep):
     second = {**RUN, "run_attempt": 2}
     api, report = watched(monkeypatch, second, stalled_run(), [second, {**second, "status": "completed"}])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 2,
         "action": "cancel",
@@ -296,7 +296,7 @@ def test_a_second_loss_is_cancelled_and_files_nothing(monkeypatch, no_sleep):
 def test_a_stalled_run_with_a_real_test_failure_is_cancelled_and_never_rerun(monkeypatch, no_sleep):
     jobs = [*stalled_run(), job("unit (3.12, 4)", conclusion="failure")]
     api, report = watched(monkeypatch, RUN, jobs, [RUN, {**RUN, "status": "completed"}])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 1,
         "action": "cancel",
@@ -308,7 +308,7 @@ def test_a_stalled_run_with_a_real_test_failure_is_cancelled_and_never_rerun(mon
 def test_a_run_that_will_not_end_is_reported_and_not_rerun(monkeypatch, no_sleep):
     monkeypatch.setattr(ci_lost_runner, "CANCEL_POLLS", 1)
     api, report = watched(monkeypatch, RUN, stalled_run(), [RUN, RUN, RUN])
-    assert report == {
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
         "run": 7,
         "attempt": 1,
         "action": "cancel",
@@ -345,7 +345,12 @@ def test_a_cancel_whose_answer_was_lost_still_reruns_the_cancelled_run(monkeypat
 def test_a_cancel_refused_because_the_run_completed_is_left_alone(monkeypatch, no_sleep):
     refused_cancel(monkeypatch, {**RUN, "status": "completed"})
     report = ci_lost_runner.watch("o/r", RUN, WORKFLOW, GRACE)
-    assert report == {"run": 7, "attempt": 1, "action": "none", "reason": "the run completed meanwhile"}
+    assert {key: report[key] for key in ("run", "attempt", "action", "reason")} == {
+        "run": 7,
+        "attempt": 1,
+        "action": "none",
+        "reason": "the run completed meanwhile",
+    }
 
 
 def test_a_cancel_refused_on_an_open_run_is_raised(monkeypatch, no_sleep):

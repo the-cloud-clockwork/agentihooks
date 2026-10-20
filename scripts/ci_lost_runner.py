@@ -120,13 +120,15 @@ def run_state(repo: str, run_id: int) -> dict:
     return json.loads(_api(f"repos/{repo}/actions/runs/{run_id}"))
 
 
-def stop(repo: str, run_id: int) -> dict:
-    for action in ("cancel", "force-cancel"):
+def stop(repo: str, run_id: int, recovery: dict) -> dict:
+    for action, field in (("cancel", "cancel_requested_at"), ("force-cancel", "force_cancel_requested_at")):
+        recovery[field] = datetime.now(UTC).isoformat()
         _api("-X", "POST", f"repos/{repo}/actions/runs/{run_id}/{action}")
         for _ in range(CANCEL_POLLS):
             time.sleep(POLL_SECONDS)
             run = run_state(repo, run_id)
             if run["status"] == "completed":
+                recovery["completed_observed_at"] = datetime.now(UTC).isoformat()
                 return run
     return run
 
@@ -168,23 +170,31 @@ def watch(repo: str, run: dict, workflow: dict, grace: timedelta, source: Source
     stuck, reason, jobs = assess(repo, run, workflow, grace, source)
     if not stuck:
         return report(run, "none", reason)
+    detected_at = datetime.now(UTC).isoformat()
     action, why = decide(run, jobs)
     if run_state(repo, run["id"])["run_attempt"] != run["run_attempt"]:
         return report(run, "none", "the run was rerun meanwhile")
+    recovery = report(run, action, f"{reason}; {why}") | {
+        "detected_at": detected_at,
+        "cancel_requested_at": None,
+        "force_cancel_requested_at": None,
+        "completed_observed_at": None,
+    }
     try:
-        ended = stop(repo, run["id"])
+        ended = stop(repo, run["id"], recovery)
     except subprocess.CalledProcessError:
         ended = run_state(repo, run["id"])
         if ended["status"] != "completed":
             raise
+        recovery["completed_observed_at"] = datetime.now(UTC).isoformat()
         if ended["conclusion"] != "cancelled":
-            return report(run, "none", "the run completed meanwhile")
+            return recovery | {"action": "none", "reason": "the run completed meanwhile"}
     if ended["status"] != "completed":
-        return report(run, "cancel", f"{reason}; the run did not end after force cancel")
+        return recovery | {"action": "cancel", "reason": f"{reason}; the run did not end after force cancel"}
     if action == "cancel":
-        return report(run, "cancel", f"{reason}; {why}")
+        return recovery
     _api("-X", "POST", f"repos/{repo}/actions/runs/{run['id']}/rerun-failed-jobs")
-    return report(run, "rerun", f"{reason}; {why}")
+    return recovery
 
 
 def guarded(step, repo: str, run: dict, workflow: dict, grace: timedelta, source: Source = live_runners) -> dict | None:
