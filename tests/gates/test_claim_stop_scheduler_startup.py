@@ -45,7 +45,7 @@ def supervisor_starts_during_readiness_probe(tmp_path, monkeypatch):
         return result
 
     monkeypatch.setattr(process_service.subprocess, "Popen", delayed_supervisor)
-    monkeypatch.setattr(process_service.fcntl, "flock", held_probe)
+    monkeypatch.setattr(fcntl, "flock", held_probe)
 
 
 @pytest.mark.parametrize("scope", ["session", "agent", "task"])
