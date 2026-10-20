@@ -161,8 +161,9 @@ def test_a_failed_launch_retires_a_master_whose_ask_item_is_gone(swarm, monkeypa
     store, runtime, ledger, master = swarm
     launch_check.begin(store, "sw", master, 100)
     tick("sw", store, ledger, runtime, 100 + launch_check.DEADLINE_MS)
-    (ask,) = asks(store, master.name)
-    store.redis.delete(*store.redis.keys(f"*{ask.id}*"))
+    key = store.key("sw", "master-retire-requests")
+    record = json.loads(store.redis.hget(key, master.name))
+    store.redis.hset(key, master.name, json.dumps({**record, "item": "gone"}))
     actions = tick("sw", store, ledger, runtime, 100 + launch_check.DEADLINE_MS + WAIT)
     assert any(a.startswith(f"retired {master.name} after its launch check failed") for a in actions), actions
     assert runtime.killed == [master.name]
