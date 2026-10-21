@@ -45,9 +45,10 @@
   },
   "remaining_limitations": [
     "Questions and follow ups route to the lead, so a non lead master decides one only as the acting lead or through a decider record; per phase routing of follow ups is SV2-MST-05's hive target work",
-    "The relay, priority and verdict writes of a master are not fenced; this package covers answering a question, deciding a follow up and setting a task",
+    "Priority and verdict writes of a master are not fenced; this package covers answering a question, deciding a follow up, setting a task and commenting or relaying onto a task",
     "The refusal counter is kept in the masters hash and returned by master_fence.measurements; it is not shipped to the metrics outbox yet",
-    "A Redis outage lets the write through with a fail-open row in the swarm gate log, like the talk budget"
+    "A Redis outage lets the write through with a fail-open row in the swarm gate log, like the talk budget",
+    "A master's inbox message to a task's claimant still goes only from the task's owning master, through master_fence.check_send; ledger writes accept any live master seat"
   ],
   "validation": {
     "red": "Proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38143194163 on the tests only commit 857ab3c7d failed: ImportError for master_fence and the talk wiring test saw Budget instead of Fence",

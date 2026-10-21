@@ -3,7 +3,7 @@ master without a live seat is refused unless it owns the item. A write by a seat
 and is recorded under the cross write record with its writer.
 
 The fence runs inside the ledger's locked write, so the owner check and the write never interleave with another
-master's. A question or follow up keeps the seat that decided it until someone other than a master changes it; a task
+master's. A question or follow up keeps its owning seat until someone other than a master changes it; a task
 follows its phase owner.
 """
 
