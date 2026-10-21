@@ -7,7 +7,7 @@ from scripts.scheduler import core, service
 from scripts.swarm import cli, controller, stack_clients, stack_env, store
 from scripts.swarm.keyspace import ROOT
 from scripts.swarm.store import RedisStore, SwarmConfig
-from scripts.swarm_ledger import ledger_route
+from scripts.swarm_ledger import ledger_link, ledger_route
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
@@ -21,6 +21,20 @@ def hub(monkeypatch):
     monkeypatch.delenv("SWARM_URL", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     monkeypatch.setenv("LEDGER_URL", HUB)
+
+
+@pytest.mark.parametrize(
+    ("environ", "local"),
+    [
+        ({}, True),
+        ({"LEDGER_URL": HUB}, False),
+        ({"LEDGER_URL": HUB, "AGENTIHOOKS_DEPLOYMENT": "local"}, True),
+        ({"AGENTIHOOKS_DEPLOYMENT": "compose"}, False),
+        ({"AGENTIHOOKS_DEPLOYMENT": ""}, False),
+    ],
+)
+def test_the_mode_rule_reads_a_hub_address_with_no_mode_as_remote(environ, local):
+    assert ledger_link.local_mode(environ) is local
 
 
 @pytest.fixture
