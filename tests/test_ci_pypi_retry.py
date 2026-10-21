@@ -149,7 +149,7 @@ def test_a_failure_that_is_not_an_index_outage_fails_at_once(tmp_path, error):
 def test_a_command_without_the_separator_is_never_run(tmp_path):
     bin_dir = _fake(tmp_path, [("", 0)])
     result = subprocess.run(
-        ["bash", str(RETRY), "Install dependencies", "install", "-e", "."],
+        ["bash", str(RETRY), "Install dependencies", "x", "install", "-e", "."],
         cwd=tmp_path,
         env={**os.environ, "PATH": f"{bin_dir}:{os.environ['PATH']}"},
         capture_output=True,
