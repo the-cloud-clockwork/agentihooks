@@ -167,7 +167,7 @@ def _rehome_seat_mail(inbox: "InboxStore", seats: set) -> None:
             continue
         for item in inbox.open_items(seat):
             if item.state == "pending":
-                inbox.redirect(item.id, BY, seat, f"moved to the inbox {seat}'s occupant reads", seat)
+                inbox.redirect(item.id, BY, seat, f"moved to the inbox that now holds {seat}", seat)
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:

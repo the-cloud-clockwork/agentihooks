@@ -453,7 +453,7 @@ class InboxStore:
                 reason=reason,
             )
             if dest is not self:
-                return self._relocate(pipe, item, moved, dest, by, (last, pooled))
+                return self._relocate(pipe, item, moved, dest, by, last, pooled)
             pipe.multi()
             pipe.hset(key, mapping=_fields(moved))
             if moved.address != item.address:
@@ -481,13 +481,12 @@ class InboxStore:
         home = self.home(address)
         return self if home == self.world else InboxStore(self.redis, persist=self.persist, world=home)
 
-    def _relocate(self, pipe, item, moved, dest, by, flags):
-        """Move item out of this inbox into dest's, pending at moved.address with its history; flags is (last pending
-        at its address, held in a master pool)."""
-        last, pooled = flags
+    def _relocate(self, pipe, item, moved, dest, by, last, pooled):
+        """Move item out of this inbox into dest's, pending at moved.address with its history."""
         history, entry = self.key("history", item.id), self.key("entry", item.id)
         pipe.watch(history, entry)
         entries, about = pipe.lrange(history, 0, -1), pipe.get(entry)
+        moved = replace(moved, sequence=pipe.incr(dest.key("sequence", moved.address)))
         pipe.multi()
         if pooled:
             self.pool.stage_remove(pipe, item)
