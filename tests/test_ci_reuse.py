@@ -996,7 +996,9 @@ _LOST_RERUN_FORM = {"queue_tier": True, "promotion": True, "consolidated": True,
         ("failure", "failure", "skipped", False),
         ("failure", "skipped", "skipped", False),
         ("success", "success", "success", False),
-        ("cancelled", "success", "success", False),
+        ("cancelled", "success", "success", True),
+        ("cancelled", "success", "failure", False),
+        ("cancelled", "skipped", "skipped", False),
     ],
 )
 def test_a_lost_unit_shard_passes_the_queue_only_on_its_green_rerun(unit, lost, rerun, passes):
