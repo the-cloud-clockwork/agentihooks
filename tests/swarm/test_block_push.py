@@ -122,11 +122,9 @@ def test_block_on_a_hive_reads_the_local_checkout_the_launch_named(hive_worktree
     assert row["repository_branches"] == {str(primary): BRANCH}
 
 
+@pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])
 @pytest.mark.parametrize(
-    ("swarm", "named", "local"), [("sw", True, True), ("other", True, False), ("sw", False, False)]
-)
-@pytest.mark.parametrize(
-    ("argv", "module", "target", "position"),
+    "command",
     [
         (["prepare"], publish, "prepare", 2),
         (["publish", "-m", "Task work", "a.py"], publish, "publish", 2),
@@ -135,8 +133,10 @@ def test_block_on_a_hive_reads_the_local_checkout_the_launch_named(hive_worktree
     ],
 )
 def test_worker_commands_read_the_launch_checkout_only_for_their_own_swarm(
-    hive_worktree, monkeypatch, tmp_path, swarm, named, local, argv, module, target, position
+    hive_worktree, monkeypatch, tmp_path, hive, command
 ):
+    swarm, named, local = hive
+    argv, module, target, position = command
     primary = hive_worktree[2]
     monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
     if not named:
