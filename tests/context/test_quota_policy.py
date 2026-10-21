@@ -276,20 +276,21 @@ def test_stop_directive_asks_for_another_account():
 
 
 @pytest.mark.parametrize(
-    ("five", "week", "tool", "blocked", "context"),
+    ("five", "week", "tool", "head"),
     [
-        (10, 98.5, "Bash", True, False),
-        (99.2, 50, "Bash", True, False),
-        (99.2, 50, "CronCreate", False, True),
+        (10, 98.5, "Bash", "QUOTA STOP"),
+        (99.2, 50, "Bash", "QUOTA WAIT"),
+        (99.2, 50, "CronCreate", "QUOTA WAIT"),
     ],
 )
-def test_pretool_blocks_stop_and_wait(five, week, tool, blocked, context):
+def test_pretool_alerts_stop_and_wait_without_blocking(five, week, tool, head):
     d = _decide(five, week, [])
     with patch.object(qp, "evaluate", return_value=d), patch.object(qp, "handed_off_block", return_value=None):
         block, ctx = qp.pretool("sess-1", tool, "/tmp")
 
-    assert bool(block) is blocked
-    assert bool(ctx) is context
+    assert block is None
+    assert ctx.startswith(head)
+    assert "Tools are not blocked." in ctx
 
 
 def test_pretool_injects_handoff_without_blocking():

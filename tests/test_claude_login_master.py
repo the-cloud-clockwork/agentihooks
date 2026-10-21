@@ -143,3 +143,36 @@ def test_the_default_render_renders_the_profile_and_returns_its_claude_home(monk
     assert claude_login._rendered("master") == tmp_path / "master" / "claude"
     assert rendered == ["master"]
     assert claude_login.Deps(console=_console()).render is None
+
+
+def test_a_slot_login_builds_its_own_home_and_becomes_the_active_master_login(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), 2) == 0
+    home = str(ah / "master-login-2" / "claude")
+    assert runs[0][1]["CLAUDE_CONFIG_DIR"] == home
+    monkeypatch.delenv(login.SLOT_ENV)
+    assert login.slot() == 2
+    assert login.home() == ah / "master-login-2" / "claude"
+    assert login.creds() == "agentihooks/master-claude-login-2"
+
+
+def test_a_failed_slot_login_keeps_the_active_master_login(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, [], code=1), 3) == 1
+    monkeypatch.delenv(login.SLOT_ENV)
+    assert login.slot() == 1
+    assert login.home() == ah / "master-login" / "claude"
+
+
+def test_a_slot_outside_the_cap_is_refused_before_any_login(ah, monkeypatch, capsys):
+    monkeypatch.setenv(login.SLOT_ENV, "1")
+    runs = []
+    assert claude_login.master(False, {"HOME": "/home/op"}, _deps(ah, runs), login.MAX_SLOTS + 1) == 2
+    assert runs == []
+    assert "outside 1 to" in capsys.readouterr().err
+
+
+def test_slot_needs_the_master_flag():
+    with pytest.raises(SystemExit):
+        claude_login.main(["--slot", "2"])

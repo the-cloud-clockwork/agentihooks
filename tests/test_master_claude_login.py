@@ -686,3 +686,29 @@ def test_a_worker_token_master_launch_holds_its_workers_at_the_one_master_ceilin
     assert source.cap(week(70.0), 0) == 0
     assert source.cap(week(69.9), 0) > 0
     assert source.cap(week(70.0, "workeratexample_com"), 0) > 0
+
+
+def test_slot_one_keeps_the_original_home_and_record(ah, monkeypatch):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    assert login.slot() == 1
+    assert login.root() == ah / "master-login"
+    assert login.creds() == login.CREDS
+
+
+def test_the_active_slot_file_picks_the_home_and_record(ah, monkeypatch):
+    monkeypatch.delenv(login.SLOT_ENV, raising=False)
+    login.use(4)
+    assert login.root() == ah / "master-login-4"
+    assert login.creds() == f"{login.CREDS}-4"
+
+
+def test_an_unreadable_or_out_of_range_slot_falls_back_to_slot_one(ah, monkeypatch):
+    monkeypatch.setenv(login.SLOT_ENV, "nine")
+    assert login.slot() == 1
+    monkeypatch.setenv(login.SLOT_ENV, str(login.MAX_SLOTS + 1))
+    assert login.slot() == 1
+
+
+def test_use_refuses_a_slot_outside_the_cap(ah):
+    with pytest.raises(login.LoginRefused):
+        login.use(0)
