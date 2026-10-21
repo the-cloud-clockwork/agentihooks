@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 from urllib.parse import urlsplit
 
 from scripts.hive import auth, bundle_origin, registry, server
-from scripts.swarm_ledger import ledger_ca
+from scripts.swarm_ledger import ledger_ca, ledger_link
 
 LOCK_FILE = "hive.lock"
 
@@ -42,7 +42,7 @@ def refresh_env(environ: MutableMapping[str, str]) -> str:
             "this host has not joined a hive: "
             "AGENTIHOOKS_HIVE_URL and AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL must both be set"
         )
-    grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh")
+    grant = _post(url, server.REFRESH_PATH, {"ledger_credential": credential}, "refresh", environ)
     auth.write_env(registry.home(environ), url, {**grant, "ledger_credential": credential})
     ledger_ca.place(registry.home(environ), grant.get("ledger_ca"), environ)
     environ["AGENTIHOOKS_HIVE_REDIS_URL"] = grant["redis_url"]
@@ -70,13 +70,15 @@ def refresh_lock(environ: Mapping[str, str]) -> Iterator[None]:
         yield
 
 
-def _post(url: str, path: str, body: dict, action: str) -> dict:
+def _post(url: str, path: str, body: dict, action: str, environ: Mapping[str, str]) -> dict:
     parts = urlsplit(url)
     if parts.scheme != "https" and not server.is_loopback(parts.hostname):
         raise auth.HiveError(f"a {action} off loopback carries credentials, so the hive URL must be https")
     request = urllib.request.Request(url.rstrip("/") + path, data=json.dumps(body).encode())
     try:
-        with urllib.request.urlopen(request, timeout=server.REQUEST_TIMEOUT_S) as response:
+        with urllib.request.urlopen(
+            request, timeout=server.REQUEST_TIMEOUT_S, **ledger_link.transport(environ)
+        ) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         try:
