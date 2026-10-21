@@ -157,18 +157,12 @@ def test_a_handoff_releases_the_old_slot_only_after_the_successor_occupies(world
     }
 
 
-def test_stored_accounts_scans_the_keyspace_in_pages_of_ten_thousand(monkeypatch):
+def test_stored_accounts_scans_the_keyspace_in_pages_of_ten_thousand():
+    from types import SimpleNamespace
     from unittest.mock import Mock
 
-    import fakeredis
-
-    from scripts.swarm.store import RedisStore
-
-    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    store.redis.set(accounts.account_key("b"), 1)
-    store.redis.set(accounts.account_key("a"), 1)
-    scan = Mock(wraps=store.redis.scan_iter)
-    monkeypatch.setattr(store.redis, "scan_iter", scan)
+    scan = Mock(return_value=iter([accounts.account_key("b"), accounts.account_key("a")]))
+    store = SimpleNamespace(redis=SimpleNamespace(scan_iter=scan))
 
     assert accounts.stored_accounts(store) == ["a", "b"]
     scan.assert_called_once_with(match=accounts.account_key("*"), count=10000)
