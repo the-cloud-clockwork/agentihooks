@@ -4,8 +4,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from hooks.context import quota_policy, quota_usage
-from hooks.context.quota_policy import Candidate
 from scripts import claude_login, master_logins, openbao_kv, openbao_step
 from scripts import master_claude_login as login
 from scripts.routing.settings import FileSettings
@@ -193,6 +191,9 @@ def test_the_help_names_the_remove_slot():
 
 
 def test_a_master_is_offered_every_free_login_with_its_own_room(monkeypatch):
+    from hooks.context import quota_policy
+    from hooks.context.quota_policy import Candidate
+
     _stored(1, {"emailAddress": "one@example.com"})
     _stored(2, TWO)
     _held(1, "master@rig-1")
@@ -222,6 +223,7 @@ def _limits(five, week):
 
 
 def _readings(monkeypatch, cache, snapshot):
+    from hooks.context import quota_usage
     from scripts import claude_quota_balancer
 
     monkeypatch.setattr(claude_quota_balancer, "cached_observations", lambda: cache)

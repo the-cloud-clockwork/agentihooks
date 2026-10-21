@@ -3,8 +3,6 @@ import os
 
 import pytest
 
-from hooks.context import quota_policy
-from hooks.context.quota_policy import Candidate
 from scripts import claude_login, master_logins, openbao_kv, openbao_step
 from scripts import master_claude_login as login
 
@@ -92,6 +90,9 @@ def test_free_lists_logins_no_other_live_master_holds(monkeypatch, rendered):
 
 
 def test_a_master_at_98_percent_of_its_week_moves_to_the_stored_login_with_most_room(monkeypatch, rendered):
+    from hooks.context import quota_policy
+    from hooks.context.quota_policy import Candidate
+
     _stored(1, "one@example.com")
     _stored(2, "two@example.com")
     _stored(3, "three@example.com")
@@ -118,6 +119,9 @@ def test_a_master_at_98_percent_of_its_week_moves_to_the_stored_login_with_most_
 
 
 def test_a_master_with_no_free_stored_login_gets_no_token_target(monkeypatch, rendered):
+    from hooks.context import quota_policy
+    from hooks.context.quota_policy import Candidate
+
     _stored(1, "one@example.com")
     monkeypatch.setattr(master_logins, "usage", lambda account, now: (40.0, 98.0, now))
     environ = _environ(rendered, "master@rig-1")
@@ -137,6 +141,8 @@ def test_a_master_with_no_free_stored_login_gets_no_token_target(monkeypatch, re
 
 
 def test_a_worker_gets_no_login_candidates():
+    from hooks.context import quota_policy
+
     assert quota_policy._login_accounts({"AGENTIHOOKS_AGENT_NAME": "engineer@rig-1"}) == []
 
 

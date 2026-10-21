@@ -1,7 +1,5 @@
 """Room left on each stored claude ai master login, from its own sessions' quota snapshots and the router cache."""
 
-from hooks.context import quota_usage
-
 
 def _used(value: object, reset: object, now: float) -> float:
     if not isinstance(value, (int, float)):
@@ -10,6 +8,7 @@ def _used(value: object, reset: object, now: float) -> float:
 
 
 def _readings(account: str) -> list[tuple[float, object, object, object, object]]:
+    from hooks.context import quota_usage
     from scripts.claude_quota_balancer import cached_observations
 
     found = [
