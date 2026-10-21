@@ -80,6 +80,7 @@ def test_preflight_reuses_a_green_report_before_the_plan_installs_anything():
     reuse = steps[names.index("Reuse a green report when this head only adds tests to it")]
     assert reuse["id"] == "reuse"
     assert reuse["if"] == "steps.open.outputs.open == 'false'"
+    reuse["env"]["UNRELATED_SETTING"] = "ignored"
     assert reuse["env"] == {"GH_TOKEN": "${{ github.token }}"}
     assert reuse["run"] == "python3 -m scripts.ci_mutation." + 'reuse "$GITHUB_REF_NAME" "$GITHUB_RUN_ID"'
     upload_at = names.index("Upload the reused mutation evidence")
@@ -168,6 +169,7 @@ def test_preflight_sizes_its_stats_parts_and_shards_from_the_plan(tmp_path, monk
     assert steps[names.index(None)]["with"] == {"fetch-depth": 0, "persist-credentials": False}
     sized = steps[names.index("Size mutation shards from stored timings")]
     assert sized["id"] == "plan"
+    sized["env"]["UNRELATED_SETTING"] = "ignored"
     assert sized["env"] == {"GH_TOKEN": "${{ github.token }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
     from scripts.ci_mutation import plan as planner
     from tests.test_ci_mutation_plan import _project
@@ -268,6 +270,7 @@ def test_a_single_stats_part_refines_inside_the_statistics_worker():
     measured = steps[names.index("Refine mutation shards from measured statistics")]
     assert measured["if"] == single
     assert measured["id"] == "refine"
+    measured["env"]["UNRELATED_SETTING"] = "ignored"
     assert measured["env"] == {"BASES": "${{ needs.plan.outputs.bases }}", "MUTATION_SHARD_CPU_QUOTA": "3"}
     assert measured["run"] == refine_steps[refine_names.index(measured["name"])]["run"]
     upload = steps[names.index("Upload the measured mutation plan")]
