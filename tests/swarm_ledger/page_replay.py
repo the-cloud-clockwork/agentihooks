@@ -60,14 +60,15 @@ CAPTURE = """() => {
 
 
 class FakeApi:
-    def __init__(self):
+    def __init__(self, limits):
         self.requests = []
         self.dialogs = []
         self.rev = INPUTS["doc"]["_meta"]["rev"]
+        self.limits = limits
 
     def state(self):
         doc = json.loads(json.dumps(INPUTS["doc"]))
-        doc["_meta"]["rev"] = self.rev
+        doc["_meta"].update(rev=self.rev, limits=self.limits)
         return doc
 
     def note(self, request):
@@ -272,7 +273,7 @@ def record(root: Path, folder: Path) -> list:
         browser = pw.chromium.launch()
         stack.callback(browser.close)
         context = browser.new_context(viewport=VIEWPORT, locale="en-US", timezone_id="UTC")
-        api = FakeApi()
+        api = FakeApi(sys.modules["ledger_server"].PAGE_LIMITS)
         context.add_init_script(DETERMINISTIC)
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)
