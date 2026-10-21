@@ -336,7 +336,7 @@ target, the least-used account (≥ 5% left) still takes a weekly handoff; on a
 5-hour limit it does so only when this account's week has under 10% left,
 otherwise the session waits for the reset. At least 2 accounts are needed for
 any handoff. `QUOTA STOP`
-and `QUOTA WAIT` block tools (WAIT allows `CronCreate`); a session that handed
+and `QUOTA WAIT` are alerts and never block a tool; a session that handed
 off is blocked from further work. Thresholds: `AGENTIHOOKS_HANDOFF_WEEK_PCT`,
 `AGENTIHOOKS_HANDOFF_5H_PCT`, `AGENTIHOOKS_HANDOFF_MIN_LEFT`,
 `AGENTIHOOKS_WAIT_MIN_WEEK_LEFT`; `QUOTA_POLICY_ENABLED=false` turns it off.
