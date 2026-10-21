@@ -223,7 +223,7 @@ def test_master_refuses_unavailable_or_foreign_accounts_and_records_its_wait_lan
 
     task = master(setup)
     setup.herdr._quota_accounts = [Account(harness, "account", state, sessions, 80, 80, 6)]
-    expected = placement.Wait("no live hive can run the master with interactive, subscription or api authentication")
+    expected = placement.Wait("no hive for master advertises a claude slot")
     assert setup.launcher.select(setup.config, "master", task) == expected
     found = placement_waits.read(setup.store, setup.config.slug)["master"]
     assert found["lane"] == "master"
