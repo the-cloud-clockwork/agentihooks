@@ -176,7 +176,8 @@ def _settle_seat_notices(inbox: "InboxStore", seats: set, active: set) -> None:
     from scripts.inbox.store import CLOSED
     from scripts.swarm.waits import notice_task
 
-    for seat in sorted(seats):
+    quiet = inbox.quiet(sorted(seats)) if seats else set()
+    for seat in sorted(seats - quiet):
         for item in inbox.open_items(seat):
             if item.state in CLOSED:
                 continue
@@ -209,8 +210,10 @@ def _settle_left_behind(inbox: "InboxStore", item, seat: str, active: set) -> No
 def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", active: set) -> None:
     from scripts.inbox.store import CLOSED
 
-    for agent in store.agents(slug):
-        if agent.name not in active or not agent.seat:
+    candidates = [agent for agent in store.agents(slug) if agent.name in active and agent.seat]
+    quiet = inbox.quiet([agent.seat for agent in candidates]) if candidates else set()
+    for agent in candidates:
+        if agent.seat in quiet:
             continue
         for item in inbox.open_items(agent.seat):
             if item.state in CLOSED or item.fyi or not item.task or item.task == agent.task:
@@ -224,7 +227,8 @@ def _settle_peer_mail(inbox: "InboxStore", slug: str, store: "RedisStore", activ
 
 
 def _settle_unfillable(inbox: "InboxStore", config, seats: set) -> None:
-    for seat in sorted(seats):
+    quiet = inbox.quiet(sorted(seats)) if seats else set()
+    for seat in sorted(seats - quiet):
         why = no_successor(seat, config)
         if not why:
             continue
