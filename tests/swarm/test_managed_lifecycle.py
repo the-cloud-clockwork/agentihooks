@@ -418,8 +418,11 @@ def test_managed_retirement_closes_the_launch_pane_only_while_it_belongs_to_the_
     def herdr(args):
         if args[:2] == ["agent", "get"]:
             return {"agent": {"pane_id": "viewer", "name": owner or rig.agent.name, "agent_session": None}}
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": "viewer", "terminal_id": "tv"}]}
         return _close_only(args)
 
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "viewer", "tv")
     rig.herdr.side_effect = herdr
     rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
     assert rig.runner.retire(rig.agent)
