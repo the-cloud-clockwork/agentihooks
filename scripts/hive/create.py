@@ -105,7 +105,7 @@ def _save(tools: Tools) -> None:
 
 
 def _kubectl(tools: Tools, argv: list[str]) -> str:
-    return machine._run(tools.run, ["kubectl", *argv], None, COMMAND_TIMEOUT_S)
+    return machine.run_checked(tools.run, ["kubectl", *argv], None, COMMAND_TIMEOUT_S)
 
 
 def _record(tools: Tools) -> dict[str, str]:
@@ -142,7 +142,7 @@ def _ssh_keys(tools: Tools, options: Options) -> str:
     with tempfile.TemporaryDirectory() as folder:
         path = Path(folder) / "host_key"
         argv = ["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", tools.state["name"], "-f", str(path)]
-        machine._run(tools.run, argv, None, COMMAND_TIMEOUT_S)
+        machine.run_checked(tools.run, argv, None, COMMAND_TIMEOUT_S)
         entries = {
             HOST_KEY: path.read_text(),
             HOST_PUBLIC_KEY: path.with_suffix(".pub").read_text().strip(),
