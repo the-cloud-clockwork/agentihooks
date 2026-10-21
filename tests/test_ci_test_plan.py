@@ -161,6 +161,7 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
     [
         (b"", False),
         (b"not a zip", False),
+        (b"{}", "corrupt-deflate"),
         (b"", True),
         (b"{", True),
         (bytes([255]), True),
@@ -174,6 +175,7 @@ def test_a_missing_record_plans_a_full_run(monkeypatch, tmp_path, capsys):
     ids=[
         "empty-download",
         "corrupt-zip",
+        "corrupt-deflate",
         "empty-json",
         "corrupt-json",
         "invalid-encoding",
@@ -192,9 +194,12 @@ def test_an_unusable_download_runs_every_test_and_names_its_own_fallback(
     api = ci_test_plan._api
     buffer = io.BytesIO()
     if zipped:
-        with zipfile.ZipFile(buffer, "w") as archive:
+        with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
             archive.writestr("manifest.json", content)
     payload = buffer.getvalue() if zipped else content
+    if zipped == "corrupt-deflate":
+        offset = 30 + len("manifest.json")
+        payload = payload[:offset] + bytes([7]) + payload[offset + 1 :]
     monkeypatch.setattr(ci_test_plan, "_api", lambda endpoint: payload if endpoint.endswith("/zip") else api(endpoint))
     monkeypatch.setattr(
         ci_test_plan.dep_manifest, "changes", lambda *args: pytest.fail("Unusable records cannot plan reuse")
