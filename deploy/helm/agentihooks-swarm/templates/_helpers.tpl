@@ -167,3 +167,13 @@ exec:
     - import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2).read()
     {{- end }}
 {{- end -}}
+
+{{- define "swarm.homeSource" -}}
+{{- if .hostPath -}}
+hostPath:{{ .hostPath.path }}
+{{- else if .persistentVolumeClaim -}}
+claim:{{ .persistentVolumeClaim.claimName }}
+{{- else -}}
+{{ toJson . }}
+{{- end -}}
+{{- end }}

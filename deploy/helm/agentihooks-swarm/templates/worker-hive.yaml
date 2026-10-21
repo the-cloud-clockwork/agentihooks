@@ -1,12 +1,3 @@
-{{- define "swarm.homeSource" -}}
-{{- if .hostPath -}}
-hostPath:{{ .hostPath.path }}
-{{- else if .persistentVolumeClaim -}}
-claim:{{ .persistentVolumeClaim.claimName }}
-{{- else -}}
-{{ toJson . }}
-{{- end -}}
-{{- end }}
 {{- define "swarm.workerHive" }}
 {{- $root := .root }}
 {{- $workers := .workers }}
@@ -222,7 +213,7 @@ spec:
 {{- end }}
 {{- $_ := set $hive "replicas" 1 }}
 {{- $_ := set $hive "homeVolume" (deepCopy $hive.homeVolume) }}
-{{- if and (gt (len $hive.homeVolume) 1) (kindIs "invalid" $hive.homeVolume.emptyDir) }}
+{{- if and (hasKey $hive.homeVolume "emptyDir") (kindIs "invalid" $hive.homeVolume.emptyDir) }}
 {{- $_ := unset $hive.homeVolume "emptyDir" }}
 {{- end }}
 {{- $home := include "swarm.homeSource" $hive.homeVolume }}
