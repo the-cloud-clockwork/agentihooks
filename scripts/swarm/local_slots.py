@@ -46,12 +46,12 @@ def _held(store: RedisStore, claims: dict, own: str, now: int) -> tuple[list[str
         for agent in store.agents(slug)
     }
     agents = [named for named, (task, agent) in records.items() if task != own and _local_worker(agent)]
-    pending = [named for named, at in claims.items() if _pending(records.get(named), now - int(at))]
+    pending = [named for named, at in claims.items() if _pending(records.get(named), own, now - int(at))]
     return [*agents, *pending], [named for named in claims if named not in pending]
 
 
-def _pending(record, age: int) -> bool:
-    return age < PENDING_MS and (record is None or record[1].state == STARTING)
+def _pending(record, own: str, age: int) -> bool:
+    return age < PENDING_MS and (record is None or (record[0] != own and record[1].state == STARTING))
 
 
 def _local_worker(agent) -> bool:

@@ -285,6 +285,7 @@ def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
     assert local_slots.held(setup.store, "box", slug, "other") == 0
     assert local_slots.claim(setup.store, "box", slug, "first", "eng-1", 8) == 0
     assert local_slots.held(setup.store, "box", slug, "other") == 1
+    assert local_slots.held(setup.store, "box", slug, "first") == 0
     assert local_slots.held(setup.store, "elsewhere", slug, "other") == 0
     setup.store.put_agent(slug, AgentRecord("eng-1", "eng", "first"))
     assert local_slots.held(setup.store, "box", slug, "other") == 1
