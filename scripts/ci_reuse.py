@@ -49,6 +49,25 @@ WATCHER_LOSS = (
     f' elif $event == "merge_group" and $job == "{WATCHER}" then'
     ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
 )
+LOST_RERUN = (
+    ('"split", "unit", "shard-check", "test-count"]', '"split", "shard-check", "test-count"]'),
+    (
+        "and all($required[];",
+        'and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result]'
+        ' | IN(["success", "skipped", "skipped"], ["failure", "success", "success"], ["cancelled", "success", "success"])))'
+        "\n      and all($required[];",
+    ),
+    (
+        ' else .value.result == "skipped" end)',
+        ' elif $event == "merge_group" and ($job | IN("unit", "unit-lost", "unit-rerun")) then true'
+        ' else .value.result == "skipped" end)',
+    ),
+    (
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")',
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")'
+        ' or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group")',
+    ),
+)
 
 INLINE_REQUIRED = (
     '(if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)',
@@ -152,6 +171,14 @@ def inline_mutation(steps: list[dict]) -> list[dict]:
         "INLINE": "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}",
     }
     return [{**aggregation, "env": env, "run": run}, *rest]
+
+
+def lost_rerun(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in LOST_RERUN:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
 
 
 def summary_steps() -> list[dict]:

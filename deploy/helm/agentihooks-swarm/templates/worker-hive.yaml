@@ -113,6 +113,10 @@ spec:
               value: {{ $workers.repositories | toJson | quote }}
             - name: HIVE_CREDENTIAL_FILE
               value: /run/hive-join/credential
+            {{- with $workers.hiveUrl }}
+            - name: AGENTIHOOKS_HIVE_URL
+              value: {{ . | quote }}
+            {{- end }}
             {{- if $workers.caSecret.name }}
             - name: SSL_CERT_FILE
               value: /run/hive-ca/ca.pem

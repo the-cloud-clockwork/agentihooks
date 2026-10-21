@@ -249,6 +249,30 @@ def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat
         assert remote.store.claimant("fixture", "task") == remote.agent.name
 
 
+def test_lost_hive_worker_leaves_a_task_awaiting_merge_in_pull_request(remote):
+    from scripts.swarm import ready, tick
+    from scripts.swarm.tick import SUSPECT
+
+    remote.agent = replace(remote.agent, state=SUSPECT)
+    remote.store.put_agent("fixture", remote.agent)
+    _beat_hive(remote, LOST + 1)
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    pr_url = "https://github.com/o/r/pull/1"
+    row = {"state": "pr", "claimed_by": remote.agent.name, "pr_url": pr_url, "awaiting": ready.AWAITING}
+    rows = {"task": dict(row)}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.retire = Mock(return_value=False)
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+
+    assert actions == [f"retired {remote.agent.name}: its hive stopped reporting"]
+    remote.runtime.retire.assert_not_called()
+    ledger.update_task.assert_not_called()
+    assert rows["task"] == row
+    assert remote.store.agents("fixture") == []
+
+
 @pytest.mark.parametrize(
     ("panes", "namespace", "retired"),
     [
@@ -608,18 +632,19 @@ def test_the_hive_retires_the_recorded_process_identity(remote, monkeypatch):
     assert runtime.retire(agent) is True
 
 
-def test_the_hive_refuses_a_retire_outside_the_recorded_namespace(remote, monkeypatch):
-    from scripts.hive.orders import Consumer
+def test_a_hive_restarted_since_launch_retires_without_signalling(remote, monkeypatch):
+    from scripts.hive.orders import Ack, Consumer, Orders
 
     _publish(remote)
     runtime, agent = remote.runtime, remote.agent
-    runtime.retire(agent)
+    assert runtime.retire(agent) is False
     hive, ended = _hive_side(monkeypatch, "another", {12: SimpleNamespace(pid=12, start_time=34)})
     Consumer(remote.redis, HIVE, hive).poll_commands()
     assert ended == []
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
-    assert runtime.retire(agent) is False
-    assert "another PID namespace" in runtime.refusal(agent)["refusal"]
+    assert Orders(remote.redis).command(HIVE, _retire_order(agent)) == Ack("done", agent.runtime_target)
+    assert runtime.retire(agent) is True
+    assert agent.name not in runtime.refusals
 
 
 def test_a_runtime_without_hive_reports_never_acts_on_a_remote_worker_locally(remote):

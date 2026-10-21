@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 import uuid
 from typing import TYPE_CHECKING
 
@@ -10,6 +11,8 @@ if TYPE_CHECKING:
     from redis import Redis
 
 RECHECK_S = 30
+# BLPOP treats a zero timeout as block forever.
+MIN_POP_S = 0.01
 
 
 def blocking_client() -> "Redis":
@@ -33,6 +36,12 @@ def wake(event: dict, delivery_id: str, redis: "Redis") -> None:
         pipe.execute()
 
 
+def _recheck(deadline: float | None) -> float:
+    if deadline is None:
+        return RECHECK_S
+    return min(RECHECK_S, max(MIN_POP_S, deadline - time.monotonic()))
+
+
 class Timer:
     def __init__(self, delay: float, *, redis: "Redis | None" = None) -> None:
         self.closed = False
@@ -49,8 +58,11 @@ class Timer:
             self.close()
             raise
 
-    def wait(self) -> None:
-        while self.redis.blpop(self.key, timeout=RECHECK_S) is None:
+    def wait(self, timeout: float | None = None) -> None:
+        deadline = None if timeout is None else time.monotonic() + timeout
+        while self.redis.blpop(self.key, timeout=_recheck(deadline)) is None:
+            if deadline is not None and time.monotonic() >= deadline:
+                return
             service.ensure_running()
 
     def close(self) -> None:
@@ -69,9 +81,9 @@ class Timer:
         self.close()
 
 
-def wait(delay: float, redis: "Redis | None" = None) -> None:
+def wait(delay: float, redis: "Redis | None" = None, timeout: float | None = None) -> None:
     with Timer(delay, redis=redis) as timer:
-        timer.wait()
+        timer.wait(timeout)
 
 
 async def async_wait(delay: float) -> None:

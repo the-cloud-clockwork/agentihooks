@@ -288,6 +288,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
+    worlds = InboxStore(store.redis).worlds()
     return {
         "config": {
             **config.__dict__,
@@ -305,7 +306,8 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
-                    for item in InboxStore(store.redis).pending_mail(a.name)
+                    for world in worlds
+                    for item in world.pending_mail(a.name)
                 ],
             }
             for a in visible

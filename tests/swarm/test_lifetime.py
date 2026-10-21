@@ -236,11 +236,13 @@ def test_runtime_reports_failed_pane_close_so_next_tick_retries():
 
     def herdr(argv):
         calls.append(argv)
+        if argv[:2] == ["agent", "get"]:
+            return {}
         raise RuntimeError("pane close failed")
 
     agent = AgentRecord("worker", "eng", "t1", pane_id="w1:p2")
     assert not HerdrRuntime(herdr=herdr).retire(agent)
-    assert calls == [["pane", "close", agent.pane_id]]
+    assert calls == [["agent", "get", agent.pane_id], ["pane", "close", agent.pane_id]]
 
 
 def test_reopen_after_idle_retirement_starts_a_fresh_master(env, monkeypatch):

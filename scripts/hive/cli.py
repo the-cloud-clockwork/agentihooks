@@ -1,4 +1,4 @@
-"""agentihooks hive add|invite|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin."""
+"""agentihooks hive add|invite|refresh|revoke|controller|serve|set|show|list|run|install|bundle-origin|setup."""
 
 import argparse
 import contextlib
@@ -189,6 +189,13 @@ def _parser() -> argparse.ArgumentParser:
         "bundle-origin", help="Write the linked bundle's git address and branch into the hive settings record"
     )
     origin.add_argument("--path", default=bundle_origin.SETTINGS_PATH, help="OpenBao record under the secret mount")
+    setup = sub.add_parser(
+        "setup", help="Write the workstation agent settings and the bundle origin into the hive settings record"
+    )
+    setup.add_argument("--path", default=bundle_origin.SETTINGS_PATH, help="OpenBao record under the secret mount")
+    setup.add_argument(
+        "--dry-run", action="store_true", help="Print the key names it would write and leave out, and write nothing"
+    )
     return parser
 
 
@@ -255,6 +262,13 @@ def _report(hive_id: str, base: dict, other: dict | None) -> bool:
     return bool(lines)
 
 
+def _setup(args: argparse.Namespace) -> str:
+    import hooks.config  # noqa: F401  loads the agentihooks env files into os.environ
+    from scripts.hive import setup
+
+    return setup.publish(os.environ, args.path, args.dry_run)
+
+
 def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -286,6 +300,8 @@ def main(argv: list[str]) -> int:
             _registry(args)
         elif args.command == "bundle-origin":
             print(bundle_origin.publish(os.environ, args.path))
+        elif args.command == "setup":
+            print(_setup(args))
         else:
             return _serve(args)
     except auth.HiveError as exc:

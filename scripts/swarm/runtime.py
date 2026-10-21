@@ -159,13 +159,9 @@ def _titled(slug, lane, seat):
 
 
 def _launch_records(name):
-    from scripts import herdr_panes
+    from scripts.codex_session.attach import launch_records
 
-    return [
-        r
-        for r in herdr_panes.load(dict(os.environ))
-        if r.kind == "init-agent" and naming.plain(r.owner_session) == naming.plain(name)
-    ]
+    return launch_records(name, dict(os.environ))
 
 
 def _opened_pane(name, since_ms):
@@ -1020,15 +1016,20 @@ class HerdrRuntime:
         slug = store.names.slug_of(agent.name)
         recorded = bindings.viewers(slug, record.execution_id)
         try:
-            viewers = self._viewer_panes(agent.pane_id, recorded)
+            owned = self._owned_panes(agent, recorded)
         except Exception as exc:
             self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"pane list: {exc}"}
             return False
-        for pane in viewers:
+        for pane in owned:
+            launch = pane == agent.pane_id
             try:
-                self.close_pane(pane)
+                if launch:
+                    self._close_owned_pane(agent)
+                else:
+                    self.close_pane(pane)
             except Exception as exc:
-                self.refusals[agent.name] = {"process": record.server_pid, "refusal": f"viewer pane {pane}: {exc}"}
+                refusal = f"pane {pane}: {exc}" if launch else f"viewer pane {pane}: {exc}"
+                self.refusals[agent.name] = {"process": record.server_pid, "refusal": refusal}
                 return False
         directory = execution_directory(record)
         if directory is not None and directory.exists():
@@ -1043,14 +1044,14 @@ class HerdrRuntime:
         self.refusals.pop(agent.name, None)
         return True
 
-    def _viewer_panes(self, launch_pane, recorded):
-        """A recorded viewer is closed only while herdr still lists its pane on the terminal it was opened with,
-        because herdr reuses a closed pane's id."""
-        live = []
-        if recorded:
-            listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
-            live = [pane for pane, terminal in recorded.items() if terminal and listed.get(pane) == terminal]
-        return [pane for pane in dict.fromkeys((launch_pane, *live)) if pane]
+    def _owned_panes(self, agent, recorded):
+        from scripts.codex_session.attach import recorded_terminals
+
+        known = recorded_terminals(agent.name, recorded, dict(os.environ))
+        if not known:
+            return []
+        listed = {p["pane_id"]: p.get("terminal_id") for p in self.herdr(["pane", "list"])["panes"]}
+        return [pane for pane, terminal in known.items() if listed.get(pane) == terminal]
 
     def retire_process(self, agent, pid, homes=(), start=0):
         if live_binding.managed(agent):
@@ -1064,11 +1065,10 @@ class HerdrRuntime:
             return False
         if agent.pane_id:
             try:
-                self.herdr(["pane", "close", agent.pane_id])
+                self._close_owned_pane(agent)
             except Exception as exc:
-                if "not found" not in str(exc):
-                    self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
-                    return False
+                self.refusals[agent.name] = {"process": pid or 0, "refusal": f"pane {agent.pane_id}: {exc}"}
+                return False
         self.refusals.pop(agent.name, None)
         return True
 
@@ -1103,6 +1103,17 @@ class HerdrRuntime:
         except Exception as exc:
             if "not found" not in str(exc):
                 raise
+
+    def _close_owned_pane(self, agent):
+        """herdr reuses a closed pane's id, so a pane it lists under another owner is left open."""
+        try:
+            found = self.herdr(["agent", "get", agent.pane_id])
+        except Exception as exc:
+            if "not found" not in str(exc):
+                raise
+            found = None
+        if found is None or _owns(found.get("agent", found), agent):
+            self.close_pane(agent.pane_id)
 
     def close_space(self, config: SwarmConfig) -> bool:
         try:

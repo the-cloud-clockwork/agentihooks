@@ -35,7 +35,7 @@ def test_spawn_hands_init_agent_the_swarm_lane_and_task(tmp_path, monkeypatch):
 
 def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
-    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
 
     def run(argv, **kwargs):
         return SimpleNamespace(returncode=0, stdout=validated(argv, "status=started\nroute_status=routed\n"), stderr="")
@@ -56,7 +56,7 @@ def test_spawn_stamps_the_launch_start_before_init_agent_runs(tmp_path, monkeypa
 def test_spawn_records_each_launch_step_and_the_host_load(tmp_path, monkeypatch):
     clock = iter([5_000.0, 9_000.0])
     loads = iter([(7.25, 6.5, 5.0), (12.0, 8.0, 6.0)])
-    monkeypatch.setattr("scripts.swarm.runtime.time.time", lambda: next(clock))
+    monkeypatch.setattr("scripts.swarm.runtime.time", SimpleNamespace(time=lambda: next(clock), sleep=lambda _: None))
     monkeypatch.setattr("scripts.swarm.runtime.os.getloadavg", lambda: next(loads))
     out = "status=started\nlauncher_at=5001000\nroute_status=routed\nharness_at=5004000\n"
 

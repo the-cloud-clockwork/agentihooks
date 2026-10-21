@@ -280,8 +280,7 @@ def _stopped_tick(store, slug, ledger, runtime, held):
 def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=False):
     from scripts.swarm import command_runner, commands, controller, incidents, lease, tick_activity
 
-    deployment = os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL)
-    if deployment != controller.LOCAL and not scheduled:
+    if not ledger_link.local_mode(os.environ) and not scheduled:
         return [CONTROLLER_TICKS]
     tick_stop.check()
     ledger = ledger or LedgerClient()
@@ -622,11 +621,12 @@ def cmd_prober(store, args):
 
 
 def cmd_tick_watch(store, args):
-    from scripts.swarm import controller, scheduled_tick, tick_watch
+    from scripts.swarm import scheduled_tick, tick_watch
     from scripts.swarm.tick import respawn_master
+    from scripts.swarm_ledger import ledger_link
 
     repair = None
-    if os.environ.get("AGENTIHOOKS_DEPLOYMENT", controller.LOCAL) == controller.LOCAL:
+    if ledger_link.local_mode(os.environ):
         runtime = routed(herdr=HerdrRuntime())
 
         def respawn(slug):

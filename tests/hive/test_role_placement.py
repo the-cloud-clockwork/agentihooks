@@ -114,11 +114,17 @@ def test_the_hive_controller_routes_the_plan_lane_through_hive_placement(setup):
     assert fenced.runtime.hive_launch.select(setup.config, "plan", {"id": "task"}).hive == "anton"
 
 
-MASTER_WAIT = "no live hive can run the master with interactive, subscription or api authentication"
+MASTER_WAIT = "no hive for master lists the repo agentihooks"
 
 
-@pytest.mark.parametrize("lacks", [{"repos": []}, {"slots": []}], ids=["repo", "slot"])
-def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headless_hives_exclude_it(setup, lacks):
+@pytest.mark.parametrize(
+    ("lacks", "missing"),
+    [({"repos": []}, "lists the repo agentihooks"), ({"slots": []}, "advertises a claude slot")],
+    ids=["repo", "slot"],
+)
+def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headless_hives_exclude_it(
+    setup, lacks, missing
+):
     from scripts.hive.placement import Wait
     from scripts.swarm import controller
     from scripts.swarm.profile_choice import ProfileDecision
@@ -129,11 +135,12 @@ def test_a_master_with_no_fitting_ui_hive_is_left_to_the_workstation_when_headle
     write_hive(setup, id="workstation", ui="yes", excluded=[], max_agents=10, **lacks)
     write_hive(setup, id="anton", ui="no", excluded=["master"], max_agents=2)
     setup.herdr._profile_decision.return_value = ProfileDecision("master", "lane", "master")
-    assert setup.launcher.select(setup.config, "master", {"id": "master"}) == Wait(MASTER_WAIT)
+    wait = f"no hive for master {missing}"
+    assert setup.launcher.select(setup.config, "master", {"id": "master"}) == Wait(wait)
     routed = RoutedRuntime(setup.herdr, RuntimeRouter([]))
     fenced = controller.FencedRuntime(setup.store, setup.config.slug, setup.held, routed, "compose")
     refused = fenced.placement_refusal("master", {"id": "master"})
-    assert refused == f"the workstation hive spawns master work: {MASTER_WAIT}"
+    assert refused == f"the workstation hive spawns master work: {wait}"
     with pytest.raises(controller.SwarmError, match="the workstation hive spawns master work"):
         fenced.spawn(setup.config, "master", "master name", {"id": "master"})
 

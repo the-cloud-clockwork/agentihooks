@@ -107,7 +107,7 @@ def herdr_runtime(tmp_path, monkeypatch, panes=None, run=None):
         calls.append(args)
         if args[:2] == ["agent", "get"]:
             if args[2] not in panes:
-                raise RuntimeError("agent_not_found")
+                raise RuntimeError(f"herdr agent get: agent target {args[2]} not found")
             return {"agent": panes[args[2]]}
         if args[:2] == ["pane", "read"]:
             return {"text": "ready"}

@@ -19,7 +19,8 @@ TOKEN = "fixture-github-token-value"
 JOINED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://joined\n"
 REFRESHED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://refreshed\n"
 OTHER = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-old-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://old\n"
-SAVED = {"refreshed": REFRESHED, "rejoined": OTHER}
+MOVED = "AGENTIHOOKS_HIVE_URL=https://tailnet.example:8770\n" + REFRESHED
+SAVED = {"refreshed": REFRESHED, "rejoined": OTHER, "moved": MOVED}
 
 
 def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
@@ -60,6 +61,7 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
         (home / "hive.env").write_text("fixture delivered hive env\n")
     if credential in SAVED:
         (home / "hive.env").write_text(SAVED[credential])
+        (home / "hive.env").chmod(0o600)
         credential = "mounted"
     repo = tmp_path / "source"
     subprocess.run(["git", "init", "--initial-branch=dev", str(repo)], check=True, capture_output=True)
@@ -168,6 +170,31 @@ def test_a_new_join_replaces_the_saved_credential_of_another_member(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert (home / "hive.env").read_text() == JOINED
+    assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
+
+
+@pytest.mark.parametrize(
+    ("credential", "hive_url", "saved"),
+    [
+        ("moved", "https://anton.example:8770", MOVED.replace("tailnet.example", "anton.example")),
+        ("moved", "", MOVED),
+        (
+            "refreshed",
+            "https://anton.example:8770/?a=1&b=2",
+            "AGENTIHOOKS_HIVE_URL=https://anton.example:8770/?a=1&b=2\n" + REFRESHED,
+        ),
+    ],
+)
+def test_the_charted_hive_url_replaces_the_endpoint_in_the_saved_credential(
+    tmp_path, monkeypatch, credential, hive_url, saved
+):
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_URL", raising=False)
+    if hive_url:
+        monkeypatch.setenv("AGENTIHOOKS_HIVE_URL", hive_url)
+    result, _, home, _ = startup(tmp_path, credential=credential)
+
+    assert result.returncode == 0, result.stderr
+    assert (home / "hive.env").read_text() == saved
     assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
 
 

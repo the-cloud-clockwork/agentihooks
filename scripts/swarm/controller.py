@@ -10,9 +10,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from scripts.scheduler.process_timer import wait as scheduled_wait
-from scripts.swarm import lease
+from scripts.swarm import lease, local_slots
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
+from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
@@ -29,7 +30,7 @@ OVERFLOW = "the local machine takes {lane} work"
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
-    machine = environ.get("AGENTIHOOKS_DEPLOYMENT", LOCAL)
+    machine = environ.get("AGENTIHOOKS_DEPLOYMENT", LOCAL if ledger_link.local_mode(environ) else "compose")
     return HYBRID if machine == LOCAL and config.hive_placement else machine
 
 
@@ -99,7 +100,7 @@ class FencedRuntime:
         refused = self._refusal(lane, task)
         return "" if _to_workstation(lane, refused) else refused
 
-    def _refusal(self, lane: str, task: dict) -> str:
+    def _refusal(self, lane: str, task: dict, claim: str = "") -> str:
         task = _master_task(lane, task)
         if refused := self._mode_refusal():
             return refused
@@ -124,26 +125,32 @@ class FencedRuntime:
                 return ""
             if lane == "master":
                 return f"{WORKSTATION.format(lane=lane)}: {selected.reason}"
-            return self._overflow(lane, task, selected)
+            return self._overflow(lane, task, selected, claim)
         wanted = router.placed_backend(lane, task)
         if wanted == WORKSTATION_BACKEND:
             return WORKSTATION.format(lane=lane)
         return DISABLED.format(backend=wanted) if router.enabled_backend(wanted) != wanted else ""
 
-    def _overflow(self, lane: str, task: dict, waited: "Wait") -> str:
+    def _overflow(self, lane: str, task: dict, waited: "Wait", claim: str) -> str:
         if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
             return waited.reason
         from scripts.hive import placement_waits, registry
-        from scripts.hive.placement import Choice, hosts, overflow
+        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
         from scripts.swarm.commands import hive_id
 
-        local = registry.show(self.store.redis, hive_id())
+        machine = hive_id()
+        local = registry.show(self.store.redis, machine)
         if local is not None and not hosts(waited.role, local, (lane,)):
             return waited.reason
         local_max = self.store.config(self.slug).local_max_agents
-        chosen = overflow(waited.role, waited, _local_agents(self.store, task["id"]), local_max)
+        chosen = overflow(waited.role, waited, local_slots.held(self.store, machine, self.slug, task["id"]), local_max)
         if not isinstance(chosen, Choice):
             return chosen.reason
+        if (
+            claim
+            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)) >= local_max
+        ):
+            return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents"
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
         return OVERFLOW.format(lane=lane)
 
@@ -156,7 +163,16 @@ class FencedRuntime:
     def spawn(self, config, lane, name, task):
         lease.renew(self.store, self.slug, self.held)
         task = _master_task(lane, task)
-        refused = self._refusal(lane, task)
+        try:
+            return self._spawn(config, lane, name, task)
+        except BaseException:
+            from scripts.swarm.commands import hive_id
+
+            local_slots.release(self.store, hive_id(), self.slug, name)
+            raise
+
+    def _spawn(self, config, lane, name, task):
+        refused = self._refusal(lane, task, name)
         workstation = _to_workstation(lane, refused)
         from scripts.hive.placement import LOCAL_FULL
 
@@ -187,18 +203,6 @@ def _master_seats(store: RedisStore, slug: str) -> frozenset[str]:
     seats = (masters.seat(index) for index in range(1, masters.MasterSeats(store.redis).count(slug) + 1))
     return frozenset(
         seat for seat in seats if not master_claude_login.enabled(slug, seat_address(slug, seat), "master", "claude")
-    )
-
-
-def _local_agents(store: RedisStore, task: str) -> int:
-    return sum(
-        agent.runtime_backend == WORKSTATION_BACKEND
-        and not agent.hive
-        and agent.lane != "master"
-        and agent.task != task
-        and agent.state != "finished"
-        for slug in store.slugs()
-        for agent in store.agents(slug)
     )
 
 

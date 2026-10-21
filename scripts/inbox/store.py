@@ -142,6 +142,15 @@ class InboxStore:
         slug = self.names.slug_of(receiver)
         return scope.host(self.redis, slug, receiver) if slug else ""
 
+    def worlds(self) -> list["InboxStore"]:
+        """This inbox and, for the controller's, each joined hive member's, which holds the mail of the agents that
+        member runs."""
+        from scripts.hive import scope
+
+        if self.world or scope.member():
+            return [self]
+        return [self, *(InboxStore(self.redis, persist=self.persist, world=m) for m in scope.members(self.redis))]
+
     @functools.cached_property
     def pool(self):
         from scripts.inbox.pool import MasterPool
@@ -171,9 +180,11 @@ class InboxStore:
         work, so a bare close names no outcome; a given item_id refuses a second write of that item."""
         if not (sender and address and text.strip()):
             raise InboxError("a message needs a sender, an address and text")
+        from scripts.hive import scope
+
         sender, address = self.names.resolve(sender), self.names.resolve(address)
         home = self.home(address)
-        if home != self.world and not self.world:
+        if home != self.world and not scope.member():
             routed = InboxStore(self.redis, persist=self.persist, world=home)
             return routed.send(sender, address, text, ref, fyi, task, item_id)
         at = now_ms()
@@ -455,6 +466,52 @@ class InboxStore:
             if address:
                 self.stage_pending(pipe, item, address)
             pipe.rpush(self.key("history", item_id), _entry(moved.state, by, reason, moved.updated_at))
+            pipe.execute()
+            return moved
+
+    def move_world(self, item_id: str, target: "InboxStore", by: str, reason: str) -> Item | None:
+        """Move an open item, its history and ledger entry into target's world, pending at the same address."""
+        from redis.exceptions import WatchError
+
+        for _ in range(MOVE_ATTEMPTS):
+            try:
+                return self._try_move_world(item_id, target, by, reason)
+            except WatchError:
+                continue
+        raise InboxError(f"message {item_id} changed meanwhile; run the command again")
+
+    def _try_move_world(self, item_id, target, by, reason):
+        key, history = self.key("item", item_id), self.key("history", item_id)
+        with self.redis.pipeline() as pipe:
+            pipe.watch(key, history, self.key("entry", item_id))
+            item = _item(pipe.hgetall(key), item_id)
+            if item.state in CLOSED:
+                return None
+            entries = pipe.lrange(history, 0, -1)
+            entry = pipe.get(self.key("entry", item_id))
+            last = self.last_pending(pipe, item)
+            moved = replace(item, state="pending", updated_at=now_ms(), reason=reason)
+            pipe.multi()
+            pipe.delete(key, history, self.key("entry", item_id))
+            pipe.zrem(self.key("address", item.address), item_id)
+            pipe.zrem(self.key("open", item.address), item_id)
+            pipe.decr(self.key("open-size", item.address))
+            pipe.zrem(self.key("pending", item.address), item_id)
+            pipe.zrem(self.key("delivered"), item_id)
+            if last:
+                pipe.srem(self.key("waiting"), item.address)
+            pipe.hset(target.key("item", item_id), mapping=_fields(moved))
+            pipe.rpush(target.key("history", item_id), *entries, _entry("pending", by, reason, moved.updated_at))
+            if entry:
+                pipe.set(target.key("entry", item_id), entry)
+            pipe.zadd(target.key("address", item.address), {item_id: item.created_at})
+            pipe.zadd(target.key("open", item.address), {item_id: item.created_at})
+            pipe.incr(target.key("open-size", item.address))
+            pipe.zadd(target.key("pending", item.address), {item_id: item.created_at})
+            pipe.sadd(target.key("waiting"), item.address)
+            if target.persist is not None:
+                target.persist(pipe)
+            pipe.publish(NOTIFY, item.address)
             pipe.execute()
             return moved
 

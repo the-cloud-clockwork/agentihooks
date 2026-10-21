@@ -8,6 +8,7 @@ from urllib.parse import quote, urlsplit
 from redis.exceptions import RedisError
 
 from scripts.swarm import stack_env, store
+from scripts.swarm_ledger import ledger_link
 
 
 def prepare(home: Path, environ: Mapping[str, str], out: TextIO) -> int:
@@ -15,7 +16,7 @@ def prepare(home: Path, environ: Mapping[str, str], out: TextIO) -> int:
     if not values.get("SWARM_REDIS_PASSWORD"):
         print("Run agentihooks swarm init before preparing existing clients.", file=out)
         return 1
-    if environ.get("AGENTIHOOKS_DEPLOYMENT", "local") != "local":
+    if not ledger_link.local_mode(environ):
         print("Client preparation requires the existing local deployment.", file=out)
         return 1
     source = urlsplit(store.redis_url(environ))

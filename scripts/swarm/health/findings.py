@@ -369,7 +369,7 @@ def master_fallback_auth(agents: list[dict]) -> list[Finding]:
             agent.get("lane") != "master"
             or agent.get("seat", "").partition("@")[0] not in ("", "master")
             or agent.get("desired_route_kind") != "interactive"
-            or agent.get("route_kind") == "interactive"
+            or agent.get("route_kind") in ("interactive", "master-login")
             or agent.get("state") in ("finished", "ended")
         ):
             continue

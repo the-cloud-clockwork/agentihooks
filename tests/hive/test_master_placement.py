@@ -45,7 +45,7 @@ def test_master_falls_back_to_a_ui_slot_before_a_preferred_headless_hive(kind):
     [
         (
             ["master"],
-            placement.Wait("no live hive can run the master with interactive, subscription or api authentication"),
+            placement.Wait(f"no hive for master lists the repo {REPO}"),
         ),
         ([], placement.MasterPlacement("headless", "token", "subscription", False)),
     ],
@@ -64,20 +64,42 @@ def test_master_reconsiders_interactive_hives_at_the_next_handoff():
     )
 
 
+@pytest.mark.parametrize("fields", [{"heartbeat_at": 1}, {"excluded": ["master"]}])
+def test_master_waits_when_no_live_hive_takes_the_master(fields):
+    assert placement.place_master("claude", "login", REPO, [hive("bad", **fields)], NOW) == placement.Wait(
+        "no live hive takes master"
+    )
+
+
+def test_master_wait_names_the_missing_repo():
+    hives = [hive("bad", repos=["other"], interactive={"claude": "login"})]
+    assert placement.place_master("claude", "login", REPO, hives, NOW) == placement.Wait(
+        f"no hive for master lists the repo {REPO}"
+    )
+
+
 @pytest.mark.parametrize(
-    "fields",
+    "slots",
     [
-        {"heartbeat_at": 1},
-        {"repos": []},
-        {"excluded": ["master"]},
-        {"slots": []},
-        {"slots": [{"harness": "codex", "account": "token", "kind": "subscription"}]},
-        {"slots": [{"harness": "claude", "account": "token", "kind": "interactive"}]},
+        [],
+        [{"harness": "codex", "account": "token", "kind": "subscription"}],
+        [{"harness": "claude", "account": "token", "kind": "interactive"}],
     ],
 )
-def test_master_waits_when_no_hive_has_an_eligible_authentication_route(fields):
-    assert placement.place_master("claude", "login", REPO, [hive("bad", **fields)], NOW) == placement.Wait(
-        "no live hive can run the master with interactive, subscription or api authentication"
+def test_master_wait_names_the_missing_slot(slots):
+    assert placement.place_master("claude", "", REPO, [hive("bad", slots=slots)], NOW) == placement.Wait(
+        "no hive for master advertises a claude slot"
+    )
+
+
+@pytest.mark.parametrize(
+    ("fields", "front"),
+    [({"interactive": {"claude": "other"}}, False), ({"master_login": {"claude": "forced"}}, True)],
+)
+def test_master_wait_names_the_missing_login(fields, front):
+    hives = [hive("bad", slots=[], **fields)]
+    assert placement.place_master("claude", "login", REPO, hives, NOW, front) == placement.Wait(
+        "no hive for master holds the claude login for login"
     )
 
 
@@ -137,7 +159,7 @@ def test_duplicate_account_labels_keep_the_first_route_without_comparing_placeme
 def test_the_front_door_master_takes_a_hive_master_login_and_never_its_slots():
     hives = [hive("login", master_login={"claude": "operator"}, prefer={"master": 1}), hive("other")]
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
-        "login", "operator", "interactive", False
+        "login", "operator", "master-login", False
     )
     hives[0]["master_login"] = {"claude": ""}
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
@@ -162,7 +184,7 @@ def test_a_declared_login_skips_a_hive_whose_master_login_differs():
 def test_a_declared_login_matching_the_hive_master_login_is_placed_there():
     hives = [hive("login", master_login={"claude": "operator"})]
     assert placement.place_master("claude", "operator", REPO, hives, NOW, front=True) == placement.MasterPlacement(
-        "login", "operator", "interactive", False
+        "login", "operator", "master-login", False
     )
 
 
@@ -177,5 +199,5 @@ def test_a_master_login_outranks_a_preferred_hive_slot_and_follows_master_prefer
         hive("b", master_login={"claude": "second"}, prefer={"master": 1}),
     ]
     assert placement.place_master("claude", "", REPO, hives, NOW, front=True) == placement.MasterPlacement(
-        "b", "second", "interactive", False
+        "b", "second", "master-login", False
     )
