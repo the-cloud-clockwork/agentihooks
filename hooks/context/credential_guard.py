@@ -171,6 +171,7 @@ FIND_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
 # Options whose value names what to SKIP; the value is never a read.
 EXCLUSION_OPTS = re.compile(r"^--?(?:exclude|exclude-dir|exclude-from|glob|iglob|ignore|ignore-file|g)$")
 GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
+ACCESS_ENV = r"(?:(?:agentihooks\s+access|-m\s+scripts\.access_env)\s+env\b|access_env\.(?:main|values)\s*\()"
 
 # grep/rg flags that emit counts or filenames rather than matching lines
 NON_CONTENT_GREP = re.compile(r"(?:^|\s)-[A-Za-z]*[clLq]")
@@ -528,6 +529,11 @@ def renderer_verdict(command):
                 KIND_ENVIRONMENT,
             )
             + "\nkubectl describe secret <name> shows the keys and byte sizes without the values."
+        )
+    if len(re.findall(ACCESS_ENV, low)) > len(re.findall(rf'\beval\s+"\$\([^()]*{ACCESS_ENV}\s*\)"', low)):
+        return (
+            block("printing the Cloudflare Access service token (agentihooks access env)", KIND_ENVIRONMENT)
+            + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
         )
     return None
 

@@ -1,7 +1,7 @@
 """Dev promotion watch: the newest finished push run of Tests on dev files one urgent ci task per failed job and
-raises a ledger alert; the failed jobs that lost their runner, and the failed jobs that read the output of a unit shard
-that lost its runner, share one runner outage task instead. The next green run closes those tasks and the alert. A run
-whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
+raises a ledger alert; the failed jobs that lost their runner, and the failed jobs whose own error is the missing
+output of a unit shard that lost its runner, share one runner outage task instead. The next green run closes those
+tasks and the alert. A run whose only failure is the Sonar job finding dev already moved past its commit is reported as superseded and files
 nothing.
 
 The minute tick calls it; CI runners cannot reach the ledger, so the fixer tasks are filed from the machine that can.
@@ -51,6 +51,13 @@ SHARD_CONSUMERS = (
     "coverage-baseline",
     "flake-budget",
     "stage-budget",
+)
+MISSING_SHARD_SIGNS = (
+    "Missing coverage for shard ",
+    "No shard durations at ",
+    "collected tests did not run in exactly one of ",
+    "head shard coverage missing: ",
+    "baseline shard coverage missing: ",
 )
 REFRESH_JOB = "refresh-durations"
 LOST_SAMPLES_SIGN = "kept no samples from durations-"
@@ -130,7 +137,7 @@ def starves(failed: tuple[str, str], shards_lost: bool) -> bool:
     job = failed[0].split(" (")[0]
     if job == REFRESH_JOB:
         return LOST_SAMPLES_SIGN in failed[1]
-    return shards_lost and job in SHARD_CONSUMERS
+    return shards_lost and job in SHARD_CONSUMERS and any(sign in failed[1] for sign in MISSING_SHARD_SIGNS)
 
 
 def outages(causes: list[tuple[str, str]], named: dict[str, dict]) -> list[tuple[str, str]]:

@@ -8,7 +8,15 @@ import json
 
 import pytest
 
-from hooks.context.credential_guard import ENV_NAMES_SAFE, GREP_EXCLUDES, RG_EXCLUDES, decide, evaluate
+from hooks.context.credential_guard import (
+    ENV_NAMES_SAFE,
+    GREP_EXCLUDES,
+    KIND_ENVIRONMENT,
+    RG_EXCLUDES,
+    block,
+    decide,
+    evaluate,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -137,6 +145,51 @@ CASES = [
     ("kubectl secret yaml", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secret db -o yaml"}}, True),
     ("kubectl secret list", {"tool_name": "Bash", "tool_input": {"command": "kubectl get secrets -n prod"}}, False),
     ("kubectl describe secret", {"tool_name": "Bash", "tool_input": {"command": "kubectl describe secret db"}}, False),
+    ("access env printed", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}}, True),
+    (
+        "access env module printed",
+        {"tool_name": "Bash", "tool_input": {"command": "/v/bin/python -m scripts.access_env env | cat"}},
+        True,
+    ),
+    (
+        "access env captured",
+        {"tool_name": "Bash", "tool_input": {"command": 'x="$(agentihooks access env)"; echo "$x"'}},
+        True,
+    ),
+    (
+        "access env evaluated",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(agentihooks access env)" && test -n "$A"'}},
+        False,
+    ),
+    (
+        "access env module evaluated",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(/v/bin/python -m scripts.access_env env)"'}},
+        False,
+    ),
+    (
+        "access env evaluated then printed",
+        {"tool_name": "Bash", "tool_input": {"command": 'eval "$(agentihooks access env)"; agentihooks access env'}},
+        True,
+    ),
+    ("access help", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access envelope"}}, False),
+    (
+        "access env called from python",
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 -c 'from scripts import access_env; access_env.main([\"env\"])'"},
+        },
+        True,
+    ),
+    (
+        "access env values from python",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c 'print(access_env.values (env))'"}},
+        True,
+    ),
+    (
+        "access env source linted",
+        {"tool_name": "Bash", "tool_input": {"command": "ruff check scripts/access_env.py"}},
+        False,
+    ),
     (
         "python opens dotenv",
         {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('.env').read())\""}},
@@ -232,6 +285,19 @@ def test_guard_never_raises_on_garbage():
     for payload in ({}, {"tool_name": None}, {"tool_input": "notadict"}, {"tool_name": "Bash", "tool_input": None}):
         decide(payload)
         evaluate(payload, allow_rewrite=True)
+
+
+def test_access_env_block_names_the_token_and_the_eval_form():
+    reason = decide({"tool_name": "Bash", "tool_input": {"command": "agentihooks access env"}})
+
+    assert reason == (
+        block("printing the Cloudflare Access service token (agentihooks access env)", KIND_ENVIRONMENT)
+        + '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
+    assert reason.startswith("BLOCKED: printing the Cloudflare Access service token (agentihooks access env).\n")
+    assert reason != block("printing the Cloudflare Access service token (agentihooks access env)", None) + (
+        '\nEvaluate it instead:  eval "$(agentihooks access env)", then test each variable by name.'
+    )
 
 
 def _bash(command, cwd=""):

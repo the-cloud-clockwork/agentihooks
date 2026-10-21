@@ -193,6 +193,10 @@ def _swarm_exports(environ: dict[str, str]) -> str:
     return "".join(f"export {key}={shlex.quote(value)}\n" for key, value in exports.items()) + pin
 
 
+def _access_export() -> str:
+    return f'eval "$({shlex.join([sys.executable, "-m", "scripts.access_env", "env"])})"\n'
+
+
 def _launch_environ(environ: dict[str, str], name: str, handoff: bool) -> dict[str, str]:
     keeps = environ.get(SPAWN) == "1" or handoff or name == environ.get("AGENTIHOOKS_AGENT_NAME")
     dropped = {SPAWN} if keeps else {SPAWN, *SWARM_IDENTITY}
@@ -503,6 +507,7 @@ def _write_launcher(
         f"cd {shlex.quote(str(directory))} || exit 1\n"
         f": > {shlex.quote(str(_started_marker(launcher)))}\n"
         f"{operator_env.source_line(environ)}"
+        f"{_access_export()}"
         f"{_predecessor_export(environ)}"
         f"{gh_config.SHELL_PIN}"
         f"export AGENTIHOOKS_EXIT_RECORD={shlex.quote(str(exit_record))}\n"
