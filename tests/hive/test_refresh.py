@@ -479,3 +479,35 @@ def test_a_refused_refresh_reports_both_refusals(admin, hive, redis_lib, tmp_pat
     assert str(refused.value) == (f"the hive Redis credential was refused and the hive refused a refresh ({NO_MEMBER})")
     assert pinged == [f"hive-{grant['id']}"]
     assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+
+
+def test_a_member_the_process_env_left_behind_yields_to_the_saved_member(admin, hive, redis_lib, tmp_path, monkeypatch):
+    left = auth.mint(admin, "pod-before-restart", PUBLIC)
+    grant = _joined(admin, hive, tmp_path, monkeypatch)
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {
+        **_hive_environ(hive, grant, tmp_path),
+        "AGENTIHOOKS_HIVE_ID": left["id"],
+        "AGENTIHOOKS_HIVE_REDIS_URL": left["redis_url"],
+    }
+
+    client = store.redis_client(environ)
+
+    assert pinged == [f"hive-{grant['id']}"]
+    assert environ["AGENTIHOOKS_HIVE_ID"] == grant["id"]
+    assert environ["AGENTIHOOKS_HIVE_REDIS_URL"] == grant["redis_url"]
+    assert client.connection_pool.connection_kwargs["username"] == f"hive-{grant['id']}"
+
+
+def test_a_workstation_keeps_its_swarm_redis_beside_a_saved_hive_member(admin, hive, redis_lib, tmp_path, monkeypatch):
+    _joined(admin, hive, tmp_path, monkeypatch)
+    swarm_url = auth._with_user("redis://h:1/0", "swarm", "p")
+    admin.acl_setuser("swarm", enabled=True, passwords=["+p"], keys=["*"], commands=["+@all"])
+    pinged = _fake_ping(admin, redis_lib, monkeypatch)
+    environ = {"AGENTIHOOKS_HOME": str(tmp_path), "AGENTIHOOKS_SWARM_REDIS_URL": swarm_url}
+
+    store.redis_client(environ)
+
+    assert pinged == ["swarm"]
+    assert "AGENTIHOOKS_HIVE_REDIS_URL" not in environ
+    assert "AGENTIHOOKS_HIVE_ID" not in environ
