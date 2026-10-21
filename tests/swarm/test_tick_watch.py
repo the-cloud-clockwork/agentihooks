@@ -311,6 +311,41 @@ def test_the_watcher_run_passes_over_every_swarm_once_a_minute(store, capsys):
     assert "sw: told master@sw the tick is stale" in capsys.readouterr().out
 
 
+def test_the_watcher_beats_its_watchdog_each_pass_and_after_every_swarm_even_a_failing_one(store, monkeypatch):
+    store.create(SwarmConfig("other", "/repo", max_eng=1, max_ci=0))
+    events = []
+
+    def judged(store, slug, *args):
+        events.append(slug)
+        if slug == "other":
+            raise RuntimeError("redis went away")
+        return []
+
+    monkeypatch.setattr(tick_watch, "watch_pass", judged)
+    tick_watch.run(
+        store, lambda: START, None, lambda seconds: events.append("wait"), passes=2, beat=lambda: events.append("beat")
+    )
+
+    one = ["beat"] + [step for slug in store.slugs() for step in (slug, "beat")] + ["wait"]
+    assert events == one + one
+
+
+def test_the_watcher_beats_the_systemd_watchdog_by_default(store, tmp_path, monkeypatch):
+    import socket
+
+    path = str(tmp_path / "notify")
+    monkeypatch.setenv("NOTIFY_SOCKET", path)
+    with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+        sock.bind(path)
+        sock.settimeout(0.5)
+        tick_watch.run(store, lambda: START, None, bounded(1), passes=1)
+
+        beats = 1 + len(store.slugs())
+        assert [sock.recv(64) for _ in range(beats)] == [b"WATCHDOG=1"] * beats
+        with pytest.raises(TimeoutError):
+            sock.recv(64)
+
+
 def test_the_watch_command_runs_without_a_parsed_swarm(monkeypatch):
     ran = []
     monkeypatch.setattr(cli, "connect", lambda: "store")
