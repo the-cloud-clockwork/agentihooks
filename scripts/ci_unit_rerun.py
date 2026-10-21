@@ -5,7 +5,8 @@ import re
 from collections.abc import Callable
 from pathlib import Path
 
-from scripts.ci_queue_retry import SHARD, base_name, runner_lost
+from scripts.ci_queue_fail_fast import logged_loss
+from scripts.ci_queue_retry import SHARD, base_name
 
 LEG = re.compile(r"\((\S+), (\d+)\)$")
 FAILED = ("failure", "cancelled", "timed_out")
@@ -17,7 +18,7 @@ def classify(jobs: list[dict], lost: Callable[[dict], bool]) -> tuple[list[tuple
         if base_name(job["name"]) != SHARD or job.get("conclusion") not in FAILED:
             continue
         match = LEG.search(job["name"])
-        if match and lost(job):
+        if match and job["conclusion"] != "timed_out" and lost(job):
             legs.append((match[1], int(match[2])))
         else:
             kept.append(job["name"])
@@ -43,7 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--plan", required=True)
     args = parser.parse_args(argv)
     jobs = [json.loads(line) for line in args.jobs.read_text().splitlines() if line]
-    matrix, reason = decide(jobs, json.loads(f"[{args.plan}]"), lambda job: runner_lost(args.repo, job["id"]))
+    seen: dict[str, bool] = {}
+    matrix, reason = decide(jobs, json.loads(f"[{args.plan}]"), lambda job: logged_loss(args.repo, job, seen))
     print(json.dumps({"rerun": matrix, "reason": reason}))
     if output := os.environ.get("GITHUB_OUTPUT"):
         with Path(output).open("a") as handle:

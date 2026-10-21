@@ -1277,10 +1277,6 @@ jobs:
     needs: [unit, split]
     runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
     timeout-minutes: 10
-    permissions:
-      actions: read
-      checks: read
-      contents: read
     outputs:
       matrix: ${{ steps.classify.outputs.matrix }}
     steps:
@@ -1299,17 +1295,14 @@ jobs:
           permission-actions: read
           permission-contents: read
 
-      - name: Read this attempt's jobs
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"
-
       - name: Name the unit shards that lost their runner
         id: classify
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PLAN: ${{ needs.split.outputs.queue_312 }}
-        run: python3 -m scripts.ci_unit_rerun --jobs "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY" --plan "$PLAN"
+        run: |
+          python3 -m scripts.ci_budget.jobs "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" > "$RUNNER_TEMP/jobs.jsonl"
+          python3 -m scripts.ci_unit_rerun --jobs "$RUNNER_TEMP/jobs.jsonl" --repo "$GITHUB_REPOSITORY" --plan "$PLAN"
 
   unit-rerun:
     name: unit rerun (${{ matrix.python-version }}, ${{ matrix.shard }})

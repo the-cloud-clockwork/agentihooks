@@ -90,29 +90,6 @@ def test_a_timed_out_rerun_is_listed_so_it_refuses_the_requeue(monkeypatch):
     )
 
 
-@pytest.mark.parametrize(("annotation", "lost"), [(LOST, True), ("Process completed with exit code 1.", False)])
-def test_a_job_without_a_log_is_judged_by_its_annotations(monkeypatch, annotation, lost):
-    calls = []
-
-    def api(*args):
-        calls.append(args[0])
-        if args[0].endswith("/logs"):
-            raise subprocess.CalledProcessError(1, ["gh", "api", *args])
-        return json.dumps([{"message": annotation}])
-
-    monkeypatch.setattr(ci_queue_retry, "_api", api)
-    assert ci_queue_retry.runner_lost("o/r", 11) is lost
-    assert calls[-1] == "repos/o/r/check-runs/11/annotations"
-
-
-def test_a_loss_written_only_in_the_log_is_found(monkeypatch):
-    def api(*args):
-        return "##[error]" + SHUTDOWN if args[0] == "repos/o/r/actions/jobs/11/logs" else "[]"
-
-    monkeypatch.setattr(ci_queue_retry, "_api", api)
-    assert ci_queue_retry.runner_lost("o/r", 11) is True
-
-
 def test_a_real_test_failure_is_not_retried():
     failed = [job("unit (3.11, 2)", RED), job("Gate — Required", "")]
     retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)

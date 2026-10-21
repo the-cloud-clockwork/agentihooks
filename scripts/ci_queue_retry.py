@@ -65,23 +65,11 @@ def log_errors(repo: str, job_id: int) -> list[str]:
     return [line for line in text.splitlines() if "##[error]" in line]
 
 
-def annotations(repo: str, job_id: int) -> list[str]:
-    return [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job_id}/annotations"))]
-
-
 def job_text(repo: str, job_id: int, log: bool) -> str:
-    notes = annotations(repo, job_id)
+    notes = [note["message"] for note in json.loads(_api(f"repos/{repo}/check-runs/{job_id}/annotations"))]
     if log:
         notes += log_errors(repo, job_id)
     return "\n".join(notes)
-
-
-def runner_lost(repo: str, job_id: int) -> bool:
-    try:
-        text = job_text(repo, job_id, True)
-    except subprocess.CalledProcessError:
-        return any(RUNNER_LOSS.search(note) for note in annotations(repo, job_id))
-    return bool(RUNNER_LOSS.search(text))
 
 
 def failed_jobs(repo: str, run_id: int) -> list[dict]:

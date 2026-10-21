@@ -52,9 +52,9 @@ def test_every_argument_is_required(tmp_path, missing):
     assert raised.value.code == 2
 
 
-@pytest.mark.parametrize("conclusion", ["timed_out", "failure"])
-def test_a_timed_out_or_unsigned_shard_reruns_nothing(conclusion):
-    matrix, _ = ci_unit_rerun.decide([_job("unit (3.12, 2)", conclusion)], PLAN, lambda job: False)
+@pytest.mark.parametrize(("conclusion", "lost"), [("timed_out", True), ("failure", False)])
+def test_a_timed_out_or_unsigned_shard_reruns_nothing(conclusion, lost):
+    matrix, _ = ci_unit_rerun.decide([_job("unit (3.12, 2)", conclusion)], PLAN, lambda job: lost)
     assert matrix == []
 
 
@@ -79,7 +79,7 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
     listing.write_text(
         json.dumps(_job("unit (3.12, 2)", "failure", 9)) + "\n\n" + json.dumps(_job("lint", "success")) + "\n"
     )
-    monkeypatch.setattr(ci_unit_rerun, "runner_lost", lambda repo, job_id: (repo, job_id) == ("o/r", 9) and lost)
+    monkeypatch.setattr(ci_unit_rerun, "logged_loss", lambda repo, job, seen: (repo, job["id"]) == ("o/r", 9) and lost)
     plan = json.dumps(PLAN[:3])[1:-1]
     argv = ["--jobs", str(listing), "--repo", "o/r", "--plan", plan]
     assert ci_unit_rerun.main(argv) == code
@@ -97,12 +97,11 @@ def test_the_rerun_job_runs_the_unit_shard_steps_for_the_classified_legs():
         " && (needs.unit.result == 'failure' || needs.unit.result == 'cancelled') }}"
     )
     assert lost["runs-on"] == jobs["shard-check"]["runs-on"]
-    read, classify = lost["steps"][-2:]
-    assert read["env"] == {"GH_TOKEN": "${{ steps.app-token.outputs.token }}"}
-    assert "scripts.ci_budget.jobs" in read["run"]
-    assert classify["env"]["GH_TOKEN"] == "${{ github.token }}"
+    classify = lost["steps"][-1]
+    assert classify["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    assert "scripts.ci_budget.jobs" in classify["run"]
     assert "scripts.ci_unit_rerun --jobs" in classify["run"]
-    assert lost["permissions"] == {"actions": "read", "checks": "read", "contents": "read"}
+    assert "permissions" not in lost
     assert rerun["name"] == "unit rerun (${{ matrix.python-version }}, ${{ matrix.shard }})"
     assert rerun["if"] == "${{ !cancelled() && needs.unit-lost.result == 'success' }}"
     assert rerun["strategy"]["matrix"] == {"include": "${{ fromJSON(needs.unit-lost.outputs.matrix) }}"}
