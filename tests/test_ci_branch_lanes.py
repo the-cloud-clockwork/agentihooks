@@ -234,7 +234,11 @@ def test_an_edited_trusted_workflow_grades_new_reusable_calls(tmp_path, monkeypa
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
     monkeypatch.chdir(head)
     assert lanes.refused(sha, base) == (
-        {f"{lanes.WORKFLOWS}/replay.yml": ["job escape calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group"]}
+        {
+            f"{lanes.WORKFLOWS}/replay.yml": [
+                "job escape calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group"
+            ]
+        }
         if unsafe
         else {}
     )
