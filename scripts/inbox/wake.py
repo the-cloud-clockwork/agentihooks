@@ -4,13 +4,13 @@ Ladder per pending item: up to three wakes one retry window apart, then an inbox
 then a follow-up on the ledger page. Every step is appended to the item's history, so the count survives restarts.
 """
 
-from dataclasses import replace
+from dataclasses import dataclass, replace
 
 from scripts.inbox import addresses, exits
 from scripts.inbox.dispatch import Dispatcher
 from scripts.inbox.seats import is_seat
 from scripts.inbox.seen import SEEN_ON_LEDGER, SeenMarks
-from scripts.inbox.store import redelivery_ms
+from scripts.inbox.store import Item, redelivery_ms
 from scripts.swarm import capabilities, idle, outage
 from scripts.swarm.delivery import READY, post
 from scripts.swarm.store import MASTER, RedisStore, SwarmError
@@ -74,6 +74,36 @@ def raised_id(entry: dict) -> str:
     return entry["reason"].rpartition(" ")[2] if entry.get("event") == TO_MASTER else ""
 
 
+@dataclass(frozen=True)
+class _WakeInputs:
+    items: list[Item]
+    receivers: dict[str, tuple[str, tuple[str, int] | None]]
+    clocks: dict[str, int | None]
+    histories: dict[str, list[dict]]
+    seen: set[tuple[str, str]]
+
+
+def _wake_inputs(inbox, slug, items, names, config, marks):
+    aliases = inbox.names.resolve_many(
+        list(dict.fromkeys(value for item in items for value in (item.address, item.sender)))
+    )
+    resolved = [replace(item, address=aliases[item.address], sender=aliases[item.sender]) for item in items]
+    eligible = [
+        item for item in resolved if item.address in names or item.sender in names or item.address.endswith(f"@{slug}")
+    ]
+    receivers = {address: _receiver(inbox, address) for address in dict.fromkeys(item.address for item in eligible)}
+    clocks = {
+        address: _seat_clock(inbox, receiver, held, names, config) for address, (receiver, held) in receivers.items()
+    }
+    histories = inbox.histories([item.id for item in eligible])
+    pairs = list(
+        dict.fromkeys(
+            (receivers[item.address][0], item.ref) for item in eligible if item.ref and receivers[item.address][0]
+        )
+    )
+    return _WakeInputs(eligible, receivers, clocks, histories, marks.seen_many(pairs))
+
+
 def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_QUIET_S * 1000):
     names, config = {a.name for a in agents}, _swarm_config(inbox, slug)
     panes = {a.name: a for a in agents if typed_wake(inbox, a)}
@@ -83,26 +113,24 @@ def wake_pass(inbox, slug, agents, herdr, ledger, now_ms, window, quiet=DEFAULT_
     statuses, prompted = {}, set()
     actions = [f"redelivered message {item.id}" for item in inbox.redeliver(now_ms, redelivery_ms())]
     actions += addresses.settle_unresolved(inbox, names, _ladder(inbox, slug), now_ms, window)
+    reads = _wake_inputs(inbox, slug, _ladder(inbox, slug), names, config, marks)
     doc = None
-    for item in _ladder(inbox, slug):
-        item = replace(item, address=inbox.names.resolve(item.address), sender=inbox.names.resolve(item.sender))
-        if item.address not in names and item.sender not in names and not item.address.endswith(f"@{slug}"):
-            continue
-        receiver, held = _receiver(inbox, item.address)
+    for item in reads.items:
+        receiver, held = reads.receivers[item.address]
         if item.sender == BY and item.ref.startswith(f"{slug}:event:"):
             if doc is None:
                 doc = ledger.state(slug)
             if _decided(item.ref, doc):
                 inbox.close(item.id, BY, "done", "decided on the ledger")
                 continue
-        if item.ref and receiver and marks.seen(receiver, item.ref):
+        if item.ref and receiver and (receiver, item.ref) in reads.seen:
             inbox.close(item.id, receiver, "done", SEEN_ON_LEDGER)
             continue
         agent = panes.get(receiver)
         if agent and agent.name not in statuses:
             statuses[agent.name] = _pane_state(inbox.redis, slug, herdr, agent, now_ms, quiet)
-        since = _seat_clock(inbox, receiver, held, names, config)
-        step = decide(item, statuses.get(receiver), inbox.history(item.id), now_ms, window, slug, since)
+        since = reads.clocks[item.address]
+        step = decide(item, statuses.get(receiver), reads.histories[item.id], now_ms, window, slug, since)
         if step == WOKEN and _still_held(inbox, held) and _wake(herdr, agent, prompted):
             if inbox.note(item.id, WOKEN, BY, f"prompted {receiver} to read its inbox", now_ms, held):
                 actions.append(f"woke {receiver} for message {item.id}")

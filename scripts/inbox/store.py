@@ -345,6 +345,15 @@ class InboxStore:
     def history(self, item_id):
         return [json.loads(entry) for entry in self.redis.lrange(self.key("history", item_id), 0, -1)]
 
+    def histories(self, item_ids: list[str]) -> dict[str, list[dict]]:
+        if not item_ids:
+            return {}
+        with self.redis.pipeline(transaction=False) as pipe:
+            for item_id in item_ids:
+                pipe.lrange(self.key("history", item_id), 0, -1)
+            rows = pipe.execute()
+        return {item_id: [json.loads(entry) for entry in row] for item_id, row in zip(item_ids, rows)}
+
     def keys_for(self, belongs):
         """The keys of every address belongs() accepts, its items and their histories, and those
         addresses' memberships in the shared waiting and indexed sets."""
@@ -705,12 +714,31 @@ class InboxStore:
         if not self.redis.exists(self.key("waiting", "built")):
             self._build_waiting()
         addresses = sorted(self.redis.smembers(self.key("waiting")))
-        items = list({item.id: item for address in addresses for item in self.pending_items(address)}.values())
-        return sorted(items, key=_order)
+        if not addresses:
+            return []
+        with self.redis.pipeline(transaction=False) as pipe:
+            for address in addresses:
+                pipe.sismember(self.key("indexed"), address)
+                pipe.zrange(self.key("pending", address), 0, -1)
+            rows = pipe.execute()
+        item_ids = dict.fromkeys(
+            item_id
+            for address, (indexed, pending) in zip(addresses, zip(*[iter(rows)] * 2))
+            for item_id in (pending if indexed else self._back_fill(address))
+        )
+        return sorted(self._items(list(item_ids)), key=_order)
 
     def pending_items(self, address):
-        items = [self.get(item_id) for item_id in self._pending_ids(address)]
-        return sorted(items, key=_order)
+        return sorted(self._items(self._pending_ids(address)), key=_order)
+
+    def _items(self, item_ids):
+        if not item_ids:
+            return []
+        with self.redis.pipeline(transaction=False) as pipe:
+            for item_id in item_ids:
+                pipe.hgetall(self.key("item", item_id))
+            rows = pipe.execute()
+        return [_item(raw, item_id) for item_id, raw in zip(item_ids, rows)]
 
     def _pending_ids(self, address):
         if self.redis.sismember(self.key("indexed"), address):

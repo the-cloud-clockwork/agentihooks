@@ -148,7 +148,6 @@
   "PLR0913": 8
  },
  "scripts/inbox/wake.py::wake_pass": {
-  "C901": 13,
   "PLR0913": 8
  },
  "scripts/init_agent.py::main": {
