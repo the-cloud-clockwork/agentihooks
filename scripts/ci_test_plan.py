@@ -15,6 +15,7 @@ UNIT_JOBS = frozenset(f"unit (3.12, {shard})" for shard in range(1, 21))
 # Full scope runs carry these into their own coverage for the tests they reuse.
 COVERAGE = frozenset(f"coverage-3.12-{shard}" for shard in range(1, 21))
 CANDIDATES = 10
+JOB_PAGE = 100
 
 
 class UnusableRecord(ValueError):
@@ -93,7 +94,7 @@ def find_record(repository: str, before: str) -> tuple[dict, dict] | None:
         live = {item["name"] for item in artifacts if not item["expired"]}
         if not kept or any(name not in live for name in COVERAGE):
             continue
-        jobs = read_jobs(f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs")
+        jobs = read_jobs(f"{actions}/runs/{run['id']}/attempts/{run['run_attempt']}/jobs", JOB_PAGE)
         if not UNIT_JOBS <= {job["name"] for job in jobs if job["conclusion"] == "success"}:
             continue
         try:

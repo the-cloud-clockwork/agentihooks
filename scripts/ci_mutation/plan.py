@@ -217,18 +217,20 @@ def shard_count(seconds: float, mutants: int, target: float, limit: int) -> int:
     return max(1, min(limit, mutants, math.ceil(seconds / (shard_workers() * target))))
 
 
-def slowest_bucket(root: Path, tests: list[str], parts: int) -> float:
-    seconds = file_seconds(root, tests)
+def slowest_bucket(root: Path, tests: list[str], parts: int, seconds: dict[str, float] | None = None) -> float:
+    if seconds is None:
+        seconds = file_seconds(root, tests)
     buckets = [
         bucket
         for index in range(parts)
-        for bucket in stats_shards(root, part_files(root, tests, (index, parts)), shard_workers())
+        for bucket in stats_shards(root, part_files(root, tests, (index, parts), seconds), shard_workers(), seconds)
     ]
     return max(sum(seconds[path] for path in bucket) for bucket in buckets)
 
 
 def stats_part_count(root: Path, tests: list[str], target: float, limit: int) -> tuple[int, float]:
-    walls = [slowest_bucket(root, tests, parts) for parts in range(1, limit + 1)]
+    seconds = file_seconds(root, tests)
+    walls = [slowest_bucket(root, tests, parts, seconds) for parts in range(1, limit + 1)]
     # One file never splits, so past the floor another part only adds a job.
     reachable = max(target, min(walls))
     parts = next(parts for parts, wall in enumerate(walls, 1) if wall <= reachable)
