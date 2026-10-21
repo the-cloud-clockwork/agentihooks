@@ -143,10 +143,12 @@ class FencedRuntime:
         if local is not None and not hosts(waited.role, local, (lane,)):
             return waited.reason
         running = local_slots.running(self.store, self.slug, task["id"])
-        found = admission.room(headroom.measure(0, lease.now_ms(self.store)), running)
+        held = local_slots.held(self.store, machine, self.slug, task["id"])
+        pending = max(0, admission.pending(self.store.redis, machine) - (held - running))
+        found = admission.room(headroom.measure(0, lease.now_ms(self.store)), running, pending)
         local_max = running + found.room
         refused = f": {found.reason}: {found.detail}"
-        chosen = overflow(waited.role, waited, local_slots.held(self.store, machine, self.slug, task["id"]), local_max)
+        chosen = overflow(waited.role, waited, held, local_max)
         if not isinstance(chosen, Choice):
             return chosen.reason + (refused if LOCAL_FULL in chosen.reason else "")
         if (
@@ -154,6 +156,8 @@ class FencedRuntime:
             and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)) >= local_max
         ):
             return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents{refused}"
+        if claim:
+            admission.reserve(self.store.redis, machine, f"{self.slug}/{claim}", local_max)
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
         return OVERFLOW.format(lane=lane)
 
@@ -169,9 +173,11 @@ class FencedRuntime:
         try:
             return self._spawn(config, lane, name, task)
         except BaseException:
+            from scripts.hive import admission
             from scripts.swarm.commands import hive_id
 
             local_slots.release(self.store, hive_id(), self.slug, name)
+            admission.release(self.store.redis, hive_id(), f"{self.slug}/{name}")
             raise
 
     def _spawn(self, config, lane, name, task):

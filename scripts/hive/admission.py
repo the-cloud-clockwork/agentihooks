@@ -1,5 +1,5 @@
 """Admit each launch by the measured headroom of the machine it lands on; pending reservations count against the room
-until the five minute load has had time to show the launched agent."""
+for three five minute load windows, until that load shows about 95 percent of the launched agent."""
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -15,10 +15,10 @@ HOST_PERCENT = 80
 SWARM_PERCENT = 40
 AGENT_CPU = 0.5
 AGENT_MB = MEMORY_PER_AGENT_MB
-PENDING_MS = 300_000
+PENDING_MS = 900_000
 NO_READING = "no fresh headroom reading"
 FIELDS = ("cpus", "load5", "available_mb", "total_mb")
-QUOTA_MARKS = ("account", "quota", "reservation is full")
+QUOTA_MARKS = ("account has room", "account reservation is full", "quota")
 
 _RESERVE = """
 local now = redis.call('TIME')
@@ -40,14 +40,19 @@ class Room:
     detail: str
 
 
-def _host(measured: dict) -> list[tuple[int, str, str]]:
+def _host(measured: dict, pending: int) -> list[tuple[int, str, str]]:
     cpus, load5, available, total = (measured[field] for field in FIELDS)
-    cpu = int((HOST_PERCENT * cpus - 100 * load5) // (100 * AGENT_CPU))
-    ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB)
+    cpu = int((HOST_PERCENT * cpus - 100 * load5) // (100 * AGENT_CPU)) - pending
+    ram = (available * 100 - (100 - HOST_PERCENT) * total) // (100 * AGENT_MB) - pending
     line = f"under the {HOST_PERCENT} percent line"
+    held = f" with {pending} pending launches" if pending else ""
     return [
-        (cpu, CPU, f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent, fits {{}} more {line}"),
-        (ram, RAM, f"{available} of {total} MB available, {AGENT_MB} MB per agent, fits {{}} more {line}"),
+        (
+            cpu,
+            CPU,
+            f"five minute load {load5:.2f} on {cpus} CPUs, {AGENT_CPU:g} CPU per agent{held}, fits {{}} more {line}",
+        ),
+        (ram, RAM, f"{available} of {total} MB available, {AGENT_MB} MB per agent{held}, fits {{}} more {line}"),
     ]
 
 
@@ -62,10 +67,10 @@ def _swarm(measured: dict, agents: int) -> list[tuple[int, str, str]]:
     ]
 
 
-def room(measured: dict | None, swarm_agents: int | None = None) -> Room:
+def room(measured: dict | None, swarm_agents: int | None = None, pending: int = 0) -> Room:
     if measured is None or any(field not in measured for field in FIELDS):
         return Room(0, MISSING, NO_READING)
-    limits = _host(measured) + ([] if swarm_agents is None else _swarm(measured, swarm_agents))
+    limits = _host(measured, pending) + ([] if swarm_agents is None else _swarm(measured, swarm_agents))
     count, reason, detail = min(limits, key=lambda limit: limit[0])
     count = max(0, count)
     return Room(count, reason, detail.format(count))

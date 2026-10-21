@@ -293,6 +293,39 @@ def test_a_failed_local_spawn_releases_its_slot(setup, monkeypatch):
     assert fenced.spawn(setup.config, "eng", "eng second", {"id": "second"}) == "placed on the workstation"
 
 
+def test_pending_local_launches_hold_the_host_line_until_the_load_shows_them(setup, monkeypatch):
+    from scripts.hive import admission, headroom
+    from scripts.swarm.store import AgentRecord
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
+    reading = {"cpus": 10, "load5": 6.0, "available_mb": 10**6, "total_mb": 10**6}
+    monkeypatch.setattr(headroom, "measure", lambda pending, now: reading)
+    for index in range(4):
+        assert fenced.spawn(setup.config, "eng", f"eng {index}", {"id": f"t{index}"}) == "placed on the workstation"
+    assert admission.pending(setup.store.redis, "box") == 4
+    for index in range(4):
+        setup.store.put_agent(setup.config.slug, AgentRecord(f"eng {index}", "eng", f"t{index}"))
+    assert fenced.placement_refusal("eng", {"id": "t4"}) == (
+        f"{HIVE_FULL}, and the local machine runs 4 of its 4 agents: cpu: five minute load 6.00 on 10 CPUs, "
+        "0.5 CPU per agent with 4 pending launches, fits 0 more under the 80 percent line"
+    )
+    assert setup.herdr.spawn.call_count == 4
+
+
+def test_a_failed_local_spawn_releases_its_reservation(setup, monkeypatch):
+    from scripts.hive import admission
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
+    setup.herdr.spawn.side_effect = SpawnError("pane refused", "unavailable")
+    with pytest.raises(SpawnError, match="^pane refused$"):
+        fenced.spawn(setup.config, "eng", "eng first", {"id": "first"})
+    assert admission.pending(setup.store.redis, "box") == 0
+
+
 def test_a_slot_counts_once_while_its_agent_runs_and_not_after_it_leaves(setup):
     from scripts.swarm import local_slots
     from scripts.swarm.store import AgentRecord

@@ -175,6 +175,7 @@ def test_concurrent_reservations_never_pass_the_room(server):
         ("worker pool node cap 40 reached", admission.NODE_CAP),
         ("no live hive takes qa", admission.PLACEMENT),
         ("no hive for eng lists the repo agentihooks", admission.PLACEMENT),
+        ("no hive for eng advertises the claude slot account-two", admission.PLACEMENT),
     ],
 )
 def test_every_refusal_falls_in_one_reason(reason, category):
@@ -206,3 +207,26 @@ def test_status_report_carries_refusal_counts_for_the_ledger_page(env):
         "cpu": 1,
         "missing telemetry": 1,
     }
+
+
+def test_pending_launches_lower_only_the_host_line_the_load_has_not_shown_yet():
+    measured = reading(cpus=10, load5=2.0)
+    assert admission.room(measured, 0) == admission.Room(
+        8, admission.CPU, "0 swarm agents at 0.5 CPU each on 10 CPUs, fits 8 more under the 40 percent swarm share"
+    )
+    assert admission.room(measured, 0, pending=3).room == 8
+    assert admission.room(measured, 0, pending=5) == admission.Room(
+        7,
+        admission.CPU,
+        "five minute load 2.00 on 10 CPUs, 0.5 CPU per agent with 5 pending launches, fits 7 more under the 80 percent line",
+    )
+    assert admission.room(measured, 6, pending=1).room == 2
+
+
+def test_a_reservation_holds_for_three_five_minute_load_windows(redis):
+    assert admission.PENDING_MS == 900_000
+    seconds, micros = redis.time()
+    admission.reserve(redis, "anton", "s/one", 1)
+    expiry = redis.zscore(admission.key("anton"), "s/one") - (int(seconds) * 1000 + int(micros) // 1000)
+    assert 899_000 <= expiry <= 901_000
+    assert 899_000 <= redis.pttl(admission.key("anton")) <= 900_000
