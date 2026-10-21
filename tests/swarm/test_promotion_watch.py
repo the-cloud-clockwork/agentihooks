@@ -903,13 +903,16 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
     ]
 
 
+UNREAD = ["No shard durations at shard-durations/*/durations.json, so those shards cannot be graded."]
+
+
 @pytest.mark.parametrize(
     "consumer",
     ["coverage-ratchet", "coverage-baseline", "flake-budget", "stage-budget", "sonar (3.12)"],
 )
 def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store, consumer):
     ledger = Ledger()
-    found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], [])]
+    found = [("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, [{"name": "Grade", "conclusion": "failure"}], UNREAD)]
     refresh(store, ledger, outage_run(found))
     assert [fields["title"] for _, fields, _ in ledger.added] == ["Promotion red: runner outage"]
     assert ledger.added[0][1]["description"].endswith(
@@ -917,6 +920,34 @@ def test_each_shard_output_consumer_joins_the_outage_of_a_lost_unit_shard(store,
         "want of their unit shard output. No code change is due; the swarm closes this task when a later dev push run "
         "passes."
     )
+
+
+@pytest.mark.parametrize(
+    ("consumer", "steps", "messages"),
+    [
+        (
+            "sonar",
+            [{"name": "Hold the Delivery L2 conditions", "conclusion": "failure"}],
+            ["Quality gate failed: 1 new bug on new code"],
+        ),
+        (
+            "shard-check (3.12)",
+            [{"name": "Check every collected test ran in exactly one shard", "conclusion": "failure"}],
+            ["Shards split on different stored durations, so their test sets overlap or leave gaps: a: x, b: y"],
+        ),
+        ("stage-budget", [{"name": "Grade", "conclusion": "failure"}], []),
+    ],
+)
+def test_a_consumer_failing_on_its_own_error_beside_a_lost_unit_shard_files_its_own_fixer(
+    store, consumer, steps, messages
+):
+    ledger = Ledger()
+    refresh(store, ledger, outage_run([("unit (3.12, 1)", RAN, DOWNLOAD), (consumer, steps, messages)]))
+    assert [fields["title"] for _, fields, _ in ledger.added] == [
+        "Promotion red: runner outage",
+        f"Promotion red: {consumer}",
+    ]
+    assert "unit shard output" not in ledger.added[0][1]["description"]
 
 
 def test_a_job_that_only_starts_like_a_unit_shard_does_not_starve_its_consumers(store):
