@@ -338,15 +338,59 @@ def test_a_new_master_records_its_launch_on_its_own_record_not_a_stale_seat_exec
     assert found[stale.name].pane_id == ""
 
 
-def test_a_live_master_present_does_not_stop_a_new_master_and_both_stay_seated(up, monkeypatch):
+def test_a_new_master_beside_a_live_front_door_takes_its_own_seat_and_title(up, monkeypatch, capsys):
+    from scripts.swarm_v2 import masters as master_seats
+
     store, _, rt = up
     live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
     store.put_agent("sw", live)
     rt.live.add(live.name)
     answers(monkeypatch)
     assert run("sw", "master", "up", "--new") == 0
-    found = masters(store)
-    assert len(found) == 2 and all(a.state != "finished" and a.seat == "master@sw" for a in found)
+    launched = printed(capsys)
+    seats = {a.name: a.seat for a in masters(store) if a.state != "finished"}
+    assert seats == {live.name: "master@sw", launched["master"]: "master-2@sw"}
+    assert launched["seat"] == "master-2@sw"
+    assert rt.killed == []
+    [(_, task)] = rt.masters
+    assert (task["id"], task["seat"], task["masters"]) == ("master-2", "master-2@sw", 2)
+    titles = {master_seats.title("sw", seat) for seat in seats.values()}
+    assert titles == {"master 1 · sw", "master 2 · sw"}
+
+
+def test_a_new_master_skips_every_master_seat_already_held(up, monkeypatch, capsys):
+    store, _, rt = up
+    for name, seat in (("master@a1b2c3-0005", "master@sw"), ("master@a1b2c3-0006", "master-2@sw")):
+        store.put_agent("sw", AgentRecord(name, MASTER, MASTER, harness="claude", seat=seat, started_at=5))
+        rt.live.add(name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new") == 0
+    assert printed(capsys)["seat"] == "master-3@sw"
+
+
+def test_a_replacing_master_retires_the_live_front_door_first(up, monkeypatch, capsys):
+    store, _, rt = up
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    rt.live.add(live.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new", "--replace") == 0
+    launched = printed(capsys)
+    assert rt.killed == [live.name]
+    held = [a for a in masters(store) if a.state != "finished" and a.name in rt.live]
+    assert [(a.name, a.seat) for a in held] == [(launched["master"], "master@sw")]
+
+
+def test_a_front_door_that_will_not_retire_starts_no_replacement(up, monkeypatch, capsys):
+    store, _, rt = up
+    live = AgentRecord("master@a1b2c3-0005", MASTER, MASTER, harness="claude", seat="master@sw", started_at=5)
+    store.put_agent("sw", live)
+    rt.live.add(live.name)
+    rt.stuck.add(live.name)
+    answers(monkeypatch)
+    assert run("sw", "master", "up", "--new", "--replace") == 1
+    assert "could not retire master@a1b2c3-0005; try again" in capsys.readouterr().err
+    assert rt.masters == [] and [a.name for a in masters(store)] == [live.name]
 
 
 def test_an_empty_saved_assignment_launches_from_the_swarm_config(up, monkeypatch):
