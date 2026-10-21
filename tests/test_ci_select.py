@@ -344,8 +344,17 @@ def test_editing_a_file_leaves_the_tree_shape(tree):
 
 
 def test_a_reshape_check_on_an_unknown_revision_fails(tree):
-    with pytest.raises(subprocess.CalledProcessError):
+    with pytest.raises(subprocess.CalledProcessError) as error:
         ci_select.reshaped(tree, "not-a-revision", "HEAD")
+    assert error.value.returncode == 128
+    assert error.value.cmd == [
+        "git",
+        "diff",
+        "--quiet",
+        "--no-renames",
+        "--diff-filter=AD",
+        "not-a-revision...HEAD",
+    ]
 
 
 def test_a_reshaped_tree_selects_the_whole_tree_checks(tree):
