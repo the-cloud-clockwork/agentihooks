@@ -288,8 +288,8 @@ def skip_dropped(function, *args):
         except (RedisConnectionError, RedisTimeoutError) as exc:
             dropped = exc
     name = f"{function.__module__}.{function.__qualname__}"
-    print(f"{name} skipped, its Redis connection dropped twice: {dropped}", file=sys.stderr)
-    return [f"skipped {name}: its Redis connection dropped twice"]
+    print(f"{name} skipped, its Redis connection dropped or timed out twice: {dropped}", file=sys.stderr)
+    return [f"skipped {name}: its Redis connection dropped or timed out twice"]
 
 
 def _codex_hook_order():
