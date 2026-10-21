@@ -1423,7 +1423,7 @@ def _worker(store, args):
 
 
 def _local_repo(store, slug):
-    local = os.environ.get(REPO_VARIABLE, "")
+    local = os.environ.get(REPO_VARIABLE)
     return local if local and os.environ.get("AGENTIHOOKS_SWARM") == slug else store.config(slug).repo
 
 
