@@ -28,11 +28,14 @@ def fleet(*off: str, **changes: dict) -> list[dict]:
         hive("pods", ui="no", ephemeral="yes", excluded=["master", "qa", "frontend"], max_agents=4),
     ]
     return [
-        {
-            **record,
-            **changes.get(record["id"], {}),
-            **({"heartbeat_at": NOW - registry.LIVE_MS - 1} if record["id"] in off else {}),
-        }
+        hive(
+            record["id"],
+            **{
+                **{key: value for key, value in record.items() if key != "room"},
+                **changes.get(record["id"], {}),
+                **({"heartbeat_at": NOW - registry.LIVE_MS - 1} if record["id"] in off else {}),
+            },
+        )
         for record in hives
     ]
 

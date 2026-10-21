@@ -361,6 +361,9 @@ def test_the_controller_carries_the_opening_by_redis_key(setup, homes):
     )
     setup.redis.hset(registry.key("host"), mapping={k: registry._encode(k, v) for k, v in hive.items()})
     setup.redis.sadd(registry.INDEX, "host")
+    from tests.hive.test_controller_launch import publish_room
+
+    publish_room(setup.store, "host", 3)
     herdr = Mock(spec=HerdrRuntime)
     herdr._profile_decision.return_value = ProfileDecision("engineer", "task", "engineer")
     herdr._quota_accounts = [Account("claude", "account", "room", 0, 80, 80, 6)]

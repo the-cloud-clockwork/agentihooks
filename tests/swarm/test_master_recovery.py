@@ -491,12 +491,13 @@ def test_an_ordered_move_never_pins_a_master_that_left_without_handing_off(store
 
 def test_the_lost_hive_move_places_the_master_on_the_hive_with_room(store):  # noqa: F811
     from scripts.hive import registry
+    from tests.hive.test_controller_launch import publish_room
 
     _hive(store, "lost", NOW - GRACE_MS - 1)
-    for hive, most in (("big", 8), ("small", 2)):
+    for hive, room in (("big", 0), ("small", 2)):
         _hive(store, hive, NOW)
-        store.redis.hset(registry.key(hive), "max_agents", most)
-    store.redis.set(f"{registry.key('big')}:sessions", json.dumps({"claude:one": 8}))
+        store.redis.hset(registry.key(hive), "max_agents", 8)
+        publish_room(store, hive, room)
     _hive_master(store)
     runtime = RecoveryRuntime()
 
