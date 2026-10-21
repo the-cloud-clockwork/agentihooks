@@ -224,6 +224,48 @@ def test_a_refused_acl_user_leaves_no_member_records(admin, redis_lib, monkeypat
     assert admin.acl_users() == ["default"]
 
 
+def _narrowed(admin, member_id):
+    user = f"hive-{member_id}"
+    admin.acl_setuser(user, reset_keys=True, keys=[f"~{ROOT}:hive:{member_id}"])
+    assert f"~{ROOT}:seat:*:learned" not in admin.acl_getuser(user)["keys"]
+    return user
+
+
+def test_regrant_gives_every_existing_member_the_current_keys_and_keeps_its_password(admin):
+    grants = [auth.mint(admin, name, PUBLIC) for name in ("laptop", "desk")]
+    users = [_narrowed(admin, grant["id"]) for grant in grants]
+    before = {user: admin.acl_getuser(user)["passwords"] for user in users}
+
+    auth.regrant(admin)
+
+    for user in users:
+        granted = admin.acl_getuser(user)
+        assert f"~{ROOT}:seat:*:learned" in granted["keys"]
+        assert f"~{ROOT}:swarm:*:dev-red" in granted["keys"]
+        assert granted["passwords"] == before[user]
+        assert granted["flags"] == ["on"]
+        assert granted["channels"] == [f"&{ROOT}:*"]
+        assert granted["categories"] == ["+@all", "-@admin", "-@dangerous"]
+
+
+def test_serve_regrants_every_member_before_it_serves(admin, monkeypatch, capsys):
+    user = _narrowed(admin, auth.mint(admin, "laptop", PUBLIC)["id"])
+    served = []
+
+    class Endpoint:
+        server_address = ("127.0.0.1", 8770)
+
+        def serve_forever(self):
+            served.append(admin.acl_getuser(user)["keys"])
+
+    monkeypatch.setattr(cli, "redis_client", lambda: admin)
+    monkeypatch.setattr(cli.ledger_ca, "served", lambda: None)
+    monkeypatch.setattr(server, "make_server", lambda *args, **kwargs: Endpoint())
+
+    assert cli.main(["serve", "--redis-url", PUBLIC]) == 0
+    assert f"~{ROOT}:seat:*:learned" in served[0]
+
+
 def test_revoke_cuts_both_credentials(admin):
     grant = auth.mint(admin, "laptop", PUBLIC)
     other = auth.mint(admin, "desk", PUBLIC)
