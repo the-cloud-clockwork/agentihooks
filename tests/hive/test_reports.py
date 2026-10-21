@@ -608,18 +608,19 @@ def test_the_hive_retires_the_recorded_process_identity(remote, monkeypatch):
     assert runtime.retire(agent) is True
 
 
-def test_the_hive_refuses_a_retire_outside_the_recorded_namespace(remote, monkeypatch):
-    from scripts.hive.orders import Consumer
+def test_a_hive_restarted_since_launch_retires_without_signalling(remote, monkeypatch):
+    from scripts.hive.orders import Ack, Consumer, Orders
 
     _publish(remote)
     runtime, agent = remote.runtime, remote.agent
-    runtime.retire(agent)
+    assert runtime.retire(agent) is False
     hive, ended = _hive_side(monkeypatch, "another", {12: SimpleNamespace(pid=12, start_time=34)})
     Consumer(remote.redis, HIVE, hive).poll_commands()
     assert ended == []
     monkeypatch.setenv("SWARM_HIVE_ID", "controller")
-    assert runtime.retire(agent) is False
-    assert "another PID namespace" in runtime.refusal(agent)["refusal"]
+    assert Orders(remote.redis).command(HIVE, _retire_order(agent)) == Ack("done", agent.runtime_target)
+    assert runtime.retire(agent) is True
+    assert agent.name not in runtime.refusals
 
 
 def test_a_runtime_without_hive_reports_never_acts_on_a_remote_worker_locally(remote):
@@ -763,22 +764,6 @@ def test_a_refused_retire_names_the_hive_and_its_reason(remote):
     )
     assert runtime.retire(agent) is False
     assert runtime.refusals[agent.name] == {"process": 0, "refusal": f"hive {HIVE} refused retire: process held"}
-
-
-def test_a_hive_restarted_since_launch_acknowledges_the_retire_and_the_controller_retires(remote, monkeypatch):
-    from scripts.hive.orders import Ack, Consumer, Orders
-    from scripts.swarm.runtime import HerdrRuntime
-    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
-
-    runtime, agent = remote.runtime, remote.agent
-    assert runtime.retire(agent) is False
-    monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
-    hive = LocalHerdrRuntime(HerdrRuntime(herdr=_herdr), namespace=lambda: "restarted", table=dict)
-    Consumer(remote.redis, HIVE, hive).poll_commands()
-    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
-    assert Orders(remote.redis).command(HIVE, _retire_order(agent)) == Ack("done", agent.runtime_target)
-    assert runtime.retire(agent) is True
-    assert agent.name not in runtime.refusals
 
 
 def test_the_hive_retires_with_the_task_scratch_homes(remote, monkeypatch):
