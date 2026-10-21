@@ -64,6 +64,18 @@ def test_a_launch_reuses_the_global_login_and_leaves_a_legacy_one_alone(ah, rend
     assert (legacy / "claude" / login.CREDENTIALS).is_file()
 
 
+def test_a_login_another_launch_wrote_after_the_offer_is_kept_over_a_legacy_one(ah, rendered, tmp_path, monkeypatch):
+    home = login.build(rendered)
+    (home / login.CREDENTIALS).write_text(json.dumps({login.GRANT: {"refreshToken": "global"}}))
+    (home / login.CONFIG).write_text(json.dumps({login.ACCOUNT: MASTER_ACCOUNT}))
+    legacy = _legacy(ah, "rig")
+    monkeypatch.setattr(login, "_offered", lambda bao: {})
+    target, found = login.prepare(_environ(rendered), tmp_path)
+    assert target == home and found == "masteratexample_com"
+    assert json.loads((target / login.CREDENTIALS).read_text()) == {login.GRANT: {"refreshToken": "global"}}
+    assert (legacy / "claude" / login.CREDENTIALS).is_file()
+
+
 def test_a_single_legacy_login_is_adopted_and_its_folder_removed(ah, rendered, tmp_path):
     legacy = _legacy(ah, "rig")
     _legacy(ah, "doctor", logged_in=False)
