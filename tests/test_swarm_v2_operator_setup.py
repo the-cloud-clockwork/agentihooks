@@ -657,13 +657,54 @@ def event(root: Path, address: str = "") -> dict:
     return {"id": "entry", "owner": "swarm-terminal", "payload": payload(root, address)}
 
 
-def test_the_sync_slot_runs_one_pass_on_the_recorded_home(tmp_path, monkeypatch):
+def shell_files(monkeypatch, loaded):
+    asked = []
+    monkeypatch.setattr(operator_setup.operator_env, "values", lambda environ: asked.append(environ) or dict(loaded))
+    return asked
+
+
+def test_the_sync_slot_runs_one_pass_on_the_recorded_home_with_the_operator_shell_env(tmp_path, monkeypatch):
     seen = []
+    monkeypatch.setenv("OPENBAO_URL", "https://stale.test")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "agentihooks"))
+    asked = shell_files(monkeypatch, {"OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "fixture-token"})
     monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: seen.append((environ, root)) or 0)
 
     operator_setup.sync(event(tmp_path / "home"), "delivery", None)
 
-    assert seen == [(operator_setup.os.environ, tmp_path / "home")]
+    assert asked == [operator_setup.os.environ]
+    [(environ, root)] = seen
+    assert root == tmp_path / "home"
+    assert (environ["OPENBAO_URL"], environ["OPENBAO_TOKEN"]) == (BAO_URL, "fixture-token")
+    assert environ["AGENTIHOOKS_HOME"] == str(tmp_path / "agentihooks")
+
+
+def test_the_sync_slot_waits_quietly_while_a_refused_setup_holds_its_alarm(tmp_path, monkeypatch):
+    shell_files(monkeypatch, {})
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: pytest.fail("no pass before setup"))
+    folder = tmp_path / "home" / "swarm-terminal"
+    folder.mkdir(parents=True)
+    (folder / "alarm").write_text(json.dumps({"message": "operator terminal setup refused", "raised": ["hive-a"]}))
+    err = Journal()
+
+    with redirect_stderr(err):
+        operator_setup.sync(event(tmp_path / "home"), "delivery", None)
+
+    assert err.getvalue() == ""
+
+
+def test_the_sync_slot_runs_on_placed_files_even_while_a_later_setup_is_refused(tmp_path, monkeypatch):
+    seen = []
+    shell_files(monkeypatch, {})
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: seen.append(root) or 0)
+    folder = tmp_path / "home" / "swarm-terminal"
+    folder.mkdir(parents=True)
+    (folder / "alarm").write_text("{}")
+    (folder / "terminal.env").write_text("AGENTIHOOKS_TERMINAL_CA_KEY=/ca\n")
+
+    operator_setup.sync(event(tmp_path / "home"), "delivery", None)
+
+    assert seen == [tmp_path / "home"]
 
 
 @pytest.mark.parametrize(
@@ -680,6 +721,7 @@ def test_a_failed_scheduled_pass_is_reported_and_never_raised(tmp_path, monkeypa
     def fail(environ, root):
         raise error
 
+    shell_files(monkeypatch, {})
     monkeypatch.setattr(operator_setup, "sync_once", fail)
     err = Journal()
 
@@ -692,18 +734,49 @@ def test_a_failed_scheduled_pass_is_reported_and_never_raised(tmp_path, monkeypa
 def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeypatch):
     seen = []
     monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", "own.example:6379")
-    monkeypatch.setenv("OPENBAO_URL", BAO_URL)
+    monkeypatch.setenv("OPENBAO_URL", "https://stale.test")
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "agentihooks"))
+    asked = shell_files(
+        monkeypatch,
+        {"OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "fixture-token", "AGENTIHOOKS_HIVE_REDIS_ADDRESS": "file.example:1"},
+    )
     monkeypatch.setattr(operator_setup, "setup", lambda root, environ: seen.append((root, environ)) or 1)
 
     operator_setup.refresh(event(tmp_path / "home", "swarm.example:6379"), "delivery", None)
     operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
 
+    assert asked == [operator_setup.os.environ, operator_setup.os.environ]
     assert [root for root, _ in seen] == [tmp_path / "home", tmp_path / "home"]
     assert [environ["AGENTIHOOKS_HIVE_REDIS_ADDRESS"] for _, environ in seen] == [
         "swarm.example:6379",
-        "own.example:6379",
+        "file.example:1",
     ]
-    assert [environ["OPENBAO_URL"] for _, environ in seen] == [BAO_URL, BAO_URL]
+    assert [(environ["OPENBAO_URL"], environ["OPENBAO_TOKEN"]) for _, environ in seen] == [
+        (BAO_URL, "fixture-token"),
+        (BAO_URL, "fixture-token"),
+    ]
+    assert {environ["AGENTIHOOKS_HOME"] for _, environ in seen} == {str(tmp_path / "agentihooks")}
+
+
+def test_the_operator_shell_env_is_the_env_file_set_over_the_runner_env(tmp_path, monkeypatch):
+    home = tmp_path / "operator"
+    state = home / ".agentihooks"
+    state.mkdir(parents=True)
+    (state / ".env").write_text("OPENBAO_URL=https://main.test\nKEPT=main\n")
+    (state / "openbao.env").write_text("OPENBAO_TOKEN=fixture-token\n")
+    (home / ".env").write_text("PERSONAL=yes\n")
+    runner = {"HOME": str(home), "PATH": operator_setup.os.environ["PATH"], "OPENBAO_URL": "https://stale.test"}
+    monkeypatch.setattr(operator_setup.os, "environ", runner)
+
+    environ = operator_setup.shell_environ()
+
+    assert {name: environ.get(name) for name in ("OPENBAO_URL", "OPENBAO_TOKEN", "KEPT", "PERSONAL")} == {
+        "OPENBAO_URL": "https://main.test",
+        "OPENBAO_TOKEN": "fixture-token",
+        "KEPT": "main",
+        "PERSONAL": "yes",
+    }
+    assert runner["OPENBAO_URL"] == "https://stale.test"
 
 
 class Journal(io.StringIO):
@@ -717,6 +790,7 @@ def test_a_failed_refresh_is_reported_and_never_raised(tmp_path, monkeypatch):
     def fail(root, environ):
         raise OSError("disk full")
 
+    shell_files(monkeypatch, {})
     monkeypatch.setattr(operator_setup, "setup", fail)
     err = Journal()
 
@@ -1077,6 +1151,7 @@ def test_scheduled_jobs_fire_their_slots_on_the_machine_scheduler(tmp_path, monk
     import time
 
     machine, root, fired = scheduler(), tmp_path / "home", []
+    shell_files(monkeypatch, {})
     monkeypatch.setattr(operator_setup, "sync_once", lambda environ, home: fired.append(("sync", home)) or 0)
     monkeypatch.setattr(operator_setup, "setup", lambda home, environ: fired.append(("refresh", home)) or 0)
     operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
