@@ -151,7 +151,7 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
         quiets = [q for world in list(worlds.up) if (q := worlds.run(world, lambda w: w.quiet(names))) is not None]
         quiet = set.intersection(*quiets) if quiets else set()
         due = [(name, seat) for name, seat in pending if not (outcomes[name] and name in quiet)]
-        if not due or not worlds.up:
+        if not due:
             break
         pending = [entry for entry in pending if entry not in due]
         for name, seat in due:
@@ -221,7 +221,9 @@ class _WorldPass:
             return None
 
 
-def _settle_world_seats(inbox: "InboxStore", slug: str, store: "RedisStore", seats: list, live: list, active: set):
+def _settle_world_seats(
+    inbox: "InboxStore", slug: str, store: "RedisStore", seats: list, live: list, active: set
+) -> None:
     _settle_seat_notices(inbox, {seat for _, seat in seats if seat}, active)
     _settle_peer_mail(inbox, slug, store, active)
     if slug in store.slugs():
