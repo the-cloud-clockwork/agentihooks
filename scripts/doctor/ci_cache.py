@@ -52,12 +52,12 @@ def write(cache: Redis, key: str, attempt: dict) -> None:
 def _trim(cache: Redis, current: str) -> None:
     keys = sorted(set(cache.scan_iter(match=f"{PREFIX}*", count=1000)) - {f"{PREFIX}lock"})
     keys.sort(key=lambda key: key != current)
-    sizes = cache.pipeline(transaction=False)
+    lengths = cache.pipeline(transaction=False)
     for key in keys:
-        sizes.strlen(key)
+        lengths.strlen(key)
     changes = cache.pipeline(transaction=False)
     total = 0
-    for key, size in zip(keys, sizes.execute(), strict=True):
+    for key, size in zip(keys, lengths.execute(), strict=True):
         if size > ENTRY_BYTES or total + size > TOTAL_BYTES:
             changes.unlink(key)
         else:
