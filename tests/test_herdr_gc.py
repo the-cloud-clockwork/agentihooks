@@ -993,3 +993,18 @@ def test_a_record_whose_pane_now_holds_a_restored_terminal_does_not_hold_the_tab
     herdr.panes["w1:p1"]["terminal_id"] = "term-restored"
     herdr.labels["w1:t-old"] = "engineer-323133-2601"
     assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == ["w1:t-old"]
+
+
+def test_a_fresh_record_whose_pane_herdr_dropped_holds_nothing(env):
+    herdr = FakeHerdr()
+    launch(env, herdr, "w1:p9", "term-9", Spot(tab="w1:t-gone"), Owner(name="engineer@323133-2602", at=NOW - 1))
+    del herdr.panes["w1:p9"]
+    tab = restored(herdr, "w1:p1", "engineer-323133-2505")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, set()) == [tab]
+
+
+def test_a_kept_tab_does_not_stop_the_tabs_after_it(env):
+    herdr = FakeHerdr()
+    restored(herdr, "w1:p1", "engineer-323133-2505")
+    later = restored(herdr, "w1:p2", "engineer-323133-2506")
+    assert herdr_gc.close_dead_tabs(env, NOW, herdr, {"engineer@323133-2505"}) == [later]

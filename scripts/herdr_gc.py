@@ -286,7 +286,7 @@ def close_dead_tabs(environ: dict[str, str], now_ms: int, herdr: Herdr, live: se
     }
     closed = []
     for tab in herdr.tabs():
-        label, tab_id = tab.get("label", ""), tab["tab_id"]
+        label, tab_id = tab["label"], tab["tab_id"]
         if not naming.PATTERNS["pane"].fullmatch(label) or label in alive or tab_id in fresh:
             continue
         held = [pane_id for pane_id, pane in panes.items() if pane["tab_id"] == tab_id]

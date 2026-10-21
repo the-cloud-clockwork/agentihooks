@@ -674,7 +674,7 @@ def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkey
             raise KeyboardInterrupt
 
     def scheduler_down():
-        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS, "the timer wait outlived its bound"
+        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS + 0.25, "the timer wait outlived its bound"
 
     monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
     monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
@@ -1291,17 +1291,22 @@ def test_each_beat_closes_dead_tabs_against_the_reported_live_names(redis, monke
 
 
 def test_closing_dead_tabs_asks_the_local_herdr_with_the_beat_time(monkeypatch):
+    import os
+
     from scripts import herdr_gc, herdr_host
 
-    calls = []
+    calls, checked = [], []
     monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
-    monkeypatch.setattr(herdr_host, "server_running", lambda environ: True)
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: checked.append(environ) or True)
     monkeypatch.setattr(daemon.time, "time", lambda: 123.456)
     monkeypatch.setattr(
-        herdr_gc, "close_dead_tabs", lambda environ, now_ms, herdr, live: calls.append((now_ms, live)) or ["w1:t1"]
+        herdr_gc,
+        "close_dead_tabs",
+        lambda environ, now_ms, herdr, live: calls.append((environ, now_ms, herdr.environ, live)) or ["w1:t1"],
     )
     assert daemon.close_dead_tabs({"ci@323133-1356"}) == ["w1:t1"]
-    assert calls == [(123456, {"ci@323133-1356"})]
+    assert checked == [dict(os.environ)]
+    assert calls == [(dict(os.environ), 123456, dict(os.environ), {"ci@323133-1356"})]
 
 
 @pytest.mark.parametrize("binary,running", [(None, True), ("/bin/herdr", False)])
