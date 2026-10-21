@@ -12,8 +12,8 @@
   "inputs": {
     "tests/fixtures/swarm_v2/master-race.json": "a11c82985cdf497aa9f0644d8381ed5e34b2cf4f3c2145206aa6e262ba70ad96"
   },
-  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2594",
+  "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/5607",
   "package": "SV2-MST-04",
-  "tested_commit": "55a3cf9cd808",
-  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147471684"
+  "tested_commit": "c8a8706bd2e7",
+  "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39667532598"
 }

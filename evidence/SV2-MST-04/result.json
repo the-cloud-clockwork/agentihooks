@@ -11,7 +11,7 @@
   "integration_gate": "G10",
   "issue": "https://github.com/the-cloud-clockwork/agentihooks/issues/2594",
   "pull_request": "https://github.com/the-cloud-clockwork/agentihooks/pull/2605",
-  "tested_commit": "55a3cf9cd808",
+  "tested_commit": "c8a8706bd2e7",
   "status": "mocked-acceptance-qualified",
   "package_complete": false,
   "evidence_class": "fakeredis swarm store, seats and masters channel and a temporary ledger folder written through the ledger write path with the master fence, two masters racing from two threads; no live swarm or ledger server. Live G10 qualification is separate.",
@@ -51,10 +51,10 @@
     "A master's inbox message to a task's claimant still goes only from the task's owning master, through master_fence.check_send; ledger writes accept any live master seat"
   ],
   "validation": {
-    "red": "Proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38143194163 on the tests only commit 857ab3c7d failed: ImportError for master_fence and the talk wiring test saw Budget instead of Fence",
-    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147471684",
-    "unit": "Proofs run https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147038081 on 07d4b069b passed every test file that touches either ledger write path; the pull request Tests run grades the full suite",
-    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/38147471684 green on 55a3cf9cd: every changed line mutant killed in master_fence, masters_channel, ledger_server and api mutations"
+    "red": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39662996453 on the tests only commit d304f0474 failed touched tests: master_fence had no CROSS record, announcement took no owner and cross writes by a live master were refused",
+    "ci_run": "https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39667532598",
+    "unit": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39667532598 on c8a8706bd passed touched tests and both stats shards over every test file that exercises the fence",
+    "mutation": "Mutation preflight https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39667532598 green on c8a8706bd: every changed line mutant in master_fence killed"
   },
   "measurements": {
     "master_write_refusals_total": 2
