@@ -79,7 +79,11 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
     listing.write_text(
         json.dumps(_job("unit (3.12, 2)", "failure", 9)) + "\n\n" + json.dumps(_job("lint", "success")) + "\n"
     )
-    monkeypatch.setattr(ci_unit_rerun, "logged_loss", lambda repo, job, seen: (repo, job["id"]) == ("o/r", 9) and lost)
+    monkeypatch.setattr(
+        ci_unit_rerun,
+        "logged_loss",
+        lambda repo, job, seen: seen.setdefault(str(job["id"]), (repo, job["id"]) == ("o/r", 9) and lost),
+    )
     plan = json.dumps(PLAN[:3])[1:-1]
     argv = ["--jobs", str(listing), "--repo", "o/r", "--plan", plan]
     assert ci_unit_rerun.main(argv) == code
