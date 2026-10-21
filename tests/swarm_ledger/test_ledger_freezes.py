@@ -244,9 +244,10 @@ def test_the_master_writes_a_freeze_and_keeps_only_the_operators_recorded_words_
 
 
 @pytest.mark.parametrize("quote", ["Freeze", "Freeze the"])
-def test_a_short_recorded_quote_is_never_kept_on_a_master_freeze(quote):
+@pytest.mark.parametrize("verb", ["freeze", "focus"])
+def test_a_short_recorded_quote_is_never_kept_on_a_master_freeze(quote, verb):
     operator_words.record(MASTER, "Freeze the plan")
-    state, rejected = freeze("plans/a", by=MASTER, quote=quote)
+    state, rejected = freeze("plans/a", verb=verb, by=MASTER, quote=quote)
     assert rejected == []
     assert "quote" not in state["freezes"][0]
 
