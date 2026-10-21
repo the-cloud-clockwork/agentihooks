@@ -660,8 +660,10 @@ class HiveAcks(FakeRuntime):
 def test_a_tick_pass_never_waits_on_hive_acknowledgements_and_a_later_pass_records_them(store):
     store.update("sw", max_eng=3)
     ledger, runtime = tasks(("t1", "eng"), ("t2", "eng"), ("t3", "eng")), HiveAcks()
-    tick("sw", store, ledger, runtime, now_ms=1_000)
+    actions = tick("sw", store, ledger, runtime, now_ms=1_000)
     names = list(runtime.ordered)
+    waits = {f"{ledger.rows[t]['claimed_by']} waits for the hive acknowledgement of {t}" for t in ("t1", "t2", "t3")}
+    assert waits <= set(actions)
     assert len(names) == 3 and runtime.spawned == []
     assert sorted(row["state"] for row in store.launches("sw")) == ["acknowledging"] * 3
     tick("sw", store, ledger, runtime, now_ms=STARTUP_GRACE_MS + 2_000)
