@@ -264,7 +264,7 @@ def test_a_hosted_caller_covers_reusable_work_without_its_own_lane(tmp_path, mon
 @pytest.mark.parametrize("caller_name", ["Trusted", "Replay"])
 def test_reusable_walk_follows_trusted_calls_and_preserves_the_outer_workflow_name(tmp_path, monkeypatch, caller_name):
     trusted = {"group": "trusted-${{ github.run_id }}"}
-    baseline = _workflow(concurrency=trusted, aaa=None)
+    baseline = _workflow(concurrency=trusted)
     baseline["name"] = caller_name
     updated = {
         **baseline,
