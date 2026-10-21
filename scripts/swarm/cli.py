@@ -136,7 +136,7 @@ from scripts.swarm import (
 from scripts.swarm.health import activity
 from scripts.swarm.health import findings as health
 from scripts.swarm.ledger_client import LedgerClient, LedgerGone, LedgerRefused
-from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.runtime import REPO_VARIABLE, HerdrRuntime
 from scripts.swarm.status import (
     auto_snapshot,
     findings,
@@ -1422,6 +1422,11 @@ def _worker(store, args):
     return agent
 
 
+def _local_repo(store, slug):
+    local = os.environ.get(REPO_VARIABLE, "")
+    return local if local and os.environ.get("AGENTIHOOKS_SWARM") == slug else store.config(slug).repo
+
+
 def cmd_issue(store, args):
     agent = _worker(store, args)
     LedgerClient().update_task(args.slug, agent.task, {"issue_url": args.url}, by=agent.name)
@@ -1493,7 +1498,7 @@ def origin_repo(run=subprocess.run):
 def cmd_prepare(store, args):
     from scripts.swarm import publish
 
-    fields = publish.prepare(args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient())
+    fields = publish.prepare(args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient())
     print(json.dumps(fields))
 
 
@@ -1501,7 +1506,7 @@ def cmd_publish(store, args):
     from scripts.swarm import publish
 
     fields = publish.publish(
-        args.slug, _worker(store, args), store.config(args.slug).repo, LedgerClient(), args.message, args.files
+        args.slug, _worker(store, args), _local_repo(store, args.slug), LedgerClient(), args.message, args.files
     )
     print(json.dumps(fields))
 
@@ -1684,7 +1689,7 @@ def cmd_block(store, args):
             return
     from scripts.swarm import publish
 
-    pushed = publish.pushed_branches(store.config(args.slug).repo, rows[agent.task], agent)
+    pushed = publish.pushed_branches(_local_repo(store, args.slug), rows[agent.task], agent)
     red_run = _dev_red_run(store, args.slug) if args.dev_red else None
     if pushed:
         ledger.update_task(args.slug, agent.task, pushed, by=agent.name)
@@ -1697,7 +1702,7 @@ def cmd_block(store, args):
 
 def _dev_red_run(store, slug):
     try:
-        red_run = dev_red.failing_run(store.config(slug).repo)
+        red_run = dev_red.failing_run(_local_repo(store, slug))
     except dev_red.READ_ERRORS as exc:
         raise SwarmError(f"cannot read the dev Tests runs: {getattr(exc, 'stderr', None) or exc}") from exc
     if red_run is None:
