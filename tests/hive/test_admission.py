@@ -189,8 +189,8 @@ def test_status_counts_refusals_by_reason_in_a_fixed_order():
         "c": {"lane": "ci", "reason": "no advertised Claude account has room"},
         "d": {"lane": "eng", "reason": "no hive for eng has room: vm cpu: busy"},
     }
-    assert admission.status_line(waits) == "admission refusals  cpu 2  ram 1  quota 1"
-    assert admission.status_line({}) == ""
+    assert admission.status_lines(waits) == ["admission refusals  cpu 2  ram 1  quota 1"]
+    assert admission.status_lines({}) == []
     assert admission.REASONS == ("cpu", "ram", "quota", "placement", "node cap", "missing telemetry")
 
 

@@ -1186,7 +1186,7 @@ def cmd_status(store, args):
     held += incidents.status_lines(store, args.slug)
     from scripts.hive import admission, placement_waits
 
-    held += [line] if (line := admission.status_line(placement_waits.read(store, args.slug))) else []
+    held += admission.status_lines(placement_waits.read(store, args.slug))
     for line in ledger_freezes.lines(doc) + quota + held + outbox.status_lines():
         print(line)
     print(bottleneck.line(bottleneck.read(store, args.slug), now_ms()))

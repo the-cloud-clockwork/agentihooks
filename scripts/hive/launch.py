@@ -258,7 +258,6 @@ class HiveLaunch:
         if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
         ):
-            admission.release(self.store.redis, selected.hive, f"{self.slug}/{request.name}")
             self.end(admitted, "account reservation is full")
             return Outcome("spawn", Status.UNAVAILABLE, HIVE, detail="account reservation is full")
         prompt_ref = self.store.key(self.slug, f"launch-prompt:{admitted.execution_id}")
@@ -404,6 +403,7 @@ class HiveLaunch:
     def end(self, agent: AgentRecord, reason: str) -> None:
         lease.require_epoch(self.store, self.slug, self.held.epoch)
         self.slots.release(agent.execution_id)
+        admission.release(self.store.redis, agent.hive, f"{self.slug}/{agent.name}")
         self.store.redis.hset(
             self.store.key(self.slug, ENDINGS),
             agent.execution_id,

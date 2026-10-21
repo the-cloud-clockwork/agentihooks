@@ -563,6 +563,21 @@ def test_failed_order_can_retry_with_a_new_generation(setup):
     assert setup.launcher.orders_for("task").generation == order.generation + 1
 
 
+def test_an_ended_launch_releases_its_admission_reservation(setup):
+    from scripts.hive import admission
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    wait = setup.launcher.wait
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(request) == "pending"
+    assert admission.pending(setup.store.redis, "remote") == 1
+    order = setup.launcher.orders_for("task")
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("failed", {}, "prompt"))
+    assert not wait(order).ok
+    assert admission.pending(setup.store.redis, "remote") == 0
+
+
 def write_hive(setup, **changes):
     from scripts.hive import registry
 

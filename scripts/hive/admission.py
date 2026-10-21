@@ -120,6 +120,6 @@ def counts(waits: dict) -> dict:
     return {reason: count for reason, count in found.items() if count}
 
 
-def status_line(waits: dict) -> str:
+def status_lines(waits: dict) -> list[str]:
     shown = "  ".join(f"{reason} {count}" for reason, count in counts(waits).items())
-    return f"admission refusals  {shown}" if shown else ""
+    return [f"admission refusals  {shown}"] if shown else []
