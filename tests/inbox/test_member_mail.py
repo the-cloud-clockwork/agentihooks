@@ -121,6 +121,13 @@ def test_a_handoff_moves_a_member_agents_mail_to_its_seat(redis, agent, mail):
     assert member.get(item.id).address == SEAT
 
 
+def test_the_handoff_envelope_lists_a_member_agents_open_mail(store, agent, mail):
+    from scripts.handoff import envelope
+
+    _, item = mail
+    assert [i["id"] for i in envelope._open_items(store, agent)] == [item.id]
+
+
 def test_a_handoff_closes_a_member_agents_wait_ended_notice(redis, agent):
     from scripts.swarm import waits
 
