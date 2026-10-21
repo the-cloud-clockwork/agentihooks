@@ -784,7 +784,7 @@ def test_the_operator_shell_env_is_the_env_file_set_over_the_runner_env(tmp_path
     runner = {"HOME": str(home), "PATH": operator_setup.os.environ["PATH"], "OPENBAO_URL": "https://stale.test"}
     monkeypatch.setattr(operator_setup.os, "environ", runner)
 
-    environ = operator_setup.shell_environ("")
+    environ = operator_setup.shell_environ()
 
     assert {name: environ.get(name) for name in ("OPENBAO_URL", "OPENBAO_TOKEN", "KEPT", "PERSONAL")} == {
         "OPENBAO_URL": "https://main.test",
