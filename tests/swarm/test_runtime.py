@@ -290,7 +290,7 @@ def test_spawn_hands_agents_the_local_checkout_of_the_swarm_repo(tmp_path, monke
     from scripts.hive import daemon
 
     monkeypatch.setattr(daemon, "local_checkout", lambda repo: f"/hive/dev/{repo.rsplit('/', 1)[-1]}")
-    spawned = _spawn_env(tmp_path, monkeypatch, repo="github.com/the-cloud-clockwork/agentihooks")
+    spawned = _spawn_env(tmp_path, monkeypatch, compact_limit=0, repo="github.com/the-cloud-clockwork/agentihooks")
     assert spawned["AGENTIHOOKS_SWARM_REPO"] == "/hive/dev/agentihooks"
 
 
