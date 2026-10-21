@@ -514,7 +514,7 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
     download = next(step for step in jobs["split"]["steps"] if step.get("name") == "Download the early collection")
     assert upload["with"]["if-no-files-found"] == "error"
     assert download["with"]["name"] == upload["with"]["name"]
-    assert "test-count" in jobs["split"]["needs"]
+    assert "test-count" not in jobs["split"]["needs"]
     adopt = next(step for step in jobs["split"]["steps"] if step.get("name") == "Adopt latest dev durations")
     assert "--collection collected.json" in adopt["run"]
     assert "test-count" in jobs["gate-required"]["needs"]
@@ -522,20 +522,37 @@ def test_full_suite_collection_starts_beside_selection_and_feeds_split():
 
 
 @pytest.mark.parametrize("result", ["success", "failure", "skipped", "cancelled"])
-def test_split_rejects_a_failed_collection_before_reading_any_artifact(result):
+def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path, result):
     steps = _workflow()["jobs"]["split"]["steps"]
     guard = next(step for step in steps if step.get("name") == "Require successful early collection")
     download = next(step for step in steps if step.get("name") == "Download the early collection")
     assert guard["if"] == download["if"]
-    assert guard["env"]["COLLECTION_RESULT"] == "${{ needs.test-count.result }}"
+    assert guard["env"]["COLLECTION_JOB"] == "test-count (${{ matrix.python-version }})"
+    assert _workflow()["jobs"]["split"]["permissions"]["actions"] == "read"
     assert steps.index(guard) < steps.index(download)
+    binary = tmp_path / "bin"
+    binary.mkdir()
+    (binary / "gh").write_text(
+        '#!/usr/bin/env bash\nprintf x >> "$CALLS"\n'
+        'if [[ "$(wc -c < "$CALLS")" -lt 2 ]]; then echo "in_progress "; else echo "completed $RESULT"; fi\n'
+    )
+    (binary / "sleep").write_text("#!/usr/bin/env bash\n")
+    for stub in binary.iterdir():
+        stub.chmod(0o755)
     outcome = subprocess.run(
         ["bash", "-e", "-c", guard["run"]],
-        env=dict(os.environ, COLLECTION_RESULT=result),
+        env=dict(
+            os.environ,
+            PATH=f"{binary}:{os.environ['PATH']}",
+            CALLS=str(tmp_path / "calls"),
+            RESULT=result,
+            COLLECTION_JOB="test-count (3.12)",
+        ),
         capture_output=True,
         text=True,
     )
     assert (outcome.returncode == 0) == (result == "success")
+    assert (tmp_path / "calls").read_text() == "xx"
 
 
 @pytest.mark.parametrize("collection,floor", [(0, 0), (1, 0), (0, 1), (1, 1)])
