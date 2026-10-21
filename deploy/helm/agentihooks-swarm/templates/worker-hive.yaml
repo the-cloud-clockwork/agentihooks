@@ -194,6 +194,9 @@ spec:
 {{- fail (printf "workers.hives %s needs its own credentialSecret: one credential is one hive" (toString .name)) }}
 {{- end }}
 {{- $_ := set $credentials $credential true }}
+{{- if hasKey . "replicas" }}
+{{- fail (printf "workers.hives %s sets replicas: each entry is one pod; remove the entry to stop it" (toString .name)) }}
+{{- end }}
 {{- if not (regexMatch "^[a-z0-9]([-a-z0-9]{0,18}[a-z0-9])?$" (toString .name)) }}
 {{- fail (printf "workers.hives name %q must be a lowercase DNS label of at most 20 characters" (toString .name)) }}
 {{- end }}

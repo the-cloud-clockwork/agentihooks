@@ -741,8 +741,8 @@ ExternalSecrets by name. Replicas that mount the same credential would report th
 the chart refuses `workers.replicas` above 1. Scale with `workers.hives`: each entry, `name` plus its own
 `credentialSecret`, renders one more hive pod, `<release>-worker-hive-<name>` with component `worker-hive-<name>` and
 its own worktrees ConfigMap. Every other key the entry sets replaces that `workers` key whole, so an entry that sets
-`homeVolume` gives the complete source. The chart refuses an entry without a credential of its own, a repeated name,
-or a name that is not a lowercase DNS label of at most 20 characters. Add a pod with no installed credential with
+`homeVolume` gives the complete source. The chart refuses an entry without a credential of its own, an entry that sets
+`replicas`, a repeated name, or a name that is not a lowercase DNS label of at most 20 characters. Add a pod with no installed credential with
 `agentihooks hive add` from the UI hive; the pod name is used only then.
 
 The pod's memory follows its agent count: `workers.memoryPerAgentMi.request` (default 700) and `.limit` (default

@@ -238,7 +238,7 @@ workers:
   nodeSelector: {}
   affinity: {}
   tolerations: []
-  # More hives in this release, one pod each. Every entry needs a name and its own credentialSecret; its other
+  # More hives in this release, one pod each, so an entry never sets replicas. Every entry needs a name and its own credentialSecret; its other
   # top level keys replace the workers keys above whole, so a hive with a homeVolume sets the complete source.
   hives: []
 

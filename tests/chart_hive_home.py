@@ -191,6 +191,7 @@ def hives_problems(chart: str) -> list[str]:
             {"name": "pool-1", "credentialSecret": {"name": "b", "key": "c"}},
         ],
         "lowercase DNS label": [{"name": "Pool_1", "credentialSecret": {"name": "a", "key": "c"}}],
+        "sets replicas": [{"name": "pool-1", "replicas": 0, "credentialSecret": {"name": "a", "key": "c"}}],
     }
     for reason, hives in refusals.items():
         refused = subprocess.run(
