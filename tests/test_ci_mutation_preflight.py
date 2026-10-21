@@ -1,5 +1,9 @@
 import json
+import os
 import shlex
+import signal
+import subprocess
+import sys
 from pathlib import Path
 from string import Template
 
@@ -428,3 +432,47 @@ def test_touched_test_selection_supplies_the_automatic_worker_limit():
     assert "workers={workers}" in select["run"]
     run = steps[names.index("Run the tests the branch touches")]
     assert run["env"]["PYTEST_XDIST_AUTO_NUM_WORKERS"] == "${{ steps.touched.outputs.workers }}"
+
+
+_GROUPED = """
+import os, pytest
+
+@pytest.mark.xdist_group("client")
+@pytest.mark.parametrize("n", range(4))
+def test_grouped(n):
+    with open(os.path.join(os.environ["GROUP_OUT"], str(n)), "w") as stream:
+        stream.write(os.environ["PYTEST_XDIST_WORKER"])
+"""
+
+
+def test_touched_tests_keep_one_xdist_group_on_one_worker(tmp_path):
+    steps, names = _steps(_workflow()["jobs"]["touched-tests"])
+    run = steps[names.index("Run the tests the branch touches")]["run"]
+    command = shlex.split(run.splitlines()[1].replace('"${files[@]}"', "test_cases.py"))
+    assert command[:3] == ["python", "-m", "pytest"]
+    command[0] = sys.executable
+    project = tmp_path / "project"
+    project.mkdir()
+    (project / "test_cases.py").write_text(_GROUPED)
+    out = tmp_path / "out"
+    out.mkdir()
+    env = {key: value for key, value in os.environ.items() if not key.startswith(("COV_CORE_", "COVERAGE_", "PYTEST_"))}
+    env |= {"PYTEST_XDIST_AUTO_NUM_WORKERS": "2", "GROUP_OUT": str(out)}
+    process = subprocess.Popen(
+        command,
+        cwd=project,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        output = process.communicate(timeout=120)[0]
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGKILL)
+        output = "timed out\n" + process.communicate()[0]
+    assert process.returncode == 0, output
+    workers = [path.read_text() for path in sorted(out.iterdir())]
+    assert len(workers) == 4, output
+    assert len(set(workers)) == 1, (workers, output)
