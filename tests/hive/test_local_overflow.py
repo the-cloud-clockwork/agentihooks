@@ -234,18 +234,24 @@ def test_swarm_set_stores_the_local_machine_cap(setup, capsys):
 
 
 def test_two_concurrent_spawns_at_cap_minus_one_yield_one_local_spawn_and_one_wait(setup, monkeypatch):
-    import time
+    import threading
     from concurrent.futures import ThreadPoolExecutor
+
+    from scripts.swarm import local_slots
 
     fenced = hybrid(setup, monkeypatch)
     fill_anton(setup)
     local_agents(setup, 7)
+    monkeypatch.setattr(local_slots, "held", lambda *_: 0)
+    read, together, first_reads = local_slots._held, threading.Barrier(2), iter(range(2))
 
-    def launch(*_):
-        time.sleep(0.2)
-        return "placed on the workstation"
+    def read_together(*args):
+        seen = read(*args)
+        if next(first_reads, None) is not None:
+            together.wait(5)
+        return seen
 
-    setup.herdr.spawn.side_effect = launch
+    monkeypatch.setattr(local_slots, "_held", read_together)
 
     def attempt(task):
         try:
