@@ -420,6 +420,27 @@ def test_respawn_master_leaves_a_swarm_another_hive_ticks(store, monkeypatch):
     assert runtime.masters == []
 
 
+def test_respawn_master_spawns_nothing_for_a_swarm_stopped_while_it_took_the_tick_lock(store, monkeypatch):
+    from scripts.swarm import controller, tick
+    from tests.swarm.test_tick import FakeRuntime
+
+    monkeypatch.setenv("SWARM_HIVE_ID", "home")
+    runtime = FakeRuntime()
+    agent(store, "master@a1b2c3-0001", FRONT_DOOR, lane=MASTER)
+    take = controller.take_tick_lock
+
+    def stop_then_take(*args):
+        store.update("sw", state="stopped")
+        return take(*args)
+
+    monkeypatch.setattr(controller, "take_tick_lock", stop_then_take)
+
+    assert tick.respawn_master("sw", store, runtime, START) == []
+    assert runtime.masters == []
+    assert [found.name for found in store.agents("sw")] == ["master@a1b2c3-0001"]
+    assert not store.redis.exists(store.key("sw", "tick-lock"))
+
+
 def test_a_swarm_in_a_ledger_outage_is_alerted_but_never_repaired(store, tmp_path, monkeypatch):
     from scripts.swarm import outage
 
