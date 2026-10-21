@@ -276,8 +276,6 @@ def sweep(
 
 
 def close_dead_tabs(environ: dict[str, str], now_ms: int, herdr: Herdr, live: set[str]) -> list[str]:
-    """Close the agent tabs herdr restored after a restart: an agent pane label with no live agent and only bare
-    shells in it. A tab holding a pane launched inside the grace is left for its launcher."""
     alive = {herdr_host.agent_name(name) for name in live}
     panes = herdr.list_panes()
     fresh = {
