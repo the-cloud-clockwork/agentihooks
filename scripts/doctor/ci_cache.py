@@ -37,7 +37,10 @@ def write(cache: Redis, key: str, attempt: dict) -> None:
     encoded = encode(attempt)
     with cache.lock(f"{PREFIX}lock", timeout=30, blocking_timeout=10):
         if len(encoded) <= ENTRY_BYTES:
-            cache.set(key, encoded, ex=TTL)
+            changes = cache.pipeline()
+            changes.set(key, encoded, keepttl=True)
+            changes.expire(key, TTL, lt=True)
+            changes.execute()
         else:
             cache.unlink(key)
         _trim(cache, key)
