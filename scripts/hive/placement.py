@@ -61,6 +61,10 @@ def _checks(
             lambda hive: route_kind != INTERACTIVE or hive["interactive"].get(harness) == slot,
             f"no {kind} for {role} holds the {harness} login for {slot}",
         ),
+        (
+            lambda hive: route_kind != MASTER_LOGIN or hive["master_login"].get(harness) == slot,
+            f"no {kind} for {role} holds the {harness} master login for {slot}",
+        ),
     ]
 
 

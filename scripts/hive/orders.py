@@ -300,7 +300,10 @@ class Consumer:
 
         if order.lane != MASTER or not front_door.holds(order.slug, agent.seat):
             return ""
-        if self.store.redis.hget(registry.key(self.hive), "ui") == "yes":
+        if (
+            order.route_kind != master_claude_login.ROUTE
+            and self.store.redis.hget(registry.key(self.hive), "ui") == "yes"
+        ):
             return ""
         return master_claude_login.unusable()
 

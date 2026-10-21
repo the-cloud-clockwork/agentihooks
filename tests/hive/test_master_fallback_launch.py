@@ -397,7 +397,7 @@ def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order
     assert reservation.master_agents(setup.store, "claude", "login") == 0
 
 
-def headless_front_door_order(setup):
+def headless_front_door_order(setup, route=""):
     from scripts.hive import orders
     from scripts.swarm import lease
     from scripts.swarm_v2.runtime.base import SpawnRequest
@@ -416,7 +416,7 @@ def headless_front_door_order(setup):
         "master",
         "login",
         "claude",
-        admitted.route_kind,
+        route or admitted.route_kind,
         "prompt",
         setup.held.epoch,
         lease.now_ms(setup.store) + 60000,
@@ -424,6 +424,7 @@ def headless_front_door_order(setup):
     return order, admitted, task
 
 
+@pytest.mark.parametrize("route", ["", "subscription"])
 @pytest.mark.parametrize(
     ("enabled", "reason"),
     [
@@ -432,14 +433,14 @@ def headless_front_door_order(setup):
     ],
 )
 def test_a_headless_hive_without_a_usable_master_login_refuses_the_front_door_launch(
-    setup, monkeypatch, tmp_path, enabled, reason
+    setup, monkeypatch, tmp_path, enabled, reason, route
 ):
     from hooks import config as hooks_config
     from scripts.hive import orders
 
     monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", enabled)
     monkeypatch.setattr(hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
-    order, admitted, task = headless_front_door_order(setup)
+    order, admitted, task = headless_front_door_order(setup, route)
     runtime = Mock()
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
     assert (ack.status, ack.failure) == ("failed", reason)
@@ -460,15 +461,17 @@ def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(
     runtime.spawn.assert_called_once()
 
 
-def test_a_ui_hive_takes_a_front_door_launch_without_the_master_login_check(setup, monkeypatch):
+@pytest.mark.parametrize(("route", "failure"), [("subscription", "unavailable: spawned"), ("", "refused")])
+def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(setup, monkeypatch, route, failure):
     from scripts import master_claude_login
     from scripts.hive import orders
     from scripts.swarm_v2.runtime.base import Outcome, Status
 
     monkeypatch.setattr(master_claude_login, "unusable", lambda: "refused")
-    order, admitted, task = headless_front_door_order(setup)
+    order, admitted, task = headless_front_door_order(setup, route)
     write_hive(setup, ui="yes")
     runtime = Mock()
     runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
     ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
-    assert ack.failure == "unavailable: spawned"
+    assert ack.failure == failure
+    assert runtime.spawn.called is (failure != "refused")
