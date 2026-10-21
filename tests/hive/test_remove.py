@@ -10,7 +10,7 @@ from scripts import openbao_kv
 from scripts.hive import auth, cli, machine, registry, remove
 from scripts.hive.placement import choose, place_master
 from scripts.inbox.store import InboxStore
-from scripts.swarm.store import PREFIX, AgentRecord, RedisStore
+from scripts.swarm.store import AgentRecord
 
 PUBLIC = "redis://hive.example:6380/2"
 TARGET = "ssh://worker@10.10.30.207:2222"
@@ -18,11 +18,26 @@ SLUG = "demo"
 SEAT = f"eng-1@{SLUG}"
 
 
+class Swarm:
+    def __init__(self, redis):
+        self.redis = redis
+        self.rows = []
+
+    def slugs(self):
+        return [SLUG] if self.rows else []
+
+    def agents(self, slug):
+        return list(self.rows) if slug == SLUG else []
+
+    def put_agent(self, slug, agent):
+        self.rows = [row for row in self.rows if row.name != agent.name] + [agent]
+
+
 @pytest.fixture
 def store():
     import fakeredis
 
-    return RedisStore(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
+    return Swarm(fakeredis.FakeRedis(server=fakeredis.FakeServer(), decode_responses=True))
 
 
 class Bao:
@@ -78,8 +93,7 @@ def _member(store, name="anton-9"):
 
 
 def _agent(store, member):
-    store.redis.sadd(f"{PREFIX}:index", SLUG)
-    agent = AgentRecord("engineer@1", "eng", "t1", seat=SEAT, hive=member, execution_id="e1", state="working")
+    agent = AgentRecord("engineer@1", "eng", "t1", seat=SEAT, hive=member, state="working")
     store.put_agent(SLUG, agent)
 
 
