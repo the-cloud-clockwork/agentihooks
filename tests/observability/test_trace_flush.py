@@ -1112,7 +1112,8 @@ def _account_names_seen(tmp_path, monkeypatch, owner):
 )
 def test_an_attempt_carries_the_sessions_account_never_the_callers(home, enabled, tmp_path, monkeypatch, owner, seen):
     assert _account_names_seen(tmp_path, monkeypatch, owner) == seen
-    assert "owner-value" not in json.dumps(json.loads(trace_flush.request_path("owned").read_text()))
+    recorded = json.loads(trace_flush.request_path("owned").read_text())["identity"]
+    assert {name: value for name, value in recorded.items() if name.startswith("AH_")} == dict.fromkeys(seen, "1")
 
 
 def test_an_attempt_applies_only_identity_names_from_the_request(home, tmp_path, monkeypatch):
