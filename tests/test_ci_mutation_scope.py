@@ -139,6 +139,18 @@ def test_selection_parses_only_test_modules_that_name_a_reached_module(tmp_path,
     assert parsed and not any("UNRELATED" in text for text in parsed)
 
 
+@pytest.mark.parametrize(
+    "importer",
+    ["from.import *\n", "from..sub import *\n", "from\\\n. import *\n", "from hooks.context import ｐarsed_form\n"],
+)
+def test_selection_keeps_imports_written_without_spaces_or_with_normalized_names(tmp_path, importer):
+    package = tmp_path / "tests" / "sub"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("import hooks.context.parsed_form\n")
+    (package / "test_importer.py").write_text(importer)
+    assert select_tests(tmp_path, Path("hooks/context/parsed_form.py")) == ["tests/sub/test_importer.py"]
+
+
 def test_a_folder_named_like_a_module_is_skipped(tmp_path):
     tests = tmp_path / "tests"
     (tests / "a.py").mkdir(parents=True)

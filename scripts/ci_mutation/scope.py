@@ -1,6 +1,7 @@
 import ast
 import re
 import subprocess
+import unicodedata
 from collections import Counter
 from functools import cache
 from pathlib import Path
@@ -168,7 +169,6 @@ def module_name(path: Path) -> str:
 @cache
 def imported_names(text: str, package: tuple[str, ...]) -> frozenset[str]:
     names = set()
-    # Import statements sit only in statement bodies, so expressions are never walked.
     pending = [ast.parse(text)]
     while pending:
         node = pending.pop()
@@ -195,11 +195,12 @@ def select_tests(root: Path, source: Path) -> list[str]:
     def importing(modules: set[str]) -> set[Path]:
         # Every import of a module names its last part or is relative, so other files are never parsed.
         words = "|".join(re.escape(name.rpartition(".")[2]) for name in modules)
-        mention = re.compile(rf"\b(?:{words})\b|\bfrom\s+\.")
+        mention = re.compile(rf"\b(?:{words})\b|\bfrom\W*\.")
         return {
             path
             for path, text in texts.items()
-            if mention.search(text) and imported_names(text, path.relative_to(root).parent.parts) & modules
+            if mention.search(unicodedata.normalize("NFKC", text))
+            and imported_names(text, path.relative_to(root).parent.parts) & modules
         }
 
     reaching = {
