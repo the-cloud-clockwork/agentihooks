@@ -1272,7 +1272,6 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-
   unit-lost:
     if: ${{ !cancelled() && github.event_name == 'merge_group' && needs.unit.result == 'failure' }}
     needs: [unit, split]
@@ -1326,6 +1325,7 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.unit-lost.outputs.matrix) }}
     steps: *unit-steps
+
   unit-selected:
     if: ${{ !cancelled() && github.event_name == 'pull_request' && needs.select.result == 'success' && needs.select.outputs.scope == 'selected' }}
     needs: [select]

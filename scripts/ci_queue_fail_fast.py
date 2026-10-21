@@ -2,8 +2,7 @@ import argparse
 import json
 from pathlib import Path
 
-# A unit shard's failure waits for unit-lost, which reruns a lost runner and fails on anything else.
-SHARD = "unit ("
+from scripts.ci_queue_retry import SHARD, base_name
 
 SELF = "queue-fail-fast"
 # Needs every graded job, so once it completes nothing graded can still fail.
@@ -16,7 +15,7 @@ def failed(jobs: list[dict]) -> str | None:
         (
             job["name"]
             for job in jobs
-            if job["name"] != SELF and not job["name"].startswith(SHARD) and job.get("conclusion") in FATAL
+            if job["name"] != SELF and base_name(job["name"]) != SHARD and job.get("conclusion") in FATAL
         ),
         None,
     )
