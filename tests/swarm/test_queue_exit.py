@@ -165,14 +165,15 @@ def test_a_head_with_no_group_run_since_it_landed_may_queue():
 def test_a_head_whose_last_group_had_a_failed_job_is_refused_naming_the_run():
     older = run_of(7, "success", run_id=1, group="g0", created="2026-10-20T08:30:00Z")
     last = run_of(7, "cancelled", run_id=5, group="g1")
-    other = run_of(7, "success", name="Proofs", run_id=6, group="g1")
+    other = run_of(7, "failure", name="Proofs", run_id=6, group="g1")
     run = runner([older, last, other], jobs={5: [["success", "failure"]]})
     with pytest.raises(SwarmError) as refused:
         queue_exit.require_fresh(URL, "abc", run)
     assert str(refused.value) == (
-        "head abc failed its last merge group run (Tests https://github.com/o/r/actions/runs/5); "
-        "push a new commit before queueing again"
+        "head abc failed its last merge group run (Tests https://github.com/o/r/actions/runs/5, "
+        "Proofs https://github.com/o/r/actions/runs/6); push a new commit before queueing again"
     )
+    assert ["gh", "api", jobs_path(5)] in run.calls
 
 
 def test_an_older_failed_group_does_not_refuse_a_clean_last_group():
