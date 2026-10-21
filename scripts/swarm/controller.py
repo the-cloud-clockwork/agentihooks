@@ -13,6 +13,7 @@ from scripts.scheduler.process_timer import wait as scheduled_wait
 from scripts.swarm import lease
 from scripts.swarm.controller_probes import HOST_SWARMS_ENV, ticked
 from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError, connect
+from scripts.swarm_ledger import ledger_link
 from scripts.swarm_v2.runtime.base import HIVE_LANES
 from scripts.swarm_v2.runtime.base import LOCAL as WORKSTATION_BACKEND
 
@@ -29,7 +30,7 @@ OVERFLOW = "the local machine takes {lane} work"
 
 
 def deployment_for(config: SwarmConfig, environ: Mapping[str, str]) -> str:
-    machine = environ.get("AGENTIHOOKS_DEPLOYMENT", LOCAL)
+    machine = environ.get("AGENTIHOOKS_DEPLOYMENT", LOCAL if ledger_link.local_mode(environ) else "compose")
     return HYBRID if machine == LOCAL and config.hive_placement else machine
 
 
