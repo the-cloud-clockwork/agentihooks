@@ -37,6 +37,7 @@ from scripts.swarm import (
     continuation,
     control_notifications,
     dead_resume,
+    deliberate_exit,
     dev_red,
     difficulty,
     dispatch_seat,
@@ -615,6 +616,11 @@ def _reap(slug, store, ledger, runtime, rows, now_ms):
 
 
 def _lost(slug, store, ledger, runtime, rows, agent, now_ms):
+    if deliberate_exit.take(store, slug, agent.name):
+        runtime.retire(agent, homes=reaper.scratch_homes(slug, agent.task))
+        return [
+            f"retired {agent.name} after a deliberate terminate" + _drop(slug, store, ledger, rows, agent, refund=True)
+        ]
     if dead_resume.reopen(slug, store, ledger, runtime, agent, now_ms):
         return [f"resumed {agent.name}"]
     if agent not in store.agents(slug):

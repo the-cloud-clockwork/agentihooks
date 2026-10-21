@@ -3146,7 +3146,9 @@ task. The prompt tells it to read its task folder and inbox and continue the sam
 input and permission prompts are left alone. A pane still showing the provider error gets at most three
 resume attempts on separate ticks before normal idle rules apply. An agent whose process
 died reopens its own conversation in the same seat; if that cannot resume, the handoff supplies its
-successor's context. Recovery preserves the existing task claim. A changed claim owner or execution
+successor's context. An agent stopped on purpose with `agentihooks terminate-agent` is never reopened:
+the command records a deliberate exit for its swarm agent, and the tick drops that agent, refunds its
+claim and returns its task to open for the next claim under the lane cap. Recovery preserves the existing task claim. A changed claim owner or execution
 generation, expired claim lease or changed seat occupant fences out the old agent, so recovery cannot
 resume work already taken by a successor.
 
