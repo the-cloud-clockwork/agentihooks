@@ -771,6 +771,29 @@ def test_cli_routes_each_operation_and_prints_its_state(monkeypatch, capsys, act
     assert capsys.readouterr().out == '{"queued": true}\n'
 
 
+@pytest.mark.parametrize("failed", [False, True])
+def test_cli_queue_refuses_a_head_whose_last_group_failed_before_intent(monkeypatch, capsys, failed):
+    from scripts.swarm import queue_exit
+
+    monkeypatch.setattr(cli, "connect", lambda: swarm_of("eng"))
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
+    seen = []
+
+    def fresh(url, head):
+        seen.append(("fresh", url, head))
+        if failed:
+            raise SwarmError(f"head {head} failed its last merge group run (Tests run)")
+
+    monkeypatch.setattr(queue_exit, "require_fresh", fresh)
+    monkeypatch.setattr(cli, "_queue_intent", lambda store, args, agent, head: seen.append(("intent", head)))
+    monkeypatch.setattr(merge_queue, "operate", lambda verb, url, **kwargs: kwargs["admit"]("abc") or {"queued": True})
+
+    assert cli.main(["sw", "merge", "queue", URL]) == (1 if failed else 0)
+    assert seen == [("fresh", URL, "abc")] + ([] if failed else [("intent", "abc")])
+    if failed:
+        assert "head abc failed its last merge group run (Tests run)" in capsys.readouterr().err
+
+
 @pytest.mark.parametrize("action", ["queue", "dequeue"])
 def test_cli_accepts_the_earlier_pull_the_task_lists(monkeypatch, action):
     from types import SimpleNamespace
