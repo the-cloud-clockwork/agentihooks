@@ -245,6 +245,85 @@ def test_an_edited_trusted_workflow_grades_new_reusable_calls(tmp_path, monkeypa
     )
 
 
+@pytest.mark.parametrize("block", [LANED, CALLED])
+@pytest.mark.parametrize("scope", ["workflow", "job"])
+def test_a_hosted_caller_covers_reusable_work_without_its_own_lane(tmp_path, monkeypatch, block, scope):
+    baseline = _workflow(concurrency=block)
+    caller = {"uses": "./.github/workflows/trusted.yml"}
+    if scope == "job":
+        caller["concurrency"] = block
+    updated = _workflow(concurrency=block if scope == "workflow" else None, replay=caller)
+    child = _workflow()
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated, "trusted.yml": child})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    (base / lanes.WORKFLOWS / "trusted.yml").write_text(yaml.safe_dump(child))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {}
+
+
+@pytest.mark.parametrize("caller_name", ["Trusted", "Replay"])
+def test_reusable_walk_follows_trusted_calls_and_preserves_the_outer_workflow_name(tmp_path, monkeypatch, caller_name):
+    trusted = {"group": "trusted-${{ github.run_id }}"}
+    baseline = _workflow(concurrency=trusted, aaa=None)
+    baseline["name"] = caller_name
+    updated = {
+        **baseline,
+        "jobs": {
+            "aaa": None,
+            "covered": {"uses": "./.github/workflows/branch.yml", "concurrency": LANED},
+            "escape": {"uses": "./.github/workflows/middle.yml"},
+        },
+    }
+    middle = _workflow(
+        concurrency=CALLED,
+        cycle={"uses": "./.github/workflows/replay.yml"},
+        work={"uses": "./.github/workflows/branch.yml"},
+    )
+    child = _workflow(concurrency=CALLED)
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated, "middle.yml": middle, "branch.yml": child})
+    for name, body in {"replay.yml": baseline, "middle.yml": middle}.items():
+        (base / lanes.WORKFLOWS / name).write_text(yaml.safe_dump(body))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == (
+        {
+            f"{lanes.WORKFLOWS}/replay.yml": [
+                "job escape calls .github/workflows/middle.yml: job work calls .github/workflows/branch.yml: job replay has no shared hosted lane concurrency group"
+            ]
+        }
+        if caller_name == "Trusted"
+        else {}
+    )
+
+
+@pytest.mark.parametrize(
+    "body, reason",
+    [
+        ("[", "does not parse as YAML"),
+        (None, "is not a workflow mapping"),
+        ([], "is not a workflow mapping"),
+        ({"jobs": ["invalid"]}, "has no jobs mapping"),
+    ],
+)
+def test_invalid_called_workflows_are_reported_without_hiding_later_calls(tmp_path, monkeypatch, body, reason):
+    trusted = {"group": "trusted-${{ github.run_id }}"}
+    baseline = _workflow(concurrency=trusted)
+    updated = _workflow(
+        concurrency=trusted,
+        first={"uses": "./.github/workflows/broken.yml"},
+        second={"uses": "./.github/workflows/broken.yml"},
+    )
+    base, head, sha = _repo(tmp_path, {"replay.yml": updated, "broken.yml": body})
+    (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
+    monkeypatch.chdir(head)
+    assert lanes.refused(sha, base) == {
+        f"{lanes.WORKFLOWS}/broken.yml": [reason],
+        f"{lanes.WORKFLOWS}/replay.yml": [
+            f"job first calls .github/workflows/broken.yml: {reason}",
+            f"job second calls .github/workflows/broken.yml: {reason}",
+        ],
+    }
+
+
 def test_proof_branch_pushes_are_graded():
     workflow = yaml.safe_load((ROOT / lanes.WORKFLOWS / "branch-lanes.yml").read_text())
     assert "diffcheck/**" not in workflow[True]["push"]["branches-ignore"]
