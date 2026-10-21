@@ -207,31 +207,35 @@ def test_a_relocated_item_leaves_its_old_inbox_and_is_fully_indexed_in_its_new_o
     _, first = mail
     redis, persisted = store.redis, []
     member = InboxStore(redis, persist=persisted.append, world="m1")
-    second = InboxStore(redis).send("sender", agent.name, "second")
+    second, third = (InboxStore(redis).send("sender", agent.name, text) for text in ("second", "third"))
     member.deliver(second.id, agent.name)
     member.read(second.id, agent.name)
+    member.deliver(third.id, agent.name)
     member.about(first.id, "tasks/t1")
     successor = seat_successor(store, agent, "")
     controller = InboxStore(redis, world="")
     earlier = controller.send("sender", successor, "earlier")
-    moved = [member.redirect(item.id, "swarm", successor, "passed on") for item in (first, second)]
+    controller.deliver(earlier.id, successor)
+    assert not redis.sismember(controller.key("waiting"), successor)
+    moved = [member.redirect(item.id, "swarm", successor, "passed on") for item in (first, second, third)]
     assert not any(redis.exists(member.key(kind, first.id)) for kind in ("item", "history", "entry"))
     assert [redis.zcard(member.key(kind, agent.name)) for kind in ("address", "open", "pending")] == [0, 0, 0]
     assert redis.get(member.key("open-size", agent.name)) == "0"
     assert not redis.sismember(member.key("waiting"), agent.name)
-    assert redis.zscore(member.key("delivered"), second.id) is None
-    ids = sorted([earlier.id, first.id, second.id])
-    assert [
-        sorted(redis.zrange(controller.key(kind, successor), 0, -1)) for kind in ("address", "open", "pending")
-    ] == [ids] * 3
-    assert redis.get(controller.key("open-size", successor)) == "3"
+    assert redis.zscore(member.key("delivered"), third.id) is None
+    relocated = sorted(item.id for item in (first, second, third))
+    assert [sorted(redis.zrange(controller.key(kind, successor), 0, -1)) for kind in ("address", "open")] == [
+        sorted([earlier.id, *relocated])
+    ] * 2
+    assert sorted(redis.zrange(controller.key("pending", successor), 0, -1)) == relocated
+    assert redis.get(controller.key("open-size", successor)) == "4"
     assert redis.sismember(controller.key("waiting"), successor)
     assert controller.entry_of(first.id) == "tasks/t1"
-    assert [controller.get(i.id).sequence for i in (first, second)] == [2, 3]
+    assert [controller.get(i.id).sequence for i in (first, second, third)] == [2, 3, 4]
     history = controller.history(second.id)
     assert [e["state"] for e in history] == ["pending", "delivered", "read", "pending"]
     assert history[-1]["at"] == moved[1].updated_at
-    assert len(persisted) == 2 and None not in persisted
+    assert len(persisted) == 3 and None not in persisted
 
 
 def test_a_relocated_front_door_item_leaves_its_old_master_pool(store, agent):
