@@ -134,7 +134,7 @@ class FencedRuntime:
         if self.deployment != HYBRID or task.get("hive") or not _workstation_herdr():
             return waited.reason
         from scripts.hive import placement_waits, registry
-        from scripts.hive.placement import Choice, hosts, overflow
+        from scripts.hive.placement import LOCAL_FULL, Choice, hosts, overflow
         from scripts.swarm.commands import hive_id
 
         machine = hive_id()
@@ -143,11 +143,13 @@ class FencedRuntime:
             return waited.reason
         local_max = self.store.config(self.slug).local_max_agents
         chosen = overflow(waited.role, waited, local_slots.held(self.store, machine, self.slug, task["id"]), local_max)
-        if claim and isinstance(chosen, Choice):
-            taken = local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)
-            chosen = overflow(waited.role, waited, taken, local_max)
         if not isinstance(chosen, Choice):
             return chosen.reason
+        if (
+            claim
+            and (taken := local_slots.claim(self.store, machine, self.slug, task["id"], claim, local_max)) >= local_max
+        ):
+            return f"{waited.reason}{LOCAL_FULL}{taken} of its {local_max} agents"
         self.store.redis.hdel(self.store.key(self.slug, placement_waits.WAITS), task["id"])
         return OVERFLOW.format(lane=lane)
 

@@ -315,3 +315,18 @@ def test_a_claim_whose_agent_never_appears_expires(setup):
     setup.store.put_agent(slug, AgentRecord("stuck", "eng", "stuck", state="starting"))
     setup.store.redis.hset(local_slots.key("box"), f"{slug}/stuck", now - local_slots.PENDING_MS)
     assert local_slots.held(setup.store, "box", slug, "other") == 1
+
+
+def test_the_machine_count_leaves_out_the_task_itself_and_holds_other_swarms_pending_claims(setup, monkeypatch):
+    from scripts.swarm import local_slots
+    from scripts.swarm.store import AgentRecord
+
+    fenced = hybrid(setup, monkeypatch)
+    fill_anton(setup)
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "box")
+    setup.store.update(setup.config.slug, local_max_agents=2)
+    setup.store.put_agent(setup.config.slug, AgentRecord("eng-self", "eng", "task"))
+    assert local_slots.claim(setup.store, "box", "other", "elsewhere", "eng-other", 8) == 0
+    assert fenced.placement_refusal("eng", {"id": "task"}) == ""
+    assert fenced.spawn(setup.config, "eng", "eng name", {"id": "task"}) == "placed on the workstation"
+    assert fenced.placement_refusal("eng", {"id": "next"}) == f"{FULL}, and the local machine runs 3 of its 2 agents"
