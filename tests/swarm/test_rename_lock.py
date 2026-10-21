@@ -151,3 +151,67 @@ def test_a_rename_that_lost_its_lease_stops_before_the_next_write(store):
     assert renamed == ["w1:p1"]
     assert set(store.redis.hkeys(store.key("sw", "agents"))) == {"sw-eng-1", "sw-eng-2"}
     assert lease.current(store, "sw").owner == "another-hive"
+
+
+def take_over_on(store, command):
+    calls = []
+
+    def herdr(args):
+        calls.append(args[:2])
+        if args[:2] == command:
+            lose_lease(store)
+        panes = [{"pane_id": "w1:p1", "name": "sw-eng-1", "workspace_id": "w1"}]
+        return {"agents": panes, "workspaces": [{"workspace_id": "w1", "label": "old"}]}
+
+    return SimpleNamespace(herdr=herdr), calls
+
+
+def test_a_rename_that_lost_its_lease_before_the_first_agent_writes_nothing(store):
+    runtime, calls = take_over_on(store, ["agent", "list"])
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        rename_swarm(store, "sw", LEDGER, runtime, 10)
+    assert calls == [["agent", "list"]]
+    assert store.redis.keys(store.key("sw", "rename-to", "*")) == []
+
+
+def test_a_rename_that_lost_its_lease_renames_no_workspace(store):
+    runtime, calls = take_over_on(store, ["workspace", "list"])
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        rename_swarm(store, "sw", LEDGER, runtime, 10)
+    assert calls == [["agent", "list"], ["agent", "rename"], ["workspace", "list"]]
+
+
+def lose_lease(store):
+    store.redis.delete(store.key("sw", "control-owner"))
+    assert lease.acquire(store, "sw", "another-hive") is not None
+
+
+def test_a_rename_that_lost_its_lease_while_naming_renames_no_pane(store, monkeypatch):
+    runtime, calls = take_over_on(store, None)
+    next_name = store.next_name
+    monkeypatch.setattr(store, "next_name", lambda *args, **kwargs: lose_lease(store) or next_name(*args, **kwargs))
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        rename_swarm(store, "sw", LEDGER, runtime, 10)
+    assert calls == [["agent", "list"]]
+
+
+def test_a_codex_rename_that_lost_its_lease_types_no_session_name(store):
+    store.put_agent("sw", AgentRecord("sw-eng-1", "eng", "t1", pane_id="w1:p1", harness="codex"))
+    runtime, calls = take_over_on(store, ["agent", "rename"])
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        rename_swarm(store, "sw", LEDGER, runtime, 10)
+    assert calls == [["agent", "list"], ["agent", "rename"]]
+
+
+def test_a_rename_that_lost_its_lease_moves_no_further_ledger_name(store):
+    store.names.alias("sw-eng-0", "sw-eng-1")
+    moved = []
+
+    def rename_agent(slug, old, new):
+        moved.append(old)
+        lose_lease(store)
+
+    runtime, _ = take_over_on(store, None)
+    with pytest.raises(SwarmError, match="the controller lease is stale"):
+        rename_swarm(store, "sw", SimpleNamespace(rename_agent=rename_agent), runtime, 10)
+    assert len(moved) == 1
