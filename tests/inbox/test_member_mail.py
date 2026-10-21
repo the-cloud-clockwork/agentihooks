@@ -293,6 +293,37 @@ def test_a_moved_seat_item_is_pending_with_its_history_and_a_move_entry(store, m
     }
 
 
+def test_the_sweep_skips_quiet_move_candidates_but_still_moves_a_seat_with_mail(store, agent, mail, monkeypatch):
+    from scripts.hive import auth
+
+    store.redis.hset(f"{auth.PREFIX}:member:m2", mapping={"name": "m2", "ledger": "digest"})
+    store.redis.sadd(auth.INDEX, "m2")
+    member, item = mail
+    store.put_agent("sw", replace(agent, state="finished"))
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    name = store.next_name("sw", "eng")
+    store.start_execution("sw", AgentRecord(name, "eng", "t1", seat=SEAT, hive="m2"), agent.execution_id)
+    store.seats.occupy(SEAT, name, 2)
+    quiet_seats = [f"eng-{n}@sw" for n in range(2, 22)]
+    for n, seat in enumerate(quiet_seats, start=2):
+        quiet_name = store.next_name("sw", "eng")
+        store.start_execution("sw", AgentRecord(quiet_name, "eng", f"t{n}", seat=seat, hive="m1"))
+        store.seats.occupy(seat, quiet_name, n)
+    calls, original = [], InboxStore.open_items
+
+    def spy(self, address):
+        calls.append((self.world, address))
+        return original(self, address)
+
+    monkeypatch.setattr(InboxStore, "open_items", spy)
+    exits.sweep(InboxStore(store.redis), "sw", store, lambda: {})
+    assert not any(address in quiet_seats for _, address in calls)
+    assert any(address == SEAT for _, address in calls)
+    target = InboxStore(store.redis, world="m2")
+    assert [i.id for i in target.open_mail(name)] == [item.id]
+    assert member.inbox(SEAT) == []
+
+
 def test_the_sweep_moves_open_seat_mail_to_a_new_occupant_on_the_controller(store, agent, mail):
     member, item = mail
     store.put_agent("sw", replace(agent, state="finished"))

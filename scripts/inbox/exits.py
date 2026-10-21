@@ -171,12 +171,17 @@ def _move_seat_mail(inbox: "InboxStore", worlds: list["InboxStore"], live: list)
         and inbox.seats.occupant(agent.seat).occupant == agent.name
         and (home := inbox.home(agent.seat)) in by_world
     ]
-    for agent, home in moves:
-        where = f"hive {home.world}" if home.world else "the controller"
-        for world in worlds:
-            if world is not home:
-                for item in world.open_items(agent.seat):
-                    world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
+    for world in worlds:
+        candidates = [(agent, home) for agent, home in moves if world is not home]
+        if not candidates:
+            continue
+        quiet = world.quiet([agent.seat for agent, _ in candidates])
+        for agent, home in candidates:
+            if agent.seat in quiet:
+                continue
+            where = f"hive {home.world}" if home.world else "the controller"
+            for item in world.open_items(agent.seat):
+                world.move_world(item.id, home, BY, f"moved to {where}, where {agent.name} runs {agent.seat}")
 
 
 def _settle_gone(inbox: "InboxStore", name: str, seat: str, state: str | None, outcome: dict) -> None:
