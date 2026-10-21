@@ -1273,3 +1273,51 @@ def test_existing_beat_refreshes_agent_join_heartbeats(redis, monkeypatch):
     monkeypatch.setattr(join_report, "heartbeat", lambda *args: seen.append(args))
     _publish(redis, monkeypatch, "pod", [], {}, 1000)
     assert seen == [(redis, "pod", 1_000_000)]
+
+
+def test_each_beat_closes_dead_tabs_against_the_reported_live_names(redis, monkeypatch):
+    from scripts.hive import orders
+
+    herdr = Mock()
+    herdr.live_names.return_value = {"engineer@323133-2505"}
+    monkeypatch.setattr(orders.Consumer, "local", lambda redis, hive: Mock(runtime=Mock(herdr=herdr)))
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    seen = []
+    monkeypatch.setattr(daemon, "close_dead_tabs", lambda live: seen.append(live) or [])
+    daemon.beat(redis, "machine")
+    assert seen == [{"engineer@323133-2505"}]
+
+
+def test_closing_dead_tabs_asks_the_local_herdr_with_the_beat_time(monkeypatch):
+    from scripts import herdr_gc, herdr_host
+
+    calls = []
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: True)
+    monkeypatch.setattr(daemon.time, "time", lambda: 123.456)
+    monkeypatch.setattr(
+        herdr_gc, "close_dead_tabs", lambda environ, now_ms, herdr, live: calls.append((now_ms, live)) or ["w1:t1"]
+    )
+    assert daemon.close_dead_tabs({"ci@323133-1356"}) == ["w1:t1"]
+    assert calls == [(123456, {"ci@323133-1356"})]
+
+
+@pytest.mark.parametrize("binary,running", [(None, True), ("/bin/herdr", False)])
+def test_closing_dead_tabs_skips_a_hive_without_a_running_herdr(monkeypatch, binary, running):
+    from scripts import herdr_gc, herdr_host
+
+    monkeypatch.setattr(herdr_host, "binary", lambda: binary)
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: running)
+    monkeypatch.setattr(herdr_gc, "close_dead_tabs", Mock(side_effect=AssertionError("asked herdr")))
+    assert daemon.close_dead_tabs(set()) == []
+
+
+def test_a_herdr_read_error_leaves_the_beat_running(monkeypatch):
+    from scripts import herdr_gc, herdr_host
+
+    monkeypatch.setattr(herdr_host, "binary", lambda: "/bin/herdr")
+    monkeypatch.setattr(herdr_host, "server_running", lambda environ: True)
+    monkeypatch.setattr(herdr_gc, "close_dead_tabs", Mock(side_effect=herdr_gc.HerdrError("socket gone")))
+    assert daemon.close_dead_tabs(set()) == []
