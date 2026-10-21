@@ -32,8 +32,8 @@ def host(redis: "Redis", slug: str, name: str) -> str:
     hosts = joined(redis)
     if not hosts:
         return ""
-    placed = [agent.hive for agent in RedisStore(redis).agents(slug) if agent.name == name and agent.hive in hosts]
-    return placed[0] if placed else ""
+    placed = RedisStore(redis).execution_registry.hive(slug, name)
+    return placed if placed in hosts else ""
 
 
 def joined(redis: "Redis") -> list[str]:
@@ -46,7 +46,12 @@ def members(redis: "Redis") -> list[str]:
     """The hives in the index that joined as members; a member's own Redis user cannot read the member records."""
     from scripts.hive.auth import PREFIX
 
-    return [hive for hive in sorted(redis.smembers(registry.INDEX)) if redis.exists(f"{PREFIX}:member:{hive}")]
+    hives = sorted(redis.smembers(registry.INDEX))
+    with redis.pipeline(transaction=False) as pipe:
+        for hive in hives:
+            pipe.exists(f"{PREFIX}:member:{hive}")
+        records = pipe.execute()
+    return [hive for hive, record in zip(hives, records, strict=True) if record]
 
 
 def readings(redis: "Redis", slug: str, name: str) -> str:
