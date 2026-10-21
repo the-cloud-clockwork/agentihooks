@@ -177,7 +177,7 @@ def test_a_real_sync_that_adds_a_declared_dependency_leaves_it_importable(tmp_pa
     wheels.mkdir()
     _wheel(wheels)
     env = {"GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t"}
-    env |= {"UV_NO_INDEX": "1", "UV_FIND_LINKS": str(wheels), "UV_NO_CACHE": "1"}
+    env |= {"UV_OFFLINE": "1", "UV_FIND_LINKS": str(wheels), "UV_NO_CACHE": "1"}
     for key, value in env.items():
         monkeypatch.setenv(key, value)
     upstream, checkout = tmp_path / "upstream", tmp_path / "checkout"

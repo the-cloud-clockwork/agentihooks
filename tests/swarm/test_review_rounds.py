@@ -1,3 +1,5 @@
+import json
+
 import pytest
 
 from scripts.gates import log as gate_log
@@ -89,3 +91,33 @@ def test_counts_read_the_given_home_without_combining_pull_requests(tmp_path, mo
     review_rounds.start("sw", "t1", given, pr_url=second)
     assert sorted(review_rounds.counts("sw", "t1", given).values()) == [1, 2]
     assert review_rounds.counts("sw", "t1") == {}
+
+
+def _logged(home):
+    path = gate_log.gates_dir("sw", home) / "reviews" / "rounds.jsonl"
+    return [json.loads(line) for line in path.read_text().splitlines()]
+
+
+def test_each_granted_round_is_logged_for_the_metrics(tmp_path):
+    review_rounds.start("sw", "t1", tmp_path)
+    review_rounds.start("sw", "t1", tmp_path, pr_url="https://github.com/o/r/pull/2")
+    logged = _logged(tmp_path)
+    assert [(line["task"], line["counter"], line["round"]) for line in logged] == [
+        ("t1", "rounds-before-pr", 1),
+        ("t1", "rounds", 1),
+    ]
+    assert all(isinstance(line["at"], int) and line["at"] > 0 for line in logged)
+
+
+def test_a_refused_round_is_not_logged(tmp_path):
+    for _ in range(3):
+        review_rounds.start("sw", "t1", tmp_path)
+    with pytest.raises(SwarmError):
+        review_rounds.start("sw", "t1", tmp_path)
+    assert [line["round"] for line in _logged(tmp_path)] == [1, 2, 3]
+
+
+def test_a_logged_round_carries_the_wall_clock_in_milliseconds(tmp_path, monkeypatch):
+    monkeypatch.setattr(review_rounds.time, "time", lambda: 1_800_000_000.25)
+    review_rounds.start("sw", "t1", tmp_path)
+    assert [line["at"] for line in _logged(tmp_path)] == [1_800_000_000_250]
