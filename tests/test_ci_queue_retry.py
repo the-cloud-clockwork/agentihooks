@@ -60,6 +60,24 @@ def test_a_lost_communication_annotation_is_retried():
     assert ci_queue_retry.decide(RUN, failed, WORKFLOW)[0]
 
 
+def test_a_shard_lost_again_on_its_in_run_rerun_is_not_requeued():
+    failed = [*lost_run(), job("unit rerun (3.11, 2)", SHUTDOWN)]
+    retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)
+    assert not retry
+    assert reason == "failed again on its in-run rerun: unit rerun (3.11, 2)"
+
+
+@pytest.mark.parametrize(("annotation", "lost"), [(LOST, True), ("Process completed with exit code 1.", False)])
+def test_a_job_without_a_log_is_judged_by_its_annotations(monkeypatch, annotation, lost):
+    def api(*args):
+        if args[0].endswith("/logs"):
+            raise subprocess.CalledProcessError(1, ["gh", "api", *args])
+        return json.dumps([{"message": annotation}])
+
+    monkeypatch.setattr(ci_queue_retry, "_api", api)
+    assert ci_queue_retry.runner_lost("o/r", 11) is lost
+
+
 def test_a_real_test_failure_is_not_retried():
     failed = [job("unit (3.11, 2)", RED), job("Gate — Required", "")]
     retry, reason = ci_queue_retry.decide(RUN, failed, WORKFLOW)

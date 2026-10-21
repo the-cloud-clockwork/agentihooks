@@ -54,6 +54,18 @@ def test_the_first_failed_job_listed_is_named():
     assert fail_fast.failed([_job("lint", "failure"), _job("sonar", "failure")]) == "lint"
 
 
+@pytest.mark.parametrize("conclusion", ["failure", "cancelled", "timed_out"])
+def test_a_failed_unit_shard_waits_for_the_lost_runner_classifier(conclusion):
+    jobs = [_job("unit (3.12, 4)", conclusion), _job("lint", "success")]
+    assert fail_fast.failed(jobs) is None
+    assert fail_fast.verdict(jobs) == "wait"
+
+
+@pytest.mark.parametrize("name", ["unit rerun (3.12, 4)", "unit-lost", "unit-selected", "shard-check (3.12)"])
+def test_a_rerun_classifier_or_judge_failure_is_named(name):
+    assert fail_fast.failed([_job("unit (3.12, 4)", "failure"), _job(name, "failure")]) == name
+
+
 def test_passing_skipped_and_running_jobs_and_the_watcher_itself_name_nothing():
     jobs = [
         _job("lint", "success"),

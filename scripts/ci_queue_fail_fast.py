@@ -2,6 +2,9 @@ import argparse
 import json
 from pathlib import Path
 
+# A unit shard's failure waits for unit-lost, which reruns a lost runner and fails on anything else.
+SHARD = "unit ("
+
 SELF = "queue-fail-fast"
 # Needs every graded job, so once it completes nothing graded can still fail.
 LAST = "stage-budget"
@@ -9,7 +12,14 @@ FATAL = ("failure", "timed_out", "cancelled")
 
 
 def failed(jobs: list[dict]) -> str | None:
-    return next((job["name"] for job in jobs if job["name"] != SELF and job.get("conclusion") in FATAL), None)
+    return next(
+        (
+            job["name"]
+            for job in jobs
+            if job["name"] != SELF and not job["name"].startswith(SHARD) and job.get("conclusion") in FATAL
+        ),
+        None,
+    )
 
 
 def settled(jobs: list[dict]) -> bool:
