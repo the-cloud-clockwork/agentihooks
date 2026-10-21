@@ -9,13 +9,12 @@ import json
 import os
 import sys
 import threading
+import time
 from dataclasses import dataclass, field, replace
 from itertools import count
 from typing import Protocol
 
 from hooks.context import context_recycle
-from scripts.ci_budget import defects as ci_defects
-from scripts.ci_budget import flakes as ci_flakes
 from scripts.doctor import priming
 from scripts.gates import Who, modes
 from scripts.gates import claims as claim_cap
@@ -30,7 +29,6 @@ from scripts.swarm import (
     affinity,
     apply_wait,
     bottleneck_remedy,
-    ci_speed,
     claim_hold,
     claim_order,
     content_refusal,
@@ -86,6 +84,7 @@ from scripts.swarm_v2 import master_scale, master_seat_alarm
 from scripts.swarm_v2 import masters as master_seats
 
 LEASE_MS = 10 * 60 * 1000
+SPAWN_BUDGET_S = 20
 STARTUP_GRACE_MS = 6 * 60 * 1000
 EXITED_BEFORE_LIFE = "its agent process exited before its launch check passed"
 SUSPECT = "suspect"
@@ -231,10 +230,7 @@ def tick(slug, store, ledger, runtime, now_ms):
 
     with PLACING:
         actions += skip_refused(quota_notice.refresh, slug, config, store, ledger, runtime, now_ms)
-        actions += skip_refused(ci_speed.refresh, slug, config, store, now_ms)
         actions += skip_refused(lost_runner.sweep, slug, config, store, now_ms)
-        actions += skip_refused(ci_defects.refresh, slug, config, store, now_ms)
-        actions += skip_refused(ci_flakes.refresh, slug, config, store, ledger, now_ms)
         actions += skip_refused(time_left.refresh, slug, store, ledger, runtime, config, doc)
         if not sleeping:
             actions += skip_refused(_codex_hook_order)
@@ -981,6 +977,12 @@ def _spawn_stop(slug, config, store, runtime, now_ms):
     return ""
 
 
+def _budget_spent(task, begun, tried):
+    if tried and time.monotonic() - begun >= SPAWN_BUDGET_S:
+        return f"spent this pass's {SPAWN_BUDGET_S} second launch budget, {task['id']} waits a pass"
+    return None
+
+
 def _record_spawn_failure(slug, store, record, error, now_ms):
     if record_failure := timing.ON_FAILURE.get():
         record_failure(f"{__name__}._spawn", error)
@@ -1008,11 +1010,12 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
     taken = {a.seat for a in agents}
     held = _held_for_master(slug, store, now_ms)
     order, actions = _spawn_order(slug, config, store, agents, rows, doc, runtime)
+    begun, tried = time.monotonic(), False
     for lane, task in order:
         expected = {"claimed_by": task.get("claimed_by", ""), "claim_generation": task.get("claim_generation", 0)}
         if held:
             return actions + held
-        if stop := _spawn_stop(slug, config, store, runtime, now_ms):
+        if stop := _spawn_stop(slug, config, store, runtime, now_ms) or _budget_spent(task, begun, tried):
             return actions + [stop]
         blocked = (
             _lives_spent(slug, store, ledger, rows, task)
@@ -1071,6 +1074,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             store.record_launch(slug, record, "pending")
             store.seats.occupy(seat, name, now_ms)
             task["transfer"] = transfers.attach(store, slug, record)
+            tried = True
             placed = runtime.spawn(config, lane, name, primed(store, slug, seat, task))
             from scripts.swarm_v2.runtime import codex
 
