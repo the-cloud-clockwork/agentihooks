@@ -223,7 +223,7 @@ def test_master_refuses_unavailable_or_foreign_accounts_and_records_its_wait_lan
 
     task = master(setup)
     setup.herdr._quota_accounts = [Account(harness, "account", state, sessions, 80, 80, 6)]
-    expected = placement.Wait("no live hive can run the master with interactive, subscription or api authentication")
+    expected = placement.Wait("no hive for master advertises a claude slot")
     assert setup.launcher.select(setup.config, "master", task) == expected
     found = placement_waits.read(setup.store, setup.config.slug)["master"]
     assert found["lane"] == "master"
@@ -295,8 +295,8 @@ def master_login_hive(setup):
 @pytest.mark.parametrize(
     ("seat", "expected"),
     [
-        ("master@fixture", ("login", "interactive", 4)),
-        (None, ("login", "interactive", 4)),
+        ("master@fixture", ("login", "master-login", None)),
+        (None, ("login", "master-login", None)),
         ("master-2@fixture", ("account", "subscription", 6)),
     ],
 )
@@ -307,7 +307,9 @@ def test_the_front_door_master_is_ordered_on_the_hive_master_login_account(setup
     assert (selected.account.name, selected.route_kind, selected.account.cap) == expected
 
 
-def test_a_master_login_without_a_hive_slot_reserves_one_launch(setup):
+def test_a_master_login_without_a_hive_slot_holds_no_account_cap(setup):
+    from scripts.swarm.capacity import Account
+
     task = {**master(setup), "seat": "master@fixture"}
     master_login_hive(setup)
     write_hive(
@@ -318,7 +320,8 @@ def test_a_master_login_without_a_hive_slot_reserves_one_launch(setup):
         slots=[{"harness": "claude", "account": "account", "kind": "subscription", "cap": 6}],
     )
     selected = setup.launcher.select(setup.config, "master", task)
-    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "interactive", 1)
+    assert (selected.account.name, selected.route_kind, selected.account.cap) == ("login", "master-login", None)
+    assert selected.account == Account("claude", "login", "room", 0, None, None, kind="master-login")
 
 
 def test_a_secondary_master_on_a_native_login_reserves_one_launch_beside_a_master_login(setup):
@@ -357,13 +360,18 @@ def test_a_front_door_master_on_a_native_hive_reserves_one_launch_while_another_
     )
 
 
-def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order(setup):
+def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order(setup, monkeypatch):
+    import json
     from types import SimpleNamespace
 
+    from scripts import master_claude_login
     from scripts.hive import orders
+    from scripts.routing import reservation
+    from scripts.routing.reservation import LaunchSlots
     from scripts.swarm import tick
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
     task = master(setup)
     master_login_hive(setup)
     name = setup.store.next_name(setup.config.slug, "master")
@@ -385,5 +393,106 @@ def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order
     setup.launcher.sleep = consume
     outcome = setup.launcher.spawn(SpawnRequest(setup.config, "master", name, task))
     assert outcome.ok, outcome.detail
-    assert (outcome.value.account, outcome.value.route_kind) == ("login", "interactive")
+    assert (outcome.value.account, outcome.value.route_kind) == ("login", "master-login")
     runtime.terminate.assert_not_called()
+    assert LaunchSlots(setup.store.redis).counts() == {}
+    raw = setup.store.redis.hget(setup.store.key(setup.config.slug, "controller-launch-orders"), "master")
+    order = orders.LaunchOrder(**json.loads(raw))
+    assert (order.slot, order.route_kind) == ("login", "master-login")
+    assert reservation.master_agents(setup.store, "claude", "login") == 0
+
+
+def headless_front_door_order(setup, route=""):
+    from scripts.hive import orders
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import SpawnRequest
+
+    task = {**master(setup), "seat": "master@fixture", "controller_epoch": setup.held.epoch}
+    master_login_hive(setup)
+    write_hive(setup, ui="no", excluded=[], master_login={"claude": "login"})
+    request = SpawnRequest(setup.config, "master", setup.store.next_name(setup.config.slug, "master"), task)
+    admitted = setup.launcher.admit(request, setup.launcher.select(setup.config, "master", task))
+    order = orders.LaunchOrder(
+        setup.config.slug,
+        admitted.execution_id,
+        admitted.generation,
+        "master",
+        "master",
+        "master",
+        "login",
+        "claude",
+        route or admitted.route_kind,
+        "prompt",
+        setup.held.epoch,
+        lease.now_ms(setup.store) + 60000,
+    )
+    return order, admitted, task
+
+
+@pytest.mark.parametrize("route", ["", "subscription"])
+@pytest.mark.parametrize(
+    ("enabled", "reason"),
+    [
+        (False, "the master claude ai login is off on this hive: set AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true"),
+        (True, "no master claude ai login: run agentihooks claude login --master"),
+    ],
+)
+def test_a_headless_hive_without_a_usable_master_login_refuses_the_front_door_launch(
+    setup, monkeypatch, tmp_path, enabled, reason, route
+):
+    from hooks import config as hooks_config
+    from scripts.hive import orders
+
+    monkeypatch.setattr(hooks_config, "MASTER_CLAUDE_LOGIN", enabled)
+    monkeypatch.setattr(hooks_config, "AGENTIHOOKS_HOME", str(tmp_path / "home"))
+    order, admitted, task = headless_front_door_order(setup, route)
+    runtime = Mock()
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert (ack.status, ack.target, ack.failure) == ("failed", {}, reason)
+    runtime.spawn.assert_not_called()
+
+
+def test_a_headless_hive_with_a_usable_master_login_takes_the_front_door_launch(setup, monkeypatch):
+    from scripts import master_claude_login
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
+    order, admitted, task = headless_front_door_order(setup)
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack.failure == "unavailable: spawned"
+    runtime.spawn.assert_called_once()
+
+
+@pytest.mark.parametrize(("route", "failure"), [("subscription", "unavailable: spawned"), ("", "refused")])
+def test_a_ui_hive_checks_the_master_login_only_for_a_master_login_order(setup, monkeypatch, route, failure):
+    from scripts import master_claude_login
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "refused")
+    order, admitted, task = headless_front_door_order(setup, route)
+    write_hive(setup, ui="yes")
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, admitted, task)
+    assert ack.failure == failure
+    assert runtime.spawn.called is (failure != "refused")
+
+
+def test_a_headless_hive_takes_a_secondary_master_without_the_master_login_check(setup, monkeypatch):
+    from dataclasses import replace
+
+    from scripts import master_claude_login
+    from scripts.hive import orders
+    from scripts.swarm_v2.runtime.base import Outcome, Status
+
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "refused")
+    order, admitted, task = headless_front_door_order(setup, "subscription")
+    runtime = Mock()
+    runtime.spawn.return_value = Outcome("spawn", Status.UNAVAILABLE, "local", detail="spawned")
+    secondary = replace(admitted, seat="master-2@fixture")
+    ack = orders.Consumer(setup.store.redis, "remote", runtime).launch(order, secondary, task)
+    assert ack.failure == "unavailable: spawned"

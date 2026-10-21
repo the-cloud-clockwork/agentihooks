@@ -4,13 +4,14 @@ mode."""
 
 import json
 import os
+import sys
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 from scripts.gates import modes
 from scripts.gates.base import Who
 from scripts.gates.enforcement import NIGHT_WATCH
-from scripts.swarm import capacity, operator_email, tick_master, timing
+from scripts.swarm import capacity, operator_email, redis_budget, tick_master, timing
 from scripts.swarm.health import merge_stall, spawn_stall
 from scripts.swarm.health.findings import MINUTE_MS, Finding
 from scripts.swarm.store import MASTER
@@ -20,9 +21,10 @@ KEY = "night-watch"
 SENDER = "swarm"
 SEAT_MS, SPAWN_MS, GAP_MS = 10 * MINUTE_MS, 30 * MINUTE_MS, 5 * MINUTE_MS
 RESPAWNS, RESPAWN_WINDOW_MS = 3, 60 * MINUTE_MS
+BUDGET_S = 30
 SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
 SOURCES = (SEAT, SPAWN, MERGE)
-HOST, QUOTA, CAP, SLEEP, UNNAMED = "host room", "quota", "cap", "sleep", "no named hold"
+HOST, QUOTA, CAP, SLEEP, TICK, UNNAMED = "host room", "quota", "cap", "sleep", "tick", "no named hold"
 SLEEPING = "the master retired with no new tasks, so the tick spawns nothing until a task is added"
 SEAT_ALERT = "The front door master seat of swarm {slug} has been empty for {minutes} minutes: {why}"
 SPAWN_ALERT = (
@@ -32,6 +34,7 @@ MERGE_ALERT = "Swarm {slug} dev merges are stuck: {summary}. {evidence}"
 CLEARED = "The night watch saw it clear: {what}"
 GAP = "The night watch starts over after a gap in its passes and raises this again if the fault remains"
 LOGGED = "night watch gate not at deny: would {action}"
+SKIPPED = "skipped the rest of the night watch pass: {why}"
 
 
 @dataclass(frozen=True)
@@ -54,17 +57,36 @@ def read(store, slug: str) -> dict:
 
 
 def run(watch: Watch) -> list[str]:
-    state, actions = read(watch.store, watch.slug), []
+    from redis.exceptions import RedisError
+
+    client = redis_budget.capped(watch.store.redis)
+    budget, actions, state = redis_budget.Budget(client, BUDGET_S), [], None
     try:
-        if watch.now_ms - state.get("at", watch.now_ms) > GAP_MS:
-            for source in SOURCES:
-                actions += _clear(watch, state, source, GAP)
-        state["at"] = watch.now_ms
-        for step in (_seat, _spawn, _merge):
-            actions += step(watch, state)
+        bound = replace(watch, store=redis_budget.bounded(watch.store, budget))
+        state = read(bound.store, watch.slug)
+        _run(bound, state, actions)
+    except (redis_budget.Spent, RedisError) as exc:
+        budget.why = budget.why or f"Redis failed: {exc}"
     finally:
-        watch.store.redis.set(watch.store.key(watch.slug, KEY), json.dumps(state))
+        try:
+            if state is not None:
+                client.set(watch.store.key(watch.slug, KEY), json.dumps(state))
+        except RedisError as exc:
+            budget.why = budget.why or f"Redis failed: {exc}"
+        redis_budget.release(client, watch.store.redis)
+    if budget.why:
+        print(f"night watch skipped the rest of its pass, {budget.why}", file=sys.stderr)
+        actions.append(SKIPPED.format(why=budget.why))
     return actions
+
+
+def _run(watch: Watch, state: dict, actions: list[str]) -> None:
+    if watch.now_ms - state.get("at", watch.now_ms) > GAP_MS:
+        for source in SOURCES:
+            actions += _clear(watch, state, source, GAP)
+    state["at"] = watch.now_ms
+    for step in (_seat, _spawn, _merge):
+        actions += step(watch, state)
 
 
 def _allows(watch, action, reason):
@@ -156,8 +178,9 @@ def held(watch, ready) -> tuple[str, str]:
         return CAP, ", ".join(f"{lane} {busy[lane]} of {configured.get(lane, 0)} seats busy" for lane in waiting)
     if decision and not any((decision.get("placements") or {}).get(lane) for lane in waiting):
         return QUOTA, decision.get("reason") or "no lane has a quota placement"
-    held_by = spawn_holds(watch.store, watch.slug)
-    return UNNAMED, held_by[0] if held_by else decision.get("reason", "no quota decision")
+    if held_by := spawn_holds(watch.store, watch.slug):
+        return TICK, held_by[0]
+    return UNNAMED, decision.get("reason", "no quota decision")
 
 
 def _spawn(watch, state):

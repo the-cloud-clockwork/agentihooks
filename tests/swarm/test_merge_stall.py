@@ -328,12 +328,12 @@ def test_observation_of_a_queue_without_a_stall_skips_workflow_requests(rig, len
         "queue": expected_length,
         "merged": expected_merged,
         "failed": "none observed",
-        "streak": 2 if length else 0,
-        "head": 11 if length else 0,
+        "streak": 2,
+        "head": 11,
         "at": AT,
     }
     runs = [command for command, _ in state["calls"] if "/actions/runs?" in command[-1]]
-    assert len(runs) == (1 if length else 0)
+    assert len(runs) == 1
     assert not any("/jobs?" in command[-1] for command, _ in state["calls"])
 
 

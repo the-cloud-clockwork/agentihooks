@@ -58,6 +58,7 @@ DROPPED = (
 )
 PRIVATE_DIR, PRIVATE_FILE = 0o700, 0o600
 NO_LOGIN = "no master claude ai login: run agentihooks claude login --master"
+OFF = "the master claude ai login is off on this hive: set AGENTIHOOKS_MASTER_CLAUDE_LOGIN=true"
 NO_QUOTA = "the master claude ai login needs workers on quota tokens; none is set"
 HELD = "the master login is held by {owner}, still running"
 API_HELPER = "{path} sets apiKeyHelper"
@@ -101,6 +102,12 @@ def signed_in() -> str:
         return ""
     email = (_read(home() / CONFIG).get(ACCOUNT) or {}).get("emailAddress")
     return aicode_tokens.slug(email) if email and _private(home()) else ""
+
+
+def unusable() -> str:
+    if hooks_config.MASTER_CLAUDE_LOGIN is not True:
+        return OFF
+    return "" if any(logins().values()) else NO_LOGIN
 
 
 def slot() -> int:

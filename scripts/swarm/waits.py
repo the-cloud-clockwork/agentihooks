@@ -235,8 +235,9 @@ def notice_task(item):
 
 def settle_notices(inbox, agent, action):
     """Close the open wait ended notices for the agent's task, naming the action it recorded on that task."""
-    for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
-        for item in inbox.inbox(address):
-            if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
-                continue
-            inbox.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")
+    for world in inbox.worlds():
+        for address in dict.fromkeys(filter(None, (agent.seat, agent.name))):
+            for item in world.inbox(address):
+                if item.sender != SENDER or item.state in CLOSED or _pick_up(agent.task) not in item.text:
+                    continue
+                world.close(item.id, SENDER, "done", f"{agent.name} recorded {action} on task {agent.task}")

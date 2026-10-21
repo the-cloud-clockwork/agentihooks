@@ -86,10 +86,6 @@ def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: 
     return caps[0] if caps else fallback
 
 
-def _master_login(hives: list[dict], hive_id: str) -> bool:
-    return any(hive["id"] == hive_id and hive["master_login"].get("claude") for hive in hives)
-
-
 def _by_origin(hives: list[dict], repo: str) -> list[dict]:
     """A hive that lists the origin of the swarm's checkout lists the swarm's repo, whatever path it keeps it at."""
     from scripts.hive.daemon import origin
@@ -196,9 +192,10 @@ class HiveLaunch:
         selected = placement.place_master("claude", "", config.repo, available, now, front)
         if isinstance(selected, placement.Wait):
             return selected if hives else placement.Wait(f"no live hive takes {placement.MASTER}")
-        if selected.route_kind == "interactive":
-            cap = _slot_cap(hives, selected, 1) if front and _master_login(hives, selected.hive) else 1
-            account = capacity.Account("claude", selected.account, "room", 0, None, None, cap, kind="interactive")
+        if selected.route_kind == placement.MASTER_LOGIN:
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, kind=placement.MASTER_LOGIN)
+        elif selected.route_kind == "interactive":
+            account = capacity.Account("claude", selected.account, "room", 0, None, None, 1, kind="interactive")
         else:
             row = accounts[_key(selected.account)]
             account = replace(row, name=selected.account, cap=_slot_cap(available, selected, row.cap))
@@ -254,7 +251,7 @@ class HiveLaunch:
             self.opening(named),
         )
         admitted = self.admit(request, selected)
-        if not self.slots.reserve(
+        if selected.route_kind != placement.MASTER_LOGIN and not self.slots.reserve(
             f"claude:{selected.account.name}", admitted.execution_id, selected.account.cap, TTL_MS
         ):
             self.end(admitted, "account reservation is full")
@@ -361,7 +358,7 @@ class HiveLaunch:
             or agent.state != "working"
         ):
             raise SwarmError("hive launch acknowledgement does not match the live execution")
-        if not self.slots.acknowledge(agent.execution_id):
+        if agent.route_kind != placement.MASTER_LOGIN and not self.slots.acknowledge(agent.execution_id):
             return Outcome("spawn", Status.AMBIGUOUS, HIVE, detail="hive launch reservation expired")
         placed = Placed(
             agent.pane_id,

@@ -5,6 +5,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 
 from scripts.hive.registry import UI_ROLES, live
+from scripts.master_claude_login import ROUTE as MASTER_LOGIN
 
 MASTER = "master"
 INTERACTIVE = "interactive"
@@ -59,6 +60,10 @@ def _checks(
         (
             lambda hive: route_kind != INTERACTIVE or hive["interactive"].get(harness) == slot,
             f"no {kind} for {role} holds the {harness} login for {slot}",
+        ),
+        (
+            lambda hive: route_kind != MASTER_LOGIN or hive["master_login"].get(harness) == slot,
+            f"no {kind} for {role} holds the {harness} master login for {slot}",
         ),
     ]
 
@@ -119,15 +124,19 @@ def overflow(role: str, waited: Wait, local_agents: int, local_max: int) -> Choi
 def place_master(
     harness: str, login: str, repo: str, hives: list[dict], now: int, front: bool = False
 ) -> MasterPlacement | Wait:
+    hosting = [hive for hive in hives if live(hive, now) and hosts(MASTER, hive)]
+    if not hosting:
+        return Wait(f"no live hive takes {MASTER}")
+    listing = [hive for hive in hosting if repo in hive["repos"]]
+    if not listing:
+        return Wait(f"no {HIVE} for {MASTER} lists the repo {repo}")
     candidates = []
-    for hive in hives:
-        if not live(hive, now) or repo not in hive["repos"] or not hosts(MASTER, hive):
-            continue
+    for hive in listing:
         headless = hive["ui"] != YES
         forced = front and hive["master_login"].get(harness)
         if forced:
             if login in ("", forced):
-                placed = MasterPlacement(hive["id"], forced, INTERACTIVE, False)
+                placed = MasterPlacement(hive["id"], forced, MASTER_LOGIN, False)
                 candidates.append((headless, False, _order(MASTER)(hive), forced, placed))
             continue
         native = hive["interactive"].get(harness)
@@ -153,6 +162,8 @@ def place_master(
                     MasterPlacement(hive["id"], slot["account"], slot["kind"], False),
                 )
             )
+    if not candidates and login:
+        return Wait(f"no {HIVE} for {MASTER} holds the {harness} login for {login}")
     if not candidates:
-        return Wait("no live hive can run the master with interactive, subscription or api authentication")
+        return Wait(f"no {HIVE} for {MASTER} advertises a {harness} slot")
     return min(candidates, key=lambda candidate: candidate[:4])[4]
