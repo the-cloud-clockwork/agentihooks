@@ -273,7 +273,9 @@ def record(root: Path, folder: Path) -> list:
         browser = pw.chromium.launch()
         stack.callback(browser.close)
         context = browser.new_context(viewport=VIEWPORT, locale="en-US", timezone_id="UTC")
-        api = FakeApi(sys.modules["ledger_server"].PAGE_LIMITS)
+        import ledger_server
+
+        api = FakeApi(ledger_server.PAGE_LIMITS)
         context.add_init_script(DETERMINISTIC)
         context.route("**/media/**", api.media)
         context.route("**/artifacts/**", api.artifact)

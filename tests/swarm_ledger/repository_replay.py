@@ -59,8 +59,8 @@ def record(root: Path, folder: Path) -> list:
     results = []
     with ExitStack() as stack:
         stack.enter_context(patch.object(core, "now_ms", lambda: clock[0]))
-        stack.enter_context(patch("secrets.token_hex", lambda n=32: "1" * (2 * n)))
-        stack.enter_context(patch("secrets.token_urlsafe", lambda n=32: "1" * 64))
+        stack.enter_context(patch.object(new_ledger.secrets, "token_hex", lambda n: "1" * (2 * n)))
+        stack.enter_context(patch.object(new_ledger.secrets, "token_urlsafe", lambda n: "1" * 64))
         stack.enter_context(patch("hooks._redis.get_redis", lambda: box.redis))
         stack.enter_context(patch("scripts.inbox.store.connect", lambda environ=None: box))
         stack.enter_context(patch("scripts.inbox.store.now_ms", lambda: clock[0]))

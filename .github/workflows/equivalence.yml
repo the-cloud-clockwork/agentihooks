@@ -80,7 +80,7 @@ jobs:
             wait "$job" || failed=1
           done
           exit "$failed"
-      - name: Compare recorded requests and storage bytes
+      - name: Compare recorded requests and stored ledger state
         run: cmp base.json head.json
       - name: Reject the planted checkbox fault
         run: |

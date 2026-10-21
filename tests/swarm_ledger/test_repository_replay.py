@@ -32,5 +32,5 @@ def test_recorded_requests_exercise_the_required_behavior(tmp_path):
     assert stored[6]["tasks"][0]["state"] == "claimed"
     assert stored[7]["tasks"][0]["state"] == stored[8]["tasks"][0]["state"] == "done"
     assert [r["bin"]["status"] for r in records if "bin" in r] == [200, 200, 404]
-    assert records[-1]["inbox"]
+    assert len(records[-1]["inbox"]) == 2
     assert {r["address"] for r in records[-1]["inbox"]} == {"master@replay"}
