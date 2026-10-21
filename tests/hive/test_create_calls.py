@@ -299,6 +299,11 @@ def test_gh_keeps_leading_space_and_trims_only_trailing_newlines():
 
     assert create_github.gh(run, ["api", "x"], {"a": 1}) == "  text X"
 
+    def spaced(argv, **kwargs):
+        return subprocess.CompletedProcess(argv, 0, "  text \n", "")
+
+    assert create_github.gh(spaced, ["api", "x"]) == "  text "
+
 
 def test_gh_that_cannot_run_names_its_subcommand():
     def run(argv, **kwargs):
@@ -359,7 +364,8 @@ def test_cli_create_help_names_every_option(capsys):
         assert f" {line} " in f" {text} "
     with pytest.raises(SystemExit):
         cli.main(["--help"])
-    assert "Create a Kubernetes hive from nothing and add it to herdr" in " ".join(capsys.readouterr().out.split())
+    top = " ".join(capsys.readouterr().out.split())
+    assert " Create a Kubernetes hive from nothing and add it to herdr " in f" {top} "
 
 
 def test_cli_create_timeout_is_a_number(capsys):
