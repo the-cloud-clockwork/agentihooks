@@ -44,6 +44,7 @@ def watch(store):
     return night_watch.Watch(store, SLUG, SimpleNamespace(), runtime, {"tasks": []}, 1_000, False, lambda: [])
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_redis_ends_the_pass_within_its_budget_and_records_a_skip(monkeypatch):
     monkeypatch.setattr(night_watch, "BUDGET_S", 0.2)
     monkeypatch.setattr(merge_stall, "findings", lambda *args: [])
