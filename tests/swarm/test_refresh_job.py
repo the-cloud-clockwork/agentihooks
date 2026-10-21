@@ -118,6 +118,22 @@ def test_start_spawns_only_while_no_job_holds_the_lock(store, monkeypatch):
     assert spawned == ["sw"]
 
 
+def test_start_spawns_at_most_once_every_five_minutes(store, monkeypatch):
+    spawned = []
+    monkeypatch.setattr(refresh_job, "spawn", spawned.append)
+    assert refresh_job.start(store, "sw") is True
+    assert refresh_job.start(store, "sw") is False
+    assert spawned == ["sw"]
+    assert 299_000 <= store.redis.pttl(refresh_job.started_key(store, "sw")) <= 300_000
+    store.redis.delete(refresh_job.started_key(store, "sw"))
+    assert refresh_job.start(store, "sw") is True
+    assert spawned == ["sw", "sw"]
+
+
+def test_the_started_key_sits_under_the_swarm(store):
+    assert refresh_job.started_key(store, "sw") == store.key("sw", "refresh-started")
+
+
 def test_the_lock_key_sits_under_the_swarm(store):
     assert refresh_job.lock_key(store, "sw") == store.key("sw", "refresh-lock")
 
