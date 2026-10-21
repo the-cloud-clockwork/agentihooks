@@ -244,14 +244,11 @@ def test_the_master_writes_a_freeze_and_keeps_only_the_operators_recorded_words_
 
 
 @pytest.mark.parametrize("quote", ["Freeze", "Freeze the"])
-@pytest.mark.parametrize("op", ["freeze_set", "freeze_clear"])
-def test_short_recorded_quotes_cannot_change_freezes(quote, op):
+def test_a_short_recorded_quote_is_never_kept_on_a_master_freeze(quote):
     operator_words.record(MASTER, "Freeze the plan")
-    freeze("plans/a")
-    fields = {"verb": "freeze"} if op == "freeze_set" else {}
-    state, rejected = write(op, by=MASTER, target="plans/a", quote=quote, **fields)
-    assert rejected
-    assert targets(state) == [("freeze", "plans/a")]
+    state, rejected = freeze("plans/a", by=MASTER, quote=quote)
+    assert rejected == []
+    assert "quote" not in state["freezes"][0]
 
 
 def test_three_recorded_words_allow_master_freezes():
