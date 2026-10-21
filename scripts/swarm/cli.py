@@ -1651,8 +1651,10 @@ def cmd_done(store, args):
     _close_members(ledger, args.slug, agent, row, {**fields, "pr_url": args.pr or row.get("pr_url")})
     waits.settle_notices(InboxStore(store.redis), agent, "done")
     _retire(store, args.slug, agent, "finished its task and exited")
-    read = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
-    print(json.dumps({"task": agent.task, "state": "done", **read, "next": "stop now; the swarm closes this session"}))
+    fallback = {"pull_request": pull.fallback} if pull is not None and pull.fallback else {}
+    print(
+        json.dumps({"task": agent.task, "state": "done", **fallback, "next": "stop now; the swarm closes this session"})
+    )
 
 
 def _pull_reader(url, pull):

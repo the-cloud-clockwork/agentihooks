@@ -10,7 +10,7 @@ def test_done_on_a_merged_pull_request_read_without_its_rollup_names_the_fallbac
     run("sw", "start")
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "engineer@a1b2c3-0001")
     fallback = cli.ledger_events.ROLLUP_FALLBACK
-    pull = cli.ledger_events.PullRequest("MERGED", 1, None, False, resolved=True, fallback=fallback)
+    pull = cli.ledger_events.PullRequest("MERGED", 1, None, False, fallback=fallback)
     monkeypatch.setattr(cli.ledger_events, "view", lambda url: pull)
     capsys.readouterr()
     assert run("sw", "done", "--pr", "https://github.com/o/r/pull/9") == 0

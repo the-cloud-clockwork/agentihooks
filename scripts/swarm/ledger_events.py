@@ -73,6 +73,7 @@ PAGES = {
 }
 MAX_PAGES = 20
 ROLLUP_FALLBACK = "merged state alone, because GitHub refused the check rollup"
+CHECK_FIELDS = frozenset({"statusCheckRollup", "checkSuites"})
 
 
 @dataclass(frozen=True)
@@ -337,17 +338,9 @@ def _merged_without_rollup(result):
     errors, raw = result.get("errors"), result["data"]["resource"]
     if not errors or raw["state"] != "MERGED":
         return None
-    if not all(error.get("type") == "FORBIDDEN" and "commits" in error["path"] for error in errors):
+    if not all(error.get("type") == "FORBIDDEN" and CHECK_FIELDS.intersection(error["path"]) for error in errors):
         return None
-    return PullRequest(
-        "MERGED",
-        iso_ms(raw["mergedAt"]),
-        None,
-        False,
-        resolved=True,
-        head=raw["headRefOid"],
-        fallback=ROLLUP_FALLBACK,
-    )
+    return PullRequest("MERGED", iso_ms(raw["mergedAt"]), None, False, head=raw["headRefOid"], fallback=ROLLUP_FALLBACK)
 
 
 def head(url, run=subprocess.run):
