@@ -247,16 +247,28 @@ def test_an_edited_trusted_workflow_grades_new_reusable_calls(tmp_path, monkeypa
 
 @pytest.mark.parametrize("block", [LANED, CALLED])
 @pytest.mark.parametrize("scope", ["workflow", "job"])
-def test_a_hosted_caller_covers_reusable_work_without_its_own_lane(tmp_path, monkeypatch, block, scope):
+@pytest.mark.parametrize("branch_only", [False, True])
+def test_a_hosted_caller_covers_reusable_work_without_its_own_lane(tmp_path, monkeypatch, block, scope, branch_only):
     baseline = _workflow(concurrency=block)
     caller = {"uses": "./.github/workflows/trusted.yml"}
     if scope == "job":
         caller["concurrency"] = block
     updated = _workflow(concurrency=block if scope == "workflow" else None, replay=caller)
-    child = _workflow()
+    child = (
+        _workflow(
+            {
+                key: value.replace("Replay", "Other") if isinstance(value, str) else value
+                for key, value in CALLED.items()
+            }
+        )
+        if branch_only
+        else _workflow()
+    )
+    child["name"] = "Other"
     base, head, sha = _repo(tmp_path, {"replay.yml": updated, "trusted.yml": child})
     (base / lanes.WORKFLOWS / "replay.yml").write_text(yaml.safe_dump(baseline))
-    (base / lanes.WORKFLOWS / "trusted.yml").write_text(yaml.safe_dump(child))
+    if not branch_only:
+        (base / lanes.WORKFLOWS / "trusted.yml").write_text(yaml.safe_dump(child))
     monkeypatch.chdir(head)
     assert lanes.refused(sha, base) == {}
 
