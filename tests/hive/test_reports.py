@@ -765,6 +765,22 @@ def test_a_refused_retire_names_the_hive_and_its_reason(remote):
     assert runtime.refusals[agent.name] == {"process": 0, "refusal": f"hive {HIVE} refused retire: process held"}
 
 
+def test_a_hive_restarted_since_launch_acknowledges_the_retire_and_the_controller_retires(remote, monkeypatch):
+    from scripts.hive.orders import Ack, Consumer, Orders
+    from scripts.swarm.runtime import HerdrRuntime
+    from scripts.swarm_v2.runtime.local import LocalHerdrRuntime
+
+    runtime, agent = remote.runtime, remote.agent
+    assert runtime.retire(agent) is False
+    monkeypatch.setenv("SWARM_HIVE_ID", HIVE)
+    hive = LocalHerdrRuntime(HerdrRuntime(herdr=_herdr), namespace=lambda: "restarted", table=dict)
+    Consumer(remote.redis, HIVE, hive).poll_commands()
+    monkeypatch.setenv("SWARM_HIVE_ID", "controller")
+    assert Orders(remote.redis).command(HIVE, _retire_order(agent)) == Ack("done", agent.runtime_target)
+    assert runtime.retire(agent) is True
+    assert agent.name not in runtime.refusals
+
+
 def test_the_hive_retires_with_the_task_scratch_homes(remote, monkeypatch):
     from scripts.hive.orders import Consumer
     from scripts.swarm import reaper
