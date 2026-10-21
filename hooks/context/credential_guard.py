@@ -171,7 +171,7 @@ FIND_EXEC_FLAGS = {"-exec", "-execdir", "-ok", "-okdir"}
 # Options whose value names what to SKIP; the value is never a read.
 EXCLUSION_OPTS = re.compile(r"^--?(?:exclude|exclude-dir|exclude-from|glob|iglob|ignore|ignore-file|g)$")
 GIT_VALUE_FLAGS = {"-C", "-c", "--git-dir", "--work-tree", "--namespace"}
-ACCESS_ENV = r"(?:agentihooks\s+access|-m\s+scripts\.access_env)\s+env\b"
+ACCESS_ENV = r"(?:(?:agentihooks\s+access|-m\s+scripts\.access_env)\s+env\b|access_env\.(?:main|values)\s*\()"
 
 # grep/rg flags that emit counts or filenames rather than matching lines
 NON_CONTENT_GREP = re.compile(r"(?:^|\s)-[A-Za-z]*[clLq]")

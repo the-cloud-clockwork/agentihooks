@@ -165,6 +165,24 @@ CASES = [
     ),
     ("access help", {"tool_name": "Bash", "tool_input": {"command": "agentihooks access envelope"}}, False),
     (
+        "access env called from python",
+        {
+            "tool_name": "Bash",
+            "tool_input": {"command": "python3 -c 'from scripts import access_env; access_env.main([\"env\"])'"},
+        },
+        True,
+    ),
+    (
+        "access env values from python",
+        {"tool_name": "Bash", "tool_input": {"command": "python3 -c 'print(access_env.values (env))'"}},
+        True,
+    ),
+    (
+        "access env source linted",
+        {"tool_name": "Bash", "tool_input": {"command": "ruff check scripts/access_env.py"}},
+        False,
+    ),
+    (
         "python opens dotenv",
         {"tool_name": "Bash", "tool_input": {"command": "python3 -c \"print(open('.env').read())\""}},
         True,
