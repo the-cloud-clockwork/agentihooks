@@ -115,3 +115,43 @@ def test_only_a_reset_still_ahead_counts_as_upcoming():
     assert session_bands.upcoming(NOW + 1, NOW) == NOW + 1
     assert session_bands.upcoming(NOW, NOW) is None
     assert session_bands.upcoming(None, NOW) is None
+
+
+@pytest.mark.parametrize(
+    ("five_left", "week_left", "ceiling", "seats"),
+    [
+        (100, 100, 12, 12),
+        (96, 100, 12, 11),
+        (96, 80, 12, 9),
+        (96, 38, 12, 6),
+        (50, 50, 12, 6),
+        (35, 60, 12, 4),
+        (20, 90, 12, 3),
+        (9.9, 90, 12, 2),
+        (4.9, 90, 12, 0),
+        (96, 4.9, 12, 0),
+        (100, 100, 20, 20),
+        (100, 100, 4, 4),
+        (100, 100, 0, 0),
+    ],
+)
+def test_a_hive_cap_grows_with_the_smaller_window_under_the_ceiling(five_left, week_left, ceiling, seats):
+    assert session_bands.scaled_cap(five_left, week_left, ceiling) == seats
+
+
+def test_a_hive_cap_without_a_reading_is_unknown():
+    assert session_bands.scaled_cap(None, 50, 12) is None
+    assert session_bands.scaled_cap(50, None, 12) is None
+
+
+@pytest.mark.parametrize(
+    ("environ", "ceiling"),
+    [
+        ({}, 12),
+        ({"AGENTIHOOKS_HIVE_SESSION_CEILING": ""}, 12),
+        ({"AGENTIHOOKS_HIVE_SESSION_CEILING": "20"}, 20),
+        ({"AGENTIHOOKS_HIVE_SESSION_CEILING": "many"}, 12),
+    ],
+)
+def test_the_hive_ceiling_comes_from_the_environment(environ, ceiling):
+    assert session_bands.hive_ceiling(environ) == ceiling
