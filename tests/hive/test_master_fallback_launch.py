@@ -357,16 +357,18 @@ def test_a_front_door_master_on_a_native_hive_reserves_one_launch_while_another_
     )
 
 
-def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order(setup):
+def test_a_front_door_successor_on_a_master_login_hive_starts_on_its_first_order(setup, monkeypatch):
     import json
     from types import SimpleNamespace
 
+    from scripts import master_claude_login
     from scripts.hive import orders
     from scripts.routing import reservation
     from scripts.routing.reservation import LaunchSlots
     from scripts.swarm import tick
     from scripts.swarm_v2.runtime.base import Outcome, SpawnRequest, Status
 
+    monkeypatch.setattr(master_claude_login, "unusable", lambda: "")
     task = master(setup)
     master_login_hive(setup)
     name = setup.store.next_name(setup.config.slug, "master")
