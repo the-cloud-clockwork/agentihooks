@@ -172,6 +172,18 @@ def test_a_member_writes_the_keys_a_worker_uses_for_done_ready_park_wait_and_sta
     assert any(fnmatchcase(key, pattern) for pattern in patterns) is writable
 
 
+def test_a_member_writes_the_keys_swarm_block_and_swarm_learned_write():
+    from fnmatch import fnmatchcase
+
+    from scripts.inbox.seats import SeatMemory
+    from scripts.swarm import dev_red
+
+    patterns = [pattern[1:] for pattern in auth._acl_keys("m1") if pattern.startswith("~")]
+
+    for key in (dev_red.key("proof"), SeatMemory(None).key("eng-1@proof", "learned")):
+        assert any(fnmatchcase(key, pattern) for pattern in patterns), key
+
+
 def test_the_grant_sizes_and_member_record(admin, redis_lib):
     grant = auth.mint(admin, "laptop", PUBLIC)
     password = redis_lib.connection.parse_url(grant["redis_url"])["password"]
