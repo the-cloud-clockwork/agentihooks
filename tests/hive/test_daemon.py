@@ -527,6 +527,13 @@ def test_clients_bound_connects_reads_and_check_health_without_retries(stalled):
     assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S) == (3, 5)
 
 
+def test_clients_keep_the_source_connection_class():
+    import redis
+
+    for client in daemon.clients(redis.Redis.from_url("rediss://127.0.0.1:1")):
+        assert client.connection_pool.connection_class is redis.SSLConnection
+
+
 def _stall_run(monkeypatch, connect, beat):
     import time
 

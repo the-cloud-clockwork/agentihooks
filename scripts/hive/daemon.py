@@ -137,7 +137,7 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 failures = 0
         except lost as exc:
             delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
-            print(f"hive Redis connection lost ({exc!r}); reconnecting in {delay}s", file=sys.stderr, flush=True)
+            print(f"hive Redis connection lost ({exc!r}); reconnecting in {delay}s", file=sys.stderr)
             time.sleep(delay)
             failures += 1
 
