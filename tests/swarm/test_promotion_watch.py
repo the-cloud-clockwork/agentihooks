@@ -916,7 +916,10 @@ def test_a_shard_output_consumer_files_its_own_fixer_when_no_unit_shard_lost_its
             "coverage-baseline",
             ["Cannot record the coverage baseline: baseline shard coverage missing: coverage-3.12-1/.coverage"],
         ),
-        ("stage-budget", ["No shard durations at shard-durations/1/durations.json, so those shards cannot be graded."]),
+        (
+            "shard-check (3.11)",
+            ["No shard durations at shard-durations/1/durations.json, so those shards cannot be graded."],
+        ),
         ("sonar (3.12)", ["Missing coverage for shard 1"]),
     ],
 )
