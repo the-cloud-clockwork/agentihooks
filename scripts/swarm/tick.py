@@ -369,9 +369,11 @@ def _verify(slug, store, ledger, runtime, rows, now_ms):
     agents, actions = [a for a in store.agents(slug) if a.name not in judged], []
     facts, live_names = runtime.bindings(agents), runtime.live_names()
     for agent in agents:
-        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
-            continue
-        if _acknowledging(slug, store, agent):
+        if (
+            agent.state == "awaiting-decision"
+            or (agent.lane == MASTER and agent.state == "starting")
+            or _acknowledging(slug, store, agent)
+        ):
             continue
         task = rows.get(agent.task, {})
         if _ended(agent, rows):
@@ -594,9 +596,11 @@ def _retire_ended(slug, store, ledger, runtime, rows, agent, now_ms):
 def _reap(slug, store, ledger, runtime, rows, now_ms):
     live, actions = runtime.live_names(), []
     for agent in store.agents(slug):
-        if agent.state == "awaiting-decision" or (agent.lane == MASTER and agent.state == "starting"):
-            continue
-        if _acknowledging(slug, store, agent):
+        if (
+            agent.state == "awaiting-decision"
+            or (agent.lane == MASTER and agent.state == "starting")
+            or _acknowledging(slug, store, agent)
+        ):
             continue
         if reason := _remote_gone_reason(slug, store, runtime, agent, now_ms):
             actions.append(_drop_remote(slug, store, ledger, rows, agent, reason))
@@ -1079,12 +1083,8 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             if _acknowledging_error(exc):
                 store.record_launch(slug, record, ACKNOWLEDGING, str(exc))
                 actions.append(f"{name} waits for the hive acknowledgement of {task['id']}")
-                continue
-            _release_admission(slug, runtime, task)
-            _record_spawn_failure(slug, store, record, exc, now_ms)
-            actions.append(f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}")
-            if isinstance(exc, ProfileUnresolved):
-                actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
+            else:
+                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)
             continue
         actions += _started(slug, config, store, ledger, doc, Started(record, task, placed, launched), now_ms)
     return actions
@@ -1117,6 +1117,23 @@ def _started(slug, config, store, ledger, doc, started, now_ms):
     ]
 
 
+@dataclass(frozen=True)
+class Failed:
+    record: AgentRecord
+    task: dict
+    error: Exception
+
+
+def _spawn_failed(slug, store, ledger, runtime, rows, failed, now_ms):
+    record, task, exc = failed.record, failed.task, failed.error
+    _release_admission(slug, runtime, task)
+    _record_spawn_failure(slug, store, record, exc, now_ms)
+    actions = [f"spawn failed for {task['id']}{_drop(slug, store, ledger, rows, record)}: {exc}"]
+    if isinstance(exc, ProfileUnresolved):
+        actions.append(_unresolved(slug, ledger, rows, task["id"], str(exc)))
+    return actions
+
+
 def _acknowledging_error(exc):
     return isinstance(exc, SpawnError) and exc.status == ACKNOWLEDGING_STATUS
 
@@ -1142,10 +1159,8 @@ def _collect_acks(slug, config, store, ledger, runtime, doc, now_ms):
         except Exception as exc:
             if _acknowledging_error(exc):
                 store.refresh(slug, agent.task, agent.name, LEASE_MS)
-                continue
-            _release_admission(slug, runtime, task)
-            _record_spawn_failure(slug, store, agent, exc, now_ms)
-            actions.append(f"spawn failed for {agent.task}{_drop(slug, store, ledger, rows, agent)}: {exc}")
+            else:
+                actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(agent, task, exc), now_ms)
             continue
         actions += _started(slug, config, store, ledger, doc, Started(agent, task, placed, launched), now_ms)
     return actions
