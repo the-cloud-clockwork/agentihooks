@@ -333,6 +333,8 @@ def on_session_start(payload: dict) -> None:
     log("Session started", {"session_id": session_id})
     if payload.get("source") == "compact":
         _inject_refocus(session_id, "compact")
+    else:
+        _close_master_coding(session_id)
     from hooks.lifecycle.guard import session_event
 
     session_event()
@@ -1227,6 +1229,15 @@ def _master_coding(payload: dict, typed: bool) -> None:
             inject_context(master_coding.NOTICES[state], also_log=False, skip_compression=True, kind="alert")
     except Exception as e:
         log("master coding window failed", {"error": str(e)})
+
+
+def _close_master_coding(session_id: str) -> None:
+    try:
+        from hooks.context import master_coding
+
+        master_coding.close(session_id)
+    except Exception as e:
+        log("master coding window close failed", {"error": str(e)})
 
 
 def _operator_question(payload: dict) -> str:

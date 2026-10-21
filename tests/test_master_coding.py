@@ -42,8 +42,7 @@ def test_a_seat_record_opens_the_window_without_the_swarm_env(unseated):
     assert master_coding.observe(SID, "allow-master-coding", typed=True) == ""
     master_coding.record_seat(SID, "rig", "master@rig-1")
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
-    assert master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC - 1)
-    assert not master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC)
+    assert master_coding.is_open(SID)
     assert master_coding.observe(SID, "disallow-master-coding", typed=True) == "closed"
     assert not master_coding.is_open(SID)
 
@@ -72,8 +71,7 @@ def test_only_the_typed_phrase_in_the_master_pane_opens_the_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=False) == ""
     assert not master_coding.is_open(SID)
     assert master_coding.observe(SID, "please allow-master-coding now", typed=True, now=1000) == "open"
-    assert master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC - 1)
-    assert not master_coding.is_open(SID, now=1000 + master_coding.WINDOW_SEC)
+    assert master_coding.is_open(SID)
     assert master_coding.observe(SID, None, typed=True) == ""
     assert master_coding.observe(None, "allow-master-coding", typed=True) == ""
 
@@ -110,8 +108,7 @@ def guard(home, file_path):
 def test_the_operator_can_renew_an_already_open_window(master):
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1000) == "open"
     assert master_coding.observe(SID, "allow-master-coding", typed=True, now=1001) == "open"
-    assert master_coding.is_open(SID, now=2800)
-    assert not master_coding.is_open(SID, now=2801)
+    assert master_coding.is_open(SID)
 
 
 def test_a_taken_master_keeps_protection_checks_without_env(unseated, monkeypatch):
