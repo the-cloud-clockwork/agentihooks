@@ -10,7 +10,7 @@ agentihooks swarm <id> url                                        print the ledg
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
-agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> master up [--last | --new | --replace]     from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
 agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
@@ -2100,6 +2100,7 @@ def build_parser():
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
+    pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
