@@ -1,4 +1,5 @@
 import argparse
+import contextlib
 import json
 import os
 import signal
@@ -266,17 +267,31 @@ def _close_pane(pane: str, socket: str) -> str:
     return "closed"
 
 
-def _record_exit(swarm: str, agent: str) -> None:
+def _record_exit(pid: int) -> tuple[str, str]:
+    import redis
+
     from scripts.swarm import deliberate_exit, store
 
+    swarm, agent = agent_environ(pid, ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"))
     if not swarm or not agent:
-        return
+        return "", ""
     try:
         deliberate_exit.record(store.connect(), swarm, agent, int(time.time() * 1000))
-    except store.SwarmError as exc:
+    except (store.SwarmError, redis.RedisError) as exc:
         print(f"swarm_exit=not-recorded ({exc})")
-        return
+        return "", ""
     print("swarm_exit=recorded")
+    return swarm, agent
+
+
+def _withdraw_exit(swarm: str, agent: str) -> None:
+    import redis
+
+    from scripts.swarm import deliberate_exit, store
+
+    if swarm and agent:
+        with contextlib.suppress(store.SwarmError, redis.RedisError):
+            deliberate_exit.take(store.connect(), swarm, agent)
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -335,7 +350,6 @@ def main(argv: list[str] | None = None) -> int:
     pane, socket = herdr_pane(selected.process.pid)
     if pane:
         report["pane_id"] = pane
-    swarm, agent = agent_environ(selected.process.pid, ("AGENTIHOOKS_SWARM", "AGENTIHOOKS_AGENT_NAME"))
     if args.json:
         print(json.dumps(report, sort_keys=True))
     else:
@@ -343,13 +357,14 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         print("result=validated signal=none")
         return 0
+    marked = _record_exit(selected.process.pid)
     try:
         escalated = terminate(selected, members, args.term_timeout)
     except (OSError, RuntimeError) as exc:
+        _withdraw_exit(*marked)
         print(f"terminate-agent: {exc}", file=sys.stderr)
         return 1
     print(f"result=terminated escalation={'SIGKILL' if escalated else 'none'}")
-    _record_exit(swarm, agent)
     if pane:
         print(f"pane_id={pane} pane={'kept' if args.keep_pane else _close_pane(pane, socket)}")
     return 0

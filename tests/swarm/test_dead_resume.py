@@ -556,6 +556,28 @@ def test_a_deliberately_terminated_engineer_is_not_resumed_and_its_task_reopens(
     assert deliberate_exit.recorded(store, "sw", agent.name) is False
 
 
+def test_a_deliberate_exit_overrides_a_pending_outage_recovery(store):
+    import json
+
+    from scripts.swarm import deliberate_exit, resume
+
+    ledger, runtime, agent = prepared_recovery(store)
+    identity = resume._recovery_identity(store, "sw", agent)
+    record = {"state": "pending", "attempts": 0, "identity": identity, "last_at": 0}
+    store.redis.hset(store.key("sw", resume.RECOVERY), agent.name, json.dumps(record))
+    assert resume.recovery_pending(store, "sw", agent) is True
+    deliberate_exit.record(store, "sw", agent.name, 5)
+    rows = {task_id: dict(row) for task_id, row in ledger.rows.items()}
+
+    assert resume.recovery_pending(store, "sw", agent) is False
+    assert resume.recover_outages("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2) == []
+    actions = tick_module._reap("sw", store, ledger, runtime, rows, STARTUP_GRACE_MS + 2)
+
+    assert actions == [f"retired {agent.name} after a deliberate terminate, task t1 reopened"]
+    assert runtime.resumed == []
+    assert ledger.rows["t1"]["state"] == "open"
+
+
 def test_a_deliberate_exit_is_kept_per_swarm_and_agent_until_taken(store):
     from scripts.swarm import deliberate_exit
 

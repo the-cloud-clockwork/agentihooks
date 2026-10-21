@@ -168,13 +168,16 @@ def test_main_records_a_deliberate_exit_for_a_terminated_swarm_agent(monkeypatch
     assert seen == recorded
     out = capsys.readouterr().out
     if recorded:
-        assert order == ["environ", "terminate", "record"]
+        assert order == ["environ", "record", "terminate"]
         assert "swarm_exit=recorded" in out.splitlines()
     else:
         assert "swarm_exit" not in out
 
 
-def test_main_reports_a_deliberate_exit_the_swarm_store_refused(monkeypatch, capsys):
+@pytest.mark.parametrize("where", ["connect", "write"])
+def test_main_reports_a_deliberate_exit_the_swarm_store_refused(monkeypatch, capsys, where):
+    import redis
+
     from scripts.swarm.store import Unreachable
 
     item = session()
@@ -186,13 +189,51 @@ def test_main_reports_a_deliberate_exit_the_swarm_store_refused(monkeypatch, cap
     monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): ("rig", "e@1"))
     monkeypatch.setattr("scripts.terminate_agent.terminate", lambda selected, members, timeout: False)
 
-    def refuse():
-        raise Unreachable("down")
+    def refuse(*args):
+        raise Unreachable("down") if where == "connect" else redis.RedisError("down")
 
-    monkeypatch.setattr("scripts.swarm.store.connect", refuse)
+    monkeypatch.setattr("scripts.swarm.store.connect", refuse if where == "connect" else lambda: object())
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", refuse)
 
     assert main(["uuid-1", "--type", "claude"]) == 0
-    assert "swarm_exit=not-recorded (down)" in capsys.readouterr().out.splitlines()
+    lines = capsys.readouterr().out.splitlines()
+    assert "swarm_exit=not-recorded (down)" in lines
+    assert "result=terminated escalation=none" in lines
+
+
+def test_main_withdraws_the_deliberate_exit_when_the_terminate_fails(monkeypatch, capsys):
+    item = session()
+    store = object()
+    taken = []
+    monkeypatch.setattr("scripts.terminate_agent.sessions", lambda: [item])
+    monkeypatch.setattr(
+        "scripts.terminate_agent.validate", lambda selected, items, force_shared=False: [selected.process]
+    )
+    monkeypatch.setattr("scripts.terminate_agent.herdr_pane", lambda pid: ("", ""))
+    monkeypatch.setattr("scripts.terminate_agent.agent_environ", lambda pid, keys, proc=Path("/proc"): ("rig", "e@1"))
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: store)
+    monkeypatch.setattr("scripts.swarm.deliberate_exit.record", lambda target, slug, name, at: None)
+    monkeypatch.setattr(
+        "scripts.swarm.deliberate_exit.take", lambda target, slug, name: taken.append((target, slug, name))
+    )
+
+    def fail(selected, members, timeout):
+        raise RuntimeError("target processes survived SIGKILL: 200")
+
+    monkeypatch.setattr("scripts.terminate_agent.terminate", fail)
+
+    assert main(["uuid-1", "--type", "claude"]) == 1
+    assert taken == [(store, "rig", "e@1")]
+    assert "terminate-agent: target processes survived SIGKILL: 200" in capsys.readouterr().err
+
+
+def test_a_failed_terminate_withdraws_no_exit_when_none_was_recorded(monkeypatch):
+    from scripts.terminate_agent import _withdraw_exit
+
+    monkeypatch.setattr("scripts.swarm.store.connect", lambda: pytest.fail("no store call without a mark"))
+
+    _withdraw_exit("", "e@1")
+    _withdraw_exit("rig", "")
 
 
 def test_terminate_uses_process_group(monkeypatch):
