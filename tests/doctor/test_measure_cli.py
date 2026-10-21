@@ -7,7 +7,6 @@ from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord
 from tests.doctor.test_doctor_cli import DOCTOR, STALE, WATCHED, env  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 NOW = 1_791_388_800_000
 RETIRED = "master@d44a5a-0056"
 LIVE = "engineer@d44a5a-0311"
