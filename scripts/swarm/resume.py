@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING
 
 from scripts import agent_choice
 from scripts.handoff import transfers
-from scripts.swarm import idle, outage, profile_choice, snapshot
+from scripts.swarm import deliberate_exit, idle, outage, profile_choice, snapshot
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmError
 from scripts.swarm_ledger import ledger_workspace
 
@@ -297,6 +297,7 @@ def recovery_pending(store: RedisStore, slug: str, agent: AgentRecord) -> bool:
         record.get("state") == "pending"
         and record["attempts"] < RECOVERY_ATTEMPTS
         and record["identity"] == _recovery_identity(store, slug, agent)
+        and not deliberate_exit.recorded(store, slug, agent.name)
     )
 
 

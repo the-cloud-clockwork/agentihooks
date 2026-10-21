@@ -474,6 +474,19 @@ def test_equivalence_runs_storage_then_page_replays_each_group_at_once():
     assert all("Path('head/" not in step.get("run", "") for step in steps)
 
 
+def test_equivalence_plants_each_fault_in_a_file_that_exists():
+    steps = yaml.safe_load((_ROOT / ".github/workflows/equivalence.yml").read_text())["jobs"]["ledger-equivalence"][
+        "steps"
+    ]
+    [plant] = [step for step in steps if step.get("name", "").startswith("Plant ")]
+    script = plant["run"].split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    loop = next(node for node in ast.walk(ast.parse(script)) if isinstance(node, ast.For))
+    planted = [(ast.literal_eval(entry.elts[0].args[0]), ast.literal_eval(entry.elts[1])) for entry in loop.iter.elts]
+    assert [path.split("/", 1)[0] for path, _ in planted] == ["fault-store", "fault-chat"]
+    for path, needle in planted:
+        assert (_ROOT / path.split("/", 1)[1]).read_text().count(needle) == 1
+
+
 @pytest.mark.parametrize("doc", ["README.md", "index.md"])
 def test_workflow_badges_point_at_existing_workflows(doc):
     names = re.findall(r"actions/workflows/([\w.-]+\.yml)", (_ROOT / doc).read_text())

@@ -10,7 +10,7 @@ agentihooks swarm <id> url                                        print the ledg
 agentihooks swarm <id> close [--note TEXT] [--now]                 a live master writes the note first; then summary, snapshot, all retired
 agentihooks swarm <id> reopen                                     keep the summary and settings, start a fresh master
 agentihooks swarm <id> take-master [--replace]                    this session becomes the master and prints its priming
-agentihooks swarm <id> master up [--last | --new]                 from a terminal: bring back the last master's conversation or start a new one
+agentihooks swarm <id> master up [--last | --new | --replace]     from a terminal: bring back the last master's conversation or start a new one
 agentihooks swarm <id> master move --to HIVE                      order the live master to hand off so its successor starts on that hive
 agentihooks swarm <id> set master-move-grace=SECONDS              how long a quiet master hive may stay quiet before the master moves (default 300)
 agentihooks swarm <id> set hive-placement=on|off                  place this swarm's work on hives while a local machine stays local
@@ -221,12 +221,12 @@ def now_ms():
     return int(time.time() * 1000)
 
 
-def _publish_tick_status(store, slug, doc):
+def _publish_tick_status(store, slug, doc, view=None):
     from scripts.swarm import command_runner
 
     failure = sys.exception()
     try:
-        timing.call(command_runner.publish, store, slug, doc)
+        timing.call(command_runner.publish, store, slug, doc, view)
     except Exception:
         if failure is None:
             raise
@@ -299,7 +299,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
         tick_activity.keep(store, slug, lambda: controller.keep_tick(store, slug, held, token, TICK_LOCK_MS), now_ms)
 
     keeping = timing.BEFORE_STEP.set(before_step)
-    doc = {}
+    doc, view = {}, None
     try:
         timing.keep()
         if store.config(slug).state == "stopped":
@@ -375,7 +375,6 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(done_gate.recheck_pass, store, slug, doc, ledger, now_ms(), view)
             actions += skip_refused(progress.checks_pass, store.redis, slug, doc["tasks"], view, now_ms())
             rows = {t["id"]: t for t in doc["tasks"]}
-            actions += skip_refused(queue_priority.refresh, store, slug, doc["tasks"], ledger)
             actions += skip_refused(waits.end_pass, store, slug, rows, inbox, view, now_ms(), ledger_events.view)
             actions += skip_refused(
                 ready.merge_pass, ready.Pass(store, slug, ledger, view, ledger_events.view, now_ms()), rows
@@ -400,12 +399,9 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             actions += skip_refused(quiet.quiet_pass, store, slug, rows, now_ms())
             actions += skip_refused(dispatcher.priorities, store, slug, doc, ledger, view, now_ms())
             if scheduled:
-                from scripts.swarm import langfuse
+                from scripts.swarm import refresh_job
 
-                actions += skip_refused(langfuse.refresh, store, slug, now_ms())
-                from scripts.swarm import grafana_alerts
-
-                actions += skip_refused(grafana_alerts.refresh, store.redis, slug, now_ms())
+                timing.call(refresh_job.start, store, slug)
             found = timing.call(
                 findings, store, slug, config, doc.get("tasks", []), doc.get("_meta", {}).get("events", []), view
             )
@@ -430,7 +426,7 @@ def run_tick(store, slug, ledger=None, runtime=None, messenger=None, scheduled=F
             return probed + controls + actions + (["started automatic snapshot"] if started else [])
     finally:
         try:
-            _publish_tick_status(store, slug, doc)
+            _publish_tick_status(store, slug, doc, view)
         finally:
             timing.BEFORE_STEP.reset(keeping)
             tick_stop.drop(token)
@@ -2104,6 +2100,7 @@ def build_parser():
     pick = master_up.add_mutually_exclusive_group()
     pick.add_argument("--last", dest="choice", action="store_const", const=master_launch.LAST, default="")
     pick.add_argument("--new", dest="choice", action="store_const", const=master_launch.NEW)
+    pick.add_argument("--replace", dest="choice", action="store_const", const=master_launch.REPLACE)
     sub.add_parser("agent-up").add_argument("profile")
     sub.add_parser("exit")
     sub.add_parser("set").add_argument("pairs", nargs="+")
