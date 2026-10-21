@@ -74,8 +74,8 @@ def beat(redis: "Redis", local_id: str) -> None:
     join_report.heartbeat(redis, local_id, int(time.time() * 1000))
     hosted = execution_report(redis, local_id, consumer.runtime.herdr)
     redis.set(reports.key(local_id), json.dumps(hosted), ex=TTL_SECONDS)
-    close_dead_tabs(set(hosted["names"]))
     publish_config(redis, local_id, report["repos"])
+    close_dead_tabs(set(hosted["names"]))
 
 
 def adopt_caps(redis: "Redis", report: dict) -> None:
