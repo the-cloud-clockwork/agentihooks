@@ -122,11 +122,30 @@ def test_block_on_a_hive_reads_the_local_checkout_the_launch_named(hive_worktree
     assert row["repository_branches"] == {str(primary): BRANCH}
 
 
-def test_block_for_another_swarm_keeps_that_swarm_repo(hive_worktree, monkeypatch):
-    monkeypatch.setenv("AGENTIHOOKS_SWARM", "other")
-    _git(hive_worktree[3], "commit", "--allow-empty", "-m", "Task work")
-    with pytest.raises(FileNotFoundError):
-        block()
+@pytest.mark.parametrize(
+    ("swarm", "named", "local"), [("sw", True, True), ("other", True, False), ("sw", False, False)]
+)
+@pytest.mark.parametrize(
+    ("argv", "module", "target", "position"),
+    [
+        (["prepare"], publish, "prepare", 2),
+        (["publish", "-m", "Task work", "a.py"], publish, "publish", 2),
+        (["block", "waiting on a token"], publish, "pushed_branches", 0),
+        (["block", "--dev-red", "dev is red"], cli.dev_red, "failing_run", 0),
+    ],
+)
+def test_worker_commands_read_the_launch_checkout_only_for_their_own_swarm(
+    hive_worktree, monkeypatch, tmp_path, swarm, named, local, argv, module, target, position
+):
+    primary = hive_worktree[2]
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", swarm)
+    if not named:
+        monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    seen = []
+    monkeypatch.setattr(publish, "pushed_branches", lambda repo, task, agent: {})
+    monkeypatch.setattr(module, target, lambda *args, **kwargs: seen.append(args[position]))
+    cli.main(["sw", "--as", AGENT, *argv])
+    assert seen == [str(primary) if local else str(tmp_path / "workstation" / "repo")]
 
 
 @pytest.mark.parametrize("tracking", [True, False])
