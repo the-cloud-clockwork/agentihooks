@@ -282,6 +282,52 @@ def test_the_wake_pass_reads_only_the_waiting_set_with_many_idle_addresses(redis
     assert len(counting.calls) <= 7, counting.calls
 
 
+@pytest.mark.parametrize("read", ["pending", "pending_items"])
+def test_pending_reads_batch_item_hashes_and_address_indexes(store, monkeypatch, read):
+    from unittest.mock import Mock
+
+    first = store.send("alice", "bob", "first")
+    second = store.send("alice", "bob", "second")
+    third = store.send("alice", "carol", "third")
+    store.pending()
+    hashes = Mock(wraps=store.redis.hgetall)
+    indexed = Mock(wraps=store.redis.sismember)
+    pipeline = Mock(wraps=store.redis.pipeline)
+    monkeypatch.setattr(store.redis, "hgetall", hashes)
+    monkeypatch.setattr(store.redis, "sismember", indexed)
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+    if read == "pending":
+        assert store.pending() == [first, second, third]
+        indexed.assert_not_called()
+        assert pipeline.call_count == 2
+    else:
+        assert store.pending_items("bob") == [first, second]
+        assert pipeline.call_count == 1
+    hashes.assert_not_called()
+    assert all(call.kwargs == {"transaction": False} for call in pipeline.call_args_list)
+
+
+def test_pending_batch_keeps_duplicate_pointers_and_legacy_rebuild_behavior(store):
+    first = store.send("alice", "bob", "first")
+    second = store.send("alice", "carol", "second")
+    store.redis.zadd(store.key("pending", "carol"), {first.id: first.sequence})
+    assert store.pending() == [first, second]
+    store.redis.srem(store.key("indexed"), "bob")
+    store.redis.delete(store.key("pending", "bob"))
+    assert store.pending() == [first, second]
+
+
+def test_pending_batch_names_a_missing_item(store):
+    from scripts.inbox.store import InboxError
+
+    item = store.send("alice", "bob", "work")
+    store.pending()
+    store.redis.delete(store.key("item", item.id))
+    with pytest.raises(InboxError, match=f"^no message {item.id}$"):
+        store.pending()
+
+
 def test_back_fill_rebuilds_the_waiting_set_once(store):
     first = store.send("alice", "bob", "one")
     store.close(store.send("alice", "carol", "old").id, "carol", "done", "handled the request")
