@@ -528,7 +528,9 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
     download = next(step for step in steps if step.get("name") == "Download the early collection")
     assert guard["if"] == download["if"]
     assert guard["env"]["COLLECTION_JOB"] == "test-count (${{ matrix.python-version }})"
-    assert _workflow()["jobs"]["split"]["permissions"]["actions"] == "read"
+    assert guard["env"]["GH_TOKEN"] == "${{ steps.app-token.outputs.token }}"
+    mint = next(step for step in steps if step.get("id") == "app-token")
+    assert steps.index(mint) < steps.index(guard)
     assert steps.index(guard) < steps.index(download)
     binary = tmp_path / "bin"
     binary.mkdir()
@@ -546,6 +548,7 @@ def test_split_rejects_a_failed_collection_before_reading_any_artifact(tmp_path,
             PATH=f"{binary}:{os.environ['PATH']}",
             CALLS=str(tmp_path / "calls"),
             RESULT=result,
+            GH_TOKEN="app",
             COLLECTION_JOB="test-count (3.12)",
         ),
         capture_output=True,
