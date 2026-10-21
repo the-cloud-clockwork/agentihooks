@@ -28,10 +28,23 @@ def test_each_lost_shard_is_rerun_once_with_its_queue_plan_leg():
 
 
 def test_a_shard_that_failed_its_tests_reruns_nothing():
-    jobs = [_job("unit (3.12, 3)", "failure", 3), _job("unit (3.12, 5)", "failure", 5)]
+    jobs = [
+        _job("unit (3.12, 3)", "failure", 3),
+        _job("unit (3.12, 5)", "failure", 5),
+        _job("unit (3.12, 6)", "failure"),
+    ]
     matrix, reason = ci_unit_rerun.decide(jobs, PLAN, lambda job: job["id"] == 3)
     assert matrix == []
-    assert reason == "failed without a runner loss signature: unit (3.12, 5)"
+    assert reason == "failed without a runner loss signature: unit (3.12, 5), unit (3.12, 6)"
+
+
+@pytest.mark.parametrize("missing", ["--jobs", "--repo", "--plan"])
+def test_every_argument_is_required(tmp_path, missing):
+    values = {"--jobs": str(tmp_path / "jobs.jsonl"), "--repo": "o/r", "--plan": ""}
+    argv = [word for flag, value in values.items() if flag != missing for word in (flag, value)]
+    with pytest.raises(SystemExit) as raised:
+        ci_unit_rerun.main(argv)
+    assert raised.value.code == 2
 
 
 @pytest.mark.parametrize("conclusion", ["timed_out", "failure"])
@@ -67,7 +80,8 @@ def test_main_writes_the_matrix_and_fails_without_a_rerun(monkeypatch, tmp_path,
     assert ci_unit_rerun.main(argv) == code
     expected = [PLAN[1]] if lost else []
     assert output.read_text() == f"matrix={json.dumps(expected)}\n"
-    assert json.loads(capsys.readouterr().out)["rerun"] == expected
+    reason = "rerunning 1 lost unit shards once" if lost else "failed without a runner loss signature: unit (3.12, 2)"
+    assert json.loads(capsys.readouterr().out) == {"rerun": expected, "reason": reason}
 
 
 def test_the_rerun_job_runs_the_unit_shard_steps_for_the_classified_legs():
