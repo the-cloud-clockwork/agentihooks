@@ -79,6 +79,40 @@ def test_nonlocal_consumers_use_aggregate_without_credential_probes(redis, monke
     assert (claude.sessions, claude.five_left, claude.week_left, claude.cap) == (3, 80, 70, 6)
 
 
+def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reservation(redis, monkeypatch):
+    import time
+
+    from hooks.context import account_sessions
+    from scripts.routing.reservation import LaunchSlots
+
+    now = int(time.time() * 1000)
+    for hive, counts, heartbeat in (
+        ("own", {"claude:one": 1, "_executions": {"claude:one": ["mine"]}}, now),
+        ("far", {"claude:one": 5, "interactive:claude:one": 1, "codex:one": 2}, now),
+        ("gone", {"claude:one": 9}, now - registry.LIVE_MS - 1),
+    ):
+        registry.update(redis, hive, ["max-agents=8"])
+        redis.hset(registry.key(hive), "heartbeat_at", heartbeat)
+        redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts))
+    slots = LaunchSlots(redis)
+    assert slots.reserve("claude:one", "mine", 9, 1000)
+    assert slots.reserve("claude:one", "starting", 9, 1000)
+    monkeypatch.delenv("AGENTIHOOKS_RUNTIME_BACKEND", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "own")
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    monkeypatch.setattr(account_sessions, "handed_off_pids", set)
+    monkeypatch.setattr(account_sessions, "live_sessions", lambda proc, skip, environ=None: {11: "one"})
+    monkeypatch.setattr(account_sessions, "_codex_processes", lambda proc: ({}, {}))
+    monkeypatch.setattr(account_sessions, "managed_held", set)
+
+    assert account_sessions.sessions_by_account() == {"one": 7}
+    assert account_sessions.sessions_by_account(local=True) == {"one": 1}
+    assert account_sessions.codex_sessions_by_account() == {"one": 2}
+    assert not slots.reserve("claude:one", "next", 7, 1000)
+    assert slots.reserve("claude:one", "next", 8, 1000)
+
+
 def test_aggregate_includes_reservations_once_and_exit_releases(redis, monkeypatch):
     from scripts.routing import reservation
 
