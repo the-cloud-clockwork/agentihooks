@@ -44,13 +44,23 @@ return 'committed'
 
 _LATEST = """
 local latest = {}
+local current = nil
+if ARGV[1] == 'name' then
+    current = {}
+    for _, name in ipairs(redis.call('HKEYS', KEYS[2])) do
+        current[name] = true
+    end
+end
 for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
-    local row = cjson.decode(raw)
-    local key = row[ARGV[1]]
-    local previous = latest[key]
-    if not previous or row.generation > previous.row.generation
-        or (ARGV[1] == 'seat' and row.generation == previous.row.generation) then
-        latest[key] = {row = row, raw = raw}
+    local named = current and string.match(raw, '^{"name": "([^"\\\\]*)"')
+    if not named or current[named] then
+        local row = cjson.decode(raw)
+        local key = row[ARGV[1]]
+        local previous = latest[key]
+        if not previous or row.generation > previous.row.generation
+            or (ARGV[1] == 'seat' and row.generation == previous.row.generation) then
+            latest[key] = {row = row, raw = raw}
+        end
     end
 end
 local result = {}
@@ -68,6 +78,21 @@ for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
     end
 end
 return 0
+"""
+_HIVE = """
+if redis.call('HEXISTS', KEYS[2], ARGV[1]) == 0 then
+    return ''
+end
+local generation, hive = nil, ''
+for _, raw in ipairs(redis.call('HVALS', KEYS[1])) do
+    if string.find(raw, ARGV[2], 1, true) then
+        local row = cjson.decode(raw)
+        if row.name == ARGV[1] and (not generation or row.generation > generation) then
+            generation, hive = row.generation, row.hive
+        end
+    end
+end
+return type(hive) == 'string' and hive or ''
 """
 
 
@@ -100,6 +125,11 @@ class ExecutionRegistry:
     def managed(self, slug: str, name: str, reader: Redis | Pipeline | None = None) -> bool:
         return bool(
             (reader if reader is not None else self.redis).eval(_MANAGED, 1, self.store.key(slug, "executions"), name)
+        )
+
+    def hive(self, slug: str, name: str) -> str:
+        return self.redis.eval(
+            _HIVE, 2, self.store.key(slug, "executions"), self.store.key(slug, "agents"), name, json.dumps(name)
         )
 
     def agents(self, slug: str) -> list[AgentRecord]:

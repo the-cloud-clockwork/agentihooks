@@ -61,6 +61,7 @@ from scripts.swarm_v2.runtime import observe
 DEFAULT_COMPACT_LIMIT = 600
 UNCLASSIFIED = "unclassified"
 PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
+HISTORY_SHOWN = 100
 
 
 from scripts.swarm_v2.checkpoints import cards as recovery_cards
@@ -313,7 +314,7 @@ def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | 
         "outbox": outbox.status(),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
         "last_tick_activity": tick_activity.read(store, slug),
-        "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
+        "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), -HISTORY_SHOWN, -1)],
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),
         "spawns": store.spawns(slug),
