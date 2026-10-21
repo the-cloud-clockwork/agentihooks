@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from scripts.hive import orders, placement, placement_waits, registry
-from scripts.hive.orders import Ack, LaunchOrder, Orders
+from scripts.hive.orders import Ack, CommandOrder, LaunchOrder, Orders
 from scripts.routing.reservation import LaunchSlots
 from scripts.swarm import capacity, lease, profile_choice
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
@@ -213,6 +213,13 @@ class HiveLaunch:
             agent.name != previous.name for agent in self.store.agents(self.slug)
         )
 
+    def unacknowledged(self, order: LaunchOrder) -> bool:
+        return lease.now_ms(self.store) >= order.expires_at and self.orders.ack(order) is None
+
+    def retire(self, order: LaunchOrder, previous: AgentRecord) -> None:
+        self.end(previous, "hive launch order expired without an acknowledgement")
+        self.orders.command(order.hive, CommandOrder(f"reap:{previous.name}", "reap", name=previous.name))
+
     def spawn(self, request: SpawnRequest) -> Outcome:
         lease.require_epoch(self.store, self.slug, request.task["controller_epoch"])
         if order := self.orders_for(request.task["id"]):
@@ -221,6 +228,8 @@ class HiveLaunch:
                 self.store.redis.hdel(self.store.key(self.slug, ORDERS), order.task)
             elif self.abandoned(order, previous):
                 self.end(previous, "hive launch order abandoned")
+            elif self.unacknowledged(order):
+                self.retire(order, previous)
             elif previous.name != request.name or previous.seat != request.task["seat"]:
                 return Outcome("spawn", Status.REFUSED, HIVE, detail="another claimant owns the hive launch order")
             else:

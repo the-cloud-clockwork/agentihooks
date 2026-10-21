@@ -448,6 +448,20 @@ def test_unexpired_unacknowledged_order_is_never_retired(setup):
     assert setup.launcher.orders_for("task") == order
 
 
+def test_an_order_is_unacknowledged_from_its_expiry_instant_until_a_receipt_lands(setup, monkeypatch):
+    from scripts.hive import launch
+    from scripts.hive.orders import Ack
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at - 1)
+    assert not setup.launcher.unacknowledged(order)
+    monkeypatch.setattr(launch.lease, "now_ms", lambda store: order.expires_at)
+    assert setup.launcher.unacknowledged(order)
+    setup.launcher.orders.finish("remote", "0-0", order, Ack("live", {"host_id": "remote"}))
+    assert not setup.launcher.unacknowledged(order)
+
+
 def test_publication_uses_one_redis_transaction(setup):
     from unittest.mock import patch
 
