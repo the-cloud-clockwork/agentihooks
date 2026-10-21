@@ -190,7 +190,7 @@ def test_the_stale_tick_watcher_is_its_own_restarting_user_service():
         "Restart": "always",
         "RestartSec": "5",
         "NotifyAccess": "main",
-        "WatchdogSec": "300",
+        "WatchdogSec": "600",
     }
     assert dict(parsed["Install"]) == {"WantedBy": "default.target"}
 

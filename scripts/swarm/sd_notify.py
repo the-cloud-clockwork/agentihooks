@@ -11,5 +11,8 @@ def notify(message: str, environ=os.environ) -> bool:
     if address.startswith("@"):
         address = "\0" + address[1:]
     with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
-        sock.sendto(message.encode(), address)
+        try:
+            sock.sendto(message.encode(), address)
+        except OSError:
+            return False
     return True

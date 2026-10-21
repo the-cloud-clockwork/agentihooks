@@ -340,7 +340,8 @@ def test_the_watcher_beats_the_systemd_watchdog_by_default(store, tmp_path, monk
         sock.settimeout(0.5)
         tick_watch.run(store, lambda: START, None, bounded(1), passes=1)
 
-        assert [sock.recv(64), sock.recv(64)] == [b"WATCHDOG=1", b"WATCHDOG=1"]
+        beats = 1 + len(store.slugs())
+        assert [sock.recv(64) for _ in range(beats)] == [b"WATCHDOG=1"] * beats
         with pytest.raises(TimeoutError):
             sock.recv(64)
 

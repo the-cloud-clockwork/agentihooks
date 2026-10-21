@@ -44,6 +44,10 @@ def test_without_a_notify_socket_nothing_is_sent(sd_notify, environ):
     assert sd_notify.notify("WATCHDOG=1", environ) is False
 
 
+def test_a_socket_that_is_gone_reports_nothing_sent(sd_notify, tmp_path):
+    assert sd_notify.notify("WATCHDOG=1", {"NOTIFY_SOCKET": str(tmp_path / "gone")}) is False
+
+
 def test_the_process_environment_names_the_socket_by_default(sd_notify, listener, monkeypatch):
     path, sock = listener
     monkeypatch.setenv("NOTIFY_SOCKET", path)
