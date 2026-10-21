@@ -148,7 +148,7 @@ def _remove(args: argparse.Namespace) -> list[str]:
     store = RedisStore(redis_client())
     label = args.label or remove.label(store.redis, args.id)
     plan = remove.Plan(args.id, label, args.path or invite.default_path(label), args.antoncore, args.wait)
-    return remove.remove(store, bao, plan)
+    return remove.remove(store, bao, plan, remove.Host())
 
 
 def _retire(args: argparse.Namespace) -> str:

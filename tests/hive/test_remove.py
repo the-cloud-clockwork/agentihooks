@@ -3,6 +3,7 @@ import json
 import subprocess
 import urllib.error
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -58,7 +59,7 @@ class Run:
         self.calls = []
 
     def __call__(self, argv, **kwargs):
-        self.calls.append(argv)
+        self.calls.append((argv, kwargs["timeout"]))
         if argv == list(machine.LIST):
             return subprocess.CompletedProcess(argv, 0, json.dumps(self.machines), "")
         if argv[:2] == ["git", "-C"] and argv[3] == "rm":
@@ -153,34 +154,60 @@ def test_remove_drains_revokes_and_deletes_the_hive_everywhere(store, tmp_path):
     bao = openbao_kv.OpenBao("https://bao.example", "t", opener=Bao())
     checkout = _antoncore(tmp_path)
     plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9", checkout, wait_s=600)
+    known = str(tmp_path / "known_hosts")
+    paths = [
+        "k8s/argocd/apps/agentihooks-hive-anton-9.yaml",
+        "k8s/manifests/agentihooks-hive-anton-9",
+        "k8s/values-overlays/agentihooks-hive-anton-9",
+    ]
 
     done = remove.remove(store, bao, plan, _host(Clock(store, member, 2), run, tmp_path))
 
-    orders = [item for inbox in InboxStore(store.redis).worlds() for item in inbox.open_items(SEAT)]
-    assert len(orders) == 1 and f"swarm {SLUG} handoff" in orders[0].text
+    orders = [item for inbox in InboxStore(store.redis).worlds() for item in inbox.inbox(SEAT)]
+    assert [item.text for item in orders] == [remove.ORDER.format(hive=member, slug=SLUG)]
     assert not store.redis.exists(remove.member_key(member))
     assert f"hive-{member}" not in store.redis.acl_users()
     assert member not in store.redis.smembers(registry.INDEX)
     assert not store.redis.keys(f"{registry.key(member)}*")
-    assert ["herdr", "machine", "remove", "p7"] in run.calls
-    assert ["herdr", "machine", "remove", "p2"] not in run.calls
-    assert ["ssh-keygen", "-R", "[10.10.30.207]:2222", "-f", str(tmp_path / "known_hosts")] in run.calls
+    assert run.calls[1:] == [
+        (["herdr", "machine", "remove", "p7"], machine.HERDR_TIMEOUT_S),
+        (["ssh-keygen", "-R", "[10.10.30.207]:2222", "-f", known], machine.SSH_TIMEOUT_S),
+        (
+            ["git", "-C", str(checkout), "rm", "-r", "-q", "--ignore-unmatch", "--", *paths],
+            machine.SSH_TIMEOUT_S,
+        ),
+    ]
     assert bao.opener.requests == [("DELETE", "https://bao.example/v1/secret/metadata/k8s/agentihooks-hive-anton-9")]
     assert sorted(p.name for p in (checkout / "k8s/manifests").iterdir()) == ["agentihooks-hive-anton-2"]
     assert not (checkout / "k8s/argocd/apps/agentihooks-hive-anton-9.yaml").exists()
     assert not (checkout / "k8s/values-overlays").exists()
-    assert done[0] == f"drained {member}: 1 agents handed off"
+    assert done == [
+        f"drained {member}: 1 agents handed off",
+        f"revoked member {member} and its Redis user",
+        "removed herdr machine anton-9",
+        "removed the host key of [10.10.30.207]:2222",
+        f"deleted 3 registry records of {member}",
+        "deleted OpenBao secret/k8s/agentihooks-hive-anton-9",
+        f"staged the removal of {', '.join(paths)} in {checkout}; commit it and open a pull request",
+    ]
 
 
 def test_a_hive_whose_agents_stay_is_left_draining_with_its_member(store, tmp_path):
     member = _member(store)
     _agent(store, member)
+    store.put_agent(SLUG, AgentRecord("engineer@2", "eng", "t2", seat=f"eng-2@{SLUG}", hive=member))
     plan = remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9", None, wait_s=30)
     bao = openbao_kv.OpenBao("https://bao.example", "t", opener=Bao())
+    clock = Clock(store, member, 99)
 
-    with pytest.raises(auth.HiveError, match="engineer@1 did not hand off within 30 seconds"):
-        remove.remove(store, bao, plan, _host(Clock(store, member, 99), Run(), tmp_path))
+    with pytest.raises(auth.HiveError) as refused:
+        remove.remove(store, bao, plan, _host(clock, Run(), tmp_path))
 
+    assert str(refused.value) == (
+        f"hive {member} takes no new agents, but engineer@1, engineer@2 did not hand off within 30 seconds; "
+        "run remove again to keep waiting"
+    )
+    assert (clock.now, clock.slept) == (30, 2)
     assert registry.show(store.redis, member)["draining"] == "yes"
     assert store.redis.exists(remove.member_key(member))
 
@@ -239,6 +266,9 @@ def test_an_openbao_failure_other_than_missing_is_raised():
     bao = openbao_kv.OpenBao("https://bao.example", "t", opener=Bao(503))
     with pytest.raises(openbao_kv.OpenBaoError):
         openbao_kv.delete(bao, "k8s/x")
+    with pytest.raises(auth.HiveError) as refused:
+        remove.unbank(bao, "k8s/x")
+    assert str(refused.value) == "OpenBao HTTP 503: x"
 
 
 def test_the_remove_command_refuses_without_openbao(monkeypatch, capsys):
@@ -246,3 +276,53 @@ def test_the_remove_command_refuses_without_openbao(monkeypatch, capsys):
     monkeypatch.delenv(openbao_kv.TOKEN_ENV, raising=False)
     assert cli.main(["remove", "abc"]) == 1
     assert "OPENBAO_URL" in capsys.readouterr().err
+
+
+def test_the_remove_command_builds_its_plan_from_the_member_and_its_options(store, monkeypatch, capsys):
+    member = _member(store)
+    monkeypatch.setattr(cli, "redis_client", lambda: store.redis)
+    monkeypatch.setenv(openbao_kv.URL_ENV, "https://bao.example")
+    monkeypatch.setenv(openbao_kv.TOKEN_ENV, "t")
+    seen = []
+
+    def removed(swarm, bao, plan, host):
+        seen.append((swarm.redis is store.redis, bao, plan, type(host)))
+        return ["first", "second"]
+
+    monkeypatch.setattr(remove, "remove", removed)
+
+    assert cli.main(["remove", member]) == 0
+    assert capsys.readouterr().out == "first\nsecond\n"
+    assert cli.main(["remove", member, "--label", "l", "--path", "p", "--antoncore", "/a", "--wait", "5"]) == 0
+    assert seen == [
+        (
+            True,
+            openbao_kv.OpenBao("https://bao.example", "t"),
+            remove.Plan(member, "anton-9", "k8s/agentihooks-hive-anton-9", None, 3600),
+            remove.Host,
+        ),
+        (
+            True,
+            openbao_kv.OpenBao("https://bao.example", "t"),
+            remove.Plan(member, "l", "p", Path("/a"), 5),
+            remove.Host,
+        ),
+    ]
+
+
+def test_the_remove_help_names_every_option(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    with pytest.raises(SystemExit):
+        cli.main(["remove", "--help"])
+    shown = capsys.readouterr().out
+    assert shown.startswith("usage: agentihooks hive remove [-h] [--label LABEL] [--path PATH] [--antoncore ANTONCORE]")
+    for text in (
+        "herdr label and manifest name; defaults to the member's name",
+        "OpenBao record under the secret mount; defaults to k8s/agentihooks-hive-LABEL",
+        "antoncore checkout to remove the hive's manifests from",
+        "seconds to wait for its agents to hand off",
+    ):
+        assert f" {text}\n" in shown
+    assert " Drain a hive, then delete it from Redis, herdr, known hosts, OpenBao and antoncore\n" in (
+        cli._parser().format_help()
+    )

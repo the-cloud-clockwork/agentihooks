@@ -121,8 +121,7 @@ def unmanifest(checkout: Path | None, name: str, run: Callable[..., subprocess.C
     return [f"staged the removal of {', '.join(paths)} in {checkout}; commit it and open a pull request"]
 
 
-def remove(store: "RedisStore", bao: openbao_kv.OpenBao, plan: Plan, host: Host | None = None) -> list[str]:
-    host = host or Host()
+def remove(store: "RedisStore", bao: openbao_kv.OpenBao, plan: Plan, host: Host) -> list[str]:
     return [
         *drain(store, plan, host),
         *revoke(store.redis, plan.hive),
