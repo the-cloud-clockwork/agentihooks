@@ -667,6 +667,7 @@ def test_the_sync_slot_runs_one_pass_on_the_recorded_home_with_the_operator_shel
     seen = []
     monkeypatch.setenv("OPENBAO_URL", "https://stale.test")
     monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path / "agentihooks"))
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", raising=False)
     asked = shell_files(monkeypatch, {"OPENBAO_URL": BAO_URL, "OPENBAO_TOKEN": "fixture-token"})
     monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: seen.append((environ, root)) or 0)
 
@@ -677,6 +678,7 @@ def test_the_sync_slot_runs_one_pass_on_the_recorded_home_with_the_operator_shel
     assert root == tmp_path / "home"
     assert (environ["OPENBAO_URL"], environ["OPENBAO_TOKEN"]) == (BAO_URL, "fixture-token")
     assert environ["AGENTIHOOKS_HOME"] == str(tmp_path / "agentihooks")
+    assert "AGENTIHOOKS_HIVE_REDIS_ADDRESS" not in environ
 
 
 def test_the_sync_slot_waits_quietly_while_a_refused_setup_holds_its_alarm(tmp_path, monkeypatch):
@@ -782,7 +784,7 @@ def test_the_operator_shell_env_is_the_env_file_set_over_the_runner_env(tmp_path
     runner = {"HOME": str(home), "PATH": operator_setup.os.environ["PATH"], "OPENBAO_URL": "https://stale.test"}
     monkeypatch.setattr(operator_setup.os, "environ", runner)
 
-    environ = operator_setup.shell_environ()
+    environ = operator_setup.shell_environ("")
 
     assert {name: environ.get(name) for name in ("OPENBAO_URL", "OPENBAO_TOKEN", "KEPT", "PERSONAL")} == {
         "OPENBAO_URL": "https://main.test",

@@ -307,7 +307,7 @@ def _contained(command: str, work: Callable[[], object]) -> None:
         print(f"operator terminal {command} failed: {type(error).__name__}: {error}", file=sys.stderr, flush=True)
 
 
-def shell_environ(address: str = "") -> dict[str, str]:
+def shell_environ(address: str) -> dict[str, str]:
     environ = {**os.environ, **operator_env.values(os.environ)}
     if address:
         environ[ADDRESS_ENV] = address
@@ -327,7 +327,7 @@ def sync(event: dict, _delivery_id: str, _redis: "Redis") -> None:
     root, _ = _job(event)
     if _awaiting_setup(Placement(root / FOLDER)):
         return
-    _contained("sync", lambda: sync_once(shell_environ(), root))
+    _contained("sync", lambda: sync_once(shell_environ(""), root))
 
 
 def outside_agent(who: Who) -> None:
