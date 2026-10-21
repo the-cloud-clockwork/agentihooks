@@ -110,46 +110,59 @@ def test_a_decision_is_posted_as_the_master_seat_that_made_it(world):
     assert MastersChannel(world.redis).read(SLUG, LEAD_NAME) == [post]
 
 
-def test_two_masters_racing_on_one_follow_up_leave_one_decision_by_its_owner(world):
+def test_the_masters_channel_line_names_the_owner_of_a_cross_write():
+    op = {"op": "set", "path": "followups/f1/done", "value": True}
+
+    assert master_fence.announcement("master-2@sw", op, "master@sw") == (
+        "master-2@sw set followups/f1/done to true for master@sw"
+    )
+    assert master_fence.announcement("master@sw", op, "master@sw") == "master@sw set followups/f1/done to true"
+
+
+def cross(world):
+    return {item: (row["owner"], row["seat"], row["by"]) for item, row in world.cross().items()}
+
+
+def test_two_masters_racing_on_one_follow_up_are_both_accepted_and_the_owner_kept(world):
     raced = world.race()
 
-    assert raced[LEAD_NAME] == {"accepted": True, "warnings": []}
-    assert raced[SECOND_NAME]["accepted"] is False
-    assert cases.names_lead(raced[SECOND_NAME]["warnings"]) is True
+    assert raced == {name: {"accepted": True, "warnings": []} for name in (LEAD_NAME, SECOND_NAME)}
     assert world.followup()["done"] is True
-    assert world.doc()["_meta"]["stamps"][f"{FOLLOWUP}/done"]["by"] == LEAD_NAME
-    assert world.posts() == [f"{LEAD} set {FOLLOWUP}/done to true"]
-    assert world.refusals() == 1
+    assert world.decisions()[FOLLOWUP]["seat"] == LEAD
+    assert world.refusals() == 0
 
 
-def test_a_master_that_writes_first_without_owning_the_follow_up_is_refused_by_routing(world):
-    assert world.decide(SECOND_NAME)["warnings"] == [f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"]
-    assert world.decide(LEAD_NAME) == {"accepted": True, "warnings": []}
+def test_a_live_master_decides_a_follow_up_another_master_owns_and_the_write_is_recorded(world):
+    assert world.decide(SECOND_NAME) == {"accepted": True, "warnings": []}
+
+    doc = world.doc()
+    rev = doc["_meta"]["stamps"][f"{FOLLOWUP}/done"]["rev"]
+    assert doc["_meta"][master_fence.DECISIONS] == {FOLLOWUP: {"seat": LEAD, "rev": rev}}
+    assert doc["_meta"][master_fence.CROSS] == {
+        FOLLOWUP: {"owner": LEAD, "seat": SECOND, "by": SECOND_NAME, "rev": rev}
+    }
+    assert world.posts() == [f"{SECOND} set {FOLLOWUP}/done to true for {LEAD}"]
+    assert world.refusals() == 0
 
 
-def test_a_master_that_writes_after_the_owner_is_refused_by_the_decider_record(world):
+def test_a_master_that_writes_after_the_owner_leaves_the_decider_record_with_the_owner(world):
     world.decide(LEAD_NAME)
-    rev = world.doc()["_meta"]["stamps"][f"{FOLLOWUP}/done"]["rev"]
 
-    assert world.decide(SECOND_NAME)["warnings"] == [
-        f"{FOLLOWUP} was decided by {LEAD} at revision {rev}, so {SECOND} cannot decide it"
-    ]
+    assert world.decide(SECOND_NAME, value=False) == {"accepted": True, "warnings": []}
+    assert world.followup()["done"] is False
+    assert world.decisions()[FOLLOWUP]["seat"] == LEAD
+    assert cross(world) == {FOLLOWUP: (LEAD, SECOND, SECOND_NAME)}
 
 
-@pytest.mark.parametrize(
-    ("warnings", "named"),
-    [
-        ([f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"], True),
-        ([f"{FOLLOWUP} was decided by {LEAD} at revision 4, so {SECOND} cannot decide it"], True),
-        ([f"{FOLLOWUP} was decided by {SECOND} at revision 4, so {SECOND} cannot decide it"], False),
-        ([f"{FOLLOWUP} was decided by {LEAD} at revision 4, so {LEAD} cannot decide it"], False),
-        ([f"{FOLLOWUP} belongs to {SECOND}, so {SECOND} cannot decide it"], False),
-        ([], False),
-        ([f"{FOLLOWUP} belongs to {LEAD}, so {SECOND} cannot decide it"] * 2, False),
-    ],
-)
-def test_the_race_check_accepts_only_a_refusal_naming_the_lead(warnings, named):
-    assert cases.names_lead(warnings) is named
+def test_a_master_without_a_live_seat_is_still_refused_naming_the_owner(world):
+    world.down(SECOND_NAME)
+
+    assert world.decide(SECOND_NAME) == {
+        "accepted": False,
+        "warnings": [f"{FOLLOWUP} belongs to {LEAD}, so {SECOND_NAME} cannot decide it"],
+    }
+    assert world.followup()["done"] is False
+    assert world.refusals() == 1
 
 
 def test_an_accepted_decision_records_its_seat_and_revision(world):
@@ -161,15 +174,17 @@ def test_an_accepted_decision_records_its_seat_and_revision(world):
     }
 
 
-def test_a_master_sets_a_task_only_in_the_phase_it_owns(world):
+def test_a_master_sets_a_task_in_any_phase_and_a_cross_write_names_its_owner(world):
     assert world.set_task(SECOND_NAME, "t2") == {"accepted": True, "warnings": []}
-    assert world.set_task(SECOND_NAME, "t1") == {
-        "accepted": False,
-        "warnings": [f"tasks/t1 belongs to {LEAD}, so {SECOND} cannot set it"],
-    }
+    assert world.set_task(SECOND_NAME, "t1") == {"accepted": True, "warnings": []}
     assert world.set_task(LEAD_NAME, "t1")["accepted"] is True
-    assert world.posts() == [f"{SECOND} set tasks/t2: description", f"{LEAD} set tasks/t1: description"]
+    assert world.posts() == [
+        f"{SECOND} set tasks/t2: description",
+        f"{SECOND} set tasks/t1: description for {LEAD}",
+        f"{LEAD} set tasks/t1: description",
+    ]
     assert world.decisions() == {}
+    assert cross(world) == {"tasks/t1": (LEAD, SECOND, SECOND_NAME)}
 
 
 def test_a_task_with_no_phase_belongs_to_the_lead(world):
@@ -177,21 +192,22 @@ def test_a_task_with_no_phase_belongs_to_the_lead(world):
         SLUG, ops=[{"op": "task_add", "id": "add-t3", "by": "swarm", "task": "t3", "title": "Loose", "lane": "eng"}]
     )
 
-    assert world.set_task(SECOND_NAME, "t3")["warnings"] == [f"tasks/t3 belongs to {LEAD}, so {SECOND} cannot set it"]
-    assert world.set_task(LEAD_NAME, "t3")["accepted"] is True
+    assert world.set_task(SECOND_NAME, "t3")["accepted"] is True
+    assert cross(world) == {"tasks/t3": (LEAD, SECOND, SECOND_NAME)}
 
 
 def test_a_refused_write_changes_nothing_and_posts_nothing(world):
     before = world.doc()
 
-    assert world.answer(SECOND_NAME) == {
+    assert world.answer(cases.FORMER) == {
         "accepted": False,
-        "warnings": [f"{QUESTION} belongs to {LEAD}, so {SECOND} cannot answer it"],
+        "warnings": [f"{QUESTION} belongs to {LEAD}, so {cases.FORMER} cannot answer it"],
     }
     after = world.doc()
     assert after["questions"] == before["questions"]
     assert after["_meta"]["stamps"] == before["_meta"]["stamps"]
     assert world.posts() == []
+    assert world.cross() == {}
     assert world.refusals() == 1
 
 
@@ -221,16 +237,15 @@ def test_a_decider_whose_seat_is_gone_no_longer_fences_the_item(world):
     assert world.decisions()[FOLLOWUP]["seat"] == LEAD
 
 
-def test_a_decider_record_outlives_its_master_while_its_seat_remains(world):
+def test_a_successor_decides_over_a_record_whose_seat_remains_and_the_record_keeps_that_seat(world):
     world.down(LEAD_NAME)
     world.decide(SECOND_NAME)
-    rev = world.decisions()[FOLLOWUP]["rev"]
     world.down(SECOND_NAME)
     world.seat(cases.SUCCESSOR, LEAD)
 
-    assert world.decide(cases.SUCCESSOR, value=False)["warnings"] == [
-        f"{FOLLOWUP} was decided by {SECOND} at revision {rev}, so {LEAD} cannot decide it"
-    ]
+    assert world.decide(cases.SUCCESSOR, value=False) == {"accepted": True, "warnings": []}
+    assert world.decisions()[FOLLOWUP]["seat"] == SECOND
+    assert cross(world) == {FOLLOWUP: (SECOND, LEAD, cases.SUCCESSOR)}
 
 
 def test_repeating_a_decision_posts_it_once(world):
@@ -304,7 +319,7 @@ def test_the_fence_is_rolled_back_by_turning_its_switch_off(world, monkeypatch, 
 
     assert (
         world.write(
-            {"op": "set", "id": "s-switch", "by": SECOND_NAME, "path": f"{FOLLOWUP}/done", "value": True},
+            {"op": "set", "id": "s-switch", "by": cases.FORMER, "path": f"{FOLLOWUP}/done", "value": True},
             connect=unreachable if accepted else None,
         )["accepted"]
         is accepted
@@ -338,7 +353,7 @@ def test_the_fence_wraps_the_inner_gate(world):
     fence = master_fence.Fence(SLUG, Inner(), connect=lambda: world.redis)
     ops = [
         {"op": "set", "id": "mine", "by": LEAD_NAME, "path": f"{FOLLOWUP}/done", "value": True},
-        {"op": "set", "id": "theirs", "by": SECOND_NAME, "path": f"{FOLLOWUP}/done", "value": False},
+        {"op": "set", "id": "theirs", "by": cases.FORMER, "path": f"{FOLLOWUP}/done", "value": False},
     ]
     _, rejected = core.sync(SLUG, ops=ops, gate=fence)
 
@@ -358,8 +373,8 @@ def test_publish_skips_a_write_the_ledger_rejected_after_the_fence(world):
 
 
 def test_refusals_are_counted_per_swarm(world):
-    world.decide(SECOND_NAME)
-    world.answer(SECOND_NAME)
+    world.decide(cases.FORMER)
+    world.answer(cases.FORMER)
 
     assert master_fence.measurements(world.redis, SLUG) == {"master_write_refusals_total": 2}
     assert master_fence.measurements(world.redis, "other") == {"master_write_refusals_total": 0}
