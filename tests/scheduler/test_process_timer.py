@@ -190,7 +190,8 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     timers = []
     original = process_timer.Timer
 
-    def timer(delay):
+    def timer(delay, **given):
+        assert given.get("redis") is None
         result = original(delay, redis=redis)
         timers.append(result)
         Scheduler(redis).run_due(now=result.entry.record["due"])
@@ -206,6 +207,22 @@ async def test_wait_helpers_consume_and_close_a_fired_timer(redis, monkeypatch, 
     assert timers[0].entry.record["delay"] == 2
     assert timers[0].entry.state == "cancelled"
     assert not redis.exists(timers[0].key)
+
+
+def test_wait_on_a_given_client_neither_builds_nor_closes_one(redis, monkeypatch):
+    original = process_timer.Timer.wait
+
+    def fired(timer):
+        Scheduler(redis).run_due(now=timer.entry.record["due"])
+        original(timer)
+
+    close = Mock()
+    monkeypatch.setattr(redis, "close", close)
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    monkeypatch.setattr(process_timer, "blocking_client", Mock(side_effect=AssertionError("built its own client")))
+    monkeypatch.setattr(process_timer.Timer, "wait", fired)
+    process_timer.wait(2, redis=redis)
+    close.assert_not_called()
 
 
 def test_controller_namespace_changes_only_in_hosted_mode(redis, monkeypatch):
