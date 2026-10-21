@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/bottleneck.py:scripts.swarm.bottleneck.x__active_review__mutmut_20:74a6be0da41adc63fb53d8a632d57d2886607c67d6e58313c70679ee918c95db": {
+    "reader": "standards_reader",
+    "reason": "Processing a parking transition exactly at interval end cannot alter elapsed review time."
+  }
+}

@@ -39,7 +39,6 @@ if TYPE_CHECKING:
 
 MIN_ROUTING_LEFT = 5.0
 PUSH_SIGNALS = ["keep pushing", "push to 100", "push until 100", "burn it to 100"]
-WAIT_TOOLS = frozenset({"CronCreate", "CronList", "CronDelete"})
 RESET_TOLERANCE_S = 600
 
 
@@ -52,6 +51,7 @@ class Candidate:
     observed_at: float
     cap: int | None = None
     reserved: bool = False
+    login: bool = False
 
     def full(self) -> bool:
         return self.cap is not None and self.sessions >= self.cap
@@ -158,13 +158,8 @@ def _codex_windows(session_id: str) -> tuple[float, float, float | None, float |
     now = time.time()
     if quota is None or quota.seven_day.used is None or now - quota.observed_at > QUOTA_USAGE_STALE_SEC:
         return None
-    five, week = quota.five_hour, quota.seven_day
-    return (
-        _effective(five.used or 0.0, five.resets_at, now),
-        _effective(week.used, week.resets_at, now),
-        five.resets_at,
-        week.resets_at,
-    )
+    week = quota.seven_day
+    return (0.0, _effective(week.used, week.resets_at, now), None, week.resets_at)
 
 
 def _session_windows(session_id: str) -> tuple[float, float, float | None, float | None] | None:
@@ -190,12 +185,17 @@ def _session_windows(session_id: str) -> tuple[float, float, float | None, float
 
 
 def _other_accounts(sessions: dict[str, int], fleet: Iterable[tuple[float, "ProbeResult"]] = ()) -> list[Candidate]:
-    from scripts import session_bands
-    from scripts.claude_quota_balancer import cached_observations
+    from scripts import operator_env, session_bands
+    from scripts.claude_quota_balancer import cached_observations, discover_credentials
 
+    environ = dict(os.environ)
+    operator_env.fill(environ)
+    current = {credential.account for credential in discover_credentials(environ)}
     now = time.time()
     newest = {}
     for observed_at, result in [*cached_observations(), *fleet]:
+        if result.account not in current:
+            continue
         if observed_at >= newest.get(result.account, (observed_at,))[0]:
             newest[result.account] = (observed_at, result)
     candidates = []
@@ -222,10 +222,9 @@ def _codex_accounts() -> list[Candidate]:
     for name, quota in codex_router.quotas(pool, environ).items():
         if quota is None or quota.seven_day.used is None:
             continue
-        five = _effective(quota.five_hour.used or 0.0, quota.five_hour.resets_at, now)
         week = _effective(quota.seven_day.used, quota.seven_day.resets_at, now)
         cap = codex_router.account_cap(quota, now)
-        candidates.append(Candidate(name, five, week, sessions.get(name, 0), quota.observed_at, cap))
+        candidates.append(Candidate(name, 0.0, week, sessions.get(name, 0), quota.observed_at, cap))
     return candidates
 
 
@@ -272,9 +271,37 @@ def evaluate(session_id: str) -> Decision | None:
         week_used=week_used,
         five_reset=five_reset,
         week_reset=week_reset,
-        others=reserved(subscriptions, held) + _api_accounts(sessions),
+        others=master_targets(
+            reserved(subscriptions, held) + _api_accounts(sessions) + _login_accounts(os.environ), os.environ
+        ),
         push=push_active(session_id),
     )
+
+
+def _master(environ) -> bool:
+    from scripts.routing import reservation
+
+    return str(environ.get(reservation.AGENT_NAME)).startswith(reservation.MASTER_NAME)
+
+
+def master_targets(candidates: list[Candidate], environ) -> list[Candidate]:
+    if not _master(environ):
+        return candidates
+    return [c for c in candidates if c.login]
+
+
+def _login_accounts(environ) -> list[Candidate]:
+    from scripts import master_claude_login, master_logins
+    from scripts.routing import reservation
+
+    if not _master(environ):
+        return []
+    now = time.time()
+    found = []
+    for account in master_claude_login.free(environ[reservation.AGENT_NAME]):
+        five, week, observed = master_logins.usage(account, now)
+        found.append(Candidate(account, five, week, 0, observed, 1, login=True))
+    return found
 
 
 def decide_reserved(ceiling: float | None, *, week_used: float, **inputs) -> Decision | None:
@@ -376,6 +403,15 @@ def _repo_slug(cwd: str) -> str:
 def render(d: Decision, session_id: str, cwd: str) -> str:
     account = d.account or "this login"
     head = f"{_trigger_text(d)} on {account}."
+    swarm = os.environ.get("AGENTIHOOKS_SWARM")
+    if d.action == "handoff" and d.target and swarm:
+        return (
+            f"QUOTA HANDOFF REQUIRED — {head}\n"
+            f"Policy decision (deterministic): hand this seat to a successor on another account now.\n"
+            f"1. Write your Handoff v2 with the handoff skill.\n"
+            f"2. Run: agentihooks swarm {swarm} handoff DOC --reason quota\n"
+            f"3. Stop. The tick keeps your seat and task and routes the successor to an account with room."
+        )
     if d.action == "handoff" and d.target:
         t = d.target
         age = max(0, int(time.time() - t.observed_at)) // 60
@@ -416,14 +452,14 @@ def render(d: Decision, session_id: str, cwd: str) -> str:
             f'1. CronCreate a one-shot job, cron "{cron}" (local time {at.strftime("%a %H:%M")}), recurring '
             f'false, prompt: "The 5-hour quota window has reset. Continue the task from where you stopped."\n'
             f"2. Tell the operator this session waits until the reset at {reset_when(d.five_reset)}, then stop. "
-            f"Every other tool is blocked until the window resets."
+            f"Tools are not blocked."
         )
     reset = d.week_reset if d.trigger == "week" else d.five_reset
     prefix = "AH_CX_TOKEN_" if os.environ.get("AGENTIHOOKS_TARGET") == "codex" else "AH_CC_TOKEN_"
     return (
         f"QUOTA STOP — {head} Resets {reset_when(reset)}. No other account has room: {_others_text(d)}.\n"
         f"Stop working and tell the operator to add another {prefix}<slug> account, or to say "
-        f'"keep pushing" to continue on this account until 100%. Every tool is blocked.'
+        f'"keep pushing" to continue on this account until 100%. Tools are not blocked.'
     )
 
 
@@ -450,10 +486,7 @@ def pretool(session_id: str, tool_name: str, cwd: str) -> tuple[str | None, str 
     d = evaluate(session_id)
     if d is None or d.action == "push":
         return None, None
-    text = render(d, session_id, cwd)
-    if d.action == "stop" or (d.action == "wait" and tool_name not in WAIT_TOOLS):
-        return f"BLOCKED: {text}", None
-    return None, text
+    return None, render(d, session_id, cwd)
 
 
 def prompt_context(session_id: str, cwd: str) -> str | None:

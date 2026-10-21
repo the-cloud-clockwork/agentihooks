@@ -37,6 +37,7 @@ class Client:
         try:
             for raw in self.ws:
                 msg = json.loads(raw)
+                msg["_at"] = time.monotonic()
                 if "id" in msg and "method" not in msg:
                     with self.lock:
                         self.responses[msg["id"]] = msg
@@ -256,6 +257,51 @@ def approvals(sock: str, repo: str) -> dict:
     return result
 
 
+def late_approval(sock: str, repo: str) -> dict:
+    a = Client(sock, "probe-owner-a")
+    thread = start_thread(a, repo, approvalPolicy="untrusted")
+    a.request("turn/start", {"threadId": thread, "input": text(APPROVAL_PROMPT)})
+    req_a, _ = a.until(is_approval_request, 120)
+    reader = Client(sock, "probe-late-reader")
+    read = reader.request("thread/read", {"threadId": thread, "includeTurns": True})
+    req_reader, reader_early = reader.until(is_approval_request, 10)
+    late = Client(sock, "probe-late-resumer")
+    resumed = late.request("thread/resume", {"threadId": thread})
+    reread = late.request("thread/read", {"threadId": thread, "includeTurns": True})
+    req_late, _ = late.until(is_approval_request, 10)
+    turns = (read.get("result") or {}).get("thread", {}).get("turns") or [{}]
+    resumed_turns = (resumed.get("result") or {}).get("thread", {}).get("turns") or [{}]
+    result = {
+        "late_resume_last_turn_status": resumed_turns[-1].get("status"),
+        "thread": thread,
+        "request_method": req_a.get("method") if req_a else None,
+        "delivered_to_owner": req_a is not None,
+        "late_reader_status": turns[-1].get("status"),
+        "delivered_to_late_reader": req_reader is not None,
+        "late_resume": resumed.get("error") or "ok",
+        "delivered_to_late_resumer": req_late is not None,
+        "late_same_request_id": bool(req_a and req_late and req_a["id"] == req_late["id"]),
+        "late_request_before_resume_reply": bool(req_late and req_late["_at"] <= resumed["_at"]),
+        "late_request_before_read_reply": bool(req_late and req_late["_at"] <= reread["_at"]),
+    }
+    if req_a:
+        a.answer(req_a["id"], {"decision": "decline"})
+        resolved_late, _ = late.until(method_is("serverRequest/resolved"), 20)
+        done, _ = a.until(method_is("turn/completed"), 180)
+        _, reader_seen = reader.until(method_is("turn/completed"), 5)
+        result.update(
+            {
+                "late_reader_methods": sorted({m.get("method") for m in reader_early + reader_seen}),
+                "resolved_seen_by_late_resumer": resolved_late is not None,
+                "turn_status": done["params"]["turn"].get("status") if done else None,
+                "file_created": (Path(repo) / "approval-probe.txt").exists(),
+            }
+        )
+    for client in (a, reader, late):
+        client.close()
+    return result
+
+
 def detach(sock: str, repo: str) -> dict:
     a = Client(sock, "probe-bridge")
     thread = start_thread(a, repo)
@@ -438,6 +484,7 @@ SCENARIOS = {
     "conversation": conversation,
     "steer": steer,
     "approvals": approvals,
+    "late_approval": late_approval,
     "detach": detach,
     "compaction": compaction,
     "sandbox": sandbox,

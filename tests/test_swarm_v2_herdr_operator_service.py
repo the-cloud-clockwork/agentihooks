@@ -3,7 +3,7 @@ import pytest
 from scripts.swarm_v2.herdr.endpoints import Endpoint, Scope
 from tests import sv2_hdr03_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 FX = cases.fixture()
 HOST_KEY = cases.HOST_KEY
 SWARMS = ("hive-a", "hive-b")
@@ -188,7 +188,7 @@ def herdr_run(herdr):
     return run
 
 
-def test_the_installed_service_saves_a_published_worker_and_removes_it_when_it_ends(tmp_path):
+def test_scheduled_passes_save_a_published_worker_and_remove_it_when_it_ends(tmp_path):
     import io
     import json
 
@@ -200,27 +200,33 @@ def test_the_installed_service_saves_a_published_worker_and_removes_it_when_it_e
     started = worker(made, "hive-a")
     publish(made, "hive-a", *started)
     client = ClientHome(tmp_path / "client", jump=operator_terminal.jump(JUMP))
-    running = operator_setup.service(JUMP, client, placed(tmp_path), herdr_run(herdr), lambda: made)
-    out, slept = io.StringIO(), []
+    root, out = placed(tmp_path), io.StringIO()
 
-    def sleep(seconds):
-        slept.append(seconds)
-        end(made, "hive-a", started[0])
+    def scheduled_pass():
+        running = operator_setup.service(JUMP, client, root, herdr_run(herdr), lambda: made)
+        operator_setup.sync_pass(running, root, out)
+        return running
 
-    assert operator_setup.serve(running, passes=2, sleep=sleep, out=out) == 0
+    scheduled_pass()
+    end(made, "hive-a", started[0])
+    running = scheduled_pass()
+    scheduled_pass()
 
     first, second = (json.loads(line) for line in out.getvalue().splitlines())
     assert list(first["registered"]) == [started[0]]
     assert second["retired"] == [started[0]]
-    assert slept == [operator_setup.SYNC_SECONDS]
     assert cases._sidebar(herdr) == ["Local", "devbox"]
     block = client.block(Endpoint(Scope("operator/operator", "hive-a", *started), FX["namespace"]))
     assert "  ProxyJump swarm-terminal-jump" in block.read_text().splitlines()
     assert client.jump_known_hosts.read_text() == f"swarm.example {JUMP_KEY}\n"
+    state = root / "swarm-terminal" / "sync-state.json"
+    assert json.loads(state.read_text()) == running.saved()
+    assert state.stat().st_mode & 0o777 == 0o600
 
 
-def test_an_unchanged_pass_prints_nothing(tmp_path):
+def test_an_unchanged_pass_prints_nothing_to_standard_output(tmp_path):
     import io
+    from contextlib import redirect_stdout
 
     from scripts.swarm_v2.herdr import operator_setup
     from scripts.swarm_v2.herdr.attach import ClientHome
@@ -229,12 +235,93 @@ def test_an_unchanged_pass_prints_nothing(tmp_path):
     made, herdr = store(), Herdr()
     publish(made, "hive-a", *worker(made, "hive-a"))
     client = ClientHome(tmp_path / "client", jump=operator_terminal.jump(JUMP))
-    running = operator_setup.service(JUMP, client, placed(tmp_path), herdr_run(herdr), lambda: made)
-    out = io.StringIO()
+    root, out = placed(tmp_path), io.StringIO()
 
-    operator_setup.serve(running, passes=3, sleep=lambda seconds: None, out=out)
+    with redirect_stdout(out):
+        for _ in range(3):
+            operator_setup.sync_pass(operator_setup.service(JUMP, client, root, herdr_run(herdr), lambda: made), root)
 
     assert len(out.getvalue().splitlines()) == 1
+
+
+@pytest.mark.parametrize("text", ["not json", "{}", "[]", '{"due": false, "seen": {}, "synced": null}'])
+def test_an_unreadable_saved_state_starts_a_full_pass(tmp_path, text):
+    import io
+
+    from scripts.swarm_v2.herdr import operator_setup
+    from scripts.swarm_v2.herdr.attach import ClientHome
+    from scripts.swarm_v2.kubernetes import operator_terminal
+
+    made, herdr = store(), Herdr()
+    started = worker(made, "hive-a")
+    publish(made, "hive-a", *started)
+    client = ClientHome(tmp_path / "client", jump=operator_terminal.jump(JUMP))
+    root, out = placed(tmp_path), io.StringIO()
+    operator_setup.sync_pass(operator_setup.service(JUMP, client, root, herdr_run(herdr), lambda: made), root, out)
+    (root / "swarm-terminal" / "sync-state.json").write_text(text)
+
+    operator_setup.sync_pass(operator_setup.service(JUMP, client, root, herdr_run(herdr), lambda: made), root, out)
+
+    assert len(out.getvalue().splitlines()) == 2
+
+
+def test_a_resumed_service_carries_the_pass_state_of_the_one_before(tmp_path):
+    import json
+
+    from scripts.swarm_v2.herdr import operator_setup
+    from scripts.swarm_v2.herdr.attach import USER, ClientHome, Jump
+    from scripts.swarm_v2.herdr.operator_service import RENEW_SECONDS
+    from scripts.swarm_v2.kubernetes import jump
+
+    made, herdr, now = store(), Herdr(), [1000.0]
+    started = worker(made, "hive-a")
+    publish(made, "hive-a", *started)
+    jump.record(made, Jump("swarm.example", 2223, JUMP_KEY))
+    root = placed(tmp_path)
+
+    def fresh():
+        running = operator_setup.service({}, ClientHome(tmp_path / "client"), root, herdr_run(herdr), lambda: made)
+        running.clock = lambda: now[0]
+        return running
+
+    first = fresh()
+    assert first.run_pass() is not None
+    saved = first.saved()
+    assert saved == {
+        "due": False,
+        "seen": {started[0]: started[1]},
+        "synced": 1000.0,
+        "jump": {"host": "swarm.example", "port": 2223, "host_public": JUMP_KEY, "user": USER},
+    }
+
+    second = fresh()
+    second.resume(json.loads(json.dumps(saved)))
+    ran = len(herdr.commands)
+    assert second.run_pass() is None
+    assert len(herdr.commands) == ran
+    assert second.upkeep.terminal.home.jump == Jump("swarm.example", 2223, JUMP_KEY)
+
+    now[0] += RENEW_SECONDS
+    third = fresh()
+    third.resume(saved)
+    assert third.run_pass() is not None
+
+
+def test_a_resumed_state_without_a_jump_keeps_the_client_jump(tmp_path):
+    from scripts.swarm_v2.herdr import operator_setup
+    from scripts.swarm_v2.herdr.attach import ClientHome
+    from scripts.swarm_v2.kubernetes import operator_terminal
+
+    made = store()
+    client = ClientHome(tmp_path / "client", jump=operator_terminal.jump(JUMP))
+    running = operator_setup.service(JUMP, client, placed(tmp_path), herdr_run(Herdr()), lambda: made)
+    bare = operator_setup.service({}, ClientHome(tmp_path / "bare"), tmp_path / "agentihooks", herdr_run(Herdr()))
+
+    running.resume({"due": False, "seen": {"x": 2}, "synced": 5.0, "jump": None})
+
+    assert (running.upkeep.due, running.upkeep.seen, running.synced) == (False, {"x": 2}, 5.0)
+    assert running.upkeep.terminal.home == client
+    assert bare.saved() == {"due": True, "seen": {}, "synced": None, "jump": None}
 
 
 def test_the_service_runs_herdr_as_the_client_home_by_default(tmp_path, monkeypatch):
@@ -271,14 +358,12 @@ def test_the_service_reads_the_transport_from_its_environment(tmp_path):
         def flush(self):
             self.flushed += 1
 
-    def sleep(seconds):
-        raise AssertionError("a single pass never sleeps")
-
     herdr = Herdr()
-    running = operator_setup.service({}, ClientHome(tmp_path / "client"), placed(tmp_path), herdr_run(herdr))
+    root = placed(tmp_path)
+    running = operator_setup.service({}, ClientHome(tmp_path / "client"), root, herdr_run(herdr))
     out = Journal()
 
-    assert operator_setup.serve(running, passes=1, sleep=sleep, out=out) == 0
+    operator_setup.sync_pass(running, root, out)
 
     assert out.flushed == 1
     assert json.loads(out.getvalue())["refused"] == {

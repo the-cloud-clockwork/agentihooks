@@ -19,7 +19,7 @@ from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.operations import Observation, OperationRequest, Phase
 from tests import sv2_hdr03_cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 HOST_KEY = sv2_hdr03_cases.HOST_KEY
 
 
@@ -522,6 +522,54 @@ def test_journal_without_a_pod_is_reported_missing(fixture):
     clock[0] += lease.ttl_ms()
     assert restarted.acquire()
     assert restarted.reconcile().missing_pods == [attempt.execution_id]
+    assert restarted.controller_orphans_by_class()["missing_pod"] == 1
+
+
+def test_ended_execution_without_a_pod_is_not_missing(fixture):
+    store, (first, _), transport, clock, grant = fixture
+    attempt = launched(store, first)
+    store.put_agent("fixture", replace(attempt, state="ended"))
+    restarted = observed(store, transport, grant, Pods([]))
+    clock[0] += lease.ttl_ms()
+    assert restarted.acquire()
+    assert restarted.reconcile().missing_pods == []
+    assert restarted.controller_orphans_by_class()["missing_pod"] == 0
+
+
+def test_live_pod_of_an_ended_execution_is_kept(fixture):
+    store, (first, _), transport, clock, grant = fixture
+    attempt = launched(store, first)
+    store.put_agent("fixture", replace(attempt, state="ended"))
+    pods = Pods([managed("eng-1", attempt.execution_id, uid="uid-ended")])
+    restarted = observed(store, transport, grant, pods)
+    clock[0] += lease.ttl_ms()
+    assert restarted.acquire()
+    plan = restarted.reconcile()
+    assert pods.deleted == [] and plan.missing_pods == []
+    assert restarted.controller_orphans_by_class()["superseded"] == 1
+
+
+def test_only_the_live_execution_without_a_pod_is_missing_beside_an_ended_one(fixture):
+    store, (first, _), transport, clock, grant = fixture
+    assert first.acquire()
+    ended = first.admit(agent(store))
+    live = first.admit(
+        replace(
+            agent(store),
+            seat="eng-2@fixture",
+            runtime_target={"pod_namespace": "workers", "pod_name": "attempt-2"},
+        )
+    )
+    assert first.release()
+    store.put_agent("fixture", replace(store.execution("fixture", ended.execution_id), state="ended"))
+    assert {seat: row.state for seat, row in store.execution_occupants("fixture").items()} == {
+        "eng-1@fixture": "ended",
+        "eng-2@fixture": live.state,
+    }
+    restarted = observed(store, transport, grant, Pods([]))
+    clock[0] += lease.ttl_ms()
+    assert restarted.acquire()
+    assert restarted.reconcile().missing_pods == [live.execution_id]
     assert restarted.controller_orphans_by_class()["missing_pod"] == 1
 
 

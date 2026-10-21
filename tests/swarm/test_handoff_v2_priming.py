@@ -82,11 +82,18 @@ Finish the task.
 
 
 @pytest.mark.parametrize("lane", ["eng", MASTER])
-def test_a_successor_spawn_receives_the_stored_envelope(store, lane):  # noqa: F811
+def test_a_successor_spawn_receives_the_stored_envelope(store, lane, monkeypatch):  # noqa: F811
     ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
     tick("sw", store, ledger, runtime, 1)
     first = masters(store)[0] if lane == MASTER else workers(store)[0]
-    envelope = {"reason": "recycle", "agent": first.name, "task": first.task}
+    continuation = {
+        "continue_from": "fresh",
+        "remote_branch": "none",
+        "remote_head": "none",
+        "fresh_reason": "no branch was pushed",
+    }
+    monkeypatch.setattr("scripts.swarm.tick.reclaim", lambda *args, **kwargs: continuation)
+    envelope = {"reason": "recycle", "agent": first.name, "task": first.task, **continuation}
     store.put_handoff("sw", first.task, "document", seat=first.seat, envelope=envelope)
     store.put_agent("sw", replace(first, state="finished"))
     tick("sw", store, ledger, runtime, 2)

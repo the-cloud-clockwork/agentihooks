@@ -36,3 +36,9 @@ def test_the_subcommand_list_describes_codex_and_quota(monkeypatch, capsys):
     lines = [line.split(None, 1) for line in _help(monkeypatch, capsys).splitlines()]
     assert ["codex", "Route to an AH_CX_TOKEN account (default login if none is set) and launch Codex"] in lines
     assert ["quota", "One table for every Claude and Codex account"] in lines
+
+
+def test_the_subcommand_list_names_no_ledger_decline(monkeypatch, capsys):
+    monkeypatch.setenv("COLUMNS", "300")
+    lines = [line.split(None, 1) for line in _help(monkeypatch, capsys).splitlines()]
+    assert ["ledger", "Swarm ledger: agent CLI, or new|serve|watch|chat <args>"] in lines

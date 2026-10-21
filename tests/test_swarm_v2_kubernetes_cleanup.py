@@ -13,7 +13,7 @@ from scripts.swarm_v2.kubernetes.completion import Completion
 from scripts.swarm_v2.kubernetes.watch import BACKEND
 from tests import sv2_kub04_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-04"
 
@@ -231,7 +231,27 @@ def _finished_and_running(world, controller):
     finished, running = world.admit(controller, "eng-1"), world.admit(controller, "eng-2")
     for attempt in (finished, running):
         world.spawn(controller, attempt, fx)
-    world.api.objects[f"swarm-{finished.execution_id}"]["status"]["phase"] = "Succeeded"
+    world.api.objects[f"swarm-{finished.execution_id}"]["status"].update(
+        phase="Succeeded",
+        containerStatuses=[
+            {
+                "name": "agent",
+                "state": {
+                    "terminated": {
+                        "exitCode": 0,
+                        "message": json.dumps(
+                            {
+                                "schema_version": 1,
+                                "execution_id": finished.execution_id,
+                                "generation": finished.generation,
+                                "transcript_end": 0,
+                            }
+                        ),
+                    }
+                },
+            }
+        ],
+    )
     world.api.objects[f"swarm-{running.execution_id}"]["status"]["phase"] = "Running"
     return finished, running
 
@@ -246,6 +266,12 @@ def test_a_completed_attempt_pod_is_deleted_and_a_running_one_kept():
         controller, _ = world.controller()
         assert controller.acquire()
         finished, running = _finished_and_running(world, controller)
+        terminated = world.api.objects[f"swarm-{finished.execution_id}"]["status"]["containerStatuses"][0]["state"][
+            "terminated"
+        ]
+        report = json.loads(terminated["message"])
+        report["transcript_end"] = 7
+        terminated["message"] = json.dumps(report)
         world.acknowledge(finished.execution_id, 7)
         complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
         assert complete(_listed(world)) == {finished.execution_id: "done"}
@@ -257,6 +283,94 @@ def test_a_completed_attempt_pod_is_deleted_and_a_running_one_kept():
         assert retention.final(world.store, cases.SLUG, running.execution_id) is None
         assert world.attached == world.secret_refs == {running.execution_id}
         assert complete(_listed(world)) == {}
+
+
+def test_a_completed_pod_waits_for_its_reported_final_transcript():
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, running = _finished_and_running(world, controller)
+        pod = world.api.objects[f"swarm-{finished.execution_id}"]
+        pod["status"]["containerStatuses"] = [
+            {
+                "name": "agent",
+                "state": {
+                    "terminated": {
+                        "exitCode": 0,
+                        "message": json.dumps(
+                            {
+                                "schema_version": 1,
+                                "execution_id": finished.execution_id,
+                                "generation": finished.generation,
+                                "transcript_end": 9,
+                            }
+                        ),
+                    }
+                },
+            }
+        ]
+        world.acknowledge(finished.execution_id, 7)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {finished.execution_id: "waiting_archive"}
+        assert f"swarm-{finished.execution_id}" in world.api.objects
+        assert retention.final(world.store, cases.SLUG, finished.execution_id).transcript_end == 9
+        world.acknowledge(finished.execution_id, 8)
+        assert complete(_listed(world)) == {finished.execution_id: "waiting_archive"}
+        world.acknowledge(finished.execution_id, 9)
+        assert complete(_listed(world)) == {finished.execution_id: "done"}
+        assert sorted(world.api.objects) == [f"swarm-{running.execution_id}"]
+
+
+@pytest.mark.parametrize(
+    "problem",
+    [
+        "missing",
+        "missing_state",
+        "missing_terminated",
+        "missing_message",
+        "malformed",
+        "generation",
+        "execution",
+        "container",
+        "duplicate",
+        "failed",
+    ],
+)
+def test_a_completed_pod_without_a_valid_final_report_is_kept(problem):
+    world = cases.World()
+    with world.clocked():
+        controller, _ = world.controller()
+        assert controller.acquire()
+        finished, _ = _finished_and_running(world, controller)
+        pod = world.api.objects[f"swarm-{finished.execution_id}"]
+        statuses = pod["status"]["containerStatuses"]
+        terminated = statuses[0]["state"]["terminated"]
+        if problem == "missing":
+            pod["status"].pop("containerStatuses")
+        elif problem == "missing_state":
+            statuses[0].pop("state")
+        elif problem == "missing_terminated":
+            statuses[0]["state"].pop("terminated")
+        elif problem == "missing_message":
+            terminated.pop("message")
+        elif problem == "malformed":
+            terminated["message"] = "broken"
+        elif problem in ("generation", "execution"):
+            report = json.loads(terminated["message"])
+            report["generation" if problem == "generation" else "execution_id"] = "another"
+            terminated["message"] = json.dumps(report)
+        elif problem == "container":
+            statuses[0]["name"] = "sidecar"
+        elif problem == "duplicate":
+            statuses.append(statuses[0])
+        else:
+            terminated["exitCode"] = 1
+        world.acknowledge(finished.execution_id, 100)
+        complete = Completion(world.client(), cases.SLUG, world.cleanup(controller))
+        assert complete(_listed(world)) == {}
+        assert f"swarm-{finished.execution_id}" in world.api.objects
+        assert retention.final(world.store, cases.SLUG, finished.execution_id) is None
 
 
 @pytest.mark.parametrize("change", ["generation", "fenced", "duplicate"])

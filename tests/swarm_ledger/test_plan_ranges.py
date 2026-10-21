@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_publish
+from scripts.swarm_ledger import ledger, ledger_artifacts, ledger_plans, ledger_publish
 from scripts.swarm_ledger import ledger_core as core
 from tests.swarm_ledger import test_plan_kind
 from tests.swarm_ledger.test_plan_kind import add, update
@@ -96,6 +96,45 @@ def test_publication_and_three_computed_ranges(published, monkeypatch):
     assert task(state, "plan")["state"] == "done"
 
 
+def test_explicit_no_plan_lines_normalizes_slice_metadata_only():
+    fields = {"plan_slice": "none", "slice": "slices/old", "description": "Independent work", "phase": "p1"}
+    assert ledger_plans.with_plan_slice({}, fields) == {
+        "description": "Independent work",
+        "phase": "p1",
+        "follow_up": True,
+    }
+    assert fields["plan_slice"] == "none"
+    assert fields["slice"] == "slices/old"
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_task_cli_accepts_explicit_no_plan_lines(published, monkeypatch, capsys, existing):
+    if existing:
+        add(published, "loose", plan_slice="first")
+        cli(monkeypatch, published, "task", "set", "loose", "plan_slice=none", "description=Independent work")
+    else:
+        cli(
+            monkeypatch,
+            published,
+            "task",
+            "add",
+            "loose",
+            "Independent work",
+            "--phase",
+            "p1",
+            "--plan-slice",
+            "none",
+            "--description",
+            "Independent work",
+        )
+    row = task(core.sync(published)[0], "loose")
+    assert row["description"] == "Independent work"
+    assert row["follow_up"] is True
+    assert not row.get("plan_slice")
+    assert not row.get("plan_lines")
+    assert not row.get("slice")
+
+
 def test_missing_anchor_refused(published):
     state, rejected = add(published, "missing", plan_slice="missing")
     assert rejected == ["add-missing"]
@@ -112,7 +151,7 @@ def test_a_task_without_a_slice_is_refused_in_a_phase_whose_plan_has_anchors(pub
     assert not any(t["id"] in ("loose", "mastered") for t in state["tasks"])
 
 
-def test_a_task_without_a_slice_cannot_move_into_a_phase_whose_plan_has_anchors(published):
+def test_a_task_moved_without_a_slice_into_an_anchored_phase_drops_its_slice_as_a_follow_up(published):
     later = {"op": "phase_add", "id": "add-p2", "by": "planner", "phase": "p2", "title": "Later"}
     core.check_op(later)
     assert core.sync(published, ops=[later])[1] == []
@@ -120,21 +159,29 @@ def test_a_task_without_a_slice_cannot_move_into_a_phase_whose_plan_has_anchors(
     op = {"op": "task_update", "id": "move", "by": "planner", "item": "tasks/elsewhere", "fields": {"phase": "p1"}}
     core.check_op(op)
     state, rejected = core.sync(published, ops=[op])
-    assert rejected == ["move"]
-    assert state["_meta"]["warnings"] == [UNSLICED]
-    assert task(state, "elsewhere")["phase"] == "p2"
-    sliced = {**op, "id": "move-sliced", "fields": {"phase": "p1", "plan_slice": "second"}}
-    core.check_op(sliced)
-    state, rejected = core.sync(published, ops=[sliced])
     assert rejected == []
+    moved = task(state, "elsewhere")
+    assert (moved["phase"], moved["follow_up"]) == ("p1", True)
+    assert (moved.get("plan_slice", ""), moved.get("plan_lines", ""), moved.get("slice", "")) == ("", "", "")
+    sliced = {**op, "id": "move-sliced", "fields": {"phase": "p2"}}
+    core.check_op(sliced)
+    assert core.sync(published, ops=[sliced])[1] == []
+    named = {**op, "id": "move-named", "fields": {"phase": "p1", "plan_slice": "second"}}
+    core.check_op(named)
+    state, rejected = core.sync(published, ops=[named])
+    assert rejected == []
+    moved = task(state, "elsewhere")
+    assert (moved["phase"], moved["plan_slice"], moved["plan_lines"], moved["follow_up"]) == (
+        "p1",
+        "second",
+        "7-9",
+        False,
+    )
+    wrong = {**op, "id": "move-wrong", "fields": {"phase": "p2", "plan_slice": "missing"}}
+    core.check_op(wrong)
+    state, rejected = core.sync(published, ops=[wrong])
+    assert rejected == ["move-wrong"]
     assert (task(state, "elsewhere")["phase"], task(state, "elsewhere")["plan_lines"]) == ("p1", "7-9")
-    back = {**op, "id": "back", "fields": {"phase": "p2"}}
-    core.check_op(back)
-    assert core.sync(published, ops=[back])[1] == []
-    again = {**op, "id": "again"}
-    core.check_op(again)
-    state, rejected = core.sync(published, ops=[again])
-    assert (rejected, state["_meta"]["warnings"]) == (["again"], [UNSLICED])
 
 
 def test_plan_tasks_and_tasks_the_swarm_queues_need_no_slice(published):

@@ -96,9 +96,9 @@
       },
       "replaced_view": {
         "agent": "engineer@a1b2c3-0002",
-        "checked_at": 1790000010800,
+        "checked_at": 1790000011050,
         "fresh_ms": 30000,
-        "live_at": 1790000010650,
+        "live_at": 1790000010850,
         "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
         "pane_id": "w1:p1",
         "reason": "conversation_mismatch",
@@ -118,8 +118,8 @@
         "reason": "stale_incarnation"
       },
       "terminal_reconnect_latency_seconds": [
-        0.15,
-        0.1
+        0.2,
+        0.2
       ]
     },
     "second_identical": true

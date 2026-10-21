@@ -10,7 +10,7 @@ import time
 from collections.abc import Mapping
 from pathlib import Path
 
-from scripts import codex_router, select_profile
+from scripts import codex_router, profile_telemetry, select_profile
 from scripts.codex_session import supervisor
 from scripts.codex_session.binding import BindingError
 from scripts.routing import codex_api, envs
@@ -114,6 +114,7 @@ def prepare(args: argparse.Namespace, agent_args: list[str], environ: dict[str, 
     model, effort, server_args = server_options(flags)
     environ.update(profile_env)
     account, placement, child = route_account(environ, route, args.exclude)
+    child.update(profile_telemetry.agentihooks_langfuse_keys())
     codex_router._report(args.report, status="routed", account=account.name, placement=placement)
     agent = AgentRecord(
         name,
@@ -171,9 +172,25 @@ def main(
         f"endpoint={record.endpoint_ref} state={record.state}",
         flush=True,
     )
+    pump = None
     try:
-        started.process.wait()
+        pump = subprocess.Popen(
+            # nosemgrep: python.lang.security.audit.dangerous-subprocess-use-tainted-env-args.dangerous-subprocess-use-tainted-env-args
+            [sys.executable, "-m", "scripts.inbox.codex", spec.slug, record.execution_id],
+            cwd=spec.cwd,
+            env=spec.environ,
+        )
+        while pump.poll() is None:
+            try:
+                started.process.wait(timeout=supervisor.POLL_S)
+                break
+            except subprocess.TimeoutExpired:
+                pass
+        else:
+            return pump.returncode or 3
     finally:
+        if pump is not None:
+            supervisor.stop(pump)
         supervisor.stop(started.process)
         supervisor.finish(store, spec.slug, started, int(time.time() * 1000))
     return started.process.returncode or 0

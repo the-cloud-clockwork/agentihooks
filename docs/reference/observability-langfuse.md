@@ -211,18 +211,23 @@ trace is also found by its `agent:<name>` tag.
 
 ## How the Doctor reads traces
 
-The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings in
-`scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads the
-same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY` and
-`LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). The swarm tick runs
-it with the other detectors every `AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it
-is the one monitor of trace freshness. Among ticks, only `swarm tick`, the
-command the timer unit runs, and the controller loop run it. A tick another swarm
-command runs inline (`start`, `reopen`, `pause`, `stop`, `set`, `restore`, and so
-`doctor start` and rig doctor) runs every other detector and leaves telemetry to
-the next scheduled pass, because the calling terminal may export keys for another
-project under the same names. `swarm tick` run by hand and `doctor measure` read
-with the caller's keys, so run them where those keys open the swarm's project.
+The Doctor's `trace` detector (`scripts/doctor/traces_read.py`, active bindings
+in `scripts/doctor/registry.py`, findings in `scripts/doctor/traces.py`) reads
+the same Langfuse public API with `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`
+and `LANGFUSE_HOST` (default `https://langfuse.homeofanton.com`). Reads for that
+exact default origin connect to the internal ingress `10.10.30.200` instead of
+the public tunnel, sending the hostname as `Host` and TLS server name so the
+certificate is still verified against it; a tunnel outage no longer fails a
+read, while a 5xx or a timeout on the internal path still raises `trace reader
+unavailable`. The swarm tick runs it with the other detectors every
+`AGENTIHOOKS_DOCTOR_INTERVAL_MINUTES` (10); it is the one monitor of trace
+freshness. Among ticks, only `swarm tick`, the command the timer unit runs, and
+the controller loop run it. A tick another swarm command runs inline (`start`,
+`reopen`, `pause`, `stop`, `set`, `restore`, and so `doctor start` and rig
+doctor) runs every other detector and leaves telemetry to the next scheduled
+pass, because the calling terminal may export keys for another project under the
+same names. `swarm tick` run by hand and `doctor measure` read with the caller's
+keys, so run them where those keys open the swarm's project.
 
 ### Active telemetry
 
@@ -249,6 +254,7 @@ Each scan joins it with:
 | `telemetry misattributed` | a trace tagged with the agent carries another life, seat, task, harness or resolved profile, or the session was accepted with no trace under the agent |
 | `trace reader unavailable` | the trace listing or any active read failed or ran out of its budget |
 | `trace coverage partial` | the historical backfill has not read every trace's observations yet |
+| `wait history partial` | the wait history of an agent with a turn gap over the limit was not read inside the 15 second wait budget or the 55 second step deadline it shares with the trace reads; its turn gaps are not judged that scan |
 
 Threshold `AGENTIHOOKS_DOCTOR_ACTIVE_STALE_SECONDS` (60), grace
 `AGENTIHOOKS_DOCTOR_ACTIVE_GRACE_SECONDS` (60). A fault is raised at the first
@@ -260,8 +266,9 @@ Langfuse event, the agent's start or the outage start), so the Doctor master get
 it once while it lasts, it clears on recovery and a new fault raises a new one.
 An agent Langfuse could not be read for is judged only on its local exporter.
 
-The read budget is 15 seconds for active bindings, one retry per binding, and
-10 seconds per request. Watermarks and the outage start live in
+The read budget is 15 seconds for active bindings, read all at once, one retry
+per binding, and 7 seconds per request. Each read failure names the file and
+line that raised it. Watermarks and the outage start live in
 `<swarm home>/<slug>/doctor-telemetry.json`.
 
 ### Historical findings
@@ -365,3 +372,143 @@ declared server as mounted (with its allowlist, and any allowlisted name the
 server does not advertise) or unmounted with the reason, and prints each gap.
 On Claude an allowlisted server stays unmounted when it is not an HTTP server,
 a referenced variable is unset, or the tool listing fails.
+
+## The swarm Langfuse summary pass
+
+Each scheduled tick (`swarm tick`, the command the timer unit runs, and the
+controller loop) asks the internal tool gateway for one Langfuse summary of the
+swarm and turns breaching accounts into health findings. A tick another swarm
+command runs inline skips it.
+
+### What it reads
+
+The reader opens a streamable HTTP MCP session to `LANGFUSE_MCP_URL` with three
+headers:
+
+| Header | Value |
+|---|---|
+| `Authorization` | `Bearer $MCP_KEY_GATEWAY` |
+| `Host` | `llm.homeofanton.com` |
+| `x-mcp-servers` | `langfuse_tools` |
+
+It calls `langfuse_tools-swarm_error_latency_summary` with the swarm slug, the
+project `agent-swarm` and a window of the last hour. The pass runs at most once
+every ten minutes per swarm, and the whole read is bounded at 30 seconds.
+
+### The encrypted internal route
+
+The public gateway name sits behind Cloudflare Access and refuses the gateway
+key, so the reader connects to the gateway's LAN ingress address instead and
+routes by the `Host` header. The ingress serves TLS for the gateway name with a
+valid `*.homeofanton.com` certificate. The reader's HTTP client takes the TLS
+server name from the `Host` header, so a request to
+`https://10.10.30.200/...` sends `llm.homeofanton.com` as SNI and verifies the
+certificate against that name while it connects to the address. The bearer
+credential therefore travels encrypted on the home network.
+
+The scheme and address come from `LANGFUSE_MCP_URL` alone; nothing in code picks
+them. An `http://` endpoint still works and sends the key in clear text, so
+every configured value in git is `https`:
+
+| Reader | Where the endpoint is set | Value |
+|---|---|---|
+| Deployed swarm controller | antoncore `k8s/values-overlays/agentihooks-swarm/values.yaml`, `controller.env` | `https://10.10.30.200/toolset/swarm-controller/mcp` |
+| Local sampler (timer ticks on a workstation) | agentihooks-bundle `profiles/anton-base` env for Claude, Codex and Copilot | `https://10.10.30.200/mcp/` |
+
+The bundle and antoncore each have a test that pins the configured scheme to
+`https`. The agentihooks Helm chart ships `controller.env.LANGFUSE_MCP_URL`
+empty, so a deployment without an overlay value runs with sampling off.
+
+The overlay gives `MCP_KEY_GATEWAY` only to the controller, from the
+`swarm-controller-gateway` Secret (key `key`) through `controller.secretEnv`.
+The switch to the encrypted route (antoncore pull request 889, agentihooks
+issue 3731) changed only the scheme and the reader's TLS server name; the
+credential and the `agent-swarm` project stayed as they were.
+
+The Grafana alert read in the same tick reuses this endpoint, client and key
+with `x-mcp-servers: grafana`, so it uses the encrypted route too. Unsetting
+`LANGFUSE_MCP_URL` turns off both reads; unsetting `MCP_KEY_GATEWAY` makes both
+fail silently.
+
+### Configuration
+
+```yaml
+# antoncore k8s/values-overlays/agentihooks-swarm/values.yaml
+controller:
+  env:
+    LANGFUSE_MCP_URL: https://10.10.30.200/toolset/swarm-controller/mcp
+  secretEnv:
+    - name: MCP_KEY_GATEWAY
+      secretName: swarm-controller-gateway
+      key: key
+      optional: true
+```
+
+The bundle sets the local value in `profiles/anton-base/.claude/settings.overrides.json`:
+
+```json
+{ "env": { "LANGFUSE_MCP_URL": "https://10.10.30.200/mcp/" } }
+```
+
+and the same value in the Codex (`config.overrides.toml`) and Copilot
+(`settings.overrides.json`) layers. `agentihooks init` also writes the
+profile's `LANGFUSE_MCP_URL` into `~/.agentihooks/.env`, between
+`# BEGIN agentihooks sampler environment` and
+`# END agentihooks sampler environment`, when that file does not already set
+it; a value already set there wins and is never overwritten. Change the value
+in git and let CI deploy it; an edited Pod is replaced on the next rollout.
+
+### Findings
+
+A row breaches when an agent with at least 10 observations has an error rate
+over 0.2, or an agent with at least 3 turns has a turn latency p95 over ten
+minutes. Breaches are grouped by the agent's account into one standing
+`langfuse_account_<account>` finding, which names each agent, task, value and
+threshold. After a successful read, a finding clears when its account no
+longer breaches, except an account whose agents had enough turns but no latency
+figure, which keeps its finding until a read can judge it. The tick prints
+`Langfuse summary read: <n> breaching accounts`; `swarm tick` prefixes each
+line with the swarm slug, as in `<slug>: Langfuse summary read: ...`.
+
+With `LANGFUSE_MCP_URL` unset the tick prints `Langfuse sampling is off:
+configure LANGFUSE_MCP_URL` once, then stays quiet and reads nothing until the
+variable is set. A failed read (refused TLS, timeout, tool error) stores the
+exception's type name under `error` in the swarm's `langfuse-summary` Redis
+key and changes no finding; the next attempt waits out the ten minute interval.
+
+### Checking the route
+
+1. The ingress presents a certificate valid for the gateway name:
+
+   ```bash
+   openssl s_client -connect 10.10.30.200:443 -servername llm.homeofanton.com \
+     -verify_return_error </dev/null 2>&1 | grep -E "subject=|Verify return code"
+   ```
+
+   Observed on 2026-10-19 from a home network workstation:
+   `subject=CN = *.homeofanton.com`, issuer Let's Encrypt, and
+   `Verify return code: 0 (ok)`.
+2. The gateway answers over that route. Without a key it refuses with 401, which
+   proves the TLS session and routing work:
+
+   ```bash
+   curl -s -o /dev/null -w "%{http_code} %{ssl_verify_result}\n" \
+     --connect-to llm.homeofanton.com:443:10.10.30.200:443 \
+     https://llm.homeofanton.com/toolset/swarm-controller/mcp
+   ```
+
+   Observed on 2026-10-19 from the same workstation: `401 0`, a refusal for
+   the missing key with certificate verification passed.
+3. The deployed value is `https`: read `controller.env.LANGFUSE_MCP_URL` in the
+   antoncore overlay on the branch ArgoCD tracks.
+
+### Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `Langfuse sampling is off` in the tick output | `LANGFUSE_MCP_URL` is unset where the tick runs | Set it in the overlay or bundle profile, then redeploy or rerun `agentihooks init` |
+| No `Langfuse summary read` line and no findings | The read failed; `error` in the `langfuse-summary` key names the exception type | Run the two checks above: a failed first check points at the ingress or its certificate, a failed second at routing; with both passing, check `MCP_KEY_GATEWAY` is set for the reader |
+| No tick line, `error` is `KeyError` | `MCP_KEY_GATEWAY` is unset; on the controller the `swarm-controller-gateway` Secret is optional, so a missing Secret starts the Pod without the key | Create the Secret with key `key`; the next pass after the ten minute interval reads |
+| Certificate verification fails | The ingress certificate does not cover the TLS server name `llm.homeofanton.com` (not observed; the first check above shows it) | Run the first check; keep `Host: llm.homeofanton.com`, since the reader takes the TLS server name from it |
+| The gateway refuses the key | The endpoint names the public gateway address behind Cloudflare Access | Use the LAN ingress address with `https` |
+| Grafana bottleneck findings never appear | The Grafana read failed, or `LANGFUSE_MCP_URL` or `MCP_KEY_GATEWAY` is unset; that read prints nothing and stores no error | Run the two checks above and confirm both variables are set where the tick runs |

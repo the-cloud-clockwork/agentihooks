@@ -9,7 +9,7 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_tick import FakeLedger
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 MASTER, ENGINEER = "master@c4d5e6-0001", "engineer@c4d5e6-0002"
 DISPATCHER, CI, PLANNER = "dispatcher@c4d5e6-0003", "ci@c4d5e6-0004", "planner@c4d5e6-0005"

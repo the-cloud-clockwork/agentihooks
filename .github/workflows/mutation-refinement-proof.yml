@@ -1,0 +1,101 @@
+name: Mutation refinement proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['diffcheck/refinement-*']
+
+concurrency:
+  group: ${{ format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') }}
+  queue: max
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  planning:
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-light' || 'ubuntu-latest' }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        repeat: [1, 2, 3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          checksum: '9167d72b3319674b6303c4cbe071854bba13ebdf3d76b1a7cbdc175471fb66d6'
+          enable-cache: false
+      - name: Install dependencies
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Prepare identical refinement inputs
+        run: |
+          mkdir -p .refinement-proof
+          cat > .refinement-proof/run.py <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+          from time import perf_counter
+          from unittest.mock import patch
+
+          from scripts.ci_mutation import measured
+          from scripts.ci_mutation.selection import selected_mutants
+          from scripts.ci_mutation.stats import SharedStats, stats_key, write_part
+
+          mode = sys.argv[1]
+          root = Path.cwd()
+          selected = {
+              path: (set(range(1, len((root / path).read_text().splitlines()) + 1)), ['tests/test_sample.py'])
+              for path in ['hooks/hook_manager.py', 'scripts/ci_mutation/identity.py']
+          }
+          stats = SharedStats(root / '.refinement-proof/stats', 'same-head')
+          for index, path in enumerate(selected):
+              scope = {path: selected[path]}
+              write_part(stats.group(index).folder / 'part-0.json', stats_key(stats.head, scope), (0, 1), [])
+          started = perf_counter()
+          if mode == 'before':
+              with patch.object(measured, 'selected_mutant_names', lambda *args: selected_mutants(*args)[1]):
+                  plan = measured.refine_plan(root, selected, stats)
+          else:
+              plan = measured.refine_plan(root, selected, stats)
+          seconds = perf_counter() - started
+          folder = root / '.refinement-proof'
+          (folder / f'{mode}.json').write_text(json.dumps(plan, sort_keys=True))
+          (folder / f'{mode}.txt').write_text(''.join(f'{name}\n' for name in sorted(plan['assignments'])))
+          (folder / f'{mode}-seconds.json').write_text(json.dumps(seconds))
+          print(f'{mode}: {seconds:.6f} seconds; {len(plan["assignments"])} selected mutants')
+          PY
+      - name: Baseline refinement planning
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: PYTHONPATH=. python .refinement-proof/run.py before
+      - name: Optimized refinement planning
+        env:
+          MUTATION_SHARD_CPU_QUOTA: "3"
+        run: PYTHONPATH=. python .refinement-proof/run.py after
+      - name: Compare every selected mutant and assignment
+        run: |
+          diff -u .refinement-proof/before.txt .refinement-proof/after.txt
+          diff -u .refinement-proof/before.json .refinement-proof/after.json
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          folder = Path('.refinement-proof')
+          before = json.loads((folder / 'before-seconds.json').read_text())
+          after = json.loads((folder / 'after-seconds.json').read_text())
+          assert after < before, (before, after)
+          print(f'Planning: {before:.6f} -> {after:.6f} seconds; selected mutant and assignment diffs empty')
+          PY
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: refinement-proof-${{ matrix.repeat }}
+          path: .refinement-proof/
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7

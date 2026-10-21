@@ -21,6 +21,16 @@ The `agentihooks` CLI is installed globally via `uv tool install --editable .` a
 
 The single entry point for installing agentihooks. Handles global setup and bundle linking.
 
+Plain `agentihooks init` installs Claude Code and Codex. Use `--target claude`
+or `--target codex` to install one supported harness.
+
+Default output shows the linked bundle, installed profile, resolved profile
+chain and overlays, then each harness home and installed MCP server, skill and
+plugin counts. Stored swarm role profiles are never recalled for an operator
+home; Codex borrows the operator profile from Claude instead. Actionable
+warnings and errors remain visible. Use `--verbose` for installation details,
+kept MCP notices and launch hints.
+
 ```bash
 agentihooks init [--bundle <path>] [--profile <name>]
 ```
@@ -53,6 +63,8 @@ downgrade cannot leave a process serving a port nothing points at. See
 | Flag | Description |
 |------|-------------|
 | `--bundle <path>` | Path to bundle directory. First-time: links the bundle and runs global install. |
+| `--target claude\|codex` | Install only the selected supported harness. |
+| `--verbose`, `-v` | Show all installer output, including linked skills and configuration details. |
 | `--profile <name>` | Profile to install. Comma-separated for chaining: `--profile coding,anton` (default: `default`, env: `AGENTIHOOKS_PROFILE`) |
 | `--force` | Clean install — resets install state (`state.json`, sync hashes, session caches, PID files, `prod_bypass/`, `controls_flags/`, `voice_flags/`, `force_refresh/`) and re-symlinks `~/.claude/` assets. **Preserves** broadcasts, enforcements, brain data, logs, quota accounts, `.env`, `.venv`. |
 
@@ -141,7 +153,7 @@ agentihooks settings-profile --clear
 
 ## `agentihooks broadcast`
 
-Send a message to all active Claude Code sessions simultaneously.
+Send a message to Claude Code and Codex sessions sharing the broadcast store.
 
 ```
 agentihooks broadcast [OPTIONS] MESSAGE
@@ -268,6 +280,19 @@ and `path` fields but requires an absolute path.
 
 ---
 
+## `agentihooks ledger task split`
+
+Declare a code or CI task's pull request halves before recording its first pull request:
+
+```bash
+agentihooks ledger --slug <id> --as <agent> \
+  task split <task> 1-10 11-20
+```
+
+Ranges are ordered, non-overlapping plan lines and must cover the task's assigned plan lines when present. A task with a recorded pull request, or a split with a recorded half, refuses the change. See [Split tasks across pull requests](../pillars/swarm.md#split-tasks-across-pull-requests) for recording each half, the automatic active-link reset between merges, completion and troubleshooting.
+
+---
+
 ## `agentihooks conditions`
 
 Inspect the [conditions](../hooks/conditions.md) the running harness would execute.
@@ -304,7 +329,8 @@ a free session under its quota band`.
 ## `agentihooks balance`
 
 Probe and rank every Claude account, plus the api row when an endpoint is
-configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `api`), `STATE`,
+configured. Columns: `#`, `ACCOUNT`, `KIND` (`subscription`, `interactive`,
+`api`; the Codex default login reads `interactive`, as routing offers it), `STATE`,
 `SESSIONS` (live/cap), `WEIGHT` (api rows), `CAP`, `ROUTING LEFT` and the five
 hour and weekly windows (`n/a` on an api row).
 
@@ -340,9 +366,14 @@ agentihooks init-agent --handoff --dir "$PWD" --name repo-handoff --prompt-file 
 |---|---|
 | `--dir`, `--name`, `--prompt` / `--prompt-file` | Directory, session/tab name, opening prompt |
 | `--dry-run` | Print the launch without opening a terminal |
+| `--codex-transport legacy\|app_server`, `--seat` | Select the transport and admitted seat for a managed Codex swarm launch; see [Managed Codex terminals](codex-managed-terminal.md) for configuration and viewer behavior |
 | `--start-timeout` | Seconds to wait for the terminal to start (default 30) |
 | `--route-timeout` | Seconds to wait for the new session's route report (default 150) |
+| `--canary-timeout` | Seconds to wait for the new session to run its profile canary (default 120 for Claude, 90 for Codex) |
 | `--handoff` | Quota handoff: any account but this one, no bare-Claude fallback, marks this session handed off once the new one is routed; exit 3 on failure |
+| `--profile <name>` | Render this role profile once, record its home in the launch report and mount that home in the launched session; see [Profile launch home](profile-launch-home.md) |
+| `--overlay <name>` | Overlay the profile wears; repeat for up to three |
+| `--bundle-revision <commit>` | Render the profile only from this bundle commit |
 
 Output is `key=value` lines: `status=started`, `route_status` (`routed`, `bare`,
 `failed`, `pending`), `account`, `placement`, and `handoff=done|failed` with
@@ -367,6 +398,137 @@ changes that. The output adds `workspace_id`, `tab_id`, `pane_id` and `agent_nam
 Agents: `--agent claude|codex`; without it, the harness of the account the session
 rotation picks: the eligible Claude or Codex account with the fewest live sessions
 under its band cap (see Load balancing). Codex runs directly (`route_status=direct`).
+
+With `--profile`, the output adds `profile_validation=validated` and
+`profile_binding=<json>` once the launched session has run its binding canary.
+The launcher starts the session through `agentihooks select-profile NAME
+--home=<recorded home>`, so a pull of `dev` or another code root between
+prepare and launch does not change the home the session mounts.
+
+---
+
+## `agentihooks select-profile`
+
+Select a profile, model and effort for one run, mount its rendered home and
+start `agentihooks claude` or `agentihooks codex`.
+
+```bash
+agentihooks select-profile engineer --agent claude -- --model opus
+agentihooks select-profile engineer --home="$HOME/.agentihooks/profiles/.homes/engineer/<key>/claude" --agent claude --dry-run
+```
+
+| Flag | Meaning |
+|---|---|
+| `name` | Profile to select |
+| `--agent claude\|codex\|copilot` | Harness (default `claude`); per-run profiles support `claude` and `codex` |
+| `--model`, `--effort minimal\|low\|medium\|high\|xhigh\|max` | Model and effort; otherwise the profile's `profile.yml` defaults, then the harness defaults |
+| `--overlay <name>` | Wear this overlay; repeat for up to three |
+| `--bundle-revision <commit>` | Render only from this bundle commit |
+| `--home <dir>` | Mount this rendered home instead of rendering; refused unless its binding matches the profile and harness and its persona and sources are unchanged |
+| `--dry-run` | Print the selected environment and `argv=` line without starting the harness |
+
+Arguments after `--` pass through to the harness. A refusal exits 2 with
+`agentihooks select-profile: <reason>` and fails a pending launch report. Home
+checks, refusals and troubleshooting: [Profile launch home](profile-launch-home.md).
+
+---
+
+## `agentihooks terminate-agent`
+
+List live Claude Code and Codex sessions, end one by exact name, session UUID or
+PID, or stand down one managed Codex conversation without ending its process.
+
+```bash
+agentihooks terminate-agent --list --type any        # TYPE NAME SESSION_ID PID PGID STATUS CWD
+agentihooks terminate-agent eng@abc-0042 --dry-run   # resolve and validate, send nothing
+agentihooks terminate-agent eng@abc-0042             # SIGTERM the process group, SIGKILL if it survives
+agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
+agentihooks terminate-agent ci@abc-0815 --stand-down --swarm <slug>
+```
+
+| Flag | Meaning |
+|---|---|
+| `--type claude\|codex\|any` | Limit listing and matching to one harness (default `any`) |
+| `--list` | Print the live sessions table |
+| `--dry-run` | Resolve and validate, print what would happen, change nothing; ends `result=validated signal=none` |
+| `--force-shared` | Allow ending a process whose other session UUIDs would end with it |
+| `--stand-down` | Stand down one managed Codex conversation instead of signalling a process |
+| `--swarm <slug>` | Swarm whose Codex records the stand-down reads; without it, the swarm the agent name belongs to |
+| `--term-timeout` | Seconds to wait after SIGTERM, and again after SIGKILL (default 3) |
+| `--keep-pane` | Leave the agent's herdr pane open after it exits |
+| `--json` | Print the resolution report as one JSON object |
+
+### Terminate a process
+
+A termination validates the target first: the PID's start time, command and
+arguments match its listing, its process group ID is above 1, every member
+belongs to one POSIX session, and the group does not contain the caller. It then
+sends SIGTERM to the whole process group, waits `--term-timeout`, rechecks the
+target's identity and sends SIGKILL to any survivor. Output is the resolution
+line (`action`, `type`, `name`, `session_id`, `pid`, `pgid`, `members`,
+`pane_id` in herdr), then `result=terminated escalation=SIGKILL|none` and, in
+herdr, `pane_id=<id> pane=closed|kept|close-failed (...)`. Exit 2 is a refused
+resolution or validation; exit 1 is a failed signal or a process that outlived
+SIGKILL.
+
+One interactive Codex process can carry several conversations, each listed as
+its own row with the same PID. Ending that process ends all of them, so a
+termination refuses it with `target process is shared by other session UUIDs:
+<ids>; use --force-shared`. Add `--force-shared` only when every listed
+conversation belongs to the agent being stopped.
+
+### Stand down one Codex conversation
+
+`--stand-down` stops one conversation of a managed Codex agent, one the swarm
+launched on the Codex app-server and recorded in its Codex transport records,
+and sends no signal. The selector is matched against each record's agent name,
+thread id, session id and execution id in the swarm. A stand-down:
+
+1. Marks that execution's transport record `stood_down`. The agent's inbox pump
+   treats the execution as no longer current and stops, so the conversation
+   takes no new turns from the inbox.
+2. Waits up to 10 seconds for an inbox publication to that seat already in
+   flight to finish.
+3. Reads the thread from the app-server and, when its last turn is in
+   progress, interrupts that turn with `turn/interrupt`, then waits up to 10
+   seconds for the turn to stop.
+
+The app-server process and every other conversation it hosts keep running.
+Under `--stand-down` only `--swarm` and `--dry-run` change the run; `--type`,
+`--json`, `--force-shared` and `--keep-pane` are ignored, `--term-timeout` is
+only checked to be positive, and `--list` prints the listing instead.
+
+```text
+$ agentihooks terminate-agent ci@abc-0815 --stand-down --dry-run
+action=stand-down-dry-run
+stops: conversation <thread> of ci@abc-0815 (execution <id> generation 3): its active turn (last recorded: <turn>) is interrupted and it takes no new turns
+keeps: app-server pid 41872: not signalled
+keeps: conversation <uuid> of eng@abc-0816: not interrupted
+result=validated signal=none
+```
+
+The dry run reads the swarm's recorded transport state and the live process
+list, and does not contact the app-server, so `last recorded:` is the turn the
+inbox last submitted or reconciled, or `none`. Without `--dry-run` the same
+`stops:` and `keeps:` lines print, the stand-down runs, and the command ends
+`result=stood-down stood_down=<agent> thread=<thread> interrupted=<turn>`; the
+run interrupts only a last turn the app-server reports in progress, and
+`interrupted=` is empty when none was.
+
+| Exit | Output | Meaning and next step |
+|---|---|---|
+| 0 | `result=validated signal=none` | Dry run; nothing changed |
+| 0 | `result=stood-down ...` | Fenced and, when a turn ran, interrupted |
+| 1 | `terminate-agent: <error>` then `<agent> stays fenced from new inbox turns; run the same stand down again to interrupt its turn` | The fence is written first, so the record is `stood_down` after this exit. Causes: an inbox publication still in flight, an unreachable app-server, or a turn still running after the interrupt. Rerun the same command. A Redis error or an unreadable transport record raises an uncaught traceback, also exit 1, with no `stays fenced` line; check the record's state before rerunning |
+| 2 | `terminate-agent: refused: <reason>` then `terminate-agent: safe alternative: <alternative>` | Nothing changed; see the refusals below |
+
+| Refusal reason | Safe alternative |
+|---|---|
+| No `--swarm` and the selector names no swarm agent | `pass --swarm <slug>` |
+| The selector has no managed Codex conversation in the swarm, and it names one process | That process's PID and conversation ids, with `agentihooks terminate-agent <pid> --force-shared --dry-run`; the same command without `--dry-run` ends every conversation in the process, so run it only when all of them belong to this agent. An empty list means the process hosts no registered conversation: skip `--force-shared` and use the plain `agentihooks terminate-agent <pid> --dry-run` |
+| The selector has no managed Codex conversation, and it names no single process | `agentihooks terminate-agent --list --type codex shows the live conversations` |
+| The conversation already ended (`exited` or `failed`) | `nothing needs standing down` |
+| The selector names several live conversations | `name one thread: <thread ids>` |
 
 ---
 
@@ -430,7 +592,7 @@ agentihooks gc                     # report what is safe to remove
 agentihooks gc --enforce           # act on findings that are due: remove, snapshot to wip/, archive
 agentihooks gc --json              # full report; also written to ~/.agentihooks/gc-last.json
 agentihooks gc --path ~/scratchpad/myrepo
-agentihooks gc --install-timer     # hourly systemd user timer (agentihooks install does this when LIFECYCLE_GC_ENABLED)
+agentihooks gc --install-timer     # hourly agentihooks scheduler cron (agentihooks install does this when LIFECYCLE_GC_ENABLED)
 agentihooks gc --remove-timer
 agentihooks lease <worktree>       # record the calling agent session as owner (wt.sh new calls this)
 agentihooks lease <dir> --kind scratch|ephemeral
@@ -444,46 +606,136 @@ agentihooks scratch rm <task-dir>       # safe replacement for rm -rf "$dir": re
 
 A path is actionable only when it is **unused** and **removing it loses nothing**:
 
-- Unused: no live process has its cwd inside it, no lease holder is alive (pid + `/proc` start time + `boot_id`, or a live session file with the same `sessionId` and matching `procStart`), nothing in it changed recently, and the machine has been up at least 2 h.
-- Worktrees: clean and reachable from a remote after 2 h idle (`remove`); dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first). Primary checkouts, `dev`/`main`/`master`, git-locked worktrees and any merge/rebase in progress are never touched.
+- Unused: no live process has its cwd inside it, no lease holder is alive (pid + `/proc` start time + `boot_id`, or a live session file with the same `sessionId` and matching `procStart`), nothing in it changed recently (except a clean pushed worktree whose lease holders are all gone), and the machine has been up at least 2 h. A worktree untouched `WT_STALE_DAYS` days skips the process, git lock, git operation and uptime checks; only the primary checkout, a protected branch and a live lease holder keep it.
+- Worktrees: clean and reachable from a remote after 2 h idle (`remove`), or at once when its lease names holders and none is alive; dirty or unpushed after 24 h idle (`snapshot` — pushed to `wip/` first; in a scratch repository the snapshot is also kept as a local `wip/` branch and a failed push still removes the worktree); any worktree untouched `WT_STALE_DAYS` days (7, a non-numeric or non-positive value counts as 7), whatever holds it except a protected branch or a live owner. Primary checkouts and `dev`/`main`/`master` are never touched; git-locked worktrees and a merge/rebase in progress are kept until they go stale.
 - Scratch task dirs (`~/scratchpad/<repo>/<task>`): idle past the root's `idle_days`, then the oldest dead dirs while the root is over `budget_gb`. A `.keep` file pins a dir; files at depth ≤ 2 are never touched.
 - Injection traces (`~/.agentihooks/injections/<session>.jsonl`): removed once the session is no longer live and the trace was last written more than `AGENTIHOOKS_TRACE_KEEP_DAYS` ago (default: the root's `idle_days`, 14). Liveness is checked again right before removal.
-- An action is `due` only after two sweeps at least 1 h apart in the same boot. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
-- `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree.
+- An action is `due` only after two sweeps at least 1 h apart in the same boot, except removal of a clean pushed worktree whose owner left, which is due on first sight. `--enforce` re-checks each due path against a fresh process snapshot right before acting.
+- `snapshot` builds a commit from the worktree through a temporary index (ignored files and files over 50 MB are left out and listed), with `[skip ci]` in the message, and pushes it to `wip/<repo>/<worktree>-<timestamp>`. A failed push keeps the worktree, except in a scratch repository, where the snapshot stays on a local `wip/` branch and the worktree is removed.
 - Removals are journaled in `~/.agentihooks/gc-journal.json`; the next sweep finishes any removal a crash interrupted.
-- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -u agentihooks-swarm.service`).
+- Herdr panes: `init-agent` (every swarm, resume and proof launch) and `run-in-terminal` with a command record each pane they open in `~/.agentihooks/herdr/panes/` (pane id, terminal id, tab, workspace, owner swarm and session, launch time, route status). `gc` lists, and `gc --enforce` and every `swarm tick` close, a recorded pane whose agent is gone: it sits at a bare shell (the agent or command exited, or the launch failed), its swarm agent was retired, or its swarm stopped or was removed. Never inside `AGENTIHOOKS_HERDR_GC_GRACE_MINUTES` (default 5) of launch, while its input line holds text, or while its screen changed or its agent was prompted inside `AGENTIHOOKS_INBOX_QUIET_S`; a pane whose terminal id changed, or a swarm store that cannot be read, keeps the pane. A pane agentihooks never recorded, such as a plain `run-in-terminal` shell, is never touched. A tab or workspace the sweep empties is closed. Each close prints with its reason, `herdr: closed pane …` in the tick journal (`journalctl --user -t agentihooks-swarm`).
 - Launch run folder (`$XDG_RUNTIME_DIR/agentihooks-claude-terminal`): launch scripts, route reports, prompts, start markers and profile reports older than a day are removed, and closing markers whose launcher has exited.
 
-Triggers: `agentihooks-gc.timer` runs `gc --enforce` hourly, first 2 h after boot. Every PreToolUse call that names a path inside a managed worktree or scratch task dir records the session as a lease holder; while gc is removing that path the call is blocked with a retry message. When free space (the smaller of `$HOME` and, on WSL, `/mnt/c`) drops below `AGENTIHOOKS_DISK_WARN_GB`, tool calls get a warning (at most every 10 min) and a sweep starts at once. SessionStart and SessionEnd start a sweep at most every `AGENTIHOOKS_GC_INTERVAL_MIN`; without systemd, the sweep runs as a detached hook task.
+Triggers: an `agentihooks-gc` cron on the agentihooks scheduler (`0 * * * *`) starts `gc --enforce` at the top of every hour; install and upgrade remove the older `agentihooks-gc.timer` systemd unit. Every PreToolUse call that names a path inside a managed worktree or scratch task dir records the session as a lease holder; while gc is removing that path the call is blocked with a retry message. When free space (the smaller of `$HOME` and, on WSL, `/mnt/c`) drops below `AGENTIHOOKS_DISK_WARN_GB`, tool calls get a warning (at most every 10 min) and a sweep starts at once. SessionStart and SessionEnd start a sweep at most every `AGENTIHOOKS_GC_INTERVAL_MIN`, as a detached hook task.
 
 Roots come from `profiles/_base/lifecycle.json`, overlaid by `lifecycle.json` in the bundle, each active profile and `~/.agentihooks/lifecycle.json`, merged by `id` (`"enabled": false` drops a root). Kinds: `worktrees`, `scratch`, `ttl` (delete idle entries), `archive` (gzip idle files matching `include`), `traces` (delete injection traces of ended sessions).
+
+### Worktree verdicts
+
+Each worktree gets the first verdict that applies, checked top to bottom. The reason is the text `gc` prints in parentheses after the path.
+
+A worktree untouched for `WT_STALE_DAYS` days (default 7) loses every `keep` and `skip` below except the primary checkout, a protected branch and a live lease holder: it is removed, pushed to `wip/` first when it holds uncommitted or unpushed work, with the reason `untouched over <days> days though <the hold it overrode>`.
+
+| Condition | Action | Reason | Due |
+|---|---|---|---|
+| The repository's primary checkout | `keep` | `primary checkout` | never |
+| On `dev`, `main` or `master` | `keep` | `protected branch <name>` | never |
+| Locked by `git worktree lock` and no lease | `keep` | `git-locked` | never |
+| A merge, rebase, cherry-pick, revert, bisect or index lock in the worktree's git dir | `skip` | `git <marker> in progress`, the marker file such as `MERGE_HEAD` | never |
+| A live process has its cwd inside | `keep` | `a process works inside` | never |
+| A lease holder is alive | `keep` | `owner session alive` | never |
+| The machine has been up under 2 h | `keep` | `boot grace` | never |
+| Throwaway lease (`--kind ephemeral`, `wt.sh tmp`), idle 2 h, even with uncommitted or unpushed work | `remove` | `throwaway checkout, owner gone` | after confirmation |
+| Throwaway lease, idle under 2 h | `keep` | `throwaway, recent` | never |
+| Clean, head on a remote, lease names holders and none is alive | `remove` | `clean and on a remote, owner left` | on first sight |
+| Clean, head on a remote, no lease or a lease with no holders, idle 2 h | `remove` | `clean and on a remote` | after confirmation |
+| Clean, head on a remote, no holders, idle under 2 h | `keep` | `clean, recent` | never |
+| Uncommitted changes or a head on no remote, idle 24 h | `snapshot` | `unique work, owner gone: push to wip/ then remove` | after confirmation |
+| Uncommitted changes or a head on no remote, idle under 24 h | `keep` | `unique work, recent` | never |
+
+A `snapshot` of a worktree whose primary checkout sits inside the same scratch root adds `; scratch repository: removed if the push fails` to its reason: the snapshot is first kept as a local `wip/` branch in that primary checkout, and when the push fails the worktree is still removed, so a test fixture with an unreachable origin cannot hold its scratch folder forever. The local branch stays after a successful push too, and it lives only as long as the scratch folder that holds the repository.
+
+Clean means `git status --porcelain` lists nothing, untracked files included. Head on a remote means `git rev-list HEAD --not --remotes` is empty, so a branch pushed under any name counts. Idle time runs from the newest of the worktree's index, `HEAD`, reflog and changed files. After confirmation means the action is `due` once two sweeps in the same boot, at least 1 h apart, gave it the same action; any `gc` run, report-only included, counts as a sweep. In the report, the second column is `due` when `--enforce` acts on the line and `pending` while it waits for that confirmation.
+
+The owner left verdict ignores idle time and confirmation. `wt.sh new` and `agentihooks lease <worktree>` record the calling agent session as a holder when one is found among the parent processes, and every tool call that names a path inside the worktree adds its session. Once each of those sessions has ended, a clean pushed worktree goes at the next `gc --enforce`, usually within the hour. The process, live holder and boot grace checks above still come first, and `--enforce` repeats them against a fresh process snapshot before it removes anything. A worktree nobody leased becomes due once it has been idle 2 h and two sweeps at least 1 h apart have seen it so, and the verdict never applies to unpushed or uncommitted work.
+
+When the repository is at the `WT_MAX_PER_REPO` cap (60) or free space is below `WT_MIN_FREE_GB` (50), `wt.sh new` and `wt.sh tmp` first run `agentihooks gc --make-room <repo> --root <worktree root> --min-free-gb <floor> --max-per-repo <cap>`. It evicts the oldest worktrees under the worktree root not held by the primary checkout, a protected branch, a git operation, a process inside or a live lease holder, and untouched for at least a minute so a worktree another `wt.sh new` just created is never taken: clean pushed ones are removed, unique work is pushed to `wip/` and then removed, and one whose push fails is kept. The cap evicts only that repository's worktrees; the floor evicts from every repository under the root. The cap counts every worktree git lists for the repository, so one created outside the root by hand still counts and is never evicted. `wt.sh` refuses only when nothing safe is left, and prints `worktree eviction failed (exit N)` first when the eviction run itself fails. To free a repository by hand:
+
+```bash
+agentihooks gc --path ~/dev/worktrees/agentihooks          # report; owner left removals print as due
+agentihooks gc --enforce --path ~/dev/worktrees/agentihooks
+```
+
+```text
+remove    due         0.02 GB  /home/me/dev/worktrees/agentihooks/engineer-0007  (clean and on a remote, owner left)
+remove    pending     0.02 GB  /home/me/dev/worktrees/agentihooks/notes  (clean and on a remote)
+```
+
+`engineer-0007` is removed by this sweep. `notes` has no lease holder, so it waits for a second sweep an hour later. A worktree still listed as `keep` with `owner session alive` belongs to a running agent: finish that agent's work and run `wt.sh done <name>` from it.
+
+### `lifecycle.json`
+
+Every layer is a JSON object with a `roots` list. Each root entry takes:
+
+| Field | Default | Meaning |
+|---|---|---|
+| `id` | required | Merge key across layers; an entry without a non-empty `id` is ignored |
+| `path` | required in the merged entry | Directory the root covers; `~` is expanded |
+| `kind` | required in the merged entry | One of the kinds above; any other value drops the root |
+| `idle_days` | `7` | Idle age before an entry is acted on |
+| `budget_gb` | `0` | `scratch` only: size above which the oldest dead dirs go |
+| `include` | `[]` | `ttl` and `archive`: list of file name globs the root acts on; empty means every entry. Dot names and the `archive` folder are always skipped |
+| `enabled` | `true` | `false` drops the root after the merge |
+
+Later layers update an earlier entry with the same `id` field by field, so an overlay names only what it changes. A personal `~/.agentihooks/lifecycle.json` that shortens the scratchpad idle time, turns off ledger archiving and adds a root of its own:
+
+```json
+{
+  "roots": [
+    {"id": "scratchpad", "idle_days": 3},
+    {"id": "ledgers", "enabled": false},
+    {"id": "build-cache", "path": "~/.cache/mybuild", "kind": "ttl", "idle_days": 2}
+  ]
+}
+```
+
+Each finding in `agentihooks gc --json` carries the `id` of the root it came from in its `root` field.
+
+A layer the reader cannot open or parse contributes no roots and the other layers still load: a missing file, a path that is a directory or cannot be read, text that is not JSON, JSON whose top level is not an object (`null`, `[]`) and an object with no `roots` all count as empty. Inside `roots`, entries that are not objects or have no `id` are skipped. Nothing reports a skipped layer or entry, so a broken overlay leaves the other layers' roots in force without a warning.
+
+Field types are not checked. These shapes raise out of the reader, which stops `agentihooks gc` with the error; on PreToolUse the lifecycle guard logs `lifecycle pre-tool failed` and lets the call through without recording a lease or blocking a path gc is removing:
+
+- A file that is not valid UTF-8.
+- `roots` set to `null` or a number; it must be a list.
+- `path` set to a number, or `kind` set to a list or object.
+- `include` set to `null`. `include` must be a list of strings: a bare string such as `"*.json"` is read as one pattern per character.
+
+`idle_days` and `budget_gb` must be numbers: a string loads without error, and the sweep can fail later when it computes an entry's age limit or the scratch size budget from it.
 
 ---
 
 ## `agentihooks refresh-rules`
 
-Push profile rule updates into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.
+Re-render every installed profile home from the bundle checkout and push the new rules into every running Claude Code session without a restart. Each target session consumes the refresh once on its next `UserPromptSubmit`.
 
 ```bash
 agentihooks refresh-rules [--profile <name>] [--dry-run] [--clear]
 ```
 
+`agentihooks init` re-renders only the profile homes of its own install target. It refuses to run in a rendered profile home or with `AGENTIHOOKS_SWARM` or `AGENTIHOOKS_PROFILE` set. `refresh-rules` runs there and re-renders the homes of every harness, so a manifesto or rule merged into the bundle reaches every rendered profile and its running sessions with no operator step.
+
 ### How it works
 
-1. Reads the installed rules: `~/.claude/CLAUDE.md` and every `~/.claude/rules/*.md`. In a rendered profile home (`CLAUDE_CONFIG_DIR`) it re-renders the profile first; that home has no `rules/` folder, its `CLAUDE.md` carries persona and rules together.
+1. Reads the installed rules: `~/.claude/CLAUDE.md` and every `~/.claude/rules/*.md`. In a rendered profile home (`CLAUDE_CONFIG_DIR`) it re-renders the profile first; that home has no `rules/` folder, its `CLAUDE.md` carries persona and rules together. In `~/.claude` it first copies the bundle rule files recorded at install into `~/.claude/rules`.
 2. Takes a snapshot of currently-alive session IDs from the broadcast registry.
 3. Writes `~/.agentihooks/force_refresh/rules-<profile>.json` containing the payload + pending session list.
-4. On each targeted session's next `UserPromptSubmit`, the hook injects the payload and removes the session from pending.
-5. When pending drains → marker deleted. Otherwise marker auto-GCs after 24h.
+4. Re-renders every other installed profile home for each harness, `claude`, `codex` and `copilot`, from the bundle as the checkout holds it now, and prints `[OK] Re-rendered the <key> profile home` for each. It skips only the Claude home of the refreshed profile, the one `--profile` names or the one detected. Run without `--profile` from a rendered home, that is the home step 1 already rendered. Codex and Copilot homes get no marker; their sessions load the new rules at their next start.
+5. Writes a refresh marker for every re-rendered Claude home, `rules-<key>.json` with that home's new rules, and prints `[OK] Refresh marker written for profile '<key>' (<n> sessions).`
+6. On each targeted session's next `UserPromptSubmit`, the hook checks that the session runs from the profile home the marker names, injects the rules of that profile's current home and removes the session from pending. A session of another profile is removed from pending with nothing injected.
+7. When pending drains → marker deleted. Otherwise marker auto-GCs after 24h.
 
 Sessions started AFTER the push never see the marker — they get fresh rules at `SessionStart`, so re-injection would be redundant.
+
+A rendered Claude home lives at `~/.agentihooks/profiles/.homes/<key>/<render>/claude`, and `~/.agentihooks/profiles/.homes/<key>/current` points at the newest render. Each re-render moves `current`; a session started earlier keeps running from its older render folder. When it consumes the marker, the hook reads the rules from `current`, so it receives the merged doctrine.
+
+The render reads the bundle checkout linked with `agentihooks init --bundle <path>` as it stands, so pull the merged commit into that checkout first. In a Doctor swarm, `agentihooks doctor <slug> intervene refresh-rules`, where `<slug>` is the watched ledger or its Doctor ledger, runs this command and logs `The Doctor refreshed the installed rules for every running session.` on both ledgers.
 
 ### Flags
 
 | Flag | Description |
 |------|-------------|
-| `--profile <name>` | Profile name (default: detected from the `~/.claude/CLAUDE.md` symlink target) |
-| `--dry-run` | Print what would be pushed (profile, content hash, payload size, target session IDs) without writing the marker |
+| `--profile <name>` | Profile name (default: the profile of the rendered home it runs from, else detected from the `~/.claude/CLAUDE.md` symlink target, else `anton`) |
+| `--dry-run` | Print what would be pushed (profile, content hash, payload size, target session IDs) without writing the marker or re-rendering any home |
 | `--clear` | Delete any existing pending marker for the profile (cancel a push in progress) |
 
 ### Examples
@@ -497,7 +749,20 @@ agentihooks refresh-rules
 
 # Cancel a pending marker without waiting for TTL
 agentihooks refresh-rules --clear
+
+# After a bundle merge: pull it into the linked bundle checkout, then refresh
+git -C ~/dev/agentihooks-bundle pull --ff-only origin dev
+agentihooks refresh-rules
+
+# The same refresh as a Doctor intervention on the watched swarm
+agentihooks doctor my-swarm intervene refresh-rules
 ```
+
+### Troubleshooting
+
+- A profile whose render is refused keeps its previous home, and the command prints `[--] Profile home <key> kept as it was: <reason>`. Fix the reason and run the command again. Any other render error stops the command; homes after that profile are not re-rendered and get no marker.
+- `--profile` naming a profile other than the home it runs from skips that profile's Claude home without re-rendering it. Run the command without `--profile`, or from that profile's home.
+- A session running from a legacy home, a real directory outside `.homes`, receives the refresh only when the command runs from that same home.
 
 ---
 

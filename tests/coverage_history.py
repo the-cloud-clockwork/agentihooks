@@ -1,3 +1,4 @@
+import functools
 import os
 import subprocess
 import time
@@ -38,6 +39,7 @@ def renamed(repo: Path, base: str) -> dict[str, str | tuple[str, ...]]:
 
 
 def _show(repo: Path, commit: str) -> Source:
+    @functools.cache
     def source(path: str) -> str | None:
         shown = subprocess.run(["git", "show", f"{commit}:{path}"], cwd=repo, capture_output=True, text=True)
         return shown.stdout if shown.returncode == 0 else None

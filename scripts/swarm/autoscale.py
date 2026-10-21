@@ -15,13 +15,34 @@ class Decision(TypedDict):
 
 def _shifted(ceilings: dict[str, int], live: dict[str, int], demand: dict[str, int], shift: int) -> tuple[dict, str]:
     giver, taker = ("eng", "ci") if shift > 0 else ("ci", "eng")
-    floor = max(live.get(giver, 0), 1 if demand.get(giver) else 0)
-    moved = min(abs(shift), max(0, ceilings[giver] - floor))
+    floor = live.get(giver, 0) + bool(demand.get(giver))
+    needed = max(0, live.get(taker, 0) + demand.get(taker, 0) - ceilings[taker])
+    moved = min(abs(shift), max(0, ceilings[giver] - floor), needed)
     ceilings[giver] -= moved
     ceilings[taker] += moved
     return {
         "shift": moved if giver == "eng" else -moved
     }, f"; lane shift {moved} from {giver} to {taker}" if moved else ""
+
+
+def _ceilings(live: dict[str, int], demand: dict[str, int], total: int) -> dict[str, int]:
+    ceilings = {}
+    room = total
+    for lane in ("plan", "ci", "eng"):
+        ceilings[lane] = min(room, live.get(lane, 0))
+        room -= ceilings[lane]
+    for lane in ("plan", "ci", "eng"):
+        added = min(room, bool(demand.get(lane)))
+        ceilings[lane] += added
+        room -= added
+    while room:
+        ready = [lane for lane in ceilings if ceilings[lane] < live.get(lane, 0) + demand.get(lane, 0)]
+        if not ready:
+            break
+        lane = min(ready, key=ceilings.get)
+        ceilings[lane] += 1
+        room -= 1
+    return ceilings
 
 
 def calculate(
@@ -44,16 +65,8 @@ def calculate(
         total = current if ticks < 3 else min(target, current + 2)
         if total == target:
             pending = {"target": None, "ticks": 0}
-    ceilings = {}
-    room = total
-    for lane in ("plan", "ci", "eng"):
-        ceilings[lane] = min(room, live.get(lane, 0))
-        room -= ceilings[lane]
-    for lane in ("plan", "ci", "eng"):
-        added = min(room, demand.get(lane, 0))
-        ceilings[lane] += added
-        room -= added
-    ceilings["eng"] += room
+    total = max(total, min(target, sum(live.values()) + sum(bool(count) for count in demand.values())))
+    ceilings = _ceilings(live, demand, total)
     extra, shifted = _shifted(ceilings, live, demand, shift) if shift else ({}, "")
     harnesses = ", ".join(f"{harness} {seats}" for harness, seats in sorted(free_seats.items()))
     host_text = "unknown" if host_room is None else host_room

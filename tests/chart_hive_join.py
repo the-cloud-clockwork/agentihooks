@@ -70,6 +70,10 @@ def container_problems(container: dict, values: dict, fullname: str) -> list[str
     if container["command"] != command(join):
         problems.append(f"the hive join command is {json.dumps(container['command'])}")
     expected_env = [{"name": "AGENTIHOOKS_DEPLOYMENT", "value": values["deployment"]}, redis_env(values, fullname)]
+    if (ledger_tls := values["ledger"]["tls"]["secretName"]) and join["serveLedgerCa"]:
+        expected_env.append(
+            {"name": "LEDGER_CA_PEM", "valueFrom": {"secretKeyRef": {"name": ledger_tls, "key": "ca.crt"}}}
+        )
     if container.get("env") != expected_env:
         problems.append(f"the hive join env is {json.dumps(container.get('env'), sort_keys=True)}")
     if container.get("volumeMounts") != [{"name": "tls", "mountPath": "/tls", "readOnly": True}]:

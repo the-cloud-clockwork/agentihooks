@@ -65,6 +65,10 @@ def markdown(result: dict, source: str) -> str:
             f"{_counts(row['transient'])} | {_cell(row['node_provision_ms'])} | {_cell(row['image_init_ms'])} | "
             f"{stages} |"
         )
+    lines.extend(["", "| Scenario | Container | Image | Pull duration |", "|---|---|---|---|"])
+    for name, row in result["scenarios"].items():
+        for pull in row["image_pulls"]:
+            lines.append(f"| {name} | {pull['container']} | {pull['image']} | {_cell(pull['duration_ms'])} |")
     return "\n".join(lines) + "\n"
 
 

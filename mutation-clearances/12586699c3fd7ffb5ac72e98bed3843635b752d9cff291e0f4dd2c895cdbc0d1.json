@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/controller.py:scripts.swarm.controller.x__stat__mutmut_4:f1e59df448fe91a7c91ec29b70c7dc509be75b7067d61f0eb86109c40a30b7d0": {
+    "reader": "Independent equivalence reader, sub agent of ci@d44a5a-0025",
+    "reason": "Only the last element of str.rsplit on the closing parenthesis is observed. Removing maxsplit or raising it from one to two leaves the text after the final parenthesis unchanged for every input. A probe over stat shaped strings with zero, one and three closing parentheses, including a comm holding nested parentheses, agreed on every output."
+  }
+}

@@ -42,6 +42,27 @@ def _inside(tool: str, value: str, cwd: Path, roots: list[Path]) -> bool:
     return any(target.is_relative_to(root) for root in roots)
 
 
+def _seated(session: str, agentihooks: Path) -> bool:
+    if os.environ.get("AGENTIHOOKS_SWARM_TASK") == "master":
+        return True
+    return bool(session) and (agentihooks / "master_seats" / f"{session}.json").is_file()
+
+
+def hotfix_open(payload: dict, role: str) -> bool:
+    """The operator typed allow-master-coding in this master pane within the last thirty minutes."""
+    if role != "master":
+        return False
+    from hooks.context import master_coding
+
+    return master_coding.is_open(str(payload.get("session_id") or ""))
+
+
+def _delegated(payload: dict, role: str, home: Path) -> bool:
+    session = re.sub(r"[^A-Za-z0-9_.@-]", "_", str(payload.get("session_id") or ""))
+    agentihooks = Path(os.environ.get("AGENTIHOOKS_HOME") or home / ".agentihooks")
+    return role == "master" and bool(payload.get("agent_id")) and _seated(session, agentihooks)
+
+
 def deny_reason(payload: dict, role: str, home: Path) -> str:
     tool = payload["tool_name"].lower()
     if tool not in BUILTIN_WRITES | SERENA_WRITES:
@@ -51,13 +72,25 @@ def deny_reason(payload: dict, role: str, home: Path) -> str:
     paths.extend(inputs.get("file_paths", []))
     cwd = Path(payload.get("cwd") or os.getcwd())
     roots = _allowed_roots(role, home)
+    if _delegated(payload, role, home) or hotfix_open(payload, role):
+        from hooks.context.master_coding import closed_in_window
+
+        if any(closed_in_window(value, cwd) for value in paths):
+            return "master hotfix window: condition folders and credential files stay closed."
+        roots.append((home / "dev" / "worktrees").resolve())
+        relative = all(value and not Path(value).expanduser().is_absolute() for value in paths)
+        if tool in SERENA_WRITES - {"mcp__serena__rename_symbol"} and paths and relative:
+            return ""
     if paths and all(_inside(tool, value, cwd, roots) for value in paths):
         return ""
     return f"{role} cannot edit outside ~/scratchpad; send the change to its author."
 
 
 def main(role: str) -> int:
-    reason = deny_reason(json.load(sys.stdin), role, Path.home())
+    try:
+        reason = deny_reason(json.load(sys.stdin), role, Path.home())
+    except Exception:
+        reason = f"{role} cannot evaluate the coding window; edits stay closed."
     if reason:
         print(reason, file=sys.stderr)
         return 2

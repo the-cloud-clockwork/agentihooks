@@ -56,7 +56,7 @@ class Runner:
 
 
 def qualifier(runner: Runner) -> Qualifier:
-    return Qualifier(capabilities.machine_probe(runner))
+    return Qualifier(capabilities.machine_probe(runner), capabilities.machine_status(runner))
 
 
 def _refused(action) -> str:
@@ -93,7 +93,7 @@ def _positive_once() -> dict:
 def _positive() -> tuple[dict, bool]:
     first, second = _positive_once(), _positive_once()
     every_machine = all(argv[:3] == ["herdr", "--machine", TARGET] for argv in first["commands"].values())
-    probed_once = len(first["probe_commands"]) == 3
+    probed_once = first["probe_commands"].count(["herdr", *capabilities.STATUS_CLIENT]) == 1
     passed = first == second and every_machine and probed_once and first["herdr_capability_mismatch_total"] == 0
     return {"first": first, "second_identical": first == second}, passed
 
@@ -138,20 +138,24 @@ def _recovery() -> tuple[dict, bool]:
     runner = Runner(fx["server"])
     gate = qualifier(runner)
     steps = {"accepted": gate.require(TARGET, "incarnation-1", "pane_read")}
+    steps["same_server_cached"] = gate.require(TARGET, "incarnation-1", "pane_read")
     runner.server = copy.deepcopy(fx["missing_forwarding_server"])
-    steps["same_incarnation_cached"] = gate.require(TARGET, "incarnation-1", "pane_read")
-    steps["restarted_without_capability"] = _refused(lambda: gate.require(TARGET, "incarnation-2", "pane_read"))
+    steps["restarted_without_capability"] = _refused(lambda: gate.require(TARGET, "incarnation-1", "pane_read"))
     runner.server = copy.deepcopy(fx["server"])
-    steps["restarted_compatible"] = gate.require(TARGET, "incarnation-3", "pane_read")
+    steps["restarted_compatible"] = gate.require(TARGET, "incarnation-1", "pane_read")
+    steps["replaced_compatible"] = gate.require(TARGET, "incarnation-2", "pane_read")
     steps["stale_incarnation"] = _refused(lambda: gate.require(TARGET, "incarnation-1", "pane_read"))
-    steps["probes"] = sum(1 for command in runner.commands if "--machine" in command)
+    steps["probes"] = runner.commands.count(["herdr", *capabilities.STATUS_CLIENT])
     steps["herdr_capability_mismatch_total"] = gate.herdr_capability_mismatch_total()
     steps["mismatches_by_target_and_reason"] = _labelled(gate)
     passed = (
-        steps["accepted"] == steps["same_incarnation_cached"] == steps["restarted_compatible"]
+        steps["accepted"]
+        == steps["same_server_cached"]
+        == steps["restarted_compatible"]
+        == steps["replaced_compatible"]
         and "surface_interest" in steps["restarted_without_capability"]
         and "was replaced" in steps["stale_incarnation"]
-        and steps["probes"] == 3
+        and steps["probes"] == 4
         and steps["herdr_capability_mismatch_total"] == 1
     )
     return steps, passed

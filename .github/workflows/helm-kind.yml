@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   kind:
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && (github.event_name == 'merge_group' && 'anton-oss-queue' || 'anton-oss') || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       KIND_VERSION: v0.33.0
@@ -22,7 +22,13 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.sha }}
+      - name: Key the declared inputs
+        id: key
+        uses: ./.github/actions/input-key
+        with:
+          job: helm-kind
       - name: Install kind
+        if: steps.key.outputs.hit != 'true'
         run: |
           if ! kind version; then
             curl -fsSLo kind-linux-amd64 "https://kind.sigs.k8s.io/dl/$KIND_VERSION/kind-linux-amd64"
@@ -34,5 +40,35 @@ jobs:
           fi
           helm version --short
           kubectl version --client
+      - name: Restore the fixture image layers
+        id: layers
+        if: steps.key.outputs.hit != 'true'
+        uses: actions/cache/restore@v4
+        with:
+          path: ${{ runner.temp }}/kind-layers
+          key: kind-layers-${{ hashFiles('Dockerfile', 'pyproject.toml', 'README.md', 'docker/swarm/requirements.lock', 'docker/swarm-node/versions.lock', 'docker/swarm-node/requirements.lock', 'scripts/swarm_v2/worker_image.py', 'deploy/helm/agentihooks-swarm/ci/terminal-worker.Dockerfile') }}
+          restore-keys: kind-layers-
       - name: Lint, install and prove the chart in kind
+        if: steps.key.outputs.hit != 'true'
+        env:
+          KIND_LAYER_CACHE: ${{ runner.temp }}/kind-layers
+          KIND_LAYER_CACHE_HIT: ${{ steps.layers.outputs.cache-hit }}
         run: bash deploy/helm/agentihooks-swarm/ci/kind-smoke.sh
+      - name: Check the fixture image layers were exported
+        id: exported
+        if: always() && steps.key.outputs.hit != 'true' && steps.layers.outputs.cache-hit != 'true'
+        run: |
+          if [[ -e $RUNNER_TEMP/kind-layers/complete ]]; then
+            echo complete=true >> "$GITHUB_OUTPUT"
+          fi
+      - name: Save the fixture image layers
+        if: always() && steps.key.outputs.hit != 'true' && steps.exported.outputs.complete == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ${{ runner.temp }}/kind-layers
+          key: ${{ steps.layers.outputs.cache-primary-key }}
+      - name: Save the passed input key
+        if: steps.key.outputs.hit == 'false' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        uses: ./.github/actions/input-key/save
+        with:
+          key: ${{ steps.key.outputs.key }}

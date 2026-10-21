@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/capacity.py:scripts.swarm.capacity.x__master_snapshot__mutmut_43:4bf1bc2b2afce7db4c253e9e31b4a61f28974a2ef8060b953b3043e2fc5ca65a": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: claude_quota_balancer._state branches only on provider_status == 'rejected', so any non-rejected value takes the same path."
+  }
+}

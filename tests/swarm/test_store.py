@@ -6,8 +6,6 @@ import pytest
 
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def store():
@@ -47,6 +45,131 @@ def test_a_task_claim_is_exclusive_until_released(store):
     assert store.claimant("smoke", "t1") == "engineer@a1b2c3-0001"
     store.release("smoke", "t1", "engineer@a1b2c3-0001")
     assert store.claim("smoke", "t1", "engineer@a1b2c3-0002", lease_ms=60_000)
+
+
+def test_lease_repair_is_fenced_against_a_newer_execution_and_other_holder(store):
+    from dataclasses import replace
+
+    from scripts.swarm.store import AgentRecord
+
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    assert store.ensure_claim("smoke", owner, 60_000)
+    assert store.claimant("smoke", "t1") == owner.name
+    store.release("smoke", "t1", owner.name)
+    successor = replace(owner, started_at=2_000)
+    store.put_agent("smoke", successor)
+    assert not store.ensure_claim("smoke", owner, 60_000)
+    assert store.claimant("smoke", "t1") is None
+    assert store.claim("smoke", "t1", "other", 60_000)
+    assert not store.ensure_claim("smoke", successor, 60_000)
+    assert store.claimant("smoke", "t1") == "other"
+
+
+def test_a_stale_release_cannot_delete_a_reacquired_lease_with_the_same_name(store):
+    store.create(config())
+    assert store.claim("smoke", "t1", "owner", 60_000)
+    generation = store.claim_generation("smoke", "t1")
+    assert store.release("smoke", "t1", "owner")
+    assert store.claim("smoke", "t1", "owner", 60_000)
+    assert not store.release_ready("smoke", "t1", "owner", generation, None)
+    assert store.claimant("smoke", "t1") == "owner"
+    assert store.release_ready("smoke", "t1", "owner", store.claim_generation("smoke", "t1"), None)
+
+
+def test_ready_cleanup_compares_the_record_even_when_the_lease_did_not_change(store):
+    store.create(config())
+    store.claim("smoke", "t1", "owner", 60_000)
+    ready_key = store.key("smoke", "ready")
+    store.redis.hset(ready_key, "t1", "new-ready-record")
+    generation = store.claim_generation("smoke", "t1")
+    assert not store.release_ready("smoke", "t1", "owner", generation, "old-ready-record")
+    assert store.claimant("smoke", "t1") == "owner"
+    assert store.redis.hget(ready_key, "t1") == "new-ready-record"
+    assert store.release_ready("smoke", "t1", "owner", generation, "new-ready-record")
+    assert store.claimant("smoke", "t1") is None
+    assert store.redis.hget(ready_key, "t1") is None
+
+
+def race_at_multi(store, monkeypatch, change):
+    original = store.redis.pipeline
+
+    def pipeline(*args, **kwargs):
+        pipe = original(*args, **kwargs)
+        multi = pipe.multi
+
+        def begin():
+            multi()
+            change()
+
+        pipe.multi = begin
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", pipeline)
+
+
+@pytest.mark.parametrize("kind", ["lease", "agents", "executions", "task-authority", "claim-journal"])
+def test_lease_repair_rejects_a_concurrent_ownership_change(store, monkeypatch, kind):
+    import json
+    from dataclasses import asdict, replace
+
+    from scripts.swarm.store import AgentRecord
+
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", started_at=1_000)
+    store.put_agent("smoke", owner)
+    row = asdict(replace(owner, started_at=2_000, execution_id="new-execution", generation=2))
+    changes = {
+        "lease": lambda: store.redis.set(store.key("smoke", "claim", "t1"), "successor"),
+        "agents": lambda: store.redis.hset(
+            store.key("smoke", "agents"), owner.name, json.dumps(asdict(replace(owner, started_at=2_000)))
+        ),
+        "executions": lambda: store.redis.hset(store.key("smoke", "executions"), "new-execution", json.dumps(row)),
+        "task-authority": lambda: store.redis.set(store.key("smoke", "task-authority", "t1"), "new-authority"),
+        "claim-journal": lambda: store.redis.set(store.key("smoke", "claim-journal", "t1"), "new-journal"),
+    }
+    race_at_multi(store, monkeypatch, changes[kind])
+    assert not store.ensure_claim("smoke", owner, 60_000)
+    assert store.claimant("smoke", "t1") == ("successor" if kind == "lease" else None)
+
+
+@pytest.mark.parametrize("kind", ["lease", "generation", "ready", "task-authority", "claim-journal"])
+def test_ready_cleanup_rejects_a_concurrent_ownership_change(store, monkeypatch, kind):
+    store.create(config())
+    store.claim("smoke", "t1", "owner", 60_000)
+    key, ready_key = store.key("smoke", "claim", "t1"), store.key("smoke", "ready")
+    generation = store.claim_generation("smoke", "t1")
+    store.redis.hset(ready_key, "t1", "old-ready")
+    changes = {
+        "lease": lambda: store.redis.set(key, "successor"),
+        "generation": lambda: store.redis.incr(f"{key}:generation"),
+        "ready": lambda: store.redis.hset(ready_key, "t1", "successor-ready"),
+        "task-authority": lambda: store.redis.set(store.key("smoke", "task-authority", "t1"), "new-authority"),
+        "claim-journal": lambda: store.redis.set(store.key("smoke", "claim-journal", "t1"), "new-journal"),
+    }
+    race_at_multi(store, monkeypatch, changes[kind])
+    assert not store.release_ready("smoke", "t1", "owner", generation, "old-ready")
+    assert store.claimant("smoke", "t1") == ("successor" if kind == "lease" else "owner")
+    assert store.redis.hget(ready_key, "t1") == ("successor-ready" if kind == "ready" else "old-ready")
+
+
+@pytest.mark.parametrize("state", ["starting", "working", "awaiting-decision"])
+def test_lease_repair_preserves_its_generation_and_expiry_until_reacquired(store, state):
+    from scripts.swarm.store import AgentRecord
+
+    store.create(config())
+    owner = AgentRecord("owner", "eng", "t1", state=state)
+    assert not store.ensure_claim("smoke", owner, 60_000)
+    store.put_agent("smoke", owner)
+    assert store.ensure_claim("smoke", owner, 60_000)
+    assert store.claim_generation("smoke", "t1") == 1
+    assert 0 < store.redis.pttl(store.key("smoke", "claim", "t1")) <= 60_000
+    assert store.ensure_claim("smoke", owner, 60_000)
+    assert store.claim_generation("smoke", "t1") == 1
+    store.release("smoke", "t1", owner.name)
+    assert store.ensure_claim("smoke", owner, 60_000)
+    assert store.claim_generation("smoke", "t1") == 2
 
 
 def test_claims_count_agent_lives_per_task_until_reset(store):
@@ -115,7 +238,16 @@ def test_launch_rows_merge_recorded_launches_with_verified_history(store):
     assert sorted(store.launches("smoke"), key=lambda row: row["agent"]) == [
         {"agent": "first", "task": "t1", "at": 1, "state": "started", "error": ""},
         {"agent": "last", "task": "t2", "at": 3, "state": "started", "error": ""},
-        {"agent": "waiting", "task": "t3", "at": 4, "state": "pending", "error": "", "pane_id": ""},
+        {
+            "agent": "waiting",
+            "task": "t3",
+            "at": 4,
+            "state": "pending",
+            "error": "",
+            "pane_id": "",
+            "after": "",
+            "head": "",
+        },
     ]
 
 
@@ -252,6 +384,32 @@ def test_scaling_settings_round_trip_and_an_old_config_reads_the_defaults(store)
     assert DEFAULT_LOAD_LOW < DEFAULT_LOAD_HIGH
 
 
+def test_the_swap_use_share_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FULL_SHARE
+
+    store.create(config(swap_full_share=0.75))
+    assert store.config("smoke").swap_full_share == 0.75
+    assert store.update("smoke", swap_full_share=1).swap_full_share == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_full_share")
+    assert store.config("smoke").swap_full_share == DEFAULT_SWAP_FULL_SHARE == 0.9
+
+
+def test_the_swap_floor_round_trips_and_an_old_config_reads_the_default(store):
+    from scripts.swarm.store import DEFAULT_SWAP_FLOOR_MB
+
+    store.create(config(swap_floor_mb=3000))
+    assert store.config("smoke").swap_floor_mb == 3000
+    assert store.update("smoke", swap_floor_mb=1).swap_floor_mb == 1
+    store.redis.hdel(store.key("smoke", "config"), "swap_floor_mb")
+    assert store.config("smoke").swap_floor_mb == DEFAULT_SWAP_FLOOR_MB == 4096
+
+
+def test_create_refuses_a_swap_use_share_outside_zero_to_one(store):
+    with pytest.raises(SwarmError) as caught:
+        store.create(config(swap_full_share=1.5))
+    assert str(caught.value) == "swap full share must be above 0 and at most 1"
+
+
 def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
     store.create(config(api_url="https://swarm.example.test:8443"))
     assert store.config("smoke").api_url == "https://swarm.example.test:8443"
@@ -272,6 +430,13 @@ def test_the_api_address_round_trips_and_an_old_config_reads_it_empty(store):
         {"load_low": True},
         {"load_high": True},
         {"load_high": "2"},
+        {"swap_full_share": 0},
+        {"swap_full_share": 1.01},
+        {"swap_full_share": True},
+        {"swap_full_share": "0.5"},
+        {"swap_floor_mb": 0},
+        {"swap_floor_mb": 0.5},
+        {"swap_floor_mb": True},
     ],
 )
 def test_update_refuses_bad_scaling_settings_and_keeps_the_stored_ones(store, changes):

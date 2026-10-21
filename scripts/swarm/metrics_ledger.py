@@ -170,8 +170,8 @@ def snapshot_nodes(doc: dict) -> list:
     ]
 
 
-def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerClient) -> None:
-    doc = ledger.state(slug)
+def record(box: metrics_outbox.Outbox, slug: str, now_ms: int, ledger: LedgerClient, doc: dict | None = None) -> None:
+    doc = ledger.state(slug) if doc is None else doc
     nodes = snapshot_nodes(doc)
     box.db.execute(CHECKPOINT)
     box.db.execute(PATHS)

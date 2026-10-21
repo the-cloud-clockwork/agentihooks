@@ -5,7 +5,7 @@ from scripts.inbox.wake import wake_pass
 from scripts.swarm.ledger_events import event_pass
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 class Ledger:

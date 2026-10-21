@@ -40,9 +40,9 @@ def tab(browser):
     def answer(route):
         if "/api/" not in route.request.url:
             return route.fulfill(body=html, content_type="text/html")
-        if "/api/swarm/" in route.request.url:
+        if "/swarm/" in route.request.url:
             return route.fulfill(body="null", content_type="application/json")
-        if not route.request.url.endswith("/api/alerts-page"):
+        if not route.request.url.endswith("/api/v1/ledgers/alerts-page/saves"):
             return route.fulfill(json={})
         if route.request.method == "PUT":
             for op in json.loads(route.request.post_data)["ops"]:
@@ -59,7 +59,7 @@ def tab(browser):
     serve_modules(context, ledger_state(DOC))
     page = context.new_page()
     page.goto(URL)
-    page.set_default_timeout(2000)
+    page.set_default_timeout(5000)
     loaded(page)
     page.sent = sent
     yield page

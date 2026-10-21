@@ -9,11 +9,12 @@ from scripts.hive import auth
 from scripts.swarm_ledger import ledger_authority as authority
 from scripts.swarm_ledger import ledger_bin, proof_ledger, run
 from scripts.swarm_ledger.api import proofs
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER, send
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+repository = default_repository()
+
 
 live = _authority_live
 CONTENT = {"title": "Anton launch proof", "phases": [{"title": "Launch", "description": "One worker on Anton"}]}
@@ -173,7 +174,10 @@ def client_env(live, credential, task):
 
 def test_the_remote_client_creates_and_removes_a_proof_ledger_with_the_controller_credential(live, credential):
     environ = client_env(live, credential, "tclient")
-    with patch.object(proof_ledger.urllib.request, "urlopen", wraps=urllib.request.urlopen) as opened:
+    with (
+        patch.object(proof_ledger.ledger_link, "transport", return_value={}),
+        patch.object(proof_ledger.urllib.request, "urlopen", wraps=urllib.request.urlopen) as opened,
+    ):
         assert proof_ledger.create(CONTENT, environ) == {"slug": "proof-323133-tclient-1", "created": True}
     assert opened.call_args.kwargs == {"timeout": 10}
     removed = proof_ledger.remove("proof-323133-tclient-1", environ)
@@ -232,3 +236,182 @@ def test_the_proof_command_needs_an_action_and_its_content(argv):
     with pytest.raises(SystemExit) as exited:
         proof_ledger.main(argv)
     assert exited.value.code == 2
+
+
+def test_creating_engineer_gets_a_scoped_pause_credential(live, credential, hive, monkeypatch):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import server
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0))
+    owner = store.next_name(SLUG, "eng")
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    status, created = create(live, credential, "tscope", agent=owner)
+    assert status == 200
+    slug = created["data"]["slug"]
+    store.create(SwarmConfig(slug, "/repo", 1, 0, scratch=True, state="running"))
+    headers = {"X-Ledger-Agent": owner, "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, owner)}
+    status, issued = post(live, f"/api/v1/proof-ledgers/{slug}/credential", {}, **headers)
+    assert status == 200
+    token = issued["data"]["credential"]
+    assert token and token != headers["X-Ledger-Token"]
+    before = store.config(slug)
+    status, accepted = post(
+        live,
+        f"/api/v1/proof-ledgers/{slug}/controls",
+        {"control": "pause"},
+        **{"X-Proof-Credential": token},
+    )
+    assert status == 200
+    assert accepted["data"]["state"] == "pending"
+    from scripts.swarm import commands
+
+    row = commands.rows(store, slug)[0]
+    assert row["command"] == "swarm" and row["argv"] == ["pause"]
+    assert store.config(slug) == before
+    from scripts.swarm import cli, command_runner
+
+    def consume_pause(argv, environ):
+        with patch.dict(os.environ, environ, clear=True):
+            return "" if cli.main(argv[1:]) == 0 else "pause failed"
+
+    monkeypatch.setattr(command_runner, "run", consume_pause)
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    monkeypatch.setattr(cli, "run_tick", lambda *args, **kwargs: [])
+    assert command_runner.consume(store, slug) == ["control swarm acknowledged"]
+    assert store.config(slug).state == "paused"
+    assert store.config(slug).max_eng == before.max_eng
+    for payload in (
+        {"control": "cancel"},
+        {"control": "force_stop"},
+        {"control": "attach"},
+        {},
+        [],
+        {"control": "pause", "extra": True},
+    ):
+        assert post(live, f"/api/v1/proof-ledgers/{slug}/controls", payload, **{"X-Proof-Credential": token})[0] == 403
+    assert (
+        post(live, f"/api/v1/proof-ledgers/{slug}/controls", {"control": "pause"}, **{"X-Proof-Credential": "wrong"})[0]
+        == 403
+    )
+    assert post(live, f"/api/v1/proof-ledgers/{slug}/controls", {"control": "pause"})[0] == 403
+    status, sibling = create(live, credential, "tsibling", agent=owner)
+    assert status == 200
+    sibling_slug = sibling["data"]["slug"]
+    store.create(SwarmConfig(sibling_slug, "/repo", 1, 0, scratch=True))
+    assert (
+        post(
+            live,
+            f"/api/v1/proof-ledgers/{sibling_slug}/controls",
+            {"control": "pause"},
+            **{"X-Proof-Credential": token},
+        )[0]
+        == 403
+    )
+    assert commands.rows(store, sibling_slug) == []
+    assert len(commands.rows(store, slug)) == 1
+    for other in (SLUG, "rig-grade-swarm", "rig-grade-swarm-doctor"):
+        assert (
+            post(
+                live, f"/api/v1/proof-ledgers/{other}/controls", {"control": "pause"}, **{"X-Proof-Credential": token}
+            )[0]
+            == 403
+        )
+
+
+def test_creating_engineer_drains_worker_through_client_without_cap_changes(
+    live, credential, hive, monkeypatch, tmp_path, capsys
+):
+    from scripts.swarm import commands, lifecycle
+    from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import server
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0))
+    owner = store.next_name(SLUG, "eng")
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    status, created = create(live, credential, "tdrain", agent=owner)
+    assert status == 200
+    slug = created["data"]["slug"]
+    store.create(SwarmConfig(slug, "/repo", 1, 0, scratch=True))
+    worker = store.start_execution(
+        slug,
+        AgentRecord(
+            store.next_name(slug, "eng"),
+            "eng",
+            "t1",
+            seat=f"eng-1@{slug}",
+            runtime_backend="kubernetes",
+            runtime_target={"pod_namespace": "proof", "pod_name": "worker", "pod_uid": "worker-uid"},
+        ),
+    )
+    monkeypatch.setenv("AGENTIHOOKS_DEPLOYMENT", "local")
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", owner)
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", SLUG)
+    monkeypatch.setattr(server, "swarm_status", lambda target: {"state": store.config(target).state})
+    before = store.config(slug)
+    body = {"control": "drain", "agent": worker.name, "op": "drain-first", **lifecycle.seen(worker, {})}
+    result = proof_ledger.control(
+        slug,
+        body,
+        {
+            "LEDGER_DIR": str(server.core.LEDGER_DIR),
+            "LEDGER_HOST": "127.0.0.1",
+            "LEDGER_PORT": str(live["port"]),
+            "AGENTIHOOKS_AGENT_NAME": owner,
+            "AGENTIHOOKS_SWARM": SLUG,
+        },
+    )
+    assert result == {"state": "running"}
+    from scripts.swarm import cli
+
+    monkeypatch.setenv("LEDGER_DIR", str(server.core.LEDGER_DIR))
+    monkeypatch.setenv("LEDGER_HOST", "127.0.0.1")
+    monkeypatch.setenv("LEDGER_PORT", str(live["port"]))
+    monkeypatch.setattr(cli, "connect", lambda: store)
+    request_file = tmp_path / "drain-request.json"
+    request_file.write_text(json.dumps(body))
+    capsys.readouterr()
+    assert cli.main([slug, "proof-control", "--request", str(request_file)]) == 0
+    assert json.loads(capsys.readouterr().out) == {"state": "running"}
+    assert store.config(slug) == before
+    operation = lifecycle.operations(store, slug)[0]
+    assert operation["control"] == "drain" and operation["execution_id"] == worker.execution_id
+    assert commands.rows(store, slug)[0]["argv"] == ["drain", worker.name, "drain-first"]
+    assert "credential" not in json.dumps(operation)
+    from scripts.swarm import command_runner
+    from scripts.swarm_v2.api.commands import CommandQueue
+
+    assert command_runner.consume(store, slug) == ["control lifecycle acknowledged"]
+    pending = CommandQueue(store, slug).pending(worker.execution_id, 10)
+    assert len(pending) == 1
+    assert pending[0]["kind"] == "drain"
+    assert pending[0]["generation"] == worker.generation
+    assert store.config(slug) == before
+
+
+@pytest.mark.parametrize("identity", ["other", "operator", "missing", "forged"])
+def test_fixture_credential_retrieval_refuses_every_identity_but_its_creator(
+    live, credential, hive, monkeypatch, identity
+):
+    from scripts.swarm.store import RedisStore, SwarmConfig
+    from tests.swarm_ledger.test_ledger_authority import server
+
+    store = RedisStore(hive)
+    store.create(SwarmConfig(SLUG, "/repo", 1, 0))
+    owner = store.next_name(SLUG, "eng")
+    monkeypatch.setattr(server, "swarm_store", lambda: store)
+    status, created = create(live, credential, "tidentity", agent=owner)
+    assert status == 200
+    name = store.next_name(SLUG, "eng") if identity == "other" else owner
+    headers = {"X-Ledger-Agent": name, "X-Ledger-Token": authority.agent_token(live["admin"], SLUG, name)}
+    if identity == "operator":
+        headers["X-Ledger-Token"] = live["admin"]
+    elif identity == "missing":
+        headers = {}
+    elif identity == "forged":
+        headers["X-Ledger-Token"] = "wrong"
+    slug = created["data"]["slug"]
+    status, refused = post(live, f"/api/v1/proof-ledgers/{slug}/credential", {}, **headers)
+    assert status == 403 and refused["error"]["code"] == "forbidden"
+    assert store.redis.lrange(store.key(slug, "command-pending"), 0, -1) == []

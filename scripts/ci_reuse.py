@@ -22,25 +22,127 @@ UNUSABLE = (
     zlib.error,
     NotImplementedError,
 )
-QUEUE_COVERAGE = (
-    'if [[ "${EVENT:-}" == merge_group ]]; then\n'
-    "  for outcome in baseline ratchet; do\n"
-    '    if ! jq -e --arg outcome "$outcome" \'."queue-baseline".outputs[$outcome] == "success"\' <<< "$NEEDS"; then\n'
-    '      echo "::error::The queue coverage $outcome did not succeed."\n'
-    "      exit 1\n"
-    "    fi\n"
-    "  done\n"
-    "fi\n"
+
+SELECTED_SCOPE = (
+    '\'all(to_entries[]; .value.result == "success"',
+    '\'(.select.outputs.scope // "") as $scope | ($event != "pull_request" or $scope != "selected"'
+    ' or ."unit-selected".result == "success") and all(to_entries[]; .value.result == "success"',
+)
+SELECTED_SKIPS = (
+    ')\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."',
+    ' or ((.key == "split" or .key == "unit" or .key == "shard-check" or .key == "coverage-ratchet")'
+    ' and .value.result == "skipped" and $event == "pull_request" and ($scope == "selected" or $scope == "none"))'
+    ' or (.key == "unit-selected" and .value.result == "skipped" and ($event != "pull_request" or $scope == "full" or $scope == "none"))'
+    ')\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."',
+)
+PROMOTION_REUSE = (
+    re.compile(r'(?s)(if \[\[ "\$\{REUSED:-false\}" == true \]\]; then\n).*?\n  exit 0\nfi\n'),
+    r'\1  echo "::error::A push or dispatch run never reuses a queue result."\n  exit 1\nfi\n',
+)
+PROMOTION_SKIPS = (
+    '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")',
+    '(.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group")'
+    ' or ((.key == "lint" or .key == "semgrep" or .key == "test-count") and .value.result == "skipped" and $event == "push")',
+)
+WATCHER = "queue-fail-fast"
+WATCHER_LOSS = (
+    f' elif $event == "merge_group" and $job == "{WATCHER}" then'
+    ' (.value.result | IN("success", "failure", "cancelled")) and (.value.outputs.failed // "") == ""'
+)
+LOST_RERUN = (
+    ('"split", "unit", "shard-check", "test-count"]', '"split", "shard-check", "test-count"]'),
+    (
+        "and all($required[];",
+        'and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result]'
+        ' | IN(["success", "skipped", "skipped"], ["failure", "success", "success"], ["cancelled", "success", "success"])))'
+        "\n      and all($required[];",
+    ),
+    (
+        ' else .value.result == "skipped" end)',
+        ' elif $event == "merge_group" and ($job | IN("unit", "unit-lost", "unit-rerun")) then true'
+        ' else .value.result == "skipped" end)',
+    ),
+    (
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")',
+        '(.key == "helm-kind" and .value.result == "skipped" and $kind == "false")'
+        ' or ((.key == "unit-lost" or .key == "unit-rerun") and .value.result == "skipped" and $event != "merge_group")',
+    ),
+)
+
+INLINE_REQUIRED = (
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)',
+    '(if $mutation == "true" then ["mutation-plan", "mutation-stats"]'
+    ' + (if $inline == "true" then [] else ["mutation"] end) else [] end)',
+)
+INLINE_SKIP = (
+    '.value.result == "skipped" and $mutation == "false")',
+    '.value.result == "skipped" and $mutation == "false")'
+    ' or (.key == "mutation" and .value.result == "skipped" and $inline == "true")',
 )
 
 
-def gate_steps(queue_coverage: bool = False) -> list[dict]:
+QUEUE_TIER = (
+    """if [[ "${EVENT:-}" == merge_group || "${EVENT:-}" == pull_request ]]; then
+  if ! jq -e --arg event "$EVENT" --arg mutation "$MUTATION" '
+    (.select.outputs.scope // "") as $scope
+    | (if $event == "merge_group" then
+      ["durations", "split", "unit", "shard-check", "test-count", \""""
+    + WATCHER
+    + """\"]
+    else
+      ["durations", "select", "test-count", "lint", "semgrep", "sonar"]
+      + (if $scope == "full" then ["split", "unit", "shard-check"] elif $scope == "selected" then ["unit-selected"] else [] end)
+      + (if $mutation == "true" then ["mutation-plan", "mutation-stats", "mutation"] else [] end)
+    end) as $required
+    | . as $jobs
+    | ($event == "merge_group" or (($mutation == "true" or $mutation == "false") and ($scope == "full" or $scope == "selected" or $scope == "none")))
+      and all($required[]; . as $job | $jobs[$job].result == "success")
+      and all(to_entries[]; .key as $job |
+        if $required | index($job) then .value.result == "success" else .value.result == "skipped" end)
+  ' <<< "$NEEDS"; then
+    echo "::error::Every gate required for this event must succeed and other gates must be skipped."
+    exit 1
+  fi
+  exit 0
+fi
+"""
+)
+
+
+def gate_steps(
+    selected: bool = False,
+    queue_tier: bool = False,
+    promotion: bool = False,
+    consolidated: bool = False,
+    summary: bool = False,
+    docs: bool = False,
+    watcher_loss: bool = False,
+) -> list[dict]:
     run = 'echo "$NEEDS"\nif [[ "${REUSED:-false}" == true ]]; then\n  if [[ "${EVENT:-}" != merge_group ]] || ! jq -e \'has("reuse") and .reuse.result == "success" and .reuse.outputs.reused == "true" and (.reuse.outputs.run // "" | test("^[0-9]+$")) and has("queue-baseline") and ."queue-baseline".result == "success" and all(to_entries[]; ((.key == "reuse" or .key == "queue-baseline" or .key == "stage-budget") and .value.result == "success") or (.key != "reuse" and .key != "queue-baseline" and .key != "stage-budget" and .value.result == "skipped"))\' <<< "$NEEDS"; then\n    echo "::error::Verified queue reuse and its coverage baseline must succeed."\n    exit 1\n  fi\n  exit 0\nfi\nif ! jq -e --arg event "${EVENT:-}" --arg mutation "$MUTATION" --arg kind "${KIND:-}" \'all(to_entries[]; .value.result == "success" or ((.key == "mutation" or .key == "mutation-plan" or .key == "mutation-stats") and .value.result == "skipped" and $mutation == "false") or (.key == "helm-kind" and .value.result == "skipped" and $kind == "false") or (.key == "queue-baseline" and .value.result == "skipped" and $event != "merge_group"))\' <<< "$NEEDS"; then\n  echo "::error::Every required gate must succeed."\n  exit 1\nfi\n'
-    if queue_coverage:
-        run = run.replace("  exit 0\nfi\n", "  exit 0\nfi\n" + QUEUE_COVERAGE).replace(
-            '$event != "merge_group"))',
-            '$event != "merge_group") or (.key == "coverage-ratchet" and .value.result == "skipped" and $event == "merge_group"))',
+    if selected or queue_tier:
+        run = run.replace(*SELECTED_SCOPE).replace(*SELECTED_SKIPS)
+    if promotion:
+        run = PROMOTION_REUSE[0].sub(PROMOTION_REUSE[1], run).replace(*PROMOTION_SKIPS)
+    if queue_tier:
+        run = QUEUE_TIER + run
+    if consolidated:
+        run = run.replace('["durations", "split",', '["select", "split",').replace(
+            '["durations", "select",', '["select",'
         )
+    if watcher_loss:
+        run = (
+            run.replace(f', "{WATCHER}"]', "]")
+            .replace(
+                "and all($required[];",
+                f'and ($event != "merge_group" or has("{WATCHER}"))\n      and all($required[];',
+            )
+            .replace(
+                'then .value.result == "success" else .value.result == "skipped" end)',
+                f'then .value.result == "success"{WATCHER_LOSS} else .value.result == "skipped" end)',
+            )
+        )
+    if docs:
+        run = run.replace('"lint", "semgrep"', '"lint", "docs", "semgrep"')
     return [
         {
             "name": "Require every gate to succeed",
@@ -53,11 +155,56 @@ def gate_steps(queue_coverage: bool = False) -> list[dict]:
             },
             "run": run,
         }
-    ]
+    ] + (summary_steps() if summary else [])
+
+
+def inline_mutation(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = (
+        aggregation["run"]
+        .replace('--arg mutation "$MUTATION"', '--arg mutation "$MUTATION" --arg inline "${INLINE:-}"')
+        .replace(*INLINE_REQUIRED)
+        .replace(*INLINE_SKIP)
+    )
+    env = {
+        **aggregation["env"],
+        "INLINE": "${{ needs.mutation-plan.outputs.shards == '[0]' && needs.mutation-plan.outputs.stats_parts == '[0]' }}",
+    }
+    return [{**aggregation, "env": env, "run": run}, *rest]
+
+
+def lost_rerun(steps: list[dict]) -> list[dict]:
+    [aggregation, *rest] = steps
+    run = aggregation["run"]
+    for old, new in LOST_RERUN:
+        run = run.replace(old, new)
+    return [{**aggregation, "run": run}, *rest]
+
+
+def summary_steps() -> list[dict]:
+    return yaml.safe_load(Path(__file__).with_name("ci_gate_summary_steps.yml").read_text())
+
+
+def pipefail_summary(steps: list[dict]) -> list[dict]:
+    return [{**step, "shell": "bash"} if step.get("name") == "Summarize this run's tests" else step for step in steps]
 
 
 def reuse_job() -> dict:
     return yaml.safe_load(Path(__file__).with_name("ci_reuse_job.yml").read_text())
+
+
+def duration_provenance_steps() -> list[dict]:
+    return yaml.safe_load(Path(__file__).with_name("ci_duration_provenance.yml").read_text())
+
+
+def paged_reuse_job() -> dict:
+    job = reuse_job()
+    [fetch] = [step for step in job["steps"] if step.get("name") == "Fetch the evidence of recent passed runs"]
+    fetch["run"] = fetch["run"].replace(
+        "gh api --paginate \"$actions/runs/$1/attempts/$2/jobs?per_page=100\" --jq '.jobs[]'",
+        'python3 -m scripts.ci_budget.jobs "$actions/runs/$1/attempts/$2/jobs" --page-size 5',
+    )
+    return job
 
 
 def _git(*args):
@@ -84,6 +231,8 @@ def _lines(path):
 def _snapshot(args):
     base, head = _revision(args.base), _revision(args.head)
     grader = _git("rev-parse", "HEAD")
+    if args.event == "pull_request":
+        base = _git("merge-base", grader, head)
     return {
         "version": 1,
         "run": args.run,
@@ -130,7 +279,7 @@ def _passed(workflow, jobs):
             for job in jobs
             if job["name"] == label or job["name"].startswith((f"{label} (", f"{label} /"))
         ]
-        if name in {"queue-baseline", "helm-kind"} and results == ["skipped"]:
+        if name in {"helm-kind", "unit-selected"} and results == ["skipped"]:
             continue
         if len(results) < _matrix(definitions[name]) or any(result != "success" for result in results):
             return False
@@ -141,8 +290,8 @@ def _digest(record):
     return hashlib.sha256(json.dumps(record, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
-def _authenticated(folder, record, jobs):
-    attestations = [job for job in jobs if job["name"] == "reuse" and job["conclusion"] == "success"]
+def _authenticated(folder, record, jobs, producer="reuse"):
+    attestations = [job for job in jobs if job["name"] == producer and job["conclusion"] == "success"]
     if len(attestations) != 1:
         return False
     log = (folder / "reuse.log").read_text()

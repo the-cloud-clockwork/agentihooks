@@ -4,11 +4,12 @@ from dataclasses import dataclass, replace
 from functools import partial
 from typing import TYPE_CHECKING
 
+from scripts.swarm.host_budget import UNKNOWN, Room
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import image_tag, masters, proof_swarm
 from scripts.swarm_v2.accounts import AccountCapacity, fleet_held
 from scripts.swarm_v2.auth_context import Registration
-from scripts.swarm_v2.herdr.capabilities import Qualifier, machine_probe
+from scripts.swarm_v2.herdr.capabilities import Qualifier
 from scripts.swarm_v2.herdr.endpoints import Clients
 from scripts.swarm_v2.herdr.target import DELIVERIES, Router
 from scripts.swarm_v2.herdr.viewer import Viewer
@@ -17,9 +18,11 @@ from scripts.swarm_v2.kubernetes.approved import INDEX, AccountRoute, FleetAccou
 from scripts.swarm_v2.kubernetes.cleanup import Cleanup
 from scripts.swarm_v2.kubernetes.client import ApiRefused, KubeHttp, PodApi, PodClient
 from scripts.swarm_v2.kubernetes.completion import Completion
+from scripts.swarm_v2.kubernetes.diagnostics import retain as retain_startup
 from scripts.swarm_v2.kubernetes.failures import AccountSlot, Recovery, restore_directive
 from scripts.swarm_v2.kubernetes.grants import PodGrants, Supervision
 from scripts.swarm_v2.kubernetes.pool import WorkerPool
+from scripts.swarm_v2.kubernetes.pool import reading as pool_reading
 from scripts.swarm_v2.kubernetes.prompts import TerminalPrompts
 from scripts.swarm_v2.kubernetes.replacement import Replacements, TaskLedger
 from scripts.swarm_v2.kubernetes.runtime import KubernetesTransport
@@ -53,6 +56,10 @@ TERMINAL_ENV = "AGENTIHOOKS_WORKER_TERMINAL"
 AGGREGATION_ENV = "AGENTIHOOKS_TERMINAL_AGGREGATION"
 REQUIRED = (POLICY_ENV, IMAGE_TAG_ENV, PROFILE_ENV, CAP_ENV, PROJECTS_ENV, BRAIN_ENV)
 RESERVATION_MS = 300_000
+WORKERS_OFF = (
+    "host room off: the Kubernetes runtime is not configured on this deployed controller, "
+    "so the worker pool cannot be read and spawns pass"
+)
 HARNESS = "claude"
 
 
@@ -193,7 +200,15 @@ class Workers:
         )
         api = pod_api(environ, self.policy["namespace"])
         terminal = None if self.terminal is None else TerminalObjects(api, self.terminal, HostKeys(store))
-        return PodGrants(api, slug, verify, supervision, terminal, partial(restore_directive, store, slug))
+        return PodGrants(
+            api,
+            slug,
+            verify,
+            supervision,
+            terminal,
+            partial(restore_directive, store, slug),
+            partial(retain_startup, store, slug),
+        )
 
 
 def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[str, str]) -> RoutedRuntime:
@@ -232,10 +247,32 @@ def tick_runtime(service: "ControlService", workers: Workers, environ: Mapping[s
     return runtime
 
 
+def worker_host(environ: Mapping[str, str], slug: str) -> Callable[[], Room]:
+    try:
+        workers = Workers.from_environ(environ, slug)
+        if workers is not None:
+            api = pod_api(environ, workers.policy["namespace"])
+            return WorkerPool(api, workers.policy.get("worker_pool"), workers.requested)
+    except WorkerSettingsRefused as refused:
+        return partial(Room, None, f"{WORKERS_OFF}: {refused}", UNKNOWN)
+    return partial(Room, None, WORKERS_OFF, UNKNOWN)
+
+
+def worker_pools(environ: Mapping[str, str], slug: str) -> Callable[[], list[dict] | None] | None:
+    try:
+        workers = Workers.from_environ(environ, slug)
+        if workers is None or "worker_pool" not in workers.policy:
+            return None
+        namespace = workers.policy["namespace"]
+        return partial(pool_reading, pod_api(environ, namespace), namespace, workers.policy["worker_pool"])
+    except WorkerSettingsRefused:
+        return None
+
+
 def terminal_views(controller: "Controller", environ: Mapping[str, str]) -> TerminalViews:
     terminal = controller.terminals.terminal
     registrations, journal = terminal.registrations, terminal.home.terminals / DELIVERIES
-    qualifier = Qualifier(machine_probe(terminal.run))
+    qualifier = Qualifier.machine(terminal.run)
     router = Router(registrations.store, registrations.catalog, qualifier, terminal.run, journal, mutations=False)
     aggregation = environ.get(AGGREGATION_ENV) != "off"
     viewer = Viewer(router, terminal.run, OPERATOR, aggregation=aggregation)

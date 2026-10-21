@@ -1,12 +1,13 @@
 import copy
 import gc
 import json
+import sqlite3
 import weakref
 
 import pytest
 
-from scripts.swarm_ledger.repository.rows import assemble, diff, encode, flatten
-from scripts.swarm_ledger.repository.sqlite import SQLiteLedgerRepository
+from scripts.swarm_ledger.repository.rows import assemble, diff, encode, flatten, read_rows, write_rows
+from scripts.swarm_ledger.repository.sqlite import ROWS_SCHEMA, SQLiteLedgerRepository
 from tests.swarm_ledger.test_sqlite import document
 
 
@@ -150,7 +151,98 @@ def test_diff_keeps_the_real_parent_key_position_and_table_when_falling_back():
     assert row[3] == 0
 
 
+@pytest.mark.parametrize(
+    ("old", "new"),
+    [
+        ({1: "old"}, {True: "new"}),
+        ({True: "old"}, {1: "new"}),
+        ([{"id": True, "value": "old"}], [{"id": 1, "value": "new"}]),
+        ([{"id": 1.0, "value": "old"}], [{"id": 1, "value": "new"}]),
+        ([{"id": "x", "value": "old"}], [{"id": {"nested": 1}, "value": "new"}]),
+        ([{"id": None, "value": "old"}], [{"id": "x", "value": "new"}]),
+        (
+            {"question": {"answers": [{"id": "a", "text": "old"}], "tail": 1}},
+            {"question": {"answers": [{"id": "a", "text": "new"}, {"id": "b", "text": "added"}], "tail": 1}},
+        ),
+        (
+            {"tasks": [{"id": "x", "comments": [{"id": "c", "text": "old"}]}]},
+            {"tasks": [{"id": "x", "comments": [{"id": "c", "text": "new"}], "added": None}]},
+        ),
+        (
+            [{"id": "same", "text": "one"}, {"id": "same", "text": "two"}],
+            [{"id": "same", "text": "three"}, {"id": "same", "text": "four"}],
+        ),
+    ],
+)
+def test_applying_row_deltas_matches_the_complete_stored_tree(old, new):
+    before, after = diff(old, new)
+    stored = flatten(old)
+    for path in before:
+        stored.pop(path, None)
+    stored.update(after)
+    assert stored == flatten(new)
+
+
 def test_diff_treats_a_root_type_change_as_position_zero():
     before, after = diff({"a": 1}, [1])
     assert before[encode([])][3] == 0
     assert after[encode([])][3] == 0
+
+
+def test_changed_list_scalar_keeps_literal_stored_row_fields():
+    old = {"values": [1, 2]}
+    new = {"values": [1, 3]}
+    before, after = diff(old, new)
+    path = '["values",["index",1,0]]'
+    assert before == {path: ("fields", '["values"]', "1", 1, "value", "2")}
+    assert after == {path: ("fields", '["values"]', "1", 1, "value", "3")}
+    stored = flatten(old)
+    stored.update(after)
+    assert assemble(stored) == new
+
+
+def test_numeric_list_ids_keep_distinct_literal_occurrence_paths():
+    stored = flatten([{"id": True}, {"id": 1}])
+    assert set(stored) == {
+        "[]",
+        '[["id",true,0]]',
+        '[["id",true,0],"id"]',
+        '[["id",1,0]]',
+        '[["id",1,0],"id"]',
+    }
+    assert stored['[["id",true,0]]'][3] == 0
+    assert stored['[["id",1,0]]'][3] == 1
+
+
+class Recorder:
+    def __init__(self):
+        self.calls = []
+
+    def execute(self, sql, parameters=()):
+        self.calls.append(("execute", sql, [parameters]))
+
+    def executemany(self, sql, rows):
+        self.calls.append(("executemany", sql, list(rows)))
+
+
+def receipts(first):
+    return {"_meta": {"api_operations": {f"op{n}": {"digest": f"d{n}"} for n in range(first, first + 1000)}}}
+
+
+def test_a_write_sends_its_changed_rows_as_one_batch_per_table_and_kind():
+    before, after = diff(receipts(0), receipts(1))
+    recorder = Recorder()
+    write_rows(recorder, "ledger", before, after)
+    assert [(kind, sql.split()[0], len(rows)) for kind, sql, rows in recorder.calls] == [
+        ("executemany", "DELETE", 2),
+        ("executemany", "INSERT", 1001),
+    ]
+
+
+def test_batched_row_writes_store_the_new_tree():
+    connection = sqlite3.connect(":memory:")
+    connection.executescript(ROWS_SCHEMA)
+    old, new = receipts(0), {**receipts(1), "chat": [{"id": "m1", "text": "moved"}]}
+    write_rows(connection, "ledger", {}, flatten(old))
+    write_rows(connection, "ledger", *diff(old, new))
+    assert read_rows(connection, "ledger") == flatten(new)

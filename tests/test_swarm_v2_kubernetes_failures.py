@@ -15,7 +15,7 @@ from scripts.swarm_v2.runtime import observe
 from scripts.swarm_v2.runtime.base import Outcome, Status
 from tests import sv2_kub05_cases as cases
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-KUB-05"
 POD = {"metadata": {}, "spec": {}, "status": {}}
@@ -434,7 +434,8 @@ def test_only_ready_nodes_are_listed_and_a_failed_listing_is_none():
     http = _Nodes((200, {"items": items}))
     assert client.PodClient(http, "swarm").ready_nodes() == ["a"]
     assert http.paths == [("GET", "/api/v1/nodes")]
-    for answer in ((403, {"reason": "Forbidden"}), (201, {"items": items}), ConnectionError("down")):
+    unreadable = ((200, {}), (200, {"items": None}), (200, []))
+    for answer in ((403, {"reason": "Forbidden"}), (201, {"items": items}), ConnectionError("down"), *unreadable):
         assert client.PodClient(_Nodes(answer), "swarm").ready_nodes() is None
 
 
@@ -580,6 +581,16 @@ def test_the_deployed_pass_deletes_a_completed_attempt_pod_and_scale_down_never_
     recover = deployed.recovery_pass(service, SimpleNamespace(image_tag="dev"), cluster)
     node = world.fx["first"]["node"]
     world.show(world.old, "clean_exit", node)
+    pod = world.api.objects[f"swarm-{world.old.execution_id}"]
+    terminated = pod["status"]["containerStatuses"][0]["state"]["terminated"]
+    terminated["message"] = json.dumps(
+        {
+            "schema_version": 1,
+            "execution_id": world.old.execution_id,
+            "generation": world.old.generation,
+            "transcript_end": 0,
+        }
+    )
     assert recover() == {world.old.execution_id: "working"}
     assert f"swarm-{world.old.execution_id}" not in world.api.objects
     assert grants.revoked == [(cases.SLUG, world.old.execution_id)]
@@ -1145,6 +1156,179 @@ def test_a_fresh_replacement_launches_without_a_checkpoint_and_a_refused_mark_wa
     assert _hash(world, "recovery-pending-tasks") == {}
 
 
+@pytest.mark.parametrize("phase", ["accepted", "unknown", "refused"])
+def test_controller_replays_a_predigest_spawn_as_one_fresh_generation(world, phase):
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    operation = world.store.operation_journal.records(cases.SLUG)[0]
+    legacy = json.loads(world.store.redis.hget(key, operation.operation_id))
+    legacy.pop("spec_digest")
+    legacy["phase"] = phase
+    world.store.redis.hset(key, operation.operation_id, json.dumps(legacy))
+    world.checkpoints.by_execution.clear()
+    assert world.live.release()
+    restarted, _ = world.controller()
+    assert restarted.acquire()
+    world.live = restarted
+    recovery, ledger = world.recovery(restarted), _Ledger()
+    relaunch = _Relaunch()
+    relaunch.recovery = recovery
+
+    def launch(request, successor):
+        restarted.execute(world.request(restarted, successor))
+        return relaunch(request, successor)
+
+    replacements = replacement.Replacements(recovery, launch, ledger)
+    world.reconcile(recovery)
+    assert replacements() == {world.old.execution_id: "ok"}
+    successor = world.occupant()
+    assert successor.generation == world.old.generation + 1
+    assert successor.execution_id != world.old.execution_id
+    assert f"swarm-{successor.execution_id}" in world.api.objects
+    superseded = world.store.operation_journal.get(cases.SLUG, operation.operation_id)
+    assert superseded.phase.value == "superseded"
+    assert superseded.result == {"reason": "missing_spec_digest"}
+    assert recovery.decision(world.old.execution_id).reason == "missing_spec_digest"
+    assert recovery.decision(world.old.execution_id).mode == "fresh"
+    assert recovery.decision(world.old.execution_id).generation == world.old.generation
+    assert recovery.restore(successor.execution_id)["recovery"] == "fresh"
+    event = restarted.telemetry.events(transition="recovery", execution_id=world.old.execution_id)[0]
+    assert event["observed_generation"] == successor.generation
+    assert world.old.execution_id not in world.slots()
+    assert world.old.execution_id not in world.grants
+    world.reconcile(recovery)
+    assert replacements() == {}
+    assert world.occupant() == successor
+    assert world.store.operation_journal.get(cases.SLUG, operation.operation_id) == superseded
+    assert len(relaunch.calls) == 1
+
+
+@pytest.mark.parametrize("phase", ["accepted", "unknown", "refused", "applied"])
+def test_controller_replay_preserves_a_spawn_with_a_spec_digest(world, phase):
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    operation = world.store.operation_journal.records(cases.SLUG)[0]
+    row = json.loads(world.store.redis.hget(key, operation.operation_id))
+    row["phase"] = phase
+    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    before = world.store.redis.hget(key, operation.operation_id)
+    recovery = world.recovery(world.live)
+    world.reconcile(recovery)
+    assert world.store.redis.hget(key, operation.operation_id) == before
+    assert world.occupant() == world.old
+    assert recovery.decision(world.old.execution_id) is None
+
+
+@pytest.mark.parametrize(
+    ("backend", "action", "spec", "phase"),
+    [
+        ("local", "spawn", "", "refused"),
+        ("kubernetes", "send", "", "refused"),
+        ("kubernetes", "spawn", "known", "refused"),
+        ("kubernetes", "spawn", "", "applied"),
+        ("kubernetes", "spawn", "", "superseded"),
+    ],
+)
+def test_journal_supersession_preserves_entries_outside_legacy_spawns(world, backend, action, spec, phase):
+    from scripts.swarm_v2.runtime.operations import Phase
+
+    journal = world.store.operation_journal
+    operation = replace(
+        journal.records(cases.SLUG)[0], backend=backend, action=action, spec_digest=spec, phase=Phase(phase)
+    )
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    world.store.redis.hset(key, operation.operation_id, json.dumps(asdict(operation)))
+    assert journal.supersede_legacy_spawn(cases.SLUG, operation) == operation
+
+
+@pytest.mark.parametrize("missing", [False, True])
+def test_journal_supersession_refuses_a_changed_or_missing_identity(world, missing):
+    from scripts.swarm_v2.runtime.operations import OperationConflict
+
+    journal = world.store.operation_journal
+    operation = journal.records(cases.SLUG)[0]
+    if missing:
+        world.store.redis.hdel(world.store.key(cases.SLUG, "runtime-operations"), operation.operation_id)
+    else:
+        operation = replace(operation, payload_digest="different")
+    with pytest.raises(OperationConflict, match="^operation identity changed$"):
+        journal.supersede_legacy_spawn(cases.SLUG, operation)
+
+
+@pytest.mark.parametrize(
+    ("backend", "action", "phase", "completed"),
+    [
+        ("local", "spawn", "refused", False),
+        ("kubernetes", "send", "refused", False),
+        ("kubernetes", "spawn", "applied", False),
+        ("kubernetes", "spawn", "refused", True),
+    ],
+)
+def test_controller_replay_preserves_nonlegacy_and_finished_entries(world, backend, action, phase, completed):
+    operation = world.store.operation_journal.records(cases.SLUG)[0]
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    row = asdict(operation)
+    row.update(backend=backend, action=action, phase=phase, spec_digest="")
+    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    if completed:
+        retention.finalize(world.store, cases.SLUG, world.live.require, world.old.execution_id, "completed", 0, "ref")
+    before = world.store.redis.hget(key, operation.operation_id)
+    recovery = world.recovery(world.live)
+    world.reconcile(recovery)
+    assert world.store.redis.hget(key, operation.operation_id) == before
+    assert recovery.decision(world.old.execution_id) is None
+    assert world.occupant() == world.old
+
+
+def test_controller_replay_continues_past_an_entry_with_a_digest(world):
+    successor = world.launch(world.live, world.fx["first"], seat="eng-2")
+    operations = world.store.operation_journal.records(cases.SLUG)
+    assert operations[0].execution_id == world.old.execution_id
+    operation = next(row for row in operations if row.execution_id == successor.execution_id)
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    row = asdict(operation)
+    row.update(spec_digest="", phase="refused")
+    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    recovery = world.recovery(world.live)
+    world.reconcile(recovery)
+    assert recovery.decision(world.old.execution_id) is None
+    assert recovery.decision(successor.execution_id).mode == "fresh"
+    assert world.occupant("eng-2").generation == successor.generation + 1
+
+
+def test_a_takeover_during_legacy_supersession_cannot_commit_the_old_epoch(world, monkeypatch):
+    key = world.store.key(cases.SLUG, "runtime-operations")
+    operation = world.store.operation_journal.records(cases.SLUG)[0]
+    row = asdict(operation)
+    row.update(spec_digest="", phase="refused", result={}, attempted=False)
+    world.store.redis.hset(key, operation.operation_id, json.dumps(row))
+    before = world.store.redis.hget(key, operation.operation_id)
+    recovery = world.recovery(world.live)
+    original = recovery.store.redis.pipeline
+    replacement_controller, _ = world.controller()
+    once = [True]
+
+    def pipeline():
+        pipe = original()
+        execute = pipe.execute
+
+        def interrupted(*args, **kwargs):
+            if once[0] and any(command[0][:2] == ("HSET", key) for command in pipe.command_stack):
+                once[0] = False
+                world.clock[0] += lease.ttl_ms()
+                assert replacement_controller.acquire()
+            return execute(*args, **kwargs)
+
+        pipe.execute = interrupted
+        return pipe
+
+    monkeypatch.setattr(recovery.store.redis, "pipeline", pipeline)
+    with pytest.raises(SwarmError):
+        world.reconcile(recovery)
+    assert not once[0]
+    recovered = {**json.loads(before), "refusal": {"reason": "mismatch", "field": "spec"}}
+    assert json.loads(world.store.redis.hget(key, operation.operation_id)) == recovered
+    assert world.occupant() == world.old
+
+
 def test_a_stale_controller_records_no_launch_and_writes_no_mark(world):
     recovery, ledger, relaunch = world.recovery(world.live), _Ledger(), _Relaunch()
     relaunch.recovery = recovery
@@ -1411,6 +1595,24 @@ def test_a_restore_receipt_requires_a_directive_and_accepts_zero_cursor(world):
     with pytest.raises(SwarmError) as caught:
         recovery.confirm(decision.replacement, restored)
     assert str(caught.value) == "no restore directive for this attempt"
+
+
+def test_a_choice_interrupted_before_its_record_cannot_leave_a_stale_directive(world, monkeypatch):
+    recovery = world.recovery(world.live, automatic=False)
+    recovery.handle(world.old.execution_id, "oom_killed")
+    record = recovery._record
+
+    def interrupted(*args):
+        monkeypatch.setattr(recovery, "_record", record)
+        raise SwarmError("interrupted")
+
+    monkeypatch.setattr(recovery, "_record", interrupted)
+    with pytest.raises(SwarmError):
+        recovery.request(world.old.execution_id, "resume")
+    decision = recovery.request(world.old.execution_id, "fresh")
+    assert decision.mode == "fresh"
+    assert recovery.restore(decision.replacement)["recovery"] == "fresh"
+    assert recovery.restore(decision.replacement)["checkpoint_id"] == ""
 
 
 @pytest.mark.parametrize("first", ["verified", "superseded"])

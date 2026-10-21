@@ -24,7 +24,7 @@ from scripts.swarm_v2.herdr.attach import ClientHome
 from scripts.swarm_v2.herdr.operator_setup import SetupRefused
 from scripts.swarm_v2.kubernetes import operator_terminal
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"
 BAO_URL = "https://bao.test"
 POLICY = {**json.loads((FIXTURES / "pod-policy.json").read_text()), "provider_accounts": []}
@@ -294,20 +294,27 @@ def test_setup_command_refusals_exit_one(tmp_path, environ, who, message):
     assert not (tmp_path / "home").exists()
 
 
-def test_service_unit_runs_setup_outside_agent_sessions():
-    assert operator_setup.unit("/opt/bin/agentihooks") == (
-        "[Unit]\nDescription=agentihooks operator terminal setup\n\n"
-        "[Service]\nType=oneshot\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        "EnvironmentFile=-%h/.agentihooks/.env\n"
-        'ExecStart="/opt/bin/agentihooks" swarm-terminal setup\n'
-        "ExecStartPost=-systemctl --user try-restart agentihooks-swarm-terminal-sync.service\n"
-    )
-    assert operator_setup.timer() == (
-        "[Unit]\nDescription=agentihooks operator terminal setup, refreshed\n\n"
-        "[Timer]\nOnBootSec=1min\nOnUnitActiveSec=15min\n\n"
-        "[Install]\nWantedBy=timers.target\n"
-    )
+def scheduler():
+    import fakeredis
+
+    from scripts.scheduler import Scheduler
+
+    return Scheduler(fakeredis.FakeRedis(decode_responses=True), machine="proof")
+
+
+LEGACY = (
+    "agentihooks-swarm-terminal.timer",
+    "agentihooks-swarm-terminal.service",
+    "agentihooks-swarm-terminal-sync.service",
+)
+
+
+def payload(root: Path, address: str) -> str:
+    return json.dumps({"address": address, "home": str(root)})
+
+
+def recorded(root: Path) -> dict:
+    return json.loads((root / "swarm-terminal" / "schedule.json").read_text())
 
 
 class Systemctl:
@@ -324,55 +331,76 @@ class Systemctl:
 QUIET = {"capture_output": True, "text": True, "timeout": 30}
 
 
-def test_install_writes_and_enables_the_timer(tmp_path):
+def test_install_removes_the_old_systemd_units(tmp_path):
+    units = tmp_path / "units"
+    units.mkdir()
+    for name in LEGACY:
+        (units / name).write_text("old\n")
+    (units / "other.timer").write_text("kept\n")
     systemctl = Systemctl()
-    tmp_path = tmp_path / "units"
 
-    operator_setup.install("/opt/bin/agentihooks", tmp_path, systemctl)
-    assert (tmp_path / "agentihooks-swarm-terminal.service").read_text() == operator_setup.unit("/opt/bin/agentihooks")
-    assert (tmp_path / "agentihooks-swarm-terminal.timer").read_text() == operator_setup.timer()
-    assert (tmp_path / "agentihooks-swarm-terminal-sync.service").read_text() == operator_setup.sync_unit(
-        "/opt/bin/agentihooks"
-    )
-    assert sorted(path.name for path in tmp_path.iterdir()) == [
-        "agentihooks-swarm-terminal-sync.service",
-        "agentihooks-swarm-terminal.service",
-        "agentihooks-swarm-terminal.timer",
+    operator_setup.install(tmp_path / "home", "", units, systemctl, scheduler(), lambda: None)
+
+    assert sorted(path.name for path in units.iterdir()) == ["other.timer"]
+    assert systemctl.calls == [
+        (
+            [
+                "systemctl",
+                "--user",
+                "disable",
+                "--now",
+                "agentihooks-swarm-terminal.timer",
+                "agentihooks-swarm-terminal-sync.service",
+            ],
+            QUIET,
+        ),
+        (["systemctl", "--user", "daemon-reload"], {**QUIET, "check": True}),
     ]
-    enable = [
-        (["systemctl", "--user", "enable", "--now", "agentihooks-swarm-terminal.timer"], QUIET),
-        (["systemctl", "--user", "enable", "--now", "agentihooks-swarm-terminal-sync.service"], QUIET),
-    ]
-    assert systemctl.calls == [(["systemctl", "--user", "daemon-reload"], {**QUIET, "check": True}), *enable]
-
-    operator_setup.install("/opt/bin/agentihooks", tmp_path, systemctl)
-    assert systemctl.calls[3:] == enable
+    operator_setup.install(tmp_path / "home", "", units, systemctl, scheduler(), lambda: None)
+    assert len(systemctl.calls) == 2
 
 
-def test_install_reports_a_failed_enable(tmp_path):
+def test_install_names_a_refused_disable_and_keeps_the_old_units(tmp_path):
+    for name in LEGACY:
+        (tmp_path / name).write_text("old\n")
+    machine = scheduler()
+
     with pytest.raises(SetupRefused) as refused:
-        operator_setup.install("/opt/bin/agentihooks", tmp_path, Systemctl(code=1, stderr="Unit not found.\n"))
+        operator_setup.install(
+            tmp_path / "home", "", tmp_path, Systemctl(code=1, stderr="Unit not loaded.\n"), machine, lambda: None
+        )
+
     assert str(refused.value) == (
-        "systemctl could not enable agentihooks-swarm-terminal.timer: Unit not found.; "
-        "agentihooks-swarm-terminal-sync.service: Unit not found."
+        "systemctl could not disable agentihooks-swarm-terminal.timer, "
+        "agentihooks-swarm-terminal-sync.service: Unit not loaded."
     )
+    assert all((tmp_path / name).exists() for name in LEGACY)
+    assert operator_setup.scheduled(tmp_path / "home", "", machine)
 
 
-def test_install_defaults_to_the_agentihooks_executable_and_user_units(tmp_path, monkeypatch):
-    looked_up = []
+def test_install_defaults_to_the_user_units_the_machine_scheduler_and_its_supervisor(tmp_path, monkeypatch):
+    import fakeredis
+
+    redis, started = fakeredis.FakeRedis(decode_responses=True), []
     monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(operator_setup.shutil, "which", lambda name: looked_up.append(name) or "/opt/bin/agentihooks")
-
-    operator_setup.install(run=Systemctl())
-
+    monkeypatch.setattr(operator_setup, "redis_client", lambda: redis)
+    monkeypatch.setattr(operator_setup, "ensure_running", lambda: started.append(True))
     units = tmp_path / ".config" / "systemd" / "user"
-    assert looked_up == ["agentihooks"]
-    assert sorted(path.name for path in units.iterdir()) == [
-        "agentihooks-swarm-terminal-sync.service",
-        "agentihooks-swarm-terminal.service",
-        "agentihooks-swarm-terminal.timer",
-    ]
-    assert (units / "agentihooks-swarm-terminal.service").read_text() == operator_setup.unit("/opt/bin/agentihooks")
+    units.mkdir(parents=True)
+    (units / "agentihooks-swarm-terminal.service").write_text("old\n")
+    systemctl = Systemctl()
+
+    operator_setup.install(tmp_path / "home", run=systemctl)
+
+    assert list(units.iterdir()) == []
+    assert systemctl.calls == [(["systemctl", "--user", "daemon-reload"], {**QUIET, "check": True})]
+    assert started == [True]
+    machine = operator_setup.Scheduler(redis)
+    record = recorded(tmp_path / "home")
+    assert sorted(machine.redis.hgetall(machine.key("entries"))) == sorted([record["refresh"], record["sync"]])
+    assert operator_setup.installed(tmp_path / "home")
+    (units / "agentihooks-swarm-terminal.timer").write_text("old\n")
+    assert not operator_setup.installed(tmp_path / "home")
 
 
 def test_parser_names_the_command_and_its_subcommands():
@@ -385,8 +413,8 @@ def test_parser_names_the_command_and_its_subcommands():
     assert (sub.dest, sub.required) == ("command", True)
     assert [(choice.dest, choice.help) for choice in sub._choices_actions] == [
         ("setup", "Place the terminal user CA key and the Pod policy from their sources"),
-        ("install", "Write and enable the user timer that runs setup and the sync service"),
-        ("sync", "Keep every hive's published workers in the operator's herdr"),
+        ("install", "Schedule setup and the herdr sync on the agentihooks scheduler, removing the old systemd units"),
+        ("sync", "Run one sync of every hive's published workers into the operator's herdr"),
     ]
     assert (antoncore.option_strings, antoncore.help) == (
         ["--antoncore"],
@@ -410,7 +438,7 @@ def test_install_options_name_their_address_and_check():
         ["--check"],
         False,
         True,
-        "exit 0 only when the units are current and enabled",
+        "exit 0 only when both jobs are scheduled and no old systemd unit remains",
     )
 
 
@@ -463,23 +491,44 @@ def test_settings_keep_an_equals_sign_in_a_path(tmp_path):
     ],
 )
 def test_install_refuses_when_systemctl_fails(tmp_path, error, named):
+    for name in ("agentihooks-swarm-terminal.timer", "agentihooks-swarm-terminal.service"):
+        (tmp_path / name).write_text("old\n")
     with pytest.raises(SetupRefused) as refused:
-        operator_setup.install("/opt/bin/agentihooks", tmp_path, Systemctl(error=error))
+        operator_setup.install(tmp_path / "home", "", tmp_path, Systemctl(error=error), scheduler(), lambda: None)
 
-    units = "agentihooks-swarm-terminal.timer and agentihooks-swarm-terminal-sync.service"
-    assert str(refused.value) == f"systemctl could not enable {units}: {named}"
+    units = "agentihooks-swarm-terminal.timer, agentihooks-swarm-terminal.service"
+    assert str(refused.value) == f"systemctl could not remove {units}: {named}"
 
 
-def test_install_command_refuses_without_the_executable(tmp_path, monkeypatch):
-    monkeypatch.setattr(operator_setup.shutil, "which", lambda name: None)
+def test_install_command_names_an_unreachable_scheduler_redis_and_keeps_the_old_units(tmp_path, monkeypatch):
+    import redis
 
-    code, out, err = run_main(["install"], {}, Who(), tmp_path / "home")
+    def refuse():
+        raise redis.ConnectionError("Connection refused")
 
-    assert (code, out, err) == (1, "", "operator terminal install refused: the agentihooks executable is not on PATH\n")
+    monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(operator_setup, "redis_client", refuse)
+    monkeypatch.setattr(operator_setup, "ensure_running", lambda: pytest.fail("started without a scheduler"))
+    units = tmp_path / ".config" / "systemd" / "user"
+    units.mkdir(parents=True)
+
+    assert run_main(["install", "--check"], {}, Who(), tmp_path / "home") == (
+        1,
+        "",
+        "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
+    )
+    for name in LEGACY:
+        (units / name).write_text("old\n")
+    assert run_main(["install"], {}, Who(), tmp_path / "home") == (
+        1,
+        "",
+        "operator terminal install refused: the scheduler Redis is unreachable: ConnectionError\n",
+    )
+    assert sorted(path.name for path in units.iterdir()) == sorted(LEGACY)
 
 
 def test_install_command_refuses_inside_an_agent_session(tmp_path, monkeypatch):
-    monkeypatch.setattr(operator_setup, "install", lambda address: pytest.fail("installed inside an agent session"))
+    monkeypatch.setattr(operator_setup, "install", lambda root, address: pytest.fail("installed in an agent session"))
 
     code, out, err = run_main(["install"], {}, Who(name="engineer@abc-1"), tmp_path / "home")
 
@@ -491,21 +540,21 @@ def test_install_command_refuses_inside_an_agent_session(tmp_path, monkeypatch):
 
 
 def test_install_command_exits_zero_when_installed(tmp_path, monkeypatch):
-    monkeypatch.setattr(operator_setup, "install", lambda address: None)
+    monkeypatch.setattr(operator_setup, "install", lambda root, address: None)
 
     assert run_main(["install"], {}, Who(), tmp_path / "home") == (0, "", "")
 
 
 def test_install_command_names_a_refused_enable(tmp_path, monkeypatch):
-    def refuse(address):
-        raise SetupRefused("systemctl could not enable agentihooks-swarm-terminal-sync.service: bus down")
+    def refuse(root, address):
+        raise SetupRefused("systemctl could not disable agentihooks-swarm-terminal-sync.service: bus down")
 
     monkeypatch.setattr(operator_setup, "install", refuse)
 
     assert run_main(["install"], {}, Who(), tmp_path / "home") == (
         1,
         "",
-        "operator terminal install refused: systemctl could not enable "
+        "operator terminal install refused: systemctl could not disable "
         "agentihooks-swarm-terminal-sync.service: bus down\n",
     )
 
@@ -604,26 +653,129 @@ def test_the_service_refuses_terminal_settings_it_cannot_open(tmp_path):
     assert str(refused.value) == "opening a worker terminal needs AGENTIHOOKS_POD_POLICY_FILE"
 
 
-def test_the_sync_unit_keeps_the_service_running():
-    assert operator_setup.sync_unit("/opt/bin/agentihooks") == (
-        "[Unit]\nDescription=agentihooks operator herdr sync of hive workers\n\n"
-        "[Service]\nType=simple\nRestart=always\nRestartSec=30\n"
-        "Environment=PATH=%h/.local/bin:%h/.cargo/bin:/usr/local/bin:/usr/bin:/bin\n"
-        "EnvironmentFile=-%h/.agentihooks/.env\n"
-        'ExecStart="/opt/bin/agentihooks" swarm-terminal sync\n\n'
-        "[Install]\nWantedBy=default.target\n"
+def event(root: Path, address: str = "") -> dict:
+    return {"id": "entry", "owner": "swarm-terminal", "payload": payload(root, address)}
+
+
+def test_the_sync_slot_runs_one_pass_on_the_recorded_home(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, root: seen.append((environ, root)) or 0)
+
+    operator_setup.sync(event(tmp_path / "home"), "delivery", None)
+
+    assert seen == [(operator_setup.os.environ, tmp_path / "home")]
+
+
+@pytest.mark.parametrize(
+    "error, line",
+    [
+        (
+            SetupRefused("the terminal files are not placed"),
+            "operator terminal sync refused: the terminal files are not placed",
+        ),
+        (RuntimeError("bus down"), "operator terminal sync failed: RuntimeError: bus down"),
+    ],
+)
+def test_a_failed_scheduled_pass_is_reported_and_never_raised(tmp_path, monkeypatch, error, line):
+    def fail(environ, root):
+        raise error
+
+    monkeypatch.setattr(operator_setup, "sync_once", fail)
+    err = Journal()
+
+    with redirect_stderr(err):
+        operator_setup.sync(event(tmp_path / "home"), "delivery", None)
+
+    assert (err.getvalue(), err.flushed) == (line + "\n", 1)
+
+
+def test_the_refresh_slot_runs_setup_with_the_recorded_address(tmp_path, monkeypatch):
+    seen = []
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_ADDRESS", "own.example:6379")
+    monkeypatch.setenv("OPENBAO_URL", BAO_URL)
+    monkeypatch.setattr(operator_setup, "setup", lambda root, environ: seen.append((root, environ)) or 1)
+
+    operator_setup.refresh(event(tmp_path / "home", "swarm.example:6379"), "delivery", None)
+    operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
+
+    assert [root for root, _ in seen] == [tmp_path / "home", tmp_path / "home"]
+    assert [environ["AGENTIHOOKS_HIVE_REDIS_ADDRESS"] for _, environ in seen] == [
+        "swarm.example:6379",
+        "own.example:6379",
+    ]
+    assert [environ["OPENBAO_URL"] for _, environ in seen] == [BAO_URL, BAO_URL]
+
+
+class Journal(io.StringIO):
+    flushed = 0
+
+    def flush(self):
+        self.flushed += 1
+
+
+def test_a_failed_refresh_is_reported_and_never_raised(tmp_path, monkeypatch):
+    def fail(root, environ):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(operator_setup, "setup", fail)
+    err = Journal()
+
+    with redirect_stderr(err):
+        operator_setup.refresh(event(tmp_path / "home"), "delivery", None)
+
+    assert (err.getvalue(), err.flushed) == ("operator terminal setup failed: OSError: disk full\n", 1)
+
+
+def test_setup_flushes_each_line_it_prints(tmp_path, monkeypatch):
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: pytest.fail("no ledger without a transport"))
+    out, err = Journal(), Journal()
+
+    with redirect_stdout(out), redirect_stderr(err):
+        assert operator_setup.setup(tmp_path / "home", {}) == 1
+    assert (out.flushed, err.flushed) == (0, 1)
+
+    monkeypatch.setattr(
+        openbao_kv.urllib.request, "urlopen", Bao({"user_ca": ssh_private(Ed25519PrivateKey.generate())})
     )
+    environ = {
+        "OPENBAO_URL": BAO_URL,
+        "OPENBAO_TOKEN": "fixture-token",
+        "AGENTIHOOKS_ANTONCORE_DIR": str(antoncore(tmp_path)),
+    }
+    with redirect_stdout(out), redirect_stderr(err):
+        assert operator_setup.setup(tmp_path / "home", environ) == 0
+    assert (out.flushed, err.flushed) == (1, 1)
 
 
-def test_install_reports_a_failed_sync_enable(tmp_path):
-    class Refusing(Systemctl):
-        def __call__(self, command, **kwargs):
-            self.code = 1 if command[-1] == "agentihooks-swarm-terminal-sync.service" else 0
-            return super().__call__(command, **kwargs)
+def test_a_successful_setup_drops_the_saved_sync_state_and_a_refused_one_keeps_it(tmp_path, monkeypatch):
+    monkeypatch.setattr(operator_setup, "LedgerClient", lambda: pytest.fail("no ledger without a transport"))
+    state = tmp_path / "home" / "swarm-terminal" / "sync-state.json"
+    state.parent.mkdir(parents=True)
+    state.write_text("{}")
 
-    with pytest.raises(SetupRefused) as refused:
-        operator_setup.install("/opt/bin/agentihooks", tmp_path, Refusing(stderr="bus down"))
-    assert str(refused.value) == "systemctl could not enable agentihooks-swarm-terminal-sync.service: bus down"
+    assert run_main(["setup"], {}, Who(), tmp_path / "home")[0] == 1
+    assert state.exists()
+
+    monkeypatch.setattr(
+        openbao_kv.urllib.request, "urlopen", Bao({"user_ca": ssh_private(Ed25519PrivateKey.generate())})
+    )
+    environ = {
+        "OPENBAO_URL": BAO_URL,
+        "OPENBAO_TOKEN": "fixture-token",
+        "AGENTIHOOKS_ANTONCORE_DIR": str(antoncore(tmp_path)),
+    }
+    assert run_main(["setup"], environ, Who(), tmp_path / "home")[0] == 0
+    assert not state.exists()
+
+
+def test_install_without_the_old_timer_or_sync_only_deletes_the_setup_unit(tmp_path):
+    (tmp_path / "agentihooks-swarm-terminal.service").write_text("old\n")
+    systemctl = Systemctl()
+
+    operator_setup.install(tmp_path / "home", "", tmp_path, systemctl, scheduler(), lambda: None)
+
+    assert not (tmp_path / "agentihooks-swarm-terminal.service").exists()
+    assert systemctl.calls == [(["systemctl", "--user", "daemon-reload"], {**QUIET, "check": True})]
 
 
 def test_sync_command_refusals_exit_one(tmp_path, monkeypatch):
@@ -636,8 +788,8 @@ def test_sync_command_refusals_exit_one(tmp_path, monkeypatch):
     )
 
 
-def test_sync_command_runs_the_service_on_the_operator_home(tmp_path, monkeypatch):
-    built = {}
+def test_sync_command_runs_one_pass_of_the_service_on_the_operator_home(tmp_path, monkeypatch):
+    built, passes = {}, []
     monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path / "operator")
 
     def service(environ, client, root):
@@ -645,10 +797,11 @@ def test_sync_command_runs_the_service_on_the_operator_home(tmp_path, monkeypatc
         return "service"
 
     monkeypatch.setattr(operator_setup, "service", service)
-    monkeypatch.setattr(operator_setup, "serve", lambda running: 0 if running == "service" else 2)
+    monkeypatch.setattr(operator_setup, "sync_pass", lambda running, root: passes.append((running, root)))
 
     assert run_main(["sync"], {"A": "b"}, Who(), tmp_path / "home") == (0, "", "")
     assert built == {"environ": {"A": "b"}, "client": ClientHome(tmp_path / "operator"), "root": tmp_path / "home"}
+    assert passes == [("service", tmp_path / "home")]
 
 
 REDIS_PASSWORD = "p w/@:fixture"
@@ -852,48 +1005,120 @@ def test_a_refused_setup_without_a_transport_only_reaches_the_journal(tmp_path, 
     assert err.startswith("operator terminal setup refused: it needs ")
 
 
-def test_install_writes_the_hive_redis_address_into_the_setup_unit(tmp_path):
-    operator_setup.install("/opt/bin/agentihooks", tmp_path, Systemctl(), "swarm.example:6379")
-
-    unit = (tmp_path / "agentihooks-swarm-terminal.service").read_text()
-    assert unit == operator_setup.unit("/opt/bin/agentihooks", "swarm.example:6379")
-    assert "Environment=AGENTIHOOKS_HIVE_REDIS_ADDRESS=swarm.example:6379\n" in unit.splitlines(keepends=True)
-    assert "AGENTIHOOKS_HIVE_REDIS_ADDRESS" not in operator_setup.unit("/opt/bin/agentihooks")
-
-
-def test_installed_holds_only_for_current_enabled_units_with_the_address(tmp_path):
+def test_install_schedules_both_jobs_once_and_records_them(tmp_path):
+    machine, started, root = scheduler(), [], tmp_path / "home"
     address = "swarm.example:6379"
-    assert not operator_setup.installed("/opt/bin/agentihooks", tmp_path, Systemctl(), address)
-    operator_setup.install("/opt/bin/agentihooks", tmp_path, Systemctl(), address)
 
-    assert operator_setup.installed("/opt/bin/agentihooks", tmp_path, Systemctl(), address)
-    assert not operator_setup.installed("/opt/bin/agentihooks", tmp_path, Systemctl(), "other.example:6379")
-    assert not operator_setup.installed("/opt/bin/agentihooks", tmp_path, Systemctl(code=1), address)
-    (tmp_path / "agentihooks-swarm-terminal-sync.service").write_text("stale\n")
-    assert not operator_setup.installed("/opt/bin/agentihooks", tmp_path, Systemctl(), address)
+    operator_setup.install(root, address, tmp_path, Systemctl(), machine, lambda: started.append(True))
+
+    record = recorded(root)
+    assert sorted(record) == ["payload", "refresh", "sync"]
+    assert record["payload"] == payload(root, address)
+    jobs = {name: machine.get(record[name]).record for name in ("refresh", "sync")}
+    assert {
+        name: (job["kind"], job["owner"], job["payload"], job["delay"], job["state"]) for name, job in jobs.items()
+    } == {
+        "refresh": ("interval", "swarm-terminal", payload(root, address), 900, "active"),
+        "sync": ("interval", "swarm-terminal", payload(root, address), 15, "active"),
+    }
+    assert {name: [(slot["signal"], slot["reference"]) for slot in job["slots"]] for name, job in jobs.items()} == {
+        "refresh": [("timeout", "scripts.swarm_v2.herdr.operator_setup:refresh")],
+        "sync": [("timeout", "scripts.swarm_v2.herdr.operator_setup:sync")],
+    }
+    assert stat.S_IMODE((root / "swarm-terminal" / "schedule.json").stat().st_mode) == 0o600
+    assert started == [True]
+
+    operator_setup.install(root, address, tmp_path, Systemctl(), machine, lambda: started.append(True))
+
+    assert recorded(root) == record
+    assert len(machine.redis.hgetall(machine.key("entries"))) == 2
+    assert started == [True, True]
 
 
-def test_installed_asks_systemctl_about_each_unit_on_its_own(tmp_path):
-    systemctl = Systemctl()
-    operator_setup.install("/opt/bin/agentihooks", tmp_path, Systemctl())
+def test_a_changed_address_replaces_both_jobs_and_cancels_the_old_ones(tmp_path):
+    machine, root = scheduler(), tmp_path / "home"
+    operator_setup.install(root, "swarm.example:6379", tmp_path, Systemctl(), machine, lambda: None)
+    old = recorded(root)
 
-    assert operator_setup.installed("/opt/bin/agentihooks", tmp_path, systemctl)
+    operator_setup.install(root, "other.example:6379", tmp_path, Systemctl(), machine, lambda: None)
 
-    assert systemctl.calls == [
-        (["systemctl", "--user", "is-enabled", "--quiet", "agentihooks-swarm-terminal.timer"], QUIET),
-        (["systemctl", "--user", "is-enabled", "--quiet", "agentihooks-swarm-terminal-sync.service"], QUIET),
-    ]
+    new = recorded(root)
+    assert new["payload"] == payload(root, "other.example:6379")
+    assert [machine.get(old[name]).state for name in ("refresh", "sync")] == ["cancelled", "cancelled"]
+    assert [machine.get(new[name]).state for name in ("refresh", "sync")] == ["active", "active"]
+    assert not {old["refresh"], old["sync"]} & {new["refresh"], new["sync"]}
 
 
-def test_installed_defaults_to_the_agentihooks_on_path_and_the_user_unit_folder(tmp_path, monkeypatch):
-    unit_dir = tmp_path / ".config" / "systemd" / "user"
-    operator_setup.install("/opt/bin/agentihooks", unit_dir, Systemctl())
-    monkeypatch.setattr(operator_setup.Path, "home", lambda: tmp_path)
-    monkeypatch.setattr(operator_setup.shutil, "which", {"agentihooks": "/opt/bin/agentihooks"}.get)
+def test_a_lost_job_or_record_is_scheduled_again_and_the_orphans_cancelled(tmp_path):
+    machine, root = scheduler(), tmp_path / "home"
+    operator_setup.install(tmp_path / "other", "", tmp_path, Systemctl(), machine, lambda: None)
+    other = recorded(tmp_path / "other")
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    first = recorded(root)
+    machine.get(first["sync"]).cancel()
+    assert not operator_setup.installed(root, "", tmp_path, machine)
 
-    assert operator_setup.installed(run=Systemctl())
-    monkeypatch.setattr(operator_setup.shutil, "which", lambda name: None)
-    assert not operator_setup.installed(run=Systemctl())
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    second = recorded(root)
+    assert machine.get(first["refresh"]).state == "cancelled"
+    assert operator_setup.installed(root, "", tmp_path, machine)
+
+    (root / "swarm-terminal" / "schedule.json").write_text("not json")
+    assert not operator_setup.installed(root, "", tmp_path, machine)
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    third = recorded(root)
+    assert [machine.get(second[name]).state for name in ("refresh", "sync")] == ["cancelled", "cancelled"]
+    assert [machine.get(third[name]).state for name in ("refresh", "sync")] == ["active", "active"]
+    assert [machine.get(other[name]).state for name in ("refresh", "sync")] == ["active", "active"]
+    assert operator_setup.installed(root, "", tmp_path, machine)
+
+
+def test_scheduled_jobs_fire_their_slots_on_the_machine_scheduler(tmp_path, monkeypatch):
+    import time
+
+    machine, root, fired = scheduler(), tmp_path / "home", []
+    monkeypatch.setattr(operator_setup, "sync_once", lambda environ, home: fired.append(("sync", home)) or 0)
+    monkeypatch.setattr(operator_setup, "setup", lambda home, environ: fired.append(("refresh", home)) or 0)
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    now = time.time()
+
+    assert machine.run_due(now=now + 16) == 1
+    assert fired == [("sync", root)]
+    assert machine.run_due(now=now + 901) == 2
+    assert sorted(fired) == [("refresh", root), ("sync", root), ("sync", root)]
+
+
+def test_installed_holds_only_for_live_jobs_with_the_address_and_no_old_unit(tmp_path):
+    machine, root, address = scheduler(), tmp_path / "home", "swarm.example:6379"
+    assert not operator_setup.installed(root, address, tmp_path, machine)
+    operator_setup.install(root, address, tmp_path, Systemctl(), machine, lambda: None)
+
+    assert operator_setup.installed(root, address, tmp_path, machine)
+    assert not operator_setup.installed(root, "other.example:6379", tmp_path, machine)
+    assert not operator_setup.installed(tmp_path / "elsewhere", address, tmp_path, machine)
+    for name in LEGACY:
+        (tmp_path / name).write_text("old\n")
+        assert not operator_setup.installed(root, address, tmp_path, machine)
+        (tmp_path / name).unlink()
+
+
+def test_a_job_mid_delivery_still_counts_as_scheduled(tmp_path):
+    machine, root = scheduler(), tmp_path / "home"
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+
+    machine.update(recorded(root)["sync"], lambda entry: entry.update(state="pending"))
+
+    assert operator_setup.installed(root, "", tmp_path, machine)
+
+
+def test_jobs_the_scheduler_no_longer_holds_are_scheduled_again(tmp_path):
+    machine, root = scheduler(), tmp_path / "home"
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    machine.redis.delete(machine.key("entries"))
+
+    assert not operator_setup.installed(root, "", tmp_path, machine)
+    operator_setup.install(root, "", tmp_path, Systemctl(), machine, lambda: None)
+    assert operator_setup.installed(root, "", tmp_path, machine)
 
 
 def test_an_unreadable_redis_password_is_refused_naming_its_openbao_path(tmp_path):
@@ -907,20 +1132,20 @@ def test_an_unreadable_redis_password_is_refused_naming_its_openbao_path(tmp_pat
 
 def test_install_check_command_exits_by_the_installed_state_and_writes_nothing(tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setattr(operator_setup, "installed", lambda address: seen.append(address) or False)
-    monkeypatch.setattr(operator_setup, "install", lambda address: (_ for _ in ()).throw(AssertionError("wrote")))
+    monkeypatch.setattr(operator_setup, "installed", lambda root, address: seen.append((root, address)) or False)
+    monkeypatch.setattr(operator_setup, "install", lambda root, address: pytest.fail("wrote"))
 
     code, out, err = run_main(["install", "--check", "--redis-address", "swarm.example:6379"], {}, Who(), tmp_path)
     assert (code, out, err) == (1, "", "")
-    monkeypatch.setattr(operator_setup, "installed", lambda address: seen.append(address) or True)
+    monkeypatch.setattr(operator_setup, "installed", lambda root, address: seen.append((root, address)) or True)
     assert run_main(["install", "--check"], {}, Who(), tmp_path)[0] == 0
-    assert seen == ["swarm.example:6379", ""]
+    assert seen == [(tmp_path, "swarm.example:6379"), (tmp_path, "")]
 
 
 def test_install_command_passes_its_hive_redis_address(tmp_path, monkeypatch):
     seen = []
-    monkeypatch.setattr(operator_setup, "install", lambda address: seen.append(address))
+    monkeypatch.setattr(operator_setup, "install", lambda root, address: seen.append((root, address)))
 
     assert run_main(["install", "--redis-address", "swarm.example:6379"], {}, Who(), tmp_path / "home")[0] == 0
     assert run_main(["install"], {}, Who(), tmp_path / "home")[0] == 0
-    assert seen == ["swarm.example:6379", ""]
+    assert seen == [(tmp_path / "home", "swarm.example:6379"), (tmp_path / "home", "")]

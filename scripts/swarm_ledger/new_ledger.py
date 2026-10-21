@@ -5,7 +5,8 @@ Usage: new_ledger.py --content <content.json> [--plan <plan-file> | --proof] [--
                      [--size small|swarm] [--as NAME] [--operator-asked WORDS]
 
 --size: small (default) is one session's work without a swarm; its creator, --as NAME (default
-$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works.
+$AGENTIHOOKS_AGENT_NAME), joins it as its worker. swarm is a plan a swarm works, and only proof and demo ledgers
+take it here: agentihooks swarm init NAME creates every other swarm with its ledger.
 
 content.json: {"title", "overview", "sources": [paths], "phases": [{"title", "description"}],
                "questions": [{"text"}], "followups": [{"text"}]}
@@ -26,25 +27,23 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import ledger_core as core  # noqa: E402
 import ledger_link  # noqa: E402
 import ledger_size  # noqa: E402
 
-from scripts.swarm_ledger.repository import repository
+from scripts.swarm_ledger import ports, storage
 
-TEMPLATE = core.TEMPLATE
 LIMITS = {"overview": 200, "phase description": 100}
 
 
 def built_slug(args):
-    from scripts.swarm import naming
+    naming = ports.swarm().naming
 
     try:
         if args.plan:
             return naming.plan_slug(args.plan, args.date)
         if args.proof:
             return naming.proof_slug(
-                os.environ, {s["slug"] for s in repository.list_summaries() if s["slug"].startswith("proof-")}
+                os.environ, {s["slug"] for s in storage.default().list_summaries() if s["slug"].startswith("proof-")}
             )
         if args.slug is None and args.size == "small":
             return naming.small_slug(os.environ)
@@ -119,6 +118,11 @@ def check(content):
     errors += [f"source not found: {s}" for s in missing]
     if not content.get("phases"):
         errors.append("no phases")
+    errors += [
+        f"tasks[{n}].rank is not allowed in seed content; set the rank after creation"
+        for n, task in enumerate(content.get("tasks", []), 1)
+        if "rank" in task
+    ]
     return errors
 
 
@@ -170,7 +174,7 @@ def build_doc(content, size="small"):
 
 
 def create(slug, content, size="small"):
-    return repository.create(slug, content, size)
+    return storage.default().create(slug, content, size)
 
 
 def main():
@@ -187,7 +191,10 @@ def main():
     args = parser.parse_args()
 
     slug = built_slug(args)
-    if repository.exists(slug):
+    naming = ports.swarm().naming
+    if args.size == "swarm" and not naming.is_code_named_swarm(slug):
+        sys.exit(f"a swarm ledger is created with its swarm by one command: {naming.SWARM_INIT}")
+    if storage.default().exists(slug):
         print(json.dumps({"slug": slug, "created": False}))
         print(ledger_link.page_line(slug))
         return
@@ -206,7 +213,7 @@ def main():
     create(slug, content, args.size)
     out = {"slug": slug, "created": True, "size": args.size}
     if small:
-        repository.apply_ops(
+        storage.default().apply_ops(
             slug, ops=[{"op": "join", "id": f"join-{secrets.token_hex(5)}", "by": args.name, "role": "member"}]
         )
         out["joined"] = args.name
@@ -215,4 +222,7 @@ def main():
 
 
 if __name__ == "__main__":
+    from scripts.swarm_ledger import composition
+
+    composition.wire()
     main()

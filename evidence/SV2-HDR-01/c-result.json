@@ -20,7 +20,14 @@
         1
       ]
     ],
-    "probes": 3,
+    "probes": 4,
+    "replaced_compatible": [
+      "herdr",
+      "--machine",
+      "worker-fixture",
+      "pane",
+      "read"
+    ],
     "restarted_compatible": [
       "herdr",
       "--machine",
@@ -29,7 +36,7 @@
       "read"
     ],
     "restarted_without_capability": "herdr server lacks surface_interest=true",
-    "same_incarnation_cached": [
+    "same_server_cached": [
       "herdr",
       "--machine",
       "worker-fixture",

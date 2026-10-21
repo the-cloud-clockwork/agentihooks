@@ -16,9 +16,12 @@ class KillMemory:
         # Upload refuses some characters mangled names may hold, so the file is named by a digest.
         return self.folder / hashlib.sha256(mutant.partition("__mutmut_")[0].encode()).hexdigest()
 
-    def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
+    def killer(self, mutant: str) -> str | None:
         path = self._path(mutant)
-        killer = path.read_text() if path.is_file() else None
+        return path.read_text() if path.is_file() else None
+
+    def order(self, mutant: str, tests: Iterable[str]) -> list[str]:
+        killer = self.killer(mutant)
         return sorted(tests, key=lambda test: test != killer)
 
     def prepare(self, mutant: str | None, tests: Iterable[str]) -> Iterable[str]:

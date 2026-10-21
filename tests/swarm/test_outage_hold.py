@@ -12,7 +12,6 @@ from tests.swarm.test_lifetime import HOUR, idle_master
 from tests.swarm.test_tick import FakeLedger, FakeRuntime, tasks, workers
 from tests.swarm.test_tick import store as store
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 NAME = "engineer@a1b2c3-0001"
 MINUTE = 60_000
 
@@ -137,8 +136,9 @@ def test_paused_time_keeps_the_newest_closed_outages_of_one_kind(store):
 
 
 def test_a_pane_error_mark_expires_within_a_day(store):
-    outage.mark_pane(store, "sw", NAME, "API Error: 529")
+    outage.mark_pane(store, "sw", NAME, "API Error: 529", 1_000)
     assert 0 < store.redis.ttl(store.key("sw", outage.PANE, NAME)) <= outage.PANE_TTL_S
+    assert 0 < store.redis.ttl(store.key("sw", outage.PANE_SINCE, NAME)) <= outage.PANE_TTL_S
 
 
 def test_a_new_provider_episode_keeps_the_closed_one_in_paused_time(store, monkeypatch):

@@ -259,9 +259,9 @@ def test_reconnect_confirms_the_original_pane_and_measures_its_latency(tmp_path)
     assert target == r.client.router.resolve(r.label[EXE_B], PANE, CONVERSATION[EXE_B])
     assert r.viewer.views()[AGENT_B].state == LIVE
     latencies = r.viewer.terminal_reconnect_latency_seconds()
-    assert latencies == [2 * FX["command_ms"] / 1000]
+    assert latencies == [4 * FX["command_ms"] / 1000]
     latencies.append(9.0)
-    assert r.viewer.terminal_reconnect_latency_seconds() == [2 * FX["command_ms"] / 1000]
+    assert r.viewer.terminal_reconnect_latency_seconds() == [4 * FX["command_ms"] / 1000]
     assert r.workers.launches() == []
 
 

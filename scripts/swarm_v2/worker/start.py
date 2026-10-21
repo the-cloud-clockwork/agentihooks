@@ -175,6 +175,22 @@ def _private(path: Path, document: dict) -> None:
     staged.replace(path)
 
 
+def _binding(attempt: Path, spec: dict, built: dict) -> None:
+    from scripts.profiles import binding
+
+    target, profile = spec["harness"], spec["profile"]
+    report = attempt / "run" / "profile-binding.json"
+    result = {"profile": profile, "harness": target}
+    try:
+        home = attempt / built["homes"][target] / f".{target}"
+        rendered = binding.inspect(home, profile, target)
+    except (AttributeError, KeyError, TypeError, ValueError) as exc:
+        _private(report, {**result, "state": "failed", "reason": str(exc)})
+        raise LaunchRefused(f"profile binding failed: {exc}") from exc
+    _private(report, {**result, "state": "passed", "rendered": rendered})
+    print(json.dumps({"profile_binding": "passed", **result}), flush=True)
+
+
 def _held(renewer: lease_renewal.Renewer) -> None:
     if renewer.lost is not None:
         raise LaunchRefused(f"admission lease lost: {renewer.lost}")
@@ -237,6 +253,7 @@ def prepare(
     renewer = lease_renewal.Renewer(lease, lease_renewal.send)
     with lease_renewal.kept(renewer):
         built = _build(attempt, spec, renewer, boot, templates, bundle)
+        _binding(attempt, spec, built)
     _held(renewer)
     worker_home.store_grant(attempt, renewer.grant)
     _private(attempt / lease_renewal.ADMISSION, renewer.record())

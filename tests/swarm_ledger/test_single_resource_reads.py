@@ -1,13 +1,15 @@
 import pytest
 
 from scripts.swarm_ledger.api import resources, routes
-from scripts.swarm_ledger.repository import repository, sqlite
+from scripts.swarm_ledger.repository import sqlite
+from scripts.swarm_ledger.storage import default as default_repository
 from tests.swarm_ledger.test_api_v1 import authority_live as _authority_live
 from tests.swarm_ledger.test_api_v1 import live as _live
 from tests.swarm_ledger.test_api_v1 import request
 from tests.swarm_ledger.test_ledger_authority import SLUG, core, server
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+repository = default_repository()
+
 authority_live = _authority_live
 live = _live
 
@@ -76,7 +78,7 @@ def test_a_thread_read_pages_with_its_query_from_the_partial_read(live, whole_lo
     core.sync(SLUG, ops=[{"op": "add", "id": f"more-{n}", "thread": path, "text": f"Note {n}"} for n in range(2)])
     state = repository.get_document(SLUG)
     whole_loads.clear()
-    reply = routes.ledger_read(server, SLUG, path, {"limit": 1})
+    reply = routes.ledger_read(server.api_services(), SLUG, path, {"limit": 1})
     assert whole_loads == []
     assert reply == resources.read(state, path, {"limit": 1})
     assert len(reply["data"]) == 1

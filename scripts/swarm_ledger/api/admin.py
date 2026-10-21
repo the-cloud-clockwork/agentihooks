@@ -1,34 +1,36 @@
-from types import ModuleType
+from scripts.swarm_ledger import ports
 
 from . import resources, schemas
 from .errors import APIError
+from .services import Services
 
 
-def layout(handler: object, server: ModuleType, payload: dict | None) -> dict:
+def layout(handler: object, services: Services, payload: dict | None) -> dict:
     if handler.command == "GET":
-        data = server.ledger_layout.read()
+        data = services.ledger.layout()
     else:
-        if handler.headers.get("Origin") not in server.ALLOWED_ORIGINS:
+        if handler.headers.get("Origin") not in services.policy.allowed_origins:
             raise APIError(403, "forbidden", "Origin not allowed")
         properties = {
             row: {
                 "type": "object",
                 "minProperties": 1,
                 "additionalProperties": False,
-                "properties": {key: {"type": "integer"} for key in fields},
+                "properties": {key: {"type": "number"} for key in fields},
             }
-            for row, fields in server.ledger_layout.ROWS.items()
+            for row, fields in services.ledger.layout_rows.items()
         }
+        properties.update(dict.fromkeys(services.ledger.layout_lists, {}))
         schemas.validate({"type": "object", "additionalProperties": False, "properties": properties}, payload)
         try:
-            data = server.ledger_layout.write(payload)
+            data = services.ledger.write_layout(payload)
         except ValueError:
             raise APIError(400, "schema_invalid", "Layout sizes are out of range") from None
     return {"data": data, "revision": resources.revision(data)}
 
 
-def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
-    if handler.headers.get("Origin") not in server.ALLOWED_ORIGINS:
+def bin_action(handler: object, services: Services, payload: dict) -> dict:
+    if handler.headers.get("Origin") not in services.policy.allowed_origins:
         raise APIError(403, "forbidden", "Origin not allowed")
     schemas.validate(
         {
@@ -37,7 +39,7 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
             "additionalProperties": False,
             "properties": {
                 "action": {"enum": ["delete", "restore"]},
-                "slug": {"type": "string", "pattern": server.core.SLUG_RE.pattern},
+                "slug": {"type": "string", "pattern": services.ledger.core.SLUG_RE.pattern},
             },
         },
         payload,
@@ -47,29 +49,76 @@ def bin_action(handler: object, server: ModuleType, payload: dict) -> dict:
         raise APIError(404, "ledger_missing", "No such ledger")
     error = None
     if payload["action"] == "delete":
-        server.ledger_bin.delete(slug)
-        if server.swarm_status(slug) is not None:
-            _, error = server.swarm_control(slug, ["stop", "--now"])
-    elif not server.ledger_bin.restore(slug):
+        services.ledger.bin_ledger(slug)
+        if services.swarm.status(slug) is not None:
+            _, error = services.swarm.control(slug, ["stop", "--now"])
+    elif not services.repository.restore(slug):
         raise APIError(404, "resource_missing", "Ledger is not in the bin")
     return {"slug": slug, "action": payload["action"], **({"swarm_error": error} if error else {})}
 
 
-def control(server: ModuleType, slug: str, principal: str, payload: dict) -> dict:
+def lifecycle(services: Services, principal: str, slug: str, payload: dict) -> dict:
+    from scripts.swarm_ledger.repository import bin_storage
+
+    schemas.validate(
+        {
+            "oneOf": [
+                {
+                    "type": "object",
+                    "required": ["action", "closed_at"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "action": {"const": "bin_closed"},
+                        "closed_at": {"type": "integer", "minimum": 1},
+                        "controller_epoch": {"type": "integer", "minimum": 1},
+                    },
+                },
+                {
+                    "type": "object",
+                    "required": ["action"],
+                    "additionalProperties": False,
+                    "properties": {
+                        "action": {"enum": ["restore", "binned"]},
+                        "controller_epoch": {"type": "integer", "minimum": 1},
+                    },
+                },
+            ],
+        },
+        payload,
+    )
+    if principal and payload["action"] == "bin_closed":
+        raise APIError(403, "forbidden", "Conditional binning needs the operator or controller credential")
+    if "controller_epoch" in payload:
+        SwarmError = ports.swarm().store.SwarmError
+
+        try:
+            services.ledger.authority.fence(slug, payload["controller_epoch"])
+        except SwarmError as exc:
+            raise APIError(409, "stale_controller", str(exc)) from None
+    if payload["action"] == "bin_closed":
+        result = bin_storage.bin_closed(slug, payload["closed_at"])
+    elif payload["action"] == "restore":
+        result = bin_storage.restore(slug)
+    else:
+        result = slug in bin_storage.entries()
+    return {"data": result}
+
+
+def control(services: Services, slug: str, principal: str, payload: dict) -> dict:
     if principal:
         raise APIError(403, "forbidden", "Swarm controls need the operator")
     schemas.validate(CONTROL, payload)
     action = payload["action"]
     try:
         if action == "quota_refresh":
-            _, error = server.refresh_quota(slug)
+            _, error = services.swarm.refresh_quota(slug)
         else:
             command, argv = (
-                ("doctor", server.DOCTOR[action])
-                if action in server.DOCTOR
-                else ("swarm", server.control_argv(payload))
+                ("doctor", services.swarm.doctor[action])
+                if action in services.swarm.doctor
+                else ("swarm", services.swarm.control_argv(payload))
             )
-            _, error = server.swarm_control(slug, argv, command)
+            _, error = services.swarm.control(slug, argv, command)
     except ValueError:
         raise APIError(400, "schema_invalid", "Control does not match its domain schema") from None
     if error:
@@ -77,7 +126,7 @@ def control(server: ModuleType, slug: str, principal: str, payload: dict) -> dic
     return {"action": action, "accepted": True}
 
 
-def upload(handler: object, server: ModuleType, slug: str, path: str) -> None:
+def upload(handler: object, services: Services, slug: str, path: str) -> None:
     try:
         length = int(handler.headers.get("Content-Length", "0"))
     except ValueError:
@@ -123,11 +172,12 @@ CONTROL = {
                 "quota_refresh",
                 "doctor_start",
                 "doctor_stop",
+                "master_move",
             ]
         },
         **{
             key: {"type": "integer"}
-            for key in ("max_eng", "max_ci", "max_plan", "compact_limit", "memory_per_agent_mb")
+            for key in ("max_eng", "max_ci", "max_plan", "masters_step", "compact_limit", "memory_per_agent_mb")
         },
         "scaling": {"enum": ["auto", "manual"]},
         "load_high": {"type": "number"},
@@ -145,6 +195,7 @@ CONTROL = {
                 "effort_min",
                 "effort_max",
                 "autonomy",
+                "hive",
             )
         },
         "gates": {"type": "object", "additionalProperties": {"type": "string"}},

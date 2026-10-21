@@ -7,6 +7,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -38,18 +39,17 @@ MERGED = {
     }
 }
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def rig(tmp_path, monkeypatch, ledger_port):
-    import redis
-    from fakeredis import TcpFakeServer
+    from fakeredis import FakeRedis, TcpFakeServer
+
+    from tests.scheduler.process_service import start_scheduler, stop_scheduler
 
     server = TcpFakeServer(("127.0.0.1", 0), server_type="redis")
     threading.Thread(target=server.serve_forever, daemon=True).start()
     url = f"redis://127.0.0.1:{server.server_address[1]}/0?protocol=3"
-    client = redis.Redis.from_url(url, decode_responses=True)
+    client = FakeRedis(server=server.fake_server, decode_responses=True, protocol=3)
     ledgers = tmp_path / "ledgers"
     ledgers.mkdir()
     monkeypatch.setattr(core, "LEDGER_DIR", ledgers)
@@ -62,7 +62,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
     }
     doc = new_ledger.build_doc(content)
     doc["tasks"][0].update(state="claimed", claimed_by=ME)
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(doc, SLUG, 8765), encoding="utf-8")
     core.sync(SLUG)
     task = doc["tasks"][0]["id"]
@@ -115,7 +115,9 @@ def rig(tmp_path, monkeypatch, ledger_port):
         )
 
     def ledger_task():
-        from scripts.swarm_ledger.repository import repository
+        from scripts.swarm_ledger.storage import default as default_repository
+
+        repository = default_repository()
 
         return next(t for t in repository.get_document(SLUG)["tasks"] if t["id"] == task)
 
@@ -138,6 +140,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         path = tmp_path / ".agentihooks" / "swarm" / SLUG / "gates" / "log.jsonl"
         return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
 
+    scheduler = start_scheduler(env)
     rig = type("Rig", (), {})()
     rig.stop, rig.redis, rig.answer, rig.task, rig.ledger_task, rig.rows = stop, client, answer, task, ledger_task, rows
     rig.set_task, rig.home = set_task, tmp_path
@@ -146,6 +149,7 @@ def rig(tmp_path, monkeypatch, ledger_port):
         yield rig
     finally:
         subprocess.run([sys.executable, str(SCRIPTS / "ledger_server.py"), "--stop"], env=env, timeout=30)
+        stop_scheduler(scheduler, client)
         server.shutdown()
         server.server_close()
 
@@ -165,6 +169,34 @@ def test_a_stop_with_work_owed_is_blocked_and_the_third_blocks_the_task(rig):
         ("claim-stop", "deny", ME),
         ("claim-stop", "blocked", ME),
     ]
+
+
+@pytest.mark.parametrize("scope", ["session", "agent", "task"])
+def test_a_lifted_stop_never_blocks_the_claim_and_clear_restarts_the_streak(rig, scope):
+    from scripts.gates import lift
+
+    assert rig.stop().returncode == 2
+    assert rig.stop().returncode == 2
+    paths = {
+        "session": lift.lift_path(SLUG, SID, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+        "agent": lift.agent_lift_path(SLUG, ME, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+        "task": lift.task_lift_path(SLUG, rig.task, "claim-stop", rig.home / ".agentihooks" / "swarm"),
+    }
+    path = paths[scope]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": time.time()}))
+    for _ in range(4):
+        stopped = rig.stop()
+        assert stopped.returncode == 0, stopped.stderr
+        assert rig.ledger_task()["state"] == "claimed"
+    assert not any(row["kind"] == "blocked" for row in rig.rows())
+
+    path.unlink()
+    first = rig.stop()
+    assert first.returncode == 2 and "stop block 1 of 2" in first.stderr
+    assert rig.stop().returncode == 2
+    assert rig.stop().returncode == 0
+    assert rig.ledger_task()["state"] == "blocked"
 
 
 def test_a_stop_after_the_merge_is_blocked_and_one_on_pending_checks_passes_with_a_wait(rig):

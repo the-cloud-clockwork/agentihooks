@@ -9,8 +9,6 @@ from scripts.swarm.tick import tick
 from tests.swarm.test_cli import _handoff_doc, env, run  # noqa: F401
 from tests.swarm.test_tick import FakeRuntime, masters, store, tasks, workers  # noqa: F401
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 RECAPS = [
     {"occupant": "engineer@a1b2c3-0004", "task": "t1", "text": "latest recap text", "at": 20},
     {"occupant": "engineer@a1b2c3-0001", "task": "t1", "text": "older recap text", "at": 10},

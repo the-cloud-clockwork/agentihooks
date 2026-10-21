@@ -18,6 +18,7 @@ GATES = {
     "pre-agent+task+sendmessage-subagent_budget.py",
     "pre-any-quiet_claim.sh",
     "pre-bash.agentihooks+bash.bash+bash.sh+bash.zsh+bash.eval-identity_pin.py",
+    "pre-bash.git+bash.gh-one_push.py",
     "pre-bash.gh+bash.agentihooks-intent_gate.py",
     "pre-bash.gh-rerun_budget.py",
     "pre-edit+write+multiedit+notebookedit+mcp__serena+bash.git-build_gate.py",

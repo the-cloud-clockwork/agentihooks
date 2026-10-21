@@ -3,7 +3,7 @@
 import re
 import time
 
-from scripts.swarm.naming import lane_of, resolve_name
+from scripts.swarm_ledger import ports
 from scripts.swarm_ledger.ledger_kinds import KINDS
 from scripts.swarm_ledger.ledger_tasks import LANES
 from scripts.swarm_ledger.repository.hierarchy import project
@@ -18,6 +18,10 @@ FULL = "full"
 FIELDS = {"freeze_set": ("verb", "target", "reason", "quote"), "freeze_clear": ("target", "reason", "quote")}
 EVENTS = {"freeze": "frozen", "focus": "focused"}
 MAX_TEXT = 2000
+
+
+def resolve_name(name):
+    return ports.swarm().naming.resolve_name(name)
 
 
 def selector(target: str) -> bool:
@@ -42,7 +46,7 @@ def check(op):
 def autonomy(slug: str) -> str:
     from redis import RedisError
 
-    from scripts.swarm.store import SwarmError, connect
+    SwarmError, connect = ports.swarm().store.SwarmError, ports.swarm().store.connect
 
     try:
         return connect().config(slug).autonomy
@@ -57,23 +61,11 @@ def author(op, ctx) -> tuple[str, str] | None:
     by = op.get("by")
     if by is None:
         return "operator", op.get("quote")
-    if lane_of(resolve_name(by)) == DISPATCH:
+    if ports.swarm().naming.lane_of(resolve_name(by)) == DISPATCH:
         return (by, "") if autonomy(ctx.slug) == FULL else None
     master = ctx.meta["members"].get(by, {}).get("role") == "orchestrator"
     words = ledger_relay.verified(by, op["quote"]) if master and op.get("quote") else ""
     return (by, words) if words else None
-
-
-def under(doc: dict, target: str) -> set:
-    below = {}
-    for node, (_, link, _) in project(doc)[0].items():
-        below.setdefault(link, []).append(node)
-    for task in doc.get("tasks", []):
-        below.setdefault(f"tasks/{task['id']}", []).extend(f"tasks/{m}" for m in task.get("group_members", []))
-    found = [target]
-    for parent in found:
-        found += [node for node in below.get(parent, []) if node not in found]
-    return set(found)
 
 
 def _set(doc, op, ctx, by, words):
@@ -92,11 +84,10 @@ def _set(doc, op, ctx, by, words):
 
 def _clear(doc, op, ctx, by):
     target = op["target"]
-    held = under(doc, target)
     rows = doc.get("freezes", [])
-    gone = [row for row in rows if row["target"] in held]
+    gone = [row for row in rows if row["target"] == target]
     if gone:
-        doc["freezes"] = [row for row in rows if row["target"] not in held]
+        doc["freezes"] = [row for row in rows if row["target"] != target]
         cleared = [row["target"] for row in gone]
         ctx.record(by, "unfrozen", target, id=op["id"], cleared=cleared, reason=op.get("reason", ""))
         ctx.stamp("freezes", by)

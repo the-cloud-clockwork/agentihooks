@@ -5,7 +5,7 @@ from scripts.swarm import ledger_events
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm_v2 import masters
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "sw"
 LEAD = f"master@{SLUG}"

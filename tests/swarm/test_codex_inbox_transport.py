@@ -7,13 +7,32 @@ from scripts.swarm import execution
 from scripts.swarm.store import APP_SERVER_TRANSPORT, LEGACY_TRANSPORT, AgentRecord, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
-def test_codex_inbox_transport_defaults_to_legacy(env):  # noqa: F811
+def test_codex_inbox_transport_defaults_to_app_server(env):  # noqa: F811
     store, _, _ = env
     run("sw", "create", "--repo", "/repo")
+    assert store.config("sw").codex_inbox_transport == APP_SERVER_TRANSPORT
+
+
+def test_a_stored_config_without_the_setting_keeps_legacy(env):  # noqa: F811
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    store.redis.hdel(store.key("sw", "config"), "codex_inbox_transport")
     assert store.config("sw").codex_inbox_transport == LEGACY_TRANSPORT
+
+
+def test_rollback_to_legacy_holds_for_new_executions_and_keeps_admitted_ones(env):  # noqa: F811
+    from scripts.swarm_v2.runtime import codex
+
+    store, _, _ = env
+    run("sw", "create", "--repo", "/repo")
+    agent = AgentRecord(store.next_name("sw", "eng"), "eng", "task", seat="eng-1@sw", harness="codex")
+    admitted = store.start_execution("sw", replace(agent, transport=codex.transport(store.config("sw"), "codex")))
+    assert run("sw", "set", "codex-inbox-transport=legacy") == 0
+    assert codex.transport(store.config("sw"), "codex") == LEGACY_TRANSPORT
+    assert store.execution("sw", admitted.execution_id).transport == APP_SERVER_TRANSPORT
 
 
 def test_set_takes_a_string_transport_and_reports_it(env, capsys):  # noqa: F811

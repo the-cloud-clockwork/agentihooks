@@ -5,7 +5,7 @@ import pytest
 
 from scripts.hive import daemon, registry
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -64,33 +64,100 @@ def test_three_missed_beats_expire_both_keys(redis, monkeypatch):
     assert redis.exists(registry.key("machine"))
 
 
-def test_run_beats_immediately_then_waits_fifteen_seconds(monkeypatch):
+@pytest.mark.parametrize("account", ["login", ""])
+def test_beat_publishes_the_master_login_account(redis, monkeypatch, account):
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon.master_claude_login, "signed_in", lambda: account)
+    daemon.beat(redis, "machine")
+    assert registry.show(redis, "machine")["master_login"] == {"claude": account}
+
+
+@pytest.mark.parametrize(("member", "indexed", "ttl"), [("machine", set(), 10), ("other", {"machine"}, 45)])
+def test_a_member_beat_leaves_the_index_and_launch_slots_to_the_controller(redis, monkeypatch, member, indexed, ttl):
+    from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm.keyspace import ROOT
+
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", member)
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon, "_executions", lambda redis, local_id, processes: {"claude:one": ["first"]})
+    slots = LaunchSlots(redis)
+    assert slots.reserve("claude:one", "first", 1, 10000)
+    assert slots.acknowledge("first")
+    redis.pexpire(f"{ROOT}:launch-slot:first", 10000)
+
+    daemon.beat(redis, "machine")
+
+    assert redis.smembers(registry.INDEX) == indexed
+    assert ttl - 5 < redis.pttl(f"{ROOT}:launch-slot:first") / 1000 <= ttl
+
+
+def _once(connection):
+    return Mock(side_effect=[(connection, connection), AssertionError("reconnected")])
+
+
+def _quiet_quota(monkeypatch):
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
+
+
+def test_run_beats_immediately_then_waits_a_beat_less_the_wake_slack(monkeypatch):
     events = []
     connection = object()
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: events.append((redis, hive)))
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: events.append("refresh"))
+    monkeypatch.setattr(
+        daemon.quota_refresh,
+        "start",
+        lambda environ, worker, attempted_at: (
+            events.append(("start", environ, worker, attempted_at)) or ("worker", attempted_at + 1)
+        ),
+    )
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon.time, "monotonic", lambda: 0)
+    monkeypatch.setattr(daemon.time, "time", lambda: 50)
 
-    def sleep(seconds):
+    waits = []
+
+    def sleep(seconds, redis, timeout):
+        assert redis is connection
+        assert timeout == seconds + 1
         events.append(seconds)
-        raise KeyboardInterrupt
+        waits.append(seconds)
+        if len(waits) == 2:
+            raise KeyboardInterrupt
 
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(connection)
-    assert events == [(connection, "local"), 15]
+        daemon.run(_once(connection))
+    environ = daemon.os.environ
+    assert events == [
+        "refresh",
+        ("start", environ, None, 50),
+        (connection, "local"),
+        13,
+        ("start", environ, "worker", 51),
+        (connection, "local"),
+        13,
+    ]
 
 
 def test_run_deducts_observation_time_from_the_beat_interval(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
     timestamps = iter([100, 103])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
+    waiter = object()
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(object())
-    sleep.assert_called_once_with(12)
+        daemon.run(Mock(return_value=(object(), waiter)))
+    sleep.assert_called_once_with(12, redis=waiter, timeout=12)
 
 
 def test_install_writes_the_service_and_enables_it(tmp_path):
@@ -198,8 +265,10 @@ def test_cli_runs_the_daemon_and_installs_service(monkeypatch):
     install = Mock(return_value=True)
     monkeypatch.setattr(daemon, "run", run)
     monkeypatch.setattr(daemon, "install", install)
+    monkeypatch.setattr(daemon, "clients", lambda source: ("bounded", source))
     assert cli.main(["run"]) == 0
-    run.assert_called_once_with(connection)
+    run.assert_called_once()
+    assert run.call_args.args[0]() == ("bounded", connection)
     assert cli.main(["install"]) == 0
     install.assert_called_once_with()
     install.return_value = False
@@ -314,12 +383,13 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
         "name": "machine",
         "ui": "no",
         "ephemeral": "no",
-        "roles": [],
+        "excluded": ["master"],
         "prefer": {},
-        "max_agents": 1,
+        "max_agents": 20,
         "harnesses": [],
         "slots": [],
         "interactive": {"claude": "", "codex": ""},
+        "master_login": {"claude": ""},
         "repos": [],
         "heartbeat_at": registry.show(redis, "machine")["heartbeat_at"],
         "version": "",
@@ -327,16 +397,292 @@ def test_initial_beat_creates_a_complete_registry_record(redis, monkeypatch):
     assert redis.smembers(registry.INDEX) == {"machine"}
 
 
+def test_a_beat_moves_a_legacy_roles_record_and_seeds_its_own_key(redis, monkeypatch):
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}},
+    )
+    redis.hset(registry.key("machine"), mapping={"ui": "no", "roles": '["eng"]', "max_agents": "1"})
+    daemon.beat(redis, "machine")
+    stored = redis.hgetall(registry.key("machine"))
+    assert "roles" not in stored and "max_agents" not in stored
+    assert (stored["name"], stored["ephemeral"]) == ("machine", "no")
+
+
 def test_an_overlong_beat_does_not_sleep_again(monkeypatch):
     monkeypatch.setattr(daemon, "hive_id", lambda: "local")
     monkeypatch.setattr(daemon, "beat", lambda redis, hive: None)
+    monkeypatch.setattr(daemon.quota_refresh, "refresh", lambda environ: None)
+    monkeypatch.setattr(daemon.quota_refresh, "start", lambda environ, worker, attempted_at: (None, attempted_at))
     timestamps = iter([100, 116])
     monkeypatch.setattr(daemon.time, "monotonic", lambda: next(timestamps))
     sleep = Mock(side_effect=KeyboardInterrupt)
-    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    monkeypatch.setattr(daemon, "scheduled_wait", sleep)
+    connection = object()
     with pytest.raises(KeyboardInterrupt):
-        daemon.run(object())
-    sleep.assert_called_once_with(0)
+        daemon.run(_once(connection))
+    sleep.assert_called_once_with(0, redis=connection, timeout=0)
+
+
+def test_run_resumes_registration_after_a_dropped_and_restored_redis(monkeypatch):
+    import fakeredis
+
+    server = fakeredis.FakeServer()
+    clients, sleeps, queued, now = [], [], [], [1000.0]
+    stream = f"{registry.key('machine')}:orders"
+
+    def connect():
+        assert len(clients) < 3
+        clients.append(fakeredis.FakeRedis(server=server, decode_responses=True))
+        return clients[-1], clients[-1]
+
+    def backoff(seconds):
+        sleeps.append(seconds)
+        server.connected = len(sleeps) == 2
+        if server.connected:
+            queued.append(clients[-1].xadd(stream, {"order": "{}"}))
+
+    def wait(seconds, redis, timeout):
+        assert redis is clients[-1]
+        if now[0] == 2000.0:
+            raise KeyboardInterrupt
+        server.connected = False
+        now[0] = 2000.0
+
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "machine")
+    monkeypatch.setattr(
+        daemon, "observe", lambda **kwargs: {"slots": [], "interactive": {}, "repos": [], "sessions": {}, "quota": {}}
+    )
+    monkeypatch.setattr(daemon.time, "time", lambda: now[0])
+    monkeypatch.setattr(daemon.time, "sleep", backoff)
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(connect)
+    assert sleeps == [1, 2]
+    assert len(clients) == 3
+    assert registry.show(clients[-1], "machine")["heartbeat_at"] == 2000000
+    assert clients[-1].xlen(stream) == 0
+    assert "invalid_order" in clients[-1].hget(f"{stream}:acks", queued[0])
+
+
+def test_run_backoff_is_capped_and_restarts_after_a_good_beat_and_wait(monkeypatch, capsys):
+    from redis.exceptions import ConnectionError, TimeoutError
+
+    outcomes = iter([ConnectionError] * 6 + [None, None, TimeoutError, None])
+    connections, sleeps, waits = [], [], []
+
+    def connect():
+        assert len(connections) < 10
+        connections.append(object())
+        if len(connections) == 1:
+            raise ConnectionError("refused")
+        return connections[-1], connections[-1]
+
+    def beat(redis, hive):
+        assert (redis, hive) == (connections[-1], "local")
+        error = next(outcomes)
+        if error:
+            raise error("lost")
+
+    def wait(seconds, redis, timeout):
+        assert redis is connections[-1]
+        waits.append(seconds)
+        if len(waits) == 1:
+            raise ConnectionError("lost while waiting")
+        if len(waits) == 3:
+            raise KeyboardInterrupt
+
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "beat", beat)
+    monkeypatch.setattr(daemon.time, "sleep", sleeps.append)
+    monkeypatch.setattr(daemon, "scheduled_wait", wait)
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(connect)
+    assert sleeps == [1, 2, 4, 8, 16, 30, 30, 30, 1]
+    lines = capsys.readouterr().err.splitlines()
+    assert lines[0] == "hive Redis connection lost (ConnectionError: refused); reconnecting in 1s"
+    assert lines[2] == "hive Redis connection lost (ConnectionError: lost); reconnecting in 4s"
+    assert len(connections) == 10
+
+
+def test_run_lets_errors_other_than_a_lost_connection_escape(monkeypatch):
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "beat", Mock(side_effect=ValueError("bad report")))
+    monkeypatch.setattr(daemon.time, "sleep", Mock(side_effect=AssertionError("retried")))
+    with pytest.raises(ValueError, match="bad report"):
+        daemon.run(_once(object()))
+
+
+@pytest.fixture
+def stalled():
+    import socket
+
+    import redis
+
+    with socket.create_server(("127.0.0.1", 0)) as server:
+        yield lambda: redis.Redis(host="127.0.0.1", port=server.getsockname()[1], decode_responses=True)
+
+
+def test_clients_set_timeouts_keepalive_health_checks_and_no_retries(monkeypatch):
+    import redis
+    from redis.backoff import NoBackoff
+
+    source = redis.Redis(host="127.0.0.1", port=1, decode_responses=True)
+    monkeypatch.setattr(source, "close", Mock())
+    beat, waiter = daemon.clients(source)
+    source.close.assert_called_once_with()
+    for client, read_timeout in ((beat, daemon.READ_TIMEOUT_S), (waiter, daemon.BEAT_SECONDS)):
+        options = client.connection_pool.connection_kwargs
+        assert options["socket_timeout"] == read_timeout
+        assert options["socket_connect_timeout"] == daemon.CONNECT_TIMEOUT_S
+        assert options["socket_keepalive"] is True
+        assert options["health_check_interval"] == daemon.BEAT_SECONDS
+        assert options["retry"].get_retries() == 0
+        assert isinstance(options["retry"]._backoff, NoBackoff)
+        assert options["decode_responses"] is True
+        assert options["port"] == source.connection_pool.connection_kwargs["port"]
+    assert (daemon.CONNECT_TIMEOUT_S, daemon.READ_TIMEOUT_S, daemon.WAKE_SLACK_S) == (3, 5, 2)
+
+
+def test_back_off_logs_the_cause_and_sleeps_the_capped_delay(monkeypatch, capsys):
+    from redis.exceptions import TimeoutError
+
+    sleep = Mock()
+    monkeypatch.setattr(daemon.time, "sleep", sleep)
+    daemon._back_off(TimeoutError("lost"), 2)
+    daemon._back_off(TimeoutError("lost"), 99)
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        "hive Redis connection lost (TimeoutError: lost); reconnecting in 4s\n"
+        "hive Redis connection lost (TimeoutError: lost); reconnecting in 30s\n"
+    )
+    assert sleep.call_args_list == [((4,),), ((30,),)]
+
+
+def test_clients_keep_the_source_connection_class():
+    import redis
+
+    source = redis.Redis.from_url("rediss://127.0.0.1:1")
+    keys = set(source.connection_pool.connection_kwargs)
+    for client in daemon.clients(source):
+        assert client.connection_pool.connection_class is redis.SSLConnection
+        assert client.connection_pool.connection_kwargs["socket_keepalive"] is True
+        assert set(client.connection_pool.connection_kwargs) == keys | {
+            "socket_timeout",
+            "socket_connect_timeout",
+            "socket_keepalive",
+            "health_check_interval",
+            "retry",
+        }
+
+
+def _stall_run(monkeypatch, connect, beat):
+    import time
+
+    monkeypatch.setattr(daemon, "BEAT_SECONDS", 0.5)
+    monkeypatch.setattr(daemon, "READ_TIMEOUT_S", 0.1)
+    monkeypatch.setattr(daemon, "WAKE_SLACK_S", 0.1)
+    _quiet_quota(monkeypatch)
+    monkeypatch.setattr(daemon, "hive_id", lambda: "local")
+    monkeypatch.setattr(daemon, "beat", beat)
+    monkeypatch.setattr(daemon.time, "sleep", Mock())
+    started = time.monotonic()
+    with pytest.raises(KeyboardInterrupt):
+        daemon.run(connect)
+    return started
+
+
+@pytest.mark.wall_clock
+def test_a_stalled_beat_socket_reconnects_and_beats_within_one_beat_interval(monkeypatch, capsys, stalled):
+    import time
+
+    import fakeredis
+
+    healthy = fakeredis.FakeRedis(decode_responses=True)
+    clients, beaten_at = [], []
+
+    def connect():
+        return (healthy, healthy) if clients else daemon.clients(stalled())
+
+    def beat(redis, hive):
+        if not clients:
+            assert redis.connection_pool.connection_kwargs["socket_timeout"] == 0.1
+        clients.append(redis)
+        redis.set("beat", hive)
+        beaten_at.append(time.monotonic())
+
+    monkeypatch.setattr(daemon, "scheduled_wait", Mock(side_effect=KeyboardInterrupt))
+    started = _stall_run(monkeypatch, connect, beat)
+    assert clients[1] is healthy
+    assert beaten_at[0] - started < daemon.BEAT_SECONDS
+    assert healthy.get("beat") == "local"
+    err = capsys.readouterr().err
+    assert err.startswith("hive Redis connection lost (")
+    assert "TimeoutError" in err
+    assert err.endswith("); reconnecting in 1s\n")
+    daemon.time.sleep.assert_called_once_with(1)
+
+
+@pytest.mark.wall_clock
+def test_a_stalled_wait_socket_reconnects_and_beats_within_one_beat_interval(monkeypatch, capsys, stalled):
+    import time
+
+    import fakeredis
+
+    healthy = fakeredis.FakeRedis(decode_responses=True)
+    beats, waiters = [], []
+
+    def connect():
+        if waiters:
+            return healthy, healthy
+        waiters.append(daemon.clients(stalled())[1])
+        return healthy, waiters[0]
+
+    def beat(redis, hive):
+        assert waiters[0].connection_pool.connection_kwargs["socket_timeout"] == 0.5
+        beats.append(time.monotonic())
+        if len(beats) == 2:
+            raise KeyboardInterrupt
+
+    from scripts.scheduler import process_timer
+
+    monkeypatch.setattr(process_timer.service, "ensure_running", lambda: None)
+    _stall_run(monkeypatch, connect, beat)
+    assert beats[1] - beats[0] < daemon.BEAT_SECONDS + 0.25
+    assert capsys.readouterr().err.endswith("); reconnecting in 1s\n")
+
+
+@pytest.mark.wall_clock
+def test_a_wait_that_never_wakes_returns_within_its_bound_and_beats_again(monkeypatch, capsys):
+    import time
+
+    import fakeredis
+
+    from scripts.scheduler import process_timer
+
+    silent = fakeredis.FakeRedis(decode_responses=True)
+    beats = []
+
+    def beat(redis, hive):
+        beats.append(time.monotonic())
+        if len(beats) == 2:
+            raise KeyboardInterrupt
+
+    def scheduler_down():
+        assert time.monotonic() - beats[-1] < daemon.BEAT_SECONDS, "the timer wait outlived its bound"
+
+    monkeypatch.setattr(process_timer, "RECHECK_S", 0.05)
+    monkeypatch.setattr(process_timer.service, "ensure_running", scheduler_down)
+    connects = []
+    _stall_run(monkeypatch, lambda: connects.append(silent) or (silent, silent), beat)
+    assert len(connects) == 1
+    assert beats[1] - beats[0] < daemon.BEAT_SECONDS
+    assert capsys.readouterr().err == ""
 
 
 def test_default_install_location_and_executable_discovery(monkeypatch, tmp_path):
@@ -427,6 +773,24 @@ def test_subscription_records_include_caps_unknown_readings_and_login(observatio
     daemon.codex_router.quotas.assert_called_once_with([account], environ)
 
 
+def test_a_signed_out_codex_reading_publishes_no_quota_and_no_cap(observations):
+    from scripts.codex_quota import CodexQuota
+
+    balancer = observations
+    balancer.cached_observations.return_value = []
+    account = daemon.codex_router.CodexAccount("two", "AH_CX_TOKEN_two")
+    daemon.codex_router.accounts.return_value = [account]
+    reading = CodexQuota(121, "", balancer.QuotaWindow(30, 1000), balancer.QuotaWindow(40, 2000), expired=True)
+    daemon.codex_router.quotas.return_value = {"two": reading}
+    slots, quota = daemon._subscriptions({}, {"claude": {}, "codex": {}}, 122)
+    assert slots == [{"harness": "codex", "account": "two", "kind": "subscription", "cap": 0}]
+    assert quota["codex:two"] == {
+        "five_hour": {"used": None, "resets_at": None},
+        "seven_day": {"used": None, "resets_at": None},
+        "observed_at": None,
+    }
+
+
 def test_stale_claude_reading_does_not_advertise_capacity(observations):
     result = observations.ProbeResult(
         "one", "allowed", "OK", 60, observations.QuotaWindow(20, 100000), observations.QuotaWindow(40, 200000)
@@ -435,6 +799,26 @@ def test_stale_claude_reading_does_not_advertise_capacity(observations):
     slots, quota = daemon._subscriptions({"AH_CC_TOKEN_one": "sentinel"}, {"claude": {}, "codex": {}}, 10000)
     assert slots == [{"harness": "claude", "account": "one", "kind": "subscription", "cap": 0}]
     assert quota["claude:one"]["observed_at"] == 1
+
+
+@pytest.mark.parametrize(
+    ("environ", "expected"),
+    [
+        ({"AH_CC_TOKEN_one": "same", "AH_CC_TOKEN_two": "same"}, [("one", 3)]),
+        ({"AH_CC_TOKEN_one": "first", "AH_CC_TOKEN_two": "second"}, [("one", 3), ("two", 0)]),
+    ],
+)
+def test_token_names_holding_one_token_report_one_slot(observations, monkeypatch, environ, expected):
+    monkeypatch.setattr(daemon.balancer.operator_env, "block_tokens", lambda: {})
+    result = observations.ProbeResult(
+        "one", "allowed", "OK", 60, observations.QuotaWindow(65, 1000), observations.QuotaWindow(40, 2000)
+    )
+    observations.cached_observations.return_value = [(120, result)]
+    slots, quota = daemon._subscriptions(environ, {"claude": {}, "codex": {}}, 122)
+    assert slots == [
+        {"harness": "claude", "account": account, "kind": "subscription", "cap": cap} for account, cap in expected
+    ]
+    assert sorted(quota) == [f"claude:{account}" for account, _ in expected]
 
 
 def test_snapshot_missing_windows_bad_records_and_newer_cache(monkeypatch, tmp_path):
@@ -667,6 +1051,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     from scripts.hive import orders, reports
     from scripts.swarm.pane import PaneObservation
     from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
+    from scripts.swarm_v2.runtime import process
 
     store = RedisStore(redis)
     store.create(SwarmConfig("swarm", "repo", 8, 0))
@@ -683,6 +1068,9 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     herdr.live_names.return_value = {here.name, "engineer@stray-0001"}
     herdr.bindings.return_value = {here.name: {"process": False}}
     herdr.conversations.return_value = {"w1:p1": "conversation"}
+    herdr.herdr.return_value = {"panes": [{"pane_id": "w1:p1"}]}
+    monkeypatch.setattr(process, "local_namespace", lambda: "hive-namespace")
+    monkeypatch.setattr(daemon.time, "time", lambda: 123)
     herdr.observe.return_value = PaneObservation("idle", typed="half")
     herdr.reported.return_value = True
     consumer = Mock(runtime=Mock(herdr=herdr))
@@ -697,6 +1085,9 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
     assert json.loads(redis.get(reports.key("machine"))) == {
         "names": sorted({here.name, "engineer@stray-0001"}),
         "panes": {"w1:p1": "conversation"},
+        "pane_ids": ["w1:p1"],
+        "process_namespace": "hive-namespace",
+        "observed_at": 123000,
         "executions": {
             here.execution_id: {
                 "slug": "swarm",
@@ -711,6 +1102,7 @@ def test_beat_publishes_what_this_hive_sees_of_its_own_executions(redis, monkeyp
                     "provider_error": "",
                     "provider_checked": False,
                     "provider_error_id": "",
+                    "content_refusal": False,
                 },
             }
         },
@@ -733,3 +1125,151 @@ def test_a_hive_with_no_executions_reports_names_without_asking_herdr_more(redis
     assert json.loads(redis.get(reports.key("machine"))) == {"names": [], "panes": {}, "executions": {}}
     herdr.bindings.assert_not_called()
     herdr.conversations.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "git@github.com:The-Org/Project.git",
+        "https://github.com/the-org/project",
+        "ssh://git@github.com/the-org/project.git/",
+    ],
+)
+def test_repositories_report_each_origin_as_a_lowercase_identity(monkeypatch, tmp_path, url):
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    repo = tmp_path / "project"
+    (repo / ".git").mkdir(parents=True)
+    (repo / ".git" / "config").write_text(f'[core]\n\tbare = false\n[remote "origin"]\n\turl = {url}\n')
+    other = tmp_path / "other"
+    (other / ".git").mkdir(parents=True)
+    (other / ".git" / "config").write_text('[remote "upstream"]\n\turl = git@github.com:else/where.git\n')
+    assert daemon.repositories() == sorted(["github.com/the-org/project", str(other), str(repo)])
+
+
+def test_repositories_follow_a_worktree_link_to_its_common_config(monkeypatch, tmp_path):
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path / "root"))
+    common = tmp_path / "main" / ".git"
+    (common / "worktrees" / "wt").mkdir(parents=True)
+    (common / "config").write_text('[remote "origin"]\n\turl = git@github.com:org/name.git\n')
+    (common / "worktrees" / "wt" / "commondir").write_text("../..\n")
+    checkout = tmp_path / "root" / "wt"
+    checkout.mkdir(parents=True)
+    (checkout / ".git").write_text(f"gitdir: {common / 'worktrees' / 'wt'}\n")
+    assert daemon.repositories() == sorted(["github.com/org/name", str(checkout)])
+
+
+def test_checkout_maps_an_identity_to_the_first_local_checkout_with_that_origin(monkeypatch, tmp_path):
+    monkeypatch.setenv("HIVE_REPO_ROOT", str(tmp_path))
+    origins = [
+        ("b-copy", "git@github.com:Org/Name.git"),
+        ("a-main", "https://github.com/org/name"),
+        ("c", "git@github.com:org/other.git"),
+    ]
+    for name, url in origins:
+        (tmp_path / name / ".git").mkdir(parents=True)
+        (tmp_path / name / ".git" / "config").write_text(f'[remote "origin"]\n\turl = {url}\n')
+    assert daemon.local_checkout("github.com/org/name") == str(tmp_path / "a-main")
+    assert daemon.local_checkout("github.com/org/other") == str(tmp_path / "c")
+    assert daemon.local_checkout("github.com/org/missing") == "github.com/org/missing"
+    assert daemon.local_checkout(str(tmp_path / "b-copy")) == str(tmp_path / "b-copy")
+
+
+def _reading(at):
+    return {"five_hour": {"used": 10, "resets_at": 900}, "seven_day": {"used": 20, "resets_at": 990}, "observed_at": at}
+
+
+def _publish(redis, monkeypatch, hive_id, slots, quota, beat_at):
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {"slots": slots, "interactive": {}, "repos": [], "sessions": {}, "quota": quota},
+    )
+    monkeypatch.setattr(daemon.time, "time", lambda: beat_at)
+    daemon.beat(redis, hive_id)
+
+
+def test_a_slot_without_a_newer_local_reading_takes_the_freshest_published_cap(redis, monkeypatch):
+    def slot(account, cap, kind="subscription", harness="claude"):
+        return {"harness": harness, "account": account, "kind": kind, "cap": cap}
+
+    monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: None)
+    shared = ["one", "own", "same", "login"]
+    _publish(
+        redis,
+        monkeypatch,
+        "workstation",
+        [slot(name, 6) for name in shared] + [slot("two", 4, harness="codex"), slot("blank", 3)],
+        {f"claude:{name}": _reading(500) for name in shared}
+        | {"codex:two": _reading(500), "claude:blank": _reading(None)},
+        1000,
+    )
+    _publish(redis, monkeypatch, "older", [slot("one", 2)], {"claude:one": _reading(400)}, 1000)
+    _publish(redis, monkeypatch, "edge", [slot("one", 7)], {"claude:one": _reading(600)}, 1000)
+    _publish(redis, monkeypatch, "stale", [slot("one", 1)], {"claude:one": _reading(900)}, 1000)
+    redis.hset(registry.key("edge"), "heartbeat_at", str(1_000_000 - registry.LIVE_MS))
+    redis.hset(registry.key("stale"), "heartbeat_at", str(1_000_000 - registry.LIVE_MS - 1))
+    local = [
+        slot("one", 0),
+        slot("two", 0, harness="codex"),
+        slot("own", 3),
+        slot("same", 5),
+        slot("login", 0, kind="interactive"),
+        slot("alone", 0),
+        slot("blank", 0),
+    ]
+    quota = {
+        "claude:one": _reading(None),
+        "codex:two": _reading(None),
+        "claude:own": _reading(600),
+        "claude:same": _reading(500),
+        "claude:login": _reading(None),
+        "claude:alone": _reading(None),
+        "claude:blank": _reading(None),
+    }
+    _publish(redis, monkeypatch, "pod", local, quota, 1000)
+    caps = {(item["harness"], item["account"]): item["cap"] for item in registry.show(redis, "pod")["slots"]}
+    assert caps == {
+        ("claude", "one"): 7,
+        ("codex", "two"): 4,
+        ("claude", "own"): 3,
+        ("claude", "same"): 5,
+        ("claude", "login"): 0,
+        ("claude", "alone"): 0,
+        ("claude", "blank"): 0,
+    }
+    published = json.loads(redis.get(f"{registry.key('pod')}:quota"))
+    assert published["claude:one"] == _reading(600)
+    assert published["codex:two"] == _reading(500)
+    assert published["claude:own"] == _reading(600)
+    assert published["claude:alone"] == _reading(None)
+
+
+def test_beat_publishes_the_configuration_with_the_repo_identities(redis, monkeypatch):
+    calls = []
+    monkeypatch.setattr(daemon, "publish_config", lambda redis, local_id, repos: calls.append((local_id, repos)))
+    _publish(redis, monkeypatch, "pod", [], {}, 1000)
+    monkeypatch.setattr(
+        daemon,
+        "observe",
+        lambda **kwargs: {"slots": [], "interactive": {}, "repos": ["/x/a", "h/o/a"], "sessions": {}, "quota": {}},
+    )
+    daemon.beat(redis, "pod")
+    assert calls == [("pod", []), ("pod", ["/x/a", "h/o/a"])]
+
+
+def test_publish_config_hands_the_hive_id_and_repos_to_the_config_snapshot(redis, monkeypatch):
+    from scripts.hive import config
+
+    calls = []
+    monkeypatch.setattr(config, "publish", lambda *args: calls.append(args))
+    daemon.publish_config(redis, "pod", ["h/o/a"])
+    assert calls == [(redis, "pod", ["h/o/a"])]
+
+
+def test_existing_beat_refreshes_agent_join_heartbeats(redis, monkeypatch):
+    from scripts.hive import join_report
+
+    seen = []
+    monkeypatch.setattr(join_report, "heartbeat", lambda *args: seen.append(args))
+    _publish(redis, monkeypatch, "pod", [], {}, 1000)
+    assert seen == [(redis, "pod", 1_000_000)]

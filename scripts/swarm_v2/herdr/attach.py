@@ -11,7 +11,12 @@ from typing import NoReturn
 from cryptography.exceptions import UnsupportedAlgorithm
 from cryptography.hazmat.primitives import serialization
 
-from scripts.swarm_v2.herdr.capabilities import Incompatible, Qualifier, Unreachable, Verdict, machine_probe
+from scripts.swarm_v2.herdr.capabilities import (
+    Incompatible,
+    Qualifier,
+    Unreachable,
+    Verdict,
+)
 from scripts.swarm_v2.herdr.catalog import Catalog
 from scripts.swarm_v2.herdr.endpoints import (
     PORT,
@@ -195,7 +200,7 @@ class Terminal:
     ) -> None:
         self.home, self.authority, self.namespace = home, authority, namespace
         self.run, self.lookup = run, lookup
-        self.qualifier = Qualifier(machine_probe(run))
+        self.qualifier = Qualifier.machine(run)
         self.registrations = Registrations(Catalog(run), Store(home.terminals / STORE))
         self.failures: Counter = Counter()
 

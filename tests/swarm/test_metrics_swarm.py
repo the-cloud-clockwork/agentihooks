@@ -10,7 +10,7 @@ from scripts.swarm.host_budget import HostSample
 from scripts.swarm.metrics_outbox import Outbox, Settings
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 SLUG = "scratch"
 NOW = 1_800_000_000_000
 TASK = {
@@ -85,6 +85,117 @@ def test_full_task_lifecycle_keeps_identity_and_actual_merge_time():
         }
     assert len({row["event_id"] for row in [*agents, *delivery]}) == 5
     assert metrics_swarm.agent_rows(SLUG, doc(events), [agent]) == agents
+
+
+def test_split_pull_requests_keep_their_own_merge_and_parking_events():
+    first, second = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    events = [
+        event("task claimed", NOW),
+        {**event("task pr", NOW + 1_000), "pr_url": first, "branch": "first"},
+        event("task parked", NOW + 2_000),
+        event("task unparked", NOW + 3_000),
+        {**event("task pr", NOW + 6_000), "pr_url": second, "branch": "second"},
+    ]
+    state = {"tasks": [{**DONE, "pr_url": second, "split_pulls": [first, second]}], "_meta": {"events": events}}
+    pulls = {
+        first: SimpleNamespace(state="MERGED", merged_at=NOW + 5_000),
+        second: SimpleNamespace(state="MERGED", merged_at=NOW + 9_000),
+    }
+    found = metrics_swarm.delivery_rows(SLUG, state, [AGENT], pulls)
+    assert [
+        (row["kind"], row["pull_request"], row["branch"], row["ts_ms"])
+        for row in found
+        if row["kind"] in ("pull_request_opened", "pull_request_merged")
+    ] == [
+        ("pull_request_opened", first, "first", NOW + 1_000),
+        ("pull_request_opened", second, "second", NOW + 6_000),
+        ("pull_request_merged", first, "first", NOW + 5_000),
+        ("pull_request_merged", second, "second", NOW + 9_000),
+    ]
+    assert [row["agent"] for row in found if row["kind"] == "pull_request_merged"] == ["worker", "worker"]
+    assert [(row["kind"], row["ts_ms"]) for row in found if row["kind"] in ("parked", "unparked")] == [
+        ("parked", NOW + 2_000),
+        ("unparked", NOW + 3_000),
+    ]
+
+
+def test_split_merge_observation_still_collects_the_final_task_sample():
+    first, final = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    state = {
+        "tasks": [{**DONE, "pr_url": final, "split_pulls": [first, final]}],
+        "_meta": {"events": [event("task done", NOW)]},
+    }
+    saved = [
+        {"kind": "pull_request_merged", "pull_request": first},
+        {"kind": "pull_request_merged", "pull_request": final},
+    ]
+    calls = []
+    box = SimpleNamespace(recent=lambda *args: saved)
+    snapshot = SimpleNamespace(doc=state, view=lambda url: calls.append(url) or "observed")
+    assert metrics_swarm.pull_rows(box, NOW, snapshot) == {final: "observed"}
+    assert calls == [final]
+    saved.append({"kind": "merge", "pull_request": final})
+    assert metrics_swarm.pull_rows(box, NOW, snapshot) == {}
+
+
+@pytest.mark.parametrize("branch", ["current", ""])
+@pytest.mark.parametrize("meta", [{}, {"_meta": {}}])
+def test_split_merge_without_opening_history_keeps_branch_fallback_and_unique_identity(branch, meta):
+    first, final = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    task = {**TASK, "state": "pr", "split_pulls": [first, final]}
+    if branch:
+        task["branch"] = branch
+    else:
+        task.pop("branch", None)
+    pulls = {url: SimpleNamespace(state="MERGED", merged_at=NOW) for url in [first, final]}
+    found = metrics_swarm.delivery_rows(SLUG, {"tasks": [task], **meta}, [], pulls)
+    assert [(row["kind"], row["pull_request"], row["branch"]) for row in found] == [
+        ("pull_request_merged", first, branch),
+        ("pull_request_merged", final, branch),
+    ]
+    assert len({row["event_id"] for row in found}) == 2
+    assert [row["ledger"] for row in found] == [SLUG, SLUG]
+
+
+@pytest.mark.parametrize(
+    "pull", [None, SimpleNamespace(state="OPEN", merged_at=NOW), SimpleNamespace(state="MERGED", merged_at=None)]
+)
+def test_split_merges_require_an_observed_merge(pull):
+    task = {**TASK, "state": "pr", "split_pulls": [TASK["pr_url"]]}
+    assert metrics_swarm.delivery_rows(SLUG, {"tasks": [task]}, [], {TASK["pr_url"]: pull}) == []
+
+
+def test_a_pending_split_pull_does_not_hide_a_later_merge():
+    first, final = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    task = {**TASK, "state": "pr", "split_pulls": [first, final]}
+    pulls = {
+        first: SimpleNamespace(state="OPEN", merged_at=None),
+        final: SimpleNamespace(state="MERGED", merged_at=NOW),
+    }
+    found = metrics_swarm.delivery_rows(SLUG, {"tasks": [task]}, [], pulls)
+    assert [row["pull_request"] for row in found] == [final]
+
+
+def test_legacy_merge_without_a_branch_records_an_empty_branch():
+    task = {**DONE}
+    task.pop("branch", None)
+    found = metrics_swarm.delivery_rows(
+        SLUG, {"tasks": [task]}, [], {task["pr_url"]: SimpleNamespace(state="MERGED", merged_at=NOW)}
+    )
+    assert len(found) == 1
+    assert found[0]["branch"] == ""
+
+
+def test_split_pull_collection_fetches_unobserved_earlier_pulls():
+    first, final = TASK["pr_url"], "https://github.com/org/repo/pull/2"
+    task = {**TASK, "state": "pr", "pr_url": final, "split_pulls": [first, final]}
+    calls = []
+    snapshot = SimpleNamespace(doc={"tasks": [task]}, view=lambda url: calls.append(url) or "observed")
+    assert metrics_swarm.pull_rows(SimpleNamespace(recent=lambda *args: []), NOW, snapshot) == {
+        first: "observed",
+        final: "observed",
+    }
+    assert calls == [first, final]
 
 
 def test_reclaimed_task_attributes_each_claim_to_its_own_life():
@@ -177,6 +288,14 @@ def test_host_sample_and_quota_unknown_values_are_explicit():
         "week_known": 1,
         "sessions": 1,
     }
+
+
+def test_host_sample_carries_swap_in_use_and_the_measured_agent_figure():
+    sample = HostSample(4.0, 2, 1024, 3, swap_used_mb=3700, swap_total_mb=4096, agent_mb=430, measured_agents=2)
+    host = metrics_swarm.host_row(SLUG, NOW, sample, {})
+
+    assert [host[key] for key in ("swap_used_mb", "swap_total_mb", "agent_mb")] == [3700, 4096, 430]
+    assert {"swap_used_mb", "swap_total_mb", "agent_mb"} <= {column for column, _ in metrics_swarm.HOST.columns}
 
 
 def test_classifier_calls_are_host_scoped_with_stable_source_ids():
@@ -587,5 +706,69 @@ def test_record_pass_exports_queue_and_launch_rows(tmp_path, monkeypatch):
         metrics_swarm.record_pass(box, SLUG, NOW, store, doc(), [], pulls)
         assert "launch_failed" in {row["kind"] for row in box.recent("agent_events", NOW)}
         assert [row["kind"] for row in box.recent("delivery_events", NOW)] == ["merge_queued"]
+    finally:
+        box.close()
+
+
+def test_host_sample_counts_live_agents_on_this_machine_and_on_hives(monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "root")
+    agents = [
+        {"runtime_backend": "local", "runtime_target": {"host_id": "root"}},
+        {"runtime_backend": "local", "runtime_target": {}},
+        {"runtime_backend": "local", "runtime_target": {"host_id": ""}},
+        {"runtime_target": {"host_id": "root"}},
+        {"runtime_backend": "local", "runtime_target": {"host_id": "hive-a"}},
+        {"runtime_backend": "kubernetes", "runtime_target": {"host_id": "root"}},
+    ]
+    counts = metrics_swarm.placement_counts(agents)
+    assert counts == {"workstation_agents": 4, "hive_agents": 2}
+    host = metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 6), counts)
+    assert [host[key] for key in ("workstation_agents", "hive_agents")] == [4, 2]
+    assert [metrics_swarm.host_row(SLUG, NOW, HostSample(1.0, 1, 1, 4), {})[key] for key in counts] == [0, 0]
+    assert {"workstation_agents", "hive_agents"} <= {column for column, _ in metrics_swarm.HOST.columns}
+
+
+def test_swarm_review_rounds_ship_as_review_round_events(tmp_path, monkeypatch):
+    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
+        folder = tmp_path / "reviews"
+        folder.mkdir()
+        lines = [{"task": "t", "counter": "rounds", "round": round_, "at": NOW + round_} for round_ in (1, 2)]
+        (folder / "rounds.jsonl").write_text("".join(json.dumps(line) + "\n" for line in lines))
+        rows = metrics_swarm.read_review_rounds(SLUG, box).rows
+        assert [(row["kind"], row["target"], row["at"], row["review_id"]) for row in rows] == [
+            ("review round", "tasks/t", NOW + 1, "swarm:t:rounds:1"),
+            ("review round", "tasks/t", NOW + 2, "swarm:t:rounds:2"),
+        ]
+        delivery = metrics_swarm.delivery_rows(SLUG, doc(rows), [AGENT], {})
+        assert [row["kind"] for row in delivery] == ["review_round", "review_round"]
+        assert len({row["event_id"] for row in delivery}) == 2
+    finally:
+        box.close()
+
+
+def test_record_pass_ships_each_swarm_review_round_once(tmp_path, monkeypatch):
+    import fakeredis
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig(SLUG, ".", 0, 0))
+    monkeypatch.setattr(metrics_swarm.host_budget, "read_host", lambda: HostSample(2.0, 2, 512, 1))
+    monkeypatch.setattr(metrics_swarm.gate_log, "recent", lambda *args, **kwargs: [])
+    monkeypatch.setattr(metrics_swarm.gate_log, "gates_dir", lambda slug: tmp_path)
+    monkeypatch.setattr(metrics_swarm, "read_classifier_calls", lambda box: metrics_swarm.LogBatch("", 0, []))
+    monkeypatch.setattr(metrics_swarm, "read_review_events", lambda slug, box: metrics_swarm.LogBatch("", 0, []))
+    (tmp_path / "reviews").mkdir()
+    log = tmp_path / "reviews" / "rounds.jsonl"
+    log.write_text(json.dumps({"task": TASK["id"], "counter": "rounds", "round": 1, "at": NOW}) + "\n")
+    box = Outbox(tmp_path / "outbox.db", Settings("http://sink", "", ""))
+    try:
+        batch = metrics_swarm.read_review_rounds(SLUG, box)
+        assert batch.source.startswith(f"{log}:") and batch.position == log.stat().st_size
+        metrics_swarm.record_pass(box, SLUG, NOW + 1_000, store, doc(), [], {})
+        rounds = [row for row in box.recent("delivery_events", NOW + 1_000) if row["kind"] == "review_round"]
+        assert [row["ts_ms"] for row in rounds] == [NOW]
+        assert metrics_swarm.read_review_rounds(SLUG, box).rows == []
     finally:
         box.close()

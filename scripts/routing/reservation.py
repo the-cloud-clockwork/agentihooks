@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from hooks.context import account_sessions
 from hooks.context.account_sessions import INTERACTIVE_PREFIX
 from scripts.routing import master_account
+from scripts.routing.slots import API
 
 if TYPE_CHECKING:
     from scripts.swarm.store import RedisStore
@@ -61,7 +62,7 @@ def master_agents(store: "RedisStore | None", harness: str, slug: str) -> int:
         and agent.state != "finished"
         and agent.harness == harness
         and agent.account == slug
-        and agent.route_kind != "interactive"
+        and agent.route_kind not in ("interactive", "master-login")
     )
 
 
@@ -87,6 +88,9 @@ class Reservation:
 
     def closes(self, slug: str, week_used: float | None) -> bool:
         return slug == self.slug and reached(week_used, self.masters)
+
+    def closes_row(self, harness: str, kind: str, slug: str, week_left: float | None) -> bool:
+        return harness == self.harness and kind != API and week_left is not None and self.closes(slug, 100 - week_left)
 
 
 def _store(environ: Mapping[str, str]) -> "RedisStore | None":
@@ -255,7 +259,7 @@ class LaunchSlots:
                 counts[slot] = counts.get(slot, 0) + delta
         return counts
 
-    def refresh(self, executions: list[str]) -> None:
+    def refresh(self, executions: list[str], ttl_ms: int = 45000) -> None:
         import json
 
         from scripts.swarm.keyspace import ROOT
@@ -264,4 +268,23 @@ class LaunchSlots:
             key = f"{ROOT}:launch-slot:{execution}"
             raw = self.redis.get(key)
             if raw is not None and json.loads(raw)["state"] == "live":
-                self.redis.pexpire(key, 45000)
+                self.redis.pexpire(key, ttl_ms)
+
+    def refresh_reported(self, now_ms: int) -> None:
+        """Keep each live hive's reported rows of executions placed on that hive alive across two controller ticks,
+        for members, whose Redis users cannot refresh them."""
+        import json
+
+        from scripts.hive import registry
+        from scripts.swarm import lease
+        from scripts.swarm.store import RedisStore
+
+        store = RedisStore(self.redis)
+        placed = {agent.execution_id: agent.hive for slug in store.slugs() for agent in store.agents(slug)}
+        for hive in registry.hives(self.redis):
+            if registry.live(hive, now_ms):
+                report = json.loads(self.redis.get(f"{registry.key(hive['id'])}:sessions") or "{}")
+                reported = [execution for ids in report.get("_executions", {}).values() for execution in ids]
+                self.refresh(
+                    [execution for execution in reported if placed.get(execution) == hive["id"]], 2 * lease.tick_ms()
+                )

@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 
@@ -7,7 +8,7 @@ from hooks.context import account_sessions, broadcast
 from scripts.gates.base import Who
 from scripts.gates.identity import refusal
 from scripts.handoff import transfers
-from scripts.swarm import take_master
+from scripts.swarm import cli, take_master
 from scripts.swarm.store import AgentRecord
 from scripts.swarm_ledger import ledger
 from scripts.terminate_agent import sessions
@@ -15,12 +16,11 @@ from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_take_master import DOC, taker  # noqa: F401
 from tests.test_terminate_agent import process
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("registered", [False, True, "alias"])
 def test_a_named_session_confirms_and_writes_as_its_new_master(taker, monkeypatch, tmp_path, capsys, registered):  # noqa: F811
     store, _, rt, _ = taker
+    monkeypatch.setattr("scripts.swarm.store.redis_client", lambda *_: store.redis)
     carried = store.next_name("sw", "eng") if registered is True else "s-261007-104655"
     monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", carried)
     monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
@@ -89,3 +89,59 @@ def test_take_master_records_the_seat_the_trace_exporter_reads(taker, monkeypatc
     assert (seated.agent, seated.swarm, seated.lane, seated.task) == (name, "sw", "master", "master")
     other = agent_trace.identity_from_env("other", launch)
     assert (other.agent, other.swarm, other.lane, other.task) == ("s-261007-104655", "sw-doctor", "", "")
+
+
+def _finding(store):
+    kept = cli.verdict_store(store, "sw")
+    kept.redis.hset(kept.key, "idle-with-claim/x", json.dumps({"measure": 1, "evidence": "seen"}))
+    return kept
+
+
+@pytest.fixture
+def registry(taker, monkeypatch, tmp_path):  # noqa: F811
+    monkeypatch.setattr(broadcast, "BROADCAST_FILE", str(tmp_path / "broadcast.json"))
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 4242)
+    monkeypatch.setattr(take_master, "name_session", broadcast.name_session)
+    return taker[0]
+
+
+@pytest.mark.parametrize("launched", ["", "s-261007-104655"])
+def test_a_hand_launched_master_gives_a_verdict_without_exporting_its_name(registry, capsys, monkeypatch, launched):
+    if launched:
+        monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", launched)
+    broadcast.register_session("seated", 4242, "/repo", "sol", name=launched)
+    assert run("sw", "take-master") == 0
+    name = broadcast.session_name(4242)
+    assert os.environ.get("AGENTIHOOKS_AGENT_NAME", "") == launched
+    kept = _finding(registry)
+    capsys.readouterr()
+    assert run("sw", "verdict", "idle-with-claim/x", "resolved") == 0
+    assert json.loads(kept.redis.hget(kept.key, "idle-with-claim/x"))["verdict"]["by"] == name
+
+
+def test_a_named_session_that_never_took_the_seat_is_refused_a_verdict(registry, capsys):
+    broadcast.register_session("unseated", 4242, "/repo", "sol", name="engineer@a1b2c3-0005")
+    kept = _finding(registry)
+    assert run("sw", "verdict", "idle-with-claim/x", "resolved") == 1
+    assert capsys.readouterr().err == "swarm: only the master or the operator gives a finding a verdict\n"
+    assert "verdict" not in json.loads(kept.redis.hget(kept.key, "idle-with-claim/x"))
+
+
+def test_a_hand_launched_master_promotes_and_retires_notes_as_itself(registry):
+    broadcast.register_session("seated", 4242, "/repo", "sol")
+    assert run("sw", "take-master") == 0
+    name = broadcast.session_name(4242)
+    registry.memory.learn("eng-1@sw", "engineer@a1b2c3-0001", "lesson one because it held", 1)
+    assert run("sw", "promote", "eng-1", "1", "canon", "--reason", "always held") == 0
+    assert run("sw", "retire", "eng-1", "1", "--reason", "stale") == 0
+    (entry,) = registry.memory.learned("eng-1@sw")
+    assert (entry["promotions"][0]["by"], entry["retired"]["by"]) == (name, name)
+
+
+def test_a_named_session_that_never_took_the_seat_may_not_retire_a_note(registry, capsys):
+    broadcast.register_session("unseated", 4242, "/repo", "sol", name="engineer@a1b2c3-0001")
+    registry.memory.learn("eng-1@sw", "engineer@a1b2c3-0001", "lesson one because it held", 1)
+    put = registry.put_agent
+    put("sw", AgentRecord("engineer@a1b2c3-0001", "eng", "t1", seat="eng-1@sw"))
+    assert run("sw", "retire", "eng-1", "1", "--reason", "stale") == 1
+    assert cli.ONLY_MASTER_RETIRE in capsys.readouterr().err

@@ -1,7 +1,19 @@
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import best_match
 
+from scripts.swarm_ledger import models
+
 from .errors import APIError
+
+
+def checkbox_path() -> str:
+    groups = {}
+    for name, model in models.MODELS.items():
+        if boxes := models.checkboxes(model):
+            groups.setdefault(boxes, []).append(name)
+    paths = (f"({'|'.join(names)})/[^/]+/({'|'.join(boxes)})" for boxes, names in groups.items())
+    return f"^({'|'.join(paths)})$"
+
 
 MUTATION = {
     "type": "object",
@@ -20,10 +32,7 @@ MUTATION = {
                 "required": ["path", "value"],
                 "additionalProperties": False,
                 "properties": {
-                    "path": {
-                        "type": "string",
-                        "pattern": "^((phases|questions|followups|tasks)/[^/]+/(done|out_of_scope)|plans/[^/]+/out_of_scope)$",
-                    },
+                    "path": {"type": "string", "pattern": checkbox_path()},
                     "base": {"type": "boolean"},
                     "value": {"type": "boolean"},
                 },
@@ -48,6 +57,8 @@ PAGINATION = {
     "properties": {
         "limit": {"type": "integer", "minimum": 1, "maximum": 100},
         "cursor": {"type": "string", "pattern": "^[a-f0-9]{64}:[0-9]{1,12}$"},
+        "state": {"enum": ["done"]},
+        "offset": {"type": "integer", "minimum": 0, "maximum": 1000000},
     },
 }
 
@@ -63,7 +74,7 @@ FIELDS = {
     "ack": "by rev",
     "claim": "by item status",
     "set": "by path value status",
-    "add_item": "by list text needs_operator",
+    "add_item": "by list text needs_operator hive task",
     "retext": "by item text",
     "gate_bypass": "by unhandled",
     "gate_lift": "by gate",
@@ -71,8 +82,8 @@ FIELDS = {
     "priority_clear": "by target reason",
     "notification_clear": "target",
     "notice": "by text",
-    "task_add": "by task title lane phase description depends_on territory kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
-    "task_update": "by item fields if_state if_plan_lines_missing quote",
+    "task_add": "by task title lane phase description depends_on territory overlays repositories kind contract proof workspace artifact profile plan_url plan_slice rank gain difficulty difficulty_source difficulty_confidence not_duplicate slice follow_up",
+    "task_update": "by item fields if_state if_match if_plan_lines_missing quote",
     "task_rank": "by item rank if_owned",
     "task_group": "by item members",
     "task_ungroup": "by item",
@@ -100,6 +111,7 @@ FIELDS = {
     "artifact_purge": "by",
     "alert_claim": "by target",
     "alert_close": "by target outcome",
+    "alert_raise": "by source text",
     "time_left": "by slots ci_minutes fix_phase watched",
     "freeze_set": "by verb target reason quote",
     "freeze_clear": "by target reason quote",
@@ -123,6 +135,7 @@ TYPES = {
     "ci_minutes": {"type": ["number", "null"], "minimum": 0},
     "value": {"type": ["boolean", "integer"]},
     "fields": {"type": "object"},
+    "if_match": {"type": "object"},
     "contract": {"type": "object"},
     "proof": {"type": "object"},
     "file": {"type": "object"},
@@ -132,8 +145,12 @@ TYPES = {
     "phases": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
     "attachments": {"type": "array", "maxItems": 100, "items": {"type": "object"}},
 }
-KIND_TYPES = {"artifact_add": {"plan": {"type": "boolean"}}, "task_rank": {"if_owned": {"type": "boolean"}}}
-for _field in ("depends_on", "territory", "if_state", "members", "watched", "halves"):
+KIND_TYPES = {
+    "artifact_add": {"plan": {"type": "boolean"}},
+    "plan_add": {"artifact": {"type": "string", "maxLength": 100000}},
+    "task_rank": {"if_owned": {"type": "boolean"}},
+}
+for _field in ("depends_on", "territory", "overlays", "repositories", "if_state", "members", "watched", "halves"):
     TYPES[_field] = {"type": "array", "maxItems": 100, "items": {"type": "string", "maxLength": 2000}}
 
 
@@ -149,6 +166,18 @@ def operation_schema(kind: str) -> dict:
             "op": {"const": kind},
             "id": {"type": "string", "minLength": 1, "maxLength": 200},
             "controller_epoch": {"type": "integer", "minimum": 1},
+            "worker_claim": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["task_id", "execution_id", "execution_generation", "task_generation", "spec_revision"],
+                "properties": {
+                    "task_id": {"type": "string", "minLength": 1},
+                    "execution_id": {"type": "string", "minLength": 1},
+                    "execution_generation": {"type": "integer", "minimum": 1},
+                    "task_generation": {"type": "integer", "minimum": 1},
+                    "spec_revision": {"type": "string", "pattern": "^[a-f0-9]{64}$"},
+                },
+            },
         },
     }
 
@@ -181,7 +210,8 @@ def check_operations(payload: dict, core: ModuleType, task_ids: tuple) -> list:
             raise APIError(400, "schema_invalid", f"Operation {kind} does not match its schema at field {field}")
     try:
         core.check_body(
-            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]}, task_ids
+            {"ops": [{k: v for k, v in op.items() if k != "controller_epoch"} for op in operations]},
+            task_ids,
         )
     except ValueError as exc:
         raise APIError(400, "schema_invalid", f"Operation does not match its domain schema: {exc}") from None
@@ -220,6 +250,7 @@ def target(op: dict) -> str:
     return {
         "alert_claim": "alerts",
         "alert_close": "alerts",
+        "alert_raise": "alerts",
         "source_add": "sources",
         "plan_add": "plans",
         "slice_add": "slices",

@@ -10,6 +10,8 @@ import ledger_comments
 import ledger_core as core
 import ledger_media as media
 
+from scripts.swarm_ledger import ports
+
 OPS = ("artifact_add", "artifact_delete", "artifact_restore", "artifact_purge")
 TRASH = "artifact_trash"
 KEEP_DAYS = 30
@@ -159,13 +161,13 @@ def operator_asked(doc, entry_id):
 
 
 def refusal(doc: dict, op: dict, members: dict) -> str:
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     member = members.get(op["by"], {})
     if op["by"] not in members:
         return "join the ledger first and name a task it holds"
     if op["task"] == "master" and member.get("role") == "orchestrator" and lane_of(op["by"]) == "master":
-        return "" if operator_asked(doc, op.get("request")) else REFUSED
+        return "" if op.get("plan") is True or operator_asked(doc, op.get("request")) else REFUSED
     task = next((t for t in doc["tasks"] if t["id"] == op["task"]), None)
     if op["task"] and task is None:
         return "join the ledger first and name a task it holds"
@@ -182,7 +184,7 @@ def _add(doc, op, ctx):
         if reason == REFUSED:
             ctx.refused.append(reason)
         return False
-    from scripts.swarm.naming import lane_of
+    lane_of = ports.swarm().naming.lane_of
 
     if (
         op["task"] == "master"
@@ -247,13 +249,18 @@ def in_use(doc):
 
 
 def sweep(slug, doc, ctx):
-    trash = doc[TRASH]
-    expired = [row for row in trash if ctx.at - row["deleted_at"] > KEEP_DAYS * DAY_MS]
-    if expired:
-        doc[TRASH] = [row for row in trash if row not in expired]
-        ctx.dirty = True
-    dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
-    used = in_use(doc)
-    media.sweep(slug, used, ctx.at)
-    for file_id in dropped - used:
-        (media.folder(slug) / file_id).unlink(missing_ok=True)
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
+    media.sweep(slug, in_use(doc), ctx.at)
+    with media_mutation(media.core.LEDGER_DIR, slug) as writable:
+        if not writable:
+            return
+        trash = doc[TRASH]
+        expired = [row for row in trash if ctx.at - row["deleted_at"] > KEEP_DAYS * DAY_MS]
+        if expired:
+            doc[TRASH] = [row for row in trash if row not in expired]
+            ctx.dirty = True
+        dropped = {row["file"]["id"] for row in expired} | set(ctx.dropped)
+        used = in_use(doc)
+        for file_id in dropped - used:
+            (media.folder(slug) / file_id).unlink(missing_ok=True)

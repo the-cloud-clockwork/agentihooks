@@ -16,6 +16,7 @@ EVENTS = {WORKFLOW: "push", PROOFS: "workflow_dispatch"}
 UNREADABLE = (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError)
 
 BACKOFF = (2, 4)
+JOB_FAILURES = ("failure", "timed_out", "cancelled")
 
 
 class Unreachable(ValueError):
@@ -23,6 +24,10 @@ class Unreachable(ValueError):
 
 
 class Missing(ValueError):
+    pass
+
+
+class Skipped(Exception):
     pass
 
 
@@ -112,20 +117,51 @@ def _report(target, started_at):
         return json.loads(zipped.read(name)), scope
 
 
-def _fetch(target, started_at):
+def _skip(target, run):
+    if run["path"] != WORKFLOW or run["conclusion"] != "success":
+        return
+    repo, number = RUN_URL.fullmatch(target).groups()
+    jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+    delegated = any(
+        job["name"] in ("pull-request", "plan")
+        and job["conclusion"] == "success"
+        and any(
+            step["name"] == "Record the revisions the report grades" and step["conclusion"] == "skipped"
+            for step in job["steps"]
+        )
+        for job in jobs
+    )
+    if not delegated:
+        return
+    runs = _api(
+        f"repos/{repo}/actions/workflows/test.yml/runs?event=pull_request&head_sha={run['head_sha']}&per_page=100"
+    )["workflow_runs"]
+    for candidate in runs:
+        if candidate["head_sha"] == run["head_sha"] and any(
+            pr["base"]["ref"] == "dev" for pr in candidate["pull_requests"]
+        ):
+            raise Skipped(candidate["html_url"])
+    raise Unreachable
+
+
+def _fetch(target, run):
     for pause in (*BACKOFF, None):
         try:
-            return _report(target, started_at)
+            return _report(target, run["run_started_at"])
         except (Unreachable, zipfile.BadZipFile, zlib.error, EOFError) as error:
             if pause is None:
                 raise FetchFailed(error) from error
         except Missing:
+            if pause == BACKOFF[0]:
+                _skip(target, run)
             if pause is None:
                 raise
         time.sleep(pause)
 
 
 def _unfetched(outcome, conclusion, error):
+    if isinstance(error, Skipped):
+        return f"{outcome}, now skipped; the open pull request runs mutation in {error}"
     if conclusion == "failure":
         return f"{outcome}, now red; run failure; its mutation report could not be fetched: {error}"
     return (
@@ -152,7 +188,7 @@ def resolution(held: dict) -> str:
     if run.get("conclusion") != "success" and run.get("conclusion") != "failure":
         return f"{outcome}, now red; run {run.get('conclusion')}"
     try:
-        report, scope = _fetch(target, run["run_started_at"])
+        report, scope = _fetch(target, run)
         covered = _covers(target, run, scope)
         failures = [
             f"{file['path']}:{failure['name']}:{failure['fingerprint']} ({failure['status']})"
@@ -161,7 +197,7 @@ def resolution(held: dict) -> str:
         ]
         failures.extend(f"{row['path']}: {row['reason']}" for row in report["not_mutated"])
         failed = report["failed"]
-    except FetchFailed as error:
+    except (Skipped, FetchFailed) as error:
         return _unfetched(outcome, run["conclusion"], error)
     except Unreachable:
         return ""
@@ -173,3 +209,29 @@ def resolution(held: dict) -> str:
         return f"{outcome}, now green; no failing mutants"
     detail = "; ".join(failures) or "mutation failed without a named survivor"
     return f"{outcome}, now red; {detail}"
+
+
+def run_resolution(target: str) -> str:
+    repo, number = RUN_URL.fullmatch(target).groups()
+    outcome = f"checks on {target}"
+    try:
+        run = _api(f"repos/{repo}/actions/runs/{number}")
+    except Unreachable as error:
+        return f"{outcome}, missing; GitHub has no such run" if "HTTP 404" in str(error) else ""
+    if run.get("status") != "completed":
+        return ""
+    conclusion = run.get("conclusion")
+    if conclusion == "success":
+        return f"{outcome}, now green"
+    if conclusion == "cancelled":
+        return f"{outcome}, cancelled; dispatch the run again and wait on the new one"
+    return f"{outcome}, now red; the run concluded {conclusion}{_failed_jobs(repo, number)}"
+
+
+def _failed_jobs(repo, number):
+    try:
+        jobs = _api(f"repos/{repo}/actions/runs/{number}/jobs?per_page=100")["jobs"]
+        failed = [f"{job['name']} {job['conclusion']}" for job in jobs if job.get("conclusion") in JOB_FAILURES]
+    except (Unreachable, KeyError, TypeError, AttributeError):
+        return "; its jobs could not be read"
+    return f"; failed jobs: {', '.join(failed)}" if failed else ""

@@ -1,7 +1,8 @@
 {
   "case": "T-SV2-PRF-02-B",
-  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
+  "evidence_class": "measured: Anton reads 1 to 3 are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; the Anton outage read comes from the startup fixture's anton-outage mode, which created a namespace with a worker Pod and a registry Pod on anton-prod, listed nodes, events and Pods, the autoscaler's ScaledUpGroup events and the Oracle instance, then deleted the namespace; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
   "input_sha256": {
+    "anton-outage-1.json": "8d5860d22787254ad0e1cca0bc07817a1dce6425c66fbbda3ebb5ff12ffcf276",
     "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
     "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
     "anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",

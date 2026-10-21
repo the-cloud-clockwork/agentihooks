@@ -1,0 +1,39 @@
+rules:
+  - id: quota-decision-without-freshness
+    languages: [python]
+    severity: ERROR
+    message: >-
+      A drain or cap decision reads a quota value in a function that never checks the reading's freshness.
+      Check it first with quota_freshness.stale or session_bands.fresh, or decide on a fleet reading from
+      self.reading whose UNKNOWN state marks one past the freshness window (a fleet reading from before a
+      passed reset reads as full room, since that path has no provider probe). codex_router.account_cap
+      checks its own configured reading window, so its callers are not matched.
+    paths:
+      exclude:
+        - scripts/session_bands.py
+        - scripts/claude_quota_balancer.py
+        - scripts/codex_router.py
+    patterns:
+      - pattern-either:
+          - pattern: scripts.session_bands.cap(...)
+          - pattern: scripts.session_bands.week_cap(...)
+          - pattern: scripts.session_bands.five_hour_cap(...)
+          - pattern: scripts.claude_quota_balancer.account_cap(...)
+          - pattern: $LEFT <= $LIMITS.drain_left
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              <... scripts.session_bands.fresh(...) ...>
+              ...
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              <... scripts.quota_freshness.stale(...) ...>
+              ...
+      - pattern-not-inside: |
+          def $F(...):
+              ...
+              $READING = self.reading(...)
+              ...
+              <... $READING.state == UNKNOWN ...>
+              ...

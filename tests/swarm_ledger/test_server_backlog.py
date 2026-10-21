@@ -40,7 +40,7 @@ def listening(monkeypatch, ledger_port, tmp_path):
     monkeypatch.setattr(server.server_code, "record", lambda *args: None)
     document = new_ledger.build_doc({"title": "Burst", "phases": [{"title": "Proof"} for _ in range(16)]})
     page = legacy_page.render(document, SLUG, ledger_port)
-    html, _ = server.core.paths(SLUG)
+    html, _ = legacy_page.paths(SLUG, server.core)
     html.write_text(page)
     server.core.sync(SLUG, ops=[])
     token = server.core.read_token(page)

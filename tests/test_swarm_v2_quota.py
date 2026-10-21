@@ -104,6 +104,8 @@ def test_a_newer_report_replaces_an_older_one(world):
 
 
 def test_routing_uses_the_newest_fleet_observation_over_a_stale_local_cache(world, monkeypatch):
+    for account in (ACCOUNT, SPARE):
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", account)
     from scripts import claude_quota_balancer as balancer
 
     world.publish(EXHAUSTED)
@@ -462,3 +464,16 @@ def test_an_unreachable_fleet_store_falls_back_to_the_local_cache(monkeypatch):
 def test_the_default_clock_is_the_redis_server_clock(world):
     observer = quota.QuotaObservations(world.store, SLUG, world.authorize)
     assert abs(observer.clock() - world.store.redis.time()[0] * 1000) < 2000
+
+
+@pytest.mark.parametrize("five_used", [None, 100.0])
+@pytest.mark.parametrize("week_used, left, cap", [(27.0, 73.0, 6), (95.0, 5.0, 6), (96.0, 4.0, 0), (100.0, 0.0, 0)])
+def test_codex_fleet_quota_uses_only_the_week(world, five_used, week_used, left, cap):
+    report = {**STALE_FULL, "five_used": five_used, "week_used": week_used}
+    world.publish(report, harness="codex")
+    reading = world.quota.reading(ACCOUNT, "codex")
+    assert reading.state == quota.OBSERVED
+    assert reading.routing_left == left
+    assert reading.week_left == left
+    assert world.quota.cap(ACCOUNT, "codex") == cap
+    assert world.quota.admit(ACCOUNT, "codex").action == (quota.ADMIT if cap else quota.WAIT)

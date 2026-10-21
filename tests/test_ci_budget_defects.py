@@ -11,14 +11,12 @@ from scripts.swarm.health import standing
 from scripts.swarm.store import PREFIX
 from scripts.swarm_ledger import ledger_comments
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CI_SPEED_READ = True
 NOW_MS = 1_791_540_000_000
 URL = "https://github.com/o/r/actions/runs/{}/job/9"
 TEXT = (
     "A pull request Tests run took 16 minutes 8 seconds from push to Gate Required, over the 15 minute budget."
-    " Its slowest stage mutation took 14 minutes 4 seconds against 8 minutes. " + URL.format(1)
+    " Its slowest stage mutation took 14 minutes 4 seconds against 8 minutes."
 )
 
 
@@ -106,6 +104,8 @@ def test_a_run_over_fifteen_minutes_updates_one_standing_ci_overrun_finding_in_p
         "threshold": 15.0,
         "unit": "minutes from push to Gate Required",
         "detail": TEXT,
+        "evidence": ["mutation: 1 run over budget; worst 14 minutes 4 seconds."],
+        "links": [{"label": "Slow run 1", "url": URL.format(1)}],
         "fired": 1,
         "episodes": ["1"],
         "first_at": NOW_MS,
@@ -137,8 +137,73 @@ def test_each_new_slow_run_updates_the_same_finding_and_counts_once(swarm):
         del JOBS[6]
     found = _found(store)
     assert (found["fired"], found["episodes"], found["value"], found["updated_at"]) == (2, ["1", "6"], 17.5, later)
-    assert found["detail"].endswith(URL.format(6))
+    assert found["links"][-1] == {"label": "Slow run 6", "url": URL.format(6)}
     assert len(standing.findings(store.redis, "sw", later)) == 1
+
+
+def test_standing_finding_groups_each_slow_stage_with_count_worst_time_and_run_links(swarm, monkeypatch):
+    store, config = swarm
+    monkeypatch.setitem(
+        JOBS,
+        6,
+        [
+            _job("mutation (1)", "01:00", "15:00", 6),
+            _job("lint", "00:00", "05:00", 6),
+            _job("Gate — Required", "17:30", "17:30", 6),
+        ],
+    )
+    monkeypatch.setitem(
+        JOBS,
+        7,
+        [
+            _job("mutation (1)", "01:00", "16:00", 7),
+            _job("Gate — Required", "18:00", "18:00", 7),
+        ],
+    )
+    runs = [_run(6, "00:00", "17:30"), _run(7, "00:00", "18:00")]
+    defects.refresh("sw", config, store, NOW_MS, run=_gh([], runs))
+    found = standing.findings(store.redis, "sw", NOW_MS)
+    assert len(found) == 1
+    assert "mutation: 2 runs over budget; worst 15 minutes." in found[0].evidence
+    assert "lint: 1 run over budget; worst 5 minutes." in found[0].evidence
+    assert found[0].as_dict()["links"] == [
+        {"label": "Slow run 6", "url": URL.format(6)},
+        {"label": "Slow run 7", "url": URL.format(7)},
+    ]
+    assert all("https://" not in text for text in found[0].evidence)
+    defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_gh([], runs))
+    assert standing.findings(store.redis, "sw", NOW_MS + defects.REFRESH_MS)[0].as_dict() == found[0].as_dict()
+    assert standing.read(store.redis, "doctor") == {}
+
+
+def test_slow_run_samples_older_than_the_window_leave_the_cache_and_the_links(swarm):
+    store, config = swarm
+    cache = defects.key("sw", "stages")
+    old = {"at": NOW_MS - defects.WINDOW_S * 1000, "stages": {"lint": 400}, "url": URL.format(0)}
+    store.redis.hset(cache, "0", json.dumps(old))
+    defects.refresh("sw", config, store, NOW_MS, run=_gh([]))
+    assert store.redis.hget(cache, "0") is None
+    assert _found(store)["links"] == [{"label": "Slow run 1", "url": URL.format(1)}]
+
+
+def test_a_slow_run_sample_keeps_only_stages_strictly_over_a_budget_and_the_run_link(swarm, monkeypatch):
+    store, config = swarm
+    monkeypatch.setitem(
+        JOBS,
+        8,
+        [
+            _job("mutation (1)", "01:00", "09:00", 8),
+            _job("unbudgeted", "00:00", "16:40", 8),
+            _job("lint", "00:00", "05:00", 8),
+            _job("Gate — Required", "17:00", "17:00", 8),
+        ],
+    )
+    run_url = "https://github.com/o/r/actions/runs/8"
+    defects.refresh("sw", config, store, NOW_MS, run=_gh([], [{**_run(8, "00:00", "17:00"), "html_url": run_url}]))
+    sample = json.loads(store.redis.hget(defects.key("sw", "stages"), "8"))
+    gate_ms = round(datetime(2026, 10, 9, 7, 17, tzinfo=UTC).timestamp() * 1000)
+    assert sample == {"at": gate_ms, "stages": {"lint": 300}, "url": run_url}
+    assert _found(store)["links"] == [{"label": "Slow run 8", "url": run_url}]
 
 
 def test_github_is_read_from_the_repository_over_the_window(swarm):
@@ -413,3 +478,30 @@ def test_each_pass_meters_at_most_a_batch_of_runs(swarm, sink, monkeypatch):
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21]
     defects.refresh("sw", config, store, NOW_MS + defects.REFRESH_MS, run=_metered_gh([]), environ=SINK)
     assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [21, 22]
+
+
+def test_with_the_sink_set_finished_merge_group_runs_are_metered_as_the_queue_tier(swarm, sink, monkeypatch):
+    store, config = swarm
+    group = _metered_run(24, "merge_group", "gh-readonly-queue/dev/pr-5-sha", "success", "09:00")
+    monkeypatch.setitem(globals(), "METERED_RUNS", [*METERED_RUNS, group])
+    monkeypatch.setitem(METERED_JOBS, 24, [{**_job("Gate — Required", "07:00", "07:30", 24), "id": 241}])
+    calls = []
+    defects.refresh("sw", config, store, NOW_MS, run=_metered_gh(calls), environ=SINK)
+    assert (24, "merge_group") in [(r["run_id"], r["event"]) for r in _inserted(sink, "ci_runs")]
+    assert (24, "gate-required") in [(r["run_id"], r["stage"]) for r in _inserted(sink, "ci_stages")]
+
+
+def test_merge_group_runs_are_read_from_the_swarm_repo_and_a_failed_read_is_named(swarm, sink, capsys):
+    store, config = swarm
+    healthy, folders = _metered_gh([]), []
+
+    def run(command, **kwargs):
+        if "event=merge_group" in command[2]:
+            folders.append(kwargs["cwd"])
+            raise subprocess.CalledProcessError(1, command, stderr="HTTP 503")
+        return healthy(command, **kwargs)
+
+    defects.refresh("sw", config, store, NOW_MS, run=run, environ=SINK)
+    assert folders and set(folders) == {"/repo"}
+    assert "ci budget skipped reading merge queue Tests runs: HTTP 503" in capsys.readouterr().err
+    assert [r["run_id"] for r in _inserted(sink, "ci_runs")] == [22, 21]

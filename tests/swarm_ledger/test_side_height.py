@@ -1,8 +1,5 @@
-from pathlib import Path
-
 import pytest
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 DOC = {
     "title": "Sidebar height",
     "overview": "o",

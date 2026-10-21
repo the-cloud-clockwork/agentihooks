@@ -114,12 +114,16 @@ def test_a_shard_without_durations_is_red_and_named(tmp_path):
 def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     jobs = yaml.safe_load((_ROOT / ".github/workflows/test.yml").read_text())["jobs"]
     job = jobs["shard-check"]
-    assert job["needs"] in (["unit", "reuse"], ["unit", "reuse", "admission"])
+    assert job["needs"] == ["unit", "unit-rerun", "select", "reuse", "admission"]
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
+        "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'pull_request' || needs.select.outputs.scope == 'full') }}",
     )
-    assert job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"]
+    assert (
+        job["strategy"]["matrix"]["python-version"] == jobs["unit"]["strategy"]["matrix"]["python-version"] == ["3.12"]
+    )
     assert "shard-check" in jobs["gate-required"]["needs"]
     steps = job["steps"]
     assert all("steps.lookup" not in step.get("if", "") for step in steps)
@@ -128,3 +132,56 @@ def test_shard_check_grades_every_unit_shard_before_the_required_gate():
     check = next(step for step in steps if step.get("run", "").startswith("python -m tests.shard_check"))
     assert download["with"]["path"] in check["run"]
     assert steps.index(download) < steps.index(check)
+
+
+def _plan(tmp_path, tests):
+    path = tmp_path / "reused-tests.json"
+    path.write_text(json.dumps({"run": "7", "tests": tests}))
+    return path
+
+
+def _check_reused(tmp_path, plan, *shards):
+    collected = tmp_path / "collected.json"
+    collected.write_text(json.dumps(ALL))
+    paths = []
+    for index, nodeids in enumerate(shards, 1):
+        path = tmp_path / f"durations-3.12-{index}" / "durations.json"
+        path.parent.mkdir()
+        path.write_text(json.dumps(dict.fromkeys(nodeids, 0.1)))
+        (path.parent / "durations.sha256").write_text("a" * 64 + "\n")
+        paths.append(str(path))
+    return subprocess.run(
+        [sys.executable, "-m", "tests.shard_check", *paths, "--collected", str(collected), "--reused", str(plan)],
+        cwd=_ROOT,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_reused_tests_run_nowhere_and_the_rest_once(tmp_path):
+    plan = _plan(tmp_path, [ALL[0], ALL[2], "test_gone.py::test_x"])
+    result = _check_reused(tmp_path, plan, [ALL[1]], [ALL[3]])
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "4 collected tests, 0 ran zero times or more than once, 2 reused" in result.stdout
+
+
+def test_a_reused_test_that_ran_is_red(tmp_path):
+    plan = _plan(tmp_path, [ALL[0]])
+    result = _check_reused(tmp_path, plan, ALL[:2], ALL[2:])
+    assert result.returncode == 1
+    assert f"{ALL[0]} ran 1 times though reused" in result.stdout
+
+
+def test_a_test_the_plan_does_not_reuse_must_still_run(tmp_path):
+    plan = _plan(tmp_path, [ALL[0]])
+    result = _check_reused(tmp_path, plan, [ALL[1]], [ALL[2]])
+    assert result.returncode == 1
+    assert f"{ALL[3]} ran 0 times" in result.stdout
+
+
+def test_an_unreadable_plan_is_red(tmp_path):
+    plan = tmp_path / "reused-tests.json"
+    plan.write_text("{}")
+    result = _check_reused(tmp_path, plan, ALL)
+    assert result.returncode == 1
+    assert "::error::Cannot read the test plan" in result.stdout

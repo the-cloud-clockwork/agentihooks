@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/merge_stall.py:scripts.swarm.health.merge_stall.x_deliver__mutmut_50:c3d21b1b861229b0287abb397ae2cc22167c2243826205b6fb7a0f75242ae0ae": {
+    "reader": "standards_reader",
+    "reason": "The Standards reader confirmed that delivery calls findings at the cached snapshot timestamp, which is no later than tried; the five minute refresh cannot run, so the repository argument is unused and changing it leaves output unchanged."
+  }
+}

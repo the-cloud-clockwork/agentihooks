@@ -15,6 +15,8 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 
+from scripts.gates.base import Who
+from scripts.swarm_v2 import operator_auth
 from scripts.swarm_v2 import resource_profiles as profiles
 from scripts.swarm_v2 import resource_sampling as sampling
 
@@ -52,7 +54,7 @@ REQUIRED = {
 OPTIONAL = {
     "nodes": (("--read-at", str, ""),),
     "derive": (("--markdown", Path, None), ("--min-repeats", int, profiles.Policy.min_repeats)),
-    "promote": (("--requalified-by", str, ""),),
+    "promote": (("--requalified-by", str, ""), ("--swarm", str, "")),
 }
 KEEPS = ("promoted", "requalified", "replayed")
 TIMEOUT = 600
@@ -163,6 +165,9 @@ def run(suite: Path, root: Path, generation: int, tools: Mapping[str, Sequence[s
     runs = []
     for workload in plan["workloads"]:
         found[f"workload:{workload['name']}"] = workload["version"]
+        found[f"workload-command:{workload['name']}"] = hashlib.sha256(
+            json.dumps([workload["command"], workload["children"]]).encode()
+        ).hexdigest()
         for children in workload["children"]:
             for repeat in range(1, plan["repeats"] + 1):
                 workdir = Path(tempfile.mkdtemp(prefix=f"{workload['name']}-", dir=root))
@@ -212,6 +217,19 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _reviewer(slug: str) -> profiles.Principal | None:
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
+
+    who = Who.from_env()
+    slug = slug or who.swarm
+    if not slug:
+        return None
+    credential = operator_auth.credential(slug, repository.token, who)
+    return operator_auth.authenticator(repository.token)(slug, credential)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.command == "run":
@@ -242,7 +260,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             args.markdown.write_text(profiles.markdown(report))
         return 0
     candidate = json.loads(args.candidate.read_text())
-    outcome = profiles.accept(args.accepted, candidate, profiles.Policy(), args.requalified_by)
+    reviewer = _reviewer(args.swarm) if args.requalified_by else None
+    outcome = profiles.accept(args.accepted, candidate, profiles.Policy(), args.requalified_by, reviewer=reviewer)
     print(json.dumps({"decision": outcome["decision"], "changes": outcome["changes"]}))
     return 0 if outcome["decision"] in KEEPS else 1
 

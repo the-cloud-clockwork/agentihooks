@@ -27,6 +27,8 @@ def main() -> int:
         parser.error(f"--stats-part {args.stats_part} needs --stats and is outside 0 to {args.stats_parts - 1}")
     os.environ["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] = "1"
     root = Path.cwd()
+    if os.environ.get("MUTATION_STATS_CACHE"):
+        os.environ["MUTATION_STATS_ROOT"] = str(root)
     changes = discover_changes(root, args.bases.split(",") if args.bases is not None else args.base, args.head)
     print(f"Changed Python files: {len(changes)}", flush=True)
     stats = None
@@ -37,6 +39,9 @@ def main() -> int:
         print(f"Mutation stats part: {part[0] + 1} of {part[1]}" if part else f"Mutation stats from {args.stats}")
     print(f"Mutation shard: {args.shard + 1} of {args.shards}")
     report = run_gate(root, changes, args.output.resolve(), args.budget, (args.shard, args.shards), stats)
+    if (failing := report.get("failing_tests")) and (summary := os.environ.get("GITHUB_STEP_SUMMARY")):
+        with Path(summary).open("a") as stream:
+            stream.write("### Mutation clean baseline failed\n\n" + "".join(f"- `{test}`\n" for test in failing))
     return int(report["failed"])
 
 

@@ -20,8 +20,12 @@ from scripts.inbox.store import Contended, DuplicateItem, InboxError, new_item_i
 
 NAME = "inbox-outbox.jsonl"
 SKIPPED = "inbox-outbox.skipped.jsonl"
+ATTEMPTS = "inbox-outbox.attempts.json"
+ATTEMPTS_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_ATTEMPTS"
+DEFAULT_ATTEMPTS = 3
 LOCK = "inbox-outbox.lock"
 OPS = ("send", "reply", "close", "post", "say", "ledger")
+APPEND_ONLY = ("add", "add_item", "relay", "answer")
 MAX_ENV = "AGENTIHOOKS_INBOX_OUTBOX_MAX_BYTES"
 WARN_ENV = "AGENTIHOOKS_INBOX_OUTBOX_WARN_BYTES"
 DEFAULT_MAX_BYTES = 1_048_576
@@ -43,6 +47,12 @@ class LedgerDown(Exception):
 
 
 class LedgerBusy(LedgerDown):
+    def __init__(self, message: str, targets: frozenset = frozenset()) -> None:
+        super().__init__(message)
+        self.targets = targets
+
+
+class RevisionConflict(Exception):
     pass
 
 
@@ -67,6 +77,27 @@ def path() -> Path:
 
 def skipped_path() -> Path:
     return home() / SKIPPED
+
+
+def attempts_path() -> Path:
+    return home() / ATTEMPTS
+
+
+def max_attempts(environ=None) -> int:
+    env = os.environ if environ is None else environ
+    return int(env.get(ATTEMPTS_ENV) or DEFAULT_ATTEMPTS)
+
+
+def status() -> dict:
+    queued = path().read_text().splitlines() if path().exists() else []
+    skipped = skipped_path().read_text().splitlines() if skipped_path().exists() else []
+    return {"queued": len(queued), "retrying": len(_attempts()), "set_aside": len(skipped)}
+
+
+def status_lines() -> list[str]:
+    found = status()
+    line = f"inbox outbox  queued {found['queued']}  retrying {found['retrying']}  set aside {found['set_aside']}"
+    return [line] if any(found.values()) else []
 
 
 def bounds(environ=None) -> tuple[int, int]:
@@ -165,7 +196,8 @@ def submit(store, entry: dict, apply) -> dict:
 
 
 def flush(store) -> Report:
-    """Replay every queued record in order; a destination that fails keeps that record and its later ones for later."""
+    """Replay every queued record in order; a failing destination keeps that record and its later ones for later, and a
+    resource still in revision conflict keeps only the later records that write it or a resource a kept record writes."""
     report = Report()
     if not waiting():
         return report
@@ -181,24 +213,25 @@ def _replay(store, report: Report) -> None:
 
     from scripts.inbox.cli import apply
 
-    kept, down = [], {"redis"} if store is None else set()
+    kept, down, held = [], {"redis"} if store is None else set(), set()
+    tracked, cap = _attempts(), max_attempts()
     for line in path().read_text().splitlines(keepends=True):
         entry = parse(line)
         if entry is None:
             _set_aside(line, "corrupt")
             report.corrupt += 1
             continue
-        if lane(entry) in down:
-            kept.append(line)
-            continue
         try:
+            if _keep_behind(entry, down, held):
+                kept.append(line)
+                continue
             apply(store, entry)
             report.applied.append(entry["item"])
         except DuplicateItem:
             report.already.append(entry["item"])
         except LedgerBusy as exc:
             if not stale(entry):
-                down.add(lane(entry))
+                _hold(entry, exc, down, held)
                 kept.append(line)
                 continue
             reason = f"{exc} for over {busy_age()} seconds ({BUSY_AGE_ENV})"
@@ -211,13 +244,54 @@ def _replay(store, report: Report) -> None:
             _set_aside(line, str(exc))
             report.rejected.append((entry["item"], str(exc)))
         except Exception as exc:
-            print(f"agentihooks msg: outbox replay stopped ({type(exc).__name__}: {exc})", file=sys.stderr)
+            tracked[entry["sum"]] = tracked.get(entry["sum"], 0) + 1
+            if _gave_up(line, entry, f"{type(exc).__name__}: {exc}", tracked[entry["sum"]], report, cap):
+                continue
             down.add(lane(entry))
             kept.append(line)
+    _save_attempts({key: tracked[key] for key in (parse(line)["sum"] for line in kept) if key in tracked})
     if kept:
         _keep(kept, report)
     else:
         _clear()
+
+
+def _keep_behind(entry: dict, down: set, held: set) -> bool:
+    if lane(entry) in down:
+        return True
+    shared = targets(entry)
+    if held & shared:
+        held.update(shared)
+        return True
+    return False
+
+
+def _hold(entry: dict, exc: LedgerBusy, down: set, held: set) -> None:
+    if exc.targets:
+        held.update(exc.targets)
+    else:
+        down.add(lane(entry))
+
+
+def _gave_up(line: str, entry: dict, error: str, count: int, report: Report, cap: int) -> bool:
+    if count < cap:
+        print(f"agentihooks msg: outbox replay stopped ({error})", file=sys.stderr)
+        return False
+    reason = f"{error} on {count} replays ({ATTEMPTS_ENV})"
+    _set_aside(line, reason)
+    report.rejected.append((entry["item"], reason))
+    return True
+
+
+def _attempts() -> dict:
+    return json.loads(attempts_path().read_text()) if attempts_path().exists() else {}
+
+
+def _save_attempts(counts: dict) -> None:
+    if counts:
+        _replace(attempts_path(), json.dumps(counts))
+    else:
+        attempts_path().unlink(missing_ok=True)
 
 
 def _keep(lines: list[str], report: Report) -> None:
@@ -237,11 +311,15 @@ def _clear() -> None:
 
 
 def _rewrite(lines: list[str]) -> None:
+    _replace(path(), "".join(lines))
+
+
+def _replace(target: Path, text: str) -> None:
     descriptor, staged = tempfile.mkstemp(dir=home())
     with os.fdopen(descriptor, "w") as handle:
-        handle.write("".join(lines))
+        handle.write(text)
         _sync(handle)
-    os.replace(staged, path())
+    os.replace(staged, target)
     _sync_home()
 
 
@@ -313,21 +391,51 @@ def ledger_record(slug: str, ops: list, agent: str, service: bool) -> dict:
 
 
 def apply_ledger(store, by: str, entry: dict) -> dict:
+    ops = entry["args"]["ops"]
+    pinned = any(op.get("expected_revision") for op in ops)
+    try:
+        state = _send_ledger(entry["args"], ops)
+    except RevisionConflict as exc:
+        if not pinned:
+            raise LedgerBusy(str(exc), targets(entry)) from None
+        if not all(op["op"] in APPEND_ONLY for op in ops):
+            raise InboxError(f"{exc} since this write was queued, so its expected revision can never apply") from None
+        fresh = [{key: value for key, value in op.items() if key != "expected_revision"} for op in ops]
+        try:
+            state = _send_ledger(entry["args"], fresh)
+        except RevisionConflict as again:
+            raise LedgerBusy(str(again), targets(entry)) from None
+    if state.get("rejected"):
+        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
+    return state
+
+
+def _send_ledger(args: dict, ops: list) -> dict:
     import urllib.error
 
     from scripts.swarm_ledger import ledger
 
-    args = entry["args"]
     try:
-        state = ledger.replay(args["slug"], args["ops"], args["agent"], args["service"])
+        return ledger.replay(args["slug"], ops, args["agent"], args["service"])
     except urllib.error.HTTPError as exc:
         from scripts.swarm_ledger.api.client import failure
 
-        if exc.code >= 500 or exc.code == 429 or failure(exc)[1].get("code") == "revision_conflict":
+        error = failure(exc)[1]
+        if error.get("code") == "revision_conflict":
+            where = (error.get("details") or {}).get("path")
+            raise RevisionConflict(
+                f"the ledger server answered {exc.code} revision conflict" + (f" on {where}" if where else "")
+            ) from None
+        if exc.code >= 500 or exc.code == 429:
             raise LedgerBusy(f"the ledger server answered {exc.code}") from None
         raise InboxError(f"the ledger server refused it: {exc.code}") from None
     except OSError as exc:
         raise LedgerDown(str(exc)) from None
-    if state.get("rejected"):
-        raise InboxError(f"the ledger server rejected {', '.join(state['rejected'])}")
-    return state
+
+
+def targets(entry: dict) -> frozenset:
+    from scripts.swarm_ledger.api import schemas
+
+    if lane(entry) != "ledger":
+        return frozenset()
+    return frozenset(schemas.target(op) for op in entry["args"]["ops"])

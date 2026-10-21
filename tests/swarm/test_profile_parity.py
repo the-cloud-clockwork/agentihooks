@@ -13,7 +13,7 @@ from scripts.swarm_v2.runtime.routed import routed
 from tests.swarm.profile_fixture import validated
 from tests.test_swarm_v2_launch import FIRST, OTHER_API, SLUG, Herdr, World, pod_target
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 TASK = {"id": "t1", "title": "Restyle the ledger page header"}
 SHIPPED = launch.worker_profiles

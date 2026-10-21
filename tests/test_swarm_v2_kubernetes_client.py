@@ -425,6 +425,19 @@ def test_snapshot_lists_the_selected_pods_with_their_resource_version():
         PodClient(Http((403, {"reason": "Forbidden"})), "ns").snapshot("a=b")
 
 
+@pytest.mark.parametrize("body", [{}, {"items": None}, {"items": {}}, {"kind": "Status"}, []])
+@pytest.mark.parametrize("call", ["list_pods", "snapshot", "list_services"])
+def test_a_list_answer_without_items_is_a_connection_failure(call, body):
+    with pytest.raises(ConnectionError, match="^the API server list answer carries no items$"):
+        getattr(PodClient(Http((200, body)), "ns"), call)("a=b")
+
+
+@pytest.mark.parametrize("body", [{}, {"items": None}, {"items": "q"}])
+def test_a_quota_list_answer_without_items_is_a_connection_failure(body):
+    with pytest.raises(ConnectionError):
+        PodClient(Http((200, body)), "ns").list_quotas()
+
+
 def _events(*events) -> bytes:
     return b"".join(json.dumps(event).encode() + b"\n" for event in events) + b"\n"
 

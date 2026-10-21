@@ -16,12 +16,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow == 'Startup stages' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('startup-stages-{0}', github.run_id) }}
-  queue: ${{ github.workflow == 'Startup stages' && 'max' || 'single' }}
+  group: ${{ github.workflow == 'Startup stages' && github.event_name == 'push' && format('startup-stages-{0}', github.ref) || github.workflow == 'Startup stages' && format('hosted-lane-{0}', ((endsWith(github.run_id, '0') || endsWith(github.run_id, '1') || endsWith(github.run_id, '2')) && 'a') || ((endsWith(github.run_id, '3') || endsWith(github.run_id, '4') || endsWith(github.run_id, '5')) && 'b') || 'c') || format('startup-stages-{0}', github.run_id) }}
+  queue: ${{ github.workflow == 'Startup stages' && github.event_name != 'push' && 'max' || 'single' }}
 
 jobs:
   measure:
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 30
     env:
       KIND_VERSION: v0.33.0

@@ -1,0 +1,6 @@
+{
+  "scripts/codex_input.py:scripts.codex_input.x\u01c1InputFramer\u01c1_sequence__mutmut_49:3b20962fcfbd849d6ff3ade4b11f16eb103522ac1de99d6823857cfc1a6cecfc": {
+    "reader": "standards-reader round three",
+    "reason": "both paste opener literals have identical bytes."
+  }
+}

@@ -7,9 +7,13 @@ The task defaults to AGENTIHOOKS_SWARM_TASK and the ledger to AGENTIHOOKS_SWARM.
 """
 
 import argparse
+import functools
 import os
 import re
 import sys
+import urllib.error
+import urllib.request
+from collections.abc import Callable
 from importlib import import_module
 
 from scripts.swarm_ledger import HERE
@@ -18,6 +22,7 @@ COMMAND = "agentihooks plan read"
 MARGIN = 10
 LINK = re.compile(r"\]\(#([\w.-]+)\)")
 ANCHOR = re.compile(r'<a id="[\w.-]+"></a>')
+MARKER = re.compile(r"^(?:[-*+]|#{1,6}|\d+[.)])\s+")
 
 
 def _ledger(name: str):
@@ -86,6 +91,54 @@ def pointer(task: dict) -> str:
     )
 
 
+def _lead(task: dict) -> str:
+    return task.get("merged_into") or task["id"]
+
+
+def sharers(doc: dict, task: dict) -> list[str]:
+    if not task.get("plan_lines"):
+        return []
+    held = (task.get("phase"), task["plan_lines"])
+    return [
+        other["id"]
+        for other in doc.get("tasks", [])
+        if other["id"] != task["id"]
+        and other.get("state") != "done"
+        and (other.get("phase"), other.get("plan_lines")) == held
+        and _lead(other) != _lead(task)
+    ]
+
+
+def own_rows(text: str, lines: str, task: dict) -> list[tuple[int, str]]:
+    named = re.compile(rf"{re.escape(task['id'])}(?![\w.-])")
+    title = task.get("title", "").strip().casefold()
+    start = _ledger("plan_ranges").bounds(lines)[0]
+    run: list[tuple[int, str]] = []
+    for number, row in enumerate(text.splitlines(), start):
+        cell = MARKER.sub("", row.strip().strip("|").split("|")[0].strip())
+        if named.match(cell) or (title and cell.casefold() == title):
+            if run and number != run[-1][0] + 1:
+                break
+            run.append((number, row))
+    return run
+
+
+def scoped(doc: dict, task: dict, part: dict) -> dict:
+    others = sharers(doc, task)
+    if not others or not isinstance(part.get("plan_chunk"), str):
+        return part
+    shared = f"plan lines {part['plan_lines']} are shared with tasks {', '.join(others)}"
+    rows = own_rows(part["plan_chunk"], part["plan_lines"], task)
+    if not rows:
+        return {"shared_slice": f"{shared}, and no row names this task, so none of them is its scope"}
+    span = f"{rows[0][0]}-{rows[-1][0]}"
+    return {
+        "plan_lines": span,
+        "plan_chunk": "".join(f"{row}\n" for _, row in rows),
+        "shared_slice": f"{shared}; this task's scope is plan lines {span}, the rows that name it",
+    }
+
+
 def _sliced_task(doc: dict, slug: str, task_id: str | None) -> dict:
     task = next((t for t in doc.get("tasks", []) if t.get("id") == task_id), None)
     if task is None:
@@ -106,16 +159,18 @@ def _packaged(phase: dict, task: dict) -> bool:
     return not phase.get("plan_ref") and bool(task) and linked(str(task.get("plan_slice")), _url(phase, task))
 
 
-def _stored(doc: dict, phase: dict, task: dict) -> str:
+def _stored(doc: dict, phase: dict, task: dict, load: Callable[[str, str], bytes] | None = None) -> str:
     ref = phase.get("plan_ref")
     if not ref and task and _url(phase, task):
         ref = {"artifact": _url(phase, task), "lines": task["plan_lines"]}
     if not ref:
         raise ValueError(f"phase {phase.get('id')} has no plan range")
-    return _ledger("plan_ranges").stored_text(ref, doc)
+    return _ledger("plan_ranges").stored_text(ref, doc, load)
 
 
-def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str:
+def read(
+    doc: dict, slug: str, task_id: str | None, phase_id: str | None, load: Callable[[str, str], bytes] | None = None
+) -> str:
     task = {} if phase_id else _sliced_task(doc, slug, task_id)
     if not phase_id and not task.get("plan_lines"):
         return f"This task has no plan lines; its description is the whole spec.\n\n{task.get('description', '')}\n"
@@ -124,13 +179,53 @@ def read(doc: dict, slug: str, task_id: str | None, phase_id: str | None) -> str
     if phase is None:
         raise ValueError(f"no phase {phase_id} in ledger {slug}")
     packaged = _packaged(phase, task)
-    source = _ledger("plan_packages").text() if packaged else _stored(doc, phase, task)
+    source = _ledger("plan_packages").text() if packaged else _stored(doc, phase, task, load)
     lines = task.get("plan_lines") or phase["plan_ref"]["lines"]
     if task.get("plan_slice"):
         lines = _ledger("plan_ranges").slice_lines(source, task["plan_slice"], f"1-{len(source.splitlines())}")
     if packaged:
         return _ledger("plan_packages").read(lines)
-    return chunk(source, lines) + (linked(source, lines, margin=MARGIN) if task else "")
+    whole = chunk(source, lines) + (linked(source, lines, margin=MARGIN) if task else "")
+    part = scoped(doc, task, {"plan_lines": lines, "plan_chunk": chunk(source, lines, margin=0)}) if task else {}
+    if "shared_slice" not in part:
+        return whole
+    scope = part.get("plan_chunk", f"{task.get('description', '')}\n")
+    rest = _without(source, lines, part.get("plan_lines")) + linked(source, lines, margin=MARGIN)
+    return f"Scope: {part['shared_slice']}.\n{scope}\nContext only, not scope:\n{rest}"
+
+
+def _without(source: str, lines: str, own: str | None) -> str:
+    start, end = _ledger("plan_ranges").bounds(lines)
+    skip = _ledger("plan_ranges").bounds(own) if own else None
+    return "".join(
+        f"{row}\n"
+        for number, row in enumerate(source.splitlines(), 1)
+        if start - MARGIN <= number <= end + MARGIN and not (skip and skip[0] <= number <= skip[1])
+    )
+
+
+def _hosted(slug: str, keys: tuple) -> dict | None:
+    from scripts.swarm_ledger import ledger
+
+    try:
+        return {key: ledger.resource(slug, key, collection=True) for key in keys}
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        return None
+
+
+def _served(env, slug: str, file_id: str) -> bytes:
+    from scripts.swarm_ledger import ledger, ledger_link
+
+    request = urllib.request.Request(f"{ledger_link.base(env)}/artifacts/{slug}/{file_id}")
+    try:
+        with ledger_link.urlopen(request, ledger.REQUEST_TIMEOUT, env) as response:
+            return response.read()
+    except urllib.error.HTTPError as error:
+        if error.code != 404:
+            raise
+        raise ValueError(f"no stored artifact {file_id}") from None
 
 
 def main(argv=None, environ=None) -> int:
@@ -148,13 +243,16 @@ def main(argv=None, environ=None) -> int:
     task_id = None if args.phase else args.task or env.get("AGENTIHOOKS_SWARM_TASK", "")
     if task_id == "":
         raise SystemExit("plan read needs a task: pass --task or run it inside a swarm task session")
-    from scripts.swarm_ledger.repository.sqlite import read_ledger
+    from scripts.swarm_ledger import ledger_link
+    from scripts.swarm_ledger.storage import read_ledger
 
-    doc = read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, "tasks", "phases", "artifacts")
+    hosted = ledger_link.remote(env)
+    keys = ("tasks", "phases", "artifacts")
+    doc = _hosted(slug, keys) if hosted else read_ledger(_ledger("ledger_core").LEDGER_DIR, slug, *keys)
     if doc is None:
         raise SystemExit(f"no ledger {slug}")
     try:
-        sys.stdout.write(read(doc, slug, task_id, args.phase))
+        sys.stdout.write(read(doc, slug, task_id, args.phase, functools.partial(_served, env) if hosted else None))
     except ValueError as error:
         raise SystemExit(str(error)) from None
     return 0

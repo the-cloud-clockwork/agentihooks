@@ -5,8 +5,6 @@ import pytest
 from scripts.hive import registry
 from scripts.routing import aggregate
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def redis():
@@ -79,6 +77,57 @@ def test_nonlocal_consumers_use_aggregate_without_credential_probes(redis, monke
     rows = capacity.accounts({"AGENTIHOOKS_RUNTIME_BACKEND": "kubernetes"}, 100)
     claude = next(row for row in rows if row.harness == "claude")
     assert (claude.sessions, claude.five_left, claude.week_left, claude.cap) == (3, 80, 70, 6)
+
+
+def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reservation(redis, monkeypatch):
+    import time
+
+    from hooks.context import account_sessions
+    from scripts import claude_quota_balancer as balancer
+    from scripts.routing.reservation import LaunchSlots
+    from scripts.swarm import capacity
+
+    now = int(time.time() * 1000)
+    for hive, counts, heartbeat in (
+        ("own", {"claude:one": 1, "_executions": {"claude:one": ["mine"], "codex:three": ["done"]}}, now),
+        ("far", {"claude:one": 5, "interactive:claude:one": 1, "codex:one": 2}, now),
+        ("near", {"claude:one": 3}, now),
+        ("silent", None, now),
+        ("gone", {"claude:one": 9}, now - registry.LIVE_MS - 1),
+    ):
+        registry.update(redis, hive, ["max-agents=8"])
+        redis.hset(registry.key(hive), "heartbeat_at", heartbeat)
+        if counts is not None:
+            redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts))
+    slots = LaunchSlots(redis)
+    assert slots.reserve("claude:one", "mine", 20, 1000)
+    assert slots.reserve("claude:one", "starting", 20, 1000)
+    assert slots.reserve("codex:two:b", "spawning", 9, 1000)
+    assert slots.reserve("codex:three", "done", 9, 1000)
+    assert slots.release("done")
+    monkeypatch.delenv("AGENTIHOOKS_RUNTIME_BACKEND", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
+    monkeypatch.setenv("SWARM_HIVE_ID", "own")
+    monkeypatch.setattr("hooks._redis.get_redis", lambda: redis)
+    monkeypatch.setattr(account_sessions, "handed_off_pids", set)
+    monkeypatch.setattr(account_sessions, "live_sessions", lambda proc, skip, environ=None: {11: "one"})
+    monkeypatch.setattr(account_sessions, "_codex_processes", lambda proc: ({}, {}))
+    monkeypatch.setattr(account_sessions, "managed_held", set)
+
+    assert account_sessions.sessions_by_account() == {"one": 10}
+    assert account_sessions.sessions_by_account(local=True) == {"one": 1}
+    assert account_sessions.codex_sessions_by_account() == {"one": 2, "two:b": 1, "three": 0}
+    assert not slots.reserve("claude:one", "next", 10, 1000)
+    assert not slots.reserve("codex:one", "codex-next", 2, 1000)
+    assert slots.reserve("codex:one", "codex-next", 3, 1000)
+
+    window = balancer.QuotaWindow(used=10)
+    result = balancer.ProbeResult("one", "allowed", "NORMAL", 90, window, window)
+    monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(time.time(), result)])
+    monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([], "cached"))
+    (row,) = capacity._claude({"AH_CC_TOKEN_one": "fake"}, time.time())
+    assert row.sessions == 10
+    assert slots.reserve("claude:one", "next", 11, 1000)
 
 
 def test_aggregate_includes_reservations_once_and_exit_releases(redis, monkeypatch):
@@ -208,6 +257,7 @@ def test_global_capacity_preserves_api_policy_and_future_reset_fields(redis, mon
             300,
             five_resets_at=200,
             reserved="reserved for 1 live master: workers stop at 70% of the week",
+            unreserved_cap=6,
         ),
         capacity.Account("codex", "one", "OPEN", 1, None, None, 4, kind="api", weight=3),
     ]

@@ -7,8 +7,6 @@ from scripts.swarm import autoscale, capacity, lane_split
 from scripts.swarm.autoscale import calculate
 from scripts.swarm.store import MANUAL_SCALING, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 READY = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 1}, room=4)
@@ -19,7 +17,9 @@ def store():
     import fakeredis
 
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    saved.create(SwarmConfig(SLUG, "/repo", max_eng=4, max_ci=1, scaling=MANUAL_SCALING))
+    saved.create(
+        SwarmConfig(SLUG, "/repo", max_eng=4, max_ci=1, scaling=MANUAL_SCALING, gates={"lane-split": "enforce"})
+    )
     return saved
 
 
@@ -170,6 +170,71 @@ def test_the_receiving_lane_never_passes_host_room(store, home):
     assert row["reason"].endswith(" Host room unknown.")
 
 
+def test_a_lane_with_no_ready_task_receives_no_seat(store, home):
+    empty = lane_split.Lanes(ready={"eng": 3, "ci": 0}, live={"eng": 1, "ci": 0}, room=4)
+    actions = ticks(store, "ci", 3, empty)
+    assert caps(store) == (4, 1)
+    assert actions == [lane_split.HELD.format(named="ci", ticks=3, reason="the ci lane has no ready task")]
+    assert gate_log.recent(SLUG, None, home) == []
+    store.update(SLUG, max_eng=1, max_ci=4)
+    idle = lane_split.Lanes(ready={"eng": 0, "ci": 2}, live={"eng": 0, "ci": 1}, room=4)
+    assert ticks(store, "engineering", 3, idle, start=3) == [
+        lane_split.HELD.format(named="engineering", ticks=3, reason="the eng lane has no ready task")
+    ]
+    assert caps(store) == (1, 4)
+
+
+def test_caps_the_operator_or_master_set_stay_where_they_set_them(store, home):
+    store.update(SLUG, caps_pinned=True)
+    actions = ticks(store, "ci", 3)
+    assert caps(store) == (4, 1)
+    assert actions == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the operator or the master set the lane caps")
+    ]
+    assert gate_log.recent(SLUG, None, home) == []
+
+
+def test_caps_stored_before_the_pin_existed_stay_where_the_operator_set_them(store, home):
+    store.redis.hdel(store.key(SLUG, "config"), "caps_pinned")
+    assert store.config(SLUG).caps_pinned is True
+    assert ticks(store, "ci", 3) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the operator or the master set the lane caps")
+    ]
+    assert caps(store) == (4, 1)
+
+
+@pytest.mark.parametrize("gates", [{}, {"lane-split": "observe"}])
+def test_log_only_records_the_would_be_move_and_moves_nothing(store, home, gates):
+    store.update(SLUG, gates=gates)
+    actions = ticks(store, "ci", 3)
+    assert caps(store) == (4, 1)
+    assert actions == [lane_split.HELD.format(named="ci", ticks=3, reason="the lane split switch is log only")]
+    (row,) = gate_log.recent(SLUG, None, home)
+    assert (row["gate"], row["kind"], row["agent"], row["tool"], row["at"]) == (
+        "lane-split",
+        "observe",
+        "dispatcher",
+        "lane-split",
+        NOW + 120_000,
+    )
+    assert row["reason"] == lane_split.MOVED.format(giver="eng", taker="ci", named="ci", ticks=3, eng=3, ci=2, total=5)
+
+
+def test_skip_moves_nothing_and_logs_nothing(store, home):
+    store.update(SLUG, gates={"lane-split": "off"})
+    assert ticks(store, "ci", 3) == [
+        lane_split.HELD.format(named="ci", ticks=3, reason="the lane split switch is skip")
+    ]
+    assert caps(store) == (4, 1)
+    assert gate_log.recent(SLUG, None, home) == []
+
+
+def test_the_lane_split_switch_defaults_to_log_only():
+    from scripts.gates import catalog
+
+    assert catalog.defaults()["lane-split"] == "observe"
+
+
 def test_seats_already_live_do_not_need_host_room(store, home):
     busy = lane_split.Lanes(ready={"eng": 3, "ci": 2}, live={"eng": 1, "ci": 3}, room=0)
     ticks(store, "ci", 3, busy)
@@ -250,14 +315,14 @@ def test_auto_scaling_without_ceilings_reads_the_stored_caps(store, home):
 def test_shift_moves_ceilings_and_keeps_the_sum():
     base = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3})
     shifted = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, shift=1)
-    assert base["ceilings"] == {"plan": 0, "ci": 1, "eng": 1}
+    assert base["ceilings"] == {"plan": 0, "ci": 2, "eng": 2}
     assert "lane shift" not in base["reason"] + shifted["reason"]
     assert shifted["ceilings"] == base["ceilings"]
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     wide = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=2)
     plain = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous)
-    assert plain["ceilings"] == {"plan": 0, "ci": 4, "eng": 2}
-    assert wide["ceilings"] == {"plan": 0, "ci": 5, "eng": 1}
+    assert plain["ceilings"] == {"plan": 0, "ci": 3, "eng": 3}
+    assert wide["ceilings"] == {"plan": 0, "ci": 4, "eng": 2}
     assert sum(wide["ceilings"].values()) == sum(plain["ceilings"].values())
     assert wide["reason"].endswith("; lane shift 1 from eng to ci.")
     assert (wide["shift"], "shift" in plain) == (1, False)
@@ -267,8 +332,8 @@ def test_a_shift_back_moves_ci_ceilings_to_engineers():
     previous = {"ceilings": {"plan": 0, "ci": 4, "eng": 2}, "pending_raise": {"target": None, "ticks": 0}}
     decision = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=-2)
     assert decision["ceilings"] == {"plan": 0, "ci": 2, "eng": 4}
-    assert decision["reason"].endswith("; lane shift 2 from ci to eng.")
-    assert decision["shift"] == -2
+    assert decision["reason"].endswith("; lane shift 1 from ci to eng.")
+    assert decision["shift"] == -1
 
 
 def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
@@ -279,20 +344,20 @@ def test_a_shift_keeps_live_agents_and_one_seat_for_ready_work():
     assert ready["ceilings"]["eng"] == 1
     idle = calculate({"eng": 0, "ci": 0}, {"claude": 4}, 10, {"eng": 0, "ci": 3}, previous, shift=9)
     assert idle["ceilings"]["eng"] == 0
-    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 1)
+    assert (live["shift"], ready["shift"], idle["shift"]) == (0, 0, 0)
 
 
 def test_a_shift_of_one_moves_one_ceiling_toward_ci():
     previous = {"ceilings": {"plan": 0, "ci": 1, "eng": 5}, "pending_raise": {"target": None, "ticks": 0}}
     one = calculate({"eng": 1, "ci": 1}, {"claude": 4}, 10, {"eng": 3, "ci": 3}, previous, shift=1)
-    assert (one["ceilings"], one["shift"]) == ({"plan": 0, "ci": 5, "eng": 1}, 1)
+    assert (one["ceilings"], one["shift"]) == ({"plan": 0, "ci": 4, "eng": 2}, 1)
     assert one["reason"].endswith("; lane shift 1 from eng to ci.")
 
 
 def test_a_lane_missing_from_live_and_demand_has_no_floor():
     previous = {"ceilings": {"plan": 0, "ci": 0, "eng": 1}, "pending_raise": {"target": None, "ticks": 0}}
     decision = calculate({"ci": 0}, {"claude": 1}, 10, {}, previous, shift=1)
-    assert (decision["ceilings"], decision["shift"]) == ({"plan": 0, "ci": 1, "eng": 0}, 1)
+    assert (decision["ceilings"], decision["shift"]) == ({"plan": 0, "ci": 0, "eng": 0}, 0)
 
 
 def test_a_clamped_shift_leaves_the_reason_unchanged():

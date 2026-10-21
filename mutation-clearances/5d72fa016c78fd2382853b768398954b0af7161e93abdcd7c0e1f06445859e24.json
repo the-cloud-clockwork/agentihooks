@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/api/proofs.py:scripts.swarm_ledger.api.proofs.x__credential__mutmut_28:ece87b997ca70c2c72ebb5e5677a6e9addd4f6d1bf182c157c847bf6aa14ccd3": {
+    "reader": "independent Standards reader",
+    "reason": "The signed scope is a JSON list of four scalar strings. JSON key_separator is used only between object keys and values, so changing colon to XX:XX is unused for every scope this function constructs. Encoded bytes, issued HMAC and validation of existing credentials remain identical. Retained complete CI shard evidence shows the fixed public credential replay survives this exact mutant."
+  }
+}

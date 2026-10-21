@@ -32,7 +32,7 @@ def page(controls, monkeypatch):
             "phases": [{"title": "Control proof", "description": "Observe notifications"}],
         },
     )
-    token = legacy_page.stored_token(core.paths("demo")[0])
+    token = legacy_page.stored_token(legacy_page.paths("demo", core)[0])
     from scripts.swarm import command_runner
 
     monkeypatch.setattr(server, "swarm_store", lambda: store)

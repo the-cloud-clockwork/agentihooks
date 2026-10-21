@@ -1,8 +1,7 @@
 import json
-import uuid
 from dataclasses import asdict, replace
 
-from scripts.swarm import naming
+from scripts.swarm import commands, controller, lease, live_binding, naming
 from scripts.swarm.runtime import herdr_target
 from scripts.swarm.store import MASTER, SwarmError
 
@@ -10,9 +9,16 @@ LOCK_MS = 600_000
 
 
 def rename_swarm(store, slug, ledger, runtime, at):
-    lock, token = store.key(slug, "tick-lock"), uuid.uuid4().hex
-    if not store.redis.set(lock, token, nx=True, px=LOCK_MS):
+    held = lease.acquire(store, slug, commands.hive_id())
+    if held is None:
+        raise SwarmError(f"swarm {slug}: belongs to another hive")
+    token = controller.take_tick_lock(store, slug, held, LOCK_MS)
+    if token is None:
         raise SwarmError(f"swarm {slug}: another tick or rename is running")
+
+    def keep():
+        controller.keep_tick(store, slug, held, token, LOCK_MS)
+
     try:
         config = store.ensure_code(slug)
         panes = {p["pane_id"]: p for p in runtime.herdr(["agent", "list"])["agents"]}
@@ -23,15 +29,20 @@ def rename_swarm(store, slug, ledger, runtime, at):
                 raise SwarmError(f"no live pane for {agent.name}; run the swarm tick first")
             reserved = store.redis.get(store.key(slug, "rename-to", agent.name)) or ""
             _check_pane(store.names, agent, pane, reserved)
+            keep()
             new = _new_name(store, slug, agent, at)
             if pane.get("name") != herdr_target(new):
+                keep()
                 runtime.herdr(["agent", "rename", agent.pane_id, herdr_target(new)])
                 actions.append(f"renamed {agent.name} to {new}")
-            if agent.harness == "codex":
+            if agent.harness == "codex" and not live_binding.managed(agent):
+                keep()
                 _name_session(store, slug, runtime, agent.pane_id, new)
+            keep()
             store.names.alias(agent.name, new)
             _move_agent(store, slug, agent, new, at)
             for old in store.names.aliases(new):
+                keep()
                 ledger.rename_agent(slug, old, new)
             workspaces.add(pane["workspace_id"])
         label = naming.space(config.repo, config.code, config.slug)
@@ -39,12 +50,12 @@ def rename_swarm(store, slug, ledger, runtime, at):
             if workspace["workspace_id"] not in workspaces and workspace.get("label") != f"swarm-{slug}":
                 continue
             if workspace.get("label") != label:
+                keep()
                 runtime.herdr(["workspace", "rename", workspace["workspace_id"], label])
                 actions.append(f"renamed space {workspace['workspace_id']} to {label}")
         return actions
     finally:
-        if store.redis.get(lock) == token:
-            store.redis.delete(lock)
+        controller.release_tick_lock(store, slug, token)
 
 
 def _name_session(store, slug, runtime, pane_id, new):

@@ -4,10 +4,19 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+New entries go in one fragment per pull request under `changelog.d/`; each
+release assembles them into its release notes. See `changelog.d/README.md`.
+
 ## [Unreleased]
 
 ### Added
 
+- `agentihooks terminate-agent <agent|thread> --stand-down [--swarm <slug>] [--dry-run]`
+  stands down one managed Codex conversation without a signal: it fences the
+  conversation from new inbox turns and interrupts its active turn, leaving the
+  app-server and its other conversations running. A refusal names its reason and
+  a safe alternative. It refuses `--type claude`, considers only Codex processes
+  and prints one JSON report with `--json`.
 - Bounded ledger write timing and request route CPU reports through the metrics
   endpoint and `python -m scripts.swarm_ledger.request_metrics` command.
 - Swarm waits accept branch mutation preflight runs and report every failing
@@ -17,6 +26,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Changed
 
+- New swarm enforcements default to log only. The stall watchdog logs would-be
+  stops and reopens while retaining alerts; set `stall-gate=deny` after
+  checking those actions against reality to enforce them.
+- The lane split and the `seat_wait` bottleneck remedy never move a seat into
+  a lane with no ready task, keep lane caps the operator or the master set
+  (every swarm stored before this change counts as set), and default to log
+  only; set `lane-split-gate=deny` to let them move seats.
+- Merge queue unit shards restore the Codex CLI from a cache seeded on `main`
+  instead of downloading it on every queue run.
+- Terminal and worker image tool downloads retry server errors and timeouts
+  up to five attempts with exponential backoff, preserving checksum checks.
+- Plain `agentihooks init` installs Claude and Codex; Copilot requires
+  `--target copilot` or `--with-copilot`. Output defaults to installed harness
+  summaries and warnings; `--verbose` shows installation details.
 - Browser preparation reuses verified Chromium and OS dependencies baked into
   ARC runners before restoring a cache or downloading browsers.
 - The swarm chart's controller API NetworkPolicy admits only the controller's
@@ -33,6 +56,42 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- Test count collection failures print each failing module and its exception in CI job logs.
+
+- `terminate-agent --stand-down` reports a Redis error with whether the
+  conversation is fenced, names a process with unregistered conversations as
+  unknown and refuses to fence a conversation that exited after its plan.
+- Master notices for new and overdue follow ups include the item identifier and
+  its exact completion command.
+- The swarm stall watchdog no longer reopens a task or stops its owner while
+  the task depends on a task not yet done, or while its owner has declared a
+  wait on another open task or on another open pull request's merge.
+- The quota usage banner test passes in any test order: tests that change the
+  banner cadence restore it, and a regression test runs them before it.
+- Launch checks report unavailable process observations without inventing profile,
+  settings, base role or overlay mismatches; observed mismatches and join failures
+  remain visible.
+- Judged bottleneck stage findings return only when current stage load grows,
+  instead of when the cumulative fired count increases.
+- Ledger task set accepts split pull request addresses as comma or JSON lists.
+- The intent gate matches a split task's `gh pr merge` that names only a branch,
+  or nothing (current branch), to the half it belongs to, and refuses one that
+  resolves to no pull request.
+- Reopening a swarm pull request retains its registered worker's ownership,
+  claim lease and worktree until retirement; status omits gone local processes.
+- Offline worker profile proofs replay the rendered Codex startup hook so
+  session registration does not depend on a live Codex session.
+- The ledger API accepts the ownership guard on task updates, so the swarm tick's
+  guarded writes no longer fail and handed off masters are retired.
+- A selected coverage run maps the page coverage it recorded when it holds only
+  browser or only node captures, instead of failing the Sonar job.
+- Swarm Codex launches isolate session files and database storage from the
+  operator home while retaining shared authentication and hooks.
+- Running promotion checks finish while newer pushes replace only the pending
+  run; CI promotes the exact graded revision through a temporary snapshot branch.
+- The worker supervisor's workspace create and pane run commands use the remaining startup
+  budget instead of a half second timeout.
+- Stopped Codex replay test fixes export field and identity sizes independently of its environment.
 - The ledger HTTP server uses a listen backlog of 128 to accept bursts of
   concurrent writers and readers.
 - The swarm merge pass reopens released tasks with the reason when an unknown

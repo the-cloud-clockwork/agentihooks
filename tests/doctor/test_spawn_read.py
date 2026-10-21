@@ -1,12 +1,8 @@
 import subprocess
 from dataclasses import asdict
 
-import pytest
-
 from scripts.doctor import spawn_read, spawns
 from tests.doctor.recorded import load
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
@@ -26,7 +22,15 @@ def test_spawn_reader_is_read_only_and_uses_the_swarm_target(monkeypatch):
     before = store.export(slug)
 
     def journal(argv, **kwargs):
-        assert argv[:6] == ["journalctl", "--user", "-u", "agentihooks-swarm.service", "--since", "1 hour ago"]
+        assert argv[:7] == [
+            "journalctl",
+            "--user",
+            "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+            "+",
+            "SYSLOG_IDENTIFIER=agentihooks-swarm",
+            "--since",
+            "1 hour ago",
+        ]
         assert kwargs["check"] is True
         return subprocess.CompletedProcess(
             argv,
@@ -68,8 +72,9 @@ def test_spawn_reader_passes_an_explicit_upper_journal_bound(monkeypatch):
         assert argv == [
             "journalctl",
             "--user",
-            "-u",
-            "agentihooks-swarm.service",
+            "_SYSTEMD_USER_UNIT=agentihooks-swarm.service",
+            "+",
+            "SYSLOG_IDENTIFIER=agentihooks-swarm",
             "--since",
             "2026-10-07T09:58:24Z",
             "--until",

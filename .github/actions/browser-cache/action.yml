@@ -12,7 +12,12 @@ runs:
         if [[ -n "${ARC_PLAYWRIGHT_BROWSERS_PATH:-}" && -d "$ARC_PLAYWRIGHT_BROWSERS_PATH" ]] \
             && [[ ! -e "$PLAYWRIGHT_BROWSERS_PATH" && ! -L "$PLAYWRIGHT_BROWSERS_PATH" ]]; then
           ln -s "$ARC_PLAYWRIGHT_BROWSERS_PATH" "$PLAYWRIGHT_BROWSERS_PATH"
-          echo "linked=true" >> "$GITHUB_OUTPUT"
+          if timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; then
+            echo "linked=true" >> "$GITHUB_OUTPUT"
+          else
+            rm "$PLAYWRIGHT_BROWSERS_PATH"
+            echo "linked=false" >> "$GITHUB_OUTPUT"
+          fi
         else
           echo "linked=false" >> "$GITHUB_OUTPUT"
         fi
@@ -30,7 +35,7 @@ runs:
     - name: Restore Chromium
       if: steps.image.outputs.linked != 'true'
       id: cache
-      uses: actions/cache@v4
+      uses: actions/cache/restore@v4
       with:
         path: ${{ github.workspace }}/.playwright
         key: chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}
@@ -42,12 +47,11 @@ runs:
         CACHE_HIT: ${{ steps.cache.outputs.cache-hit }}
         PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       run: |
-        if [[ "${IMAGE_LINKED:-false}" == true || "$CACHE_HIT" == true ]] \
-            && timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; then
+        if [[ "${IMAGE_LINKED:-false}" == true ]] || \
+            { [[ "$CACHE_HIT" == true ]] && timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"; }; then
           [[ "${IMAGE_LINKED:-false}" != true ]] || echo "Using baked Chromium and OS dependencies without a download"
           echo "ready=true" >> "$GITHUB_OUTPUT"
         else
-          [[ "${IMAGE_LINKED:-false}" != true ]] || rm "$PLAYWRIGHT_BROWSERS_PATH"
           echo "ready=false" >> "$GITHUB_OUTPUT"
         fi
     - name: Use the Ubuntu archive for browser dependencies
@@ -61,14 +65,19 @@ runs:
         ATTEMPT_SECONDS: "120"
         PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
       run: |
+        install_and_verify() {
+          python -m playwright install --with-deps chromium &&
+            timeout 30s bash "$GITHUB_ACTION_PATH/verify.sh"
+        }
+        export -f install_and_verify
         for attempt in 1 2; do
-          timeout --kill-after=10s "${ATTEMPT_SECONDS}s" python -m playwright install --with-deps chromium && exit 0
+          timeout --kill-after=10s "${ATTEMPT_SECONDS}s" bash -c install_and_verify && exit 0
           [[ "$attempt" == 2 ]] || echo "::warning title=Retried browser install::Chromium install attempt $attempt failed or exceeded ${ATTEMPT_SECONDS}s; retrying once."
         done
         exit 1
-    - name: Verify the installed browser
-      if: steps.launch.outputs.ready != 'true'
-      shell: bash
-      env:
-        PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
-      run: timeout 10s bash "$GITHUB_ACTION_PATH/verify.sh"
+    - name: Save Chromium from dev
+      if: steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true' && github.event_name == 'push' && github.ref == 'refs/heads/dev'
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ github.workspace }}/.playwright
+        key: ${{ steps.cache.outputs.cache-primary-key }}

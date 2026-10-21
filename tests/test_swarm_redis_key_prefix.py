@@ -14,8 +14,6 @@ from scripts.swarm import store as swarm_store
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests import redis_key_guard, swarm_v2_isolation
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 def _client():
     import fakeredis

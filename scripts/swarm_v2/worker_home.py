@@ -242,8 +242,8 @@ def render(execution: filesystem.Execution, target: str) -> None:
 
 
 def materialize(attempt: Path, target: str) -> None:
-    from scripts.profiles import browser
-    from scripts.profiles.render import _bundle, _chain, _is_doc, _settings, claude_environment
+    from scripts.profiles import binding, browser, sources
+    from scripts.profiles.render import _bundle, _chain, _features, _is_doc, _settings, claude_environment
     from scripts.swarm_v2 import broadcast_bridge
     from scripts.targets import get_adapter
     from scripts.targets._common import _install_module
@@ -279,6 +279,13 @@ def materialize(attempt: Path, target: str) -> None:
         layers += [(root.name, root / ".claude" / subdir) for root in roots if (root / ".claude" / subdir).is_dir()]
         adapter.install_features(subdir, layers, keep)
     adapter.install_persona(dirs, names, bundle)
+    home = adapter.home()
+    persona = home / binding.PERSONAS[target]
+    _write(persona, binding.persona(_text(persona)))
+    sources.write(
+        home.parent / f"{target}.sources.json", sources.rows(bundle, dirs, _features("rules", _is_doc, bundle, dirs))
+    )
+    binding.write(home, name, target)
     adapter.register_hooks_utils(name)
     servers: dict = {}
     for root in roots:
@@ -287,7 +294,8 @@ def materialize(attempt: Path, target: str) -> None:
         )
         if layer:
             servers.update(_i._load_native_layer(layer).get("mcpServers") or {})
-    adapter.register_mcp(browser.configure(servers, names))
+    workable = {name: server for name, server in servers.items() if not name.lower().startswith(browser.EXTENSION)}
+    adapter.register_mcp(browser.configure(workable, names))
 
 
 def _strings(value: object) -> list[str]:

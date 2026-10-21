@@ -82,6 +82,55 @@ def test_main_adopts_the_restored_dev_durations(tmp_path, monkeypatch):
     assert json.loads((tmp_path / ".test_durations").read_text()) == {"t.py::a": 3.0, "t.py::b": 4.0}
 
 
+@pytest.mark.parametrize("cached", [False, True])
+def test_planner_prices_every_new_case_from_the_measured_median(tmp_path, monkeypatch, cached):
+    from tests.shards import assign_nodes
+
+    measured = {f"t.py::test_{index}": float(index + 1) for index in range(10)}
+    collected = [*measured, "new.py::test_new"]
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(dev_durations, "collected_tests", lambda root: collected)
+    (tmp_path / ".test_durations").write_text(json.dumps(measured))
+    restored = _restored(tmp_path / "restored", measured) if cached else tmp_path / "missing"
+    digest = tmp_path / "durations.sha256"
+    dev_durations.main(["3.12", str(restored), "--hash", str(digest)])
+    chosen = json.loads((tmp_path / ".test_durations").read_text())
+    assert chosen == {**measured, "new.py::test_new": 5.5}
+    parts = assign_nodes(chosen, 2, set(), 1)
+    assert sorted(node for part in parts for node in part) == sorted(collected)
+    assert digest.read_text().strip() == hashlib.sha256((tmp_path / ".test_durations").read_bytes()).hexdigest()
+
+
+@pytest.mark.parametrize("version", ["3.11", "3.12"])
+@pytest.mark.parametrize("cached", [False, True])
+def test_precollected_suite_preserves_durations_hash_and_shard_assignments(tmp_path, monkeypatch, version, cached):
+    from tests.shards import assign_nodes
+
+    nodes = ["t.py::a", "t.py::b", "new.py::c"]
+    monkeypatch.setattr(dev_durations, "_ROOT", tmp_path)
+    monkeypatch.setattr(dev_durations, "collected_tests", lambda root: nodes)
+    (tmp_path / ".test_durations").write_text(json.dumps({"t.py::a": 2.0, "t.py::b": 4.0}))
+    restored = _restored(tmp_path / "restored", dict.fromkeys(nodes, 9.0)) if cached else tmp_path / "missing"
+    collection = tmp_path / "collected.json"
+    digest = tmp_path / "durations.sha256"
+    args = [version, str(restored), "--collected", str(collection), "--hash", str(digest)]
+    dev_durations.main(args)
+    expected = (tmp_path / ".test_durations").read_bytes()
+    expected_hash = digest.read_text()
+    expected_shards = assign_nodes(json.loads(expected), 2, set(), 1)
+    (tmp_path / ".test_durations").write_text(json.dumps({"t.py::a": 2.0, "t.py::b": 4.0}))
+
+    def unexpected_collection(root):
+        pytest.fail("The supplied collection must not be collected again")
+
+    monkeypatch.setattr(dev_durations, "collected_tests", unexpected_collection)
+    dev_durations.main([*args, "--collection", str(collection)])
+    assert (tmp_path / ".test_durations").read_bytes() == expected
+    assert digest.read_text() == expected_hash
+    assert json.loads(collection.read_text()) == nodes
+    assert assign_nodes(json.loads((tmp_path / ".test_durations").read_text()), 2, set(), 1) == expected_shards
+
+
 def test_main_never_calls_github(tmp_path, monkeypatch):
     tools = tmp_path / "bin"
     tools.mkdir()

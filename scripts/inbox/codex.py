@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import sys
 import time
 from collections.abc import Callable
@@ -12,18 +13,18 @@ from scripts.codex_session import protocol
 from scripts.codex_session.binding import CONNECTED, DEGRADED, BindingStore, TransportRecord
 from scripts.inbox.dispatch import Dispatcher, digest
 from scripts.inbox.receipts import MISMATCH, RELEASED, Delivery, DispatchError
-from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms
+from scripts.inbox.store import NOTIFY, InboxStore, Item, now_ms, owner_ttl_s
+from scripts.swarm import stale_nudge
 from scripts.swarm.delivery import envelope as delivery_envelope
 
 if TYPE_CHECKING:
     from redis.client import Pipeline
 
 STOPPED = "stopped"
-UNOBSERVED = "an active turn that began before this pump connected"
-RECONCILE_S = 30.0
+RECONCILE_S = 10.0
 POLL_S = 0.2
 BACKOFF_S = 1.0
-BACKOFF_MAX_S = 60.0
+BACKOFF_MAX_S = 15.0
 IN_PROGRESS = "inProgress"
 TURN_STARTED, TURN_COMPLETED, RESOLVED = "turn/started", "turn/completed", "serverRequest/resolved"
 LOST_OWNER = "{} no longer delivers for {}"
@@ -108,7 +109,7 @@ class Transport:
         transact(self.bindings.redis, update)
 
     def require(self, pipe: Pipeline | None = None) -> TransportRecord:
-        from scripts.codex_session.binding import EXITED, FAILED
+        from scripts.codex_session.binding import EXITED, FAILED, STOOD_DOWN
 
         store = self.bindings.store
         if pipe is not None:
@@ -116,7 +117,7 @@ class Transport:
 
             pipe.watch(store.key(self.slug, "executions"), store.key(self.slug, RECORDS))
         record = self.bindings.get(self.slug, self.execution_id)
-        if record is None or record.state in {EXITED, FAILED}:
+        if record is None or record.state in {EXITED, FAILED, STOOD_DOWN}:
             raise StaleExecution("execution is no longer current")
         current = store.execution_registry.occupants(self.slug, pipe).get(record.seat)
         if (
@@ -196,13 +197,17 @@ class Pump:
         self.hold_until = 0.0
         self.backoff = timing.backoff_s
         self.surfaced = ""
+        self.leased = False
 
     def run(self, stop: Callable[[], bool]) -> str:
         starting, reconnecting = True, False
-        backoff = self.timing.backoff_s
+        backoff, pause = self.timing.backoff_s, 0.0
         try:
             while True:
                 try:
+                    if pause:
+                        self._pause(pause)
+                        pause = 0.0
                     if starting:
                         self.start()
                         starting = False
@@ -223,13 +228,28 @@ class Pump:
                     self._degrade(failure)
                     if stop():
                         return STOPPED
-                    self.timing.sleep(backoff)
+                    pause = backoff
                     backoff = min(backoff * 2, self.timing.backoff_max_s)
                     starting, reconnecting = False, True
         finally:
             if self.subscription is not None:
                 self.subscription.close()
             self.binding.connection.close()
+
+    def _pause(self, delay: float) -> None:
+        whole, rest = divmod(delay, self.timing.reconcile_s)
+        for piece in [self.timing.reconcile_s] * int(whole) + ([rest] if rest else []):
+            if self.leased:
+                self._renew()
+            self.timing.sleep(piece)
+
+    def _lease_s(self) -> int:
+        return max(owner_ttl_s(), math.ceil(2 * self.timing.reconcile_s))
+
+    def _renew(self) -> None:
+        binding = self.binding
+        if not self.dispatcher.renew(binding.recipient, binding.owner, ttl_s=self._lease_s()):
+            raise DispatchError(LOST_OWNER.format(binding.owner, binding.recipient))
 
     def _degrade(self, failure: Exception) -> None:
         from redis.exceptions import RedisError
@@ -261,13 +281,13 @@ class Pump:
         binding = self.binding
         binding.transport.require()
         binding.connection.listener = self.state.observe
-        self.dispatcher.own(binding.recipient, binding.owner)
+        self.dispatcher.own(binding.recipient, binding.owner, ttl_s=self._lease_s())
+        self.leased = True
         self.receipts.recover(binding.recipient, binding.owner)
         self.subscription = self.store.redis.pubsub()
         self.subscription.subscribe(NOTIFY)
+        protocol.resume_thread(binding.connection, binding.thread_id)
         self._refresh()
-        if self.state.active_turn:
-            self.state.requests[UNOBSERVED] = UNOBSERVED
         self.next_reconcile = self.timing.clock()
         binding.transport.mark(state=CONNECTED, last_error_class="")
 
@@ -281,8 +301,20 @@ class Pump:
         if woken:
             self.queue += self.dispatcher.reserve(self.binding.recipient, self.binding.owner)
         self._surface()
+        if self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
+            self._submit_nudge()
         while self.queue and not self.state.requests and self.timing.clock() >= self.hold_until:
             self._submit(self.queue.pop(0))
+
+    def _submit_nudge(self) -> None:
+        nudge = next((d for d in self.queue if d.ref.startswith(stale_nudge.REF) and self._jumps(d)), None)
+        if nudge is None:
+            return
+        self.queue.remove(nudge)
+        self._submit(nudge)
+
+    def _jumps(self, delivery: Delivery) -> bool:
+        return stale_nudge.is_nudge(self.store.get(delivery.item))
 
     def _hinted(self) -> bool:
         if self.subscription.get_message(timeout=0) is None:
@@ -293,8 +325,7 @@ class Pump:
 
     def _reconcile(self) -> None:
         binding = self.binding
-        if not self.dispatcher.renew(binding.recipient, binding.owner):
-            raise DispatchError(LOST_OWNER.format(binding.owner, binding.recipient))
+        self._renew()
         self._refresh()
         binding.transport.mark(last_reconcile_at=self.timing.now_ms(), active_turn_id=self.state.active_turn)
         self.next_reconcile = self.timing.clock() + self.timing.reconcile_s
@@ -312,6 +343,7 @@ class Pump:
             self.log(HELD.format(self.binding.thread_id, pending))
 
     def _submit(self, delivery: Delivery) -> None:
+        self._renew()
         owner = self.binding.owner
         item = self.store.get(delivery.item)
         if digest(item) != delivery.digest:
@@ -324,7 +356,7 @@ class Pump:
             self.receipts.reject(delivery.id, owner, str(gone))
             return
         try:
-            self._arbitrate(envelope(item, delivery))
+            self._arbitrate(envelope(item, delivery), stale_nudge.interrupts(item, self.timing.now_ms()))
         except protocol.Refused as refused:
             self._requeue(delivery, str(refused))
             self._hold()
@@ -345,19 +377,23 @@ class Pump:
             self.receipts.reject(queued.id, owner, RELEASED)
         self.queue.clear()
 
-    def _arbitrate(self, text: str) -> None:
+    def _arbitrate(self, text: str, fresh: bool) -> None:
         try:
-            self._send(text)
+            self._send(text, fresh)
         except protocol.Refused as refused:
             try:
                 self._refresh()
             except (protocol.ProtocolError, TimeoutError) as lost:
                 raise protocol.Refused(str(refused)) from lost
-            self._send(text)
+            self._send(text, fresh)
 
-    def _send(self, text: str) -> None:
+    def _send(self, text: str, fresh: bool) -> None:
         def send():
             connection, thread = self.binding.connection, self.binding.thread_id
+            if self.state.active_turn and fresh:
+                protocol.interrupt_turn(connection, thread, self.state.active_turn)
+                self.state.active_turn = ""
+                self.state.requests.clear()
             if self.state.active_turn:
                 self.state.follow(protocol.steer_turn(connection, thread, self.state.active_turn, text))
             else:
@@ -369,3 +405,30 @@ class Pump:
         self.hold_until = self.timing.clock() + self.backoff
         self.next_reconcile = min(self.next_reconcile, self.hold_until)
         self.backoff = min(self.backoff * 2, self.timing.backoff_max_s)
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+    import signal
+    from threading import Event
+
+    from scripts.codex_session.supervisor import UNIX
+    from scripts.inbox.store import connect as inbox_connect
+    from scripts.swarm.store import connect as swarm_connect
+
+    parser = argparse.ArgumentParser(prog="python -m scripts.inbox.codex")
+    parser.add_argument("swarm")
+    parser.add_argument("execution")
+    args = parser.parse_args(argv)
+    transport = Transport(BindingStore(swarm_connect()), args.swarm, args.execution)
+    record = transport.require()
+    connection, _ = protocol.connect(record.endpoint_ref.removeprefix(UNIX), 5.0)
+    binding = Binding(connection, record.thread_id, record.agent_name, record.execution_id, transport)
+    stopped = Event()
+    for signum in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(signum, lambda number, frame: stopped.set())
+    return 0 if Pump(inbox_connect(), binding).run(stopped.is_set) == STOPPED else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

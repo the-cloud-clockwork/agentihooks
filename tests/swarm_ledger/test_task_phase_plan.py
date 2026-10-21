@@ -20,7 +20,7 @@ def ledger_dir(tmp_path, monkeypatch):
         "sources": [],
         "phases": [{"title": "one", "description": "d"}, {"title": "two", "description": "e"}],
     }
-    html_path, _ = core.paths(SLUG)
+    html_path, _ = legacy_page.paths(SLUG, core)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     state = anchored(SLUG, "old", "shared")
     url = state["phases"][0]["plan_ref"]["artifact"]
@@ -116,12 +116,35 @@ def test_setting_the_same_phase_keeps_the_existing_plan_metadata():
     assert task(state) == before
 
 
-def test_a_refused_move_keeps_the_existing_plan_metadata():
+def test_a_move_into_an_anchored_phase_without_a_slice_drops_the_old_slice_as_a_follow_up():
     anchored(SLUG, "new", phase="p2")
-    before = task(core.sync(SLUG)[0]).copy()
     state, rejected = update(phase="p2")
-    assert rejected == ["move-phase"]
-    assert task(state) == before
+    assert rejected == []
+    moved = task(state)
+    assert (moved["phase"], moved["follow_up"]) == ("p2", True)
+    assert (moved.get("plan_slice", ""), moved.get("plan_lines", "")) == ("", "")
+
+
+def test_a_move_into_a_phase_without_a_plan_marks_no_follow_up():
+    state, rejected = update(phase="p2")
+    assert rejected == []
+    assert (task(state)["phase"], "follow_up" in task(state)) == ("p2", False)
+
+
+@pytest.mark.parametrize(
+    "named, destination, follow_up",
+    [
+        ({}, {"plan_url": "https://example.com/plan"}, True),
+        ({}, {"plan_ref": {"artifact": "a", "lines": "1-2"}}, True),
+        ({}, {}, None),
+        ({"slice": "slices/plan-a.first"}, {"plan_url": "https://example.com/plan"}, False),
+        ({"plan_slice": "first"}, {"plan_url": "https://example.com/plan"}, False),
+    ],
+)
+def test_a_move_marks_a_follow_up_only_into_a_planned_phase_without_a_named_slice(named, destination, follow_up):
+    fields = {"phase": "p2", **named}
+    ledger_tasks._move_plan({"phases": [{"id": "p1"}]}, {"phase": "p1"}, fields, {"id": "p2", **destination})
+    assert fields.get("follow_up") is follow_up
 
 
 def test_replacement_slice_uses_the_destination_link_without_a_plan_reference():

@@ -11,12 +11,14 @@ from scripts.gates import log as gate_log
 from scripts.gates import quiet as quiet_gate
 from scripts.gates.talk import WORKER_LANES
 from scripts.handoff import transfers
-from scripts.hive import placement_waits
+from scripts.hive import placement_waits, reports
+from scripts.inbox import outbox
 from scripts.inbox.store import InboxStore
 from scripts.swarm import (
     affinity,
     bottleneck,
     bottleneck_status,
+    capabilities,
     drain_watch,
     failed_panes,
     idle,
@@ -27,16 +29,30 @@ from scripts.swarm import (
     outage,
     overlays,
     quota_view,
+    remote_control,
     retire_watch,
+    review_rounds,
     snapshot,
     stall_watch,
     tick_master,
+    timing,
 )
-from scripts.swarm.health import activity, checks, prompt_backlog, spawn_stall, standing, verdicts
+from scripts.swarm.health import (
+    activity,
+    checks,
+    merge_stall,
+    night_watch,
+    prompt_backlog,
+    spawn_stall,
+    standing,
+    urgent_hold,
+    verdicts,
+)
 from scripts.swarm.health import findings as health
 from scripts.swarm.naming import swarm_name
-from scripts.swarm.store import ASSIST, SwarmError
-from scripts.swarm.tick import STARTUP_GRACE_MS, agent_status
+from scripts.swarm.runtime import HerdrRuntime
+from scripts.swarm.store import ASSIST, AgentRecord, RedisStore, SwarmError
+from scripts.swarm.tick import STARTUP_GRACE_MS, Runtime, agent_status
 from scripts.swarm_ledger import plan_shape
 from scripts.swarm_v2 import telemetry
 from scripts.swarm_v2.reconciliation import accounts as account_reconciliation
@@ -45,6 +61,7 @@ from scripts.swarm_v2.runtime import observe
 DEFAULT_COMPACT_LIMIT = 600
 UNCLASSIFIED = "unclassified"
 PAUSED_WHILE_SLOW = ("idle with claim", "stale claim")
+HISTORY_SHOWN = 100
 
 
 from scripts.swarm_v2.checkpoints import cards as recovery_cards
@@ -70,8 +87,13 @@ def verdict_store(store, slug):
     return verdicts.VerdictStore(store.redis, store.key(slug, "findings"))
 
 
-def findings(store, slug, config, tasks, events):
+def findings(store, slug, config, tasks, events, view=None):
     agents, limits = store.agents(slug), health.limits()
+    if view is None:
+        pending = checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST)
+        passing = checks.cached_green(store.redis, store.key(slug, "checks"))
+    else:
+        pending, passing = checks.from_view(view, approval=config.autonomy == ASSIST)
     placement_waits.prune(store, slug, tasks)
     events = [
         *events,
@@ -80,26 +102,33 @@ def findings(store, slug, config, tasks, events):
                 "kind": "task started" if row["state"] == "started" else "launch failed",
                 "target": f"tasks/{row['task']}",
                 "error": row["error"],
+                "at": row["at"],
+                "after": row.get("after"),
+                "head": row.get("head"),
             }
             for row in store.launches(slug)
             if row["state"] in ("started", "failed")
         ),
     ]
-    quiet = quiet_gate.quiet_minutes(store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
-    rows = _health_rows(store, slug, agents, quiet, now_ms())
+    quiet = timing.call(quiet_gate.quiet_minutes, store.redis, slug, agents, {t["id"]: t for t in tasks}, now_ms())
+    rows = timing.call(_health_rows, store, slug, agents, quiet, now_ms())
     found = (
         health.findings(
-            {"tasks": tasks, "_meta": {"events": events}},
+            {
+                "tasks": tasks,
+                "_meta": {"events": events},
+                "review_rounds": {task["id"]: review_rounds.counts(slug, task["id"]) for task in tasks},
+            },
             rows,
-            activity.counts(slug),
+            timing.call(activity.counts, slug),
             limits,
             checks.waiting(
                 rows,
                 tasks,
                 limits,
-                checks.cached(store.redis, store.key(slug, "checks"), approval=config.autonomy == ASSIST),
+                pending,
             ),
-            checks.green(tasks, checks.cached_green(store.redis, store.key(slug, "checks"))),
+            checks.green(tasks, passing),
             talk_since_outcome(store, slug, rows),
         )
         + live_binding.findings(store, slug)
@@ -108,7 +137,10 @@ def findings(store, slug, config, tasks, events):
         + drain_watch.findings(store, slug, limits, now_ms())
         + launch_check.findings(store, slug)
         + spawn_stall.findings(store, slug)
+        + night_watch.findings(store, slug)
+        + timing.call(merge_stall.findings, store, slug, config.repo, now_ms())
         + prompt_backlog.findings(store, slug)
+        + urgent_hold.findings(store, slug)
         + placement_waits.findings(store, slug, now_ms())
         + standing.findings(store.redis, slug, now_ms())
     )
@@ -120,6 +152,7 @@ def findings(store, slug, config, tasks, events):
 
 def _health_rows(store, slug, agents, quiet, at):
     latest = activity.last_events(slug)
+    failed = remote_control.failures(store, slug)
     rows = []
     for agent in agents:
         started = launch_check.session_started_at(agent)
@@ -133,6 +166,7 @@ def _health_rows(store, slug, agents, quiet, at):
                 "quiet_minutes": quiet.get(agent.name),
                 "tool_quiet_minutes": minutes,
                 "pane_state": store.redis.get(store.key(slug, "pane-state", agent.name)),
+                "remote_control_failure": failed.get(agent.name),
             }
         )
     return rows
@@ -232,16 +266,29 @@ def observation(store, slug, agent):
     return {"state": UNCLASSIFIED, "observed_at": at, "sources": {observe.Source.HEARTBEAT.value: heartbeat}}
 
 
-def status_report(store, slug, state):
-    from scripts.swarm import capacity
+def transport(agent: AgentRecord) -> dict:
+    found = capabilities.of_agent(agent)
+    return {"push_inbox": found.push_inbox, "native_terminal_attach": found.native_terminal_attach}
+
+
+def live_agents(agents: list[AgentRecord], runtime: Runtime) -> list[AgentRecord]:
+    names = runtime.live_names()
+    return [a for a in agents if a.runtime_backend != "local" or reports.host(a) or a.name in names]
+
+
+def status_report(store: RedisStore, slug: str, state: dict, runtime: Runtime | None = None, view=None) -> dict:
+    from scripts.hive import join_report
+    from scripts.swarm import capacity, tick_activity
 
     config = store.config(slug)
     tasks = state.get("tasks", [])
     events = state.get("_meta", {}).get("events", [])
     agents = [a.__dict__ for a in store.agents(slug)]
+    visible = live_agents(store.agents(slug), runtime or HerdrRuntime())
     handed = transfers.list_transfers(store, slug)
     active = lift.current(slug, now_ms())
     promotion = tick_master.read(store, slug)
+    worlds = InboxStore(store.redis).worlds()
     return {
         "config": {
             **config.__dict__,
@@ -254,21 +301,26 @@ def status_report(store, slug, state):
                 "promoted": a.name == promotion.get("promoted"),
                 "state_since": int(store.redis.hget(store.key(slug, "state-since"), a.name) or 0),
                 "observation": observation(store, slug, a),
+                "capabilities": transport(a),
+                "hive_join": join_report.read(store.redis, a),
                 "gates": active.get(a.name, []),
                 "inbox": [
                     {"text": item.text, "sender": item.sender, "state": item.state}
-                    for item in InboxStore(store.redis).pending_mail(a.name)
+                    for world in worlds
+                    for item in world.pending_mail(a.name)
                 ],
             }
-            for a in store.agents(slug)
+            for a in visible
         ],
         "outages": outage.open_records(slug),
+        "outbox": outbox.status(),
         "last_tick": int(store.redis.get(store.key(slug, "last-tick")) or 0),
-        "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), 0, -1)],
+        "last_tick_activity": tick_activity.read(store, slug),
+        "history": [json.loads(row) for row in store.redis.lrange(store.key(slug, "history"), -HISTORY_SHOWN, -1)],
         "tasks": task_counts(tasks),
         "task_revisions": lifecycle.revisions(state.get("_meta", {}).get("stamps", {})),
         "spawns": store.spawns(slug),
-        "findings": findings(store, slug, config, tasks, events),
+        "findings": findings(store, slug, config, tasks, events, view),
         "launch_checks": launch_check.reports(store, slug),
         "failed_launch_panes": failed_panes.report(store, slug),
         "auto_snapshot": auto_snapshot(config),

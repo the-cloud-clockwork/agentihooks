@@ -80,6 +80,83 @@ async def test_each_session_edits_only_its_own_worktree(router, repo):
         assert not (repo["primary"] / "f.txt").exists()
 
 
+async def test_child_read_inherits_parent_worktree_without_activation(router, repo):
+    parent_meta = {"sessionId": "parent", "threadId": "parent"}
+    child_meta = {"sessionId": "parent", "threadId": "child"}
+    async with connect(router) as parent, connect(router) as child, connect(router) as unrelated:
+        await parent.call_tool("activate_project", {"project": str(repo["a"])}, meta=parent_meta)
+        result = await child.call_tool("find_symbol", {"name_path_pattern": "Binding"}, meta=child_meta)
+        assert not result.isError
+        assert _text(result) == f"root={repo['a']}"
+        isolated = await unrelated.call_tool("find_symbol", {}, meta={"sessionId": "other", "threadId": "other-child"})
+        assert isolated.isError
+        assert "No project" in _text(isolated)
+        await parent.call_tool("activate_project", {"project": str(repo["b"])}, meta=parent_meta)
+        moved = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(moved) == f"root={repo['b']}"
+        await child.call_tool("activate_project", {"project": str(repo["a"])}, meta=child_meta)
+        explicit = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(explicit) == f"root={repo['a']}"
+        parent_read = await parent.call_tool("find_symbol", {}, meta=parent_meta)
+        assert _text(parent_read) == f"root={repo['b']}"
+
+
+async def test_child_inherits_primary_read_restriction_and_removed_worktree(router, repo):
+    from hooks.serena_router.server import UNBOUND
+
+    parent_meta = {"sessionId": "parent", "threadId": "parent"}
+    child_meta = {"sessionId": "parent", "threadId": "child"}
+    async with connect(router) as parent, connect(router) as child:
+        await parent.call_tool("activate_project", {"project": str(repo["primary"])}, meta=parent_meta)
+        read = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert _text(read) == f"root={repo['primary']}"
+        edit = await child.call_tool("replace_content", {"relative_path": "f.txt", "repl": "refused"}, meta=child_meta)
+        assert edit.isError
+        assert "primary checkout" in _text(edit)
+        await parent.call_tool("activate_project", {"project": str(repo["a"])}, meta=parent_meta)
+        _git(repo["primary"], "worktree", "remove", "--force", str(repo["a"]))
+        removed = await child.call_tool("find_symbol", {}, meta=child_meta)
+        assert removed.isError
+        assert UNBOUND in _text(removed)
+        parent_read = await parent.call_tool("find_symbol", {}, meta=parent_meta)
+        assert parent_read.isError
+        assert UNBOUND in _text(parent_read)
+
+
+async def test_child_cannot_supply_another_child_as_the_root(router, repo):
+    async with connect(router) as first, connect(router) as second:
+        await first.call_tool(
+            "activate_project", {"project": str(repo["a"])}, meta={"sessionId": "parent", "threadId": "first"}
+        )
+        result = await second.call_tool("find_symbol", {}, meta={"sessionId": "parent", "threadId": "second"})
+        assert result.isError
+        assert "No project" in _text(result)
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        None,
+        {},
+        {"sessionId": "parent"},
+        {"threadId": "child"},
+        {"sessionId": "", "threadId": "child"},
+        {"sessionId": 7, "threadId": "child"},
+        {"sessionId": ["parent"], "threadId": "child"},
+        {"sessionId": "parent", "threadId": ""},
+        {"sessionId": "parent", "threadId": 7},
+    ],
+)
+async def test_child_requires_complete_string_identity(router, repo, meta):
+    async with connect(router) as parent, connect(router) as child:
+        await parent.call_tool(
+            "activate_project", {"project": str(repo["a"])}, meta={"sessionId": "parent", "threadId": "parent"}
+        )
+        result = await child.call_tool("find_symbol", {}, meta=meta)
+        assert result.isError
+        assert "No project" in _text(result)
+
+
 async def test_edit_refused_while_unbound(router, repo):
     from hooks.serena_router.server import UNBOUND
 
@@ -190,14 +267,18 @@ def test_app_bounds_idle_sessions():
     assert app.state.session_manager.session_idle_timeout == SESSION_IDLE_SECONDS
 
 
-async def _listed_over_http(router, path: str) -> set[str]:
+async def _listed_over_http(router, path: str, monkeypatch) -> set[str]:
     import json
 
     import httpx
 
-    from hooks.serena_router.app import build_app
+    from hooks.serena_router import app as router_app
 
-    app = build_app(*router)
+    async def wait(_delay):
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(router_app, "scheduled_wait", wait)
+    app = router_app.build_app(*router)
     headers = {"Accept": "application/json, text/event-stream"}
     init = {
         "jsonrpc": "2.0",
@@ -224,15 +305,17 @@ async def test_default_listing_hides_the_opt_in_tools(router):
     assert not names & OPT_IN
 
 
-async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router):
-    names = await _listed_over_http(router, "/mcp")
+async def test_mcp_endpoint_hides_the_opt_in_tools_without_a_query(router, monkeypatch):
+    names = await _listed_over_http(router, "/mcp", monkeypatch)
     assert "find_symbol" in names
     assert not names & OPT_IN
 
 
-async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router):
-    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern") >= OPT_IN | {"find_symbol"}
-    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file") == {"search_for_pattern"}
+async def test_mcp_endpoint_lists_the_opt_in_tools_its_query_names(router, monkeypatch):
+    assert await _listed_over_http(router, "/mcp?tools=read_file,search_for_pattern", monkeypatch) >= OPT_IN | {
+        "find_symbol"
+    }
+    assert OPT_IN - await _listed_over_http(router, "/mcp?tools=read_file", monkeypatch) == {"search_for_pattern"}
 
 
 def test_listed_ignores_names_outside_the_opt_in_set():
@@ -250,3 +333,72 @@ def test_fake_backend_imports_only_the_standard_library():
     modules = {a.name for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
     modules |= {n.module for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
     assert {m.split(".")[0] for m in modules} <= sys.stdlib_module_names
+
+
+async def test_eviction_runs_only_after_a_scheduler_signal(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hooks.serena_router import app
+
+    calls = []
+    pool = type("Pool", (), {"evict_idle": AsyncMock(side_effect=lambda: calls.append("evict"))})()
+
+    async def wait(delay):
+        calls.append(delay)
+        if len(calls) > 1:
+            raise asyncio.CancelledError
+
+    monkeypatch.setattr(app, "scheduled_wait", wait)
+    with pytest.raises(asyncio.CancelledError):
+        await app._evict_forever(pool)
+    assert calls == [app.EVICT_EVERY_SECONDS, "evict", app.EVICT_EVERY_SECONDS]
+    pool.evict_idle.assert_awaited_once_with()
+
+
+async def test_app_shutdown_awaits_eviction_cleanup_before_closing_the_pool(monkeypatch):
+    from hooks.serena_router import app as router_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
+    started, finished = asyncio.Event(), asyncio.Event()
+
+    async def evict(_pool):
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            finished.set()
+
+    async def close():
+        assert finished.is_set()
+
+    pool = Pool(BackendConfig(command=(sys.executable, str(FAKE))))
+    monkeypatch.setattr(router_app, "_evict_forever", evict)
+    monkeypatch.setattr(pool, "close", close)
+    app = router_app.build_app(pool, [])
+    async with app.router.lifespan_context(app):
+        await asyncio.wait_for(started.wait(), timeout=1)
+    assert finished.is_set()
+
+
+async def test_app_shutdown_closes_the_pool_when_eviction_failed(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    from hooks.serena_router import app as router_app
+    from hooks.serena_router.pool import BackendConfig, Pool
+
+    started = asyncio.Event()
+
+    async def evict(_pool):
+        started.set()
+        raise RuntimeError("eviction failed")
+
+    pool = Pool(BackendConfig(command=(sys.executable, str(FAKE))))
+    close = AsyncMock()
+    monkeypatch.setattr(router_app, "_evict_forever", evict)
+    monkeypatch.setattr(pool, "close", close)
+    app = router_app.build_app(pool, [])
+    with pytest.raises(ExceptionGroup) as caught:
+        async with app.router.lifespan_context(app):
+            await asyncio.wait_for(started.wait(), timeout=1)
+    close.assert_awaited_once_with()
+    assert caught.value.exceptions[0].args == ("eviction failed",)

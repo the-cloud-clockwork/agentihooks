@@ -1,0 +1,142 @@
+---
+title: Ledger load gate
+parent: Reference
+nav_order: 27
+---
+
+# Ledger load gate
+
+The ledger load gate starts a scratch ledger server holding a ledger the size of the live one, drives ninety seconds of writes and reads from ten clients, and fails when the server is too slow, too busy or keeps growing. A write latency check alone can pass a server whose thread count or memory grows steadily, and such a server stalls the live swarm once the growth adds up. The gate therefore also samples the server's thread count and resident memory through the whole run and fails when either keeps rising past a limit set in code.
+
+The gate is `tests.ledger_load.gate`. The `Ledger server load` workflow runs it.
+
+## Where it runs
+
+| Event | Runs | Tier |
+|---|---|---|
+| Push to `dev` | yes, as the `ledger-load` job of the Tests workflow | [promotion](delivery-tiers.md) |
+| `workflow_dispatch` of Tests that passes admission | yes | promotion |
+| Pull request and merge group | no | none |
+| `workflow_dispatch` of `Ledger server load` | yes, under its own name in a [hosted lane](../ci-timing.md) | none |
+
+`ledger-load` is a need of `Gate — Required`, so a red run holds promotion of that `dev` head to `main`; it never holds the merge queue. Per [delivery tiers](delivery-tiers.md), a red run gets a fixer task, never a rerun until it passes. The job has a fifteen minute timeout and a green run takes about two minutes and fifteen seconds, ninety seconds of which are the workload.
+
+The job keys its declared inputs with the [CI result cache](ci-result-cache.md). When the key hits, the gate step is skipped and the earlier green result stands. Only a passing push or dispatch saves the key.
+
+The gate refuses to run outside GitHub Actions:
+
+```text
+the ledger load gate runs in CI only: it loads the machine for a minute and a half
+```
+
+## Workload
+
+| Setting | Value |
+|---|---|
+| Ledger | 1000 tasks, 60 phases, 800 follow ups, 500 chat lines, 50 alerts, three comments per task, one per phase, padded to at least 5,000,000 bytes |
+| Writer clients | 10, together writing twice the live peak of 29 writes a minute; each write is followed by two reads |
+| Item readers | 10, one single resource read a second each |
+| Page stream | one server-sent event stream held open through the run |
+| Duration | three bin sweeps of the server watcher: `(SWEEPS + 1) × BIN_SWEEP_EVERY × watch interval` = 3 × 15 × 2 s = 90 s |
+| Sampler | once a second: server CPU seconds from `/proc/<pid>/stat`, and `Threads` and `VmRSS` from `/proc/<pid>/status` |
+
+## Verdict
+
+The run fails on any of these, each printed as a `::error::` line:
+
+| Check | Limit | Message |
+|---|---|---|
+| Failed requests | none | `N requests failed, first: …`; a rejected write (`write rejected: …`), a dropped page stream (`event stream: …`) and a sampler error (`server sampler: …`) each count as one |
+| Writes completed | 90% of expected | `N writes completed of M expected` |
+| Write latency | p95 at most 2.0 s | `write p95 Xs exceeds 2.0s` |
+| Server CPU | busiest 10 s window at most 1.0 core | `server CPU held X cores over 10s, budget 1.0`, or `no 10s window of server CPU was sampled` |
+| Thread growth | 8 threads | `server threads kept growing: medians A, B, C; growth budget 8` |
+| Memory growth | 65,536 KiB (64 MiB) | `server RSS kept growing: medians A, B, C; growth budget 65536` |
+| Resource coverage | 60 s of samples after warmup | `server resource sampling did not cover 60s after warmup` |
+| Single resource reads | 90% of expected | `N single resource reads completed of M expected` |
+| Server log | no `Exception in thread` line | `a ledger server background thread died` |
+| Alert expiry sweep | no alert left past its quiet hour | `the expiry sweep left N alerts past their quiet hour open` |
+
+A server that exits before listening or does not listen within 60 s stops the run with `ledger server exited with N` or `ledger server did not listen on port P within 60.0s`.
+
+When write p95 is the only failure, the gate prints two `::notice::` lines, repeats the run once on a fresh ledger and grades the repeat alone. The repeat prints its own JSON measure line, and `tests.ledger_load.paired` reads the last one. Any other failure, a resource growth failure included, is final on the first run.
+
+## Resource growth check
+
+The check grades the samples `(time, threads, RSS KiB)` the sampler took through the run:
+
+1. Samples from the first 20 seconds (`RESOURCE_WARMUP_S`) are dropped, so server start up and client joins do not count as growth.
+2. The remaining samples must number at least three and span at least 60 seconds (`RESOURCE_WINDOW_S`). Otherwise the run fails for missing coverage.
+3. That span is cut into three equal time windows. A window with no sample fails the run with `server resource sampling missed a growth window`.
+4. For threads and for RSS separately, the gate takes the median of each window. It fails when the medians rise strictly, first < middle < last, and the last exceeds the first by more than the limit: `THREAD_GROWTH` = 8 threads, `RSS_GROWTH_KIB` = 65,536 KiB.
+
+Medians absorb short spikes. A server that grows and then settles, or that grows by less than the limit, passes. A sampler that cannot read `/proc` records a failed request, `server sampler: …`, and its missing samples also fail the coverage check.
+
+## Limits graded from the base
+
+Every limit is a module constant in `tests/ledger_load/gate.py`. The run reads the same constants from the base revision with `git show <base>:tests/ledger_load/gate.py` and grades with the stricter of the two:
+
+| Constant | Stricter value |
+|---|---|
+| `THREAD_GROWTH`, `RSS_GROWTH_KIB`, `RESOURCE_WARMUP_S` | the smaller |
+| `RESOURCE_WINDOW_S` | the larger |
+| `WRITE_P95_S`, `CPU_CORES`, `CPU_WINDOW_S` | the smaller |
+| `LEDGER_BYTES`, `CLIENTS`, `LIVE_PEAK_WRITES_PER_MINUTE`, `HEADROOM`, `MIN_WRITES`, `READS_PER_SECOND`, `SWEEPS` | the larger |
+
+A change cannot loosen the limits it is graded by. Raising a growth limit takes two changes: land the higher value on `dev` first. Later runs grade against that value because `dev` is their base. A base older than the resource check, one that assigns none of the four resource constants, is graded with the initial values 20 s, 60 s, 8 threads and 65,536 KiB. A base missing any other constant fails the run with `the base gate assigns no …`.
+
+The Tests workflow passes the push's `before` revision as the base, and on a dispatch of Tests its `base` input. A base that `git show` cannot read fails the run with `git could not show the ledger load gate at base …`.
+
+## Output
+
+Each run prints one JSON line with the measure, then the error lines:
+
+```json
+{"seconds": 90.0, "clients": 10, "write_every_s": 10.345, "writes": 90,
+ "write_p50_s": 0.071, "write_p95_s": 0.178, "write_max_s": 0.31,
+ "reads": 90, "read_p95_s": 0.05, "item_reads": 900, "item_read_p95_s": 0.02,
+ "busiest_cores": 0.42, "errors": 0,
+ "resources": [[1234.5, 6, 81234], [1235.5, 6, 81240], "…"],
+ "budget": {"write_p95_s": 2.0, "cores": 1.0, "thread_growth": 8, "rss_growth_kib": 65536}}
+```
+
+`resources` holds every sample as `[monotonic seconds, threads, RSS KiB]`, so a failing run shows exactly when the growth started. The `budget` object and the `seconds`, `clients` and `write_every_s` values come from code; the measured values are illustrative. On a failure the gate also prints the last 4000 characters of the server log.
+
+## Running it by hand
+
+Dispatch the workflow on a branch, naming the base whose limits grade the run:
+
+```bash
+gh workflow run ledger-load.yml --ref <branch> -f base=origin/dev
+```
+
+| Input | Default | Effect |
+|---|---|---|
+| `base` | `origin/dev` | revision whose constants grade the run |
+| `compare` | `false` | run base and head gates interleaved twice on one runner, then `tests.ledger_load.paired` fails when the head's best write p95 or busiest CPU window exceeds the base's by more than 10%, or the head had more failed requests. Each of the four gate runs still applies its own resource growth check |
+| `streams` | `false` | compare page stream publication CPU between base and head instead of running the gate |
+
+A dispatch never saves the input key unless the gate ran and passed.
+
+## Diagnosing a failure
+
+| Message | Meaning | Next step |
+|---|---|---|
+| `server threads kept growing` | threads rose through all three windows by more than eight | look for a thread started per request or per sweep that never ends: a `threading.Thread` without a join or exit condition, or an executor created per call |
+| `server RSS kept growing` | resident memory rose through all three windows by more than 64 MiB | look for a cache, list or event buffer that only grows during writes |
+| `server resource sampling did not cover 60s after warmup` | the sampler stopped early or never started | read the `server sampler:` error; a server that exited mid run also ends sampling |
+| `server resource sampling missed a growth window` | a gap in sampling left one window empty | the sampler or runner stalled; the timestamps in `resources` show the gap |
+| `the base gate assigns no …` | the base revision lacks a limit constant | dispatch with a base that has the gate, such as `origin/dev` |
+
+## CI evidence
+
+Recorded in [pull request 4042](https://github.com/the-cloud-clockwork/agentihooks/pull/4042). The planted thread ran on the `diffcheck/ci-323133-1138` branch:
+
+| Run | Change | Result |
+|---|---|---|
+| [39032389271](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39032389271) | planted request thread that is started per request and never ends | red on thread growth only: medians 45, 70, 91 against a budget of 8; zero failed requests, write p95 0.245 s |
+| [39035495745](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39035495745) | the merged head, unchanged server | green in 135 s: zero errors, write p95 0.178 s, threads six falling to four |
+| [39031831528](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39031831528) | Proofs dispatch of the verdict unit tests before the check existed | red: five resource verdict tests failed |
+| [39032187789](https://github.com/the-cloud-clockwork/agentihooks/actions/runs/39032187789) | Proofs dispatch of the verdict unit tests with the check | green: 45 passed |
+
+The verdict logic is unit tested in `tests/ledger_load/test_gate.py`, which runs in the unit suite.

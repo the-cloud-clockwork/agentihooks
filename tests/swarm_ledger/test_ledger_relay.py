@@ -46,7 +46,7 @@ def make_ledger():
         "questions": [{"text": "which broker?"}],
         "followups": [{"text": "check disk"}],
     }
-    html_path, json_path = core.paths(SLUG)
+    html_path, json_path = legacy_page.paths(SLUG, core)
     core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
     html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
     json_path.unlink(missing_ok=True)
@@ -89,8 +89,16 @@ class Relay(unittest.TestCase):
         state, _ = core.sync(SLUG, ops=[relay(2, self.question)])
         self.assertNotIn(self.question, [p["item"] for p in state["priorities"]])
 
+    def test_short_recorded_quotes_cannot_answer_a_question(self):
+        for n, quote in enumerate(("queue", "the queue"), start=40):
+            with self.subTest(quote=quote):
+                state, rejected = core.sync(SLUG, ops=[relay(n, self.question, quote=quote)])
+                self.assertEqual(rejected, [f"rl-{n}"])
+                self.assertEqual(state["questions"][0]["answers"], [])
+                self.assertIn(self.question, [p["item"] for p in state["priorities"]])
+
     def test_a_relay_on_another_item_is_an_operator_comment(self):
-        state, rejected = core.sync(SLUG, ops=[relay(3, self.phase, text="Approved, merge it.", quote="approve")])
+        state, rejected = core.sync(SLUG, ops=[relay(3, self.phase, text="Approved, merge it.", quote="use the queue")])
         self.assertEqual(rejected, [])
         comment = state["phases"][0]["comments"][-1]
         self.assertEqual(
@@ -146,7 +154,7 @@ class Relay(unittest.TestCase):
     def test_verified_is_empty_without_recorded_words(self):
         self.assertEqual(ledger_relay.verified("nobody", "use the queue"), "")
         self.assertEqual(ledger_relay.verified("nobody", "xx"), "")
-        self.assertEqual(ledger_relay.verified("master@a1-1", "the  QUEUE"), "the queue")
+        self.assertEqual(ledger_relay.verified("master@a1-1", "use the  QUEUE"), "Use the queue")
 
 
 def _cli(monkeypatch, item, quote, by="master@a1-1"):
@@ -172,6 +180,20 @@ def test_cli_relays_words_the_operator_said_in_the_pane(monkeypatch, capsys):
         "master@a1-1",
         "Use the queue",
     )
+
+
+@pytest.mark.parametrize("environ", [{}, {"AGENTIHOOKS_AGENT_NAME": "launch-session"}])
+def test_cli_relays_a_quote_typed_in_a_taken_master_pane_without_swarm_env(monkeypatch, capsys, environ):
+    from hooks.context import master_coding
+
+    state = make_ledger()
+    question = f"questions/{state['questions'][0]['id']}"
+    master_coding.record_seat("taken", SLUG, "master@a1-1")
+    assert operator_words.typed({"session_id": "taken", "prompt": "Use the queue for the broker"}, environ)
+    _cli(monkeypatch, question, "use the queue")
+    assert json.loads(capsys.readouterr().out) == {"relayed": True, "item": question}
+    state, _ = core.sync(SLUG)
+    assert state["questions"][0]["answers"][-1]["quote"] == "Use the queue"
 
 
 def test_cli_refuses_words_the_operator_never_said(monkeypatch):
@@ -236,8 +258,8 @@ def test_a_relay_onto_a_note_is_his_comment_carrying_only_the_quoted_words():
 
 def test_a_quote_the_span_search_misses_is_refused_not_stored_as_the_whole_prompt():
     operator_words.record("master@a1-1", "İstanbul is the city")
-    assert operator_words.matching("master@a1-1", "i̇stanbul", within=None)
-    assert ledger_relay.verified("master@a1-1", "i̇stanbul") == ""
+    assert operator_words.matching("master@a1-1", "i̇stanbul is the", within=None)
+    assert ledger_relay.verified("master@a1-1", "i̇stanbul is the") == ""
 
 
 def test_cli_relay_needs_item_text_and_quote():

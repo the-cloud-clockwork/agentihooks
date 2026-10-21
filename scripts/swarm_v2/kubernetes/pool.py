@@ -91,6 +91,17 @@ def pool_room(pool: dict, launch: dict, used: Usage) -> Room:
     )
 
 
+def reading(api: PodApi, namespace: str, pool: dict) -> list[dict] | None:
+    """The ceiling is the policy Pod limit and nodes the distinct nodes running live worker Pods, never node groups."""
+    try:
+        pods = api.list_pods("")
+    except (ApiRefused, OSError):
+        return None
+    live = [pod for pod in pods if pod.get("status", {}).get("phase") not in FINISHED]
+    nodes = {pod["spec"].get("nodeName") for pod in live} - {None, ""}
+    return [{"pool": namespace, "configured_maximum": pool["pods"], "nodes": len(nodes)}]
+
+
 def _count(quantity: str) -> int:
     return int(_amount(quantity))
 

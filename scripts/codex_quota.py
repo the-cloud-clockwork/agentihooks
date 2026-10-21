@@ -107,10 +107,10 @@ def rollout_session_id(path: Path) -> str:
 
 
 def latest_codex_quota(
-    environ: dict[str, str] | None = None, keep: Callable[[str], bool] | None = None
+    environ: dict[str, str] | None = None, keep: Callable[[str], bool] | None = None, sessions: Path | None = None
 ) -> CodexQuota | None:
-    """Newest rate-limit event among the recent rollouts whose session id ``keep`` accepts."""
-    sessions = codex_home(dict(os.environ if environ is None else environ)) / "sessions"
+    """Newest rate-limit event among the recent rollouts under ``sessions`` whose session id ``keep`` accepts."""
+    sessions = sessions or codex_home(dict(os.environ if environ is None else environ)) / "sessions"
     try:
         rollouts = sorted(sessions.glob("*/*/*/rollout-*.jsonl"), key=lambda p: p.stat().st_mtime, reverse=True)
     except OSError:

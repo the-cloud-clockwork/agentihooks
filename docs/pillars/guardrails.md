@@ -10,7 +10,7 @@ permalink: /docs/pillars/guardrails/
 
 **What keeps them safe.**
 
-Claude Code agents are powerful. Without boundaries, they can push to production branches, bump versions without a release workflow, leak credentials into tool calls, loop infinitely on broken commands, or quietly bloat their own instruction files. Guardrails close all of these gaps — automatically, at the hook layer, before any damage reaches your codebase.
+Guardrails apply to Claude Code and Codex. Both harnesses can run powerful tools. Without boundaries, they can push to production branches, bump versions without a release workflow, leak credentials into tool calls, loop infinitely on broken commands, or quietly bloat their own instruction files. Guardrails close all of these gaps — automatically, at the hook layer, before any damage reaches your codebase.
 
 > Your fleet operates within boundaries you set.
 
@@ -194,11 +194,13 @@ Prevents destructive git operations that bypass the normal PR and release workfl
 | `git push --force-with-lease` | Force push variant — same risk |
 | `git tag` | Tagging is a release operation; must go through CI |
 
-All blocked operations return exit code 2 with a human-readable explanation and, where applicable, the recommended alternative (e.g., `gh workflow run release.yml` for tagging).
+The prod lockdown guard also refuses `gh pr merge` into a base branch with a merge queue: the installed gh predates merge queues and lands the pull request directly through the admin bypass, cancelling the running group build. Queue it with `agentihooks swarm <slug> merge queue <url>` (the GraphQL `enqueuePullRequest` mutation). Only bypass mode lifts this refusal. The guard reads `gh pr merge` only; a merge through `gh api` is not checked.
+
+All blocked operations return exit code 2 with a human-readable explanation. CI alone promotes green `dev` into `main` and issues release tags. Agent pull requests target `dev`; no signal or bypass opens their creation or merge into `main`, `master` or `v1`.
 
 ### What is allowed
 
-Normal `git push` (without force flags) is allowed — branch protection is a remote concern handled by GitHub. Read-only operations (`git checkout`, `git switch`, `git pull`, `git log`, `git status`, `git diff`) are never touched.
+Normal pushes to worktree branches and read-only inspection are allowed. Direct pushes and commits to `main` or `master` remain blocked. Pull requests must name an explicit base; `--base dev` needs no PR signal.
 
 The guard strips heredoc bodies and quoted commit messages before pattern matching to avoid false positives on message content that happens to mention "main" or "master".
 
@@ -226,8 +228,7 @@ If a `Write` or `Edit` targets one of these files and the new content contains a
 
 ```
 BLOCKED: Version field modification in pyproject.toml is not allowed.
-Version bumping is handled by the release workflow
-(gh workflow run release.yml -f bump=patch|minor|major).
+Version bumping is handled by CI promotion and its release workflow.
 Do not edit version fields manually.
 ```
 
@@ -353,17 +354,17 @@ File identity is tracked by path + `mtime`. A file modified on disk since the la
 **Default:** On — `CONTROLS_BYPASS_ENABLED=true`
 
 A session-level escape hatch the operator activates by saying **`disable controls`**
-(or `turn off controls`, `deactivate controls`, `kill controls`). While active, every CI-manifesto signal gate is short-circuited at once. Restored by **`enable controls`** (or `turn on`, `activate`, `restore`) or by SessionEnd of the activating session.
+(or `turn off controls`, `deactivate controls`, `kill controls`). It lifts the workflow gates listed below. Protected promotion and PyPI authorization remain enforced. Restored by **`enable controls`** (or `turn on`, `activate`, `restore`) or by SessionEnd of the activating session.
 
 ### What it unlocks
 
 While bypass mode is ACTIVE:
 
-- Branch creation (CI Manifesto §13) — `git checkout -b`, `git switch -c`, `git branch <name>`
-- PR creation (§14) into non-protected bases — `gh pr create` with no per-session counter cap (PRs into `main`/`master`/`v1` still need the operator's PR signal)
-- Release workflow trigger — `gh workflow run release.yml`
+- Branch creation (CI Manifesto §8) — `git checkout -b`, `git switch -c`, `git branch <name>`
+- PR creation into non-protected bases — `gh pr create` with no per-session counter cap; `--base dev` already needs no signal
 - Hotfix-category prod ops (§5) — `:latest`/`:prod`/`:stable` image push, tag, build
 - Force push to non-main branches — `git push --force`, `-f`, `--force-with-lease`
+- `gh pr merge` past the merge queue of a non-protected base
 
 ### What stays HARD FLOOR
 
@@ -372,7 +373,10 @@ These remain blocked even with controls disabled — no toggle reaches them:
 - Direct `git push` to main/master (also blocked at OS layer + GitHub ruleset)
 - Force push to main/master (caught by the main-push pattern that runs first)
 - `git commit` while HEAD is on main/master
-- `--base main` requirement on `gh pr create` (correctness, not permission)
+- Agent creation or merge of pull requests into `main`, `master` or `v1`; CI alone owns promotion
+- Manual release workflow dispatch by agents; CI alone creates releases
+- PyPI publication without the operator's `release dance` request
+- Explicit `--base` requirement on `gh pr create`
 - `git reset` on main, `git tag`, `git branch -D main`
 - Secrets written to code files (Write/Edit/Bash-redirect into a file)
 
@@ -399,12 +403,15 @@ A `CONTROLS` banner is injected on every transition and on each turn while bypas
 
 ### When the operator is likely to invoke it
 
-- Multi-step main-targeted work where re-signaling each gate would be friction
 - Spawning a fleet of subagents to open multiple PRs in parallel
 - Hotfix sequences where the operator has already validated and just wants speed
 - Force-push to a feature branch after a rebase
 
 Agents must NOT volunteer the toggle ("want me to disable controls?"). The operator decides; the agent doesn't suggest the escape hatch.
+
+### Release publication
+
+`release dance` authorizes `gh workflow run publish-pypi.yml --ref main` only. The workflow publishes the latest stable release after verifying its tag tree matches `main`. Verify the successful workflow, the package index version and a clean install. CI promotion owns the preceding release, tag and images; release, hotfix and PR signals never authorize agents to open or merge a protected promotion pull request.
 
 ---
 

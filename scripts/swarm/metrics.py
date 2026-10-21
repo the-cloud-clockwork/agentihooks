@@ -5,6 +5,7 @@ from functools import partial
 
 from scripts.swarm import (
     bottleneck,
+    capacity,
     freeze,
     metrics_fleet,
     metrics_ledger,
@@ -12,6 +13,7 @@ from scripts.swarm import (
     metrics_swarm,
     stage_detector,
     stages,
+    timing,
 )
 from scripts.swarm.ledger_client import LedgerClient
 from scripts.swarm.store import SwarmError
@@ -25,16 +27,20 @@ def tick_row(slug, now_ms, actions):
 
 
 def _collect(slug, now_ms, swarm, box, errors, environ):
-    pulls = metrics_swarm.pull_rows(box, now_ms, swarm)
+    pulls = timing.call(metrics_swarm.pull_rows, box, now_ms, swarm)
     watched = freeze.watched(slug, swarm.store, swarm.ledger, swarm.doc)
     metrics_swarm.record_pass(box, slug, now_ms, swarm.store, watched, swarm.findings, pulls)
     bottleneck.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []))
-    ready = stages.claimable(watched, freeze.fix_phase(swarm.store.config(slug)))
+    config = swarm.store.config(slug)
+    seats = capacity.caps(capacity.read(swarm.store, slug), config)
+    ready = stages.claimable(watched, freeze.fix_phase(config), seats)
     stage_detector.record(box, swarm.store, slug, now_ms, swarm.doc.get("tasks", []), environ, ready=ready)
     from redis.exceptions import RedisError
 
+    from scripts.swarm_v2 import deployed
+
     try:
-        metrics_fleet.record(box, swarm.store, slug, now_ms)
+        metrics_fleet.record(box, swarm.store, slug, now_ms, pools=deployed.worker_pools(environ, slug))
     except (OSError, SwarmError, ValueError, KeyError, RedisError) as exc:
         errors.append(f"fleet metrics failed: {exc}")
 
@@ -44,12 +50,12 @@ def record(table, rows, now_ms, environ=os.environ, extra=None):
     if sink is None:
         return []
     try:
-        box = metrics_outbox.Outbox(metrics_outbox.spool_path(), sink)
+        box = timing.call(metrics_outbox.Outbox, metrics_outbox.spool_path(), sink)
         try:
             box.append(table, rows)
             if extra is not None:
                 extra(box)
-            box.flush(now_ms)
+            timing.call(box.flush, now_ms)
         finally:
             box.close()
     except (sqlite3.Error, OSError, ValueError) as exc:
@@ -57,17 +63,20 @@ def record(table, rows, now_ms, environ=os.environ, extra=None):
     return []
 
 
-def _ledger(slug, now_ms, errors, box):
+def _ledger(slug, now_ms, errors, box, swarm=None):
     try:
-        metrics_ledger.record(box, slug, now_ms, LedgerClient())
+        if swarm is not None and swarm.ledger is not None:
+            metrics_ledger.record(box, slug, now_ms, swarm.ledger, swarm.doc)
+        else:
+            metrics_ledger.record(box, slug, now_ms, LedgerClient())
     except (OSError, SwarmError) as exc:
         errors.append(f"ledger metrics failed: {exc}")
 
 
 def _pass(slug, now_ms, swarm, errors, box, environ):
-    _ledger(slug, now_ms, errors, box)
+    timing.call(_ledger, slug, now_ms, errors, box, swarm)
     if swarm is not None:
-        _collect(slug, now_ms, swarm, box, errors, environ)
+        timing.call(_collect, slug, now_ms, swarm, box, errors, environ)
 
 
 def record_pass(

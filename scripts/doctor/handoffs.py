@@ -25,6 +25,9 @@ def _words(text):
 def missing_recap(handoffs):
     found = []
     for h in handoffs:
+        if not h["from"] and not h["seat"]:
+            found.append(_unattributed(h))
+            continue
         if any(r["occupant"] == h["from"] for r in h["recaps"]):
             continue
         found.append(
@@ -45,6 +48,21 @@ def missing_recap(handoffs):
             )
         )
     return found
+
+
+def _unattributed(h):
+    return Finding(
+        "unattributed handoff",
+        h["task"],
+        "handoff record names no seat and no sender",
+        (
+            f"task {h['task']} with no seat on record",
+            "no sender on record",
+            f"successor {h['to']}" if h["to"] else "successor not started yet",
+        ),
+        "every handoff names its seat or its sender",
+        1,
+    )
 
 
 def reasked(handoffs, share=REASK_SHARE):

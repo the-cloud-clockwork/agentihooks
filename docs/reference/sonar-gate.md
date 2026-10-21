@@ -1,6 +1,6 @@
 # Sonar quality gate
 
-The `sonar` job in the Tests workflow is a need of `Gate — Required`. It scans every pull request, merge queue entry and dev push, then fails when the SonarQube quality gate fails.
+The `sonar` job in the Tests workflow is a pull request requirement of `Gate — Required`. It scans the current pull request head and fails when the SonarQube quality gate fails. The merge queue runs the unit suite and test count checks; it does not repeat Sonar or the other pull request checks. Promotion owns the slower integration checks, and a red promotion holds release while `dev` keeps merging. See [Delivery tiers](/docs/reference/delivery-tiers/) for the three tiers.
 
 agentihooks is bound to the `Delivery L2` gate, defined and bound in antoncore's SonarQube stack config (`stacks/sonarqube/config/gates/delivery-l2.json` and `projects.json`). Its conditions on new code:
 

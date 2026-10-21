@@ -181,8 +181,142 @@ def test_engineer_guidance_dequeues_a_queued_pull_request_before_pushing_a_fix(s
     assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
 
 
-@pytest.mark.parametrize("skill", [_skill("engineer"), ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md"])
+@pytest.mark.parametrize(
+    "skill",
+    [
+        _skill("engineer"),
+        ROLES / "engineer" / ".claude" / "rules" / "engineer-role.md",
+        ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "master" / ".claude" / "rules" / "master-role.md",
+    ],
+)
 def test_swarm_engineer_guidance_names_no_raw_gh_merge_or_dequeue_mutation(skill):
     text = skill.read_text()
 
     assert [raw for raw in ("dequeuePullRequest", "gh pr merge") if raw in text] == []
+
+
+@pytest.mark.parametrize(
+    "guidance",
+    [
+        ROLES / "cicd" / ".claude" / "skills" / "swarm-ci" / "SKILL.md",
+        ROLES / "master" / "CLAUDE.md",
+        ROLES / "master" / ".claude" / "rules" / "master-role.md",
+    ],
+)
+def test_ci_and_master_guidance_queues_instead_of_merging(guidance):
+    text = " ".join(guidance.read_text().split())
+
+    assert "agentihooks swarm <slug> merge queue <url>" in text
+    assert "merge on green" not in text.lower()
+
+
+def test_rendered_qa_persona_reads_tests_from_ci_only(world):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    persona = " ".join((render.render_claude("qa") / "CLAUDE.md").read_text().split())
+
+    assert "run the gates, mutation and smoke runs" not in persona
+    assert "runs the gates" not in (ROLES / "qa" / "profile.yml").read_text()
+    steps = ("results from their CI runs", "never on this machine", "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN")
+    assert [step for step in steps if step not in persona] == []
+
+
+def test_rendered_swarm_engineer_skill_reads_red_and_green_in_ci(world):
+    from scripts.profiles import render
+
+    world["install"]._save_state({})
+    out = render.render_claude("engineer")
+    text = " ".join((out / "skills" / "swarm-engineer" / "SKILL.md").read_text().split())
+
+    assert "lint and tests green" not in text
+    steps = (
+        "branch mutation preflight",
+        "read it red on that branch push's preflight run",
+        "wait until it is green on the current head",
+        "then open the first draft",
+        "read it red in CI on a draft pull request",
+        "read it green in CI",
+        "AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN",
+    )
+    assert [step for step in steps if step not in text] == []
+    assert [text.index(step) for step in steps] == sorted(text.index(step) for step in steps)
+
+
+MASTER_POOL = (
+    "masters-step",
+    "`master@<slug>`",
+    "`master-2@<slug>`",
+    "first in first out",
+    "exactly one",
+    "skipping a master that is gone or being retired by the tick",
+    "with the same id",
+    "Items from the operator bypass the pool and go to the front door",
+    "behaves exactly as a single master swarm",
+    "agentihooks swarm <slug> masters-channel say",
+    "agentihooks swarm <slug> masters-channel read",
+    "ten minutes",
+    "MASTER_INBOX_CLASSIFIER_WITH_FALLBACKS",
+    "Claude and Codex",
+)
+
+
+def _section(text: str, heading: str, until: str = "\n## ") -> str:
+    start = text.index(heading)
+    end = text.find(until, start + len(heading))
+    return text[start : end if end != -1 else len(text)]
+
+
+def test_rendered_claude_and_codex_masters_carry_the_same_master_pool(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    claude = out.parent / "claude"
+    pools = {
+        home: _section(persona.read_text(), "## Master pool")
+        for home, persona in (("claude", claude / "CLAUDE.md"), ("codex", out / "AGENTS.md"))
+    }
+    skills = {
+        home: root / "skills" / "swarm-master" / "SKILL.md" for home, root in (("claude", claude), ("codex", out))
+    }
+
+    assert pools["claude"] == pools["codex"]
+    assert [phrase for phrase in MASTER_POOL if phrase not in " ".join(pools["claude"].split())] == []
+    assert skills["claude"].resolve() == skills["codex"].resolve() == _skill("master")
+    skill = " ".join(_section(skills["codex"].read_text(), "## Master pool").split())
+    assert [phrase for phrase in MASTER_POOL if phrase not in skill] == []
+
+
+MASTER_SCALING = (
+    "keeps automatic scaling on",
+    "agentihooks balance",
+    "agentihooks swarm <slug> autoscale",
+    "before stating capacity",
+    "nothing past host room",
+)
+
+
+def test_rendered_claude_and_codex_masters_carry_the_scaling_rule(world):
+    from scripts.profiles import render
+
+    out = render.render_codex("package:master")
+    claude = out.parent / "claude"
+    rules = {
+        home: " ".join(_section(persona.read_text(), "## Scaling").split())
+        for home, persona in (("claude", claude / "CLAUDE.md"), ("codex", out / "AGENTS.md"))
+    }
+    skill = " ".join(_section((claude / "skills" / "swarm-master" / "SKILL.md").read_text(), "## Scaling").split())
+
+    assert rules["claude"] == rules["codex"]
+    assert [phrase for phrase in MASTER_SCALING if phrase not in rules["claude"]] == []
+    assert [phrase for phrase in MASTER_SCALING if phrase not in skill] == []
+
+
+def test_swarm_docs_describe_the_master_pool_for_claude_and_codex():
+    docs = ROLES.parents[2] / "docs" / "pillars" / "swarm.md"
+    text = " ".join(_section(docs.read_text(), "### Master pool", "\n### ").split())
+    phrases = [phrase.replace("<slug>", "<id>") for phrase in MASTER_POOL]
+
+    assert [phrase for phrase in phrases if phrase not in text] == []

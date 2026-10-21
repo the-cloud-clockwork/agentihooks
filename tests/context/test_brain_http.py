@@ -67,6 +67,28 @@ def test_brain_http_disabled_when_url_empty(monkeypatch):
     assert bh.get("/feed") is None
 
 
+def test_brain_http_kubernetes_fallback_warns_once(monkeypatch):
+    import hooks._brain_http as bh
+    import hooks.config as config
+
+    monkeypatch.setattr(config, "BRAIN_URL", "")
+    monkeypatch.setenv("KUBERNETES_SERVICE_HOST", "10.0.0.1")
+    monkeypatch.setattr(bh, "_K8S_FALLBACK_WARNED", {"v": False})
+    with patch("hooks._brain_http.log") as log:
+        assert bh.brain_http_enabled() is False
+        log.assert_called_once_with(
+            "brain_http_disabled_in_k8s",
+            {
+                "msg": "BRAIN_URL unset on a K8s pod — falling back to filesystem. "
+                "Wire BRAIN_URL=http://agentibrain-kb-router.<ns>.svc:8080.",
+                "severity": "critical",
+            },
+        )
+        assert bh._K8S_FALLBACK_WARNED["v"] is True
+        assert bh.brain_http_enabled() is False
+        assert log.call_count == 1
+
+
 def test_brain_http_get_sends_bearer(monkeypatch):
     _reload_config_with_env(monkeypatch, BRAIN_URL="http://kb:8080", KB_ROUTER_TOKEN="t0ken")
     import hooks._brain_http as bh

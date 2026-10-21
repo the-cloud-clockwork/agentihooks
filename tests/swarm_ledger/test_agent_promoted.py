@@ -30,6 +30,7 @@ def test_a_promoted_engineer_row_is_marked_promoted():
 def test_the_state_cell_shows_the_promoted_label():
     page = page_source()
     assert (
-        'a.promoted ? h("span", { class: "sw-promoted" }, label(a.state), label("promoted")) : label(a.state)' in page
+        'a.promoted ? h("span", { class: "sw-promoted", "data-tip": `${a.state} · promoted` }, '
+        'label(a.state), " ", label("promoted")) : label(a.state)' in page
     )
     assert ".lbl.promoted {" in page

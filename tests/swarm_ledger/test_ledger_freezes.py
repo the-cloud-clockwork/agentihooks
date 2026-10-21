@@ -28,7 +28,7 @@ def freeze_ledger(tmp_path, monkeypatch):
         "sources": [],
         "phases": [{"title": "Build"}, {"title": "Ship"}],
     }
-    html, json_path = core.paths(SLUG)
+    html, json_path = legacy_page.paths(SLUG, core)
     json_path.unlink(missing_ok=True)
     html.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765))
     core.sync(SLUG)
@@ -167,19 +167,26 @@ def test_a_freeze_on_a_node_the_ledger_lacks_is_rejected():
     assert rejected and state["freezes"] == []
 
 
-def test_unfreezing_a_plan_clears_freezes_on_its_phases_slices_and_tasks():
+def test_unfreezing_a_plan_clears_only_the_records_on_that_plan():
     for target in ("plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p2", "tasks/t2", "lane:ci"):
         freeze(target)
-    freeze("phases/p1", verb="focus")
+    freeze("plans/a", verb="focus")
     state, rejected = write("freeze_clear", target="plans/a", reason="hierarchy shipped")
     assert rejected == []
-    assert targets(state) == [("freeze", "phases/p2"), ("freeze", "tasks/t2"), ("freeze", "lane:ci")]
+    assert targets(state) == [
+        ("freeze", "phases/p1"),
+        ("freeze", "slices/a.first"),
+        ("freeze", "tasks/t1"),
+        ("freeze", "phases/p2"),
+        ("freeze", "tasks/t2"),
+        ("freeze", "lane:ci"),
+    ]
     assert event_of(state) == {
         "by": "operator",
         "kind": "unfrozen",
         "target": "plans/a",
         "id": state["_meta"]["events"][-1]["id"],
-        "cleared": ["plans/a", "phases/p1", "slices/a.first", "tasks/t1", "phases/p1"],
+        "cleared": ["plans/a", "plans/a"],
         "reason": "hierarchy shipped",
     }
     assert state["_meta"]["events"][-1]["id"].startswith("freeze_clear-")
@@ -187,18 +194,13 @@ def test_unfreezing_a_plan_clears_freezes_on_its_phases_slices_and_tasks():
     assert (stamp["by"], stamp["rev"]) == ("operator", state["_meta"]["rev"])
 
 
-def test_a_task_group_lead_holds_its_members_under_it():
-    doc = {
-        "phases": [{"id": "p1"}],
-        "tasks": [
-            {"id": "t1", "phase": "p1", "group_members": ["t3"]},
-            {"id": "t2", "phase": "p1"},
-            {"id": "t3", "phase": "p1", "merged_into": "t1"},
-        ],
-    }
-    assert ledger_freezes.under(doc, "tasks/t1") == {"tasks/t1", "tasks/t3"}
-    assert ledger_freezes.under(doc, "phases/p1") == {"phases/p1", "tasks/t1", "tasks/t2", "tasks/t3"}
-    assert ledger_freezes.under(doc, "tasks/t2") == {"tasks/t2"}
+def test_unfreezing_a_phase_keeps_the_freezes_on_its_slices_and_tasks():
+    for target in ("phases/p1", "slices/a.first", "tasks/t1"):
+        freeze(target)
+    state, rejected = write("freeze_clear", target="phases/p1")
+    assert rejected == []
+    assert targets(state) == [("freeze", "slices/a.first"), ("freeze", "tasks/t1")]
+    assert event_of(state)["cleared"] == ["phases/p1"]
 
 
 def test_clearing_a_selector_removes_only_that_selector():
@@ -240,6 +242,27 @@ def test_the_master_writes_a_freeze_only_with_the_operators_recorded_words():
     assert rejected == [] and state["freezes"] == []
     assert event_of(state)["by"] == MASTER
     assert state["_meta"]["stamps"]["freezes"]["by"] == MASTER
+
+
+@pytest.mark.parametrize("quote", ["Freeze", "Freeze the"])
+@pytest.mark.parametrize("op", ["freeze_set", "freeze_clear"])
+def test_short_recorded_quotes_cannot_change_freezes(quote, op):
+    operator_words.record(MASTER, "Freeze the plan")
+    freeze("plans/a")
+    fields = {"verb": "freeze"} if op == "freeze_set" else {}
+    state, rejected = write(op, by=MASTER, target="plans/a", quote=quote, **fields)
+    assert rejected
+    assert targets(state) == [("freeze", "plans/a")]
+
+
+def test_three_recorded_words_allow_master_freezes():
+    operator_words.record(MASTER, "Freeze the plan")
+    state, rejected = freeze("plans/a", by=MASTER, quote="freeze the plan")
+    assert rejected == []
+    assert state["freezes"][0]["quote"] == "Freeze the plan"
+    state, rejected = write("freeze_clear", by=MASTER, target="plans/a", quote="freeze the plan")
+    assert rejected == []
+    assert state["freezes"] == []
 
 
 def test_an_author_who_never_joined_is_refused_without_error():
@@ -301,7 +324,9 @@ def test_the_first_freeze_on_a_ledger_without_a_freezes_collection_creates_it(ve
 
 
 def test_the_server_path_stores_the_first_focus_on_a_ledger_saved_without_freezes():
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     stored = repository.bound(core)
     state = stored.get_document(SLUG)

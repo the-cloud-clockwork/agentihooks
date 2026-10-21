@@ -4,15 +4,13 @@ import pytest
 
 from scripts.gates import Call, Gate, Who
 from scripts.gates.base import Decision
-from scripts.gates.claim_stop import PLAIN, STREAK, ClaimStop, parked_by, refusal, ruling
+from scripts.gates.claim_stop import CHECKS_WAIT_MS, PLAIN, STREAK, ClaimStop, parked_by, refusal, ruling
 from scripts.gates.progress import Progress
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import idle
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import AgentRecord, RedisStore
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 SLUG, ME = "demo", "engineer@100001-0001"
 URL = "https://github.com/o/r/pull/7"
@@ -33,7 +31,9 @@ class FakeLedger:
     def tasks(self, slug):
         return list(self.rows.values()) if slug == SLUG else []
 
-    def update_task(self, slug, task_id, fields, by="swarm"):
+    def update_task(self, slug, task_id, fields, by="swarm", if_state=()):
+        if if_state and self.rows[task_id].get("state") not in if_state:
+            return
         self.updates.append((slug, task_id, fields, by))
         self.rows[task_id].update(fields)
 
@@ -100,6 +100,59 @@ def test_ruling_follows_the_pull_request_then_the_wait():
     assert ruling(task, CLOSED, {"until": 1}) == ("", "")
 
 
+@pytest.mark.parametrize("kind", ["task", "merge"])
+def test_a_stop_on_red_checks_preserves_an_open_dependency_wait(rig, kind):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    target = "repair" if kind == "task" else URL + "0"
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    rig.pulls[URL + "0"] = RED
+    on = {"kind": kind, "target": target}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "shared repair", rig.clock[0], on=on)
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.stop() == Decision()
+    assert rig.task["state"] == "claimed"
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    if kind == "task":
+        rig.ledger.rows["repair"]["state"] = "done"
+    else:
+        rig.pulls[target] = MERGED
+    assert not rig.stop().allowed
+
+
+@pytest.mark.parametrize(
+    "on, expired",
+    [
+        ({"kind": "task", "target": "t1"}, False),
+        ({"kind": "task", "target": "gone"}, False),
+        ({"kind": "merge", "target": URL}, False),
+        ({"kind": "reply", "target": "review"}, False),
+        ({"kind": "task", "target": "repair"}, True),
+    ],
+)
+def test_red_checks_still_refuse_a_wait_that_is_not_a_live_dependency(rig, on, expired):
+    rig.task["pr_url"], rig.pulls[URL] = URL, RED
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    until = rig.clock[0] - 1 if expired else rig.clock[0] + 60_000
+    idle.declare_wait(rig.store.redis, SLUG, ME, until, "repair", rig.clock[0] - 120_000, on=on)
+    assert not rig.stop().allowed
+
+
+def test_a_merged_task_still_owes_closure_while_a_dependency_is_open(rig):
+    rig.task["pr_url"], rig.pulls[URL] = URL, MERGED
+    rig.ledger.rows["repair"] = {"id": "repair", "state": "pr"}
+    idle.declare_wait(
+        rig.store.redis,
+        SLUG,
+        ME,
+        rig.clock[0] + 60_000,
+        "repair",
+        rig.clock[0],
+        on={"kind": "task", "target": "repair"},
+    )
+    assert not rig.stop().allowed
+
+
 @pytest.mark.parametrize("queued", [False, True])
 def test_a_red_job_outside_a_passed_required_gate_rules_as_green_and_a_red_gate_as_red(queued):
     task = {"id": "t1", "pr_url": URL}
@@ -138,7 +191,7 @@ def test_each_refusal_names_the_one_command_that_clears_it():
     )
     assert refusal("idle", SLUG, {"id": "t1"}, None) == (
         f"you hold task t1 with no open pull request and no wait. Name the wait: agentihooks swarm {SLUG} wait --on "
-        "checks <pr url> | reply <inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with "
+        "checks <pr or Actions run url> | reply <inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with "
         f"{block}"
     )
 
@@ -173,7 +226,7 @@ def test_the_contract_refusal_names_the_proof_its_kind_closes_on(kind, proof):
     task, block = {"id": "t1", "pr_url": URL, "kind": kind}, f'agentihooks swarm {SLUG} block "<why>"'
     assert refusal("contract", SLUG, task, MERGED) == (
         f"your pull request {URL} merged, and {kind} task t1 closes on its proof contract: close it with agentihooks "
-        f"swarm {SLUG} done {proof}. Name the wait: agentihooks swarm {SLUG} wait --on checks <pr url> | reply "
+        f"swarm {SLUG} done {proof}. Name the wait: agentihooks swarm {SLUG} wait --on checks <pr or Actions run url> | reply "
         f"<inbox item> | task <id>, or a bare wait of at most 60 minutes; or block with {block}"
     )
 
@@ -190,6 +243,40 @@ def test_a_stop_after_the_merge_is_blocked(rig):
     rig.pulls[URL] = MERGED
     decision = rig.stop()
     assert not decision.allowed and "merged: close the task now" in decision.reason
+
+
+def test_a_merged_first_half_clears_the_active_pull_request_and_the_second_half_stops_on_a_wait(rig):
+    rig.task.update(state="pr", pr_url=URL, split=["1-10", "11-20"], split_pulls=[URL])
+    rig.pulls[URL] = MERGED
+    assert "you hold task t1 with no open pull request and no wait" in rig.stop().reason
+    assert rig.ledger.updates == [(SLUG, "t1", {"pr_url": "", "state": "claimed"}, "swarm")]
+    assert (rig.task["split"], rig.task["split_pulls"]) == (["1-10", "11-20"], [URL])
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, "second half", rig.clock[0])
+    assert rig.stop().allowed
+    rig.clock[0] += 60_000
+    second = URL + "1"
+    rig.task.update(state="pr", pr_url=second, split_pulls=[URL, second])
+    rig.pulls[second] = PENDING
+    assert rig.stop().allowed
+    assert len(rig.ledger.updates) == 1
+
+
+def test_the_half_reset_writes_only_a_task_still_in_pr(rig):
+    rig.task.update(state="claimed", pr_url=URL, split=["1-10", "11-20"], split_pulls=[URL])
+    rig.pulls[URL] = MERGED
+    assert "you hold task t1 with no open pull request and no wait" in rig.stop().reason
+    assert (rig.ledger.updates, rig.task["pr_url"]) == ([], URL)
+
+
+def test_the_second_half_stops_on_its_own_pull_request_and_its_merge_owes_done(rig):
+    second = URL + "1"
+    rig.task.update(state="pr", pr_url=second, split=["1-10", "11-20"], split_pulls=[URL, second])
+    rig.pulls[URL], rig.pulls[second] = MERGED, PENDING
+    assert rig.stop().allowed
+    rig.pulls[second] = MERGED
+    decision = rig.stop()
+    assert not decision.allowed and f"{second} merged: close the task now" in decision.reason
+    assert rig.ledger.updates == []
 
 
 def test_a_tune_task_with_a_merged_fix_stops_on_its_measurement_wait_until_the_wait_ends(rig):
@@ -225,8 +312,15 @@ def test_a_stop_on_pending_checks_passes_and_records_a_checked_wait(rig):
     assert held["reason"] == f"checks on {URL}"
 
 
-@pytest.mark.parametrize("on", [{"kind": "reply", "target": "a1b2c3"}, {"kind": "task", "target": "t9"}])
-def test_a_stop_on_pending_checks_keeps_a_live_reply_or_task_wait_and_its_reason(rig, on):
+@pytest.mark.parametrize(
+    "on",
+    [
+        {"kind": "reply", "target": "a1b2c3"},
+        {"kind": "task", "target": "t9"},
+        {"kind": "checks", "target": "https://github.com/o/r/actions/runs/123"},
+    ],
+)
+def test_a_stop_on_pending_checks_keeps_a_live_reply_task_or_run_wait_and_its_reason(rig, on):
     rig.task.update(state="pr", pr_url=URL)
     rig.pulls[URL] = PENDING
     until = rig.clock[0] + 60_000
@@ -280,6 +374,61 @@ def test_the_third_block_in_a_row_blocks_the_task_and_lets_the_stop_through(rig)
     assert [(a.state, a.pane_id) for a in rig.store.agents(SLUG)] == [("finished", "p1")]
     assert [(r["gate"], r["kind"], r["agent"], r["tool"]) for r in rig.rows()] == [("claim-stop", "blocked", ME, "")]
     assert rig.store.redis.get(f"{KEY_ROOT}:swarm:{SLUG}:stop-blocks:{ME}") is None
+
+
+@pytest.mark.parametrize("scope", ["session", "agent", "task"])
+def test_a_lift_clears_prior_stops_and_expiry_requires_three_new_stops(rig, tmp_path, monkeypatch, scope):
+    from scripts.gates import lift
+
+    clock = [1_790_000_000.0]
+    monkeypatch.setattr(lift.time, "time", lambda: clock[0])
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    call = Call("", session="stopping-session")
+    assert not rig.gate.decide(call, WHO, state).allowed
+    assert not rig.gate.decide(call, WHO, state).allowed
+    paths = {
+        "session": lift.lift_path(SLUG, call.session, rig.gate.name, tmp_path),
+        "agent": lift.agent_lift_path(SLUG, ME, rig.gate.name, tmp_path),
+        "task": lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path),
+    }
+    path = paths[scope]
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"at": clock[0]}))
+
+    for _ in range(4):
+        assert rig.gate.decide(call, WHO, state).allowed
+        assert rig.task["state"] == "claimed"
+        assert rig.store.claimant(SLUG, WHO.task) == ME
+    assert rig.ledger.updates == []
+    assert rig.rows() == []
+
+    clock[0] += lift.LIFT_SECONDS
+    first = rig.gate.decide(call, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(call, WHO, state).allowed
+    assert rig.gate.decide(call, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
+
+
+@pytest.mark.parametrize("invalid", ["expired", "moved-head"])
+def test_an_invalid_task_lift_cannot_fall_back_to_its_fresh_agent_lift(rig, tmp_path, monkeypatch, invalid):
+    from scripts.gates import intent, lift
+
+    now = 1_790_000_000.0
+    monkeypatch.setattr(lift.time, "time", lambda: now)
+    monkeypatch.setattr(intent, "pr_head", lambda url: "new-head")
+    state = Verdicts(SLUG, rig.gate.name, tmp_path)
+    lift.lift_agent(WHO, rig.gate.name, tmp_path, now=now)
+    record = {"at": now - lift.LIFT_SECONDS}
+    if invalid == "moved-head":
+        record = {"at": now, "url": URL, "head": "old-head"}
+    lift.task_lift_path(SLUG, WHO.task, rig.gate.name, tmp_path).write_text(json.dumps(record))
+
+    first = rig.gate.decide(STOP, WHO, state)
+    assert not first.allowed and "stop block 1 of 2" in first.reason
+    assert not rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.gate.decide(STOP, WHO, state).allowed
+    assert rig.task["state"] == "blocked"
 
 
 @pytest.mark.parametrize("owed", sorted(PLAIN))
@@ -435,3 +584,53 @@ def test_the_gate_entry_runs_it_by_name():
     from scripts.gates.entry import GATES
 
     assert isinstance(GATES["claim-stop"], ClaimStop)
+
+
+def test_a_live_checks_wait_on_another_pull_request_grades_that_pull_request_only(rig):
+    other = URL + "1"
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL], rig.pulls[other] = RED, PENDING
+    on = {"kind": "checks", "target": other}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {other}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+    rig.pulls[other] = GREEN
+    assert rig.stop().allowed
+    rig.pulls[other] = RED
+    decision = rig.stop()
+    assert decision.reason.startswith(f"checks failed on {other}: tests (1), lint. Fix")
+    rig.pulls[URL], rig.pulls[other] = PENDING, MERGED
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["on"] == on
+
+
+def test_a_live_checks_wait_on_a_run_lets_a_red_pull_request_stop(rig):
+    run = "https://github.com/o/r/actions/runs/123"
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = RED
+    on = {"kind": "checks", "target": run}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {run}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    assert rig.stop().allowed
+    assert rig.stop().allowed
+    assert rig.task["state"] == "pr"
+
+
+def test_a_checks_wait_on_the_task_pull_request_keeps_grading_it(rig):
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL] = PENDING
+    on = {"kind": "checks", "target": URL}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {URL}", rig.clock[0], on=on)
+    assert rig.stop().allowed
+    assert idle.wait(rig.store.redis, SLUG, ME)["until"] == rig.clock[0] + CHECKS_WAIT_MS
+    rig.pulls[URL] = RED
+    assert rig.stop().reason.startswith(f"checks failed on {URL}: tests (1), lint. Fix")
+
+
+def test_a_merged_task_pull_request_still_owes_done_while_a_checks_wait_names_another(rig):
+    other = URL + "1"
+    rig.task.update(state="pr", pr_url=URL)
+    rig.pulls[URL], rig.pulls[other] = MERGED, PENDING
+    on = {"kind": "checks", "target": other}
+    idle.declare_wait(rig.store.redis, SLUG, ME, rig.clock[0] + 60_000, f"checks on {other}", rig.clock[0], on=on)
+    assert rig.stop().reason.startswith(f"your pull request {URL} merged: close the task now")

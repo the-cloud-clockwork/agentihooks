@@ -16,7 +16,6 @@ from tests.swarm.profile_fixture import validated
 from tests.swarm.test_cli import run
 from tests.swarm.test_tick import FakeRuntime, masters, tasks
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 store, env = test_tick.store, test_cli.env
 
 FRONTIER = {

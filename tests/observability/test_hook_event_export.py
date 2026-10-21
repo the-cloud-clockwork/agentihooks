@@ -43,6 +43,7 @@ def collector():
     threading.Thread(target=server.serve_forever, daemon=True).start()
     yield f"http://127.0.0.1:{server.server_port}", paths
     server.shutdown()
+    server.server_close()
 
 
 def test_hook_event_is_exported_before_the_hook_process_exits(collector, tmp_path):

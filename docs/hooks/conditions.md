@@ -11,8 +11,9 @@ permalink: /docs/hooks/conditions/
 A condition is a script in a bundle or profile that runs on every tool call it
 matches. It can add context for the agent, rewrite the tool input before the tool
 runs, replace the tool output the agent sees, or deny the call. A `stop` condition
-runs when the agent stops and can keep it working. The filename is the whole
-configuration: `pre-bash.git-guard.sh` runs before every Bash call that runs `git`.
+runs when the agent stops and can keep it working. A `start` condition runs at
+SessionStart and can only add context. The filename is the whole configuration:
+`pre-bash.git-guard.sh` runs before every Bash call that runs `git`.
 
 1. TOC
 {:toc}
@@ -146,7 +147,7 @@ gate and the file-tool gate are exact.
 
 | Part | Rule |
 |---|---|
-| `step` | `pre` (PreToolUse), `post` (PostToolUse) or `stop` (Stop) |
+| `step` | `pre` (PreToolUse), `post` (PostToolUse), `stop` (Stop) or `start` (SessionStart) |
 | `matcher` | everything between the first and the last `-`; see [Matcher grammar](#matcher-grammar) |
 | `name` | the last `-` segment; use `_`, never `-` (`ls_formatter`) |
 | `.async` | optional; run detached, output ignored |
@@ -163,14 +164,15 @@ work as-is:
 pre-mcp__gateway-tools__github-create_pull_request-audit.py
 ```
 
-Stop has no tool, so a `stop` condition has no matcher: `stop-<name>[.async].<ext>`
-(`stop-idle.sh`). `stop-bash-idle.sh` does not parse.
+Stop and SessionStart have no tool, so a `stop` or `start` condition has no
+matcher: `stop-<name>[.async].<ext>` (`stop-idle.sh`), `start-<name>[.async].<ext>`
+(`start-greeting.sh`). `stop-bash-idle.sh` does not parse.
 
 ## Matcher grammar
 
 One grammar serves conditions and the [enforcement `matcher`](#enforcement-matcher).
 Matching is case-insensitive and runs on the tool name after target normalization,
-so `bash` also matches the Codex and Copilot shell tools.
+so `bash` also matches the Codex shell tools.
 
 | Token | Matches |
 |---|---|
@@ -207,12 +209,12 @@ matcher, where the same string matches no tool.
 
 | Variable | Value |
 |---|---|
-| `AH_STEP` | `pre`, `post` or `stop` |
-| `AH_EVENT` | `PreToolUse`, `PostToolUse` or `Stop` |
+| `AH_STEP` | `pre`, `post`, `stop` or `start` |
+| `AH_EVENT` | `PreToolUse`, `PostToolUse`, `Stop` or `SessionStart` |
 | `AH_TOOL_NAME` | normalized tool name |
 | `AH_TOOL_USE_ID` | the call's id, for keying concurrent runs |
 | `AH_SESSION_ID`, `AH_CWD`, `AH_TRANSCRIPT_PATH`, `AH_PERMISSION_MODE` | from the payload |
-| `AH_TARGET` | `claude`, `codex` or `copilot` |
+| `AH_TARGET` | `claude` or `codex` for the supported harnesses |
 | `AH_CONDITION` | the condition's filename |
 | `AH_CONDITION_SOURCE` | `bundle` or `profile:<name>` |
 
@@ -263,6 +265,15 @@ A condition that errors or times out fails open, as on the tool steps. A stop
 condition that blocks on every Stop keeps the agent working forever: read
 `stop_hook_active` or count its own blocks.
 
+## Start step
+
+A `start` condition runs at SessionStart. Its stdin is the SessionStart
+payload: `session_id`, `cwd`, `source` (`startup`, `resume`, `clear`,
+`compact`), `transcript_path`. A `start` condition can only add context —
+`tool_input`, `tool_output` and `decision` are never read from it, so it can
+never deny, rewrite or block the session. A condition that errors or times
+out fails open, as on the other steps.
+
 ## Execution
 
 - Synchronous conditions that match one call run in parallel, each on the original
@@ -300,15 +311,16 @@ rules in settings still apply to the rewritten input.
 
 ## Harness support
 
-| Capability | Claude Code | Codex | Copilot |
-|---|---|---|---|
-| Context (pre) | yes | no (no PreToolUse context channel) | yes |
-| Context (post) | yes | yes | yes |
-| Deny (pre) | yes | yes | yes |
-| `ask` | yes | treated as deny | treated as deny |
-| Input rewrite | yes | dropped with a note | dropped with a note |
-| Output rewrite / post block | yes | dropped / becomes context | dropped / becomes context |
-| Stop block | yes | yes (exit 2) | not settled live |
+| Capability | Claude Code | Codex |
+|---|---|---|
+| Context (pre) | yes | no (no PreToolUse context channel) |
+| Context (post) | yes | yes |
+| Context (start) | yes | yes |
+| Deny (pre) | yes | yes |
+| `ask` | yes | treated as deny |
+| Input rewrite | yes | dropped with a note |
+| Output rewrite / post block | yes | dropped / becomes context |
+| Stop block | yes | yes (exit 2) |
 
 PostToolUse does not fire for tools that fail, so a `post` condition never sees
 failed calls.
@@ -399,15 +411,14 @@ The MCP tool `enforcement_set` takes the same `matcher` argument.
 
 ## Extending to other hook events
 
-The step table in `hooks/context/conditions.py` holds `pre`, `post` and `stop` today.
-Adding an event takes one table row and a `run_step` call in that event's handler.
-These tokens are reserved for that:
+The step table in `hooks/context/conditions.py` holds `pre`, `post`, `stop` and
+`start` today. Adding an event takes one table row and a `run_step` call in
+that event's handler. These tokens are reserved for that:
 
 | Step | Event | Matched field |
 |---|---|---|
 | `fail` | PostToolUseFailure | tool name (the event must also be wired in `settings.base.json`) |
 | `permission` | PermissionRequest | tool name |
-| `start` | SessionStart | `source` (`startup`, `resume`, `clear`, `compact`) |
 | `end` | SessionEnd | `reason` |
 | `substart` / `substop` | SubagentStart / SubagentStop | `agent_type` |
 | `compact` | PreCompact | `trigger` (`manual`, `auto`) |
@@ -418,7 +429,7 @@ These tokens are reserved for that:
 
 | Variable | Default | Description |
 |---|---|---|
-| `CONDITIONS_ENABLED` | `true` | Run conditions on PreToolUse, PostToolUse and Stop |
+| `CONDITIONS_ENABLED` | `true` | Run conditions on PreToolUse, PostToolUse, Stop and SessionStart |
 | `CONDITIONS_TIMEOUT_SEC` | `10` | Per-condition timeout; the process group is killed on expiry |
 | `CONDITIONS_MAX_PARALLEL` | `8` | Synchronous conditions run at once for one call |
 | `CONDITIONS_TRUSTED_OWNERS` | `""` | Extra git remote owners whose repositories' directory layer may run (`*` = all). The linked bundle's owner is always trusted |

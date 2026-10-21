@@ -30,6 +30,24 @@ def check_address(inbox: InboxStore, sender: str, address: str) -> None:
     raise InboxError(f"unknown inbox address {address}; valid addresses: {', '.join(sorted(valid))}")
 
 
+def dispatcher_status(inbox: InboxStore, address: str) -> dict:
+    from scripts.swarm.store import DISPATCH, FULL, RedisStore
+
+    seat = address if is_seat(address) else inbox.seats.known_seat(address)
+    if not seat.startswith("dispatcher@"):
+        return {}
+    slug = seat.removeprefix("dispatcher@")
+    store = RedisStore(inbox.redis)
+    owner = next((a.name for a in store.agents(slug) if a.lane == DISPATCH and a.state != "finished"), "")
+    activation = "recorded consumer" if owner else "pending lifecycle checks"
+    if raw := inbox.redis.hgetall(store.key(slug, "config")):
+        if raw["state"] in ("stopping", "stopped") or (raw["state"] == "paused" and not owner):
+            activation = raw["state"]
+        elif raw.get("autonomy") != FULL:
+            activation = "autonomy"
+    return {"dispatch": {"owner": seat, "consumer": owner, "activation": activation}}
+
+
 def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
     address = inbox.names.resolve(address)
     if address == "operator" or address in live:
@@ -45,15 +63,20 @@ def resolves(inbox: InboxStore, address: str, live: set[str]) -> bool:
 
 
 def settle_unresolved(inbox: InboxStore, names: set[str], items: list, now_ms: int, window: int) -> list[str]:
-    live, actions = None, []
+    live, actions, known = None, [], set()
+    resolved = inbox.names.resolve_many(list(dict.fromkeys(item.address for item in items)))
     for item in items:
-        address = inbox.names.resolve(item.address)
+        address = resolved[item.address]
         if now_ms - item.created_at < window:
             continue
         if live is None:
             sessions = get_active_sessions(cleanup=True)
             live = names | {n for sid, row in sessions.items() for n in (sid, row.get("name", "")) if n}
-        if not resolves(inbox, address, live):
-            if inbox.withdraw(item.id, "swarm", f"cancelled: recipient no longer resolves: {address}", item.address):
-                actions.append(f"closed message {item.id}: recipient no longer resolves")
+        if address in known:
+            continue
+        if resolves(inbox, address, live):
+            known.add(address)
+            continue
+        if inbox.withdraw(item.id, "swarm", f"cancelled: recipient no longer resolves: {address}", item.address):
+            actions.append(f"closed message {item.id}: recipient no longer resolves")
     return actions

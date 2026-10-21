@@ -29,7 +29,17 @@ app.kubernetes.io/component: {{ .component }}
 {{- end -}}
 
 {{- define "swarm.ledgerUrl" -}}
-{{- printf "http://%s-ledger:%v" (include "swarm.fullname" .) .Values.ledger.port -}}
+{{- printf "%s://%s-ledger:%v" (ternary "https" "http" (not (empty .Values.ledger.tls.secretName))) (include "swarm.fullname" .) .Values.ledger.port -}}
+{{- end -}}
+
+{{- define "swarm.ledgerCa" -}}
+{{- with .Values.ledger.tls.secretName }}
+- name: LEDGER_CA_PEM
+  valueFrom:
+    secretKeyRef:
+      name: {{ . | quote }}
+      key: ca.crt
+{{- end }}
 {{- end -}}
 
 {{- define "swarm.redisEnv" -}}
@@ -80,6 +90,7 @@ app.kubernetes.io/component: {{ .component }}
   value: {{ .Values.deployment | quote }}
 - name: LEDGER_URL
   value: {{ include "swarm.ledgerUrl" . | quote }}
+{{ include "swarm.ledgerCa" . }}
 - name: SWARM_HIVE_ID
   value: {{ .Values.hive.id | default (include "swarm.fullname" .) | quote }}
 {{ include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" $role) }}
@@ -93,8 +104,8 @@ app.kubernetes.io/component: {{ .component }}
 {{- end }}
 {{- end -}}
 
-{{- define "swarm.controllerSecretEnv" -}}
-{{- range .Values.controller.secretEnv }}
+{{- define "swarm.secretKeyEnv" -}}
+{{- range . }}
 - name: {{ .name }}
   valueFrom:
     secretKeyRef:
@@ -150,5 +161,19 @@ exec:
   command:
     - python
     - -c
+    {{- if .Values.ledger.tls.secretName }}
+    - import os, ssl, urllib.request; c = ssl.create_default_context(cadata=os.environ["LEDGER_CA_PEM"]); c.check_hostname = False; urllib.request.urlopen("https://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2, context=c).read()
+    {{- else }}
     - import os, urllib.request; urllib.request.urlopen("http://127.0.0.1:" + os.environ["LEDGER_PORT"] + "/healthz", timeout=2).read()
+    {{- end }}
 {{- end -}}
+
+{{- define "swarm.homeSource" -}}
+{{- if .hostPath -}}
+hostPath:{{ .hostPath.path }}
+{{- else if .persistentVolumeClaim -}}
+claim:{{ .persistentVolumeClaim.claimName }}
+{{- else -}}
+{{ toJson . }}
+{{- end -}}
+{{- end }}

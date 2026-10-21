@@ -13,7 +13,9 @@ from scripts.swarm_v2.herdr import visibility
 
 
 def hive_id() -> str:
-    return os.environ.get("SWARM_HIVE_ID") or registry.seeded_id() or socket.gethostname()
+    from scripts.hive import scope
+
+    return scope.member() or os.environ.get("SWARM_HIVE_ID") or registry.seeded_id() or socket.gethostname()
 
 
 def bind(store: RedisStore, slug: str, owner: str) -> bool:
@@ -62,7 +64,26 @@ def rows(store: RedisStore, slug: str) -> list[dict]:
     ]
 
 
-def consume(store: RedisStore, slug: str, owner: str, execute: Callable[[dict], str]) -> list[str]:
+def claim(store: RedisStore, records: str, key: str, owner: str, epoch: int) -> dict | None:
+    """Accept a pending row once, though the tick and the quota prober read the same queue."""
+    from redis.exceptions import WatchError
+
+    with store.redis.pipeline() as pipe:
+        try:
+            pipe.watch(records)
+            row = json.loads(pipe.hget(records, key))
+            if row["state"] != "pending":
+                return None
+            row.update(owner=owner, epoch=epoch, state="accepted", accepted_at=time.time_ns() // 1_000_000)
+            pipe.multi()
+            pipe.hset(records, key, json.dumps(row))
+            pipe.execute()
+        except WatchError:
+            return None
+    return row
+
+
+def consume(store: RedisStore, slug: str, owner: str, execute: Callable[[dict], str], only: str = "") -> list[str]:
     held = lease.acquire(store, slug, owner)
     if held is None:
         return []
@@ -74,11 +95,12 @@ def consume(store: RedisStore, slug: str, owner: str, execute: Callable[[dict], 
         if row["state"] != "pending":
             store.redis.lrem(pending, 1, key)
             continue
-        if row["owner"] and row["owner"] != owner:
+        if (row["owner"] and row["owner"] != owner) or (only and row["command"] != only):
             continue
         stale = row.get("epoch", 0) not in (0, held.epoch)
-        row.update(owner=owner, epoch=held.epoch, state="accepted", accepted_at=time.time_ns() // 1_000_000)
-        store.redis.hset(records, key, json.dumps(row))
+        row = claim(store, records, key, owner, held.epoch)
+        if row is None:
+            continue
         lease.require(store, slug, held)
         error = "the controller lease is stale" if stale else execute(row)
         row.update(
@@ -98,18 +120,21 @@ def publish(store: RedisStore, slug: str, status: dict, tails: dict) -> None:
 
 
 def view(store: RedisStore, slug: str) -> dict:
-    from scripts.swarm import lifecycle
+    from scripts.swarm import lifecycle, quota_refresh, tick_activity
 
     config = store.config(slug)
     data = json.loads(store.redis.get(store.key(slug, "published")) or "{}")
     status = data.get("status", {"agents": [], "tasks": {}})
+    quota = quota_refresh.latest(store, slug, status.get("quota"))
+    status = status if quota is None else {**status, "quota": quota}
     now = time.time_ns() // 1_000_000
     terminals = visibility.read(store, slug, now)
     executions, errors = execution_card.cards(status.get("agents", []), terminals)
     return {
         **status,
+        "last_tick_activity": tick_activity.read(store, slug),
         "top_bottleneck": bottleneck_status.report(store, slug, now),
-        "config": {**status.get("config", config.__dict__), "state": config.state},
+        "config": {**status.get("config", config.__dict__), "state": config.state, "autonomy": config.autonomy},
         "commands": rows(store, slug),
         "terminals": terminals,
         "executions": executions,

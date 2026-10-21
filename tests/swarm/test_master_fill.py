@@ -3,12 +3,10 @@ from dataclasses import replace
 import pytest
 
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
-from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, tick
-from scripts.swarm_v2 import master_fill
+from scripts.swarm.tick import MASTER_DOWN, STARTUP_GRACE_MS, SpawnError, tick
+from scripts.swarm_v2 import master_fill, master_seat_alarm
 from scripts.swarm_v2.masters import MasterSeats
 from tests.swarm.test_tick import FakeRuntime, masters, tasks
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 @pytest.fixture
@@ -211,3 +209,112 @@ def test_a_full_host_holds_the_seat_with_the_hold_it_names(store):
         actions = master_fill.run("sw", store.config("sw"), store, FakeRuntime(), {}, 7)
     assert actions == ["holding the master spawn"]
     assert held.call_args.args == ("sw", store, 7, MASTER)
+
+
+class SeatTwoDown(FakeRuntime):
+    def __init__(self):
+        super().__init__()
+        self.down = True
+
+    def spawn(self, config, lane, name, task):
+        if self.down and task["id"] == "master-2":
+            raise SpawnError("profile canary timeout")
+        return super().spawn(config, lane, name, task)
+
+
+def _seat_two_down(store):
+    MasterSeats(store.redis).set_count("sw", 2)
+    ledger, runtime = tasks(), SeatTwoDown()
+    ledger.phases = [{"id": "p1"}, {"id": "p2"}]
+    return ledger, runtime
+
+
+def _seat_notes(ledger):
+    return [note for note in ledger.notes if "master-2@sw" in note]
+
+
+def test_one_failed_seat_two_launch_raises_no_operator_alarm(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    assert _seat_notes(ledger) == []
+
+
+def test_repeated_failed_seat_two_launches_raise_one_alarm_naming_seat_phases_and_error(store):
+    ledger, runtime = _seat_two_down(store)
+    MasterSeats(store.redis).own_hive("sw", "anton-1", "master-2@sw")
+    tick("sw", store, ledger, runtime, 1)
+    raised = tick("sw", store, ledger, runtime, 2)
+    tick("sw", store, ledger, runtime, 3)
+    owners = MasterSeats(store.redis).owners("sw", ledger.state("sw"))
+    owned = sorted(phase for phase, owner in owners.items() if owner == "master-2@sw")
+    held = ", ".join(owned)
+    assert len(owned) >= 2 and _seat_notes(ledger) == [
+        master_seat_alarm.DOWN.format(address="master-2@sw", count=2, held=held, error="profile canary timeout")
+    ]
+    assert "raised the launch alarm of master seat master-2@sw" in raised
+
+
+def test_an_alarm_for_a_seat_owning_no_phase_says_none(store):
+    ledger, runtime = _seat_two_down(store)
+    ledger.phases = []
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    (note,) = _seat_notes(ledger)
+    assert "go unattended: none." in note
+
+
+def test_a_seat_two_master_that_binds_clears_the_alarm(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    runtime.down = False
+    cleared = tick("sw", store, ledger, runtime, 3)
+    tick("sw", store, ledger, runtime, 4)
+    owners = MasterSeats(store.redis).owners("sw", ledger.state("sw"))
+    held = ", ".join(sorted(phase for phase, owner in owners.items() if owner == "master-2@sw"))
+    assert _seat_notes(ledger)[1:] == [master_seat_alarm.BACK.format(address="master-2@sw", held=held)]
+    assert "cleared the launch alarm of master seat master-2@sw" in cleared
+    assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}
+    runtime.down = True
+    (second,) = [a for a in masters(store) if a.seat == "master-2@sw"]
+    store.put_agent("sw", replace(second, state="finished"))
+    runtime.live.discard(second.name)
+    tick("sw", store, ledger, runtime, 5 + STARTUP_GRACE_MS)
+    assert len(_seat_notes(ledger)) == 2
+    tick("sw", store, ledger, runtime, 6 + STARTUP_GRACE_MS)
+    assert len(_seat_notes(ledger)) == 3
+
+
+def test_a_seat_that_leaves_the_count_drops_its_failures(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    MasterSeats(store.redis).set_count("sw", 1)
+    tick("sw", store, ledger, runtime, 2)
+    assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}
+    MasterSeats(store.redis).set_count("sw", 2)
+    tick("sw", store, ledger, runtime, 3)
+    assert _seat_notes(ledger) == []
+
+
+def test_a_seat_that_leaves_the_count_after_its_alarm_closes_the_alarm(store):
+    ledger, runtime = _seat_two_down(store)
+    tick("sw", store, ledger, runtime, 1)
+    tick("sw", store, ledger, runtime, 2)
+    MasterSeats(store.redis).set_count("sw", 1)
+    closed = tick("sw", store, ledger, runtime, 3)
+    assert _seat_notes(ledger)[1:] == [master_seat_alarm.RETIRED.format(address="master-2@sw")]
+    assert "closed the launch alarm of retired master seat master-2@sw" in closed
+    assert store.redis.hgetall(store.key("sw", master_seat_alarm.KEY)) == {}
+
+
+def test_a_finished_master_still_live_in_the_seat_does_not_clear_the_alarm(store):
+    MasterSeats(store.redis).set_count("sw", 2)
+    ledger, runtime = tasks(), FakeRuntime()
+    for _ in range(2):
+        master_seat_alarm.failed(store, "sw", "master-2", "profile canary timeout")
+    master_seat_alarm.run("sw", store, ledger, runtime, {})
+    store.put_agent("sw", AgentRecord("ghost", MASTER, "master-2", state="finished", seat="master-2@sw"))
+    runtime.live.add("ghost")
+    assert master_seat_alarm.run("sw", store, ledger, runtime, {}) == []
+    assert len(_seat_notes(ledger)) == 1
+    assert store.redis.hget(store.key("sw", master_seat_alarm.KEY), "master-2")

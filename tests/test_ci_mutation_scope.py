@@ -10,6 +10,29 @@ def test_hunks_include_only_added_and_changed_head_lines():
     assert changed_lines(diff) == {3, 4, 5, 13}
 
 
+@pytest.mark.parametrize(
+    ("entry", "test", "expected"),
+    [
+        ("tests/a.py", "tests/a.py::t", True),
+        ("tests/a.py", "tests/a.pyc::t", False),
+        ("tests/a.py::t", "tests/a.py::t", True),
+        ("tests/a.py::t", "tests/a.py::t[1]@port", True),
+        ("tests/a.py::t", "tests/a.py::t@port", True),
+        ("tests/a.py::t", "tests/a.py::tx", False),
+        ("tests/a.py::t", "tests/b.py::t", False),
+        ("tests/a.py::T", "tests/a.py::T::t", True),
+        ("tests/a.py::t[a@b]", "tests/a.py::t[a@b]", True),
+    ],
+)
+def test_a_selected_file_or_test_id_owns_its_parametrized_and_grouped_node_ids(entry, test, expected):
+    from scripts.ci_mutation.scope import selects, test_file
+
+    assert selects(entry, test) is expected
+    assert test_file(test) == test.partition("::")[0]
+    assert test_file("tests/a.py") == "tests/a.py"
+    assert test_file("tests/a.py::T::t[1]") == "tests/a.py"
+
+
 def test_tests_are_discovered_by_module_name_and_import(tmp_path):
     tests = tmp_path / "tests"
     tests.mkdir()
@@ -93,6 +116,39 @@ def test_a_rewritten_test_module_is_selected_again(tmp_path):
     assert select_tests(tmp_path, Path("hooks/context/sample.py")) == []
     (tests / "test_late.py").write_text("from hooks.context import sample\n")
     assert select_tests(tmp_path, Path("hooks/context/sample.py")) == ["tests/test_late.py"]
+
+
+def test_selection_parses_only_test_modules_that_name_a_reached_module(tmp_path, monkeypatch):
+    from scripts.ci_mutation import scope
+
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_direct.py").write_text("from hooks.context import parsed_sample\n")
+    (tests / "parsed_helper.py").write_text("import hooks.context.parsed_sample\n")
+    (tests / "test_helper_user.py").write_text("from tests import parsed_helper\n")
+    for index in range(3):
+        (tests / f"test_unrelated_{index}.py").write_text(f"import os\nUNRELATED = {index}\n")
+    parsed = []
+    parse = scope.ast.parse
+    monkeypatch.setattr(scope.ast, "parse", lambda text, *args, **kwargs: parsed.append(text) or parse(text))
+    scope.imported_names.cache_clear()
+    assert select_tests(tmp_path, Path("hooks/context/parsed_sample.py")) == [
+        "tests/test_direct.py",
+        "tests/test_helper_user.py",
+    ]
+    assert parsed and not any("UNRELATED" in text for text in parsed)
+
+
+@pytest.mark.parametrize(
+    "importer",
+    ["from.import *\n", "from..sub import *\n", "from\\\n. import *\n", "from hooks.context import ｐarsed_form\n"],
+)
+def test_selection_keeps_imports_written_without_spaces_or_with_normalized_names(tmp_path, importer):
+    package = tmp_path / "tests" / "sub"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("import hooks.context.parsed_form\n")
+    (package / "test_importer.py").write_text(importer)
+    assert select_tests(tmp_path, Path("hooks/context/parsed_form.py")) == ["tests/sub/test_importer.py"]
 
 
 def test_a_folder_named_like_a_module_is_skipped(tmp_path):
@@ -233,6 +289,37 @@ def test_a_line_left_as_the_given_base_had_it_is_never_graded(tmp_path):
     git("merge", "-q", "--no-edit", "dev")
     commit("kept.py", "def k():\n    return 1\n")
     assert discover_changes(tmp_path, pinned, "HEAD") == {"hooks/own.py": {1, 2}}
+
+
+def test_a_branch_that_merged_dev_and_edited_a_test_grades_only_its_own_lines_from_current_dev(tmp_path):
+    import yaml
+
+    from scripts.ci_mutation.scope import discover_changes, own_bases
+    from tests.test_ci_hosted_lanes import _evaluate
+
+    jobs = yaml.safe_load((Path(__file__).resolve().parents[1] / ".github/workflows/test.yml").read_text())["jobs"]
+    plan = next(step for step in jobs["mutation-plan"]["steps"] if step.get("id") == "plan")
+    assert jobs["mutation-plan"]["steps"][0]["with"]["fetch-depth"] == 0
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 1\n")
+    git("add", "tests/test_x.py")
+    pinned = commit("dev.py", "a = 1\n")
+    git("checkout", "-q", "-b", "branch")
+    commit("own.py", "def f():\n    return 1\n")
+    (tmp_path / "tests" / "test_x.py").write_text("def test_a():\n    assert 2\n")
+    git("commit", "-q", "-am", "edit test")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "def d():\n    return 2\n")
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    merged_dev = git("rev-parse", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    assert discover_changes(tmp_path, [pinned, merged_dev], "HEAD") == {"hooks/own.py": {1, 2}, "hooks/dev.py": {1, 2}}
+    event = {"pull_request": {"base": {"sha": pinned}}}
+    bases = own_bases(tmp_path, _evaluate(plan["env"]["BASE"], event=event), "HEAD")
+    assert bases == [merged_dev]
+    assert discover_changes(tmp_path, bases, "HEAD") == {"hooks/own.py": {1, 2}}
 
 
 def test_resolved_bases_are_graded_without_looking_up_branches_again(tmp_path):
@@ -438,6 +525,8 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
     calls = []
 
     def run(command, **kwargs):
+        if "test.yml" in command[4]:
+            return subprocess.CompletedProcess(command, 0, "", "")
         calls.append((command, kwargs))
         code, out = jobs[command[4].split("/")[5]] if len(calls) > 1 else runs
         return subprocess.CompletedProcess(command, code, out, "")
@@ -460,3 +549,173 @@ def test_a_commit_is_graded_only_by_a_push_preflight_whose_mutation_job_passed(
         [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "--jq", green] for run in asked
     ]
     assert calls == [(command, {"capture_output": True, "text": True}) for command in expected_calls]
+
+
+@pytest.mark.parametrize(
+    ("preflight", "runs", "jobs", "expected"),
+    [
+        ("", "9\n", {"9": "success\nsuccess\n"}, True),
+        ("5\n", "9\n", {"9": "success\n"}, True),
+        ("", "9\n", {"9": "success\nfailure\n"}, False),
+        ("", "9\n", {"9": "failure\nsuccess\n"}, False),
+        ("", "9\n", {"9": "success\nskipped\n"}, False),
+        ("", "9\n", {"9": ""}, False),
+        ("", "8\n9\n", {"8": "cancelled\n", "9": "success\n"}, True),
+        ("", "", {}, False),
+    ],
+)
+def test_an_open_branch_is_graded_by_its_pull_request_mutation_shards_when_its_push_preflight_skipped(
+    monkeypatch, preflight, runs, jobs, expected
+):
+    import subprocess
+
+    from scripts.ci_mutation import scope
+
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        path = command[4]
+        if "mutation-preflight.yml" in path:
+            out = preflight
+        elif "test.yml" in path:
+            out = runs
+        elif "--paginate" not in command:
+            out = "0\n"
+        else:
+            out = jobs[path.split("/")[5]]
+        return subprocess.CompletedProcess(command, 0, out, "")
+
+    monkeypatch.setattr(scope.subprocess, "run", run)
+    assert scope.graded_green("abc") is expected
+    api = ["gh", "api", "-X", "GET"]
+    shards = scope.SHARDS
+    listed = [
+        *api,
+        "repos/{owner}/{repo}/actions/workflows/test.yml/runs",
+        "-f",
+        "head_sha=abc",
+        "-f",
+        "event=pull_request",
+        "--jq",
+        ".workflow_runs[].id",
+    ]
+    checked = len(preflight.split())
+    assert calls[checked + 1] == listed
+    asked = runs.split()[: runs.split().index("9") + 1] if expected else runs.split()
+    jobs_listed = [
+        [*api, f"repos/{{owner}}/{{repo}}/actions/runs/{run}/jobs", "-f", "filter=all", "--paginate", "--jq", shards]
+        for run in asked
+    ]
+    assert calls[checked + 2 :] == jobs_listed
+
+
+_INLINE = "Mutate the only shard in the statistics job"
+
+
+@pytest.mark.parametrize(
+    ("jobs", "expected"),
+    [
+        (
+            [{"name": "mutation (0)", "conclusion": "success"}, {"name": "mutation (1)", "conclusion": "failure"}],
+            ["success", "failure"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "success",
+                    "steps": [{"name": _INLINE, "conclusion": "success"}],
+                },
+                {"name": "mutation", "conclusion": "skipped"},
+            ],
+            ["success"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "failure",
+                    "steps": [{"name": _INLINE, "conclusion": "failure"}],
+                }
+            ],
+            ["failure"],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "success",
+                    "steps": [{"name": _INLINE, "conclusion": "skipped"}],
+                },
+                {"name": "mutation (0)", "conclusion": "success"},
+            ],
+            ["success"],
+        ),
+        (
+            [
+                {"name": "mutation-stats (1)", "conclusion": "success"},
+                {"name": "mutation-plan", "conclusion": "success"},
+            ],
+            [],
+        ),
+        (
+            [
+                {
+                    "name": "mutation-stats (0)",
+                    "conclusion": "failure",
+                    "steps": [{"name": _INLINE, "conclusion": "success"}, {"name": "Upload", "conclusion": "failure"}],
+                }
+            ],
+            ["failure"],
+        ),
+    ],
+)
+def test_pull_request_grading_counts_the_shard_mutated_inside_the_statistics_job(jobs, expected):
+    import json
+    import subprocess
+
+    from scripts.ci_mutation import scope
+
+    found = subprocess.run(["jq", "-r", scope.SHARDS], input=json.dumps({"jobs": jobs}), capture_output=True, text=True)
+    assert (found.returncode, found.stdout.split()) == (0, expected), found.stderr
+
+
+@pytest.mark.parametrize("helper", ["oracle.py", "transitive", "fixture", "other.py", "dev.py"])
+def test_inherited_lines_are_regraded_once_the_branch_changes_a_source_helper_their_tests_import(tmp_path, helper):
+    from scripts.ci_mutation.scope import discover_changes
+
+    git, commit = _repo(tmp_path)
+    (tmp_path / "tests").mkdir()
+    fixtures = {"transitive": "from hooks import dev\n", "fixture": "from hooks.oracle import ONE\n"}
+    imports = {
+        "transitive": "from hooks import oracle\nfrom tests.fixtures import dev\n",
+        "fixture": "from hooks import dev\nfrom tests.fixtures import ONE as oracle_one\n",
+    }
+    if helper in fixtures:
+        (tmp_path / "tests" / "fixtures.py").write_text(fixtures[helper])
+    oracle = "oracle_one" if helper == "fixture" else "oracle.ONE"
+    head = imports.get(helper, "from hooks import dev, oracle\n")
+    (tmp_path / "tests" / "test_api.py").write_text(f"{head}\n\ndef test_d():\n    assert dev.d() == {oracle}\n")
+    helper = "oracle.py" if helper in fixtures else helper
+    (tmp_path / "tests" / "test_other.py").write_text("from hooks import other\n")
+    git("add", "tests")
+    commit("oracle.py", "ONE = 1\n")
+    kept = "def d():\n    return 1\n\n\ndef k():\n    return 1\n"
+    pinned = commit("dev.py", kept)
+    git("checkout", "-q", "-b", "branch")
+    if helper == "dev.py":
+        commit(helper, kept + "\n\ndef g():\n    return 3\n")
+    else:
+        commit(helper, "ONE = 1\nTWO = 2\n")
+    git("checkout", "-q", "dev")
+    commit("dev.py", "def c():\n    return 0\n\n\n" + kept)
+    git("update-ref", "refs/remotes/origin/dev", "HEAD")
+    git("checkout", "-q", "branch")
+    git("merge", "-q", "--no-edit", "dev")
+    expected = {
+        "oracle.py": {"hooks/oracle.py": {2}, "hooks/dev.py": {1, 2, 3, 4}},
+        "other.py": {"hooks/other.py": {1, 2}},
+        "dev.py": {"hooks/dev.py": {11, 12, 13, 14}},
+    }
+    assert discover_changes(tmp_path, pinned, "HEAD") == expected[helper]

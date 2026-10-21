@@ -8,9 +8,10 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Protocol
 
-from hooks.context.profile_chain import PACKAGE_ROLES
+from hooks.context import profile_chain
 from scripts.swarm import live_binding, profile_choice, prompt
 from scripts.swarm.store import AgentRecord, SwarmError
+from scripts.swarm_ledger import hosted_probe
 from scripts.swarm_v2 import broadcast_bridge, worker_home
 from scripts.swarm_v2.accounts import ACCOUNT_FULL, AccountCapacity, Slot
 from scripts.swarm_v2.auth_context import LaunchAuthority
@@ -93,7 +94,9 @@ def opening(request: SpawnRequest) -> str:
 
 
 def worker_profiles() -> set[str]:
-    roles = {path.name for path in PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")}
+    roles = {
+        path.name for path in profile_chain.PACKAGE_ROLES.iterdir() if path.is_dir() and not path.name.startswith("_")
+    }
     return {WORKER_DEFAULT, *roles}
 
 
@@ -108,6 +111,11 @@ def quota_predecessor(task: dict) -> tuple[str, str] | None:
     if envelope.get("reason") != "quota" or not saved.get("harness") or not saved.get("account"):
         return None
     return saved["harness"], saved["account"]
+
+
+def hosted_ledger() -> dict[str, str]:
+    url = hosted_probe.address()
+    return {hosted_probe.HOSTED_ENV: url} if url else {}
 
 
 def kept(agent: AgentRecord, reason: str) -> AgentRecord:
@@ -170,7 +178,7 @@ class DistributedLaunch:
             "generation": admitted.generation,
             "account": terms.account,
             "profile": admitted.profile,
-            "endpoints": {broadcast_bridge.API_URL: terms.api_url},
+            "endpoints": {broadcast_bridge.API_URL: terms.api_url, **hosted_ledger()},
         }
         outcome = self.router.spawn(replace(request, task={**request.task, **identity}))
         if outcome.status in NOT_LAUNCHED:

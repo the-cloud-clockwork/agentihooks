@@ -1,0 +1,6 @@
+{
+  "scripts/inbox/store.py:scripts.inbox.store.xǁInboxStoreǁ_try_reopen__mutmut_14:e8b456c64af36c187203f64df62709e49ede3ca18debfcba6b467d8cb3d97241": {
+    "reader": "standards_reader",
+    "reason": "Equivalent: _item uses its item_id argument only in its empty-hash branch, which _try_reopen already short-circuits by returning None when the hash is empty; otherwise every Item field, id included, is read from the stored hash written by _fields."
+  }
+}

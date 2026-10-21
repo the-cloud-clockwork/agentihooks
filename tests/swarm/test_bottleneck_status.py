@@ -9,7 +9,7 @@ from scripts.swarm.health import standing
 from scripts.swarm.store import RedisStore, SwarmConfig
 from tests.swarm.test_cli import env as env
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 NOW = 1_791_700_000_000
 
 
@@ -29,17 +29,17 @@ def detect(store, *rows):
 def test_line_names_the_detectors_first_stage_and_trend_over_alert_ratios(store):
     reading = standing.Reading(88.6, 2, "task hours in the window", "quota")
     standing.fire(store.redis, "sw", "quota_hold", reading, NOW)
-    standing.fire(store.redis, "sw", "claim_wait", standing.Reading(157, 4, "task hours in the window", "claim"), NOW)
-    detect(store, ("claim_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "falling"))
+    standing.fire(store.redis, "sw", "seat_wait", standing.Reading(157, 4, "task hours in the window", "claim"), NOW)
+    detect(store, ("seat_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "falling"))
     found = bottleneck_status.report(store, "sw", NOW + 300_000)
     assert (found["stage"], found["trend"], found["seconds"], found["measured_at"]) == (
-        "claim_wait",
+        "seat_wait",
         "rising",
         665404.0,
         NOW,
     )
     assert bottleneck_status.line(found) == (
-        "Top bottleneck claim wait; trend rising; measured 5 minutes ago; last action none recorded"
+        "Top bottleneck seat wait; trend rising; measured 5 minutes ago; last action none recorded"
     )
 
 
@@ -53,10 +53,73 @@ def test_trend_is_unknown_only_before_the_detector_runs(store):
         "measured": "never",
         "last_action": "none recorded",
         "action_at": 0,
+        "waits": [],
     }
     detect(store, ("build", 0.0, "falling"))
     found = bottleneck_status.report(store, "sw", NOW)
     assert (found["stage"], found["label"], found["trend"]) == ("", "none", "none")
+
+
+def test_the_report_names_seat_wait_and_queue_wait_with_their_meaning(store):
+    detect(store, ("queue_wait", 36000.0, "rising"), ("seat_wait", 5400.0, "falling"))
+    assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
+        "Seat wait 1.5 task hours: ready while every seat of its lane was busy",
+        "Queue wait 10.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
+    ]
+    detect(store, ("build", 3600.0, "rising"))
+    assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
+        "Seat wait 0.0 task hours: ready while every seat of its lane was busy",
+        "Queue wait 0.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
+    ]
+
+
+def test_queue_wait_never_names_the_top_bottleneck(store):
+    detect(store, ("queue_wait", 36000.0, "rising"), ("seat_wait", 5400.0, "falling"))
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert (found["stage"], found["seconds"], found["trend"]) == ("seat_wait", 5400.0, "falling")
+    detect(store, ("queue_wait", 36000.0, "rising"))
+    assert bottleneck_status.report(store, "sw", NOW)["stage"] == ""
+
+
+@pytest.mark.parametrize(
+    ("launch_seconds", "seat_seconds", "expected"),
+    [(0.0, 0.0, ""), (3600.0, 7200.0, "seat_wait"), (7200.0, 3600.0, "launch_failure"), (1.0, 0.0, "launch_failure")],
+)
+def test_top_bottleneck_uses_positive_task_hours_in_status_and_notices(store, launch_seconds, seat_seconds, expected):
+    detect(store, ("build", 3600.0, "rising"))
+    bottleneck_status.refresh("sw", store, NOW)
+    detect(
+        store,
+        ("queue_wait", 257400.0, "rising"),
+        ("launch_failure", launch_seconds, "falling"),
+        ("seat_wait", seat_seconds, "falling"),
+    )
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert found["stage"] == expected
+    assert found["seconds"] == max(launch_seconds, seat_seconds)
+    lines = bottleneck_status.refresh("sw", store, NOW)
+    assert lines == [bottleneck_status.line(found)]
+    assert lines[0].startswith(f"Top bottleneck {expected.replace('_', ' ') or 'none'};")
+    assert InboxStore(store.redis).pending_mail("master@sw")[-1].text == lines[0]
+
+
+@pytest.mark.parametrize(("seconds", "hours"), [(257400.0, "71.5"), (3600000.0, "1000.0")])
+def test_top_bottleneck_explains_why_the_leading_stage_was_excluded(store, seconds, hours):
+    detect(store, ("queue_wait", seconds, "rising"), ("launch_failure", 0.0, "falling"), ("seat_wait", 0.0, "falling"))
+    found = bottleneck_status.report(store, "sw", NOW)
+    assert bottleneck_status.line(found) == (
+        "Top bottleneck none; trend none; measured 0 minutes ago; last action none recorded;"
+        f" Leading stage queue wait {hours} task hours skipped:"
+        " tasks beyond the seat limit or ready while a seat was free are excluded from bottleneck ranking"
+    )
+
+
+def test_the_waits_add_every_row_of_a_stage_in_exact_hours(store):
+    detect(store, ("queue_wait", 3600.0, "rising"), ("queue_wait", 1800.0, "rising"), ("seat_wait", 180.0, "rising"))
+    assert bottleneck_status.report(store, "sw", NOW)["waits"] == [
+        "Seat wait 0.1 task hours: ready while every seat of its lane was busy",
+        "Queue wait 1.5 task hours: ready while a seat was free or behind more tasks than its lane has seats",
+    ]
 
 
 @pytest.mark.parametrize(
@@ -83,17 +146,21 @@ def test_page_view_reads_the_stored_ranking_over_the_published_snapshot(store, m
     store.create(SwarmConfig("sw", ".", 0, 0, state="paused"))
     stale = {"stage": "quota_hold", "label": "quota hold", "trend": "steady", "last_action": "none recorded"}
     commands.publish(store, "sw", {"agents": [], "tasks": {}, "top_bottleneck": stale}, {})
-    detect(store, ("claim_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "rising"))
+    detect(store, ("seat_wait", 665404.0, "rising"), ("quota_hold", 216504.0, "rising"))
     monkeypatch.setattr(commands, "time", SimpleNamespace(time_ns=lambda: (NOW + 299_999) * 1_000_000))
     assert commands.view(store, "sw")["top_bottleneck"] == {
-        "stage": "claim_wait",
-        "label": "claim wait",
+        "stage": "seat_wait",
+        "label": "seat wait",
         "trend": "rising",
         "seconds": 665404.0,
         "measured_at": NOW,
         "measured": "4 minutes ago",
         "last_action": "none recorded",
         "action_at": 0,
+        "waits": [
+            "Seat wait 184.8 task hours: ready while every seat of its lane was busy",
+            "Queue wait 0.0 task hours: ready while a seat was free or behind more tasks than its lane has seats",
+        ],
     }
 
 
@@ -149,14 +216,28 @@ def test_status_json_and_text_share_the_detectors_stage_trend_and_action(env, mo
     capsys.readouterr()
     monkeypatch.setattr(status, "now_ms", lambda: NOW)
     monkeypatch.setattr(cli, "now_ms", lambda: NOW)
-    detect(store, ("claim_wait", 7200.0, "rising"), ("quota_hold", 3600.0, "rising"))
-    bottleneck_status.record_action(store, "sw", "claim_wait", "Added a seat", NOW)
+    detect(store, ("seat_wait", 7200.0, "rising"), ("quota_hold", 3600.0, "rising"))
+    bottleneck_status.record_action(store, "sw", "seat_wait", "Added a seat", NOW)
     report = status.status_report(store, "sw", {"tasks": []})["top_bottleneck"]
-    assert (report["stage"], report["trend"], report["last_action"]) == ("claim_wait", "rising", "Added a seat")
+    assert (report["stage"], report["trend"], report["last_action"]) == ("seat_wait", "rising", "Added a seat")
     cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
     out = capsys.readouterr().out
-    assert "top stages in the last 4 hours: claim wait 2.0 task hours (rising)" in out
-    assert "Top bottleneck claim wait; trend rising; measured 0 minutes ago; last action Added a seat" in out
+    assert "top stages in the last 4 hours: seat wait 2.0 task hours (rising)" in out
+    assert "Top bottleneck seat wait; trend rising; measured 0 minutes ago; last action Added a seat" in out
+
+
+def test_status_json_and_text_show_the_inbox_outbox_records_set_aside(env, capsys):
+    from scripts.inbox import outbox
+
+    store, _, _ = env
+    cli.main(["sw", "create", "--repo", "/repo"])
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "inbox outbox" not in capsys.readouterr().out
+    outbox.home().mkdir(parents=True, exist_ok=True)
+    outbox.skipped_path().write_text('{"reason": "corrupt", "line": "x"}\n')
+    assert status.status_report(store, "sw", {"tasks": []})["outbox"] == {"queued": 0, "retrying": 0, "set_aside": 1}
+    cli.cmd_status(store, SimpleNamespace(slug="sw", json=False))
+    assert "inbox outbox  queued 0  retrying 0  set aside 1\n" in capsys.readouterr().out
 
 
 def test_tick_delivers_new_metric_stage_once_before_status_publication(env, monkeypatch):

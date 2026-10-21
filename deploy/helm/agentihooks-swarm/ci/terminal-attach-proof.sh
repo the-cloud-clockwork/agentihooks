@@ -1,17 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-image=$1
-cluster=$2
-release=$3
-slug=$4
+worker_image=$1
+release=$2
+slug=$3
 namespace=swarm-pod-proof
-worker_image=local/agentihooks-swarm-terminal-worker:kind
 controller=(-l "app.kubernetes.io/instance=$release,app.kubernetes.io/component=controller")
 
-docker build -q --build-arg IMAGE="$image" -t "$worker_image" \
-  -f deploy/helm/agentihooks-swarm/ci/terminal-worker.Dockerfile . >/dev/null
-kind load docker-image "$worker_image" --name "$cluster"
 kubectl apply -f - <<EOF
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

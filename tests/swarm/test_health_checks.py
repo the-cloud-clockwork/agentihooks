@@ -6,8 +6,6 @@ from scripts.swarm.health import checks
 from scripts.swarm.health.findings import Limits
 from scripts.swarm.keyspace import ROOT as KEY_ROOT
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 URL = "https://github.com/o/r/pull/7"
 PENDING = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpending\t0\thttps://x/2\n"
 PASSED = "lint\tpass\t8s\thttps://x/1\nunit (3.11, 1)\tpass\t12s\thttps://x/2\n"
@@ -156,3 +154,36 @@ def test_status_credits_the_dispatcher_seat_with_the_priorities_it_settled(monke
     events += [{"kind": "priority cleared", "target": f"followups/c{n}", "by": seat, "at": at} for n in range(5)]
     found = status.findings(store, "triage-proof", config, [], events)
     assert [f["evidence"] for f in found if f["kind"] == "ceremony"] == expected
+
+
+@pytest.mark.parametrize(
+    "pending,passed,approval,expected",
+    [
+        (None, None, False, (False, False)),
+        (True, False, False, (True, False)),
+        (False, True, False, (False, True)),
+        (False, True, True, (True, True)),
+        (False, False, True, (False, False)),
+    ],
+)
+def test_snapshot_check_probes_preserve_unknown_waiting_and_approval_states(pending, passed, approval, expected):
+    from types import SimpleNamespace
+
+    from scripts.swarm.health import checks
+
+    snapshot = None if pending is None else SimpleNamespace(checks_pending=pending, checks_passed=passed)
+
+    def view(url):
+        assert url == URL
+        return snapshot
+
+    waiting, green = checks.from_view(view, approval=approval)
+    assert (waiting(URL), green(URL)) == expected
+
+
+def test_default_snapshot_probe_treats_passing_checks_as_finished():
+    from types import SimpleNamespace
+
+    waiting, green = checks.from_view(lambda url: SimpleNamespace(checks_pending=False, checks_passed=True))
+    assert waiting(URL) is False
+    assert green(URL) is True

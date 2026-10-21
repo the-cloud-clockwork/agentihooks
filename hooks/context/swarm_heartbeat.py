@@ -40,12 +40,15 @@ def heard(prompt, environ=None, redis=None, now_ms=None):
     """Record a prompt the operator sent, so the inbox wake pass leaves the pane alone for its quiet window."""
     env = os.environ if environ is None else environ
     slug, name = env.get("AGENTIHOOKS_SWARM"), env.get("AGENTIHOOKS_AGENT_NAME")
-    if not (slug and name) or not is_operator_prompt(prompt, slug):
+    if not (slug and name):
         return False
     if redis is None:
         from scripts.swarm.store import redis_client
 
         redis = redis_client(env)
+    idle.begin_turn(redis, slug, name)
+    if not is_operator_prompt(prompt, slug):
+        return False
     idle.prompted(redis, slug, name, time.time_ns() // 1_000_000 if now_ms is None else now_ms)
     return True
 

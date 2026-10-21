@@ -1,13 +1,7 @@
 import copy
 
-import pytest
-
 from scripts.doctor import spawns
 from tests.doctor.recorded import load
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
-
 from tests.swarm.profile_fixture import validated
 
 

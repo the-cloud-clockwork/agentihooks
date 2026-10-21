@@ -71,7 +71,14 @@ def inspect(data):
 
 
 def write_file(path: Path, data: bytes) -> None:
-    with request_metrics.locked(core.LOCK):
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
+    with (
+        request_metrics.locked(core.LOCK),
+        media_mutation(path.parent.parent, path.parent.name.removesuffix(".media")) as writable,
+    ):
+        if not writable:
+            raise Refused(409, "ledger moved to hosted service")
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             tmp = path.with_suffix(".part")
@@ -131,14 +138,23 @@ def attach_paths(slug: str, doc: dict, events: list[dict]) -> None:
 
 
 def purge(slug):
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
     if not isinstance(slug, str) or not core.SLUG_RE.match(slug):
         raise ValueError(f"refusing to purge media for {slug!r}: not a ledger slug")
-    shutil.rmtree(folder(slug), ignore_errors=True)
+    with media_mutation(core.LEDGER_DIR, slug) as writable:
+        if writable:
+            shutil.rmtree(folder(slug), ignore_errors=True)
 
 
 def sweep(slug: str, used: set[str], now: int) -> None:
+    from scripts.swarm_ledger.storage_migration.hosted import media_mutation
+
     # Uploads and their entry writes arrive in separate requests.
     cutoff = now / 1000 - 3600
-    for path in folder(slug).glob("*"):
-        if path.is_file() and path.name not in used and path.stat().st_mtime < cutoff:
-            path.unlink()
+    with media_mutation(core.LEDGER_DIR, slug) as writable:
+        if not writable:
+            return
+        for path in folder(slug).glob("*"):
+            if path.is_file() and path.name not in used and path.stat().st_mtime < cutoff:
+                path.unlink()

@@ -21,7 +21,7 @@ from scripts.swarm_v2.registry import CLOSED, LIVE, FleetRegistry, Scope, Sessio
 from scripts.swarm_v2.runtime.base import Capability, Outcome, Placement, RuntimeRouter, SpawnRequest, Status
 from scripts.swarm_v2.runtime.routed import routed
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SLUG = "fixture"
 ACCOUNT = "fixture"
@@ -988,7 +988,27 @@ def test_a_launch_whose_model_answer_turned_front_end_is_refused_before_admissio
 
 
 def test_the_worker_image_profiles_are_the_default_and_every_package_role():
-    assert launch_module.worker_profiles() == {"default", "cicd", "dispatcher", "engineer", "master", "planner", "qa"}
+    assert launch_module.worker_profiles() == {
+        "default",
+        "cicd",
+        "dispatcher",
+        "documentation",
+        "engineer",
+        "master",
+        "planner",
+        "qa",
+    }
+
+
+def test_the_worker_image_profiles_read_the_package_roles_folder_patched_after_import(tmp_path, monkeypatch):
+    from hooks.context import profile_chain
+
+    for role in ("solo", "_hidden"):
+        (tmp_path / role).mkdir()
+    (tmp_path / "file").write_text("")
+    monkeypatch.setattr(profile_chain, "PACKAGE_ROLES", tmp_path)
+
+    assert launch_module.worker_profiles() == {"default", "solo"}
 
 
 @pytest.mark.parametrize("profile", ["frontend", "engineer", "anton-base"])

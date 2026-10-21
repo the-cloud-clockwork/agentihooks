@@ -50,4 +50,37 @@ def test_env_example_selects_compose_deployment():
 
 def test_swarm_smoke_runs_the_compose_hive_proof():
     jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
-    assert any("compose-hive-smoke.sh" in step.get("run", "") for step in jobs["compose-hive"]["steps"])
+    assert any("compose-hive-smoke.sh" in step.get("run", "") for job in jobs.values() for step in job["steps"])
+
+
+def test_hive_join_retries_the_redis_mirror_pull_before_starting_redis():
+    jobs = yaml.safe_load((ROOT / ".github/workflows/swarm-smoke.yml").read_text())["jobs"]
+    assert any("hive-join-smoke.sh" in step.get("run", "") for job in jobs.values() for step in job["steps"])
+    script = (ROOT / "scripts/packaging/hive-join-smoke.sh").read_text()
+    pull = "bash scripts/packaging/pull-runtime-image.sh mirror.gcr.io/library/redis:7-alpine\n"
+    start = 'docker run --pull never -d --name "$run-redis"'
+    retry = (ROOT / "scripts/packaging/pull-runtime-image.sh").read_text()
+    assert "attempts=3" in retry
+    assert 'for attempt in $(seq "$attempts"); do' in retry
+    assert 'if acquire "$@"; then' in retry
+    assert 'if (( attempt == attempts )); then\n    exit "$status"\n  fi' in retry
+    assert "sleep 10" in retry
+    assert script.index(pull) < script.index(start)
+
+
+def test_swarm_init_ships_the_repository_stack_byte_for_byte():
+    bundled = ROOT / "scripts/swarm/stack"
+    shipped = sorted(str(path.relative_to(bundled)) for path in bundled.rglob("*") if path.is_file())
+    assert shipped == [
+        "compose.yaml",
+        "deploy/compose/adopt.yaml",
+        "deploy/compose/redis/healthcheck.sh",
+        "deploy/compose/redis/start.sh",
+        "deploy/compose/redis/users.acl.template",
+    ]
+    for name in shipped:
+        assert (bundled / name).read_bytes() == (ROOT / name).read_bytes(), name
+    check = (ROOT / "deploy/compose/redis/healthcheck.sh").read_text()
+    assert 'REDISCLI_AUTH="$SWARM_REDIS_PASSWORD" redis-cli' in check and "--pass" not in check
+    for service in ("swarm", "controller", "hive"):
+        assert SERVICES[service]["image"] == "ghcr.io/the-cloud-clockwork/agentihooks-swarm:${SWARM_IMAGE_TAG:-dev}"

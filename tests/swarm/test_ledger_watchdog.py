@@ -1,3 +1,4 @@
+import json
 import os
 import signal
 import subprocess
@@ -13,10 +14,9 @@ from scripts.swarm_ledger import server_code
 from tests.swarm.test_ledger_probe import Clock, ProbedLedger
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 PID = 4242
 PYTHON = "/venv/bin/python3"
+REASON = "its code changed on disk"
 
 
 @pytest.fixture
@@ -177,7 +177,7 @@ def test_an_unreadable_code_tree_skips_the_pass(tmp_path, monkeypatch):
 def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_script(tmp_path):
     host = Host(tmp_path)
     plant(host.proc, host.argv)
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == ""
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
         ("run", [*host.argv[:2], "--ensure"], str(host.folder), 210, False, True),
@@ -187,7 +187,7 @@ def test_a_restart_stops_the_server_by_its_own_pid_and_starts_it_from_its_own_sc
 def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
     host = Host(tmp_path, survives=True)
     plant(host.proc, host.argv)
-    ledger_watchdog.restart(host, PID, host.argv[:2])
+    ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
     assert host.calls == [
         ("kill", PID, signal.SIGTERM),
         *[("sleep", 0.1)] * 100,
@@ -196,11 +196,55 @@ def test_a_server_that_ignores_the_stop_is_killed_after_ten_seconds(tmp_path):
     ]
 
 
+def watchdog_log(host):
+    return [json.loads(line) for line in (host.folder / ledger_watchdog.LOG).read_text().splitlines()]
+
+
+def test_every_signal_a_restart_sends_leaves_a_record_of_its_reason_target_and_caller(tmp_path, monkeypatch):
+    host = Host(tmp_path, survives=True)
+    plant(host.proc, host.argv)
+    monkeypatch.setattr(ledger_watchdog.time, "time", lambda: 1_792_000_000.5)
+    monkeypatch.setattr(ledger_watchdog.sys, "argv", ["agentihooks", "swarm", "tick"])
+    kill = host.kill
+
+    def recorded_first(pid, sig):
+        assert watchdog_log(host)[-1]["signal"] == signal.Signals(sig).name
+        kill(pid, sig)
+
+    host.kill = recorded_first
+    ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+    caller = {"pid": os.getpid(), "argv": ["agentihooks", "swarm", "tick"]}
+    assert watchdog_log(host) == [
+        {"at": 1_792_000_000.5, "reason": REASON, "signal": "SIGTERM", "pid": PID, "caller": caller},
+        {"at": 1_792_000_000.5, "reason": REASON, "signal": "SIGKILL", "pid": PID, "caller": caller},
+    ]
+    assert ledger_watchdog.LOG == ".watchdog.log"
+
+
+def test_a_restart_whose_record_cannot_be_written_sends_no_signal_and_reports_why(tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ledger_watchdog.LOG).mkdir()
+    error = ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+    assert error.startswith("[Errno 21] Is a directory")
+    assert host.calls == []
+
+
+def test_a_watched_restart_records_why_it_stopped_the_server(store, tmp_path):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host)
+    assert [(entry["reason"], entry["signal"], entry["pid"]) for entry in watchdog_log(host)] == [
+        (REASON, "SIGTERM", PID)
+    ]
+
+
 def test_a_pid_taken_by_another_program_during_the_stop_is_never_killed(tmp_path):
     host = Host(tmp_path, survives=True)
     plant(host.proc, host.argv)
     host.sleep = lambda seconds: plant(host.proc, ["python3", "-m", "http.server"])
-    ledger_watchdog.restart(host, PID, host.argv[:2])
+    ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
     assert [call for call in host.calls if call[0] == "kill"] == [("kill", PID, signal.SIGTERM)]
 
 
@@ -211,7 +255,7 @@ def test_a_server_gone_before_the_stop_is_still_started(tmp_path):
         raise ProcessLookupError
 
     host.kill = gone
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == ""
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == ""
     assert [call[0] for call in host.calls] == ["run"]
 
 
@@ -224,7 +268,7 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
         raise PermissionError(1, "Operation not permitted")
 
     host.kill = refused
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "[Errno 1] Operation not permitted"
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "[Errno 1] Operation not permitted"
     assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == [
         "the ledger server needed a restart because its code changed on disk, and the restart failed: "
         "[Errno 1] Operation not permitted"
@@ -243,19 +287,35 @@ def test_a_server_the_tick_may_not_signal_is_reported_and_never_started_again(st
     assert len(master_mail(store)) == 0
 
 
+def test_a_tick_on_a_hosted_ledger_never_restarts_a_local_server(store, tmp_path, monkeypatch):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv)
+    (host.folder / ".server.pid").write_text(str(PID))
+    monkeypatch.setenv("SWARM_URL", "https://swarm.example")
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == []
+    assert host.calls == []
+    monkeypatch.delenv("SWARM_URL")
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), host) == [
+        "restarted the ledger server on new code; three writes took 0.0 seconds, 0.0 seconds and 0.0 seconds"
+    ]
+
+
 def test_a_start_that_fails_or_hangs_returns_its_error(tmp_path):
     host = Host(tmp_path, code=1, stderr="ledger server did not answer on http://127.0.0.1:8765\n")
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "ledger server did not answer on http://127.0.0.1:8765"
+    assert (
+        ledger_watchdog.restart(host, PID, host.argv[:2], REASON)
+        == "ledger server did not answer on http://127.0.0.1:8765"
+    )
     host.code, host.stderr = 3, ""
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "exit code 3"
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "exit code 3"
     host.code, host.stderr = 1, "a" + "x" * 250
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == "x" * 200
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == "x" * 200
 
     def hung(argv, **kw):
         raise subprocess.TimeoutExpired(argv, 30)
 
     host.run = hung
-    assert ledger_watchdog.restart(host, PID, host.argv[:2]) == (
+    assert ledger_watchdog.restart(host, PID, host.argv[:2], REASON) == (
         f"Command '{[*host.argv[:2], '--ensure']}' timed out after 30 seconds"
     )
 
@@ -359,7 +419,13 @@ def test_a_server_that_does_not_start_again_alerts_the_master(store, tmp_path):
     for _ in range(2):
         ledger_probe.observe(store, "sw", ledger, FakeRuntime(), 1000, clock=ledger.clock, facts=lambda: {})
     assert master_mail(store) == [
-        "The ledger server needed a restart because its code changed on disk, and the restart failed: port 8765 busy."
+        "The ledger probe failed: sw pass 1: read 0.1 seconds and write 0.1 seconds, restart failed, "
+        "CPU unknown over pass, streaks before/after slow 0/1, fast 0/0. "
+        "sw pass 2: read 0.1 seconds and write 0.1 seconds, restart failed, "
+        "CPU unknown over pass, streaks before/after slow 1/2, fast 0/0. "
+        "Server start time unknown. Newest on dev unknown. "
+        "The ledger server needed a restart because its code changed on disk, and the restart failed: port 8765 busy. "
+        "Idle and stale claim checks and nudges pause until recovery below four seconds."
     ]
 
 
@@ -458,6 +524,54 @@ def test_the_default_host_reads_the_ledger_folder_from_the_environment(monkeypat
     assert (host.folder, host.proc) == (tmp_path, ledger_watchdog.PROC)
     assert (host.kill, host.run, host.sleep) == (os.kill, subprocess.run, ledger_watchdog.time.sleep)
     assert host.clock is ledger_watchdog.time.monotonic
+
+
+@pytest.mark.parametrize(("state", "binned"), [("stopped", False), ("running", True)])
+def test_a_retired_proof_never_stops_the_shared_server(store, tmp_path, monkeypatch, state, binned):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv, threads=400)
+    current(host, tmp_path)
+    store.update("sw", state=state)
+    ledger = ProbedLedger(Clock())
+    ledger.bin = {"sw"} if binned else set()
+    monkeypatch.setattr(ledger_watchdog, "default_host", lambda: host)
+
+    assert ledger_watchdog.watch(store, "sw", ledger, FakeRuntime()) == []
+    assert host.calls == []
+    assert (host.proc / str(PID)).is_dir()
+    assert store.redis.get(ledger_watchdog.LOCK_KEY) is None
+
+
+def test_a_scratch_proof_never_uses_the_implicit_shared_host(store, tmp_path, monkeypatch):
+    host = Host(tmp_path)
+    plant(host.proc, host.argv, threads=400)
+    current(host, tmp_path)
+    store.update("sw", scratch=True)
+    monkeypatch.setattr(ledger_watchdog, "default_host", lambda: host)
+
+    assert ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime()) == []
+    assert host.calls == []
+    assert (host.proc / str(PID)).is_dir()
+    assert store.redis.get(ledger_watchdog.LOCK_KEY) is None
+
+
+def test_a_scratch_watchdog_stops_only_its_explicit_server(store, tmp_path, monkeypatch):
+    shared_root, scratch_root = tmp_path / "shared", tmp_path / "scratch"
+    shared_root.mkdir()
+    scratch_root.mkdir()
+    shared = Host(shared_root)
+    scratch = Host(scratch_root)
+    for host, root in ((shared, shared_root), (scratch, scratch_root)):
+        plant(host.proc, host.argv, threads=400)
+        current(host, root)
+    store.update("sw", scratch=True)
+    monkeypatch.setattr(ledger_watchdog, "default_host", lambda: shared)
+
+    actions = ledger_watchdog.watch(store, "sw", ProbedLedger(Clock()), FakeRuntime(), scratch)
+
+    assert actions and scratch.calls[0] == ("kill", PID, signal.SIGTERM)
+    assert scratch.calls[-1][0] == "run" and scratch.calls[-1][2] == str(scratch.folder)
+    assert shared.calls == [] and (shared.proc / str(PID)).is_dir()
 
 
 def test_the_tick_runs_the_watchdog_before_the_ledger_probe(monkeypatch, store):

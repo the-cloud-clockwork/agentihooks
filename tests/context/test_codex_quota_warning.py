@@ -52,7 +52,7 @@ def test_a_codex_session_reads_its_windows_from_its_own_rollout(codex):
     now = time.time()
     _rollout(codex, PEER, 99.0, 99.0, int(now + 60), int(now + 60))
     _rollout(codex, SID, 40.0, 91.0, int(now + 3600), int(now + 86400))
-    assert qp._session_windows(SID) == (40.0, 91.0, int(now + 3600), int(now + 86400))
+    assert qp._session_windows(SID) == (0.0, 91.0, None, int(now + 86400))
     assert qp._session_windows("019a0000-0000-7000-8000-00000000000f") is None
 
 
@@ -65,18 +65,19 @@ def test_a_stale_codex_reading_is_no_reading(codex):
 def test_a_passed_codex_reset_counts_as_an_empty_window(codex):
     now = time.time()
     _rollout(codex, SID, 97.0, 91.0, int(now - 1), int(now + 86400))
-    assert qp._session_windows(SID) == (0.0, 91.0, int(now - 1), int(now + 86400))
+    assert qp._session_windows(SID) == (0.0, 91.0, None, int(now + 86400))
 
 
 def test_controlled_crossings_give_exactly_one_warning_each_and_a_reset_rearms_it(codex):
     now = time.time()
-    five_reset, week_reset, next_five = int(now + 3600), int(now + 5 * 86400), int(now + 7200)
+    five_reset, week_reset, next_week = int(now + 3600), int(now + 5 * 86400), int(now + 6 * 86400)
 
-    def warn(five, week, five_at=five_reset):
-        _rollout(codex, SID, five, week, five_at, week_reset)
+    def warn(five, week, week_at=week_reset):
+        _rollout(codex, SID, five, week, five_reset, week_at)
         return qp.early_warning(SID)
 
     assert warn(94.0, 89.0) is None
+    assert warn(100.0, 89.0) is None
     week = warn(10.0, 90.0)
     assert week == (
         f"QUOTA WARNING — Codex account alpha has 10% of its 7-day quota left (90% used); it resets "
@@ -85,23 +86,20 @@ def test_controlled_crossings_give_exactly_one_warning_each_and_a_reset_rearms_i
     )
     assert _clock(week_reset) in week
     assert warn(10.0, 93.0) is None
-    five = warn(95.0, 93.0)
-    assert "Codex account alpha has 5% of its 5-hour quota left (95% used)" in five
-    assert _clock(five_reset) in five and "at 99% used" in five
-    assert warn(97.0, 94.0) is None
-    assert warn(20.0, 94.0, next_five) is None
-    rearmed = warn(96.0, 94.0, next_five)
-    assert "4% of its 5-hour quota left" in rearmed and _clock(next_five) in rearmed
-    assert warn(98.0, 94.0, next_five) is None
+    assert warn(95.0, 93.0) is None
+    assert warn(20.0, 89.0, next_week) is None
+    rearmed = warn(96.0, 94.0, next_week)
+    assert "6% of its 7-day quota left" in rearmed and _clock(next_week) in rearmed
+    assert warn(100.0, 94.0, next_week) is None
 
 
-def test_both_windows_crossing_at_once_warn_together_once(codex):
+def test_both_windows_crossing_at_once_warns_only_for_the_week(codex):
     now = time.time()
     _rollout(codex, SID, 95.0, 90.0, int(now + 3600), int(now + 86400))
     text = qp.early_warning(SID)
-    week, five = text.split("\n")
-    assert week.startswith("QUOTA WARNING — Codex account alpha has 10% of its 7-day quota left")
-    assert five.startswith("QUOTA WARNING — Codex account alpha has 5% of its 5-hour quota left")
+    assert text.startswith("QUOTA WARNING — Codex account alpha has 10% of its 7-day quota left")
+    assert "5-hour" not in text
+    assert "\n" not in text
     assert qp.early_warning(SID) is None
 
 
@@ -239,7 +237,7 @@ def test_a_reading_exactly_at_the_stale_limit_still_counts(codex, monkeypatch):
     now = 1_791_700_000
     monkeypatch.setattr(qp.time, "time", lambda: now)
     _rollout(codex, SID, 40.0, 91.0, now + 3600, now + 86400, observed=now - qp.QUOTA_USAGE_STALE_SEC)
-    assert qp._session_windows(SID) == (40.0, 91.0, now + 3600, now + 86400)
+    assert qp._session_windows(SID) == (0.0, 91.0, None, now + 86400)
 
 
 def test_a_weekly_only_reading_has_an_empty_five_hour_window_and_passed_resets_empty_both(codex):
@@ -247,7 +245,7 @@ def test_a_weekly_only_reading_has_an_empty_five_hour_window_and_passed_resets_e
     _rollout(codex, SID, None, 91.0, None, int(now + 86400))
     assert qp._session_windows(SID) == (0.0, 91.0, None, int(now + 86400))
     _rollout(codex, SID, 97.0, 91.0, int(now - 1), int(now - 1))
-    assert qp._session_windows(SID) == (0.0, 0.0, int(now - 1), int(now - 1))
+    assert qp._session_windows(SID) == (0.0, 0.0, None, int(now - 1))
 
 
 def test_codex_candidates_cover_idle_accounts_and_passed_resets_and_the_default_login_only_without_tokens(
@@ -263,7 +261,7 @@ def test_codex_candidates_cover_idle_accounts_and_passed_resets_and_the_default_
     monkeypatch.setattr("scripts.codex_router._registry", lambda: owners)
     monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {"beta": 2})
     rows = {c.account: (c.five_used, c.week_used, c.sessions) for c in qp._codex_accounts()}
-    assert rows == {"gamma": (0.0, 0.0, 0), "beta": (40.0, 50.0, 2)}
+    assert rows == {"gamma": (0.0, 0.0, 0), "beta": (0.0, 50.0, 2)}
     monkeypatch.delenv("AH_CX_TOKEN_gamma")
     monkeypatch.delenv("AH_CX_TOKEN_beta")
     monkeypatch.setattr("hooks.context.account_sessions.codex_sessions_by_account", lambda: {})
@@ -302,7 +300,7 @@ def test_posttool_context_follows_the_policy_switch_and_the_wait_tools(monkeypat
     monkeypatch.setattr(qp, "handed_off_block", lambda session: None)
     monkeypatch.setattr(qp, "early_warning", lambda session: "early")
     assert qp.posttool_context(SID, "CronCreate", "/repo").startswith("QUOTA WAIT")
-    assert qp.posttool_context(SID, "Bash", "/repo") == "early"
+    assert qp.posttool_context(SID, "Bash", "/repo").startswith("QUOTA WAIT")
     monkeypatch.setattr(qp, "QUOTA_POLICY_ENABLED", False)
     assert qp.posttool_context(SID, "CronCreate", "/repo") is None
 

@@ -1,10 +1,11 @@
 import json
 import subprocess
 from types import SimpleNamespace
+from unittest.mock import ANY
 
 import pytest
 
-from hooks.classifier import ClassifierUnavailable, YesNo
+from hooks.classifier import ClassifierUnavailable, YesNo, definitions
 from scripts.gates import Call, Gate, Who, entry, intent, intent_history
 from scripts.gates.verdicts import Verdicts
 from scripts.swarm import timing
@@ -45,6 +46,75 @@ def verdicts(tmp_path):
 def rows(tmp_path):
     path = tmp_path / SLUG / "gates" / "log.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines()] if path.exists() else []
+
+
+@pytest.mark.parametrize(
+    "mode, verdict, head, allowed",
+    [
+        ("enforce", "fail", "abc", False),
+        ("coach", "fail", "abc", True),
+        ("observe", "fail", "abc", True),
+        ("off", "fail", "abc", True),
+        ("enforce", "pending", "abc", True),
+        ("enforce", "fail", "old", True),
+        ("enforce", "pass", "abc", True),
+        ("enforce", None, "abc", True),
+    ],
+)
+def test_queue_uses_only_a_judged_current_head_verdict(tmp_path, monkeypatch, mode, verdict, head, allowed):
+    state = verdicts(tmp_path)
+    if verdict:
+        state.write(TASK, verdict, "missing required behavior", NOW, url=URL, head=head)
+    reads = []
+    monkeypatch.setattr(intent, "pr_head", lambda url: reads.append(url) or "abc")
+    monkeypatch.setattr(intent, "pr_merged", lambda url: False)
+    decision = intent.IntentGate(clock=lambda: NOW / 1000).decide(
+        bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, state, mode
+    )
+    assert decision.allowed is allowed
+    assert reads == ([URL] if verdict == "fail" and mode != "off" else [])
+    if verdict == "fail" and head == "abc" and mode in ("enforce", "coach"):
+        assert decision.reason.startswith(f"intent check failed for task {TASK}: missing required behavior.")
+        assert decision.reason.endswith(f"then run agentihooks swarm {SLUG} pr <url> for a new check.")
+    if mode in ("observe", "off"):
+        assert decision.reason == ""
+    if mode in ("coach", "observe"):
+        [row] = rows(tmp_path)
+        assert (row["gate"], row["kind"], row["agent"], row["task"], row["tool"], row["reason"]) == (
+            "intent",
+            mode,
+            ME,
+            TASK,
+            "Bash",
+            f"intent check failed for task {TASK}: missing required behavior. "
+            "Fix steps: Deliver the missing parent intent behavior identified in the verdict, "
+            "add evidence that the phase can use it as delivered, commit and push the fix, "
+            f"then run agentihooks swarm {SLUG} pr <url> for a new check.",
+        )
+
+
+def test_queue_admission_does_not_skip_another_gated_command(tmp_path):
+    state = verdicts(tmp_path)
+    state.write(TASK, "pending", intent.RUNNING, NOW)
+    command = f"agentihooks swarm {SLUG} merge queue {URL}; gh pr merge 9"
+    decision = intent.IntentGate(clock=lambda: NOW / 1000).decide(bash(command), WHO, state)
+    assert not decision.allowed
+    assert "intent check running" in decision.reason
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {},
+        {"url": "https://github.com/o/r/pull/10", "head": "abc"},
+        {"url": URL},
+    ],
+)
+def test_queue_does_not_lookup_an_unjudged_target(tmp_path, monkeypatch, fields):
+    state = verdicts(tmp_path)
+    state.write(TASK, "fail", "old result", NOW, **fields)
+    monkeypatch.setattr(intent, "pr_head", lambda url: pytest.fail("the target has no judgment"))
+    assert intent.IntentGate().decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, state).allowed
 
 
 def answer(noul):
@@ -102,7 +172,6 @@ class TestGate:
             "cd x && /usr/bin/gh pr merge --rebase 9",
             f"agentihooks swarm {SLUG} done --pr {URL}",
             f"env A=1 agentihooks swarm {SLUG} done",
-            f"agentihooks swarm {SLUG} merge queue {URL}",
             f"agentihooks swarm {SLUG} ready handoff.md",
         ],
     )
@@ -183,9 +252,7 @@ class TestGate:
         )
         assert row["reason"] == "intent check still pending after two minutes, passed unchecked"
 
-    @pytest.mark.parametrize(
-        "command", [f"agentihooks swarm {SLUG} merge queue {URL}", f"agentihooks swarm {SLUG} done --pr {URL}"]
-    )
+    @pytest.mark.parametrize("command", [f"gh pr merge {URL}", f"agentihooks swarm {SLUG} done --pr {URL}"])
     def test_a_draft_record_on_a_ready_pull_request_refuses_as_running(self, tmp_path, command):
         verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
         ran = Ran((0, "false\n"))
@@ -205,7 +272,7 @@ class TestGate:
     def test_a_draft_record_stays_draft_while_github_reads_draft_or_fails(self, tmp_path, result):
         verdicts(tmp_path).write(TASK, "pending", intent.DRAFT, NOW - 60_000, phase="p8")
         gate = intent.IntentGate(clock=lambda: NOW / 1000, run=Ran(result))
-        decision = gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, verdicts(tmp_path))
+        decision = gate.decide(bash("gh pr merge 9"), WHO, verdicts(tmp_path))
         assert decision.reason.startswith(f"intent for task {TASK} is judged once its pull request is ready")
         assert verdicts(tmp_path).read(TASK)["reason"] == intent.DRAFT
 
@@ -225,7 +292,7 @@ class TestGate:
             return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
 
         gate = intent.IntentGate(clock=lambda: NOW / 1000, run=judged)
-        assert gate.decide(bash(f"agentihooks swarm {SLUG} merge queue {URL}"), WHO, verdicts(tmp_path)).allowed
+        assert gate.decide(bash(f"gh pr merge {URL}"), WHO, verdicts(tmp_path)).allowed
         assert verdicts(tmp_path).read(TASK) == {"verdict": "pass", "reason": "fine", "at": NOW - 1, "phase": "p8"}
 
     def test_a_verdict_landing_during_the_draft_read_is_decided_in_the_same_mode(self, tmp_path):
@@ -236,7 +303,7 @@ class TestGate:
             return subprocess.CompletedProcess(args, 0, stdout="false\n", stderr="")
 
         gate = intent.IntentGate(clock=lambda: NOW / 1000, run=failed)
-        command = bash(f"agentihooks swarm {SLUG} merge queue {URL}")
+        command = bash(f"gh pr merge {URL}")
         assert gate.decide(command, WHO, verdicts(tmp_path), "coach").allowed
 
 
@@ -327,7 +394,7 @@ class TestStamp:
 
 
 class TestJudge:
-    def test_judge_asks_four_yes_no_questions_under_its_purpose(self):
+    def test_judge_asks_five_yes_no_questions_under_its_purpose(self):
         seen = []
         assert intent.judge({"s": 1}, decide=classifier(0.8, seen=seen)) == (
             "pass",
@@ -335,7 +402,7 @@ class TestJudge:
         )
         [(state, questions, purpose)] = seen
         assert (state, purpose) == ({"s": 1}, "intent-check")
-        assert list(questions) == ["usable", "delivers", "reachable", "weakens"]
+        assert list(questions) == ["usable", "aligned", "delivers", "reachable", "weakens"]
         assert all(isinstance(q, YesNo) for q in questions.values())
 
     def test_a_usable_change_that_weakens_the_phase_fails_with_that_reason(self):
@@ -504,6 +571,7 @@ class TestCheckPass:
             "at": NOW,
             "phase": "p8",
             "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
+            "persisted_at": ANY,
         }
         assert got.viewed == [URL]
         assert got.ledger.updates == [(SLUG, TASK, {"state": "claimed"}, "swarm")]
@@ -573,6 +641,7 @@ class TestCheckPass:
             "at": NOW,
             "phase": "p8",
             "inputs": intent._fingerprint(DOC, DOC["tasks"][0]),
+            "persisted_at": ANY,
         }
         assert (got.ledger.updates, got.mail.sent, rows(tmp_path)) == ([], [], [])
         assert got.actions == [f"task {TASK} intent check pass"]
@@ -730,7 +799,7 @@ class TestModeOf:
 
 PLAN = "".join(f"line {n}\n" for n in range(1, 41))
 CHUNK_STATE = {"task_text": "", "plan_lines": "15-17", "plan_chunk": "line 15\n\nline 17\n"}
-BASE_QUESTIONS = ["usable", "delivers", "reachable", "weakens"]
+BASE_QUESTIONS = ["usable", "aligned", "delivers", "reachable", "weakens"]
 CHUNK_QUESTIONS = [*BASE_QUESTIONS, "underdelivers", "overdelivers", "misses_line_15", "misses_line_17"]
 
 
@@ -763,6 +832,10 @@ def planned(tmp_path, monkeypatch):
 class TestPlanChunk:
     def test_the_state_carries_the_exact_plan_chunk_without_margin(self, planned):
         state = intent.state_of(planned, planned["tasks"][0], PR)
+        assert (state["plan_lines"], state["plan_chunk"]) == ("15-17", "line 15\nline 16\nline 17\n")
+
+    def test_the_plan_state_carries_the_exact_plan_chunk_without_margin(self, planned):
+        state = intent.plan_state(planned, planned["tasks"][0], [])
         assert (state["plan_lines"], state["plan_chunk"]) == ("15-17", "line 15\nline 16\nline 17\n")
 
     def test_a_task_without_plan_lines_carries_no_plan_fields(self, planned):
@@ -904,10 +977,11 @@ class TestPlanSource:
     def test_a_swarm_v2_package_slice_is_read_from_the_package_plan(self, monkeypatch):
         from scripts.swarm_ledger import plan_packages
 
-        monkeypatch.setattr(plan_packages, "text", lambda: PLAN)
+        monkeypatch.setattr(plan_packages, "text", lambda: PLAN.replace("line 15\n", "#### SV2-CTL-04 line 15\n"))
         issue = "https://github.com/o/r/issues/7"
         task = {**DOC["tasks"][0], "plan_lines": "15-17", "plan_slice": "SV2-CTL-04", "plan_url": issue}
-        assert intent.state_of({**DOC, "tasks": [task]}, task, PR)["plan_chunk"] == SLICE
+        chunk = intent.state_of({**DOC, "tasks": [task]}, task, PR)["plan_chunk"]
+        assert chunk == "#### SV2-CTL-04 line 15\nline 16\nline 17\n"
 
     def test_a_pass_cites_the_plan_lines_it_judged(self):
         assert intent.judge(CHUNK_STATE, decide=chunk_classifier()) == (
@@ -930,21 +1004,29 @@ TRACED = {
     ],
 }
 UNOPENED = {**DOC, "tasks": [{**{k: v for k, v in DOC["tasks"][0].items() if k != "pr_url"}, "state": "claimed"}]}
-PLANNED_REASON = "the phase can use it as delivered at probability 0.80"
-JUDGE = intent.judge
+PLANNED_REASON = "the plan serves the phase at probability 0.80 and covers the task at probability 0.90"
+JUDGE, JUDGED = intent.judge, intent.judged
 
 
-def planned_ask(seen, usable=0.8):
+def plan_classifier(aligned):
+    def decide(state, questions, purpose):
+        values = {"aligned": aligned, "covers": 0.9, "weakens": 0.1}
+        return SimpleNamespace(answers={key: answer(values[key]) for key in questions})
+
+    return decide
+
+
+def planned_ask(seen, aligned=0.8):
     def ask(state):
         seen.append(state)
-        return JUDGE(state, classifier(usable))
+        return JUDGED(state, plan_classifier(aligned))
 
     return ask
 
 
 @pytest.fixture
 def asks(monkeypatch):
-    return lambda answer: monkeypatch.setattr(intent, "judge", answer)
+    return lambda ask: monkeypatch.setattr(intent, "judged", lambda state: intent._answer(ask(state)))
 
 
 class TestPlanCheck:
@@ -954,17 +1036,22 @@ class TestPlanCheck:
         checked = intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "coach", NOW, home=tmp_path)
         assert checked == {"verdict": "pass", "reason": PLANNED_REASON}
         [state] = seen
-        assert state["pull_request_body"] == (
-            "- read the slice | scripts/gates/intent.py, docs | the judge needs it\n"
-            "- cite the lines | docs | the verdict names them\n"
-        )
-        assert state["changed_files"] == ["docs", "scripts/gates/intent.py"]
+        assert state["planned_pieces"] == [
+            "read the slice | scripts/gates/intent.py, docs | the judge needs it",
+            "cite the lines | docs | the verdict names them",
+        ]
+        assert state["planned_areas"] == ["docs", "scripts/gates/intent.py"]
         assert verdicts(tmp_path).read(TASK) == {
             "verdict": "pass",
             "reason": PLANNED_REASON,
             "at": NOW,
             "phase": "p8",
             "planned": "h1",
+            "stage": "plan",
+            "criterion": None,
+            "model": None,
+            "definition": "intent-check-plan",
+            "definition_digest": definitions.load(intent.PLAN).digest,
         }
         [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
         assert {k: record[k] for k in ("task", "agent", "at", "verdict", "reason", "purpose")} == {
@@ -1020,10 +1107,10 @@ class TestPlanCheck:
         [record] = [json.loads(line) for line in (tmp_path / SLUG / "gates" / "intent" / "history.jsonl").open()]
         assert record["agent"] == ""
 
-    def test_the_tick_still_judges_the_pull_request_after_a_planned_pass(self, tmp_path, asks):
+    def test_the_tick_still_judges_the_pull_request_after_a_planned_pass(self, tmp_path, asks, monkeypatch):
         asks(planned_ask([]))
         intent.plan_check(SLUG, UNOPENED, TASK, TRACED, "enforce", NOW, home=tmp_path)
-        asks(JUDGE)
+        monkeypatch.setattr(intent, "judged", JUDGED)
         got = run_pass(tmp_path, usable=0.1)
         assert got.viewed == [URL]
         assert "planned" not in verdicts(tmp_path).read(TASK)

@@ -8,7 +8,6 @@ from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_tick import FakeRuntime
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "phased"
 MASTER_SEAT = f"master@{SLUG}"
 

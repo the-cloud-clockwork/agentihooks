@@ -4,8 +4,6 @@ from scripts.swarm import store as swarm_store
 from scripts.swarm.store import RedisStore, SwarmConfig
 from scripts.swarm_ledger import ledger_freezes
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.fixture
 def swarms(monkeypatch):

@@ -15,7 +15,16 @@ READY = "steps.launch.outputs.ready != 'true'"
 HOSTED = READY + " && runner.environment == 'github-hosted'"
 
 
-def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=False, attempt_seconds=None):
+def _setup(
+    tmp_path,
+    monkeypatch,
+    *,
+    cached,
+    ready,
+    recovery=True,
+    stall_once=False,
+    attempt_seconds=None,
+):
     executable = tmp_path / "python"
     calls = tmp_path / "calls"
     marker = tmp_path / "ready"
@@ -24,6 +33,9 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
         marker.touch()
     if stall_once:
         stall.touch()
+    launch_stall = tmp_path / "launch_stall"
+    if os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "stall":
+        launch_stall.touch()
     executable.write_text(
         "#!/usr/bin/env bash\nset -euo pipefail\n"
         'if [[ "$*" == *"install --with-deps chromium"* ]]; then\n'
@@ -33,7 +45,9 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
         '  touch "$READY"\n'
         "else\n"
         '  echo launch >> "$CALLS"\n'
-        '  [[ -f "$READY" ]]\n'
+        '  [[ -f "$READY" ]] || exit 1\n'
+        '  if [[ -f "$LAUNCH_STALL" ]]; then rm "$LAUNCH_STALL"; sleep 30; fi\n'
+        '  [[ "$LAUNCH_FAILS" != true ]]\n'
         "fi\n"
     )
     executable.chmod(0o755)
@@ -45,6 +59,8 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
     monkeypatch.setenv("READY", str(marker))
     monkeypatch.setenv("STALL", str(stall))
     monkeypatch.setenv("RECOVERY", str(recovery).lower())
+    monkeypatch.setenv("LAUNCH_STALL", str(launch_stall))
+    monkeypatch.setenv("LAUNCH_FAILS", str(os.environ.get("BROWSER_CACHE_TEST_LAUNCH") == "fail").lower())
     monkeypatch.setenv("CACHE_HIT", str(cached).lower())
     monkeypatch.setenv("GITHUB_ACTION_PATH", str(ACTION))
     output = tmp_path / "output"
@@ -53,6 +69,8 @@ def _setup(tmp_path, monkeypatch, *, cached, ready, recovery=True, stall_once=Fa
     steps = action["runs"]["steps"]
     start = next(i for i, step in enumerate(steps) if step.get("id") == "launch")
     for step in steps[start:]:
+        if "run" not in step:
+            continue
         condition = step.get("if")
         assert condition in (None, READY, HOSTED)
         if condition and output.read_text().strip() == "ready=true":
@@ -97,12 +115,28 @@ def test_failed_browser_recovery_is_red_after_exactly_two_attempts(tmp_path, mon
     assert result.stdout.count("::warning title=Retried browser install::") == 1
 
 
+@pytest.mark.wall_clock
 def test_a_stalled_download_is_killed_at_its_attempt_timeout_and_retried_green(tmp_path, monkeypatch):
     started = time.monotonic()
     result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, stall_once=True, attempt_seconds=5)
     assert result.returncode == 0, result.stderr
     assert calls == ["mirror", "install", "install", "launch"]
     assert time.monotonic() - started < 20
+
+
+def test_a_stalled_installed_browser_launch_is_retried_green(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_CACHE_TEST_LAUNCH", "stall")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False, attempt_seconds=5)
+    assert result.returncode == 0, result.stderr
+    assert calls == ["mirror", "install", "launch", "install", "launch"]
+
+
+def test_failed_installed_browser_launch_is_red_after_two_attempts(tmp_path, monkeypatch):
+    monkeypatch.setenv("BROWSER_CACHE_TEST_LAUNCH", "fail")
+    result, calls = _setup(tmp_path, monkeypatch, cached=False, ready=False)
+    assert result.returncode != 0
+    assert calls == ["mirror", "install", "launch", "install", "launch"]
+    assert result.stdout.count("::warning title=Retried browser install::") == 1
 
 
 def _timeouts(run):
@@ -117,7 +151,8 @@ def _attempt_budget():
     attempt = int(install["env"]["ATTEMPT_SECONDS"])
     kill = int(
         re.search(
-            r"timeout --kill-after=(\d+)s \"\$\{ATTEMPT_SECONDS\}s\" python -m playwright install", install["run"]
+            r"timeout --kill-after=(\d+)s \"\$\{ATTEMPT_SECONDS\}s\" (?:python -m playwright install|bash)",
+            install["run"],
         ).group(1)
     )
     others = sum(_timeouts(step.get("run", "")) for step in steps if step is not install)
@@ -158,13 +193,27 @@ def test_every_browser_cache_caller_gives_its_step_both_attempts_and_names_that_
 
 def test_cache_uses_installed_playwright_version_and_absolute_browser_folder():
     action = yaml.safe_load((ACTION / "action.yml").read_text())
-    cache = next(step for step in action["runs"]["steps"] if step.get("uses") == "actions/cache@v4")
+    cache = next(step for step in action["runs"]["steps"] if step.get("uses") == "actions/cache/restore@v4")
     assert cache["with"]["path"] == "${{ github.workspace }}/.playwright"
     assert cache["with"]["key"] == ("chromium-${{ runner.os }}-${{ runner.arch }}-${{ steps.version.outputs.version }}")
     assert "restore-keys" not in cache["with"]
     stamp = next(step for step in action["runs"]["steps"] if step.get("id") == "version")
     assert "importlib.metadata" in stamp["run"]
     assert 'version("playwright")' in stamp["run"]
+
+
+def test_only_a_dev_push_saves_the_browser_after_installing_it():
+    steps = yaml.safe_load((ACTION / "action.yml").read_text())["runs"]["steps"]
+    uses = [step.get("uses") for step in steps if "uses" in step]
+    assert uses == ["actions/cache/restore@v4", "actions/cache/save@v4"]
+    restore = next(step for step in steps if step.get("uses") == "actions/cache/restore@v4")
+    save = next(step for step in steps if step.get("uses") == "actions/cache/save@v4")
+    assert steps.index(save) == len(steps) - 1
+    assert save["with"] == {"path": restore["with"]["path"], "key": "${{ steps.cache.outputs.cache-primary-key }}"}
+    assert save["if"] == (
+        "steps.launch.outputs.ready != 'true' && steps.cache.outputs.cache-hit != 'true'"
+        " && github.event_name == 'push' && github.ref == 'refs/heads/dev'"
+    )
 
 
 @pytest.mark.parametrize(

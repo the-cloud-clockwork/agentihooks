@@ -6,7 +6,6 @@ from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 VOID = {"meta", "input", "br", "img", "hr", "link", "path"}
 SECTIONS = {
     "Original sources": False,
@@ -71,7 +70,17 @@ def sections():
     return list(walk(body(), "section"))
 
 
-SWARM_PANELS = {"quota-fold", "overlays-fold", "agents-fold", "health-fold", "handoff-fold", "freeze-fold"}
+SWARM_PANELS = {
+    "quota-fold",
+    "hives-fold",
+    "overlays-fold",
+    "agents-fold",
+    "health-fold",
+    "handoff-fold",
+    "freeze-fold",
+    "architecture-fold",
+}
+DESIGN = Path(__file__).resolve().parents[2] / "DESIGN.md"
 
 
 def in_ledger_section(node):
@@ -107,6 +116,16 @@ class OnlyLedgerSectionsFold(unittest.TestCase):
             self.assertIn("fold", box.attrs.get("class", "").split(), name)
             self.assertIn("open", box.attrs, name)
             self.assertEqual(box.kids[0].tag, "summary", name)
+
+    def test_swarm_panels_follow_the_order_the_design_record_names(self):
+        line = next(row for row in DESIGN.read_text().splitlines() if row.startswith("- **Panels.**"))
+        names = line.split("in this order: ", 1)[1].split(".", 1)[0].split(", ")
+        heads = [
+            next(walk(node.kids[0], "h3")).text
+            for node in walk(body(), "details")
+            if node.attrs.get("id") in SWARM_PANELS
+        ]
+        self.assertEqual(heads, names)
 
     def test_nothing_outside_the_ledger_sections_and_swarm_panels_folds(self):
         stray = [
@@ -252,6 +271,8 @@ class El {
 const document = { createElement: (tag) => new El(tag) };
 const wired = [];
 function collapsible(box) { wired.push(box.attrs.id); }
+function closedLeft() { return 0; }
+function closedMore() { return null; }
 function shape(el) { return { tag: el.tag, attrs: el.attrs, text: el.textContent, kids: el.kids.map(shape) }; }
 """
 
@@ -280,7 +301,10 @@ class OutlineFolds(unittest.TestCase):
     def build(self):
         script = (
             FakeDom.SCRIPT
-            + "const PAGE_SIZE = 50; const shown = {}; const wanted = { id: null };"
+            + "const PAGE_SIZE = 50;"
+            + "const FULL_PAGE"
+            + page().split("  const FULL_PAGE", 1)[1].split("\n", 1)[0]
+            + "const shown = {}; const wanted = { id: null };"
             + "".join(
                 function_source(n) + "\n"
                 for n in (

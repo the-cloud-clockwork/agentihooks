@@ -44,7 +44,7 @@ def _environ(pid: int) -> dict[str, str]:
 def carries(process: Process, name: str) -> bool:
     named = {process.argv[i + 1] for i, word in enumerate(process.argv[:-1]) if word == "--name"}
     named.add(_environ(process.pid)[NAME_KEY])
-    return name in {naming.resolve_name(found) for found in named if found}
+    return naming.plain(name) in {naming.plain(naming.resolve_name(found)) for found in named if found}
 
 
 def _from(process: Process, homes: list[Path]) -> bool:

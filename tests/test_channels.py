@@ -281,7 +281,7 @@ class TestBrainAdapter:
             for callback in (resolve, record, context):
                 callback.assert_not_called()
         if enabled and session and project:
-            inject.assert_called_once_with(project, skip_compression=True)
+            inject.assert_called_once_with(project, skip_compression=True, kind="brain")
         else:
             inject.assert_not_called()
 

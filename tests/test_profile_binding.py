@@ -1,4 +1,5 @@
 import json
+import shutil
 from pathlib import Path
 
 import pytest
@@ -104,6 +105,93 @@ def test_running_session_validates_the_canary_a_later_render_delivered(tmp_path,
         binding.validate("0" * 24)
 
 
+def test_rehomed_request_validates_against_the_execution_copy(tmp_path, monkeypatch):
+    shared = tmp_path / "engineer" / "codex"
+    shared.mkdir(parents=True)
+    (shared / "AGENTS.md").write_text(binding.persona("Engineer instructions.\n"))
+    (shared.parent / "codex.sources.json").write_text("[]")
+    binding.write(shared, "engineer", "codex")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", shared)
+    launched = json.loads(report.read_text())["rendered"]
+    copy = tmp_path / "execution" / "codex"
+    shutil.copytree(shared, copy)
+    shutil.copyfile(shared.parent / "codex.sources.json", copy.parent / "codex.sources.json")
+    evidence = json.loads((copy / binding.FILE).read_text())
+    (copy / binding.FILE).write_text(json.dumps({**evidence, "home": str(copy.resolve())}) + "\n")
+    env = {"AGENTIHOOKS_PROFILE": "engineer", "CODEX_HOME": str(copy), binding.REPORT: str(report)}
+    monkeypatch.setattr(binding, "process", lambda: (123, "codex", env, "default"))
+
+    binding.rehome(report, copy)
+
+    rendered = json.loads(report.read_text())["rendered"]
+    assert rendered["home"] == str(copy.resolve())
+    assert rendered["canary"] == launched["canary"]
+    assert binding.validate(launched["canary"])["home"] == str(copy.resolve())
+
+
+@pytest.mark.parametrize(
+    ("persona", "stale", "reason"),
+    [
+        ("Other instructions.\n", False, "execution home canary differs from the launch request"),
+        ("Engineer instructions.\n", True, "profile mismatch in rendered binding"),
+    ],
+)
+def test_rehome_refuses_and_marks_an_invalid_execution_copy(tmp_path, persona, stale, reason):
+    shared = tmp_path / "shared" / "codex"
+    copy = tmp_path / "execution" / "codex"
+    for home, text in ((shared, "Engineer instructions.\n"), (copy, persona)):
+        home.mkdir(parents=True)
+        (home / "AGENTS.md").write_text(binding.persona(text))
+        (home.parent / "codex.sources.json").write_text("[]")
+        binding.write(home, "engineer", "codex")
+    if stale:
+        (copy / binding.FILE).write_text((shared / binding.FILE).read_text())
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", shared)
+    launched = json.loads(report.read_text())
+
+    with pytest.raises(ValueError, match=f"^{reason}$"):
+        binding.rehome(report, copy)
+    assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
+
+
+def _rendered(home, text, profile="engineer"):
+    home.mkdir(parents=True)
+    (home / "AGENTS.md").write_text(binding.persona(text))
+    (home.parent / "codex.sources.json").write_text("[]")
+    binding.write(home, profile, "codex")
+
+
+def test_a_shared_rehome_takes_the_execution_home_canary(tmp_path):
+    shared, launch = tmp_path / "shared" / "codex", tmp_path / "launch" / "codex"
+    _rendered(shared, "Live instructions.\n")
+    _rendered(launch, "Engineer instructions.\n")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", launch)
+    launched = json.loads(report.read_text())
+
+    binding.rehome(report, shared, shared=True)
+
+    rendered = binding.inspect(shared, "engineer", "codex")
+    assert rendered["canary"] != launched["rendered"]["canary"]
+    assert json.loads(report.read_text()) == {**launched, "rendered": rendered}
+
+
+def test_a_shared_rehome_still_refuses_a_home_of_another_profile(tmp_path):
+    shared, launch = tmp_path / "shared" / "codex", tmp_path / "launch" / "codex"
+    _rendered(shared, "Engineer instructions.\n", "master")
+    _rendered(launch, "Engineer instructions.\n")
+    report = tmp_path / "report.json"
+    binding.request(report, "engineer", "codex", launch)
+    launched = json.loads(report.read_text())
+
+    with pytest.raises(ValueError, match="^profile mismatch in rendered binding$"):
+        binding.rehome(report, shared, shared=True)
+    reason = "profile mismatch in rendered binding"
+    assert json.loads(report.read_text()) == {**launched, "state": "failed", "reason": reason}
+
+
 @pytest.mark.parametrize(
     ("source", "target", "message"),
     [
@@ -177,6 +265,8 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         str(tmp_path),
         "--route-timeout",
         "0.1",
+        "--canary-timeout",
+        "0.1",
     ]
     native = (
         ["--model", "configured-model", "--effort", "medium"]
@@ -206,7 +296,8 @@ def test_launch_success_requires_live_binding_canary(tmp_path, monkeypatch, caps
         reasons = {
             "wrong": "live harness profile mismatch with requested choice",
             "missing": f"missing profile home: {tmp_path / 'missing'}",
-            "absent": "mounted profile canary did not validate before timeout",
+            "absent": "mounted profile canary did not validate before timeout: "
+            f"the {target} agent reported no canary within 0.1s",
             "account": "live process account differs from requested route",
         }
         assert output.err == f"agentihooks init-agent: {reasons[control]}\n"
@@ -287,7 +378,13 @@ def test_swarm_refuses_a_started_process_without_validation(tmp_path):
     runtime = HerdrRuntime(home=tmp_path, run=run)
     config = SimpleNamespace(slug="proof", repo=str(tmp_path), autonomy="delegate", compact_limit=0)
     with pytest.raises(SpawnError, match="validation is missing"):
-        runtime._launch(config, "eng", "task", "worker", ["init-agent", "--agent", "codex", "--profile", "engineer"])
+        runtime._launch(
+            config,
+            "eng",
+            "task",
+            "worker",
+            ["init-agent", "--dir", "/repo", "--agent", "codex", "--profile", "engineer"],
+        )
     assert calls[-1][1:] == ["terminate-agent", "worker", "--force-shared"]
 
 

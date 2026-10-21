@@ -21,8 +21,6 @@ from tests.swarm.test_tick import FakeLedger
 from tests.swarm.test_tick import FakeRuntime as TickRuntime
 from tests.test_swarm_v2_runtime import REMOTE, herdr_runtime, local_fake, remote_fake, request
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ANTON = "boot-anton/pid:[4026531836]"
 WORKER = "boot-aws-worker/pid:[4026532001]"
 PID, STARTED = 4321, 777
@@ -228,6 +226,30 @@ def test_a_foreign_namespace_terminate_signals_nothing_and_counts_one_rejection(
     assert WORKER not in repr(outcome)
     assert (ended, calls) == ([], [])
     assert router.rejected == {(LOCAL, Unqualified.FOREIGN_NAMESPACE): 1}
+
+
+def test_a_record_this_host_launched_before_its_namespace_restarted_retires_without_signalling(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()})
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    router = RuntimeRouter([local])
+    assert router.terminate(agent, ("/scratch/t1",)) == Outcome(
+        "terminate", Status.OK, LOCAL, detail="its process namespace has ended"
+    )
+    assert (ended, calls) == ([], [])
+    assert router.rejected == {}
+
+
+def test_a_record_of_this_host_is_still_refused_when_the_local_namespace_is_unreadable(tmp_path, monkeypatch):
+    monkeypatch.setattr("scripts.swarm.commands.hive_id", lambda: "hive-a")
+    local, calls, ended = adapter(tmp_path, monkeypatch, {PID: proc()}, namespace="")
+    agent = record(namespace=WORKER)
+    agent = replace(agent, runtime_target={**agent.runtime_target, "host_id": "hive-a"})
+    assert RuntimeRouter([local]).terminate(agent) == Outcome(
+        "terminate", Status.REFUSED, LOCAL, Unqualified.NO_NAMESPACE, "local process namespace is unreadable"
+    )
+    assert (ended, calls) == ([], [])
 
 
 def test_a_legacy_local_record_keeps_the_recorded_launch_pid_path(tmp_path, monkeypatch):
@@ -458,6 +480,34 @@ def test_retire_process_hands_the_reaper_the_verified_start_time_and_legacy_reti
     assert seen == [(NAME, PID, ["/scratch/t1"], STARTED), (NAME, 55, [], 0)]
 
 
+@pytest.mark.parametrize(("owner", "closed"), [("engineer@a1b2c3-0009", False), (NAME, True), ("", True)])
+def test_retire_process_closes_the_recorded_pane_only_while_it_belongs_to_the_ended_worker(
+    tmp_path, monkeypatch, owner, closed
+):
+    pane = {"pane_id": "w1:p1", "name": owner, "agent_session": None}
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch, panes={"w1:p1": pane})
+    assert herdr.retire_process(AgentRecord(NAME, "eng", "t1", pane_id="w1:p1"), PID, (), STARTED) is True
+    assert (["pane", "close", "w1:p1"] in calls) is closed
+    assert herdr.refusal(AgentRecord(NAME, "eng", "t1")) == {"process": 0, "refusal": "unknown"}
+
+
+def test_retire_process_refuses_and_closes_nothing_when_herdr_cannot_name_the_pane_owner(tmp_path, monkeypatch):
+    herdr, calls = herdr_runtime(tmp_path, monkeypatch)
+    answer = herdr.herdr
+
+    def unavailable(args):
+        if args[:2] == ["agent", "get"]:
+            calls.append(args)
+            raise RuntimeError("herdr agent get: server unavailable")
+        return answer(args)
+
+    herdr.herdr = unavailable
+    agent = AgentRecord(NAME, "eng", "t1", pane_id="w1:p1")
+    assert herdr.retire_process(agent, PID, (), STARTED) is False
+    assert calls == [["agent", "get", "w1:p1"]]
+    assert herdr.refusal(agent) == {"process": PID, "refusal": "pane w1:p1: herdr agent get: server unavailable"}
+
+
 def test_each_unqualified_terminate_is_counted():
     router = RuntimeRouter([local_fake()])
     router.terminate(record(execution=""))
@@ -495,9 +545,9 @@ def test_the_reap_keeps_earlier_actions_when_a_remote_agent_turns_suspect(remote
     assert f"suspect {agent.name}: its runtime did not answer" in actions
 
 
-def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_swarm):
+def test_an_idle_remote_agent_is_retired_through_its_runtime_without_a_typed_nudge(remote_swarm):
     from scripts.gates import log
-    from scripts.swarm.tick import IDLE_KILL_TICKS, IDLE_NUDGE_TICKS
+    from scripts.swarm.tick import IDLE_KILL_TICKS
 
     store, ledger, agent = remote_swarm
     store.update("sw", state="paused")
@@ -505,8 +555,7 @@ def test_an_idle_remote_agent_is_nudged_then_retired_through_its_runtime(remote_
     runtime.statuses[agent.name] = "idle"
     for n in range(IDLE_KILL_TICKS):
         tick("sw", store, ledger, runtime, now_ms=2_000 + n)
-        if n + 1 == IDLE_NUDGE_TICKS:
-            assert runtime.nudged == [agent.name]
+    assert runtime.nudged == []
     assert [row["at"] for row in log.recent("sw")][:2] == [2_000, 2_001]
     assert agent.name in runtime.homes and ledger.rows["t1"]["state"] == "open"
 

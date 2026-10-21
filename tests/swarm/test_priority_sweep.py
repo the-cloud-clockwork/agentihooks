@@ -6,7 +6,6 @@ from scripts.swarm.ledger_events import PullRequest
 from scripts.swarm.store import RedisStore
 from tests.doctor.test_doctor_cli import FileLedger, core, new_ledger, state
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 SLUG = "prio-sweep"
 ASK = "Pick the port for the demo server."
 

@@ -21,7 +21,7 @@ def _run(number, created):
 
 
 def _jobs(mutation):
-    jobs = [{"name": "pull-request", "conclusion": "success"}]
+    jobs = [{"name": "plan", "conclusion": "success"}]
     return {"jobs": jobs + ([{"name": "mutation", "conclusion": mutation}] if mutation else [])}
 
 

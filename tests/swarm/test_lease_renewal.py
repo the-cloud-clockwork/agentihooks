@@ -8,7 +8,7 @@ from scripts.swarm.store import RedisStore, SwarmConfig, SwarmError
 from tests.swarm.test_cli import env, run  # noqa: F401
 from tests.swarm.test_delivery import FakeHerdr
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture
@@ -135,6 +135,40 @@ def test_a_tick_whose_lease_was_stolen_stops(store, clock):
     assert len(writes) == 1
     assert spawned == []
     assert lease.current(store, "sw") == stolen
+
+
+def test_a_tick_fences_each_ledger_write_with_the_lease_of_the_swarm_that_owns_it(store, clock):
+    for slug in ("sw", "peer", "idle"):
+        store.create(SwarmConfig(slug, ".", 1, 0))
+    peer = lease.acquire(store, "peer", "peer-hive")
+    store.redis.set(store.key("sw", "control-epoch"), peer.epoch + 4)
+    held = lease.acquire(store, "sw", "home")
+    seen = []
+    ledger = controller.FencedLedger(
+        store,
+        "sw",
+        held,
+        SimpleNamespace(
+            update_task=lambda *args, **kwargs: seen.append((args, kwargs, lease.EPOCH.get())),
+            read=lambda: seen.append(((), {}, lease.EPOCH.get())),
+        ),
+    )
+    ledger.update_task("sw", "t", {})
+    ledger.update_task(slug="sw", task_id="t", fields={})
+    ledger.update_task("peer", "t", {})
+    ledger.update_task(slug="peer", task_id="t", fields={})
+    ledger.update_task("idle", "t", {})
+    ledger.read()
+    assert seen == [
+        (("sw", "t", {}), {}, held.epoch),
+        ((), {"slug": "sw", "task_id": "t", "fields": {}}, held.epoch),
+        (("peer", "t", {}), {}, peer.epoch),
+        ((), {"slug": "peer", "task_id": "t", "fields": {}}, peer.epoch),
+        (("idle", "t", {}), {}, None),
+        ((), {}, held.epoch),
+    ]
+    assert held.epoch != peer.epoch
+    assert lease.EPOCH.get() is None
 
 
 def test_run_tick_slower_than_the_lease_finishes(env, clock, monkeypatch):  # noqa: F811
@@ -295,7 +329,7 @@ def test_the_controller_sleeps_one_configured_tick_between_passes(store, monkeyp
     monkeypatch.setattr(scripts.operator_env, "classifier", lambda environ: [])
     monkeypatch.setattr(controller, "connect", lambda: store)
     monkeypatch.setattr(controller, "run_once", lambda saved: {})
-    monkeypatch.setattr(controller.time, "sleep", sleep)
+    monkeypatch.setattr(controller, "scheduled_wait", sleep)
     assert controller.main(["run"]) == 1
     assert slept == [4.0]
 
@@ -423,8 +457,8 @@ def test_a_launch_slower_than_the_lease_keeps_the_intent_pass_in_the_same_tick(e
     started = clock[0]
     actions = cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
     assert clock[0] - started > lease.ttl_ms()
-    assert events[-1] == "intent"
-    assert events[:-1] and all(beat is True for beat in events[:-1])
+    assert events[0] == "intent"
+    assert events[1:] and all(beat is True for beat in events[1:])
     assert "judged" in actions
     assert lease.current(store, "sw").epoch == 1
     assert store.redis.get(store.key("sw", "last-tick"))
@@ -462,8 +496,76 @@ def test_a_slow_launch_that_never_starts_is_recorded_against_the_launch_not_the_
     monkeypatch.setattr(rt, "spawn", slow)
     monkeypatch.setattr(cli.intent, "Check", Check)
     cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
-    assert events == [True] * 5 + ["intent"]
+    assert events == ["intent"] + [True] * 5
     assert [(row["state"], row["error"]) for row in store.launches("sw") if row["task"] == "t1"] == [
         ("failed", refused)
     ]
     assert lease.current(store, "sw").epoch == 1
+
+
+def test_a_doctor_timer_slower_than_the_lease_keeps_it_through_the_merge_pass(env, clock, monkeypatch):  # noqa: F811
+    from scripts.doctor import cli as doctor
+
+    store, ledger, rt = env
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", template="doctor")
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    monkeypatch.setattr(lease, "beat_s", lambda: 0.01)
+    events = []
+
+    def detectors(*args):
+        for _ in range(2):
+            clock[0] += 120000
+            events.append(renewed(store, clock))
+        return []
+
+    monkeypatch.setattr(doctor, "timer", detectors)
+    monkeypatch.setattr(cli.ready, "merge_pass", lambda *args: events.append("merge") or [])
+    started = clock[0]
+    cli.run_tick(store, "sw", ledger, rt, FakeHerdr({}))
+    assert clock[0] - started > lease.ttl_ms()
+    assert events == [True, True, "merge"]
+    assert lease.current(store, "sw").epoch == 1
+
+
+def test_scheduler_delivery_reaches_the_doctor_timer(env, clock, monkeypatch, tmp_path):  # noqa: F811
+    import subprocess
+    import sys
+    from unittest.mock import Mock
+
+    from scripts.doctor import cli as doctor
+    from scripts.scheduler.core import Scheduler
+    from scripts.swarm import scheduled_tick, timer
+
+    store, ledger, runtime = env
+    monkeypatch.setattr(cli, "now_ms", lambda: clock[0])
+    run("sw", "create", "--repo", "/repo")
+    store.update("sw", template="doctor")
+    monkeypatch.delenv("AGENTIHOOKS_CONTROLLER_TICK_SECONDS", raising=False)
+    callback = Mock(return_value=[])
+    monkeypatch.setattr(doctor, "timer", lambda *args: callback(*args))
+    monkeypatch.setattr("scripts.swarm.langfuse.refresh", lambda *args: [])
+    monkeypatch.setattr(timer, "entry_point", lambda: "/agentihooks")
+    monkeypatch.setattr(scheduled_tick, "runtime_dir", lambda: tmp_path)
+    monkeypatch.setattr(scheduled_tick, "machine_lock", lambda _name: (tmp_path / "swarm-tick.lock").open("a+"))
+    monkeypatch.setattr(scheduled_tick, "shutil", SimpleNamespace(which=lambda _name: None))
+
+    def start_tick(command, **_options):
+        assert command == ["/agentihooks", "swarm", "tick"]
+        cli.run_tick(store, "sw", ledger, runtime, FakeHerdr({}), scheduled=True)
+        return SimpleNamespace(wait=lambda _timeout: 0)
+
+    def start_holder(command, **_options):
+        assert command == [sys.executable, "-m", "scripts.swarm.scheduled_tick"]
+        assert scheduled_tick.main(popen=start_tick) == 0
+
+    monkeypatch.setattr(scheduled_tick, "subprocess", SimpleNamespace(Popen=start_holder, DEVNULL=subprocess.DEVNULL))
+    scheduler = Scheduler(store.redis)
+    entry = scheduler.get(scheduled_tick.ensure(scheduler))
+    due = entry.record["due"]
+    assert scheduler.run_due(now=due) == 1
+    callback.assert_called_once_with(store, "sw", clock[0], True)
+    assert entry.state == "active"
+    assert entry.record["due"] > due
+    assert scheduler.run_due(now=due) == 0
+    callback.assert_called_once()

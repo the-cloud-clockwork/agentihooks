@@ -8,6 +8,7 @@ that runs without the channel.
 
 import json
 import sys
+import time
 from pathlib import Path
 
 from scripts.inbox.cli import check_answer, identity
@@ -24,15 +25,46 @@ METHOD = "notifications/claude/channel"
 UNSHOWN = "the inbox channel could not show it"
 
 
-def launch_args(root=ROOT, python=sys.executable):
-    code = f"import sys; sys.path.insert(0, {root!r}); from scripts.inbox.channel import main; main()"
+def launch_args(root: str = ROOT, python: str = sys.executable, *, active: bool = True) -> list[str]:
+    entry = "main()" if active else "main(active=False)"
+    code = f"import sys; sys.path.insert(0, {root!r}); from scripts.inbox.channel import main; {entry}"
     config = {"mcpServers": {NAME: {"command": python, "args": ["-I", "-c", code]}}}
     return [f"--mcp-config={json.dumps(config)}", FLAG]
 
 
+def register(environ: dict[str, str]) -> None:
+    from scripts import claude_trust
+    from scripts.claude_config import claude_json
+
+    config = claude_json(environ)
+    config.parent.mkdir(parents=True, exist_ok=True)
+    lock = config.with_name(config.name + ".lock")
+    deadline = time.monotonic() + 3
+    while True:
+        try:
+            lock.mkdir()
+            break
+        except FileExistsError:
+            if time.monotonic() >= deadline:
+                raise OSError(f"{lock} is held") from None
+            time.sleep(0.1)
+    try:
+        data = claude_trust._read(config)
+        servers = data.setdefault("mcpServers", {})
+        if not isinstance(servers, dict):
+            raise ValueError(f"{config} mcpServers is not a JSON object")
+        server = json.loads(launch_args(active=False)[0].removeprefix("--mcp-config="))["mcpServers"][NAME]
+        if servers.get(NAME) != server:
+            servers[NAME] = server
+            claude_trust._write(config, data)
+    finally:
+        lock.rmdir()
+
+
 def event(item):
     meta = {"item_id": item.id, "sender": item.sender, "sent_at_ms": str(item.created_at)}
-    return {"method": METHOD, "params": {"content": item.text, "meta": meta}}
+    content = f"Information only; closes on read or confirmed receipt.\n{item.text}" if item.fyi else item.text
+    return {"method": METHOD, "params": {"content": content, "meta": meta}}
 
 
 def answer(store, me, item_id, text):
@@ -137,7 +169,7 @@ async def _push(store, me, write, ready):
             pubsub.close()
 
 
-async def run(store, me, read, write):
+async def run(store, me, read, write, active=True):
     import anyio
     import mcp.types as types
     from mcp.server.lowlevel import Server
@@ -170,28 +202,32 @@ async def run(store, me, read, write):
 
     options = server.create_initialization_options(experimental_capabilities={"claude/channel": {}})
     async with anyio.create_task_group() as group:
-        group.start_soon(push)
+        if active:
+            group.start_soon(push)
         await server.run(read, write, options)
         group.cancel_scope.cancel()
 
 
-async def serve(store, me):
+async def serve(store, me, active=True):
     from mcp.server.stdio import stdio_server
 
     async with stdio_server() as (read, write):
-        await run(store, me, read, write)
+        await run(store, me, read, write, active)
 
 
-def main():
+def main(active: bool = True) -> None:
     import anyio
 
     try:
-        me = identity()
+        me = identity() if active else ""
     except InboxError as exc:
         print(f"agentihooks inbox channel: {exc}", file=sys.stderr)
         raise SystemExit(1) from exc
     try:
-        store = connect()
+        store = connect() if active else None
     except InboxError:
         store = None
-    anyio.run(serve, store, me)
+    if active:
+        anyio.run(serve, store, me)
+    else:
+        anyio.run(serve, store, me, False)

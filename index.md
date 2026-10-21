@@ -2,18 +2,18 @@
 layout: home
 title: Home
 nav_order: 1
-description: "AgentiHooks — The definitive Claude Code harness. Identity, Guardrails, Context Intelligence, Fleet Command."
+description: "AgentiHooks — A harness for Claude Code and Codex. Identity, Guardrails, Context Intelligence, Fleet Command."
 permalink: /
 ---
 
 # AgentiHooks
 {: .fs-9 .fw-700 }
 
-The definitive Claude Code harness — built on four pillars that make your agents safer, smarter, and controllable at any scale.
+A harness for Claude Code and Codex — built on four pillars that make your agents safer, smarter, and controllable at any scale.
 {: .fs-5 .text-grey-dk-100 .mb-6 }
 
 <div class="hero-actions text-center mb-8" markdown="0">
-  <a href="#install" class="btn btn-primary fs-5 mr-2">Get Started</a>
+  <a href="{{ site.baseurl }}/docs/getting-started/compose-quick-start/" class="btn btn-primary fs-5 mr-2">Get Started</a>
   <a href="{{ site.baseurl }}/docs/bundles/" class="btn btn-green fs-5 mr-2">Bundles</a>
   <a href="{{ site.baseurl }}/docs/cost-management/" class="btn fs-5 mr-2">Cost Management</a>
   <a href="https://github.com/The-Cloud-Clockwork/agentihooks" class="btn fs-5" target="_blank">View on GitHub</a>
@@ -21,7 +21,7 @@ The definitive Claude Code harness — built on four pillars that make your agen
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/blob/main/LICENSE)
 [![Tests](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml/badge.svg)](https://github.com/The-Cloud-Clockwork/agentihooks/actions/workflows/test.yml)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://python.org)
+[![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://python.org)
 {: .text-center .mb-8 }
 
 ---
@@ -29,7 +29,7 @@ The definitive Claude Code harness — built on four pillars that make your agen
 ## The Four Pillars
 {: .fs-7 .fw-600 }
 
-AgentiHooks is organized around four core capabilities. Together they make it the definitive harness for running Claude Code at any scale — from a single session on your laptop to thousands of agent pods in Kubernetes.
+AgentiHooks is organized around four core capabilities. Together they make it a harness for running Claude Code and Codex — from a single session on your laptop to thousands of agent pods in Kubernetes.
 
 ```mermaid
 flowchart LR
@@ -53,7 +53,7 @@ flowchart LR
         F1["Broadcast system\nReal-time messaging\nAll sessions at once\nSeverity tiers + channel filtering"]
     end
 
-    CLAUDE["Claude Code\nAgent"] --> P1
+    CLAUDE["Claude Code or Codex\nAgent"] --> P1
     CLAUDE --> P2
     CLAUDE --> P3
     P4 --> CLAUDE
@@ -105,7 +105,7 @@ File read deduplication blocks a re-read if the file has not changed since last 
 
 **Talk to your entire agent fleet — in real time.**
 
-No other tool does this. One command. Every active Claude Code session. Right now.
+No other tool does this. One command. Claude Code and Codex sessions sharing the broadcast store.
 
 ```bash
 agentihooks broadcast -s critical "Production incident — do NOT deploy."
@@ -117,7 +117,7 @@ The broadcast system delivers your message to every session on its next hook eve
 
 ---
 
-## Bundles — your Claude Code stack as one repo
+## Bundles — your Claude Code and Codex setup as one repo
 {: .fs-7 .fw-600 }
 
 A **bundle** is a single external repository containing everything that defines your AI environment: profiles, MCP servers, skills, sub-agents, slash commands, and coding rules. AgentiHooks is the engine; the bundle is your data. Clone it on any machine, run one command, and you have your full setup.
@@ -167,13 +167,13 @@ agentihooks init --profile coding,infra-ops
 pip install agentihooks
 ```
 
-Then wire everything into Claude Code in one command:
+For the service stack, start with the [Docker Compose bundle quick start]({{ site.baseurl }}/docs/getting-started/compose-quick-start/). For native agents, install hooks for Claude Code and Codex:
 
 ```bash
 agentihooks init
 ```
 
-That's it. Hooks are active and the `agentihooks` MCP server's 13 tools (channels, enforcement, conditions) are registered the next time you start `claude`.
+Hooks and the `agentihooks` MCP server are registered for the next Claude Code or Codex session.
 
 ---
 
@@ -302,7 +302,7 @@ Registered files are tracked in `~/.agentihooks/state.json` and re-applied autom
 
 AgentiHooks is a platform, not just a tool. Fork the repo and you immediately inherit:
 
-- The full hook lifecycle (SessionStart → Stop) wired into Claude Code
+- The hook lifecycle (SessionStart → Stop) wired into Claude Code and Codex
 - MCP tools across 3 categories (channels, enforcement, conditions), ready to use or filter down
 - Profile system — swap agent personality and permissions with one flag
 - Install scripts, settings management, and credential loading
@@ -352,6 +352,7 @@ rm -rf ~/.agentihooks
 | **[Hook System]({{ site.baseurl }}/docs/hooks/)** | All 10 hook events, broadcast system, lifecycle reference |
 | **[MCP Tools]({{ site.baseurl }}/docs/mcp-tools/)** | MCP tools across 3 categories (channels, enforcement, conditions) |
 | **[Reference]({{ site.baseurl }}/docs/reference/)** | CLI commands, configuration variables, env vars |
+| **[Developer account login]({{ site.baseurl }}/docs/reference/account-login.html)** | Claude and Codex login, token storage, OpenBao keys and refresh authority |
 | **[Extending]({{ site.baseurl }}/docs/extending/)** | Add tools, add profiles, fork safely |
 | **[Bundles]({{ site.baseurl }}/docs/bundles/)** | Prebuilt capability bundles |
 | **[Connectors]({{ site.baseurl }}/docs/connectors/)** | Integrations with external systems |

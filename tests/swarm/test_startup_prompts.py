@@ -5,8 +5,6 @@ import pytest
 from scripts.swarm.runtime import HerdrRuntime
 from scripts.swarm.store import AgentRecord
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 CAPTURE = Path(__file__).parents[1] / "fixtures/swarm/claude-import-prompt.txt"
 TITLE = "Allow external CLAUDE.md file imports?"
 
@@ -60,12 +58,13 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     store.put_agent("prompt-proof", agent)
     ledger = FakeLedger([{"id": "task", "state": "claimed", "title": "Startup proof"}])
     runtime = FakeRuntime()
+    runtime.live.add(agent.name)
     runtime.observe = lambda a: PaneObservation("waiting", TITLE)
     for n in range(1, 5):
         beat(store.redis, "prompt-proof", agent.name, "working", n)
         agent = store.agents("prompt-proof")[0]
         _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, agent, n)
-        report = status_report(store, "prompt-proof", ledger.state("prompt-proof"))
+        report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
         assert report["agents"][0]["status"] == "waiting"
         assert report["agents"][0]["input_ticks"] == n
         assert report["agents"][0]["input_prompt"] == TITLE
@@ -77,7 +76,7 @@ def test_claimed_selection_prompt_counts_consecutive_ticks_and_reports_health():
     assert runtime.nudged == runtime.killed == []
     runtime.observe = lambda a: PaneObservation("working")
     _watch_idle("prompt-proof", store, ledger, runtime, ledger.rows, store.agents("prompt-proof")[0], 5)
-    report = status_report(store, "prompt-proof", ledger.state("prompt-proof"))
+    report = status_report(store, "prompt-proof", ledger.state("prompt-proof"), runtime)
     assert report["agents"][0]["status"] == "working"
     assert report["agents"][0]["input_ticks"] == 0
     assert report["agents"][0]["input_prompt"] == ""
@@ -276,6 +275,8 @@ def test_status_text_shows_a_pane_held_at_a_prompt_as_waiting_and_the_finding_na
     ledger = FakeLedger([{"id": "task", "state": "claimed", "title": "Startup proof"}])
     monkeypatch.setattr(cli, "LedgerClient", lambda: ledger)
     runtime = FakeRuntime()
+    runtime.live.add("engineer-one")
+    monkeypatch.setattr(cli, "HerdrRuntime", lambda: runtime)
     runtime.observe = HerdrRuntime(home=tmp_path, herdr=_herdr_showing("claude-trust-prompt.txt")).observe
     for tick in range(1, 5):
         agent = store.agents("prompt-proof")[0]
@@ -305,7 +306,8 @@ def test_the_spawn_prompt_names_each_running_task_that_shares_an_area():
         "Task t1, claimed by engineer@a1b2c3-0001, shares hooks.",
         "Task t2, claimed by engineer@a1b2c3-0002, shares docs/a.md and scripts/swarm/tick.py.",
     ]
-    assert "inbox" in prompt.OVERLAP_LINE and "merge dev" in prompt.OVERLAP_LINE
+    assert "inbox" in prompt.OVERLAP_LINE and "merge dev only on a real conflict" in prompt.OVERLAP_LINE
+    assert "before your own merge" not in prompt.OVERLAP_LINE
 
 
 def test_a_prompt_without_overlaps_says_nothing_about_shared_areas():
@@ -313,6 +315,19 @@ def test_a_prompt_without_overlaps_says_nothing_about_shared_areas():
 
     text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", {"id": "t3", "title": "Build it", "overlaps": []})
     assert prompt.OVERLAP_LINE not in text and "shares" not in text
+
+
+def test_an_ownerless_overlap_never_requests_a_note_or_claims_to_wait_on_checks():
+    from scripts.swarm import prompt
+
+    task = {
+        "id": "t3",
+        "title": "Build it",
+        "overlaps": [{"task": "t1", "claimant": "", "checks": False, "areas": ["hooks"]}],
+    }
+    text = prompt.build("sw", "/repo", "eng", "engineer@a1b2c3-0003", task)
+    assert "Task t1, no live agent; no coordination note needed, shares hooks." in text
+    assert "waiting on checks" not in text
 
 
 ENGINEER = "engineer@a1b2c3-0003"
@@ -332,10 +347,12 @@ def _step(lines, number):
 @pytest.mark.parametrize("kind", ["code", "ci"])
 def test_the_code_steps_push_and_record_the_branch_at_the_first_commit(kind):
     step = _step(_steps({"kind": kind}), 4)
-    assert (
-        "at your first commit push the branch (git push -u origin HEAD) and record it: agentihooks swarm sw branch"
-        in step
-    )
+    assert 'publish --message "<commit message>" -- <explicit touched files>' in step
+    assert "Then review per the dev-cycle skill" in step
+    assert "Tests run only in CI." in step
+    if kind == "ci":
+        assert "2. Prepare your task worktree: agentihooks swarm sw prepare" in _step(_steps({"kind": kind}), 2)
+    assert "commits only those files, runs the committed HEAD prepush gate, then pushes and records the branch" in step
 
 
 @pytest.mark.parametrize("kind", ["code", "ci"])

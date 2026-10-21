@@ -2,14 +2,17 @@ import json
 import os
 import subprocess
 import sys
+from collections import OrderedDict
 from pathlib import Path
 from types import SimpleNamespace
 
+import pluggy
 import pytest
+import xdist.newhooks
 import yaml
 from xdist.scheduler import LoadScopeScheduling
 
-from tests.flake_ledger import FlakeLedger
+from tests.flake_ledger import FlakeLedger, RefillingLoadGroupScheduling
 
 pytestmark = pytest.mark.unit
 
@@ -228,6 +231,71 @@ def test_a_crash_past_the_worker_restart_limit_stays_failed(tmp_path):
         ledger.pytest_handlecrashitem(crashitem=f"test_probes.py::test_{n}", report=report, sched=sched)
         outcomes.append(report.outcome)
     assert outcomes == ["rerun", "rerun", "failed"]
+
+
+class _Worker:
+    def __init__(self, events):
+        self.shutting_down = False
+        self.events = events
+
+    def send_runtest_some(self, indices):
+        self.events.extend(("sent", index) for index in indices)
+
+    def shutdown(self):
+        self.shutting_down = True
+
+
+class _Recorder:
+    def __init__(self, events):
+        self.events = events
+
+    @pytest.hookimpl
+    def pytest_handlecrashitem(self, crashitem, report, sched):
+        self.events.append(("recorded", crashitem))
+
+
+def test_a_crashed_test_reaches_another_worker_only_after_its_crash_is_recorded(tmp_path):
+    crashing, sibling = "test_probes.py::test_crashes_always", "test_probes.py::test_sibling"
+    events = []
+    crashed, alive = _Worker(events), _Worker(events)
+    sched = RefillingLoadGroupScheduling.__new__(RefillingLoadGroupScheduling)
+    sched.config = SimpleNamespace(option=SimpleNamespace(maxworkerrestart="2"), getoption={"reruns": 2}.get)
+    sched.log = lambda *args: None
+    sched.workqueue = OrderedDict()
+    sched.registered_collections = {crashed: [crashing, sibling], alive: [crashing, sibling]}
+    sched.assigned_work = {crashed: {crashing: {crashing: False}}, alive: {sibling: {sibling: True}}}
+    hooks = pluggy.PluginManager("pytest")
+    hooks.add_hookspecs(xdist.newhooks)
+    hooks.register(_Recorder(events))
+    hooks.register(FlakeLedger(tmp_path / "flakes.jsonl"))
+    assert sched.remove_node(crashed) == crashing
+    assert events == []
+    report = SimpleNamespace(failed=True, outcome="failed")
+    hooks.hook.pytest_handlecrashitem(crashitem=crashing, report=report, sched=sched)
+    assert events == [("recorded", crashing), ("sent", 0)]
+    assert report.outcome == "rerun"
+
+
+def test_a_crashed_test_skips_a_replacement_worker_that_has_not_collected(tmp_path):
+    crashing, sibling = "test_probes.py::test_crashes_always", "test_probes.py::test_sibling"
+    events = []
+    crashed, alive, joining = _Worker(events), _Worker(events), _Worker(events)
+    sched = RefillingLoadGroupScheduling.__new__(RefillingLoadGroupScheduling)
+    sched.config = SimpleNamespace(option=SimpleNamespace(maxworkerrestart="2"), getoption={"reruns": 2}.get)
+    sched.log = lambda *args: None
+    sched.workqueue = OrderedDict()
+    sched.registered_collections = {crashed: [crashing, sibling], alive: [crashing, sibling]}
+    sched.assigned_work = {crashed: {crashing: {crashing: False}}, joining: {}, alive: {sibling: {sibling: True}}}
+    assert sched.remove_node(crashed) == crashing
+    report = SimpleNamespace(failed=True, outcome="failed")
+    FlakeLedger(tmp_path / "flakes.jsonl").pytest_handlecrashitem(crashitem=crashing, report=report, sched=sched)
+    assert events == [("sent", 0)]
+    assert not sched.workqueue
+    sched.numnodes, sched.collection = 2, [crashing, sibling]
+    sched.workqueue[sibling] = {sibling: False}
+    sched.schedule()
+    assert events == [("sent", 0), ("sent", 1)]
+    assert not joining.shutting_down
 
 
 def test_a_worker_crash_without_reruns_stays_red_and_is_not_run_again(tmp_path):

@@ -8,7 +8,7 @@ from scripts.swarm.store import AgentRecord, RedisStore
 
 SLUG = "sw"
 HARNESSES = ["claude", "codex"]
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

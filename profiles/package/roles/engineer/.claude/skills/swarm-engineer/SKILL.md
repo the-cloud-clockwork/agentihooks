@@ -42,10 +42,16 @@ call. `agentihooks msg inbox` lists them, `agentihooks msg read <id>` shows one.
 
 1. A spec naming the seams: a GitHub issue where the repo has issues, recorded
    with `agentihooks swarm <slug> issue <url>`; otherwise the ledger task is the spec.
-2. Your own worktree off the base branch (the worktree skill), red test first,
-   then the least code to green, lint and tests green, commit.
-3. Push, open the pull request into the base branch, record it with
-   `agentihooks swarm <slug> pr <url>`.
+2. Your own worktree off the base branch (the worktree skill). Commit the
+   seam's failing test and push it. In a repo with the branch mutation
+   preflight, read it red on that branch push's preflight run, wait until it is
+   green on the current head, then open the first draft. In any other repo,
+   read it red in CI on a draft pull request into the base branch, opened at
+   the first push. Then commit the least code to green, push and read it green
+   in CI. Lint, format and size may run locally; tests and mutation never run
+   on this machine unless the user set `AGENTIHOOKS_ALLOW_LOCAL_TEST_RUN=true`.
+3. Record the pull request with `agentihooks swarm <slug> pr <url>` and mark
+   it ready once its checks are green.
 4. Record landed work in plain words:
    `agentihooks ledger --slug <slug> --as <name> comment phases/<phase> "<what landed>"`.
    A follow up you find is proposed, never queued as your own task:
@@ -90,18 +96,22 @@ The swarm ends a checked wait when the thing resolves and tells you through the 
 
 ## Close with the proof
 
-A code or ci task at delegate or full autonomy closes at
+A task with a pull request at delegate or full autonomy releases its seat at
 `agentihooks swarm <slug> ready <doc>` once both reviews closed and the
 pull request is out of draft and holds the worktree head: leave the crew first,
 then ready writes the short Handoff v2 and ends your session. The tick watches
 the checks, queues the pull request on green, waits for the merge, closes the
-task and removes the worktree; red checks reopen it for the next engineer.
+task and removes the worktree; red checks reopen it for the next engineer. A
+task of another kind stays open after the merge for the next engineer to close
+with its proof.
 
 Otherwise, merge on green checks and closed review. On a base branch with a merge queue,
 a merge only queues the pull request and it lands when the queue run passes, so
 do not merge there: queue it on green checks with
 `agentihooks swarm <slug> merge queue <url>`, which goes through the GitHub API
-and works with any gh, then wait with
+and works with any gh. It queues the green head as is; do not merge dev into it
+first, since the merge group retests it against the newest dev. Merge dev only on
+a real conflict or when GitHub refuses the enqueue. Then wait with
 `agentihooks swarm <slug> wait --on merge <url>` and keep the worktree until it
 merges. `agentihooks swarm <slug> merge state <url>` reports whether it sits in
 the queue. GitHub refuses a push while the pull request sits in the queue. To

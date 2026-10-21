@@ -129,7 +129,9 @@ def test_registries_are_saved_to_the_registry_table(tmp_path):
 
 def test_sync_through_the_full_module_reads_and_writes_that_modules_folder(tmp_path, monkeypatch):
     from scripts.swarm_ledger import ledger_core as full
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger.storage import default as default_repository
+
+    repository = default_repository()
 
     monkeypatch.setattr(full, "LEDGER_DIR", tmp_path)
     assert repository.bound(full).create("full", CONTENT) is True

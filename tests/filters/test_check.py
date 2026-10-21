@@ -12,8 +12,6 @@ from scripts.inbox import cli  # noqa: E402
 from scripts.inbox.store import InboxStore  # noqa: E402
 from scripts.swarm_ledger import ledger_agent_ops, ledger_core  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 FILTER = """mode: finders
 finders:
   - regex: 'because accounts have quota'

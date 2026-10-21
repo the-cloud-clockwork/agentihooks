@@ -24,7 +24,7 @@ from scripts.swarm_v2.admission import (
 from tests.sv2_ctl03_cases import build, fresh_store, inputs, outcomes, run_case
 from tests.swarm.test_tick import FakeLedger, FakeRuntime
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 GENERAL = Template("general", Resources(16384, 4000))
 COMPUTE = Template("compute", Resources(8192, 8000))
@@ -357,10 +357,10 @@ def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
     data, store, gate, ledger, runtime = tick_fixture()
     original = ledger.update_task
 
-    def refuse(slug, task_id, fields, by="swarm", if_state=()):
+    def refuse(slug, task_id, fields, by="swarm", if_state=(), if_match=None):
         if task_id == "t01" and fields.get("claimed_by"):
             return {**ledger.rows[task_id], "state": "claimed", "claimed_by": "someone"}
-        return original(slug, task_id, fields, by, if_state)
+        return original(slug, task_id, fields, by, if_state, if_match)
 
     ledger.update_task = refuse
     actions = tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
@@ -369,6 +369,29 @@ def test_tick_releases_the_reservation_when_the_ledger_refuses_the_claim():
     assert "t01" not in gate.pending("sw", data["clock_ms"])
     assert [task for _, _, task in runtime.spawned] == ["t02", "t03", "t05"]
     assert gate.pending_execution_admission_total("sw") == {ADMITTED: 4, RELEASED: 1, IMPOSSIBLE: 1, DEFERRED: 5}
+
+
+def test_a_live_owner_appearing_after_admission_releases_the_unused_reservation(monkeypatch):
+    from scripts.swarm.store import AgentRecord
+
+    data, store, gate, ledger, runtime = tick_fixture()
+    admit = gate.admit
+
+    def claimed_elsewhere(slug, selected, now_ms):
+        decisions = admit(slug, selected, now_ms)
+        if any(task["id"] == "t01" for task in selected):
+            assert decisions[0].outcome == ADMITTED
+            owner = AgentRecord("existing-owner", "eng", "t01", started_at=now_ms)
+            store.put_agent("sw", owner)
+            runtime.live.add(owner.name)
+            ledger.rows["t01"].update(state="claimed", claimed_by=owner.name)
+        return decisions
+
+    monkeypatch.setattr(gate, "admit", claimed_elsewhere)
+    tick("sw", store, ledger, runtime, now_ms=data["clock_ms"])
+    assert "t01" not in gate.pending("sw", data["clock_ms"])
+    assert "t01" not in [task for _, _, task in runtime.spawned]
+    assert gate.pending_execution_admission_total("sw")[RELEASED] == 1
 
 
 def test_tick_takes_no_reservation_while_the_runtime_has_no_capacity():

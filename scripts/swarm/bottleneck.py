@@ -43,13 +43,47 @@ def _green(runs: list, pushed: float, end: float) -> float:
     return later[0]["ts_ms"] if later else end
 
 
+def _active_review(start: float, end: float, events: list) -> list[tuple]:
+    spans, cursor, parked = [], start, False
+    for event in sorted(events, key=lambda event: event["ts_ms"]):
+        if event["kind"] not in ("parked", "unparked") or event["ts_ms"] >= end:
+            continue
+        at = max(start, event["ts_ms"])
+        if not parked and at > cursor:
+            spans.append(("review", cursor, at))
+        parked = event["kind"] == "parked"
+        cursor = at
+    if not parked and cursor < end:
+        spans.append(("review", cursor, end))
+    return spans
+
+
+def _pull_reviews(events: list, runs: list, claimed: float, end: float, branch: str) -> list[tuple]:
+    pulls = {}
+    for event in events:
+        if event.get("pull_request") and event["kind"] in ("pull_request_opened", "pull_request_merged", "merge"):
+            pulls.setdefault(event["pull_request"], []).append(event)
+    spans, bounds = [], {}
+    for mine in sorted(pulls.values(), key=lambda mine: min(event["ts_ms"] for event in mine)):
+        stop = min((event["ts_ms"] for event in mine if event["kind"] in ("merge", "pull_request_merged")), default=end)
+        head = next((event["branch"] for event in mine if event.get("branch")), branch)
+        lower = bounds.get(head, claimed)
+        checks = [run for run in runs if run["branch"] == head and _created(run) >= lower]
+        spans.extend(_active_review(_green(checks, lower, stop), stop, events))
+        bounds[head] = stop
+    return spans
+
+
 def task_spans(rows: dict, tasks: list, now_ms: int) -> list[tuple]:
     claims, seen, opened = {}, {}, {}
     for event in rows["agent_events"]:
         seen[event["task"]] = max(seen.get(event["task"], event["ts_ms"]), event["ts_ms"])
         if event["kind"] == "claim":
             claims[event["task"]] = min(claims.get(event["task"], event["ts_ms"]), event["ts_ms"])
-    merges = {event["task"]: event["ts_ms"] for event in rows["delivery_events"] if event["kind"] == "merge"}
+    merges = {}
+    for event in rows["delivery_events"]:
+        if event["kind"] == "merge":
+            merges[event["task"]] = max(merges.get(event["task"], event["ts_ms"]), event["ts_ms"])
     for event in rows["delivery_events"]:
         if event["kind"] == "pull_request_opened":
             opened.setdefault(event["task"], []).append(event["ts_ms"])
@@ -62,7 +96,14 @@ def task_spans(rows: dict, tasks: list, now_ms: int) -> list[tuple]:
         pushes = [at for at in [*map(_created, runs), *opened.get(task, [])] if at >= claimed]
         pushed = min([*pushes, end])
         green = _green(runs, pushed, end)
-        spans += [("engineering", claimed, pushed), ("ci", pushed, green), ("review", green, end)]
+        spans += [("engineering", claimed, pushed), ("ci", pushed, green)]
+        events = [event for event in rows["delivery_events"] if event["task"] == task]
+        reviews = _pull_reviews(events, rows["ci_runs"], claimed, now_ms if task in live else end, branches.get(task))
+        has_pulls = any(
+            event.get("pull_request") and event["kind"] in ("pull_request_opened", "pull_request_merged", "merge")
+            for event in events
+        )
+        spans += reviews if has_pulls else _active_review(green, end, events)
     return spans
 
 

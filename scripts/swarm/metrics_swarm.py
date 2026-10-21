@@ -1,7 +1,7 @@
 import hashlib
 import json
 import socket
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +18,8 @@ VERDICTS = ("fail", "pass")
 EVENT_COLUMNS = (*((key, "String") for key in IDENTITY), ("kind", "String"), ("reason", "String"))
 AGENTS = metrics_outbox.Table("agent_events", (*EVENT_COLUMNS, ("finding_kind", "String")))
 DELIVERY = metrics_outbox.Table(
-    "delivery_events", (*EVENT_COLUMNS, ("pull_request", "String"), ("claim_to_merge_seconds", "Float64"))
+    "delivery_events",
+    (*EVENT_COLUMNS, ("pull_request", "String"), ("branch", "String"), ("claim_to_merge_seconds", "Float64")),
 )
 HOST = metrics_outbox.Table(
     "host_samples",
@@ -27,6 +28,11 @@ HOST = metrics_outbox.Table(
         ("available_mb", "Int64"),
         ("load_per_cpu", "Float64"),
         ("live_agents", "Int64"),
+        ("workstation_agents", "Int64"),
+        ("hive_agents", "Int64"),
+        ("swap_used_mb", "Int64"),
+        ("swap_total_mb", "Int64"),
+        ("agent_mb", "Int64"),
         ("held_spawns", "Int64"),
         ("held_by", "String"),
         ("held_harness", "String"),
@@ -163,13 +169,41 @@ def agent_rows(slug: str, doc: dict, agents: list) -> list[dict]:
 
 
 def _delivery(row: dict, task: dict, duration: float = -1.0) -> dict:
-    return {**row, "pull_request": task.get("pr_url", ""), "claim_to_merge_seconds": duration}
+    return {
+        **row,
+        "pull_request": task.get("pr_url", ""),
+        "branch": task.get("branch", ""),
+        "claim_to_merge_seconds": duration,
+    }
+
+
+def _split_merges(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]:
+    rows = []
+    for task in doc.get("tasks", []):
+        for url in task.get("split_pulls") or []:
+            pull = pulls.get(url)
+            if pull is None or pull.state != "MERGED" or pull.merged_at is None:
+                continue
+            opened = next(
+                (
+                    source
+                    for source in doc.get("_meta", {}).get("events", [])
+                    if source["target"] == f"tasks/{task['id']}" and source.get("pr_url") == url
+                ),
+                {},
+            )
+            identity = {**task, "pr_url": url, "branch": opened.get("branch", task.get("branch", ""))}
+            agent = _owner(agents, task["id"], pull.merged_at)
+            rows.append(_delivery(_event(slug, task, agent, pull.merged_at, "pull_request_merged", url), identity))
+    return rows
 
 
 def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]:
     rows, claims = [], {}
     kinds = {
         "task pr": "pull_request_opened",
+        "task parked": "parked",
+        "task unparked": "unparked",
         "review round": "review_round",
         "intent fail": "intent_failed",
         "intent pass": "intent_passed",
@@ -180,7 +214,7 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
             claims[task_id] = min(claims.get(task_id, source["at"]), source["at"])
         if source["kind"] not in kinds:
             continue
-        task = _task(doc, task_id)
+        task = {**_task(doc, task_id), **{key: source[key] for key in ("pr_url", "branch") if key in source}}
         agent = _owner(agents, task_id, source["at"], source.get("by", ""))
         rows.append(
             _delivery(
@@ -196,7 +230,7 @@ def delivery_rows(slug: str, doc: dict, agents: list, pulls: dict) -> list[dict]
         duration = (at - claimed) / 1000 if claimed is not None else -1.0
         agent = _owner(agents, task["id"], at)
         rows.append(_delivery(_event(slug, task, agent, at, "merge", task["id"]), task, duration))
-    return rows
+    return rows + _split_merges(slug, doc, agents, pulls)
 
 
 def queue_rows(slug: str, doc: dict, agents: list, pulls: dict, now_ms: int) -> list[dict]:
@@ -268,6 +302,18 @@ def signal_rows(slug: str, doc: dict, agents: list, handoffs: list, found: list)
     return rows
 
 
+def placement_counts(agents: list[dict]) -> dict:
+    from scripts.swarm.commands import hive_id
+
+    here = hive_id()
+    remote = sum(
+        agent.get("runtime_backend", "local") != "local"
+        or (agent.get("runtime_target") or {}).get("host_id", here) not in ("", here)
+        for agent in agents
+    )
+    return {"workstation_agents": len(agents) - remote, "hive_agents": remote}
+
+
 def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict) -> dict:
     return {
         **_base(slug, now_ms, ["host", now_ms], {}),
@@ -275,6 +321,11 @@ def host_row(slug: str, now_ms: int, sample: host_budget.HostSample, quota: dict
         "available_mb": sample.available_mb,
         "load_per_cpu": sample.load1 / sample.cpus,
         "live_agents": sample.agents,
+        "workstation_agents": quota.get("workstation_agents", 0),
+        "hive_agents": quota.get("hive_agents", 0),
+        "swap_used_mb": sample.swap_used_mb,
+        "swap_total_mb": sample.swap_total_mb,
+        "agent_mb": sample.agent_mb,
         "held_spawns": quota.get("held_spawns", 0),
         "held_by": quota.get("held_by", ""),
         "held_harness": quota.get("held_harness", ""),
@@ -318,20 +369,26 @@ def classifier_rows(calls: list, host: str) -> list[dict]:
     ]
 
 
-def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
+def pull_targets(doc: dict, now_ms: int, recent: Sequence[dict] = ()) -> list[tuple[str, bool]]:
+    recorded = {row["pull_request"] for row in recent if row["kind"] == "merge"}
+    merged = {row["pull_request"] for row in recent if row["kind"] == "pull_request_merged"}
     completed = {
         event["target"].removeprefix("tasks/")
-        for event in swarm.doc.get("_meta", {}).get("events", [])
+        for event in doc.get("_meta", {}).get("events", [])
         if event["kind"] == "task done" and event["at"] >= now_ms - metrics_outbox.DAY_MS
     }
-    recorded = {row["pull_request"] for row in box.recent("delivery_events", now_ms) if row["kind"] == "merge"}
-    return {
-        task["pr_url"]: swarm.view(task["pr_url"])
-        for task in swarm.doc["tasks"]
-        if task.get("pr_url")
-        and task["pr_url"] not in recorded
-        and (task["state"] in ("pr", "claimed") or task["id"] in completed)
-    }
+    return [
+        (url, url == task.get("pr_url"))
+        for task in doc.get("tasks", [])
+        if task.get("state") in ("pr", "claimed") or task.get("id") in completed
+        for url in dict.fromkeys([*(task.get("split_pulls") or []), task.get("pr_url")])
+        if url and url not in (recorded if url == task.get("pr_url") else merged)
+    ]
+
+
+def pull_rows(box: metrics_outbox.Outbox, now_ms: int, swarm: TickInput) -> dict:
+    recent = box.recent("delivery_events", now_ms)
+    return {url: swarm.view(url) for url, _ in pull_targets(swarm.doc, now_ms, recent)}
 
 
 def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
@@ -358,6 +415,20 @@ def read_review_events(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
                     "review_id": review["id"],
                 }
             )
+    return LogBatch(batch.source, batch.position, events)
+
+
+def read_review_rounds(slug: str, box: metrics_outbox.Outbox) -> LogBatch:
+    batch = _log_batch(gate_log.gates_dir(slug) / "reviews" / "rounds.jsonl", box)
+    events = [
+        {
+            "kind": "review round",
+            "target": f"tasks/{source['task']}",
+            "at": source["at"],
+            "review_id": f"swarm:{source['task']}:{source['counter']}:{source['round']}",
+        }
+        for source in batch.rows
+    ]
     return LogBatch(batch.source, batch.position, events)
 
 
@@ -398,8 +469,10 @@ def record_pass(
     quota["held_by"] = ("host" if hold else "quota") if quota["held_spawns"] else ""
     quota["held_harness"] = "" if hold else held_harness(store.config(slug).lanes, held)
     quota["reason"] = hold or quota.get("reason", "")
+    quota.update(placement_counts(live))
     reviews, classifiers = read_review_events(slug, box), read_classifier_calls(box)
-    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows]}}
+    rounds = read_review_rounds(slug, box)
+    review_doc = {**doc, "_meta": {"events": [*doc.get("_meta", {}).get("events", []), *reviews.rows, *rounds.rows]}}
     batches = (
         (
             AGENTS,
@@ -422,4 +495,5 @@ def record_pass(
             _supersede_merges(box, recent)
         box.append(table, recent)
     _checkpoint(box, reviews)
+    _checkpoint(box, rounds)
     _checkpoint(box, classifiers)

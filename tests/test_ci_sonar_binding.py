@@ -27,10 +27,7 @@ def test_sonar_requires_the_bound_gate_with_a_separate_reader(tmp_path, binding,
     assert step is not None
     assert step["env"] == {"SONAR_READ_TOKEN": "${{ secrets.SONAR_READ_TOKEN }}"}
     assert step.get("continue-on-error", False) is False
-    assert step["if"] in {
-        "steps.current.outputs.superseded != 'true'",
-        "success() && steps.proxy.outcome == 'success' && steps.current.outputs.superseded != 'true'",
-    }
+    assert step["if"] == "success() && steps.proxy.outcome == 'success'"
     assert steps.index(next(s for s in steps if s.get("id") == "proxy")) < steps.index(step)
     assert steps.index(step) < steps.index(next(s for s in steps if s.get("name") == "SonarQube Scan"))
     curl = tmp_path / "curl"

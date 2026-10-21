@@ -11,7 +11,7 @@ from tests.swarm.test_cli import env as env
 from tests.swarm.test_delivery import FakeHerdr
 from tests.swarm.test_spawn_stall import stalled as stalled
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 
 @pytest.fixture

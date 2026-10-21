@@ -10,15 +10,13 @@ from scripts.swarm.ledger_client import LedgerRefused
 from scripts.swarm.ledger_events import Mail
 from scripts.swarm.store import ASSIST, MANUAL_SCALING, RedisStore, SwarmConfig, SwarmError
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 SLUG = "sw"
 NOW = 1_800_000_000_000
 HOUR = 3_600_000
 LATER = NOW + bottleneck.WINDOW_MS
 ROOMY = lane_split.Lanes(ready={"eng": 3, "ci": 1}, live={"eng": 1, "ci": 0}, room=4)
 RULE = bottleneck_remedy.RULE
-CLAIM = "claim wait at 7.5 task hours in the window, over its 2 threshold"
+CLAIM = "seat wait at 7.5 task hours in the window, over its 2 threshold"
 REVIEW = "review at 5 task hours in the window, over its 2 threshold"
 FAILED = "launch failure at 0.5 task hours, over its 0.25 threshold"
 HELD = "quota hold at 3 task hours, over its 2 threshold"
@@ -30,7 +28,9 @@ def store():
     import fakeredis
 
     saved = RedisStore(fakeredis.FakeRedis(decode_responses=True))
-    saved.create(SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=2, scaling=MANUAL_SCALING))
+    saved.create(
+        SwarmConfig(SLUG, "/repo", max_eng=2, max_ci=2, scaling=MANUAL_SCALING, gates={"lane-split": "enforce"})
+    )
     return saved
 
 
@@ -124,7 +124,7 @@ def fix_task(rank=None, state="open"):
 
 
 def claim_fix(rank=None):
-    return {**fix_task(rank), "title": "Bottleneck fix for the claim wait stage"}
+    return {**fix_task(rank), "title": "Bottleneck fix for the seat wait stage"}
 
 
 def proposal(stage, targeted, why, fix=None, fired=1, task=None):
@@ -138,13 +138,13 @@ def proposed(targeted, why):
     return bottleneck_remedy.PROPOSED.format(targeted=targeted, why=why)
 
 
-def test_claim_wait_moves_one_seat_from_ci_to_engineers_and_records_the_hours(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+def test_seat_wait_moves_one_seat_from_ci_to_engineers_and_records_the_hours(store, home, shipped):
+    fire(store, "seat_wait", value=7.5)
     text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1)
     assert run(store) == [text]
     assert caps(store) == (3, 1)
-    assert recorded(store) == {"claim_wait": {"text": text, "at": NOW}}
-    assert stamped(store) == {"claim_wait": str(NOW)}
+    assert recorded(store) == {"seat_wait": {"text": text, "at": NOW}}
+    assert stamped(store) == {"seat_wait": str(NOW)}
     assert logged(home) == [(NOW, "dispatcher", "apply", "", RULE, text)]
     assert master_items(store) == []
 
@@ -153,7 +153,7 @@ def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, ho
     store.update(SLUG, scaling="auto")
     autoscale = {"ceilings": {"plan": 1, "ci": 2, "eng": 3}, "shift": 3}
     store.redis.set(store.key(SLUG, "quota-capacity"), json.dumps({"autoscale": autoscale}))
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=4, ci=1)
     assert run(store) == [text]
     assert store.config(SLUG).lane_shift == 2
@@ -161,31 +161,59 @@ def test_auto_scaling_moves_the_stored_shift_against_the_last_ceilings(store, ho
 
 
 def test_a_seat_shift_never_passes_a_cap_and_proposes_instead(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     full = lane_split.Lanes(ready={"eng": 3, "ci": 1}, live={"eng": 1, "ci": 2}, room=4)
     why = "the ci lane keeps a seat for each of its 2 live agents"
     assert run(store, lanes=full) == [proposed(CLAIM, why)]
     assert caps(store) == (2, 2)
-    assert master_items(store) == [proposal("claim wait", CLAIM, why)]
-    assert recorded(store)["claim_wait"]["text"] == proposed(CLAIM, why)
+    assert master_items(store) == [proposal("seat wait", CLAIM, why)]
+    assert recorded(store)["seat_wait"]["text"] == proposed(CLAIM, why)
     assert logged(home) == [(NOW, "dispatcher", "propose", "", RULE, proposed(CLAIM, why))]
 
 
+def test_a_seat_shift_into_a_lane_with_no_ready_task_proposes_instead(store, home, shipped):
+    fire(store, "seat_wait", value=7.5)
+    empty = lane_split.Lanes(ready={"eng": 0, "ci": 1}, live={"eng": 1, "ci": 0}, room=4)
+    why = "the eng lane has no ready task"
+    assert run(store, lanes=empty) == [proposed(CLAIM, why)]
+    assert caps(store) == (2, 2)
+
+
+def test_a_seat_shift_keeps_the_caps_the_operator_or_master_set(store, home, shipped):
+    store.update(SLUG, caps_pinned=True)
+    fire(store, "seat_wait", value=7.5)
+    why = "the operator or the master set the lane caps"
+    assert run(store) == [proposed(CLAIM, why)]
+    assert caps(store) == (2, 2)
+
+
+def test_a_seat_shift_in_log_only_records_the_would_be_move(store, home, shipped):
+    store.update(SLUG, gates={})
+    fire(store, "seat_wait", value=7.5)
+    why = "the lane split switch is log only"
+    assert run(store) == [proposed(CLAIM, why)]
+    assert caps(store) == (2, 2)
+    text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1)
+    assert [row for row in logged(home) if row[1] == "lane-split"] == [
+        (NOW, "lane-split", "observe", "", "lane-split", text)
+    ]
+
+
 def test_one_action_per_stage_per_window_and_the_cap_holds_across_windows(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     run(store)
     assert run(store, at=LATER - 1) == []
     assert caps(store) == (3, 1)
     one_live = lane_split.Lanes(ready={"eng": 3, "ci": 0}, live={"eng": 1, "ci": 1}, room=4)
-    fire(store, "claim_wait", value=7.5, at=LATER)
+    fire(store, "seat_wait", value=7.5, at=LATER)
     why = "the ci lane keeps a seat for each of its 1 live agents"
     assert run(store, lanes=one_live, at=LATER) == [proposed(CLAIM, why)]
     assert caps(store) == (3, 1)
-    assert stamped(store) == {"claim_wait": str(LATER)}
+    assert stamped(store) == {"seat_wait": str(LATER)}
 
 
 def test_a_change_the_swarm_refuses_is_proposed(store, home, shipped, monkeypatch):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
 
     def refuse(*args, **kwargs):
         raise SwarmError("boom")
@@ -301,7 +329,7 @@ def test_a_refused_rank_proposes_raising_the_existing_task(store, home, shipped)
 
 
 def test_a_mechanical_remedy_runs_before_its_fix_task_is_raised(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     ledger = FakeLedger()
     text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1)
     assert run(store, ledger=ledger, doc={"tasks": [claim_fix()]}) == [text]
@@ -309,7 +337,7 @@ def test_a_mechanical_remedy_runs_before_its_fix_task_is_raised(store, home, shi
 
 
 def test_a_refused_mechanical_remedy_raises_its_fix_task(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     ledger = FakeLedger()
     full = lane_split.Lanes(ready={"eng": 3, "ci": 1}, live={"eng": 1, "ci": 2}, room=4)
     text = bottleneck_remedy.RAISED.format(task="r1", targeted=CLAIM)
@@ -318,7 +346,7 @@ def test_a_refused_mechanical_remedy_raises_its_fix_task(store, home, shipped):
 
 
 def test_a_refused_mechanical_remedy_with_an_urgent_fix_task_does_nothing(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     full = lane_split.Lanes(ready={"eng": 3, "ci": 1}, live={"eng": 1, "ci": 2}, room=4)
     assert run(store, doc={"tasks": [claim_fix(rank="urgent")]}, lanes=full) == []
     assert master_items(store) == [] and stamped(store) == {}
@@ -341,43 +369,43 @@ def test_a_non_mechanical_stage_sends_exactly_one_proposal_per_window(store, hom
 @pytest.mark.parametrize(("doc", "ask"), [({"tasks": []}, None), ({"tasks": [claim_fix()]}, "r1")])
 def test_below_delegate_a_mechanical_stage_is_proposed(store, home, shipped, doc, ask):
     store.update(SLUG, autonomy=ASSIST)
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     why = bottleneck_remedy.BELOW.format(autonomy=ASSIST)
     assert run(store, doc=doc) == [proposed(CLAIM, why)]
     assert caps(store) == (2, 2)
-    fix = "Bottleneck fix for the claim wait stage"
-    assert master_items(store) == [proposal("claim wait", CLAIM, why, fix=fix, task=ask)]
+    fix = "Bottleneck fix for the seat wait stage"
+    assert master_items(store) == [proposal("seat wait", CLAIM, why, fix=fix, task=ask)]
 
 
 def test_below_delegate_an_urgent_fix_task_needs_no_proposal(store, home, shipped):
     store.update(SLUG, autonomy=ASSIST)
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     assert run(store, doc={"tasks": [claim_fix(rank="urgent")]}) == []
     assert master_items(store) == []
 
 
 def test_a_stale_finding_runs_no_remedy(store, home, shipped):
-    fire(store, "claim_wait", at=NOW - standing.STALE_MS)
+    fire(store, "seat_wait", at=NOW - standing.STALE_MS)
     assert run(store) == []
     assert caps(store) == (2, 2)
 
 
 @pytest.mark.parametrize(("hours", "threshold"), [(2.0, 2.0), (1.0, 0.0)])
 def test_a_reading_not_over_a_threshold_runs_no_remedy(store, home, shipped, hours, threshold):
-    detect(store, "claim_wait", hours, threshold)
+    detect(store, "seat_wait", hours, threshold)
     assert run(store) == []
     assert caps(store) == (2, 2) and master_items(store) == [] and recorded(store) == {}
 
 
 def test_a_stage_not_due_leaves_the_next_stage_its_remedy(store, home, shipped):
-    fire(store, "claim_wait", at=NOW - standing.STALE_MS)
+    fire(store, "seat_wait", at=NOW - standing.STALE_MS)
     fire(store, "merge_queue", value=4.0, threshold=1.5)
     assert len(run(store)) == 1
     assert list(recorded(store)) == ["merge_queue"]
 
 
 def test_a_stage_needing_no_action_leaves_the_next_stage_its_remedy(store, home, shipped):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     fire(store, "merge_queue", value=4.0, threshold=1.5)
     full = lane_split.Lanes(ready={"eng": 3, "ci": 1}, live={"eng": 1, "ci": 2}, room=4)
     assert len(run(store, doc={"tasks": [claim_fix(rank="urgent")]}, lanes=full)) == 1
@@ -385,7 +413,8 @@ def test_a_stage_needing_no_action_leaves_the_next_stage_its_remedy(store, home,
 
 
 def test_actions_taken_before_a_failing_stage_are_still_logged(store, home, shipped, monkeypatch):
-    fire(store, "claim_wait", value=7.5)
+    pin(store, "ci", "claude")
+    detect(store, "launch_failure", 0.5, 0.25, labels=("claude",))
     fire(store, "merge_queue", value=4.0, threshold=1.5)
 
     def broken(*args, **kwargs):
@@ -394,7 +423,7 @@ def test_actions_taken_before_a_failing_stage_are_still_logged(store, home, ship
     monkeypatch.setattr(InboxStore, "send", broken)
     with pytest.raises(RuntimeError):
         run(store)
-    text = bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1)
+    text = bottleneck_remedy.MOVED.format(lane="ci", source="claude", target="codex", targeted=FAILED)
     assert logged(home) == [(NOW, "dispatcher", "apply", "", RULE, text)]
 
 
@@ -405,7 +434,7 @@ def test_a_ci_overrun_proposal_names_its_own_unit(store, home, shipped):
 
 
 def test_the_step_reads_the_lanes_of_its_ledger_state_and_clock(store, home, shipped, monkeypatch):
-    fire(store, "claim_wait", value=7.5)
+    fire(store, "seat_wait", value=7.5)
     fire(store, "review")
     seen = []
     monkeypatch.setattr(lane_split, "_lanes", lambda *args: seen.append(args) or ROOMY)
@@ -413,11 +442,11 @@ def test_the_step_reads_the_lanes_of_its_ledger_state_and_clock(store, home, shi
     found = bottleneck_remedy.step(SLUG, store, ledger, doc, NOW)
     assert seen == [(SLUG, store, doc, NOW)]
     assert found[:2] == [
-        bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1),
         bottleneck_remedy.RAISED.format(task="r1", targeted=REVIEW),
+        bottleneck_remedy.SHIFTED.format(giver="ci", taker="eng", targeted=CLAIM, eng=3, ci=1),
     ]
     assert ledger.ranks == [(SLUG, "r1", "urgent", "dispatcher", True)]
-    assert stamped(store) == {"claim_wait": str(NOW), "review": str(NOW)}
+    assert stamped(store) == {"seat_wait": str(NOW), "review": str(NOW)}
 
 
 def test_the_tick_hands_its_store_ledger_state_and_clock_to_the_remedies(monkeypatch):

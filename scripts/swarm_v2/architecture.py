@@ -375,15 +375,21 @@ def _run(args, key: Ed25519PublicKey | None) -> int:
     if args.command == "record":
         print(json.dumps(apply_inventory(args.record, load_inventory(args.inventory), key), indent=2))
     elif args.command == "approve":
-        key = _cli_approve(args, key)
+        key = _cli_approve(args)
     elif args.command == "rollback":
         print(json.dumps(rollback(args.record, args.to, args.operation, **_operator_transport(args.slug)), indent=2))
-    Path(args.markdown).write_text(render(load_record(args.record), key))
+    write_markdown(args.record, args.markdown, key)
     return 0
 
 
+def write_markdown(record: Path | str, markdown: Path | str, key: Ed25519PublicKey | None) -> None:
+    Path(markdown).write_text(render(load_record(record), key))
+
+
 def _page_credential(slug: str) -> str | None:
-    from scripts.swarm_ledger.repository import repository
+    from scripts.swarm_ledger import storage
+
+    repository = storage.default()
 
     return repository.token(slug)
 
@@ -396,16 +402,29 @@ def _operator_transport(slug: str) -> dict:
     }
 
 
-def _cli_approve(args, key: Ed25519PublicKey | None) -> Ed25519PublicKey:
-    signer = signing_key(os.environ)
+def operator_approval(
+    record: Path | str,
+    inventory: Path | str,
+    proposal_id: str,
+    reason: str,
+    transport: dict,
+    environ: Mapping[str, str],
+) -> tuple[dict, Ed25519PublicKey]:
+    signer = signing_key(environ)
+    key = verify_key(environ)
     if key is not None and key_id(key) != key_id(signer.public_key()):
         raise ArchitectureError(f"{SIGNING_ENV} does not match {KEY_ENV}")
-    proposal = next((p for p in load_inventory(args.inventory)["proposals"] if p["id"] == args.proposal), None)
+    proposal = next((p for p in load_inventory(inventory)["proposals"] if p["id"] == proposal_id), None)
     if proposal is None:
-        raise ArchitectureError(f"{args.inventory} has no proposal {args.proposal}")
-    change = approve(args.record, proposal, args.reason, signer=signer, **_operator_transport(args.slug))
+        raise ArchitectureError(f"{inventory} has no proposal {proposal_id}")
+    return approve(record, proposal, reason, signer=signer, **transport), signer.public_key()
+
+
+def _cli_approve(args) -> Ed25519PublicKey:
+    transport = _operator_transport(args.slug)
+    change, key = operator_approval(args.record, args.inventory, args.proposal, args.reason, transport, os.environ)
     print(json.dumps(change, indent=2))
-    return signer.public_key()
+    return key
 
 
 def verify_key(environ: Mapping[str, str]) -> Ed25519PublicKey | None:

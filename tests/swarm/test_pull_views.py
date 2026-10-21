@@ -5,9 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from scripts.swarm.ledger_events import GATE, SENT_TTL_S, views
+from scripts.swarm.ledger_events import view as single_view
 from scripts.swarm.store import PREFIX
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 
 def resource(head="h1", state="OPEN"):
@@ -76,6 +75,32 @@ def test_a_bad_resource_does_not_discard_its_neighbors():
     assert [found[url] for url in urls[1:]] == [None, None, None]
 
 
+def test_a_batched_pull_request_pages_through_more_than_one_hundred_contexts():
+    urls = [f"https://github.com/o/r/pull/{n}" for n in range(2)]
+    big = resource("h2")
+    commit = big["commits"]["nodes"][0]["commit"]
+    commit["id"] = "C_h2"
+    first = [{"name": f"job {n}", "conclusion": "SUCCESS", "databaseId": n} for n in range(100)]
+    commit["statusCheckRollup"] = {"contexts": {"nodes": first, "pageInfo": {"hasNextPage": True, "endCursor": "c"}}}
+    rest = [{"name": "job 100", "conclusion": "FAILURE", "databaseId": 100}]
+    page = {"node": {"statusCheckRollup": {"contexts": {"nodes": rest, "pageInfo": {"hasNextPage": False}}}}}
+    replies = [{"data": {"p0": resource(), "p1": big}}, {"data": page}]
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return SimpleNamespace(returncode=0, stdout=json.dumps(replies[len(calls) - 1]))
+
+    found = views(urls, run)
+    assert len(calls) == 2
+    assert {"id=C_h2", "after=c"} <= set(calls[1])
+    assert "isRequired(pullRequestNumber:1)" in calls[1][4]
+    assert "isRequired(pullRequestNumber:0)" in calls[0][-1] and "$number" not in calls[0][-1]
+    assert found[urls[0]].head == "h1"
+    assert found[urls[1]].failed == ("job 100",)
+    assert found[urls[1]].red is True
+
+
 def test_partial_graphql_errors_leave_other_pull_requests_readable():
     urls = [f"https://github.com/o/r/pull/{n}" for n in range(2)]
     raw = {
@@ -134,7 +159,8 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
         if "nodes(ids:" in query:
             tree = "tree1" if '"tree1"' in query else "tree2"
             assert (
-                query == f'query={{nodes(ids:["{tree}"]){{id ...on Tree{{entries{{object{{...on Blob{{text}}}}}}}}}}}}'
+                query
+                == f'query={{nodes(ids:["{tree}"]){{id ...on Tree{{entries{{name object{{...on Blob{{text}}}}}}}}}}}}'
             )
             return SimpleNamespace(
                 returncode=0,
@@ -170,7 +196,84 @@ def test_workflow_declarations_cache_by_immutable_tree_while_heads_and_checks_re
     assert not third.gate_passed
     assert "Blob{text}" not in calls[0]
     assert all(key.startswith(f"{PREFIX}:") for key in cache.scan_iter())
-    assert 0 < cache.ttl(f"{PREFIX}:workflow-gate:tree1") <= SENT_TTL_S
+    assert 0 < cache.ttl(f"{PREFIX}:workflow-gate-files:tree1") <= SENT_TTL_S
+
+
+@pytest.mark.parametrize("batched", [False, True])
+@pytest.mark.parametrize("optional", [False, True])
+@pytest.mark.parametrize("conclusion", [None, "FAILURE", "SUCCESS"])
+@pytest.mark.parametrize("phase", ["jobs", "suite", "absent"])
+@pytest.mark.parametrize("event", [None, "pull_request"])
+def test_a_status_gate_judges_only_jobs_of_its_declared_workflow(batched, optional, conclusion, phase, event):
+    import fakeredis
+
+    url = "https://github.com/o/r/pull/1"
+    required = {"id": "W1", "resourcePath": "/o/r/actions/workflows/test.yml"}
+    other = {"id": "W2", "resourcePath": "/o/r/actions/workflows/docs.yml"}
+    run = {"databaseId": 1, "event": event, "workflow": required}
+    probe = {"databaseId": 2 if optional else 1, "event": event, "workflow": other if optional else required}
+    checks = [
+        {"context": GATE, "state": "SUCCESS", "isRequired": True},
+        {
+            "name": "unit",
+            "databaseId": 10,
+            "conclusion": "SUCCESS",
+            "isRequired": False,
+            "checkSuite": {"workflowRun": run},
+        },
+        {
+            "name": "probe",
+            "databaseId": 20,
+            "conclusion": conclusion,
+            "isRequired": False,
+            "checkSuite": {"workflowRun": probe},
+        },
+    ]
+    suites = [
+        {"status": "COMPLETED", "workflowRun": run},
+        {"status": "IN_PROGRESS" if conclusion is None else "COMPLETED", "workflowRun": probe},
+    ]
+    if phase != "jobs":
+        checks = [checks[0], *([checks[-1]] if optional else [])]
+    if phase == "absent":
+        suites = [suites[-1]] if optional else []
+    tree = {
+        "id": "tree1",
+        "entries": [
+            {"name": "test.yml", "object": {"text": f"name: Tests\njobs:\n  gate:\n    name: {GATE}\n"}},
+            {"name": "docs.yml", "object": {"text": "name: Docs\njobs:\n  measure:\n    name: probe\n"}},
+        ],
+    }
+    raw = resource()
+    commit = raw["commits"]["nodes"][0]["commit"]
+    commit["file"] = {"object": tree}
+    commit["statusCheckRollup"] = {"contexts": {"nodes": checks, "pageInfo": {}}}
+    commit["checkSuites"] = {"nodes": suites, "pageInfo": {}}
+    calls = []
+
+    def read(command, **kwargs):
+        query = next(arg for arg in command if arg.startswith("query="))
+        calls.append(query)
+        if "nodes(ids:" in query:
+            assert "entries{name object" in query
+            data = {"nodes": [tree]}
+        else:
+            assert "workflow{id name resourcePath}" in query
+            assert "workflow{id resourcePath}" in query
+            snapshot = json.loads(json.dumps(raw))
+            if batched:
+                snapshot["commits"]["nodes"][0]["commit"]["file"] = {"object": {"id": "tree1"}}
+            data = {"p0" if batched else "resource": snapshot}
+        return SimpleNamespace(returncode=0, stdout=json.dumps({"data": data}))
+
+    cache = fakeredis.FakeRedis(decode_responses=True)
+    for _ in range(2):
+        pull = views([url], read, cache)[url] if batched else single_view(url, read)
+        assert pull.head == "h1"
+        assert pull.resolved is (phase == "jobs" and (optional or conclusion is not None))
+        assert pull.red is (phase == "jobs" and not optional and conclusion == "FAILURE")
+        assert pull.failed == (("probe",) if phase == "jobs" and not optional and conclusion == "FAILURE" else ())
+    assert sum("nodes(ids:" in query for query in calls) == int(batched)
 
 
 def test_unreadable_workflow_declaration_is_unknown_and_is_not_cached():
@@ -219,6 +322,160 @@ def test_tick_snapshot_batches_claimed_tasks_and_caches_fallbacks(doc, monkeypat
     lookup("other")
     lookup("other")
     assert fallback == ["other"]
+
+
+def test_metrics_completed_and_split_pulls_are_prefetched_without_late_slow_reads(monkeypatch, tmp_path):
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox, metrics_swarm
+    from scripts.swarm.store import RedisStore
+
+    urls = [f"https://github.com/o/r/pull/{number}" for number in range(1, 5)]
+    doc = {
+        "tasks": [
+            {"id": "active", "state": "pr", "pr_url": urls[0], "split_pulls": [urls[1]]},
+            {"id": "done", "state": "done", "pr_url": urls[2], "split_pulls": [urls[3]]},
+        ],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": int(time.time() * 1000)}]},
+    }
+    elapsed = [0.0]
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    def batch(found, cache):
+        elapsed[0] += 20
+        return dict.fromkeys(found)
+
+    def late(url):
+        elapsed[0] += 20
+        return None
+
+    monkeypatch.setattr(ledger_events, "views", batch)
+    monkeypatch.setattr(ledger_events, "view", late)
+    lookup = ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    box = metrics_outbox.Outbox(tmp_path / "metrics.sqlite", metrics_outbox.Settings("http://sink", "", ""))
+    try:
+        started = elapsed[0]
+        found = metrics_swarm.pull_rows(
+            box, int(time.time() * 1000), metrics_swarm.TickInput(store, doc, [], lookup, None)
+        )
+        assert elapsed[0] - started < 30, f"Late PR reads held metrics for {elapsed[0] - started} seconds"
+        assert set(found) == set(urls)
+    finally:
+        box.close()
+
+
+@pytest.mark.parametrize(
+    "recorded_primary,recorded_split", [(True, True), (True, False), (False, True), (False, False)]
+)
+def test_tick_prefetch_skips_recorded_completed_metrics_but_keeps_unrecorded_backfill(
+    monkeypatch, tmp_path, recorded_primary, recorded_split
+):
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox
+    from scripts.swarm.store import RedisStore
+
+    now = int(time.time() * 1000)
+    urls = [f"https://github.com/o/r/pull/{number}" for number in range(1, 5)]
+    doc = {
+        "tasks": [
+            {"id": "active", "state": "pr", "pr_url": urls[0], "split_pulls": [urls[1]]},
+            {"id": "done", "state": "done", "pr_url": urls[2], "split_pulls": [urls[3]]},
+        ],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": now}]},
+    }
+    path = tmp_path / "metrics.sqlite"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+    table = metrics_outbox.Table("delivery_events", (("kind", "String"), ("pull_request", "String")))
+    box = metrics_outbox.Outbox(path, metrics_outbox.Settings("http://sink", "", ""))
+    try:
+        for enabled, kind, url in [
+            (recorded_primary, "merge", urls[2]),
+            (recorded_split, "pull_request_merged", urls[3]),
+        ]:
+            if enabled:
+                box.append(
+                    table,
+                    [
+                        {
+                            "event_id": kind,
+                            "ledger": "sw",
+                            "plan": "",
+                            "phase": "",
+                            "slice": "",
+                            "task": "",
+                            "ts_ms": now,
+                            "kind": kind,
+                            "pull_request": url,
+                        }
+                    ],
+                )
+    finally:
+        box.close()
+    batches = []
+    monkeypatch.setattr(ledger_events, "views", lambda found, cache: batches.append(found) or dict.fromkeys(found))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+
+    expected = (
+        {urls[0], urls[1]}
+        | ({urls[2]} if not recorded_primary else set())
+        | ({urls[3]} if not recorded_split else set())
+    )
+    assert len(batches) == 2
+    assert all(set(batch) == expected for batch in batches)
+
+
+def test_expired_metric_rows_do_not_hide_recent_completion_backfill(monkeypatch, tmp_path):
+    import time
+
+    import fakeredis
+
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import ledger_events, metrics_outbox
+    from scripts.swarm.store import RedisStore
+
+    now, url = int(time.time() * 1000), "https://github.com/o/r/pull/1"
+    path = tmp_path / "metrics.sqlite"
+    monkeypatch.setattr(metrics_outbox, "spool_path", lambda: path)
+    table = metrics_outbox.Table("delivery_events", (("kind", "String"), ("pull_request", "String")))
+    box = metrics_outbox.Outbox(path, metrics_outbox.Settings("http://sink", "", ""))
+    try:
+        box.append(
+            table,
+            [
+                {
+                    "event_id": "old",
+                    "ledger": "sw",
+                    "plan": "",
+                    "phase": "",
+                    "slice": "",
+                    "task": "",
+                    "ts_ms": now - metrics_outbox.DAY_MS - 1,
+                    "kind": "merge",
+                    "pull_request": url,
+                }
+            ],
+        )
+    finally:
+        box.close()
+    doc = {
+        "tasks": [{"id": "done", "state": "done", "pr_url": url}],
+        "_meta": {"events": [{"kind": "task done", "target": "tasks/done", "at": now}]},
+    }
+    batches = []
+    monkeypatch.setattr(ledger_events, "views", lambda found, cache: batches.append(found) or dict.fromkeys(found))
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    ledger_events.tick_view(InboxStore(store.redis), store, "sw", doc)
+    assert batches == [[url]]
 
 
 def test_missing_workflow_directory_does_not_declare_a_required_gate():

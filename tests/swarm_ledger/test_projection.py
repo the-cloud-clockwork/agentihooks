@@ -13,8 +13,10 @@ import ledger  # noqa: E402
 import ledger_core as core  # noqa: E402
 import new_ledger  # noqa: E402
 
-from scripts.swarm_ledger.repository import repository as storage  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger import legacy_page  # noqa: E402
+
+storage = default_repository()
 
 SLUG = "time_left_minutes-2026-01-01"
 
@@ -29,7 +31,7 @@ class TimeLeft(unittest.TestCase):
             "questions": [],
             "followups": [],
         }
-        html_path, json_path = core.paths(SLUG)
+        html_path, json_path = legacy_page.paths(SLUG, core)
         core.LEDGER_DIR.mkdir(parents=True, exist_ok=True)
         html_path.write_text(legacy_page.render(new_ledger.build_doc(content), SLUG, 8765), encoding="utf-8")
         json_path.unlink(missing_ok=True)
@@ -98,6 +100,7 @@ const activeAgents = () => 0;
 const swarm = null;
 const inboxPending = () => 0;
 const document = {dispatchEvent: () => true};
+const closedLeft = () => 0;
 let meta = {created_at: Date.now() - 3600000};
 let doc = {phases: [{done: true}, {done: false}], followups: [], questions: [], tasks: [], time_left_minutes: 200};
 """

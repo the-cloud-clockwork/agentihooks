@@ -4,6 +4,9 @@ import subprocess
 from pathlib import Path
 
 from coverage import CoverageData
+from coverage.exceptions import NotPython
+
+from tests.coverage_grade import statements_of
 
 
 def _git(repo: Path, revision: str) -> str:
@@ -38,6 +41,12 @@ def _executed(shards: list[Path]) -> dict[str, list[int]]:
 
 
 def record(repo: Path, shards: list[Path], target: Path, previous: Path | None = None) -> None:
+    executed = _executed(shards)
+    for path, lines in executed.items():
+        statements = statements_of((repo / path).read_text(), lines)
+        for line in sorted(set(lines) - set(statements)):
+            print(f"::warning::{path}:{line} is not executable in the current source; dropped from baseline")
+        executed[path] = sorted(set(statements.values()))
     history = []
     if previous and previous.is_file():
         old = read(previous)
@@ -46,7 +55,7 @@ def record(repo: Path, shards: list[Path], target: Path, previous: Path | None =
         "commit": _git(repo, "HEAD"),
         "tree": _git(repo, "HEAD^{tree}"),
         "shards": len(shards),
-        "executed": _executed(shards),
+        "executed": executed,
         "history": history,
     }
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -68,7 +77,7 @@ def main(argv: list[str] | None = None) -> int:
         if downloaded != sorted(shard.parent.name for shard in shards):
             raise ValueError(f"downloaded shard coverage {downloaded} is not the {args.shards} shards the run split")
         record(args.head, shards, args.out, args.previous)
-    except (subprocess.CalledProcessError, KeyError, ValueError, OSError) as exc:
+    except (subprocess.CalledProcessError, KeyError, ValueError, OSError, NotPython) as exc:
         print(f"::error::Cannot record the coverage baseline: {exc}")
         return 1
     return 0

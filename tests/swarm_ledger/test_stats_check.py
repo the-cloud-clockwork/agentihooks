@@ -1,9 +1,6 @@
 import subprocess
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
-
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 
 
 def function_source(name):
@@ -55,6 +52,7 @@ def test_older_server_response_cannot_replace_newer_stats():
         + "let rev = 12, meta = {rev: 12}, doc = {time_left_minutes: 60};\n"
         + "let ops = [], seedBroken = false;\n"
         + "const withDefaults = x => x, applyChecks = () => {}, banner = () => {}, render = () => {}, lsWrite = () => {};\n"
+        + "const keepDropped = () => {}, mergeOlder = () => {};\n"
         + "let firstState = () => {};\n"
         + "applyServer({_meta: {rev: 11}, time_left_minutes: 400});\n"
         + "assert.equal(rev, 12); assert.equal(doc.time_left_minutes, 60);\n"
@@ -116,8 +114,7 @@ def test_the_stats_card_has_no_stats_check_row():
         "const h = (tag, attrs, ...children) => attrs.text || children.filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const span = () => '1m'; const inScope = list => list; const activeAgents = () => 0;\n"
         "const swarm = null; const inboxPending = () => 0; const document = {dispatchEvent: () => true};\n"
-        + EVENTS
-        + "let meta = {created_at: 1, events: [sent, answer]};\n"
+        "const closedLeft = () => 0;\n" + EVENTS + "let meta = {created_at: 1, events: [sent, answer]};\n"
         "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: null, chat: [{id: 'm3', by: 'boss', at: 150, text: 'ok'}]};\n"
         "const statsSent = null;\n"
         + function_source("statsCheck")
@@ -158,6 +155,7 @@ def test_the_stats_card_counts_unfrozen_and_frozen_work_apart():
         "const h = (tag, attrs, ...children) => [attrs.text, ...children].filter(Boolean).join(' ');\n"
         "const when = () => 'now'; const inScope = list => list; const activeAgents = () => 0;\n"
         "const swarm = null; const inboxPending = () => 0; const document = {dispatchEvent: () => true};\n"
+        "const closedLeft = () => 0;\n"
         "let meta = {created_at: 1, events: [],"
         " time_left: {at: 5, calculation: {remaining: 2, frozen: 3, frozen_work: 90}}};\n"
         "let doc = {phases: [], followups: [], questions: [], tasks: [], time_left_minutes: 30};\n"

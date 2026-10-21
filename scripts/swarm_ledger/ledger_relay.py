@@ -7,6 +7,8 @@ the entry carries those words, of any length and in any wording.
 
 import re
 
+from scripts.swarm_ledger import ports
+
 ITEM_RE = re.compile(r"^(phases|questions|followups|tasks|notes)/[^/]+$")
 AUTHOR_RE = re.compile(r"^[A-Za-z][\w.@-]{0,63}$")
 OPS = ("relay",)
@@ -27,21 +29,47 @@ def check(op):
         raise ValueError("relay needs quote, the operator's words")
 
 
+def watched_masters(by: str) -> list[str]:
+    from redis.exceptions import RedisError
+
+    from scripts.doctor.priming import TEMPLATE
+
+    get_redis = ports.hooks().redis
+    operator_words = ports.hooks().operator_words
+    RedisStore, SwarmError = ports.swarm().store.RedisStore, ports.swarm().store.SwarmError
+
+    redis = get_redis()
+    if redis is None:
+        return []
+    store = RedisStore(redis)
+    try:
+        slug = store.names.slug_of(by)
+        watched = store.peer(slug)
+        if not watched or store.config(slug).template != TEMPLATE:
+            return []
+        code = store.names.code_of(watched)
+    except (RedisError, SwarmError):
+        return []
+    return operator_words.recorded(f"master@{code}-*") if code else []
+
+
 def speakers(by):
     """Every address of the relaying agent, then every master and planner of its swarm with recorded words."""
-    from hooks.context import operator_words
-    from scripts.swarm.naming import addresses, parse
+    operator_words = ports.hooks().operator_words
+    addresses, parse = ports.swarm().naming.addresses, ports.swarm().naming.parse
 
     names = addresses(by)
     codes = sorted({agent.code for agent in map(parse, names) if agent})
     crew = [n for code in codes for kind in ("master", "planner") for n in operator_words.recorded(f"{kind}@{code}-*")]
-    return list(dict.fromkeys([*names, *crew]))
+    return list(dict.fromkeys([*names, *crew, *watched_masters(by)]))
 
 
 def verified(by, quote):
     """The quoted span, as the operator wrote it, of recorded words from any master or planner of the relaying agent's swarm."""
-    from hooks.context import operator_words
+    operator_words = ports.hooks().operator_words
 
+    if len(quote.split()) < 3:
+        return ""
     words = next((w for name in speakers(by) if (w := operator_words.matching(name, quote, within=None))), "")
     found = re.search(r"\s+".join(map(re.escape, quote.split())), words, re.IGNORECASE)
     return found.group(0) if found else ""

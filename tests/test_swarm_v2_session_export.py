@@ -15,7 +15,7 @@ CODEX_ID = "019a2b3c-4d5e-7f60-8a9b-0c1d2e3f4a5b"
 
 def _scope(incarnation="inc-1"):
     return {
-        "authority": {"execution_id": "exe-" + "a" * 32},
+        "authority": {"execution_id": "exe-" + "a" * 32, "generation": 3},
         "incarnation": incarnation,
         "supervisor_pid": 1,
         "process_namespace": "pid:[1]",
@@ -57,7 +57,12 @@ def test_claude_sessions_are_copied_into_a_manifest_the_supervisor_accepts(tmp_p
 
     relative = "checkpoints/inc-1/manifest.json"
     manifest_path = attempt / relative
-    assert fields == {"status": "complete", "manifest": relative, "sha256": _digest(manifest_path.read_bytes())}
+    assert fields == {
+        "status": "complete",
+        "manifest": relative,
+        "sha256": _digest(manifest_path.read_bytes()),
+        "transcript_end": 0,
+    }
     manifest = json.loads(manifest_path.read_text())
     assert manifest == {
         **scope,
@@ -112,7 +117,7 @@ def test_portable_export_selects_newest_main_conversation_and_returns_durable_ac
         "publish",
         lambda *args, **kwargs: calls.append((args, kwargs)) or acknowledgement,
     )
-    assert session_export.export(attempt, scope, environ) == acknowledgement
+    assert session_export.export(attempt, scope, environ) == {**acknowledgement, "transcript_end": 0}
     assert calls == [((attempt, scope, environ), {"newest": newest})]
     assert not (attempt / "checkpoints").exists()
 
@@ -128,6 +133,22 @@ def test_codex_rollouts_name_their_session_id(tmp_path):
     manifest = json.loads((attempt / fields["manifest"]).read_text())
     assert (manifest["harness"], manifest["native_session_id"]) == ("codex", CODEX_ID)
     assert [entry["path"] for entry in manifest["files"]] == [f"2026/10/11/{rollout.name}"]
+
+
+def test_export_reports_the_final_normalized_main_transcript_length(tmp_path):
+    attempt, home, environ = _home(tmp_path, "claude")
+    projects = home / ".claude" / "projects" / "p"
+    _session(
+        projects / f"{CLAUDE_ID}.jsonl",
+        b'{"type":"user","message":{"content":"first"}}\n'
+        b'{"type":"assistant","message":{"content":[{"type":"text","text":"last"}]}}\n'
+        b'{"type":"system","message":"ignored"}\n',
+        2_000,
+    )
+    _session(projects / f"{OLDER_ID}.jsonl", b"{}\n", 1_000)
+    _session(projects / CLAUDE_ID / "subagents" / "agent.jsonl", b"{}\n", 3_000)
+
+    assert session_export.export(attempt, _scope(), environ)["transcript_end"] == 2
 
 
 def test_an_attempt_without_a_native_session_reports_incomplete(tmp_path):
@@ -167,6 +188,9 @@ def test_the_exporter_reports_ready_then_exports_once_its_incarnation_is_quiesce
     attempt, home, root, scope = supervised
     _session(home / ".claude" / "projects" / "p" / f"{CLAUDE_ID}.jsonl", b"{}\n", 1_000)
     protocol.write(root / "quiesced.json", {**scope, "incarnation": "previous", "status": "quiesced"})
+    termination = attempt / "termination.log"
+    termination.touch()
+    monkeypatch.setattr(session_export.completion, "TERMINATION_LOG", termination)
     pauses = []
 
     def pause(seconds):
@@ -181,6 +205,12 @@ def test_the_exporter_reports_ready_then_exports_once_its_incarnation_is_quiesce
     assert session_export.main() == 0
 
     assert pauses == [0.05]
+    assert json.loads(termination.read_text()) == {
+        "schema_version": 1,
+        "execution_id": "exe-" + "a" * 32,
+        "generation": 3,
+        "transcript_end": 0,
+    }
     acknowledgement = protocol.read(root / "exporter.checkpoint.json")
     assert protocol.checkpoint(Path.cwd(), acknowledgement, scope) == "ckp-inc-1"
 

@@ -12,8 +12,10 @@ import shlex
 import stat
 import sys
 from collections.abc import Callable, Mapping
+from http.client import HTTPException
 from pathlib import Path
 from typing import NamedTuple
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 from scripts import openbao_kv
@@ -44,6 +46,10 @@ def _exported(secret: Mapping[str, object], accounts: Accounts) -> dict[str, str
     return by_email | {key: value for key, value in values.items() if _named(key, accounts.prefix)}
 
 
+class Unreachable(Exception):
+    pass
+
+
 def from_openbao(environ: Mapping[str, str], accounts: Accounts) -> dict[str, str] | None:
     url, bao, path = environ.get("OPENBAO_URL"), environ.get("OPENBAO_TOKEN"), accounts.path(environ)
     if not url or not bao or not path:
@@ -52,8 +58,10 @@ def from_openbao(environ: Mapping[str, str], accounts: Accounts) -> dict[str, st
     try:
         with urlopen(request, timeout=TIMEOUT_S) as response:
             tokens = _exported(json.load(response)["data"]["data"], accounts)
-    except (OSError, ValueError, KeyError, TypeError, AttributeError):
+    except (HTTPError, HTTPException, ValueError, KeyError, TypeError, AttributeError):
         return None
+    except OSError as error:
+        raise Unreachable from error
     return tokens or None
 
 
@@ -84,15 +92,18 @@ def from_file(path: Path, prefix: str) -> tuple[dict[str, str], str]:
         return {}, f"no fallback at {path}"
 
 
-def load(environ: Mapping[str, str], accounts: Accounts) -> dict[str, str]:
-    tokens = from_openbao(environ, accounts)
+def load(environ: Mapping[str, str], accounts: Accounts, reachable: bool = True) -> tuple[dict[str, str], bool]:
+    try:
+        tokens = from_openbao(environ, accounts) if reachable else None
+    except Unreachable:
+        tokens, reachable = None, False
     if tokens is not None:
-        return tokens
+        return tokens, reachable
     fallback = fallback_path(environ, accounts.fallback)
     tokens, note = from_file(fallback, accounts.prefix)
     if fallback.exists() or (environ.get("OPENBAO_URL") and accounts.path(environ)):
         print(f"agentihooks accounts: OpenBao unreachable, {note}", file=sys.stderr)
-    return tokens
+    return tokens, reachable
 
 
 def render(tokens: Mapping[str, str]) -> str:
@@ -103,5 +114,7 @@ def main(argv: list[str]) -> int:
     if argv != ["env"]:
         print(USAGE, file=sys.stderr)
         return 2
-    sys.stdout.write(render({**load(os.environ, CLAUDE), **load(os.environ, CODEX)}))
+    claude, reachable = load(os.environ, CLAUDE)
+    codex, _ = load(os.environ, CODEX, reachable)
+    sys.stdout.write(render({**claude, **codex}))
     return 0

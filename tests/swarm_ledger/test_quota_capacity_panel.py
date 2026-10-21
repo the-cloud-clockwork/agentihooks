@@ -43,14 +43,15 @@ def run_js(names, expr):
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 
 
-def test_each_quota_row_carries_the_state_and_routing_left_the_tick_decided_on_and_dashes_without_one():
+def test_each_quota_row_shows_the_balance_state_and_routing_left_even_when_the_tick_decided_otherwise():
     sw = {
         "quota_capacity": DECISION,
         "quota": {
             "cap": 3,
             "rows": [
-                {"account": "alpha", "agent": "claude", "five_hour_left": 41, "seven_day_left": 9, "sessions": 2},
-                {"account": "alpha", "agent": "codex", "five_hour_left": 90, "seven_day_left": 80, "sessions": 0},
+                {"account": "alpha", "agent": "claude", "state": "DRAIN", "routing_left": 9.6, "sessions": 2},
+                {"account": "alpha", "agent": "codex", "state": "CLOSED", "routing_left": 3, "sessions": 0},
+                {"account": "beta", "agent": "codex", "state": "SIGNED_OUT", "routing_left": None, "sessions": 0},
                 {"account": "gamma", "agent": "claude", "five_hour_left": 70, "seven_day_left": 30, "sessions": 1},
             ],
         },
@@ -60,17 +61,17 @@ def test_each_quota_row_carries_the_state_and_routing_left_the_tick_decided_on_a
         f"quotaRows({json.dumps(sw)}, {NOW}).map((q) => [q.account, q.harness, q.state, q.routing])",
     )
     assert out == [
-        ["alpha", "claude", "closed", "8%"],
-        ["alpha", "codex", "open", "80%"],
+        ["alpha", "claude", "drain", "10%"],
+        ["alpha", "codex", "closed", "3%"],
+        ["beta", "codex", "signed out", "—"],
         ["gamma", "claude", "—", "—"],
     ]
 
 
-def test_routing_left_is_unknown_when_a_window_is_unknown():
+def test_an_unknown_routing_reading_shows_a_dash():
     out = run_js(
         ["percent", "accountState"],
-        "[accountState({quota_capacity: {accounts: [{harness: 'claude', name: 'a', state: 'UNKNOWN', routing: null}]}},"
-        " {account: 'a', agent: 'claude', five_hour_left: 50, seven_day_left: 40})]",
+        "[accountState({account: 'a', agent: 'claude', state: 'UNKNOWN', routing_left: null})]",
     )
     assert out == [{"state": "unknown", "routing": "—"}]
 
@@ -101,4 +102,5 @@ def test_account_states_take_their_role_colour():
     page = page_source()
     assert "#quota-table .lbl.open { color: var(--positive); }" in page
     assert "#quota-table .lbl.closed { color: var(--destructive); }" in page
+    assert "#quota-table .lbl.drain { color: var(--warn); }" in page
     assert ".lbl.awaiting-decision, .lbl.unknown { color: var(--warn); }" in page

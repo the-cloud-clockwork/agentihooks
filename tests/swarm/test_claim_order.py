@@ -81,7 +81,13 @@ def test_key_is_rank_then_resumed_work_then_the_fast_clear_exception_then_depth(
 
 
 @pytest.mark.parametrize(
-    "work", [{"branch": "engineer-a1b2c3-0001"}, {"pr_url": "https://example.test/pull/1"}, {"parked_on": ["gone"]}]
+    "work",
+    [
+        {"branch": "engineer-a1b2c3-0001"},
+        {"pr_url": "https://example.test/pull/1"},
+        {"parked_on": ["gone"]},
+        {"awaiting": "fix"},
+    ],
 )
 def test_a_task_carrying_earlier_work_goes_ahead_of_fresh_tasks_of_its_rank_only(work):
     ledger = rows(
@@ -93,6 +99,12 @@ def test_a_task_carrying_earlier_work_goes_ahead_of_fresh_tasks_of_its_rank_only
     )
     assert claim_order.resumed(ledger["resumed"]) and not claim_order.resumed(ledger["deep"])
     assert ordered(ledger)[:4] == ["urgent", "resumed", "small", "deep"]
+
+
+@pytest.mark.parametrize("awaiting", ["", "merge", "approval"])
+def test_only_a_task_awaiting_fix_counts_as_resumed_by_its_mark(awaiting):
+    assert claim_order.resumed({"id": "t", "awaiting": awaiting}) is False
+    assert claim_order.resumed({"id": "t", "awaiting": claim_order.FIX}) is True
 
 
 def test_rank_orders_before_depth_and_the_exception():

@@ -1,8 +1,9 @@
 import time
 from collections.abc import Callable
-from dataclasses import replace
+from dataclasses import asdict, replace
 
 from scripts.swarm.store import RedisStore
+from scripts.swarm_v2.herdr.attach import Jump
 from scripts.swarm_v2.herdr.endpoints import CERTIFICATE_SECONDS
 from scripts.swarm_v2.herdr.publications import TransportRefused
 from scripts.swarm_v2.herdr.reconcile import Report
@@ -48,3 +49,18 @@ class Service:
         if report is not None:
             self.synced = now
         return report
+
+    def saved(self) -> dict:
+        jump = self.upkeep.terminal.home.jump
+        return {
+            "due": self.upkeep.due,
+            "seen": self.upkeep.seen,
+            "synced": self.synced,
+            "jump": None if jump is None else asdict(jump),
+        }
+
+    def resume(self, saved: dict) -> None:
+        self.upkeep.due, self.upkeep.seen, self.synced = saved["due"], saved["seen"], saved["synced"]
+        if saved["jump"] is not None:
+            terminal = self.upkeep.terminal
+            terminal.home = replace(terminal.home, jump=Jump(**saved["jump"]))

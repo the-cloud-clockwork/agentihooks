@@ -182,11 +182,19 @@ After committing inputs, `bash docker/swarm-node/smoke.sh OUTPUT_DIRECTORY`
 builds an archived clean context, scans the built image for credentials with
 `docker/swarm-node/scan.sh`, starts two independent containers with network
 disabled, rejects three invalid locks, rebuilds the worker stage without cache and starts
-the retained image again. The rebuild reuses the pip wheels and tool binaries of the
-`downloads` stage, each checked against its locked sha256 before use. It
+the retained image again. The rebuild reuses the pip wheels of the `python-downloads`
+stage and the tool binaries of the `tool-downloads` stage, which fetches the locked tools
+concurrently; each is checked against its locked sha256 before use. It
 also bootstraps the fixture profiles in `fixtures/profiles` inside fresh
-containers, runs `claude mcp list`, `codex mcp list`, `claude -p` and `codex
-exec` offline so their SessionStart hooks register the session, proves
+containers, runs `claude mcp list`, `codex mcp list` and `claude -p` offline,
+and replays a fixture SessionStart event through the rendered Codex hook.
+Both hooks must register exactly one session in the proof working directory;
+Codex registration does not depend on an authenticated model request. The replay
+keeps the first observed matching registry write as its registration timestamp
+and fails if new hook descendants remain alive after a one second grace period,
+killing and naming each survivor. Both positive containers must exit less than
+two seconds after registration. See [Worker profile proof](../../docs/reference/worker-profile-proof.md)
+for CI commands, fixed limits, timing fields and failure diagnosis. It proves
 refusals, crash recovery and a profile rollback, and writes the SV2-IMG-02
 evidence. The output contains the build manifest, software
 inventory, profile hashes and package evidence. Production deployment and new
@@ -285,3 +293,33 @@ branch starts no build. Proof branch publication goes only to the
 `agentihooks-worker-proof` repository. Rollback points deployment at the last
 accepted digest without rebuilding or retagging it; deployment selection belongs
 to antoncore GitOps.
+
+The candidate build reuses a layer cache in the Actions cache. Its key is
+`worker-layers-` followed by a hash of every file under `docker/swarm-node/`,
+this README included, and `scripts/swarm_v2/worker_image.py`. The other
+sources the worker stage copies, such as `hooks/`, `scripts/` and `profiles/`,
+are not in the key: a change there keeps the exact hit, Docker rebuilds the
+affected layers in that run, and the stored entry stays as it was. When no
+entry has the exact key, the newest `worker-layers-` entry the run can read
+seeds the build. Actions cache scope applies: a run reads entries saved on its
+own ref or on the default branch, `main`, so dev pushes and dispatches on dev
+share entries, and a release run reads only its own tag's entries and `main`'s.
+
+On an exact hit the build only reads the cache and nothing is saved. On a miss
+the build also writes every stage's layers (`mode=max`) to a separate folder.
+The job keeps and saves that folder under the exact key in its last steps:
+after the requalification match, the registry publication, the floating `dev`
+tag move and the release tagging, and before the attestation upload. The keep
+and save steps have no condition beyond the cache miss. They are skipped when
+an earlier step fails, so a refused candidate or a failed publication saves no
+cache, and neither does a run that is cancelled or hits the job's sixty minute
+timeout before the save. A run that qualifies without publishing skips the
+publication steps and still saves once the requalification matches.
+`tests/contracts/image_manifest/test_workflow.py` checks that the cache is kept
+and saved only after the requalification match and every publication step.
+
+To find whether a run saved the cache, open its job log: `Keep the qualified
+candidate layers` and `Save the qualified candidate layers` show as skipped on
+an exact hit and as run on a miss. Neither step continues on error, so a
+failed save turns the run red; the image is already published by then, and its
+digest and tags stand.

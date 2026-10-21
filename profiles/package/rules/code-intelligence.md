@@ -16,3 +16,4 @@ Every session reaches Serena (`mcp__serena__*`) at one endpoint, the agentihooks
 - Work the operator asks to do directly on the base branch (`WT_BASE_BRANCH`, default `dev`) in the primary checkout edits with built-in Read / Edit; the router refuses the primary checkout.
 - Sub-agents work in the parent's worktree and leave `activate_project` to the parent.
 - Serena runs only through the router: `agentihooks serena status` lists the backends, `wt.sh done` releases one. Registering another Serena server or running `serena start-mcp-server` by hand is out.
+- `AGENTIHOOKS_SERENA=false` is the one off switch, for a session or a machine: it lets every edit through and injects no Serena directive.

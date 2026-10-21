@@ -12,6 +12,8 @@ from scripts.swarm_ledger.api import client as api_client
 from scripts.swarm_ledger.api import resources, routes
 from scripts.swarm_ledger.api.errors import APIError
 from scripts.swarm_ledger.repository import sqlite as store
+from scripts.swarm_v2 import masters
+from tests.swarm_ledger.api_fakes import as_services
 
 SLUG = "hierarchy-pages"
 
@@ -53,7 +55,7 @@ class Served(api_client.ResourceClient):
         self.paths.append(path)
         try:
             return routes.ledger_read(
-                SimpleNamespace(repository=repo), slug, urlsplit(path).path, routes.pagination(path)
+                as_services(SimpleNamespace(repository=repo)), slug, urlsplit(path).path, routes.pagination(path)
             )
         except APIError as exc:
             body = json.dumps({"error": {"code": exc.code, "message": str(exc)}}).encode()
@@ -71,10 +73,10 @@ def test_a_hierarchy_above_the_reply_cap_returns_every_node_across_pages(large):
 
 
 def test_a_page_of_the_hierarchy_carries_a_cursor_to_the_next(large):
-    first = routes.ledger_read(SimpleNamespace(repository=large), SLUG, "hierarchy", {"limit": 3})
+    first = routes.ledger_read(as_services(SimpleNamespace(repository=large)), SLUG, "hierarchy", {"limit": 3})
     assert [row["node"] for row in first["data"]] == ["phases/p0", "tasks/t0-0", "tasks/t0-1"]
     second = routes.ledger_read(
-        SimpleNamespace(repository=large), SLUG, "hierarchy", {"limit": 2, "cursor": first["next_cursor"]}
+        as_services(SimpleNamespace(repository=large)), SLUG, "hierarchy", {"limit": 2, "cursor": first["next_cursor"]}
     )
     assert [row["node"] for row in second["data"]] == ["tasks/t0-2", "tasks/t0-3"]
     assert second["revision"] == first["revision"]
@@ -135,15 +137,16 @@ def test_the_phase_pass_reads_every_page_of_a_ledger_above_the_cap(large, monkey
     flat = ledger_client._ledger()
     monkeypatch.setattr(api_client, "ResourceClient", lambda base, credentials, timeout: served)
     monkeypatch.setattr(flat, "credentials", lambda slug, service=False: {})
-    monkeypatch.setattr(flat, "base", lambda: "http://ledger.test")
+    monkeypatch.setattr(flat, "base", lambda slug="": "http://ledger.test")
     ticked = []
 
     class Ledger(ledger_client.LedgerClient):
         def set_phase(self, slug, phase_id, done, status):
             ticked.append((phase_id, done))
 
+    monkeypatch.setattr(masters, "held", lambda redis, slug, agents: {})
     document = state(40, 100)
-    actions = phases.phase_pass(Inbox(), SimpleNamespace(agents=lambda slug: []), SLUG, document, Ledger())
+    actions = phases.phase_pass(Inbox(), SimpleNamespace(agents=lambda slug: [], redis=None), SLUG, document, Ledger())
     assert ticked == [(f"p{n}", n % 2 == 0) for n in range(40)]
     assert actions == [f"phase p{n} {'ticked' if n % 2 == 0 else 'reopened'}" for n in range(40)]
     assert len(served.paths) > 1

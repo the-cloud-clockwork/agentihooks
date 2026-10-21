@@ -1,7 +1,8 @@
 {
   "case": "T-SV2-PRF-02-A",
-  "evidence_class": "measured: Anton reads are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
+  "evidence_class": "measured: Anton reads 1 to 3 are read only kubectl and aws listings of nodes, events, Pods, autoscaling activities and EC2 instances, read 3 also the agent log of each swarm worker Pod, reduced by startup_bench reduce; the kind reads come from the Startup stages workflow named in their source, where a GitHub hosted runner pulled the published worker image from a local registry that the fixture stopped and restarted; the Anton outage read comes from the startup fixture's anton-outage mode, which created a namespace with a worker Pod and a registry Pod on anton-prod, listed nodes, events and Pods, the autoscaler's ScaledUpGroup events and the Oracle instance, then deleted the namespace; attribution, report and claim are functions over those committed reads; the account release in case C runs the KUB-05 recovery over fakeredis and is mocked",
   "input_sha256": {
+    "anton-outage-1.json": "8d5860d22787254ad0e1cca0bc07817a1dce6425c66fbbda3ebb5ff12ffcf276",
     "anton-read-1.json": "850d67d30fb7ec52e89277b2e467c6a9785fba87e56dcff3e2dcd94dc4f9695a",
     "anton-read-2.json": "4ae6cdceb5cfe22509ba51da0efa04b6a57c8770189b0f2c35e2e6825741e7c4",
     "anton-read-3.json": "d55c97ca370de23b73af9e80ecc9db06a3f3742855d8df56a646d4137728a2a8",
@@ -9,6 +10,77 @@
     "kind-run-2.json": "a2b14c83b40160e2de8be5c949f78c28e7ec73cc82a2e175ffa2959a091b1b16"
   },
   "observed": {
+    "anton-outage-1.json": {
+      "read_at": "2026-10-16T20:49:20Z",
+      "source": "startup fixture anton-outage mode at 1dd43842b6bc51122e6bf19cb539d6fc619dc14a against anton-prod, read at 2026-10-16T20:49:20Z: one worker Pod of the agentihooks-worker:dev image scaled the empty Oracle research pool, which has no kata runtime, from zero and pulled through a registry that started 96 seconds after the Pod was scheduled",
+      "startup_stage_p50_p95": {
+        "cold-node/uncached-image": {
+          "failures": {},
+          "from_zero": 1,
+          "image_init_ms": {
+            "n": 1,
+            "p50": 112000,
+            "p95": 112000
+          },
+          "node_provision_ms": {
+            "n": 1,
+            "p50": 225718,
+            "p95": 225718
+          },
+          "node_sources": {
+            "new_instance": 1
+          },
+          "pending": 0,
+          "samples": 1,
+          "stages": {
+            "bootstrap": {
+              "n": 1,
+              "p50": 1000,
+              "p95": 1000
+            },
+            "image": {
+              "n": 1,
+              "p50": 23522,
+              "p95": 23522
+            },
+            "instance": {
+              "n": 1,
+              "p50": 21323,
+              "p95": 21323
+            },
+            "join": {
+              "n": 1,
+              "p50": 197677,
+              "p95": 197677
+            },
+            "pod_start": {
+              "n": 1,
+              "p50": 14237,
+              "p95": 14237
+            },
+            "pull_retry": {
+              "n": 1,
+              "p50": 88478,
+              "p95": 88478
+            },
+            "schedule": {
+              "n": 1,
+              "p50": 763,
+              "p95": 763
+            },
+            "trigger": {
+              "n": 1,
+              "p50": 5955,
+              "p95": 5955
+            }
+          },
+          "started": 1,
+          "transient": {
+            "registry_unavailable": 1
+          }
+        }
+      }
+    },
     "anton-read-1.json": {
       "read_at": "2026-10-11T14:57:15Z",
       "source": "read only kubectl and aws read of anton-prod at 2026-10-11T14:57:15Z",

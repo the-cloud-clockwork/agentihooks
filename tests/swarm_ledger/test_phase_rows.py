@@ -14,7 +14,6 @@ from tests.swarm_ledger.ledger_page import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-TEMPLATE = ROOT / "scripts" / "swarm_ledger" / "template.html"
 CASES = json.loads((ROOT / "tests" / "fixtures" / "phase_lifecycle.json").read_text())
 URL = "http://ledger.test/phase-rows"
 DOC = {

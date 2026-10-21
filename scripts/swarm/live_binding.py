@@ -254,10 +254,21 @@ def record(store: RedisStore, slug: str, agent: AgentRecord, facts: dict, now_ms
     return differences
 
 
+def _seated(agents: list[AgentRecord]) -> set[str]:
+    newest = {}
+    for agent in agents:
+        if agent.started_at >= newest.get(agent.task, agent).started_at:
+            newest[agent.task] = agent
+    return {agent.name for agent in newest.values() if agent.state != "finished"}
+
+
 def findings(store: RedisStore, slug: str) -> list[Finding]:
     result = []
+    seated = _seated(store.agents(slug))
     for raw in store.redis.hgetall(store.key(slug, "live-bindings")).values():
         report = json.loads(raw)
+        if report["agent"] not in seated:
+            continue
         for field, values in report["differences"].items():
             result.append(
                 Finding(

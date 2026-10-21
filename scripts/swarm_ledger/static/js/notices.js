@@ -1,5 +1,6 @@
 import { $, h, headCount, newId, noticeTime } from "./dom.js";
 import { doc, queue } from "./sync.js";
+import { hiddenDone } from "./state.js";
 import { verdictButton } from "./render.js";
 import { jumpTo } from "./outline.js";
 import { foldSaved } from "./folds.js";
@@ -22,7 +23,8 @@ function prioritySubject(item) {
   const [field, noun] = PRIORITY_KINDS[list];
   const found = doc[list].find((i) => i.id === id && !i.deleted);
   const label = field === "title" ? id : noun;
-  return found ? { label, title: found[field] } : { label, title: `This ${noun} was removed`, gone: true };
+  if (found) return { label, title: found[field] };
+  return hiddenDone(doc, list).has(id) ? { label, title: `This ${noun} is done` } : { label, title: `This ${noun} was removed`, gone: true };
 }
 
 export function renderPriorities() {
@@ -147,6 +149,7 @@ export function bottleneckStat(top) {
     h("dt", {}, statGrip("Top bottleneck"), top ? `Top bottleneck · ${measuredAge(top)}` : "Top bottleneck"),
     h("dd", {}, h("ul", { class: "bottleneck-list" }, h("li", { class: "bottleneck-stage", text: top ? top.label || "none" : "unavailable" }),
       h("li", { text: `Trend ${top && top.trend || "unknown"}` }),
-      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }))));
+      h("li", { text: `Last action ${top && top.last_action || "none recorded"}` }),
+      ...((top && top.waits) || []).map((text) => h("li", { class: "bottleneck-wait", text })))));
 }
 

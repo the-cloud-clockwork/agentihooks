@@ -8,7 +8,7 @@ on:
         type: choice
         required: true
         default: tests
-        options: [tests, mutation, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory]
+        options: [tests, mutation, mutation-deadlines, mutation-replay, semgrep, worker-image, swarm-image, brain-smoke, helm-kind, github-access, row-memory, operations-cpu, operations-receipts]
       base:
         description: Base revision for mutation or Semgrep scope
         required: true
@@ -19,6 +19,11 @@ on:
         default: ''
       browser:
         description: Install Chromium for focused browser tests
+        type: boolean
+        required: false
+        default: false
+      existing_only:
+        description: Explicitly skip missing paths and run only existing requested tests
         type: boolean
         required: false
         default: false
@@ -34,6 +39,177 @@ permissions:
   actions: read
 
 jobs:
+  mutation-deadlines:
+    if: inputs.proof == 'mutation-deadlines'
+    uses: ./.github/workflows/mutation-deadline-proof.yml
+
+  operations-receipts:
+    if: inputs.proof == 'operations-receipts'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 15
+    env:
+      RECEIPT_STATS_BASE: ${{ inputs.base }}
+      RECEIPT_STATS_TESTS: ${{ inputs.tests || 'tests/swarm_ledger/receipt_probe.py' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+          fetch-depth: 0
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
+          path: base
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - name: Install shared dependencies
+        working-directory: head
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Observe base receipt request times
+        working-directory: base
+        run: |
+          cp ../head/tests/swarm_ledger/receipt_probe.py tests/swarm_ledger/receipt_probe.py
+          python -m pytest tests/swarm_ledger/receipt_probe.py -n 0 -s --tb=short
+      - name: Observe head receipt request times on the same runner
+        if: always()
+        working-directory: head
+        run: python -m pytest tests/swarm_ledger/receipt_probe.py -n 0 -s --tb=short
+      - name: Observe instrumented base receipts
+        if: always()
+        working-directory: base
+        run: |
+          cp ../head/tests/swarm_ledger/receipt_stats_probe.py tests/swarm_ledger/receipt_stats_probe.py
+          cp -a ../head/scripts/ci_mutation/. scripts/ci_mutation/
+          python -m tests.swarm_ledger.receipt_stats_probe
+      - name: Observe instrumented head receipts
+        if: always()
+        working-directory: head
+        run: python -m tests.swarm_ledger.receipt_stats_probe
+
+  operations-cpu:
+    if: inputs.proof == 'operations-cpu'
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss-batch' || 'ubuntu-latest' }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: head
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.base == 'origin/dev' && 'dev' || inputs.base }}
+          path: base
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v10.2.0
+        with:
+          version: '0.12.23'
+          enable-cache: false
+      - name: Install dependencies shared by both revisions
+        working-directory: head
+        run: uv pip install --system --excludes .github/test-excludes.txt -e '.[dev,all]'
+      - name: Replay base on the shared runner
+        working-directory: base
+        env:
+          OPERATIONS_CPU_REPORT: ${{ github.workspace }}/operations-base.json
+          PYTHONUNBUFFERED: '1'
+        run: |
+          cp ../head/tests/swarm_ledger/operations_cpu_replay.py tests/swarm_ledger/operations_cpu_replay.py
+          cp ../head/tests/swarm_ledger/operations_relay.py tests/swarm_ledger/operations_relay.py
+          cp ../head/tests/swarm_ledger/operations_corpus.json.gz tests/swarm_ledger/operations_corpus.json.gz
+          python -m pytest tests/swarm_ledger/operations_cpu_replay.py -n 0 --tb=short
+      - name: Replay head on the same runner
+        working-directory: head
+        env:
+          OPERATIONS_CPU_REPORT: ${{ github.workspace }}/operations-head.json
+          PYTHONUNBUFFERED: '1'
+        run: |
+          python -m pytest tests/swarm_ledger/operations_cpu_replay.py -n 0 --tb=short
+      - name: Plant dropped stream updates and retained memory
+        if: always()
+        run: |
+          cp -a head fault
+          python - <<'PY'
+          from pathlib import Path
+          path = Path('fault/scripts/swarm_ledger/events/patch.py')
+          source = path.read_text()
+          needle = 'if type(a) is not type(b) or a != b:\n        return False'
+          assert source.count(needle) == 1
+          path.write_text(source.replace(needle, 'if True:\n        return True'))
+          path = Path('fault/tests/swarm_ledger/operations_cpu_replay.py')
+          source = path.read_text()
+          needle = 'memory_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss'
+          assert source.count(needle) == 1
+          path.write_text(source.replace(needle, needle + '\n    memory_fault = bytearray(b"x") * (128 * 1024 * 1024)'))
+          PY
+      - name: Replay the dropped stream control
+        if: always()
+        working-directory: fault
+        env:
+          OPERATIONS_CPU_REPORT: ${{ github.workspace }}/operations-fault.json
+          PYTHONUNBUFFERED: '1'
+        run: python -m pytest tests/swarm_ledger/operations_cpu_replay.py -n 0 --tb=short
+      - name: Compare acceptance, revision and persistence on the same corpus
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          base = json.loads(Path('operations-base.json').read_text())
+          head = json.loads(Path('operations-head.json').read_text())
+          fault = json.loads(Path('operations-fault.json').read_text())
+          assert base['source'] == head['source']
+          assert base['outputs'] == head['outputs'], 'Operation or persisted-state outcomes changed'
+          assert head['outputs'] != fault['outputs'], 'Dropped stream update escaped the comparison'
+          assert fault['peak_rss_kib_after_replay'] > base['peak_rss_kib_after_replay'] * 1.1, 'Retained memory escaped the bound'
+          fault_growth = fault['peak_rss_kib_after_replay'] - fault['peak_rss_kib_before_replay']
+          base_growth = base['peak_rss_kib_after_replay'] - base['peak_rss_kib_before_replay']
+          assert fault_growth > max(base_growth, 1) * 1.1, 'Retained replay memory escaped the growth bound'
+          accepted = sum(1 for output in head['outputs'] if output['reply'].get('applied'))
+          assert accepted, 'No operation in the corpus was accepted'
+          def p95(values):
+              ordered = sorted(values)
+              return ordered[min(len(ordered) - 1, int(0.95 * len(ordered)))]
+          print(json.dumps({
+              'accepted': accepted,
+              'base_cpu_seconds_p95': p95(base['cpu_seconds']),
+              'head_cpu_seconds_p95': p95(head['cpu_seconds']),
+              'requests': head['requests'],
+              'base_cpu_seconds_per_request': base['mean_cpu_seconds'],
+              'head_cpu_seconds_per_request': head['mean_cpu_seconds'],
+              'ratio': head['mean_cpu_seconds'] / base['mean_cpu_seconds'],
+              'base_peak_rss_kib': base['peak_rss_kib_after_replay'],
+              'head_peak_rss_kib': head['peak_rss_kib_after_replay'],
+              'operation_mix': head['source']['operation_mix'],
+          }, indent=2))
+          assert head['mean_cpu_seconds'] <= base['mean_cpu_seconds'] / 2
+          assert head['peak_rss_kib_after_replay'] <= base['peak_rss_kib_after_replay'] * 1.1
+          growth = {
+              side: run['peak_rss_kib_after_replay'] - run['peak_rss_kib_before_replay']
+              for side, run in (('base', base), ('head', head))
+          }
+          print(json.dumps({'peak_rss_growth_kib': growth}))
+          assert growth['head'] <= max(growth['base'], 1) * 1.1, 'Replay memory growth exceeded base by more than ten percent'
+          PY
+      - name: Retain the CPU profile and every outcome
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: operations-cpu
+          path: operations-*.json
+          if-no-files-found: error
+
+  mutation-replay:
+    if: inputs.proof == 'mutation-replay'
+    uses: ./.github/workflows/mutation-replay.yml
+    with:
+      case: ${{ inputs.base }}
+
   row-memory:
     if: inputs.proof == 'row-memory'
     uses: ./.github/workflows/ledger-row-memory.yml
@@ -77,10 +253,11 @@ jobs:
 
   tests:
     if: inputs.proof == 'tests'
-    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && github.triggering_actor == 'github-merge-queue[bot]') && 'anton-oss' || 'ubuntu-latest' }}
+    runs-on: ${{ (github.event_name != 'pull_request_target' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.actor) && contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor) || (github.event_name == 'merge_group' || github.event_name == 'push' && github.ref == 'refs/heads/dev') && github.actor == 'github-merge-queue[bot]' && (github.triggering_actor == 'github-merge-queue[bot]' || contains(fromJSON('["nestorcolt","agenticore-app[bot]","tcc-main-ci[bot]"]'), github.triggering_actor))) && 'anton-oss' || 'ubuntu-latest' }}
     timeout-minutes: 15
     env:
       TEST_PATHS: ${{ inputs.tests }}
+      EXISTING_ONLY: ${{ inputs.existing_only }}
       PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.playwright
     steps:
       - uses: actions/checkout@v4
@@ -92,9 +269,24 @@ jobs:
           [[ "$TEST_PATHS" != *$'\n'* ]] || { echo '::error::Give every test path on one line.'; exit 1; }
           read -r -a paths <<< "$TEST_PATHS"
           [[ ${#paths[@]} -gt 0 ]] || { echo '::error::Choose explicit test paths under tests/.'; exit 1; }
+          missing=false
+          selected=()
+          annotation=error
+          [[ "${EXISTING_ONLY:-false}" != true ]] || annotation=warning
           for path in "${paths[@]}"; do
             [[ "$path" == tests/* && "$path" != *..* ]] || { echo '::error::Every test path must be under tests/.'; exit 1; }
+            if [[ -e "${path%%::*}" ]]; then
+              selected+=("$path")
+            else
+              echo "::$annotation::Test path ${path%%::*} does not exist."
+              missing=true
+            fi
           done
+          [[ "$missing" == false || "${EXISTING_ONLY:-false}" == true ]] || exit 1
+          [[ ${#selected[@]} -gt 0 ]] || { echo '::error::No requested test paths exist.'; exit 1; }
+          if [[ "${EXISTING_ONLY:-false}" == true ]]; then
+            echo "TEST_PATHS=${selected[*]}" >> "$GITHUB_ENV"
+          fi
 
       - uses: actions/setup-python@v5
         with:
@@ -119,4 +311,4 @@ jobs:
           PYTHONUNBUFFERED: '1'
         run: |
           read -r -a paths <<< "$TEST_PATHS"
-          python -m pytest "${paths[@]}" -v -n auto --dist loadgroup --tb=short
+          workers=$(python -m scripts.ci_cpu_quota) && python -m pytest "${paths[@]}" -v -n "$workers" --dist loadgroup -p tests.flake_ledger --tb=short

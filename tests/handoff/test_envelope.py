@@ -8,8 +8,6 @@ from scripts.handoff.envelope import REASONS, build, reclaim
 from scripts.inbox.store import InboxStore
 from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 WORKTREE = "/wt/repo/engineer-a1b2c3-0001"
 PR = "https://github.com/o/r/pull/9"
 HEAD = "4f2a9c0e1b7d3a5c6e8f0a1b2c3d4e5f6a7b8c9d"
@@ -134,11 +132,14 @@ def test_a_master_envelope_records_its_launch_effort_inside_the_swarm_range(stor
     assert envelope["launch"]["harness"] == harness
 
 
-def test_a_master_envelope_follows_the_configured_swarm_range(store):
-    store.update("sw", effort_min="low", effort_max="medium")
-    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort="max")
+@pytest.mark.parametrize(
+    ("bounds", "saved"), [(("low", "medium"), "max"), (("low", "medium"), "low"), (("medium", "xhigh"), "medium")]
+)
+def test_a_master_envelope_never_records_a_launch_effort_below_high(store, bounds, saved):
+    store.update("sw", effort_min=bounds[0], effort_max=bounds[1])
+    master = AgentRecord("master@a1b2c3-0001", "master", "master", harness="claude", effort=saved)
     envelope = build(store, "sw", master, "recycle", [], 0, run=lambda argv, **_: _done(code=1))
-    assert envelope["launch"]["effort"] == "medium"
+    assert envelope["launch"]["effort"] == "high"
 
 
 @pytest.mark.parametrize(("harness", "effort"), [("copilot", "max"), ("claude", "")])
@@ -258,9 +259,9 @@ def test_a_reclaim_skips_a_life_that_never_pushed_for_an_older_one_that_did():
     assert (verdict["continue_from"], verdict["remote_head"]) == ("origin/engineer-a1b2c3-0001", HEAD)
 
 
-def test_a_reclaim_follows_the_upstream_a_continuing_life_pushed_to():
+def test_a_reclaim_never_infers_task_ownership_from_a_worktree_upstream():
     run = _remote({"engineer-a1b2c3-0000": HEAD}, upstreams={WORKTREE: "origin/engineer-a1b2c3-0000"})
-    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "origin/engineer-a1b2c3-0000"
+    assert reclaim("/repo", [OLDER], "", run=run)["continue_from"] == "fresh"
 
 
 def test_a_reclaim_falls_back_to_the_branch_the_ledger_recorded():
@@ -273,8 +274,7 @@ def test_a_reclaim_with_no_pushed_branch_starts_fresh_and_names_what_it_checked(
         "remote_branch": "none",
         "remote_head": "none",
         "continue_from": "fresh",
-        "fresh_reason": "no earlier life pushed a branch: checked engineer-a1b2c3-0002, engineer-a1b2c3-0001 and "
-        "feature-x on the remote",
+        "fresh_reason": "no earlier life pushed a branch: checked feature-x on the remote",
     }
 
 

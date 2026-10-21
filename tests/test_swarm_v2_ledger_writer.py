@@ -192,12 +192,12 @@ def test_verify_names_a_failed_integrity_check(tmp_path, monkeypatch):
     (tmp_path / "copy.sqlite3").touch()
     connection = Mock()
     connection.execute.return_value.fetchone.return_value = ("row 3 missing from index",)
-    connect = Mock(return_value=connection)
-    monkeypatch.setattr(ledger_writer.sqlite3, "connect", connect)
+    existing = Mock(return_value=connection)
+    monkeypatch.setattr(ledger_writer, "existing", existing)
     with pytest.raises(ValueError) as failed:
         ledger_writer.verify(tmp_path / "copy.sqlite3")
     assert str(failed.value) == f"{tmp_path / 'copy.sqlite3'} failed its integrity check: row 3 missing from index"
-    connect.assert_called_once_with(tmp_path / "copy.sqlite3")
+    existing.assert_called_once_with(tmp_path / "copy.sqlite3")
     connection.execute.assert_called_once_with("PRAGMA integrity_check")
     connection.close.assert_called_once_with()
 
@@ -346,6 +346,14 @@ def test_the_server_holds_the_lease_while_it_serves_and_releases_it_after(servin
     server.legacy.adopt.assert_called_once_with(server.stored)
     successor = ledger_writer.WriterLease(serving).acquire(OTHER)
     successor.release()
+
+
+def test_a_server_on_the_shared_database_serves_beside_a_held_folder(serving, lease, monkeypatch):
+    monkeypatch.setenv(server.storage.postgres.URL, "postgresql://ledger.invalid/swarm")
+    server.serve()
+    server.ThreadingHTTPServer.return_value.serve_forever.assert_called_once_with()
+    assert ledger_writer.holder(serving)["pid"] == CLAIMANT["pid"]
+    assert ledger_writer.conflicts_total(serving) == 0
 
 
 @pytest.mark.parametrize("case", ["a", "b", "c"])

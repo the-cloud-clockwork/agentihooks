@@ -6,28 +6,29 @@ has_children: true
 
 # Getting Started
 
-AgentiHooks is a lifecycle hook system and MCP tool server for [Claude Code](https://github.com/anthropics/claude-code) agents.
+AgentiHooks is a lifecycle hook system and MCP tool server for **Claude Code and Codex** agents. Start with the [Docker Compose bundle quick start](compose-quick-start.md), or use [native installation](installation.md) for standalone sessions.
 
 ## What you get
 
-- **[Cost management](../cost-management/)** -- slash your token burn with output filtering, file read dedup, lazy MCP loading, context warnings, and native rate limit display. All on by default. [See what you save ->](../cost-management/)
-- **10 lifecycle hooks** -- intercept every Claude Code event (SessionStart, PreToolUse, Stop, etc.) to log transcripts, inject context, scan for secrets, and learn from tool errors
-- **13 MCP tools** across 3 categories -- channels (fleet broadcast + brain), enforcement (doctrine banners) and conditions (session-created condition scripts)
-- **Profile system** -- swap agent personalities, skills, and tool access by choosing a profile at install time
-- **3-layer asset merge** -- agentihooks built-in, bundle global, and profile-specific skills/agents/commands/rules
-- **Cross-session memory** -- tool error patterns persist across sessions via NDJSON store
-- **[Broadcast system](../hooks/broadcast.md)** -- send operator messages to all active Claude Code sessions simultaneously; severities: `info` (once, 4h), `alert` (every turn, 1h), `critical` (every turn + every tool call, 30m); compose manually or use `agentihooks broadcast emit "natural language"` for AI-assisted severity selection. Optional channel tagging: messages published to a named channel only reach sessions subscribed via the `AGENTIHOOKS_BASE_CHANNELS` env var (configured per-profile / per-repo / per-container)
+- Profiles, shared instructions and skills for Claude Code and Codex, with native settings for each harness.
+- Lifecycle hooks for guardrails, context delivery and tool error memory.
+- MCP tools for channels, enforcement, conditions and scheduling.
+- Optional broadcasts and targeted channels for sessions sharing the broadcast store.
+- Optional swarm services for task coordination, durable inbox messages, quota routing and handoffs.
+
+Harness capabilities differ. See the [Codex reference](../reference/CODEX-COMPAT.md) for hook delivery, permissions and configuration limits.
 
 ## Prerequisites
 
-- Python 3.11+
+- Python 3.12+
 - [uv](https://github.com/astral-sh/uv) (recommended) or pip
-- Claude Code CLI
+- Claude Code CLI or Codex CLI for native agent sessions; Docker with the Compose plugin for the service quick start
 
 ## Pages in this section
 
 | Page | What it covers |
 |------|---------------|
-| [Installation](installation.md) | Install agentihooks globally into `~/.claude` |
+| [Docker Compose quick start](compose-quick-start.md) | Start the packaged swarm services and connect clients |
+| [Installation](installation.md) | Install native Claude Code and Codex hooks |
 | [Profiles](profiles.md) | Choose and switch agent profiles, 3-layer merge |
 | [Portability & Reusability](portability.md) | Move setups across machines, manage credentials |

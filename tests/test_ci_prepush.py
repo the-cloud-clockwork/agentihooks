@@ -128,6 +128,22 @@ def test_plan_grades_size_with_the_base_grader_and_runs_two_workers(repo, tmp_pa
     assert (grade / "scripts/size_limits.py").read_text() == "GRADER = 1\n"
 
 
+def test_plan_reads_the_allowlist_and_grader_at_the_merge_base(repo, tmp_path):
+    _git(repo, "checkout", "-q", "-b", "work")
+    _commit(repo, {"scripts/beta.py": "B = 2\n"}, "change")
+    _git(repo, "checkout", "-q", "base")
+    _commit(
+        repo, {"tests/SIZE_ALLOWLIST.json": '{"shrunk": {}}\n', "scripts/size_limits.py": "GRADER = 3\n"}, "base moves"
+    )
+    _git(repo, "checkout", "-q", "work")
+    grade = tmp_path / "grade"
+
+    ci_prepush.plan(repo, "base", grade)
+
+    assert (grade / "tests/SIZE_ALLOWLIST.json").read_text() == '{"base": {}}\n'
+    assert (grade / "scripts/size_limits.py").read_text() == "GRADER = 1\n"
+
+
 @pytest.mark.parametrize("value", [None, "false", "0", "yes"])
 def test_plan_skips_local_tests_unless_true(repo, tmp_path, monkeypatch, value):
     _commit(repo, {"scripts/beta.py": "B = 2\n"}, "change")
@@ -258,3 +274,21 @@ def test_main_runs_in_the_repository_top_level(repo, monkeypatch, argv, base):
     assert ci_prepush.main(argv) == 0
 
     assert seen == [(repo.resolve(), base)]
+
+
+@pytest.mark.parametrize("missing", ["ruff", "pytest"])
+def test_missing_gate_tool_names_the_module_and_interpreter(repo, monkeypatch, capsys, missing):
+    import importlib.util
+
+    _commit(repo, {"scripts/alpha.py": "A = 3\n"}, "change")
+    assert ci_prepush.run(repo, "base", _Runner()) == 0
+    capsys.readouterr()
+    find_spec = importlib.util.find_spec
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None if name == missing else find_spec(name))
+    runner = _Runner()
+
+    assert ci_prepush.run(repo, "base", runner) == 1
+
+    assert f"missing gate tool {missing}; interpreter: {sys.executable}" in capsys.readouterr().out
+    assert not ci_prepush.passed(repo)
+    assert all(command[2] != missing for command, _, _ in runner.calls)

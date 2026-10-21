@@ -6,8 +6,6 @@ import pytest
 from scripts.swarm import commands, execution_card
 from tests import sv2_ux01_cases
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 EVIDENCE = Path(__file__).parents[3] / "evidence" / "SV2-UX-01"
 MODULES = (commands, execution_card)
 

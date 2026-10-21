@@ -1,0 +1,6 @@
+{
+  "scripts/doctor/traces.py:scripts.doctor.traces.x__wait_covers__mutmut_12:ff7bba518c28f76a131c0a3a00bfd46bea9102aee38e5dba321dcecaf0235b0f": {
+    "reader": "Standards reader /root/standards_reader, round three",
+    "reason": "The sole caller _uncovered_gaps negates _wait_covers. When a wait starts beyond the coverage cursor, the original break reaches return False and the mutant returns None. Both are falsey, so the caller includes the same gap and produces identical findings. Independently confirmed against complete mutation run 38842957065."
+  }
+}

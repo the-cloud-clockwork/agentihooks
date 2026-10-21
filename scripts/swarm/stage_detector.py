@@ -8,7 +8,7 @@ from scripts.swarm.health import standing
 from scripts.swarm.store import RedisStore
 
 THRESHOLD_HOURS = {
-    "claim_wait": 4.0,
+    "seat_wait": 4.0,
     "review": 4.0,
     "quota_hold": 2.0,
     "host_hold": 2.0,
@@ -96,6 +96,8 @@ def update_findings(store: RedisStore, slug: str, found: dict, now_ms: int) -> N
             standing.update_detector(store.redis, slug, row, now_ms, threshold)
         elif existing:
             standing.clear_detector(store.redis, slug, row["stage"])
+    for stage in rows.keys() - {row["stage"] for row in found["stages"]}:
+        standing.clear_detector(store.redis, slug, stage)
 
 
 def record(

@@ -13,8 +13,6 @@ from tests.swarm_ledger.test_ledger_authority import SLUG, WORKER
 from tests.swarm_ledger.test_ledger_authority import live as _authority_live
 from tests.swarm_ledger.test_remote_ledger_client import hive as _remote_hive
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 live = _authority_live
 hive = _remote_hive
 REMOTE = {

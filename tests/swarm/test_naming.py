@@ -11,8 +11,6 @@ from scripts.inbox.store import InboxStore
 from scripts.swarm import naming
 from scripts.swarm.store import MASTER, AgentRecord, RedisStore, SwarmConfig
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 ROOT = Path(__file__).resolve().parents[2]
 HERDR_NAME = re.compile(r"^[a-z][a-z0-9_-]{0,31}$")
 
@@ -303,6 +301,49 @@ def test_resolve_many_reads_every_alias_in_one_round_trip(store, redis, monkeypa
     assert reads == [keys]
 
 
+def test_names_batches_alias_and_record_reads_without_changing_rows(store, redis, monkeypatch):
+    from unittest.mock import Mock
+
+    names = [store.next_name("sw", lane, at=at) for lane, at in (("eng", 17), ("ci", 23))]
+    store.names.note(names[1], session_id="session")
+    store.names.retire(names[1], 31)
+    code = store.names.code_of("sw")
+    redis.rpush(store.names.key("names", code), "old-agent", "missing", names[0])
+    store.names.alias("old-agent", names[1])
+    expected = [store.names.entry(name) for name in [*names, "old-agent", "missing", names[0]]]
+    direct = Mock(wraps=redis.hgetall)
+    aliases = Mock(wraps=redis.mget)
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "hgetall", direct)
+    monkeypatch.setattr(redis, "mget", aliases)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+
+    assert store.names.names("sw") == expected
+    direct.assert_not_called()
+    aliases.assert_called_once_with(
+        [store.names.key("alias", name) for name in [*names, "old-agent", "missing", names[0]]]
+    )
+    pipeline.assert_called_once_with(transaction=False)
+
+
+def test_names_without_a_code_reads_no_records(store, redis, monkeypatch):
+    from unittest.mock import Mock
+
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    assert store.names.names("missing") == []
+    pipeline.assert_not_called()
+
+
+def test_names_with_an_empty_list_reads_no_records(store, redis, monkeypatch):
+    from unittest.mock import Mock
+
+    pipeline = Mock(wraps=redis.pipeline)
+    monkeypatch.setattr(redis, "pipeline", pipeline)
+    assert store.names.names("sw") == []
+    pipeline.assert_not_called()
+
+
 def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, caplog):
     from redis.exceptions import RedisError
 
@@ -314,6 +355,25 @@ def test_resolve_many_keeps_every_name_when_redis_fails(redis, monkeypatch, capl
     assert [(r.name, r.levelname, r.getMessage()) for r in caplog.records] == [
         ("scripts.swarm.naming", "WARNING", "alias lookup failed for 2 names: down")
     ]
+
+
+def test_slugs_of_answers_slug_of_for_every_name_in_two_reads(store, redis, monkeypatch):
+    store.create(SwarmConfig("other", "/home/x/dev/other", max_eng=1, max_ci=1))
+    mine, theirs = store.next_name("sw", "eng"), store.next_name("other", "ci")
+    store.names.alias("sw-eng-1", mine)
+    orphan = "ci@ffffff-0001"
+    names = ["sw-eng-1", mine, theirs, "sw-ci-2", "stranger", orphan]
+    expected = {name: store.names.slug_of(name) for name in names}
+    reads = []
+    for command in ("get", "hget", "hgetall", "mget", "hmget"):
+        real = getattr(redis, command)
+        monkeypatch.setattr(redis, command, lambda *a, real=real, command=command: reads.append(command) or real(*a))
+    assert naming.NameRegistry(redis).slugs_of(names) == expected
+    assert expected == {"sw-eng-1": "sw", mine: "sw", theirs: "other", "sw-ci-2": "sw", "stranger": "", orphan: ""}
+    assert reads == ["mget", "hmget"]
+    reads.clear()
+    assert naming.NameRegistry(redis).slugs_of(["stranger"]) == {"stranger": ""}
+    assert reads == ["mget"]
 
 
 def test_resolve_names_needs_no_redis(monkeypatch):

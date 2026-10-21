@@ -1,0 +1,6 @@
+{
+  "hooks/context/inbox_delivery.py:hooks.context.inbox_delivery.x__settlement_context__mutmut_28:9eda5f09cb6999bea511d7aaf268c4af722eca4bc6789e5fcfd10701a548ad14": {
+    "reader": "Standards",
+    "reason": "Standards reader ruled that the marker value is never read; SET NX success, key existence, expiration and public reminder output are identical."
+  }
+}

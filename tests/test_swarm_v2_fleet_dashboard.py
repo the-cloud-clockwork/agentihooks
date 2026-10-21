@@ -7,7 +7,7 @@ import pytest
 from scripts.swarm.store import RedisStore, SwarmError
 from scripts.swarm_v2 import fleet_dashboard as fleet
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 EVIDENCE = Path(__file__).parents[1] / "evidence" / "SV2-OBS-05"
 FIXTURES = Path(__file__).parent / "fixtures" / "swarm_v2"

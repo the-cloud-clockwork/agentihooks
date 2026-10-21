@@ -1,17 +1,22 @@
 import { $, h } from "./dom.js";
 import { itemState } from "./state.js";
-import { doc } from "./sync.js";
+import { closedLeft, doc, pageIn, pagedOut } from "./sync.js";
 import { noticeTarget, showAlerts, showNotifications } from "./notices.js";
 import { showArtifacts } from "./artifacts.js";
 import { renderSwarm, swarm } from "./swarm.js";
 import { collapsible, groupOpen, markToggles, rememberGroup } from "./folds.js";
 import { selectTab } from "./layout.js";
 import { render } from "./render.js";
-import { firstPage, lazy, moreButton, wanted } from "./pages.js";
+import { closedMore, firstPage, lazy, moreButton, wanted } from "./pages.js";
 
 let outlinePick = null;
 
 let outlineFrame = 0;
+let outlineObserver = null;
+const outlineTargets = new Map();
+const outlinePositions = new WeakMap();
+let markedCurrent = null;
+let markedSection = null;
 
 function swarmRows() {
   selectTab("swarm", false);
@@ -38,10 +43,24 @@ export function revealTarget(id) {
   return el;
 }
 
+export function pageTo(id) {
+  const [kind, list, ...rest] = id.split("-");
+  if (kind !== "item" || document.getElementById(id) || !pagedOut(list, rest.join("-"))) return false;
+  pageIn(list, rest.join("-")).then(() => land(revealTarget(id)));
+  return true;
+}
+
 export function jumpTo(ev, item) {
-  const el = revealTarget(`item-${item.replace("/", "-")}`);
+  const id = `item-${item.replace("/", "-")}`;
+  if (pageTo(id)) return ev.preventDefault();
+  const el = revealTarget(id);
   if (!el) return;
   ev.preventDefault();
+  land(el);
+}
+
+function land(el) {
+  if (!el) return;
   el.scrollIntoView({ behavior: "smooth", block: "center" });
   el.classList.remove("flash");
   void el.offsetWidth;
@@ -54,8 +73,9 @@ function outlineOf(doc, heads) {
   return heads.map((head) => {
     const list = (head.list ? doc[head.list] || [] : []).filter((i) => !i.deleted);
     const grouped = ["tasks", "followups"].includes(head.list);
-    const counts = grouped ? [...new Set(list.map((i) => i.state || (i.done ? "done" : "open")))]
-      .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length} ${state}`).join(" · ") : "";
+    const hidden = head.list ? closedLeft(head.list) : 0;
+    const counts = grouped ? [...new Set([...list.map((i) => i.state || (i.done ? "done" : "open")), ...(hidden ? ["done"] : [])])]
+      .map((state) => `${list.filter((i) => (i.state || (i.done ? "done" : "open")) === state).length + (state === "done" ? hidden : 0)} ${state}`).join(" · ") : "";
     return { id: head.id, title: head.title + (counts ? ` · ${counts}` : ""),
       items: head.list === "followups" ? [] : list.map(entry(head.list)) };
   });
@@ -75,7 +95,8 @@ function outlineGroup(s) {
   collapsible(box);
   const key = `ol-${s.id}`;
   return h("li", { class: "ol-sec" }, lazy(box, () => h("ul", { class: "ol-items" },
-    ...firstPage(key, s.items, (i) => i.id).map((i) => h("li", {}, outlineLink(i))), moreButton(key, s.items.length, "more items", outlineAgain) || "")));
+    ...firstPage(key, s.items, (i) => i.id).map((i) => h("li", {}, outlineLink(i))), moreButton(key, s.items.length, "more items", outlineAgain) || "",
+    (s.items.length && closedMore(s.id.replace(/^sec-/, ""), "done", () => render())) || "")));
 }
 
 export function outlineBoxes() {
@@ -115,7 +136,7 @@ export function renderOutline() {
     nav.replaceChildren(h("div", { class: "ol-tools" }, h("button", { class: "link", type: "button", id: "outline-all", on: { click: foldAll } })),
       h("ul", {}, ...tree.map(outlineGroup)));
   }
-  markOutline();
+  scheduleOutline();
   markPending();
 }
 
@@ -128,23 +149,58 @@ function markPending() {
   for (const a of $("outline").querySelectorAll("a[data-target]")) a.classList.toggle("pending", pending.has(a.dataset.target));
 }
 
+function observeOutline(links) {
+  if (!outlineObserver) outlineObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) outlinePositions.set(entry.target, {
+      passed: entry.boundingClientRect.top <= 120,
+      visible: !!(entry.boundingClientRect.width || entry.boundingClientRect.height),
+    });
+    markOutline();
+  });
+  const targets = new Map();
+  for (const link of links) {
+    const id = link.dataset.target;
+    const target = document.getElementById(id);
+    if (target) targets.set(id, target);
+  }
+  for (const [id, target] of outlineTargets) if (targets.get(id) !== target) {
+    outlineObserver.unobserve(target);
+    outlineTargets.delete(id);
+  }
+  for (const [id, target] of targets) if (outlineTargets.get(id) !== target) {
+    outlineTargets.set(id, target);
+    outlineObserver.observe(target);
+  }
+}
+
+function scheduleOutline() {
+  if (outlineFrame) return;
+  outlineFrame = requestAnimationFrame(() => setTimeout(() => {
+    outlineFrame = 0;
+    if (outlineObserver) outlineObserver.disconnect();
+    outlineTargets.clear();
+    markOutline();
+  }, 0));
+}
+
 export function markOutline() {
   const nav = $("outline");
   const links = [...nav.querySelectorAll("a[data-target]")];
+  observeOutline(links);
   let current = outlinePick && links.find((a) => a.dataset.target === outlinePick);
   if (!current) for (const a of links) {
-    const el = document.getElementById(a.dataset.target);
-    if (el && el.getClientRects().length && el.getBoundingClientRect().top <= 120) current = a;
+    const position = outlinePositions.get(outlineTargets.get(a.dataset.target));
+    if (position && position.visible && position.passed) current = a;
   }
   if (current && !current.getClientRects().length) current = current.closest(".ol-sec").querySelector("a");
   const section = current && current.closest(".ol-sec").querySelector("a");
-  for (const a of links) {
-    a.classList.toggle("on", a === current);
-    a.classList.toggle("in", a === section && a !== current);
-  }
-  if (current && (current.offsetTop < nav.scrollTop || current.offsetTop > nav.scrollTop + nav.clientHeight - 24)) {
-    nav.scrollTop = current.offsetTop - nav.clientHeight / 2;
-  }
+  if (current === markedCurrent && section === markedSection) return;
+  if (current) current.scrollIntoView({ block: "nearest" });
+  for (const a of [markedCurrent, markedSection]) if (a) a.classList.remove("on", "in");
+  if (current) current.classList.add("on");
+  if (section && section !== current) section.classList.add("in");
+  markedCurrent = current;
+  markedSection = section;
 }
 
 export function reveal(el) {
@@ -160,6 +216,8 @@ export function showOutline(open) {
 
 export function wireOutline() {
   $("outline-toggle").addEventListener("click", () => showOutline(!$("outline").classList.contains("open")));
+  document.querySelector(".col").addEventListener("toggle", scheduleOutline, true);
+  document.addEventListener("scroll", (ev) => { if (ev.target !== $("outline")) scheduleOutline(); }, { capture: true, passive: true });
   $("outline").addEventListener("click", (ev) => {
     const a = ev.target.closest("a[data-target]");
     const el = a && revealTarget(a.dataset.target);
@@ -172,7 +230,5 @@ export function wireOutline() {
   });
   const userScroll = () => { outlinePick = null; };
   for (const ev of ["wheel", "touchstart", "keydown"]) window.addEventListener(ev, userScroll, { passive: true });
-  for (const ev of ["scroll", "resize"]) window.addEventListener(ev, () => {
-    if (!outlineFrame) outlineFrame = requestAnimationFrame(() => { outlineFrame = 0; markOutline(); });
-  }, { passive: true });
+  for (const ev of ["scroll", "resize"]) window.addEventListener(ev, scheduleOutline, { passive: true });
 }

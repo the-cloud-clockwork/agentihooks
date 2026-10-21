@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -6,8 +7,6 @@ import hooks.context.swarm_wait_nudge as nudge
 from hooks import hook_manager
 from hooks.targets.emitter import flush
 from scripts.swarm import idle
-
-pytestmark = pytest.mark.xdist_group("fakeredis")
 
 NAME = "engineer@abc123-0001"
 WORKER = {"AGENTIHOOKS_SWARM": "rig", "AGENTIHOOKS_SWARM_TASK": "t7", "AGENTIHOOKS_AGENT_NAME": NAME}
@@ -48,6 +47,23 @@ def _declare(redis, slug="rig", name=NAME):
         _bash("gh run watch 37671144724"),
         _bash("gh pr checks 1367 --watch --interval 30"),
         {"tool_name": "Monitor", "tool_input": {"command": "until gh pr checks 1; do sleep 30; done"}},
+        {"tool_name": "sleep", "tool_input": {"duration_ms": 55000}},
+        {"tool_name": "wait", "tool_input": {"cell_id": "measurement"}},
+        {"tool_name": "write_stdin", "tool_input": {"session_id": 1, "chars": "", "yield_time_ms": 30000}},
+        {"tool_name": "write_stdin", "tool_input": {"session_id": 1, "yield_time_ms": 30000}},
+        _bash('text(await tools.exec_command({cmd:"sleep 55"}));'),
+        _bash('const r = await tools.exec_command({ cmd: "cd ~/x && sleep 300", workdir: "/w" });'),
+        _bash('await tools.exec_command({cmd:"ls"}); await tools.exec_command({cmd:"gh run watch 1"});'),
+        _bash('await tools.exec_command({cmd:"echo \\$HOME"}); sleep 900'),
+        _bash('await tools.exec_command({cmd:"echo \\$HOME"}); await tools.exec_command({cmd:"sleep 900"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\$x"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900", workdir:"/a\\$b"});'),
+        _bash('await tools.exec_command({workdir:"/w", cmd:"sleep 900"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900", workdir:"\\uZZ"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\\\$x"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\v"});'),
+        _bash('await tools.exec_command({cmd:"sleep \\\n900"});'),
+        _bash('await tools.exec_command({cmd:"ls\\nsleep 900"});'),
     ],
 )
 def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
@@ -73,10 +89,26 @@ def test_a_worker_with_no_declared_wait_is_told_to_declare_it(redis, payload):
         {"tool_name": "Bash", "tool_input": {}},
         {"tool_name": "Bash"},
         {"tool_name": "Edit", "tool_input": {"file_path": "a.py"}},
+        {"tool_name": "write_stdin", "tool_input": {"session_id": 1, "chars": "y\n", "yield_time_ms": 1000}},
+        {"tool_name": "sleepy", "tool_input": {}},
+        _bash('text(await tools.exec_command({cmd:"ls -la"}));'),
+        _bash('await tools.exec_command({workdir:"/w"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900 \\uZZ"});'),
+        _bash('await tools.exec_command({cmd:"sleep 900'),
+        {"tool_name": "Read", "tool_input": {"command": "sleep 900"}},
+        {"tool_name": "Edit", "tool_input": {"command": "gh run watch 1"}},
+        _bash('text("sleep 55"); await tools.exec_command({cmd:"git status"});'),
     ],
 )
 def test_a_call_that_is_not_a_wait_is_not_told(redis, payload):
     assert nudge.nudge(payload, environ=WORKER) == ""
+
+
+@pytest.mark.parametrize(
+    "program", ["await tools.exec_command({cmd:'sleep 900'});", "await tools.exec_command({cmd:`sleep 900`});"]
+)
+def test_only_double_quoted_nested_commands_are_read(redis, program):
+    assert nudge.nudge(_bash(program), environ=WORKER) == ""
 
 
 def test_a_worker_with_a_declared_wait_is_not_told(redis):
@@ -143,6 +175,30 @@ def test_the_pre_tool_hook_logs_a_failed_lookup_and_adds_nothing(worker, monkeyp
     monkeypatch.setattr(hook_manager, "log", lambda message, data=None: logged.append((message, data)))
     assert TOLD not in _pre(capsys, _bash("sleep 900"))
     assert ("swarm wait nudge failed", {"error": "redis down"}) in logged
+
+
+def _post(capsys, payload):
+    hook_manager.on_post_tool_use({"session_id": "s1", "cwd": "/", **payload})
+    flush("PostToolUse")
+    out = capsys.readouterr().out
+    return json.loads(out).get("hookSpecificOutput", {}).get("additionalContext", "") if out.strip() else ""
+
+
+def test_the_post_tool_hook_carries_the_nudge_where_the_pre_tool_event_cannot(worker, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    assert TOLD not in _pre(capsys, _bash("sleep 900"))
+    assert TOLD in _post(capsys, _bash("sleep 900"))
+
+
+def test_the_post_tool_hook_leaves_the_nudge_to_a_pre_tool_event_that_carries_it(worker, capsys):
+    assert TOLD in _pre(capsys, _bash("sleep 900"))
+    assert TOLD not in _post(capsys, _bash("sleep 900"))
+
+
+def test_the_post_tool_hook_tells_nothing_once_a_wait_is_declared(worker, monkeypatch, capsys):
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    _declare(worker)
+    assert TOLD not in _post(capsys, _bash("sleep 900"))
 
 
 @pytest.mark.parametrize(

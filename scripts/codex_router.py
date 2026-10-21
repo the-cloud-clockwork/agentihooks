@@ -8,6 +8,7 @@ environment under its own name; none is printed or written anywhere.
 import base64
 import contextlib
 import fcntl
+import hashlib
 import json
 import os
 import shutil
@@ -26,7 +27,15 @@ from hooks.context.account_sessions import (
     INTERNAL_RUN,
     codex_sessions_by_account,
 )
-from scripts import codex_quota, codex_sessions, codex_usage, operator_env, session_bands
+from scripts import (
+    codex_quota,
+    codex_rollouts,
+    codex_sessions,
+    codex_usage,
+    operator_env,
+    quota_freshness,
+    session_bands,
+)
 from scripts.codex_quota import CodexQuota
 from scripts.routing import codex_api, envs, place
 from scripts.routing.slots import API, INTERACTIVE, SUBSCRIPTION, Slot
@@ -56,6 +65,7 @@ API_KIND = "api"
 OAUTH_KIND = "chatgpt-oauth"
 ACCESS_TOKEN_KIND = "codex-access-token"
 LOGIN_PASSTHROUGH = ("status", "help")
+FINGERPRINT_LENGTH = 8
 
 
 @dataclass(frozen=True)
@@ -70,6 +80,10 @@ class CodexAccount:
     @property
     def is_token(self) -> bool:
         return bool(self.env_name)
+
+    @property
+    def kind(self) -> str:
+        return SUBSCRIPTION if self.is_token else INTERACTIVE
 
     @property
     def is_api(self) -> bool:
@@ -183,6 +197,16 @@ def routing_pool(environ: Mapping[str, str], run: Callable = subprocess.run) -> 
     return token_accounts(environ) or [CodexAccount(CODEX_DEFAULT)]
 
 
+def live_accounts(pool: list[CodexAccount], sessions: Mapping[str, int]) -> list[CodexAccount]:
+    """Token accounts live sessions run on that the pool lacks, since a routed session holds only its own token."""
+    known = {account.name for account in pool}
+    return [
+        CodexAccount(name, f"{CODEX_TOKEN_PREFIX}{name}")
+        for name in sessions
+        if name not in known and name not in {CODEX_DEFAULT, API_ACCOUNT}
+    ]
+
+
 def _registry() -> dict:
     from hooks.context.broadcast import _load_sessions
 
@@ -190,20 +214,25 @@ def _registry() -> dict:
 
 
 def quotas(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, CodexQuota | None]:
-    """Each account's newest quota, from the session logs the session registry attributes to it."""
+    """Each account's newest quota from its own sessions folder, else the session logs the registry attributes to it."""
     owner = {session_id: info.get("account") for session_id, info in _registry().items()}
     tokens = {account.name for account in [*pool, *token_accounts(environ)] if account.is_token}
+    linked = set().union(*(codex_rollouts.session_ids(environ, name) for name in tokens))
 
     def keep(account: CodexAccount) -> Callable[[str], bool]:
         if account.is_token:
             return lambda session_id: owner.get(session_id) == account.name
         if not tokens:
             return lambda session_id: True
-        return lambda session_id: session_id in owner and owner[session_id] not in tokens
+        return lambda session_id: session_id in owner and owner[session_id] not in tokens and session_id not in linked
+
+    def read(account: CodexAccount) -> CodexQuota | None:
+        own = codex_rollouts.folder(environ, account.name)
+        found = codex_quota.latest_codex_quota(sessions=own) if own.is_dir() else None
+        return found or codex_quota.latest_codex_quota(dict(environ), keep(account))
 
     usage = codex_usage.cached()
-    readings = {account.name: codex_quota.latest_codex_quota(dict(environ), keep(account)) for account in pool}
-    return {name: _newest(found, usage.get(name)) for name, found in readings.items()}
+    return {account.name: _newest(read(account), usage.get(account.name)) for account in pool}
 
 
 def _newest(found: CodexQuota | None, cached: CodexQuota | None) -> CodexQuota | None:
@@ -223,6 +252,11 @@ def usable(quota: CodexQuota, now: float, environ: Mapping[str, str] | None = No
     if session_bands.fresh(quota.observed_at, now):
         return True
     return now - quota.observed_at <= _reading_max_age(os.environ if environ is None else environ)
+
+
+def stale_reset(quota: CodexQuota, now: float, environ: Mapping[str, str] | None = None) -> bool:
+    """A reading past its max age whose week has reset since says nothing about the new week."""
+    return not usable(quota, now, environ) and codex_quota.passed(quota.seven_day, now)
 
 
 def account_cap(quota: CodexQuota | None, now: float, environ: Mapping[str, str] | None = None) -> int | None:
@@ -265,6 +299,54 @@ def _bearer(account: CodexAccount, environ: Mapping[str, str]) -> tuple[str, str
     return (token, claim) if claim else None
 
 
+def identity(account: CodexAccount, environ: Mapping[str, str]) -> str:
+    """The ChatGPT account id claim behind this account's credential; empty when its credential carries none."""
+    if account.is_api:
+        return ""
+    return _token_identity(environ.get(account.env_name) if account.is_token else _default_token(environ))
+
+
+def _token_identity(token: str | None) -> str:
+    return _chatgpt_account_id(_claims(token)) if token else ""
+
+
+def fingerprint(account_id: str) -> str:
+    return hashlib.sha256(account_id.encode()).hexdigest()[:FINGERPRINT_LENGTH] if account_id else ""
+
+
+def duplicates(pool: list[CodexAccount], environ: Mapping[str, str]) -> dict[str, str]:
+    """Each token account whose ChatGPT account repeats an earlier token account's, mapped to that earlier name."""
+    first: dict[str, str] = {}
+    repeated = {}
+    for account in pool:
+        found = identity(account, environ) if account.is_token else ""
+        if found and found in first:
+            repeated[account.name] = first[found]
+        elif found:
+            first[found] = account.name
+    return repeated
+
+
+def identity_warnings(environ: Mapping[str, str]) -> list[str]:
+    return [
+        f"{CODEX_TOKEN_PREFIX}{name} is the same ChatGPT account as {earlier}; it is not routed"
+        for name, earlier in duplicates(token_accounts(environ), environ).items()
+    ]
+
+
+def default_distinction(environ: Mapping[str, str]) -> str:
+    """One line naming whether the default login is a ChatGPT account no token account repeats."""
+    found = {account.name: identity(account, environ) for account in token_accounts(environ)}
+    if not found:
+        return ""
+    default = _token_identity(_default_token(environ))
+    if not default:
+        return "codex default login: identity unknown"
+    same = [name for name, account_id in found.items() if account_id == default]
+    verdict = f"same ChatGPT account as {', '.join(same)}" if same else f"distinct from {', '.join(found)}"
+    return f"codex default login #{fingerprint(default)}: {verdict}"
+
+
 def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = subprocess.run) -> CodexQuota | None:
     """A fresh reading: the free usage read for a ChatGPT token, else one tiny exec read from its rollout."""
     codex_bin = shutil.which(CODEX_BIN) or CODEX_BIN
@@ -287,7 +369,10 @@ def probe(account: CodexAccount, environ: Mapping[str, str], run: Callable = sub
     except (OSError, subprocess.TimeoutExpired, RoutingError):
         return None
     thread = _thread(done.stdout) if done.stdout else ""
-    return codex_quota.session_quota(dict(environ), thread) if thread else None
+    if not thread:
+        return None
+    codex_rollouts.link_thread(environ, account.name, thread)
+    return codex_quota.session_quota(dict(environ), thread)
 
 
 def _attempts_path() -> Path:
@@ -301,15 +386,23 @@ def _probe_attempts() -> dict[str, float]:
 
 
 def fresh_quotas(
-    pool: list[CodexAccount], environ: Mapping[str, str], now: float, run: Callable = subprocess.run
+    pool: list[CodexAccount],
+    environ: Mapping[str, str],
+    now: float,
+    run: Callable = subprocess.run,
+    force: bool = False,
 ) -> dict[str, CodexQuota | None]:
-    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window."""
+    """Each account's newest reading, probed again when it is missing or stale, at most once per freshness window;
+    ``force`` probes every signed in account."""
     found = quotas(pool, environ)
     attempts = _probe_attempts()
     for account in pool:
         seen = found.get(account.name)
-        stale = not session_bands.fresh(seen.observed_at if seen else None, now)
-        if account.signed_in and stale and not session_bands.fresh(attempts.get(account.name), now):
+        stale = seen is None or quota_freshness.stale(
+            seen.observed_at, (seen.five_hour.resets_at, seen.seven_day.resets_at), now
+        )
+        due = force or (stale and not session_bands.fresh(attempts.get(account.name), now))
+        if account.signed_in and due:
             attempts[account.name] = now
             found[account.name] = probe(account, environ, run) or seen
     with contextlib.suppress(OSError):
@@ -328,11 +421,13 @@ class CodexAccountSource:
         return () if self.run is None else (self.run,)
 
     def pool(self, environ: Mapping[str, str]) -> list[CodexAccount]:
-        return [
+        found = [
             account
             for account in accounts(environ, *self._run())
             if account.signed_in and not refusal(account, environ)
         ]
+        repeated = duplicates(found, environ)
+        return [account for account in found if account.name not in repeated]
 
     def readings(
         self, pool: list[CodexAccount], environ: Mapping[str, str], now: float
@@ -347,7 +442,7 @@ class CodexAccountSource:
                 cap,
                 self.sessions.get(account.name, 0),
                 _spend_by(quota, now),
-                kind=SUBSCRIPTION if account.is_token else INTERACTIVE,
+                kind=account.kind,
             )
             for account in pool
             if account.signed_in
@@ -542,6 +637,8 @@ def main(
     route, args = _take(args, "--route")
     exclude, args = _take(args, "--agentihooks-exclude")
     args = codex_sessions.resolve(args, _without_tokens(active))
+    for warning in identity_warnings(active):
+        print(f"agentihooks codex: warning: {warning}", file=sys.stderr)
     lock_path = Path(active.get("HOME", str(Path.home()))) / ".agentihooks" / "codex-route.lock"
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     # Held until exec: the descriptor is close-on-exec, so the next launch counts this one as a live session.

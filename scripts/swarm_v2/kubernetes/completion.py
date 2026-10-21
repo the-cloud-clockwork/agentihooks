@@ -1,5 +1,3 @@
-"""Worker Pods run with restartPolicy Never: once a Pod has Succeeded its archive watermark cannot advance."""
-
 import json
 from collections import Counter
 from collections.abc import Iterable
@@ -11,6 +9,7 @@ from scripts.swarm_v2.kubernetes.client import ApiRefused
 from scripts.swarm_v2.kubernetes.failures import FENCES, FRESH, RECOVERIES, RESUME
 from scripts.swarm_v2.kubernetes.runtime import GENERATION_LABEL
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
+from scripts.swarm_v2.worker import completion
 
 SUCCEEDED, COMPLETED, CANCELLED, REFUSED = "Succeeded", "completed", "cancelled", "refused"
 
@@ -29,7 +28,7 @@ class Completion:
         listed = Counter(pod["metadata"]["labels"].get(EXECUTION_LABEL) for pod in pods)
         for pod in pods:
             if self._completed(pod, known, listed):
-                self._finalize(pod["metadata"])
+                self._finalize(pod)
         self._retire()
         finals = set(self.store.redis.hkeys(self.store.key(self.slug, "attempt-finals")))
         finals -= set(self.store.redis.hkeys(self.store.key(self.slug, "attempt-retained")))
@@ -47,9 +46,21 @@ class Completion:
             and retention.final(self.store, self.slug, execution_id) is None
         )
 
-    def _finalize(self, metadata: dict) -> None:
+    def _finalize(self, pod: dict) -> None:
+        metadata = pod["metadata"]
         execution_id = metadata["labels"][EXECUTION_LABEL]
-        end = retention.archive_watermark(self.store, self.slug, execution_id)
+        reports = [
+            entry.get("state", {}).get("terminated", {})
+            for entry in pod["status"].get("containerStatuses", [])
+            if entry["name"] == "agent"
+        ]
+        if len(reports) != 1 or reports[0].get("exitCode") != 0:
+            return
+        end = completion.transcript_end(
+            reports[0].get("message", ""), execution_id, int(metadata["labels"][GENERATION_LABEL])
+        )
+        if end is None:
+            return
         outcome = f"pods/{metadata['name']}/{metadata['uid']}"
         retention.finalize(self.store, self.slug, self.cleanup.require, execution_id, COMPLETED, end, outcome)
 

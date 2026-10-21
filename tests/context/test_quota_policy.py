@@ -82,6 +82,8 @@ def test_handoff_targets_are_judged_by_their_band_caps_alone():
 
 
 def test_other_accounts_carry_their_band_cap(monkeypatch):
+    for account in ("beta", "gamma", "delta", "eps"):
+        monkeypatch.setenv(f"AH_CC_TOKEN_{account}", account)
     from scripts import claude_quota_balancer as balancer
 
     def result(account, five_used, week_used):
@@ -125,6 +127,7 @@ def test_a_stale_target_has_no_session_cap_until_the_router_refreshes_it():
 
 
 def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     beta = balancer.ProbeResult(
@@ -137,6 +140,7 @@ def test_other_accounts_count_an_account_with_no_live_session_as_zero(monkeypatc
 
 
 def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refresh(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     beta = balancer.ProbeResult(
@@ -149,6 +153,7 @@ def test_a_stale_reading_stays_a_target_with_no_band_cap_for_the_router_to_refre
 
 
 def test_a_newer_fleet_observation_outranks_the_local_cache(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     def beta(five_used):
@@ -165,6 +170,7 @@ def test_a_newer_fleet_observation_outranks_the_local_cache(monkeypatch):
 
 
 def test_a_fleet_observation_wins_a_tie_with_the_local_cache(monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from scripts import claude_quota_balancer as balancer
 
     def beta(five_used):
@@ -239,6 +245,18 @@ def test_handoff_directive_names_the_command_and_the_document():
     assert "beta has 60% left" in text
 
 
+def test_a_swarm_session_hands_off_through_its_seat(monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "demo")
+    d = _decide(10, 98.5, [_c("beta", 10, 40)])
+
+    text = qp.render(d, "sess-1", "/home/u/dev/repo")
+
+    assert text.startswith("QUOTA HANDOFF REQUIRED")
+    assert "Run: agentihooks swarm demo handoff DOC --reason quota\n" in text
+    assert "init-agent" not in text
+    assert "keeps your seat and task" in text
+
+
 def test_wait_directive_carries_a_cron_for_the_reset():
     d = _decide(99.2, 50, [])
 
@@ -258,20 +276,21 @@ def test_stop_directive_asks_for_another_account():
 
 
 @pytest.mark.parametrize(
-    ("five", "week", "tool", "blocked", "context"),
+    ("five", "week", "tool", "head"),
     [
-        (10, 98.5, "Bash", True, False),
-        (99.2, 50, "Bash", True, False),
-        (99.2, 50, "CronCreate", False, True),
+        (10, 98.5, "Bash", "QUOTA STOP"),
+        (99.2, 50, "Bash", "QUOTA WAIT"),
+        (99.2, 50, "CronCreate", "QUOTA WAIT"),
     ],
 )
-def test_pretool_blocks_stop_and_wait(five, week, tool, blocked, context):
+def test_pretool_alerts_stop_and_wait_without_blocking(five, week, tool, head):
     d = _decide(five, week, [])
     with patch.object(qp, "evaluate", return_value=d), patch.object(qp, "handed_off_block", return_value=None):
         block, ctx = qp.pretool("sess-1", tool, "/tmp")
 
-    assert bool(block) is blocked
-    assert bool(ctx) is context
+    assert block is None
+    assert ctx.startswith(head)
+    assert "Tools are not blocked." in ctx
 
 
 def test_pretool_injects_handoff_without_blocking():
@@ -299,6 +318,7 @@ def test_spent_windows_reset_after_their_reset_time():
 
 
 def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monkeypatch):
+    monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
     from hooks.context import quota_usage
     from scripts import claude_quota_balancer as balancer
 
@@ -344,15 +364,99 @@ def test_evaluate_reads_the_session_snapshot_and_the_router_cache(tmp_path, monk
     assert d.target.sessions == 1
 
 
-def test_pre_tool_use_raises_the_stop_block():
+@pytest.mark.parametrize("source", ["cache", "fleet"])
+@pytest.mark.parametrize("credentials", ["missing", "empty", "environment", "operator"])
+def test_handoff_ignores_cached_accounts_without_credentials(tmp_path, monkeypatch, source, credentials):
+    from dataclasses import replace
+
+    from hooks.context import account_sessions, quota_usage
+    from scripts import claude_quota_balancer as balancer
+    from scripts.swarm_v2 import quota
+
+    monkeypatch.setenv("AGENTIHOOKS_HOME", str(tmp_path))
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.delenv("AGENTIHOOKS_TARGET", raising=False)
+    for name in tuple(qp.os.environ):
+        if name.startswith(balancer.TOKEN_PREFIX):
+            monkeypatch.delenv(name)
+    available = credentials in ("environment", "operator")
+    if credentials == "environment":
+        monkeypatch.setenv("AH_CC_TOKEN_beta", "available")
+    elif credentials == "empty":
+        monkeypatch.setenv("AH_CC_TOKEN_beta", "")
+    elif credentials == "operator":
+        monkeypatch.setattr("scripts.operator_env.block_tokens", lambda: {"AH_CC_TOKEN_beta": "available"})
+    monkeypatch.setattr(quota_usage, "AGENTIHOOKS_HOME", tmp_path)
+    now = time.time()
+    quota_usage.record_rate_limits(
+        "stale-target",
+        {
+            "five_hour": {"used_percentage": 40, "resets_at": now + 3600},
+            "seven_day": {"used_percentage": 99, "resets_at": now + 86400},
+        },
+    )
+    beta = balancer.ProbeResult(
+        "beta", "allowed", "NORMAL", 70.0, balancer.QuotaWindow(10.0, None), balancer.QuotaWindow(30.0, None)
+    )
+    balancer._write_cache(
+        tmp_path / "claude-router-cache.json",
+        {
+            "version": 1,
+            "modes": {
+                "normal": {
+                    "accounts": {
+                        "AH_CC_TOKEN_removed": {
+                            "observed_at": now,
+                            "result": balancer._result_data(replace(beta, account="removed")),
+                        },
+                        "AH_CC_TOKEN_beta": {"observed_at": now, "result": balancer._result_data(beta)},
+                    }
+                }
+            },
+        }
+        if source == "cache"
+        else {},
+    )
+    monkeypatch.setattr(
+        quota,
+        "fleet_observations",
+        lambda environ: [(now, replace(beta, account="removed")), (now, beta)] if source == "fleet" else [],
+    )
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "alpha")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {"alpha": 1, "beta": 1})
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+
+    decision = qp.evaluate("stale-target")
+    assert decision.action == ("handoff" if available else "stop")
+    assert (decision.target.account if decision.target else None) == ("beta" if available else None)
+
+
+def test_pre_tool_use_lets_the_tool_run_under_the_stop_alert():
     from hooks import hook_manager
 
     d = _decide(10, 98.5, [])
     with patch.object(qp, "evaluate", return_value=d), patch.object(qp, "handed_off_block", return_value=None):
-        with pytest.raises(hook_manager.BlockAction, match="QUOTA STOP"):
+        hook_manager.on_pre_tool_use(
+            {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-stop", "cwd": "/tmp"}
+        )
+
+
+def test_pre_tool_use_raises_the_handed_off_block(monkeypatch):
+    from hooks import hook_manager
+
+    monkeypatch.setattr("hooks.config.QUOTA_POLICY_ENABLED", True)
+    reason = "BLOCKED: this session handed its task off to account beta at 09:00."
+    with (
+        patch.object(qp, "handed_off_block", return_value=reason),
+        patch.object(qp, "evaluate") as evaluate,
+    ):
+        with pytest.raises(hook_manager.BlockAction, match="handed its task off to account beta"):
             hook_manager.on_pre_tool_use(
-                {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-stop", "cwd": "/tmp"}
+                {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-moved", "cwd": "/tmp"}
             )
+    evaluate.assert_not_called()
 
 
 def test_reserve_account_is_the_last_handoff_target():
@@ -656,7 +760,7 @@ def _evaluate(monkeypatch, five_used, week_used, held=None, agent=""):
     monkeypatch.setattr(qp, "_session_windows", lambda session_id: (five_used, week_used, None, None))
     monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
     monkeypatch.setattr(account_sessions, "session_account", lambda pid: "main")
-    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda: {})
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
     monkeypatch.setattr(quota, "fleet_observations", lambda environ: {})
     main = qp.Candidate("main", 10.0, 75.0, 0, 0.0, 6)
     monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: [main])
@@ -694,3 +798,101 @@ def test_evaluate_hands_a_worker_off_at_the_ceiling(monkeypatch):
 
 def test_evaluate_leaves_a_master_on_its_account_at_the_ceiling(monkeypatch):
     assert _evaluate(monkeypatch, 10.0, 70.0, MASTER_HELD, agent="master@1")[1] == []
+
+
+def _master_at(monkeypatch, week_used, five_used=10.0, logins=()):
+    from hooks.context import account_sessions
+    from scripts.routing import reservation
+    from scripts.swarm_v2 import quota
+
+    for name in ("AH_ROUTE_API", "AGENTIHOOKS_TARGET"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("AGENTIHOOKS_AGENT_NAME", "master@1")
+    monkeypatch.setenv("AH_ROUTE_INTERACTIVE_main", "1")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.setattr(qp, "_session_windows", lambda session_id: (five_used, week_used, None, None))
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "main")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
+    monkeypatch.setattr(quota, "fleet_observations", lambda environ: {})
+    others = [
+        qp.Candidate("main", five_used, week_used, 1, 0.0, 6, login=True),
+        qp.Candidate("token", 10.0, 5.0, 0, 0.0, 6),
+        *(qp.Candidate(name, 10.0, week, 0, 0.0, 6, login=True) for name, week in logins),
+    ]
+    monkeypatch.setattr(qp, "_other_accounts", lambda sessions, observed: others)
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [qp.Candidate("api", None, None, 0, 0.0, 4)])
+    monkeypatch.setattr(qp, "push_active", lambda session_id: False)
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: MASTER_HELD)
+    return qp.evaluate("s")
+
+
+def test_a_master_hands_off_at_98_percent_of_the_week_to_the_claude_ai_login_with_the_most_room(monkeypatch):
+    assert qp.QUOTA_HANDOFF_WEEK_PCT == 98
+    decision = _master_at(monkeypatch, 98.0, logins=[("second", 60.0), ("third", 20.0)])
+    assert (decision.action, decision.trigger, decision.account, decision.target.account) == (
+        "handoff",
+        "week",
+        "main",
+        "third",
+    )
+    assert "agentihooks swarm sw handoff DOC --reason quota" in qp.render(decision, "s", "/repo")
+    assert _master_at(monkeypatch, 97.9, logins=[("third", 20.0)]) is None
+
+
+def test_a_master_is_never_handed_to_a_token_or_the_api(monkeypatch):
+    decision = _master_at(monkeypatch, 98.0)
+    assert (decision.action, decision.target) == ("stop", None)
+    assert [c.account for c in decision.others] == ["main"]
+
+
+def test_a_master_hands_off_at_99_percent_of_the_five_hour_window_while_another_login_is_free(monkeypatch):
+    assert qp.QUOTA_HANDOFF_5H_PCT == 99
+    decision = _master_at(monkeypatch, 40.0, 99.0, logins=[("second", 20.0)])
+    assert (decision.action, decision.trigger, decision.target.account) == ("handoff", "five_hour", "second")
+    assert _master_at(monkeypatch, 40.0, 99.0).target is None
+    assert _master_at(monkeypatch, 40.0, 98.9, logins=[("second", 20.0)]) is None
+
+
+def test_only_masters_are_limited_to_claude_ai_logins():
+    token, login = qp.Candidate("token", 10.0, 5.0, 0, 0.0, 6), qp.Candidate("second", 10.0, 5.0, 0, 0.0, 6, login=True)
+    assert qp.master_targets([token, login], {"AGENTIHOOKS_AGENT_NAME": "master@a1b2c3-0001"}) == [login]
+    assert qp.master_targets([token, login], {"AGENTIHOOKS_AGENT_NAME": "engineer@a1b2c3-0001"}) == [token, login]
+    assert qp.master_targets([token, login], {}) == [token, login]
+
+
+@pytest.mark.parametrize("five_used", [None, 100.0])
+@pytest.mark.parametrize("week_used", [10.0, 98.0])
+def test_codex_handoff_policy_uses_only_current_and_target_weeks(monkeypatch, five_used, week_used):
+    from hooks.context import account_sessions
+    from scripts import codex_quota, codex_router
+    from scripts.claude_quota_balancer import QuotaWindow
+    from scripts.routing import reservation
+
+    current = codex_quota.CodexQuota(100, "pro", QuotaWindow(five_used, 500), QuotaWindow(week_used, 600))
+    target = codex_quota.CodexQuota(100, "pro", QuotaWindow(100.0, 500), QuotaWindow(27.0, 600))
+    monkeypatch.setenv("AGENTIHOOKS_TARGET", "codex")
+    monkeypatch.delenv("AH_ROUTE_API", raising=False)
+    monkeypatch.setattr(qp.time, "time", lambda: 100)
+    monkeypatch.setattr(codex_quota, "session_quota", lambda environ, session: current)
+    monkeypatch.setattr(codex_router.CodexAccountSource, "pool", lambda self, environ: [])
+    monkeypatch.setattr(codex_router, "quotas", lambda pool, environ: {"target": target})
+    monkeypatch.setattr(account_sessions, "agent_pid", lambda: 1)
+    monkeypatch.setattr(account_sessions, "session_account", lambda pid: "self")
+    monkeypatch.setattr(account_sessions, "sessions_by_account", lambda **_: {})
+    monkeypatch.setattr(account_sessions, "codex_sessions_by_account", lambda: {"target": 0})
+    monkeypatch.setattr(reservation, "current", lambda harness, environ: None)
+    monkeypatch.setattr(qp, "_api_accounts", lambda sessions: [])
+    monkeypatch.setattr(qp, "push_active", lambda session: False)
+    observed = qp.evaluate("s")
+    if week_used == 10.0:
+        assert observed is None
+    else:
+        assert (observed.action, observed.trigger, observed.five_used, observed.five_reset) == (
+            "handoff",
+            "week",
+            0.0,
+            None,
+        )
+        assert observed.target.account == "target"
+        assert observed.target.routing_left == 73.0

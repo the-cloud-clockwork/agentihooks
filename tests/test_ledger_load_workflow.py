@@ -23,6 +23,7 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
     assert job["if"] in (
         "${{ !cancelled() && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
         "${{ !cancelled() && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') && (github.event_name != 'merge_group' || needs.reuse.outputs.reused != 'true') }}",
+        "${{ !cancelled() && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && (github.event_name != 'workflow_dispatch' || needs.admission.result == 'success') }}",
     )
     load = yaml.safe_load((WORKFLOWS / "ledger-load.yml").read_text())["jobs"]["load"]
     assert "redis" in load["services"]
@@ -33,7 +34,7 @@ def test_the_ledger_load_gate_runs_beside_the_shards_with_redis_inside_the_budge
         if step.get("name") == "Write and read a full size ledger from ten clients within the server budget"
     )
     assert "-m tests.ledger_load.gate --folder" in gate["run"]
-    assert gate["if"] == "${{ !inputs.streams }}"
+    assert gate["if"] == "${{ !inputs.streams && !inputs.compare && steps.key.outputs.hit != 'true' }}"
 
 
 def test_the_ledger_load_gate_grades_with_the_budgets_of_the_fetched_base():

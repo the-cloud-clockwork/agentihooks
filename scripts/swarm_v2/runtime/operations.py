@@ -35,6 +35,7 @@ class Phase(StrEnum):
     UNKNOWN = "unknown"
     APPLIED = "applied"
     REFUSED = "refused"
+    SUPERSEDED = "superseded"
 
 
 @dataclass(frozen=True)
@@ -60,6 +61,7 @@ class Operation:
     controller_epoch: int | None = None
     attempted: bool = False
     spec_digest: str = ""
+    refusal: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -70,6 +72,7 @@ class Observation:
     backend: str = ""
     payload_digest: str = ""
     result: dict = field(default_factory=dict)
+    refusal: dict = field(default_factory=dict, compare=False)
 
 
 class OperationTransport(Protocol):
@@ -134,9 +137,9 @@ class OperationJournal:
             if not raw:
                 return expected
             previous = _decode(raw)
-            if replace(previous, phase=Phase.ACCEPTED, result={}, attempted=False, spec_digest="") != replace(
-                expected, controller_epoch=previous.controller_epoch, spec_digest=""
-            ):
+            if replace(
+                previous, phase=Phase.ACCEPTED, result={}, attempted=False, spec_digest="", refusal={}
+            ) != replace(expected, controller_epoch=previous.controller_epoch, spec_digest=""):
                 raise OperationConflict(_ERRORS["payload"])
             if agent.runtime_backend in (specs or {}) and previous.spec_digest not in ("", expected.spec_digest):
                 raise OperationConflict(_ERRORS["spec"])
@@ -153,15 +156,33 @@ class OperationJournal:
             if not raw:
                 raise OperationConflict(_ERRORS["missing"])
             current = _decode(raw)
-            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False}
+            settled = {"phase": Phase.ACCEPTED, "result": {}, "attempted": False, "refusal": {}}
             if replace(current, **settled) != replace(operation, **settled):
                 raise OperationConflict(_ERRORS["identity"])
-            if current.phase is Phase.APPLIED:
+            if current.phase in (Phase.APPLIED, Phase.SUPERSEDED):
                 return current
             phase = Phase.ACCEPTED if observation.phase is Phase.ABSENT else observation.phase
             result = observation.result if phase is Phase.APPLIED else {}
             sent = (current.attempted or attempted) and phase in (Phase.UNKNOWN, Phase.APPLIED)
-            return replace(current, phase=phase, result=result, attempted=sent)
+            refusal = {Phase.APPLIED: {}, Phase.REFUSED: observation.refusal}.get(phase, current.refusal)
+            return replace(current, phase=phase, result=result, attempted=sent, refusal=refusal)
+
+        return self._write(slug, update)
+
+    def supersede_legacy_spawn(self, slug: str, operation: Operation) -> Operation:
+        def update(pipe):
+            self._current(slug, operation.execution_id, operation.generation, pipe)
+            raw = pipe.hget(self.store.key(slug, "runtime-operations"), operation.operation_id)
+            if not raw or _decode(raw) != operation:
+                raise OperationConflict(_ERRORS["identity"])
+            if (
+                operation.backend != "kubernetes"
+                or operation.action != SPAWN
+                or operation.spec_digest
+                or operation.phase in (Phase.APPLIED, Phase.SUPERSEDED)
+            ):
+                return operation
+            return replace(operation, phase=Phase.SUPERSEDED, result={"reason": "missing_spec_digest"})
 
         return self._write(slug, update)
 
@@ -208,7 +229,7 @@ class Operations:
     def execute(self, slug: str, request: OperationRequest) -> Operation:
         request = replace(request, payload=json.loads(json.dumps(request.payload)))
         operation = self.journal.prepare(slug, request, self._specs(request))
-        if operation.phase is Phase.APPLIED:
+        if operation.phase in (Phase.APPLIED, Phase.SUPERSEDED):
             return operation
         transport = self.transports.get(operation.backend)
         if transport is None:
@@ -233,7 +254,11 @@ class Operations:
         }
 
     def unresolved(self, slug: str) -> list[Operation]:
-        return [operation for operation in self.journal.records(slug) if operation.phase is not Phase.APPLIED]
+        return [
+            operation
+            for operation in self.journal.records(slug)
+            if operation.phase not in (Phase.APPLIED, Phase.SUPERSEDED)
+        ]
 
     def recover(self, slug: str) -> list[Operation]:
         recovered = []
@@ -257,8 +282,9 @@ class Operations:
             return Observation(Phase.UNKNOWN)
 
     def _qualified(self, operation: Operation, observation: Observation) -> Observation:
+        refused = Observation(Phase.REFUSED, refusal={"reason": "identity", "field": ""})
         if not isinstance(observation.phase, Phase):
-            return Observation(Phase.REFUSED)
+            return refused
         if observation.phase is Phase.APPLIED and (
             type(observation.generation) is not int
             or (
@@ -269,5 +295,5 @@ class Operations:
             )
             != (operation.execution_id, operation.generation, operation.backend, operation.payload_digest)
         ):
-            return Observation(Phase.REFUSED)
+            return refused
         return observation

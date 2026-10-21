@@ -79,6 +79,7 @@ def test_two_swarms_masters_sum():
                 _Agent("master", "codex", "main"),
                 _Agent("master", "claude", "main", state="finished"),
                 _Agent("master", "claude", "main", route_kind="interactive"),
+                _Agent("master", "claude", "main", route_kind="master-login"),
             ],
         }
     )
@@ -272,3 +273,16 @@ def test_an_interactive_master_counts_once(tmp_path):
     _process(tmp_path, 10, ["claude"], {"AH_ROUTE_INTERACTIVE_main": "1"}, "claude")
     store = _Store({"one": [_Agent("master", "claude", "main", route_kind="interactive")]})
     assert reservation.masters_live("claude", "main", store, tmp_path) == 1
+
+
+def test_a_reservation_closes_only_a_subscription_row_of_its_harness_and_slug_past_the_ceiling():
+    held = reservation.Reservation("codex", "default", 1)
+    assert held.closes_row("codex", "subscription", "default", 30.0)
+    assert [
+        held.closes_row("codex", "subscription", "default", 30.1),
+        held.closes_row("claude", "subscription", "default", 10.0),
+        held.closes_row("codex", "api", "default", 10.0),
+        held.closes_row("codex", "subscription", "spare", 10.0),
+        held.closes_row("codex", "subscription", "default", None),
+        reservation.Reservation("codex", "default", 0).closes_row("codex", "subscription", "default", 10.0),
+    ] == [False] * 6

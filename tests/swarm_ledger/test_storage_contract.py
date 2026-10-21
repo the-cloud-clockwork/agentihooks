@@ -15,11 +15,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts" / "swarm_
 import ledger_core as core  # noqa: E402
 
 from scripts.swarm_ledger import ledger_server as server  # noqa: E402
-from scripts.swarm_ledger.repository import repository  # noqa: E402
 from scripts.swarm_ledger.repository.sqlite import DATABASE  # noqa: E402
+from scripts.swarm_ledger.storage import default as default_repository  # noqa: E402
 from tests.swarm_ledger.test_sqlite import CONTENT, store  # noqa: E402
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
+repository = default_repository()
 
 
 def ledger_files(folder, slug):

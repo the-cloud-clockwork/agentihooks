@@ -13,7 +13,9 @@ SESSIONS = {"claude": ("CLAUDE_CONFIG_DIR", "projects"), "codex": ("CODEX_HOME",
 SESSION_ID_LENGTH = 36
 
 
+from hooks.memory.transcript_reader import iter_transcript_records
 from scripts.swarm_v2.checkpoints import capture as portable_capture
+from scripts.swarm_v2.worker import completion
 
 
 def _sessions(root: Path) -> list[Path]:
@@ -44,10 +46,10 @@ def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
     transcripts = [path for path in found if "subagents" not in path.relative_to(root).parts]
     if not transcripts:
         return {"status": "incomplete", "reason": "no_native_session"}
+    newest = max(transcripts, key=lambda path: path.stat().st_mtime_ns)
+    end = sum(1 for _ in iter_transcript_records(newest))
     if portable_capture.enabled(environ):
-        return portable_capture.publish(
-            attempt, scope, environ, newest=max(transcripts, key=lambda path: path.stat().st_mtime_ns)
-        )
+        return {**portable_capture.publish(attempt, scope, environ, newest=newest), "transcript_end": end}
     checkpoint = Path("checkpoints") / scope["incarnation"]
     files = []
     for source in found:
@@ -55,7 +57,6 @@ def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
         raw = source.read_bytes()
         _copy(raw, attempt / checkpoint / "session" / relative)
         files.append({"path": str(relative), "sha256": hashlib.sha256(raw).hexdigest(), "size": len(raw)})
-    newest = max(transcripts, key=lambda path: path.stat().st_mtime_ns)
     manifest = checkpoint / "manifest.json"
     write(
         attempt / manifest,
@@ -69,7 +70,7 @@ def export(attempt: Path, scope: dict, environ: Mapping[str, str]) -> dict:
         },
     )
     digest = hashlib.sha256((attempt / manifest).read_bytes()).hexdigest()
-    return {"status": "complete", "manifest": str(manifest), "sha256": digest}
+    return {"status": "complete", "manifest": str(manifest), "sha256": digest, "transcript_end": end}
 
 
 def main() -> int:
@@ -84,6 +85,7 @@ def main() -> int:
         fields = export(Path.cwd(), scope, os.environ)
     else:
         fields = {"status": "incomplete", "reason": "forced_quiescence"}
+    completion.report(scope, fields)
     acknowledge("exporter.checkpoint", **fields)
     return 0
 

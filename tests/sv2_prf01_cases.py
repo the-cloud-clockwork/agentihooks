@@ -164,7 +164,9 @@ def _interrupted(path: Path, candidate: dict) -> tuple[str, bool]:
     before = path.read_bytes()
     with mock.patch.object(Path, "replace", side_effect=OSError("interrupted before install")):
         try:
-            profiles.accept(path, candidate, POLICY, REVIEWER)
+            profiles.accept(
+                path, candidate, POLICY, REVIEWER, reviewer=profiles.Principal(REVIEWER, profiles.Role.OPERATOR)
+            )
             outcome = "installed"
         except OSError as error:
             outcome = str(error)
@@ -186,7 +188,11 @@ def _recovery() -> tuple[dict, bool]:
         decisions.append(profiles.accept(path, json.loads(json.dumps(accepted)), POLICY, "")["decision"])
         held_unchanged = path.read_bytes() == before
         interruption, survived = _interrupted(path, candidate)
-        decisions.append(profiles.accept(path, candidate, POLICY, REVIEWER)["decision"])
+        decisions.append(
+            profiles.accept(
+                path, candidate, POLICY, REVIEWER, reviewer=profiles.Principal(REVIEWER, profiles.Role.OPERATOR)
+            )["decision"]
+        )
         installed_bytes = path.read_bytes()
         installed = json.loads(installed_bytes)["generation"]
         restored = profiles.rollback(path)

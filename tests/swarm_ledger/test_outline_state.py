@@ -2,11 +2,9 @@ import json
 import re
 import subprocess
 import unittest
-from pathlib import Path
 
 from tests.swarm_ledger.ledger_page import page_source
 
-TEMPLATE = Path(__file__).resolve().parents[2] / "scripts" / "swarm_ledger" / "template.html"
 STUB_H = "function h(tag, attrs, ...kids) { return { tag, attrs: attrs || {}, kids: kids.filter(Boolean) }; }\n"
 STUB_FOLD = "function collapsible() {}\n"
 STUB_PAGES = (
@@ -27,7 +25,10 @@ def function_source(name):
 
 def run_js(names, expr, prelude=""):
     script = (
-        prelude + "".join(function_source(n) + "\n" for n in names) + f"process.stdout.write(JSON.stringify({expr}));"
+        "function closedLeft() { return 0; }\nfunction closedMore() { return null; }\n"
+        + prelude
+        + "".join(function_source(n) + "\n" for n in names)
+        + f"process.stdout.write(JSON.stringify({expr}));"
     )
     return json.loads(subprocess.run(["node", "-e", script], check=True, capture_output=True, text=True).stdout)
 

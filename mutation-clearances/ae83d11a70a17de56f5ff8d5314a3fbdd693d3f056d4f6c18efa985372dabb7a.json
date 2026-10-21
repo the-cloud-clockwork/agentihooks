@@ -1,0 +1,6 @@
+{
+  "scripts/swarm_ledger/events/patch.py:scripts.swarm_ledger.events.patch.x_list_diff__mutmut_16:800fe63492b3d27f506a01d2f81613813ede7469ae6b7bbf15335a3ca3a84f2d": {
+    "reader": "Spec second reader",
+    "reason": "This call compares fresh lists of unique string IDs from ids_of; shared identity cannot shortcut their list or scalar comparisons."
+  }
+}

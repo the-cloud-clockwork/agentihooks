@@ -1,5 +1,5 @@
 {{- $join := .Values.hive.join }}
-{{- if $join.enabled }}
+{{- if and $join.enabled (not .Values.hiveOnly) }}
 {{- if not $join.tlsSecretName }}
 {{- fail "hive.join.tlsSecretName is required: the join endpoint hands out credentials, so it serves only TLS" }}
 {{- end }}
@@ -71,6 +71,9 @@ spec:
                   key: {{ required "hive.join.redisSecret.key names the key holding the administrator Redis URL" $join.redisSecret.key }}
             {{- else }}
             {{- include "swarm.redisEnv" (dict "Values" .Values "Chart" .Chart "Release" .Release "role" "hive-join") | nindent 12 }}
+            {{- end }}
+            {{- if $join.serveLedgerCa }}
+            {{- include "swarm.ledgerCa" . | nindent 12 }}
             {{- end }}
           ports:
             - name: join

@@ -47,7 +47,7 @@ def injected(monkeypatch):
     return captured
 
 
-SHOWN = (NOTE, {"also_log": False, "skip_compression": True})
+SHOWN = (NOTE, {"also_log": False, "skip_compression": True, "kind": "refocus"})
 
 
 def test_run_returns_each_context_and_the_block(monkeypatch):

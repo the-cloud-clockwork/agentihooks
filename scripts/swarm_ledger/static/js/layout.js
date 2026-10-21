@@ -3,7 +3,7 @@ import { $, store, stored } from "./dom.js";
 import { readLayout, writeLayout } from "./api.js";
 import { showArtifacts } from "./artifacts.js";
 import { anchorPanel, showAlerts, showNotifications } from "./notices.js";
-import { revealTarget } from "./outline.js";
+import { pageTo, revealTarget } from "./outline.js";
 import { renderSwarm, swarm } from "./swarm.js";
 
 const tabScroll = {};
@@ -30,7 +30,10 @@ export function openHash() {
   const target = id && revealTarget(id);
   if (target) {
     requestAnimationFrame(() => target.scrollIntoView({ block: "start" }));
-  } else selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+    return;
+  }
+  selectTab(stored(`plan-ledger:${SLUG}:tab`, "ledger"), false);
+  pageTo(id);
 }
 
 export function wireTabs() {
@@ -266,7 +269,7 @@ export function startLayout() {
   wireStats();
   $("layout-reset").addEventListener("click", () => setLayout({}, 0));
   readLayout()
-    .then((resp) => (resp.ok ? resp.json() : null))
+    .then((resp) => (resp.ok ? resp.json().then((reply) => reply.data) : null))
     .then((saved) => {
       if (saved && !layoutSave) { applyLayout(saved); mirrorLayout(); }
     })

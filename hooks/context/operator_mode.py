@@ -1,5 +1,7 @@
 """Whether the operator is present in a session: a bound session starts off, typed operator on turns it on.
 
+The question tool and permission prompts stay off in every session, bound or not, until typed operator on.
+
 On lasts until the operator types operator off.
 """
 
@@ -16,7 +18,7 @@ QUIET_EVERY = 2
 QUIET_WORDS = 20
 REMINDER = "Operator not present: replies stay within {words} words."
 SWITCH = re.compile(r"operator (on|off)\b")
-ON_NOTICE = "Operator on: the operator is present in this pane until he types operator off."
+ON_NOTICE = "Operator on: the operator is present in this pane until the idle timer expires or he types operator off."
 OFF_NOTICE = "Operator off: the operator is not present in this pane."
 TURN_NOTICE = "Operator present for this turn: reply without a word limit."
 QUESTION_TOOL = "AskUserQuestion"
@@ -30,6 +32,14 @@ MASTER_ASK_REFUSAL = (
     "Say only one short line, type operator on to answer the questions here, or leave them in Priorities with "
     'agentihooks ledger --slug {slug} --as {name} priority add <item> "<the ask in plain words>".'
 )
+STANDALONE_ASK_REFUSAL = (
+    "The operator is not present in this pane, so the question tool is off until he types operator on. "
+    "State the open question in one short line, take the most reasonable choice and keep working."
+)
+PROMPT_REFUSAL = (
+    "Denied {tool}: the operator is not present in this pane, and only his typed operator on opens this prompt. "
+    "Keep working without it."
+)
 
 
 def _path(session_id):
@@ -40,9 +50,10 @@ def _path(session_id):
 
 def _load(session_id):
     try:
-        return json.loads(_path(session_id).read_text())
+        state = json.loads(_path(session_id).read_text())
     except (OSError, ValueError):
         return {}
+    return state if isinstance(state, dict) else {}
 
 
 def _save(session_id, state):
@@ -67,14 +78,23 @@ def _turn(state, now):
 
 
 def observe(session_id, prompt, typed, now=None):
+    from hooks.context import operator_expiry
+
     if not session_id:
         return ""
     now = time.time() if now is None else now
     word = switch(prompt) if typed else ""
-    state = _load(session_id)
-    if word or (typed and _on(state, now)):
-        state.update(on=word != "off", at=now)
-    _save(session_id, {**state, "turn_at": now if typed and word != "off" else None})
+    with operator_expiry.state_lock(session_id):
+        state = _load(session_id)
+        if word or (typed and _on(state, now)):
+            state.update(on=word != "off", at=now)
+        state["turn_at"] = now if typed and word != "off" else None
+        if word == "off":
+            operator_expiry.cancel(session_id, state)
+        elif typed and state.get("on"):
+            operator_expiry.start(session_id, state, now)
+        else:
+            _save(session_id, state)
     return word
 
 
@@ -91,9 +111,13 @@ def notice(payload, typed, now=None):
 
 def present(session_id, environ=None, now=None):
     env = os.environ if environ is None else environ
-    if not (env.get("AGENTIHOOKS_SWARM") or _bound(env, session_id)):
+    if not _attached(env, session_id):
         return True
     return _on(_load(session_id), time.time() if now is None else now)
+
+
+def _attached(env, session_id):
+    return bool(env.get("AGENTIHOOKS_SWARM") or _bound(env, session_id))
 
 
 def _binding(env, session_id):
@@ -106,23 +130,25 @@ def _binding(env, session_id):
     return slug, bound.get("name") or env.get("AGENTIHOOKS_AGENT_NAME") or "<name>"
 
 
-def question_block(tool_name, session_id, environ=None, now=None):
-    """The refusal of the question tool while the operator is away, naming the ledger command to use instead."""
+def question_block(tool_name, session_id, environ=None):
+    """The refusal of the question tool until the operator types operator on, naming what to do instead."""
     env = os.environ if environ is None else environ
-    if tool_name != QUESTION_TOOL or _heard(session_id, env, now):
+    if tool_name != QUESTION_TOOL or _heard(session_id):
         return ""
+    if not _attached(env, session_id):
+        return STANDALONE_ASK_REFUSAL
     slug, name = _binding(env, session_id)
     refusal = MASTER_ASK_REFUSAL if name.startswith("master@") else ASK_REFUSAL
     return refusal.format(slug=slug, name=name)
 
 
-def _heard(session_id, environ, now):
-    now = time.time() if now is None else now
-    return present(session_id, environ, now) or _turn(_load(session_id), now)
+def _heard(session_id):
+    return bool(session_id) and bool(_load(session_id).get("on"))
 
 
 def _away(session_id, environ, now):
-    return bool(session_id) and not _heard(session_id, environ, now)
+    now = time.time() if now is None else now
+    return bool(session_id) and not (present(session_id, environ) or _turn(_load(session_id), now))
 
 
 def _reminder_text(environ):
@@ -132,9 +158,14 @@ def _reminder_text(environ):
 
 def reminder(session_id, environ=None, now=None):
     """The quiet reminder on every second tool call while the operator is away."""
-    if not _away(session_id, environ, now):
+    from hooks.context import operator_expiry
+
+    if not session_id:
         return ""
-    state = _load(session_id)
-    calls = state.get("calls", 0) + 1
-    _save(session_id, {**state, "calls": calls})
+    with operator_expiry.state_lock(session_id):
+        if not _away(session_id, environ, now):
+            return ""
+        state = _load(session_id)
+        calls = state.get("calls", 0) + 1
+        _save(session_id, {**state, "calls": calls})
     return _reminder_text(environ) if calls % QUIET_EVERY == 0 else ""

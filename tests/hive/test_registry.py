@@ -9,23 +9,23 @@ from scripts.swarm import commands, lease
 from scripts.swarm.store import RedisStore
 from scripts.swarm_v2.keyspace import installation
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 DEFAULT = {
     "id": "box",
     "name": "box",
     "ui": "no",
     "ephemeral": "no",
-    "roles": [],
+    "excluded": ["master"],
     "prefer": {},
-    "max_agents": 1,
+    "max_agents": 20,
     "harnesses": [],
     "slots": [],
     "interactive": {"claude": "", "codex": ""},
+    "master_login": {"claude": ""},
     "repos": [],
     "heartbeat_at": 0,
     "version": "",
 }
+HEADED = {**DEFAULT, "ui": "yes", "excluded": [], "max_agents": 10}
 
 
 @pytest.fixture
@@ -40,13 +40,27 @@ def test_a_new_hive_gets_every_field_and_joins_the_index(redis):
     assert registry.show(redis, "box") == {**DEFAULT, "max_agents": 3}
     assert redis.smembers(f"{registry.ROOT}:hives") == {"box"}
     stored = redis.hgetall(f"{registry.ROOT}:hive:box")
-    assert stored["roles"] == "[]"
+    assert "roles" not in stored and "excluded" not in stored
     assert stored["interactive"] == '{"claude": "", "codex": ""}'
     assert stored["max_agents"] == "3"
 
 
+def test_a_member_updates_its_settings_without_writing_the_controller_index(redis, monkeypatch):
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_ID", "box")
+    monkeypatch.setenv("AGENTIHOOKS_HIVE_REDIS_URL", "redis://localhost:6379/15")
+    monkeypatch.setenv("AGENTIHOOKS_SWARM_REDIS_URL", "redis://localhost:6379/15")
+    assert registry.update(redis, "box", ["ui=no", "ephemeral=yes", "excluded=master,qa"]) == {
+        **DEFAULT,
+        "ui": "no",
+        "ephemeral": "yes",
+        "excluded": ["master", "qa"],
+    }
+    assert registry.show(redis, "box")["excluded"] == ["master", "qa"]
+    assert not redis.exists(registry.INDEX)
+
+
 def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
-    registry.update(redis, "box", ["ui=yes", "roles=master,eng", "prefer=master:1,eng:2"])
+    registry.update(redis, "box", ["ui=yes", "excluded=qa", "prefer=master:1,eng:2"])
     redis.hset(f"{registry.ROOT}:hive:box", mapping={"heartbeat_at": "500", "slots": '["a"]', "version": "2.4"})
     record = registry.update(redis, "box", ["name=Laptop", "ephemeral=yes", "max-agents=4"])
     expected = {
@@ -54,7 +68,7 @@ def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
         "name": "Laptop",
         "ui": "yes",
         "ephemeral": "yes",
-        "roles": ["master", "eng"],
+        "excluded": ["qa"],
         "prefer": {"master": 1, "eng": 2},
         "max_agents": 4,
         "slots": ["a"],
@@ -65,15 +79,16 @@ def test_settings_merge_onto_the_stored_record_and_keep_reported_fields(redis):
     assert registry.show(redis, "box") == expected
 
 
-def test_empty_roles_and_prefer_clear_them(redis):
-    registry.update(redis, "box", ["roles=eng,ci,", "prefer=eng:1,,ci:2"])
-    assert registry.show(redis, "box")["prefer"] == {"eng": 1, "ci": 2}
-    record = registry.update(redis, "box", ["prefer=", "roles="])
-    assert (record["roles"], record["prefer"]) == ([], {})
+def test_empty_excluded_and_prefer_clear_them(redis):
+    registry.update(redis, "box", ["excluded=eng,ci,", "prefer=plan:1,,dispatch:2"])
+    assert registry.show(redis, "box")["prefer"] == {"plan": 1, "dispatch": 2}
+    assert registry.show(redis, "box")["excluded"] == ["eng", "ci"]
+    record = registry.update(redis, "box", ["prefer=", "excluded="])
+    assert (record["excluded"], record["prefer"]) == ([], {})
 
 
 def _race_once(monkeypatch, field, value):
-    read = registry.show
+    read = registry._stored
     pending = [(field, value)]
 
     def racing(client, hive_id):
@@ -82,7 +97,7 @@ def _race_once(monkeypatch, field, value):
             client.hset(registry.key(hive_id), *pending.pop())
         return record
 
-    monkeypatch.setattr(registry, "show", racing)
+    monkeypatch.setattr(registry, "_stored", racing)
     return read
 
 
@@ -95,26 +110,26 @@ def test_a_setting_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeyp
 
 
 def test_a_new_hive_keeps_a_heartbeat_written_while_it_was_checked(redis, monkeypatch):
-    read = _race_once(monkeypatch, "heartbeat_at", "900")
-    assert registry.update(redis, "box", ["ui=yes"]) == {**DEFAULT, "ui": "yes", "heartbeat_at": 900}
-    assert read(redis, "box") == {**DEFAULT, "ui": "yes", "heartbeat_at": 900}
+    _race_once(monkeypatch, "heartbeat_at", "900")
+    assert registry.update(redis, "box", ["ui=yes"]) == {**HEADED, "heartbeat_at": 900}
+    assert registry.show(redis, "box") == {**HEADED, "heartbeat_at": 900}
 
 
 def test_a_setting_is_checked_again_against_a_concurrent_change(redis, monkeypatch):
     registry.update(redis, "box", ["ui=yes"])
     _race_once(monkeypatch, "ui", "no")
     with pytest.raises(HiveError) as error:
-        registry.update(redis, "box", ["roles=master"])
-    assert str(error.value) == "role master needs a UI, and this hive has ui=no"
-    assert redis.hget(registry.key("box"), "roles") == "[]"
+        registry.update(redis, "box", ["prefer=master:1"])
+    assert str(error.value) == "prefer names master, a role this hive excludes"
+    assert redis.hget(registry.key("box"), "prefer") == "{}"
 
 
 @pytest.mark.parametrize(
     ("field", "value"),
     [
-        ("roles", "eng"),
+        ("excluded", "eng"),
         ("max_agents", "many"),
-        ("roles", "5"),
+        ("excluded", "5"),
         ("prefer", "[]"),
         ("harnesses", "{}"),
         ("slots", '"a"'),
@@ -133,8 +148,8 @@ def test_a_value_may_hold_an_equals_sign(redis):
     assert registry.update(redis, "box", ["name=a=b"])["name"] == "a=b"
 
 
-def test_repeated_roles_are_kept_once(redis):
-    assert registry.update(redis, "box", ["roles=eng,ci,eng"])["roles"] == ["eng", "ci"]
+def test_repeated_excluded_names_are_kept_once(redis):
+    assert registry.update(redis, "box", ["excluded=eng,ci,eng"])["excluded"] == ["eng", "ci"]
 
 
 def test_a_record_written_by_another_writer_shows_with_defaults(redis):
@@ -147,20 +162,23 @@ def test_a_record_written_by_another_writer_shows_with_defaults(redis):
     ("settings", "reason"),
     [
         ([], "hive set needs at least one setting"),
-        (["colour=red"], "unknown setting 'colour=red'; settings are name, ui, ephemeral, roles, prefer, max-agents"),
-        (["ui"], "unknown setting 'ui'; settings are name, ui, ephemeral, roles, prefer, max-agents"),
+        (
+            ["colour=red"],
+            "unknown setting 'colour=red'; settings are name, ui, ephemeral, excluded, prefer, max-agents",
+        ),
+        (["ui"], "unknown setting 'ui'; settings are name, ui, ephemeral, excluded, prefer, max-agents"),
         (["ui=maybe"], "ui must be yes or no, not 'maybe'"),
         (["ephemeral=true"], "ephemeral must be yes or no, not 'true'"),
         (["name="], "name must not be empty"),
-        (["roles=eng,cook"], "unknown role cook; roles are master, qa, frontend, eng, ci, plan"),
+        (["excluded=eng,a:b"], "excluded takes lane roles or profiles, not 'a:b'"),
         (["max-agents=0"], "max-agents must be a positive whole number, not '0'"),
         (["max-agents=two"], "max-agents must be a positive whole number, not 'two'"),
         (["max-agents=-1"], "max-agents must be a positive whole number, not '-1'"),
         (["max-agents=²"], "max-agents must be a positive whole number, not '²'"),
-        (["roles=eng", "prefer=eng"], "prefer takes role:rank, not 'eng'"),
-        (["roles=eng", "prefer=eng:0"], "the rank of eng must be a positive whole number, not '0'"),
-        (["roles=eng", "prefer=eng:1:2"], "the rank of eng must be a positive whole number, not '1:2'"),
-        (["roles=eng", "prefer=ci:1"], "prefer names ci, a role this hive does not take"),
+        (["prefer=eng"], "prefer takes role:rank, not 'eng'"),
+        (["prefer=eng:0"], "the rank of eng must be a positive whole number, not '0'"),
+        (["prefer=eng:1:2"], "the rank of eng must be a positive whole number, not '1:2'"),
+        (["prefer=master:1"], "prefer names master, a role this hive excludes"),
     ],
 )
 def test_invalid_settings_are_refused_and_nothing_is_written(redis, settings, reason):
@@ -180,22 +198,6 @@ def test_a_malformed_hive_id_is_refused(redis, hive_id):
 
 def test_the_longest_hive_id_is_accepted(redis):
     assert registry.update(redis, "a._-" + "x" * 59, ["ui=yes"])["ui"] == "yes"
-
-
-@pytest.mark.parametrize("role", ["master", "qa", "frontend"])
-def test_a_ui_role_is_refused_on_a_headless_hive(redis, role):
-    with pytest.raises(HiveError) as error:
-        registry.update(redis, "box", [f"roles=eng,{role}"])
-    assert str(error.value) == f"role {role} needs a UI, and this hive has ui=no"
-    assert registry.update(redis, "box", ["ui=yes", f"roles=eng,{role}"])["roles"] == ["eng", role]
-    with pytest.raises(HiveError) as error:
-        registry.update(redis, "box", ["ui=no"])
-    assert str(error.value) == f"role {role} needs a UI, and this hive has ui=no"
-    assert registry.show(redis, "box")["ui"] == "yes"
-
-
-def test_headless_roles_are_accepted_on_a_headless_hive(redis):
-    assert registry.update(redis, "box", ["roles=eng,ci,plan"])["roles"] == ["eng", "ci", "plan"]
 
 
 def test_liveness_follows_the_heartbeat_window():
@@ -219,24 +221,24 @@ def test_hives_lists_indexed_records_sorted_and_skips_missing(redis):
 def test_cli_set_show_and_list(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     monkeypatch.setattr(cli, "now_ms", lambda: 100_000)
-    assert cli.main(["set", "box", "ui=yes", "roles=master", "prefer=master:1", "max-agents=3"]) == 0
+    assert cli.main(["set", "box", "ui=yes", "excluded=qa", "prefer=master:1", "max-agents=3"]) == 0
     printed = json.loads(capsys.readouterr().out)
-    assert printed["roles"] == ["master"]
+    assert printed["excluded"] == ["qa"]
     assert printed["max_agents"] == 3
-    registry.update(redis, "pod", ["roles=eng"])
+    registry.update(redis, "pod", ["excluded=eng"])
     redis.hset(f"{registry.ROOT}:hive:box", "heartbeat_at", "50000")
     assert cli.main(["show", "box"]) == 0
     assert json.loads(capsys.readouterr().out)["heartbeat_at"] == 50_000
     assert cli.main(["list"]) == 0
     assert capsys.readouterr().out == (
-        "box\tlive\tui=yes\troles=master\tmax-agents=3\npod\tstale\tui=no\troles=eng\tmax-agents=1\n"
+        "box\tlive\tui=yes\tmax-agents=3\texcluded=qa\npod\tstale\tui=no\tmax-agents=20\texcluded=eng\n"
     )
 
 
 def test_cli_refusals_exit_one_with_the_reason(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
-    assert cli.main(["set", "box", "roles=qa"]) == 1
-    assert capsys.readouterr().err == "hive set refused: role qa needs a UI, and this hive has ui=no\n"
+    assert cli.main(["set", "box", "prefer=master:1"]) == 1
+    assert capsys.readouterr().err == "hive set refused: prefer names master, a role this hive excludes\n"
     assert cli.main(["show", "box"]) == 1
     assert capsys.readouterr().err == "hive show refused: no hive box\n"
 
@@ -255,12 +257,12 @@ def test_cli_set_takes_any_number_of_key_value_settings(redis, monkeypatch, caps
     assert capsys.readouterr().err == "hive set refused: hive set needs at least one setting\n"
 
 
-def test_cli_list_joins_roles_with_commas(redis, monkeypatch, capsys):
+def test_cli_list_joins_excluded_with_commas(redis, monkeypatch, capsys):
     monkeypatch.setattr(cli, "redis_client", lambda: redis)
     monkeypatch.setattr(cli, "now_ms", lambda: 0)
-    registry.update(redis, "box", ["roles=eng,ci"])
+    registry.update(redis, "box", ["excluded=eng,ci"])
     assert cli.main(["list"]) == 0
-    assert capsys.readouterr().out == "box\tstale\tui=no\troles=eng,ci\tmax-agents=1\n"
+    assert capsys.readouterr().out == "box\tstale\tui=no\tmax-agents=20\texcluded=eng,ci\n"
 
 
 @pytest.fixture

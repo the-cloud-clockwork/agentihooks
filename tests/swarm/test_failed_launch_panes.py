@@ -13,7 +13,6 @@ from scripts.swarm.store import AgentRecord, RedisStore, SwarmConfig
 from scripts.swarm.tick import EXITED_BEFORE_LIFE, SpawnError, tick
 from tests.swarm.test_tick import FakeRuntime, tasks
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
 LAUNCH_CHECKED = True
 
 SCREEN = "$ agentihooks codex --route default\nCodex account default not found\n\n$ \n\n"
@@ -383,6 +382,33 @@ def test_a_pane_belongs_to_a_launch_only_while_herdr_shows_its_terminal(tmp_path
     assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
     del listed["panes"]
     assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0001") is False
+
+
+@pytest.mark.parametrize(
+    "owner,name", [("engineer-a1b2c3-0001", "engineer@a1b2c3-0001"), ("engineer@a1b2c3-0001", "engineer-a1b2c3-0001")]
+)
+def test_a_failed_launch_recognizes_its_pane_under_either_owner_name(tmp_path, monkeypatch, owner, name):
+    _record(monkeypatch, tmp_path, owner, "w1:p9", "term_a", 1)
+    listed = {"panes": [{"pane_id": "w1:p9", "terminal_id": "term_a"}]}
+    runtime = HerdrRuntime(home=tmp_path, herdr=lambda args: listed)
+    assert runtime.launched_pane("w1:p9", name) is True
+    assert runtime.launched_pane("w1:p9", "engineer@a1b2c3-0002") is False
+    listed["panes"][0]["terminal_id"] = "term_operator"
+    assert runtime.launched_pane("w1:p9", name) is False
+
+
+def test_a_timed_out_claude_launch_recovers_its_plain_owner_pane(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime_module.time, "time", lambda: 5.0)
+    _record(monkeypatch, tmp_path, "engineer-a1b2c3-0001", "w1:p6", "term_old", 4_999)
+    _record(monkeypatch, tmp_path, "engineer-a1b2c3-0001", "w1:p7", "term_first", 5_000)
+    _record(monkeypatch, tmp_path, "engineer-a1b2c3-0001", "w1:p9", "term_new", 5_001)
+    _record(monkeypatch, tmp_path, "engineer-a1b2c3-0002", "w1:p8", "term_other", 5_002)
+    error = _launch_fails(tmp_path, "", run_error=subprocess.TimeoutExpired("init-agent", 300))
+    assert (error.pane_id, error.status, str(error)) == (
+        "w1:p9",
+        "ambiguous",
+        "init-agent timed out for engineer@a1b2c3-0001",
+    )
 
 
 def test_the_runtime_reads_a_pane_tail_and_closes_it_by_its_id(tmp_path):

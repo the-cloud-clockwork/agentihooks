@@ -45,3 +45,13 @@ def installed_langfuse_env(target: str) -> dict[str, str]:
         names.append(record["settings_profile"])
     directories = [(name, directory) for name in names if (directory := install._resolve_profile_dir(name)) is not None]
     return langfuse_env(directories)
+
+
+def agentihooks_langfuse_keys() -> dict[str, str]:
+    from scripts.mcp_daemon import _scan_env_file
+
+    keys = {}
+    for name in ("PUBLIC_KEY", "SECRET_KEY"):
+        if value := _scan_env_file(f"OTEL_LANGFUSE_{name}") or _scan_env_file(f"LANGFUSE_{name}"):
+            keys[f"OTEL_LANGFUSE_{name}"] = value
+    return keys

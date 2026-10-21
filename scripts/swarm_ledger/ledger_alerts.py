@@ -3,9 +3,19 @@ and closes it done with an outcome."""
 
 from scripts.inbox import outbox
 
-OPS = ("alert_claim", "alert_close")
-SIZE, SYNC = "size", "sync"
-TARGETS = {SIZE: "master", SYNC: "master"}
+OPS = ("alert_claim", "alert_close", "alert_raise")
+SIZE, SYNC, PROMOTION, RELEASE = "size", "sync", "promotion", "release"
+SEAT, SPAWN, MERGE = "seat", "spawn", "merge"
+TARGETS = {
+    SIZE: "master",
+    SYNC: "master",
+    PROMOTION: "master",
+    RELEASE: "master",
+    SEAT: "master",
+    SPAWN: "master",
+    MERGE: "master",
+}
+RAISED = (PROMOTION, RELEASE, SEAT, SPAWN, MERGE)
 OPEN, CLAIMED, DONE = "open", "claimed", "done"
 OPERATOR = "operator"
 SENDER = "ledger"
@@ -14,7 +24,29 @@ MAX_OUTCOME = 2000
 SENT_TTL_S = 30 * 24 * 3600
 
 
+def check_raise(op):
+    by, text = op.get("by"), op.get("text")
+    if (
+        set(op) != {"op", "id", "by", "source", "text"}
+        or op["source"] not in RAISED
+        or not isinstance(by, str)
+        or not by.strip()
+        or not isinstance(text, str)
+        or not text.strip()
+        or len(text) > MAX_OUTCOME
+    ):
+        raise ValueError(f"alert_raise takes by, a source among {RAISED} and a text of up to {MAX_OUTCOME} characters")
+
+
+def raise_source(doc, ctx, source, text):
+    if not any(a["source"] == source and a["state"] != DONE for a in doc.setdefault("alerts", [])):
+        raise_warning(doc, ctx, (source, text), [])
+    return True
+
+
 def check(op):
+    if op["op"] == "alert_raise":
+        return check_raise(op)
     allowed = {"op", "id", "target", "by", *(("outcome",) if op["op"] == "alert_close" else ())}
     if set(op) - allowed or not isinstance(op.get("target"), str) or not op["target"]:
         raise ValueError(f"{op['op']} takes target, an alert id, and an optional by")
@@ -27,6 +59,8 @@ def check(op):
 
 
 def apply(doc, op, ctx):
+    if op["op"] == "alert_raise":
+        return raise_source(doc, ctx, op["source"], op["text"].strip())
     alert = next((a for a in doc.setdefault("alerts", []) if a["id"] == op["target"]), None)
     if alert is None or alert["state"] == DONE:
         return False

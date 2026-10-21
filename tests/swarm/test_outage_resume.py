@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from scripts.swarm import idle, outage, resume
+from scripts.swarm import idle, outage, profile_choice, prompt, resume
 from scripts.swarm.pane import PaneObservation
 from scripts.swarm.tick import Placed, SpawnError, tick
 from scripts.swarm_ledger import ledger_workspace
@@ -208,7 +208,9 @@ def test_work_after_outage_closure_excludes_an_agent_that_only_becomes_idle_late
 
 
 @pytest.mark.parametrize("error_state", ["idle", "waiting"])
-def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_count_idle(store, error_state):
+def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_times_then_free_the_seat(
+    store, error_state
+):
     from scripts.swarm.store import RedisStore
 
     ledger, runtime, agents = three_owners(store)
@@ -228,10 +230,13 @@ def test_overlapping_outages_hold_recovery_and_persistent_errors_retry_three_tim
         tick("sw", store, ledger, runtime, at * MINUTE)
         idle.beat(store.redis, "sw", stuck.name, "idle", at * MINUTE + 1)
     assert runtime.nudged.count(stuck.name) == 3
+    assert store.claimant("sw", stuck.task) == stuck.name
     tick("sw", store, ledger, runtime, 13 * MINUTE)
     assert runtime.nudged.count(stuck.name) == 3
-    assert next(agent for agent in store.agents("sw") if agent.name == stuck.name).idle_ticks == 1
-    assert store.claimant("sw", stuck.task) == stuck.name
+    assert stuck.name in runtime.killed
+    assert stuck.name not in {agent.name for agent in store.agents("sw")}
+    assert store.claimant("sw", stuck.task) is None
+    assert ledger.rows[stuck.task]["state"] == "open"
 
 
 def test_a_new_task_generation_fences_the_recovery_pass(store):
@@ -438,7 +443,10 @@ def test_a_refused_retry_waits_for_the_next_tick(store, tmp_path, monkeypatch):
     assert runtime.nudged.count(stuck.name) == 1
 
 
-def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(store, tmp_path, monkeypatch):
+@pytest.mark.parametrize("conversation", ["fresh-conversation", ""])
+def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff(
+    store, tmp_path, monkeypatch, conversation
+):
     from scripts.handoff import transfers
 
     ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
@@ -447,22 +455,73 @@ def test_a_dead_owner_without_a_worktree_restarts_from_its_last_transfer_handoff
     handoff = "## Next\nContinue from the saved proof.\n"
     transfers.record(store, "sw", dead, "quota", handoff, 2 * MINUTE)
     store.put_agent("sw", replace(dead, idle_ticks=2))
+    native_spawn = runtime.spawn
+
+    def spawn(config, lane, name, task):
+        return replace(native_spawn(config, lane, name, task), conversation_id=conversation)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
     launches = len(runtime.spawned)
     actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
     assert f"outage resume for {dead.name}" in actions
     assert not runtime.resumed
     assert runtime.spawned[launches:] == [("eng", dead.name, dead.task)]
     assert runtime.tasks[-1]["handoff"] == handoff
-    assert transfers.get(store, "sw", runtime.tasks[-1]["transfer"])["reason"] == "outage"
+    transfer = runtime.tasks[-1]["transfer"]
+    assert transfer == transfers.get(store, "sw", transfer["id"])
+    assert (transfer["reason"], transfer["successor"], transfer["handoff"]) == ("outage", dead.name, handoff)
+    assert handoff in "\n".join(prompt.priming_lines(runtime.tasks[-1]))
     assert runtime.spawn_configs[-1] == "sw"
     assert runtime.tasks[-1]["seat"] == dead.seat
     restarted = next(agent for agent in owners(store) if agent.name == dead.name)
     assert (restarted.pane_id, restarted.conversation_id, restarted.started_at, restarted.idle_ticks) == (
         f"w1:p{launches + 1}",
-        "",
+        conversation,
         9 * MINUTE,
         0,
     )
+
+
+def test_a_dead_owner_whose_handoff_lost_its_run_options_restarts_fresh_on_its_seat(store, tmp_path, monkeypatch):
+    from scripts.handoff import transfers
+
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    handoff = "## Next\nContinue from the saved proof.\n"
+    transfers.record(store, "sw", dead, "quota", handoff, 2 * MINUTE)
+    native_spawn, launched = runtime.spawn, []
+
+    def spawn(config, lane, name, task):
+        launched.append(profile_choice.transfer(task))
+        return native_spawn(config, lane, name, task)
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    launches = len(runtime.spawned)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name}" in actions
+    assert launched == [{}]
+    assert runtime.spawned[launches:] == [("eng", dead.name, dead.task)]
+    fresh = runtime.tasks[-1]
+    assert (fresh["seat"], fresh["handoff"], fresh["transfer"]["handoff"]) == (dead.seat, handoff, handoff)
+    assert handoff in "\n".join(prompt.priming_lines(fresh))
+    assert recovery_state(store, dead.name) == "done"
+
+
+def test_a_restart_refused_for_another_reason_is_reported(store, tmp_path, monkeypatch):
+    ledger, runtime, agents = pending_owners(store, tmp_path, monkeypatch, worktree=False)
+    dead = agents[2]
+    runtime.live.remove(dead.name)
+    refused = []
+
+    def spawn(config, lane, name, task):
+        refused.append(task)
+        raise SpawnError("no seat", "unavailable")
+
+    monkeypatch.setattr(runtime, "spawn", spawn)
+    actions = resume.recover_outages("sw", store, ledger, runtime, rows_of(ledger), 9 * MINUTE)
+    assert f"outage resume for {dead.name} refused: no seat" in actions
+    assert len(refused) == 1
 
 
 @pytest.mark.parametrize("moment", ["before resume", "during resume", "before respawn"])

@@ -4,8 +4,6 @@ import pytest
 
 from scripts.swarm import metrics, metrics_outbox, metrics_swarm
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 
 @pytest.mark.parametrize("slug", ["live-looking", "proof-looking"])
 def test_scratch_marker_prevents_all_metrics_and_shared_spool_work(tmp_path, monkeypatch, slug):

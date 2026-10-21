@@ -1,0 +1,6 @@
+{
+  "scripts/swarm/health/merge_stall.py:scripts.swarm.health.merge_stall.x_request__mutmut_33:0545fe8169bc41c75b1063db3d20d32f33bbb1011f00c4fcb1b295982b5b3027": {
+    "reader": "Standards",
+    "reason": "Equivalent for source-defined contexts: no DEADLINE supplies remaining20, so min(21,20) stays20; observe sets the sole active deadline ten seconds ahead, so remaining is at most10 and min(20,remaining) equals min(21,remaining)."
+  }
+}

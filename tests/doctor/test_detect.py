@@ -7,8 +7,6 @@ from scripts.swarm import ledger_events
 from scripts.swarm.health.findings import Finding
 from tests.doctor.recorded import load
 
-pytestmark = pytest.mark.xdist_group("fakeredis")
-
 STALE = Finding("stale claim", "watch-eng-1", "no change for 40 minutes", ("task t1",), "30 minutes", 40)
 
 
@@ -35,14 +33,14 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
     import json
 
     rows = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
-    assert [(row["step"], row["phase"], row.get("outcome")) for row in rows] == [
-        ("doctor.spawn", "started", None),
-        ("doctor.spawn", "finished", "error"),
-        ("doctor.health", "started", None),
-        ("doctor.health", "finished", "success"),
-        ("doctor.trace", "started", None),
-        ("doctor.trace", "finished", "success"),
-    ]
+    steps = {}
+    for row in rows:
+        steps.setdefault(row["step"], []).append((row["phase"], row.get("outcome")))
+    assert steps == {
+        "doctor.spawn": [("started", None), ("finished", "error")],
+        "doctor.health": [("started", None), ("finished", "success")],
+        "doctor.trace": [("started", None), ("finished", "success")],
+    }
     assert all(row["slug"] == "doctor" for row in rows)
     assert all(
         row[key] >= 0
@@ -50,6 +48,34 @@ def test_detector_records_its_own_stage_and_keeps_running_after_failure(capsys):
         if row["phase"] == "finished"
         for key in ("wall_s", "own_cpu_s", "reaped_child_cpu_s")
     )
+
+
+def test_the_detectors_of_one_pass_run_side_by_side():
+    import threading
+
+    met = threading.Barrier(3, timeout=5)
+
+    def waits():
+        met.wait()
+        return [STALE]
+
+    assert detect.collect({"spawn": waits, "health": waits, "ci": waits}) == ([STALE, STALE, STALE], [])
+
+
+def test_every_detector_of_a_wide_pass_runs_at_once():
+    import threading
+
+    met = threading.Barrier(40, timeout=5)
+
+    def waits():
+        met.wait()
+        return [STALE]
+
+    assert detect.collect({f"d{n}": waits for n in range(40)}) == ([STALE] * 40, [])
+
+
+def test_a_pass_with_no_detectors_finds_nothing():
+    assert detect.collect({}) == ([], [])
 
 
 def test_the_spawn_reader_reads_the_watched_swarm_at_the_pass_time(monkeypatch):
@@ -76,6 +102,35 @@ def test_the_master_launch_reader_reads_the_watched_swarm(monkeypatch):
     store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
     assert detect.readers(store, None, "sw", 42, environ={})["master launch"]() == [STALE]
     assert seen == [(store, "sw")]
+
+
+@pytest.mark.parametrize(("configured", "limit"), [(0, 600), (700, 700)])
+def test_the_context_overrun_reader_reads_the_swarm_agents_at_its_compact_limit(monkeypatch, configured, limit):
+    import fakeredis
+
+    from hooks.context import context_recycle
+    from scripts.doctor import context_overruns
+    from scripts.swarm.store import AgentRecord
+
+    asked = []
+    monkeypatch.setenv("AGENTIHOOKS_COMPACT_LIMIT", "600")
+    monkeypatch.setattr(
+        context_recycle, "unmarked_overrun", lambda session, compact: asked.append((session, compact)) or 1
+    )
+
+    def found(agents, overrun):
+        assert [(a["name"], a["conversation_id"]) for a in agents] == [("master@323133-0175", "c1")]
+        return [STALE] if overrun("c1") == 1 else []
+
+    monkeypatch.setattr(context_overruns, "findings", found)
+    agent = AgentRecord("master@323133-0175", "master", "master", conversation_id="c1")
+    store = SimpleNamespace(
+        redis=fakeredis.FakeRedis(decode_responses=True),
+        config=lambda slug: SimpleNamespace(compact_limit=configured if slug == "sw" else 1),
+        agents=lambda slug: [agent] if slug == "sw" else [],
+    )
+    assert detect.readers(store, None, "sw", 42, environ={})["context overrun"]() == [STALE]
+    assert asked == [("c1", limit)]
 
 
 def test_the_inbox_reader_holds_delivered_mail_to_its_receiver_and_leaves_out_outside_sessions():
@@ -128,6 +183,39 @@ def test_ci_reports_a_red_head_only_past_the_tick_red_window(monkeypatch):
     assert [f.id for f in late] == ["red-checks/487"]
 
 
+def test_ci_reads_the_pull_requests_of_one_pass_side_by_side(monkeypatch):
+    import threading
+
+    import fakeredis
+
+    met = threading.Barrier(2, timeout=5)
+
+    def pull_request(repo, number, cache):
+        met.wait()
+        return {"number": number}
+
+    monkeypatch.setattr(detect.ci_read, "pull_request", pull_request)
+    monkeypatch.setattr(detect.ci, "findings", lambda record, now_ms: [record["number"]])
+    tasks = [{"state": "pr", "pr_url": f"https://github.com/o/r/pull/{n}"} for n in (4, 5)]
+    store = SimpleNamespace(redis=fakeredis.FakeRedis(decode_responses=True))
+    assert detect.readers(store, SimpleNamespace(tasks=lambda slug: tasks), "s", 1, environ={})["ci"]() == [4, 5]
+
+
+def test_one_pass_reads_the_watched_tasks_once_for_the_ci_and_trace_detectors(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore
+
+    store, reads = RedisStore(fakeredis.FakeRedis(decode_responses=True)), []
+    ledger = SimpleNamespace(tasks=lambda slug: reads.append(slug) or [])
+    monkeypatch.setattr(detect.traces_read, "record", lambda slug, tasks, agents, now_ms, get: {"traces": []})
+    monkeypatch.setattr(detect.traces, "findings", lambda record, limits: [])
+    found = detect.readers(store, ledger, "sw", 1_000, environ={})
+    assert found["ci"]() == []
+    assert found["trace"]() == []
+    assert reads == ["sw"]
+
+
 def test_the_health_detector_judges_only_what_the_current_health_pass_reports(monkeypatch):
     import json
 
@@ -156,6 +244,12 @@ def test_the_health_detector_judges_only_what_the_current_health_pass_reports(mo
     assert seen[-1] == (store, "bare", "config of bare", [], [])
 
 
+def _canonical(call):
+    import json
+
+    return json.dumps(call, sort_keys=True)
+
+
 def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tmp_path):
     from hooks.observability import agent_trace
     from scripts.doctor import registry, traces_read
@@ -174,19 +268,22 @@ def test_the_trace_detector_reads_the_swarm_tag_and_its_sessions(monkeypatch, tm
     monkeypatch.setattr(traces_read, "SWARM_HOME", tmp_path)
     monkeypatch.setattr(agent_trace, "CURSOR_DIR", tmp_path / "agent_trace")
     found = detect.readers(store, ledger, "s", 10**12, environ={})["trace"]()
-    assert asked == [
-        (
-            "traces",
-            {
-                "tags": ["swarm:s", "agent:s-master-1"],
-                "fields": "core,io",
-                "orderBy": "timestamp.desc",
-                "limit": registry.TRACES_LIMIT,
-                "page": 1,
-            },
-        ),
-        ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100}),
-    ]
+    assert sorted(asked, key=_canonical) == sorted(
+        [
+            (
+                "traces",
+                {
+                    "tags": ["swarm:s", "agent:s-master-1"],
+                    "fields": "core,io",
+                    "orderBy": "timestamp.desc",
+                    "limit": registry.TRACES_LIMIT,
+                    "page": 1,
+                },
+            ),
+            ("traces", {"tags": "swarm:s", "fields": "core", "page": 1, "limit": 100}),
+        ],
+        key=_canonical,
+    )
     assert [f.id for f in found] == ["untraced-session/s-master-1", "telemetry-never-exported/s-master-1.1"]
     assert (tmp_path / "s" / traces_read.STATE_FILE).exists()
 
@@ -223,3 +320,23 @@ def test_a_pass_without_telemetry_drops_only_the_trace_reader():
     every = set(detect.readers(store, None, "sw", 1_000, environ={}))
     assert "trace" in every
     assert set(detect.readers(store, None, "sw", 1_000, environ={}, telemetry=False)) == every - {"trace"}
+
+
+def test_the_dev_workflow_reader_judges_the_watched_repo_dev_pushes(monkeypatch):
+    import fakeredis
+
+    from scripts.swarm.store import RedisStore, SwarmConfig
+
+    store = RedisStore(fakeredis.FakeRedis(decode_responses=True))
+    store.create(SwarmConfig("sw", "/repo", max_eng=1, max_ci=0))
+    path = ".github/workflows/hive-worker.yml"
+    runs = [
+        {"id": n, "name": "Worker hive pod", "path": path, "conclusion": "failure", "created_at": "t", "html_url": "u"}
+        for n in range(10, 15)
+    ]
+    record = {"runs": runs, "green": {}, "jobs": {}}
+    monkeypatch.setattr(detect.ci_read, "dev_pushes", {"/repo": record}.get)
+    reader = detect.readers(store, None, "sw", 1, environ={}).get("dev workflow", lambda: [])
+    assert [f.id for f in reader()] == ["red-dev-workflow/hive-worker.yml"]
+    record["runs"].insert(0, {**runs[0], "id": 15, "conclusion": "success"})
+    assert reader() == []

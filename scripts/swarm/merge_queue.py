@@ -1,31 +1,15 @@
 import json
-import re
 import subprocess
-from fnmatch import fnmatch
+from collections.abc import Callable
 
+from scripts.swarm import ledger_events, staged_compatibility
 from scripts.swarm.store import SwarmError
 
 FRESHNESS = """query($url: URI!) { resource(url: $url) { ... on PullRequest {
-    number repository { nameWithOwner ref(qualifiedName: "refs/heads/dev") { target { oid } } }
+    repository { nameWithOwner }
+    baseRefName baseRef { branchProtectionRule { requiredStatusCheckContexts requiredStatusChecks { context app { databaseId } } } }
 } } }"""
-GRADING = (
-    ".github/*",
-    ".semgrep/*",
-    "tests/*",
-    "scripts/ci*",
-    "scripts/gate*",
-    "scripts/check*",
-    "scripts/size_limits.py",
-    "mutation*",
-    "delivery.yaml",
-    "pyproject.toml",
-    "uv.lock",
-    "ruff.toml",
-    ".ruff.toml",
-    "sonar-project.properties",
-    ".coveragerc",
-)
-FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } }'
+FIELDS = 'id state headRefOid baseRefName mergeQueueEntry { id position state } isDraft mergeable reviewDecision statusCheckRollup { state } repository { mergeQueue(branch: "dev") { id } } body'
 STATE = "query($url: URI!) { resource(url: $url) { ... on PullRequest { " + FIELDS + " } } }"
 QUEUE = """mutation($id: ID!, $head: GitObjectID!) {
     enqueuePullRequest(input: {pullRequestId: $id, expectedHeadOid: $head}) { mergeQueueEntry { id } }
@@ -62,12 +46,8 @@ def graphql(query: str, variables: dict, run=subprocess.run) -> dict:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def rest(path: str, run, fields: dict | None = None) -> dict | str:
+def rest(path: str, run) -> dict | list | str:
     command = ["gh", "api", path]
-    if fields is not None:
-        command += ["--method", "PUT"]
-        for name, value in fields.items():
-            command += ["-f", f"{name}={value}"]
     try:
         done = run(command, capture_output=True, text=True, timeout=20)
         if done.returncode:
@@ -77,75 +57,77 @@ def rest(path: str, run, fields: dict | None = None) -> dict | str:
         raise SwarmError(f"GitHub API: {exc}") from exc
 
 
-def checked_base(repo: str, head: str, run) -> str:
-    runs = rest(f"repos/{repo}/actions/workflows/test.yml/runs?event=pull_request&head_sha={head}&per_page=1", run)
-    records = runs["workflow_runs"]
-    if not records or records[0]["conclusion"] != "success" or records[0]["head_sha"] != head:
-        raise SwarmError("the current pull request head must pass Tests before queueing")
-    jobs = rest(f"repos/{repo}/actions/runs/{records[0]['id']}/jobs?per_page=100", run)["jobs"]
-    job = next((job for job in jobs if job["name"] == "test-count (3.11)" and job["conclusion"] == "success"), None)
-    if job is None:
-        raise SwarmError("cannot establish the base of the green checks")
-    log = rest(f"repos/{repo}/actions/jobs/{job['id']}/logs", run)
-    bases = set(re.findall(r"^\S+\s+BASE: ([0-9a-f]{40})\s*$", log, re.MULTILINE))
-    if len(bases) != 1:
-        raise SwarmError("cannot establish the base of the green checks")
-    return bases.pop()
+def required_view(url: str, run) -> "ledger_events.PullRequest | None":
+    def read(command, **kwargs):
+        try:
+            done = run(command, **kwargs)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise SwarmError(f"GitHub API: {exc}") from exc
+        if done.returncode:
+            raise SwarmError(done.stderr.strip() or "GitHub API failed")
+        return done
 
-
-def refreshed(repo: str, head: str, run) -> bool:
-    commit = rest(f"repos/{repo}/commits/{head}", run)
-    return (commit["committer"] or {}).get("login") == "web-flow" and commit["commit"]["message"].startswith(
-        "Merge branch 'dev' into "
+    resource = graphql(FRESHNESS, {"url": url}, run)["resource"]
+    repo = resource["repository"]["nameWithOwner"]
+    rules = rest(f"repos/{repo}/rules/branches/{resource['baseRefName']}", run)
+    protection = (resource.get("baseRef") or {}).get("branchProtectionRule") or {}
+    expected = dict.fromkeys(protection.get("requiredStatusCheckContexts") or [])
+    expected.update(
+        (check["context"], (check.get("app") or {}).get("databaseId"))
+        for check in protection.get("requiredStatusChecks") or []
     )
-
-
-def refresh(url: str, raw: dict, run) -> bool:
-    pull = graphql(FRESHNESS, {"url": url}, run)["resource"]
-    repo = pull["repository"]["nameWithOwner"]
-    base = checked_base(repo, raw["headRefOid"], run)
-    current = graphql(FRESHNESS, {"url": url}, run)["resource"]["repository"]["ref"]["target"]["oid"]
-    if base == current or refreshed(repo, raw["headRefOid"], run):
-        return False
-    files = rest(f"repos/{repo}/compare/{base}...{current}", run)["files"]
-    changed = len(files) >= 300 or any(
-        fnmatch(file.get(key, ""), pattern)
-        for file in files
-        for key in ("filename", "previous_filename")
-        for pattern in GRADING
+    expected.update(
+        (check["context"], check.get("integration_id"))
+        for rule in rules
+        if rule["type"] == "required_status_checks"
+        for check in rule["parameters"]["required_status_checks"]
     )
-    latest = graphql(FRESHNESS, {"url": url}, run)["resource"]["repository"]["ref"]["target"]["oid"]
-    if latest != current:
-        raise SwarmError("dev advanced during the grading comparison; retry queueing")
-    if changed:
-        rest(f"repos/{repo}/pulls/{pull['number']}/update-branch", run, {"expected_head_sha": raw["headRefOid"]})
-    return changed
+    return ledger_events.view(url, read, required_checks=expected)
 
 
-def operate(action: str, url: str, run=subprocess.run) -> dict:
+def require_green(url: str, head: str, run) -> None:
+    pull = required_view(url, run)
+    if pull is None or pull.head != head or not pull.resolved or pull.red:
+        failed = f"; failed: {', '.join(pull.failed)}" if pull and pull.failed else ""
+        raise SwarmError(f"required checks on the current pull request head must pass before queueing{failed}")
+
+
+def journaled(journal, action: str, url: str, head: str, call: Callable[[], dict]) -> dict:
+    if journal is None:
+        return call()
+    before = journal.groups()
+    errors = []
+    try:
+        return call()
+    except SwarmError as exc:
+        errors.append(str(exc))
+        raise
+    finally:
+        journal.write(action, url, head, before, journal.groups(), errors)
+
+
+def operate(action: str, url: str, run=subprocess.run, admit=None, journal=None) -> dict:
     raw = graphql(STATE, {"url": url}, run)["resource"]
     if not raw:
         raise SwarmError("GitHub URL does not identify a pull request")
     if action != "state" and raw["baseRefName"] != "dev":
         raise SwarmError("swarm merge queue operations require a pull request into dev")
-    raw_head = raw["headRefOid"]
-    waiting = False
     if action == "queue" and raw["mergeQueueEntry"] is None:
+        staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
+        if admit is not None:
+            admit(raw["headRefOid"])
         if raw["repository"]["mergeQueue"] is None:
-            if (
-                raw["isDraft"]
-                or raw["reviewDecision"] not in (None, "APPROVED")
-                or (raw["statusCheckRollup"] or {}).get("state") != "SUCCESS"
-            ):
+            if raw["isDraft"] or raw["reviewDecision"] not in (None, "APPROVED"):
                 raise SwarmError("squash merge requires a ready pull request with green checks and no pending review")
+            require_green(url, raw["headRefOid"], run)
             graphql(MERGE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
         else:
-            waiting = refresh(url, raw, run)
-            if not waiting:
-                graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+            require_green(url, raw["headRefOid"], run)
+            variables = {"id": raw["id"], "head": raw["headRefOid"]}
+            journaled(journal, "queue", url, raw["headRefOid"], lambda: graphql(QUEUE, variables, run))
         raw = graphql(STATE, {"url": url}, run)["resource"]
     if action == "dequeue":
-        graphql(DEQUEUE, {"id": raw["id"]}, run)
+        journaled(journal, "dequeue", url, raw["headRefOid"], lambda: graphql(DEQUEUE, {"id": raw["id"]}, run))
         raw = graphql(STATE, {"url": url}, run)["resource"]
     return {
         "url": url,
@@ -153,5 +135,82 @@ def operate(action: str, url: str, run=subprocess.run) -> dict:
         "head": raw["headRefOid"],
         "queued": raw["mergeQueueEntry"] is not None,
         "entry": raw["mergeQueueEntry"],
-        **({"waiting": "checks", "previous_head": raw_head} if waiting else {}),
     }
+
+
+def waiting_ahead(url: str, target: str, run) -> list[dict]:
+    query = """query($url: URI!, $after: String) { resource(url: $url) { ... on PullRequest {
+      repository { mergeQueue(branch: "dev") { entries(first: 100, after: $after) {
+        nodes { state pullRequest { id url headRefOid } }
+        pageInfo { hasNextPage endCursor }
+      } } }
+    } } }"""
+    variables = {"url": url}
+    waiting = []
+    while True:
+        page = graphql(query, variables, run)["resource"]["repository"]["mergeQueue"]["entries"]
+        for entry in page["nodes"]:
+            if entry["pullRequest"]["id"] == target:
+                return waiting
+            if entry["state"] == "QUEUED":
+                waiting.append(entry["pullRequest"])
+        if not page["pageInfo"]["hasNextPage"]:
+            return waiting
+        variables["after"] = page["pageInfo"]["endCursor"]
+
+
+class Untracked:
+    def add(self, pull: dict) -> None:
+        pass
+
+    def discard(self, url: str) -> None:
+        pass
+
+
+def prioritize(url: str, run=subprocess.run, journal=None, ahead=(), displaced=None) -> dict:
+    displaced = displaced or Untracked()
+    raw = graphql(STATE, {"url": url}, run)["resource"]
+    if not raw or raw["baseRefName"] != "dev" or raw["state"] != "OPEN":
+        raise SwarmError("queue priority requires an open pull request into dev")
+    if raw.get("isDraft"):
+        raise SwarmError("queue priority requires a ready pull request")
+    if raw["repository"]["mergeQueue"] is None:
+        raise SwarmError("queue priority requires a dev merge queue")
+    staged_compatibility.require(url, raw["headRefOid"], raw.get("body") or "", run)
+    require_green(url, raw["headRefOid"], run)
+    waiting = [pull for pull in waiting_ahead(url, raw["id"], run) if pull["url"] not in ahead]
+    before = journal.groups() if journal is not None else None
+    errors = []
+    steps = []
+    try:
+        removed = []
+        try:
+            for pull in reversed(waiting):
+                current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
+                if current["mergeQueueEntry"] is not None and current["mergeQueueEntry"]["state"] == "QUEUED":
+                    removed.append(pull)
+                    steps.append(["dequeue", pull["url"]])
+                    displaced.add(pull)
+                    graphql(DEQUEUE, {"id": pull["id"]}, run)
+            current = graphql(STATE, {"url": url}, run)["resource"]
+            if current["mergeQueueEntry"] is None:
+                steps.append(["queue", url])
+                graphql(QUEUE, {"id": raw["id"], "head": raw["headRefOid"]}, run)
+        except SwarmError as exc:
+            errors.append(str(exc))
+        restored = []
+        for pull in reversed(removed):
+            try:
+                current = graphql(STATE, {"url": pull["url"]}, run)["resource"]
+                if current["mergeQueueEntry"] is None:
+                    staged_compatibility.require(pull["url"], pull["headRefOid"], current.get("body") or "", run)
+                    steps.append(["restore", pull["url"]])
+                    graphql(QUEUE, {"id": pull["id"], "head": pull["headRefOid"]}, run)
+                    restored.append(pull["url"])
+                displaced.discard(pull["url"])
+            except SwarmError as exc:
+                errors.append(f"could not restore {pull['url']}: {exc}")
+        return {"url": url, "displaced": restored, "errors": errors}
+    finally:
+        if journal is not None:
+            journal.write("priority", url, raw["headRefOid"], before, journal.groups(), errors, steps=steps)

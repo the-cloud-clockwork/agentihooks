@@ -7,6 +7,7 @@ from pathlib import Path
 
 from hooks.context.account_sessions import agent_pid
 from hooks.context.broadcast import live_session_ids, name_session, pin_session
+from hooks.context.master_coding import record_seat
 from hooks.observability import agent_trace
 from hooks.proc import processes
 from scripts.handoff import transfers
@@ -61,30 +62,30 @@ def pin(slug, name, environ=os.environ):
 
 
 def hive_of(environ=os.environ):
-    if not ledger_link.remote(environ):
+    if ledger_link.local_mode(environ):
         return ""
     if not environ.get("AGENTIHOOKS_HIVE_ID"):
-        raise SwarmError("take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive join")
+        raise SwarmError("take-master on a remote host needs AGENTIHOOKS_HIVE_ID from agentihooks hive add")
     return environ["AGENTIHOOKS_HIVE_ID"]
 
 
 def placed(store, slug, record, hive, pid):
     previous = store.execution_occupants(slug).get(record.seat)
-    target = {**process.launch_target(pid, process.local_namespace(), processes()), "host_id": hive}
+    target = process.launch_target(pid, process.local_namespace(), processes())
+    if hive:
+        target["host_id"] = hive
     record = replace(record, hive=hive, runtime_target=target)
     return store.start_execution(slug, record, previous.execution_id if previous else "")
 
 
 def admitted(store, slug, record, admit, pid, hive):
-    if hive:
-        record = placed(store, slug, record, hive, pid)
+    record = placed(store, slug, record, hive, pid)
     pin(slug, record.name)
     try:
         admit(record.name)
     except BaseException:
-        if hive:
-            store.execution_registry.update(slug, replace(record, state="ended"))
-            store.drop_agent(slug, record.name)
+        store.execution_registry.update(slug, replace(record, state="ended"))
+        store.drop_agent(slug, record.name)
         raise
     if hive:
         pin_session(pid, slug)
@@ -146,5 +147,6 @@ def take(store, slug, name, runtime, now_ms, replace_live=False, admit=lambda na
     store.put_agent(slug, record)
     for session_id in live_session_ids(pid):
         agent_trace.record_seat(session_id, name, slug, MASTER, MASTER)
+        record_seat(session_id, slug, name)
     launch_check.begin(store, slug, record, now_ms, relaunch=False)
     return record, transfers.attach(store, slug, record)

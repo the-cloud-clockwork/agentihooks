@@ -9,27 +9,31 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from hooks.context import profile_chain
+from scripts.hive import join_report
 from scripts.swarm import live_binding, naming
 from scripts.swarm.health.findings import Finding
 from scripts.swarm.store import AgentRecord, RedisStore
 
 DEADLINE_MS = 60 * 1000
 STAMP = ".agentihooks-render.json"
+HOST_OVERLAYS = "host_overlays"
 SETTINGS = ("hooks", "model", "effort")
 WORDS = {
     "joined": "joining the ledger and holding its seat",
     "late": "joining the ledger within a minute of its session start",
+    "observation": "an available process observation",
     "profile": "its profile",
     "settings": "its hooks, model and effort",
     "base": "its role on the package base role",
     "overlay": "every overlay its profile declares",
     "name": "its name",
 }
-REPORT_ONLY = frozenset({"late"})
+REPORT_ONLY = frozenset({"late", *(f"hive_{name}" for name in join_report.OPTIONAL)})
 OUTCOMES = {
     "relaunch": "It is being retired and relaunched once.",
     "spent": "Its one automatic relaunch is spent; operator action is required.",
     "report": "This is reported only; the master keeps running.",
+    "retired": "The failed hive agent was retired.",
 }
 
 
@@ -73,6 +77,11 @@ def declared(profile: str, overlays: Sequence[str] = ()) -> list[str]:
     return list(dict.fromkeys([*render.declared(profile), *overlays]))
 
 
+def expected(agent: AgentRecord) -> list[str]:
+    host = agent.profile_decision.get(HOST_OVERLAYS)
+    return declared(agent.profile, agent.overlays) if host is None else list(host)
+
+
 def joined_at(agent: AgentRecord, doc: dict) -> int | None:
     meta = doc.get("_meta", {})
     current = meta.get("members", {}).get(agent.name, {}).get("joined_at")
@@ -107,9 +116,9 @@ def _joined(store, agent, doc, started_at):
 def _process(agent, facts):
     differences = live_binding.compare(agent, facts)
     found = {}
-    if "process" in differences or "profile" in differences:
+    if "profile" in differences:
         found["profile"] = {"expected": agent.profile, "actual": facts.get("profile")}
-    if "process" in differences or any(key in differences for key in SETTINGS):
+    if any(key in differences for key in SETTINGS):
         expected = {**live_binding.assignment(agent), "hooks": True}
         found["settings"] = {
             "expected": {key: expected[key] for key in SETTINGS},
@@ -146,13 +155,23 @@ def _name(store, slug, agent):
 def misses(
     store: RedisStore, slug: str, agent: AgentRecord, facts: dict, doc: dict, on_bundle: bool, declared: list[str]
 ) -> dict:
-    return {
-        **_joined(store, agent, doc, session_started_at(agent)),
-        **_process(agent, facts),
-        **_base(agent, facts, on_bundle),
-        **_overlays(facts, declared),
-        **_name(store, slug, agent),
-    }
+    from scripts.hive import reports
+    from scripts.swarm.commands import hive_id
+
+    if agent.hive and agent.hive != hive_id() or reports.host(agent):
+        report = join_report.read(store.redis, agent)
+        if not report:
+            return {"hive_join": {"expected": "session join report", "actual": "missing"}}
+        return {
+            f"hive_{name}": {"expected": "available", "actual": "missing"}
+            for name in join_report.graded(report)["misses"]
+        }
+    found = _joined(store, agent, doc, session_started_at(agent))
+    if not facts or facts.get("process", True) is not True:
+        found["observation"] = {"expected": "available process observation", "actual": "unavailable"}
+    else:
+        found.update({**_process(agent, facts), **_base(agent, facts, on_bundle), **_overlays(facts, declared)})
+    return {**found, **_name(store, slug, agent)}
 
 
 def record(
@@ -198,7 +217,7 @@ def clear_relaunched(store: RedisStore, slug: str, task: str) -> None:
 
 
 def told(found: dict, outcome: str) -> str:
-    fields = ", ".join(WORDS[field] for field in found)
+    fields = ", ".join(WORDS.get(field, field.removeprefix("hive_").replace("_", " ")) for field in found)
     return f"The master failed its launch check within a minute on {fields}. {OUTCOMES[outcome]}"
 
 

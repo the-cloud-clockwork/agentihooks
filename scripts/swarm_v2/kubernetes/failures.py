@@ -15,10 +15,12 @@ from scripts.swarm_v2.controller import Controller
 from scripts.swarm_v2.kubernetes.cleanup import Release
 from scripts.swarm_v2.kubernetes.watch import BACKEND, EXECUTION_LABEL
 from scripts.swarm_v2.runtime import observe
+from scripts.swarm_v2.runtime.operations import SPAWN, Phase
 
 OOM_KILLED, EVICTED, NODE_LOST = "oom_killed", "evicted", "node_lost"
 IMAGE_PULL, APPLICATION_EXIT = "image_pull", "application_exit"
 REASONS = (OOM_KILLED, EVICTED, NODE_LOST, IMAGE_PULL, APPLICATION_EXIT)
+LEGACY_SPEC = "missing_spec_digest"
 PULL_WAITING = frozenset(("ErrImagePull", "ImagePullBackOff", "InvalidImageName"))
 PULL_GRACE_MS = 120_000
 NODE_NOT_READY = "NodeNotReady"
@@ -150,6 +152,7 @@ class Recovery:
         """Pass None for `ready_nodes` when the node listing failed, so an unlisted node is never proof of loss;
         `deleted` holds the last state of each Pod deleted since the previous pass."""
         self.controller.require()
+        self._legacy_spawns()
         self._resume()
         self._requested()
         ready = None if ready_nodes is None else frozenset(ready_nodes)
@@ -169,7 +172,7 @@ class Recovery:
         return seen
 
     def handle(self, execution_id: str, reason: str) -> Decision:
-        if reason not in REASONS:
+        if reason not in (*REASONS, LEGACY_SPEC):
             raise SwarmError("unsupported failure reason")
         self.controller.require()
         known = self.decision(execution_id)
@@ -260,7 +263,7 @@ class Recovery:
         session = fence["native_session"] if recovery == restoring.NATIVE else ""
         directive = restoring.Directive(decision.checkpoint, recovery, session, fence["archive_watermark"])
         self.controller.require()
-        self.store.redis.hsetnx(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
+        self.store.redis.hset(self._key(RESTORES), decision.replacement, json.dumps(directive.record()))
 
     def _requested(self) -> None:
         for execution_id, choice in sorted(self.store.redis.hgetall(self._key(REQUESTS)).items()):
@@ -308,6 +311,23 @@ class Recovery:
         decided = set(self.store.redis.hkeys(self._key(RECOVERIES)))
         for execution_id in sorted(set(self.store.redis.hkeys(self._key(FENCES))) - decided):
             self.handle(execution_id, self.fence(execution_id)["reason"])
+
+    def _legacy_spawns(self) -> None:
+        occupants = {agent.execution_id for agent in self.store.execution_occupants(self.slug).values()}
+        for operation in self.store.operation_journal.records(self.slug):
+            if (
+                operation.execution_id not in occupants
+                or operation.backend != BACKEND
+                or operation.action != SPAWN
+                or operation.spec_digest
+                or operation.phase is Phase.APPLIED
+                or retention.final(self.store, self.slug, operation.execution_id)
+            ):
+                continue
+            self.controller.require()
+            with lease.fencing(self.controller.held.epoch):
+                self.store.operation_journal.supersede_legacy_spawn(self.slug, operation)
+            self.handle(operation.execution_id, LEGACY_SPEC)
 
     def _observe(
         self, agent: AgentRecord, pods: list[dict], ready: frozenset[str] | None, last: dict | None = None
@@ -401,6 +421,11 @@ class Recovery:
         return fence
 
     def _decide(self, agent: AgentRecord, reason: str) -> Decision:
+        if reason == LEGACY_SPEC and self.automatic and not self.paused():
+            successor = self._replace(agent)
+            decision = Decision(agent.execution_id, agent.generation, reason, FRESH, replacement=successor.execution_id)
+            self._direct(decision, restoring.FRESH)
+            return self._record(agent, decision, successor.generation)
         entry = self._checkpoint(agent.execution_id, native_only=True)
         if not self.automatic or self.paused() or reason == IMAGE_PULL or not entry or not agent.conversation_id:
             occupant = self.store.execution_occupants(self.slug)[agent.seat]

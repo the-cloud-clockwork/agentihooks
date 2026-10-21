@@ -31,7 +31,7 @@ from tests.test_swarm_v2_kubernetes_terminal import (
     registration,
 )
 
-pytestmark = [pytest.mark.unit, pytest.mark.xdist_group("fakeredis")]
+pytestmark = pytest.mark.unit
 
 SWARM = "fixture-swarm"
 MASTER = "master@a1b2c3-0001"

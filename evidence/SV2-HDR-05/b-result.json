@@ -24,9 +24,9 @@
       "cached": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
-          "checked_at": 1790000000400,
+          "checked_at": 1790000000500,
           "fresh_ms": 30000,
-          "live_at": 1790000000400,
+          "live_at": 1790000000500,
           "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
           "pane_id": "w1:p1",
           "reason": "",
@@ -34,9 +34,9 @@
         },
         "engineer@a1b2c3-0002": {
           "agent": "engineer@a1b2c3-0002",
-          "checked_at": 1790000000500,
+          "checked_at": 1790000000700,
           "fresh_ms": 30000,
-          "live_at": 1790000000250,
+          "live_at": 1790000000300,
           "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
           "pane_id": "w1:p1",
           "reason": "unreachable",
@@ -52,9 +52,9 @@
       "expired": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
-          "checked_at": 1790000000400,
+          "checked_at": 1790000000500,
           "fresh_ms": 30000,
-          "live_at": 1790000000400,
+          "live_at": 1790000000500,
           "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
           "pane_id": "w1:p1",
           "reason": "stale",
@@ -62,9 +62,9 @@
         },
         "engineer@a1b2c3-0002": {
           "agent": "engineer@a1b2c3-0002",
-          "checked_at": 1790000000500,
+          "checked_at": 1790000000700,
           "fresh_ms": 30000,
-          "live_at": 1790000000250,
+          "live_at": 1790000000300,
           "machine": "swarm-exe-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb-terminal",
           "pane_id": "w1:p1",
           "reason": "unreachable",
@@ -82,9 +82,9 @@
       "published_after_window": {
         "engineer@a1b2c3-0001": {
           "agent": "engineer@a1b2c3-0001",
-          "checked_at": 1790000000400,
+          "checked_at": 1790000000500,
           "fresh_ms": 30000,
-          "live_at": 1790000000400,
+          "live_at": 1790000000500,
           "machine": "swarm-exe-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa-terminal",
           "pane_id": "w1:p1",
           "reason": "stale",
