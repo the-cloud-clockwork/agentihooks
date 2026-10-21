@@ -1514,6 +1514,7 @@ def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers
     InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, 1)
+    assert actions[0] == "the operator wrote on the ledger, paused to start the master"
     assert "spawned master master@a1b2c3-0001" in actions
     assert [a.name for a in masters(store)] == ["master@a1b2c3-0001"] and workers(store) == []
     assert runtime.spawned == [] and store.config("sw").state == "paused"
