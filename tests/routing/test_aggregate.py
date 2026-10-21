@@ -89,16 +89,22 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
 
     now = int(time.time() * 1000)
     for hive, counts, heartbeat in (
-        ("own", {"claude:one": 1, "_executions": {"claude:one": ["mine"]}}, now),
+        ("own", {"claude:one": 1, "_executions": {"claude:one": ["mine"], "codex:three": ["done"]}}, now),
         ("far", {"claude:one": 5, "interactive:claude:one": 1, "codex:one": 2}, now),
+        ("near", {"claude:one": 3}, now),
+        ("silent", None, now),
         ("gone", {"claude:one": 9}, now - registry.LIVE_MS - 1),
     ):
         registry.update(redis, hive, ["max-agents=8"])
         redis.hset(registry.key(hive), "heartbeat_at", heartbeat)
-        redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts))
+        if counts is not None:
+            redis.set(f"{registry.key(hive)}:sessions", json.dumps(counts))
     slots = LaunchSlots(redis)
-    assert slots.reserve("claude:one", "mine", 9, 1000)
-    assert slots.reserve("claude:one", "starting", 9, 1000)
+    assert slots.reserve("claude:one", "mine", 20, 1000)
+    assert slots.reserve("claude:one", "starting", 20, 1000)
+    assert slots.reserve("codex:two:b", "spawning", 9, 1000)
+    assert slots.reserve("codex:three", "done", 9, 1000)
+    assert slots.release("done")
     monkeypatch.delenv("AGENTIHOOKS_RUNTIME_BACKEND", raising=False)
     monkeypatch.delenv("AGENTIHOOKS_HIVE_ID", raising=False)
     monkeypatch.setenv("SWARM_HIVE_ID", "own")
@@ -108,10 +114,10 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
     monkeypatch.setattr(account_sessions, "_codex_processes", lambda proc: ({}, {}))
     monkeypatch.setattr(account_sessions, "managed_held", set)
 
-    assert account_sessions.sessions_by_account() == {"one": 7}
+    assert account_sessions.sessions_by_account() == {"one": 10}
     assert account_sessions.sessions_by_account(local=True) == {"one": 1}
-    assert account_sessions.codex_sessions_by_account() == {"one": 2}
-    assert not slots.reserve("claude:one", "next", 7, 1000)
+    assert account_sessions.codex_sessions_by_account() == {"one": 2, "two:b": 1, "three": 0}
+    assert not slots.reserve("claude:one", "next", 10, 1000)
     assert not slots.reserve("codex:one", "codex-next", 2, 1000)
     assert slots.reserve("codex:one", "codex-next", 3, 1000)
 
@@ -120,8 +126,8 @@ def test_local_backend_counts_other_hives_and_unreported_launches_like_the_reser
     monkeypatch.setattr(balancer, "cached_observations", lambda **kw: [(time.time(), result)])
     monkeypatch.setattr(balancer, "collect_results", lambda *args, **kwargs: ([], "cached"))
     (row,) = capacity._claude({"AH_CC_TOKEN_one": "fake"}, time.time())
-    assert row.sessions == 7
-    assert slots.reserve("claude:one", "next", 8, 1000)
+    assert row.sessions == 10
+    assert slots.reserve("claude:one", "next", 11, 1000)
 
 
 def test_aggregate_includes_reservations_once_and_exit_releases(redis, monkeypatch):
