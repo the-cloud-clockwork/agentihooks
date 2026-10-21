@@ -70,15 +70,20 @@ def refresh_lock(environ: Mapping[str, str]) -> Iterator[None]:
         yield
 
 
+def _trust(environ: Mapping[str, str]) -> dict:
+    # The first refresh delivers the ledger CA, so a named file that does not exist yet means system trust.
+    if environ.get(ledger_link.CA_ENV) or ledger_link.ca_file(environ).is_file():
+        return ledger_link.transport(environ)
+    return {}
+
+
 def _post(url: str, path: str, body: dict, action: str, environ: Mapping[str, str]) -> dict:
     parts = urlsplit(url)
     if parts.scheme != "https" and not server.is_loopback(parts.hostname):
         raise auth.HiveError(f"a {action} off loopback carries credentials, so the hive URL must be https")
     request = urllib.request.Request(url.rstrip("/") + path, data=json.dumps(body).encode())
     try:
-        with urllib.request.urlopen(
-            request, timeout=server.REQUEST_TIMEOUT_S, **ledger_link.transport(environ)
-        ) as response:
+        with urllib.request.urlopen(request, timeout=server.REQUEST_TIMEOUT_S, **_trust(environ)) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
         try:
