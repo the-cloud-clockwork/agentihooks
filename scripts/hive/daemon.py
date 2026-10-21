@@ -3,6 +3,7 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -25,6 +26,8 @@ if TYPE_CHECKING:
 BEAT_SECONDS = 15
 TTL_SECONDS = BEAT_SECONDS * 3
 RETRY_SECONDS = (1, 2, 4, 8, 16, 30)
+CONNECT_TIMEOUT_S = 3
+READ_TIMEOUT_S = 5
 UNIT = "agentihooks-hive.service"
 ORIGIN = re.compile(r'\[remote "origin"\][^\[]*?\burl\s*=\s*(\S+)')
 REMOTE = re.compile(r"(?:[a-z+]+://)?(?:[^@/]+@)?([^/:]+)[:/](.+?)(?:\.git)?/?")
@@ -113,7 +116,7 @@ def fence(redis: "Redis", local_id: str, runtime: "LocalHerdrRuntime") -> bool:
     return redis.hlen(key) > 0
 
 
-def run(connect: Callable[[], "Redis"]) -> None:
+def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
     from redis.exceptions import ConnectionError, TimeoutError
 
     lost = (ConnectionError, TimeoutError)
@@ -124,17 +127,43 @@ def run(connect: Callable[[], "Redis"]) -> None:
     failures = 0
     while True:
         try:
-            redis = connect()
+            redis, waiter = connect()
             while True:
                 started = time.monotonic()
                 worker, attempted_at = quota_refresh.start(os.environ, worker, attempted_at)
                 renewed = github_app_cli.renew(renewed, time.time())
                 beat(redis, local_id)
-                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)))
+                scheduled_wait(max(0, BEAT_SECONDS - (time.monotonic() - started)), redis=waiter)
                 failures = 0
-        except lost:
-            time.sleep(RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)])
+        except lost as exc:
+            delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
+            print(f"hive Redis connection lost ({exc!r}); reconnecting in {delay}s", file=sys.stderr, flush=True)
+            time.sleep(delay)
             failures += 1
+
+
+def clients(source: "Redis") -> tuple["Redis", "Redis"]:
+    from redis import ConnectionPool, Redis
+    from redis.backoff import NoBackoff
+    from redis.retry import Retry
+
+    pool = source.connection_pool
+    options = {
+        **pool.connection_kwargs,
+        "socket_connect_timeout": CONNECT_TIMEOUT_S,
+        "socket_keepalive": True,
+        "health_check_interval": BEAT_SECONDS,
+        "retry": Retry(NoBackoff(), 0),
+    }
+    source.close()
+    return tuple(
+        Redis(
+            connection_pool=ConnectionPool(
+                connection_class=pool.connection_class, **options | {"socket_timeout": timeout}
+            )
+        )
+        for timeout in (READ_TIMEOUT_S, BEAT_SECONDS + READ_TIMEOUT_S)
+    )
 
 
 def unit(binary: str) -> str:
