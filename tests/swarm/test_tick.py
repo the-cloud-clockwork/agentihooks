@@ -705,7 +705,11 @@ def test_a_refused_hive_acknowledgement_reopens_its_task(store):
     assert ledger.rows["t1"]["claimed_by"] != first
 
 
-def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store):
+def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(store, monkeypatch):
+    from scripts.swarm_v2.runtime import codex
+
+    admitted, admit = [], codex.admit_legacy
+    monkeypatch.setattr(codex, "admit_legacy", lambda *args: admitted.append(args[0]) or admit(*args))
     ledger, runtime = tasks(("t1", "eng")), HiveAcks()
     tick("sw", store, ledger, runtime, now_ms=1_000)
     first = runtime.ordered[0]
@@ -718,6 +722,7 @@ def test_a_transient_collect_error_keeps_the_claim_until_the_hive_acknowledges(s
     tick("sw", store, ledger, runtime, now_ms=3_000)
     assert [row["state"] for row in store.launches("sw")] == ["started"]
     assert runtime.ordered == [first]
+    assert admitted and all(seen is store for seen in admitted)
 
 
 def test_a_launch_no_hive_acknowledges_within_the_claim_lease_reopens_its_task(store):

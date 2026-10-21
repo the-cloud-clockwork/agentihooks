@@ -1081,7 +1081,7 @@ def _spawn(slug, config, store, ledger, runtime, rows, doc, now_ms):
             launched = codex.admit_legacy(store, slug, placed_record(record, placed), runtime)
         except Exception as exc:
             if _acknowledging_error(exc):
-                store.record_launch(slug, record, ACKNOWLEDGING, str(exc))
+                store.record_launch(slug, record, ACKNOWLEDGING)
                 actions.append(f"{name} waits for the hive acknowledgement of {task['id']}")
             else:
                 actions += _spawn_failed(slug, store, ledger, runtime, rows, Failed(record, task, exc), now_ms)

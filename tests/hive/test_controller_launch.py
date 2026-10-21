@@ -1097,7 +1097,7 @@ def test_a_collect_without_a_live_order_refuses_instead_of_ordering_again(setup)
     order = replace(order, expires_at=launch.lease.now_ms(store) - 1)
     store.redis.hset(store.key(slug, launch.ORDERS), "task-1", json.dumps(order.__dict__))
     assert setup.launcher.collect(request) == Outcome("spawn", Status.AMBIGUOUS, "hive", detail=launch.EXPIRED)
-    setup.launcher.reap.assert_called_once()
+    assert setup.launcher.reap.call_args.args[0] == order
     assert store.execution_registry.get(slug, order.execution_id).state == "ended"
     assert setup.launcher.orders_for("task-1") == order
     assert setup.launcher.collect(request) == gone
