@@ -71,22 +71,23 @@ def _key(account: str) -> str:
     return account.replace("_", "-")
 
 
-def _open_claude_rows(rows: list, redis: object, now_ms: int) -> list:
+def _open_claude_rows(rows: list, hived: dict[str, int]) -> list:
     """Claude accounts with a free seat once the sessions every live hive reports are counted beside local ones."""
-    from scripts.routing import aggregate
-
-    hived = (
-        {}
-        if aggregate.enabled()
-        else {
-            _key(row["account"]): row["sessions"]
-            for row in aggregate.read(redis, now_ms / 1000).values()
-            if row["harness"] == "claude"
-        }
-    )
     return [
         row for row in rows if row.harness == "claude" and capacity.free_seats(row) - hived.get(_key(row.name), 0) > 0
     ]
+
+
+def _hive_sessions(redis: object, now_ms: int) -> dict[str, int]:
+    from scripts.routing import aggregate
+
+    if aggregate.enabled():
+        return {}
+    return {
+        _key(row["account"]): row["sessions"]
+        for row in aggregate.read(redis, now_ms / 1000).values()
+        if row["harness"] == "claude"
+    }
 
 
 def _slot_cap(hives: list[dict], selected: placement.MasterPlacement, fallback: int | None) -> int | None:
@@ -180,10 +181,21 @@ class HiveLaunch:
             selected = self._master_selection(config, decision, hives, now, rows, front)
             return self._record_wait(lane, task, selected)
         account = saved.get("account") or self.herdr.planned_account(task["id"], "claude")
-        open_rows = _open_claude_rows(rows, self.store.redis, now)
+        hived = _hive_sessions(self.store.redis, now)
+        open_rows = _open_claude_rows(rows, hived)
         candidates = [row for row in open_rows if not account or row.name == account]
         if not candidates and not saved.get("account"):
             candidates = open_rows
+        if not candidates:
+            seats = ", ".join(
+                f"{row.name} {row.sessions} here and {hived.get(_key(row.name), 0)} on hives of {row.cap}"
+                for row in rows
+                if row.harness == "claude"
+            )
+            pinned = f"; pinned to {account}" if account else ""
+            return self._record_wait(
+                lane, task, placement.Wait(f"no Claude account has room after hive sessions: {seats}{pinned}", role)
+            )
         route_kind = task.get("route_kind", "subscription")
         found = _first_choice(
             candidates, lambda name: placement.choose(role, "claude", name, route_kind, config.repo, hives, now)
