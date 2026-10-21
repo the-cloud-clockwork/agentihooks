@@ -247,7 +247,8 @@ class InboxStore:
         return self._with_seat(receiver, self.open_items)
 
     def quiet(self, addresses: list[str]) -> set[str]:
-        """Addresses whose open index is current and holds nothing; any other needs open_items to tell."""
+        """Addresses whose open index is current and holds nothing, or that have never been sent anything: either
+        proves open_items would return []."""
         with self.redis.pipeline(transaction=False) as pipe:
             for address in addresses:
                 pipe.sismember(self.key("open-indexed"), address)
@@ -258,7 +259,7 @@ class InboxStore:
         return {
             address
             for address, (indexed, size, total, opened) in zip(addresses, zip(*[iter(rows)] * 4))
-            if _index_current(indexed, size, total) and not opened
+            if not opened and (total == 0 or _index_current(indexed, size, total))
         }
 
     def _open_ids(self, address):
