@@ -415,3 +415,14 @@ def test_tick_still_reopens_on_an_ordinary_spawn_failure(swarm):
     ledger = tasks(("t1", "eng"))
     tick.tick("sw", swarm, ledger, FakeRuntime(fail=True), now_ms=1_000)
     assert ledger.rows["t1"]["state"] == "open"
+
+
+def test_a_fresh_spawn_keeps_its_handoff_without_the_original_run_options():
+    complete = {"profile": "engineer", "harness": "claude", "model": "opus", "effort": "high"}
+    lost = {"handoff": "## Next\nGo on\n", "handoff_envelope": {"launch": {"profile": "engineer"}}}
+    with pytest.raises(tick.SpawnError) as error:
+        profile_choice.transfer(lost)
+    assert error.value.status == "unsupported"
+    assert profile_choice.transfer({**lost, profile_choice.FRESH: True}) == {}
+    assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}, profile_choice.FRESH: True}) == {}
+    assert profile_choice.transfer({**lost, "handoff_envelope": {"launch": complete}}) == complete
