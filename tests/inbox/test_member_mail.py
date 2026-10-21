@@ -143,7 +143,7 @@ def test_the_exit_sweep_finishes_past_a_world_that_never_answers_and_settles_the
 
 
 def test_the_exit_sweep_skips_a_world_that_stops_answering_after_ping_and_settles_the_others(
-    store, agent, mail, monkeypatch
+    store, agent, mail, monkeypatch, capsys
 ):
     member, item = mail
     _with_world(monkeypatch, InboxStore(AnsweringPingThenHung(), world="m2"))
@@ -153,6 +153,44 @@ def test_the_exit_sweep_skips_a_world_that_stops_answering_after_ping_and_settle
     assert lines == [
         "skipped the inbox of hive m2 this pass: its Redis timed out or dropped: Timeout reading from socket"
     ]
+    assert capsys.readouterr() == ("", f"{lines[0]}\n")
+
+
+def test_a_skipped_controller_world_is_named_the_controller_and_leaves_the_pass(capsys):
+    world = InboxStore(AnsweringPingThenHung(), world="")
+    worlds = exits._WorldPass([world])
+    assert worlds.run(world, lambda w: w.redis.get("key")) is None
+    assert worlds.up == []
+    assert worlds.skipped == [
+        "skipped the inbox of the controller this pass: its Redis timed out or dropped: Timeout reading from socket"
+    ]
+    assert capsys.readouterr() == ("", f"{worlds.skipped[0]}\n")
+
+
+def test_a_quiet_move_candidate_does_not_stop_the_world_moving_a_later_seat_with_mail():
+    from types import SimpleNamespace
+
+    opened, moved = [], []
+
+    class World:
+        def quiet(self, seats):
+            return {"eng-1@sw"}
+
+        def open_items(self, seat):
+            opened.append(seat)
+            return [SimpleNamespace(id="i1")]
+
+        def move_world(self, item_id, home, by, reason):
+            moved.append((item_id, reason))
+
+    home = SimpleNamespace(world="m2")
+    candidates = [
+        (SimpleNamespace(seat="eng-1@sw", name="a1"), home),
+        (SimpleNamespace(seat="eng-2@sw", name="a2"), home),
+    ]
+    exits._move_world_mail(World(), candidates)
+    assert opened == ["eng-2@sw"]
+    assert moved == [("i1", "moved to hive m2, where a2 runs eng-2@sw")]
 
 
 def test_a_pass_with_every_world_down_records_the_exit_and_the_next_pass_settles_its_mail(
