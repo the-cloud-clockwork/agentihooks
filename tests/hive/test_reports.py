@@ -160,6 +160,74 @@ def test_a_lost_hive_marks_its_executions_unknown_not_dead(remote):
     assert remote.store.claimant("fixture", "task") == agent.name
 
 
+LOST = 10 * 60_000
+NOW = 10**9
+
+
+def _beat_hive(remote, age):
+    from scripts.hive import registry
+
+    if age is not None:
+        remote.redis.hset(registry.key(HIVE), "heartbeat_at", 0 if age == "never" else NOW - age)
+
+
+@pytest.mark.parametrize(
+    ("age", "reporting", "lost"),
+    [
+        (LOST + 1, False, True),
+        (LOST, False, False),
+        (LOST + 1, True, False),
+        ("never", False, False),
+        (None, False, False),
+    ],
+)
+def test_a_hive_is_lost_only_after_its_heartbeat_outlives_the_grace_window(remote, age, reporting, lost):
+    _beat_hive(remote, age)
+    if reporting:
+        _publish(remote)
+    assert remote.runtime.hive.lost(remote.agent, NOW) is lost
+    here = replace(remote.agent, runtime_target={"host_id": "controller"})
+    assert remote.runtime.hive.lost(here, NOW) is False
+
+
+@pytest.mark.parametrize(
+    ("age", "beat", "retired"),
+    [
+        (LOST + 1, None, True),
+        (LOST + 1, LOST + 1, True),
+        (LOST + 1, LOST, False),
+        (LOST, None, False),
+        (None, None, False),
+    ],
+)
+def test_tick_retires_workers_of_a_hive_that_stopped_reporting(remote, age, beat, retired):
+    from scripts.swarm import idle, tick
+    from scripts.swarm.tick import SUSPECT
+
+    remote.agent = replace(remote.agent, state=SUSPECT)
+    remote.store.put_agent("fixture", remote.agent)
+    _beat_hive(remote, age)
+    if beat is not None:
+        idle.beat(remote.redis, "fixture", remote.agent.name, idle.WORKING, NOW - beat)
+    remote.store.claim("fixture", "task", remote.agent.name, 60000)
+    rows = {"task": {"state": "claimed", "claimed_by": remote.agent.name}}
+    ledger = Mock()
+    ledger.update_task.return_value = {"state": "open", "claimed_by": ""}
+    remote.runtime.retire = Mock(side_effect=AssertionError("a lost hive takes no process command"))
+
+    actions = tick._reap("fixture", remote.store, ledger, remote.runtime, rows, NOW)
+
+    if retired:
+        assert remote.store.agents("fixture") == []
+        assert remote.store.claimant("fixture", "task") is None
+        assert remote.store.execution_registry.occupants("fixture")[remote.agent.seat].state == "ended"
+        assert actions == [f"retired {remote.agent.name}: its hive stopped reporting, task task reopened"]
+    else:
+        assert actions == []
+        assert [(a.name, a.state) for a in remote.store.agents("fixture")] == [(remote.agent.name, SUSPECT)]
+        assert remote.store.claimant("fixture", "task") == remote.agent.name
+
+
 @pytest.mark.parametrize(
     ("panes", "namespace", "retired"),
     [
