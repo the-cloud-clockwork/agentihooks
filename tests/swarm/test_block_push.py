@@ -134,6 +134,16 @@ def test_block_on_a_hive_reads_the_launch_checkout_for_a_repository_missing_here
     assert row["repository_branches"] == {str(primary): BRANCH}
 
 
+def test_block_on_a_hive_without_any_task_repository_here_blocks_without_a_branch(hive_worktree, monkeypatch, tmp_path):
+    ledger = hive_worktree[0]
+    monkeypatch.setenv("AGENTIHOOKS_SWARM", "sw")
+    monkeypatch.delenv("AGENTIHOOKS_SWARM_REPO")
+    ledger.rows["t1"]["repositories"] = [str(tmp_path / "workstation" / "antoncore")]
+    assert block() == 0
+    assert ledger.rows["t1"]["state"] == "blocked"
+    assert "branch" not in ledger.rows["t1"]
+
+
 @pytest.mark.parametrize("hive", [("sw", True, True), ("other", True, False), ("sw", False, False)])
 @pytest.mark.parametrize(
     "command",
