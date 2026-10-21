@@ -377,6 +377,43 @@ def test_the_local_terminal_leaves_other_executions_to_the_worker_terminal(monke
     assert attach.local_terminal(store, "sw", "exe-4", {}) is None
 
 
+@pytest.mark.parametrize(("listed", "closed"), [("term-0", True), ("operator-shell", False)])
+def test_a_reopen_closes_the_earlier_launch_pane_only_on_its_recorded_terminal(monkeypatch, listed, closed):
+    from types import SimpleNamespace
+
+    from scripts import herdr_host, herdr_panes
+
+    agents = [replace(agent, pane_id="w1:p0") for agent in _agents()]
+    config = SimpleNamespace(repo="/home/op/dev/agentihooks", code="323133", slug="sw")
+    redis = Mock()
+    redis.hgetall.return_value = {}
+    store = SimpleNamespace(
+        agents=lambda asked: agents,
+        config=lambda asked: config,
+        execution_registry=SimpleNamespace(set_pane=lambda *pane: None),
+        redis=redis,
+        key=lambda *parts: ":".join(parts),
+    )
+    monkeypatch.setattr("scripts.swarm.live_binding.transport", lambda found, seen: RECORD)
+    monkeypatch.setattr(
+        herdr_host, "open_command", lambda *call: herdr_host.Placement("w1", "w1:t1", "w1:p1", "term-1")
+    )
+    launch = SimpleNamespace(pane_id="w1:p0", terminal_id="term-0", kind="init-agent", owner_session="sw-master-1")
+    monkeypatch.setattr(herdr_panes, "load", lambda environ: [launch])
+    calls = []
+
+    def cli(args, environ):
+        calls.append(args)
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": "w1:p0", "terminal_id": listed}, {"pane_id": "w1:p1", "terminal_id": "term-1"}]}
+        return {}
+
+    monkeypatch.setattr(herdr_host, "_cli", cli)
+    assert attach.local_terminal(store, "sw", "exe-1", {})["pane"] == "w1:p1"
+    assert (["pane", "close", "w1:p0"] in calls) is closed
+    assert ["pane", "close", "w1:p1"] not in calls
+
+
 def test_swarm_terminal_reopens_a_local_execution_before_the_worker_terminal(monkeypatch, capsys):
     import json
     from types import SimpleNamespace

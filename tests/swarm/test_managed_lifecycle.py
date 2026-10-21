@@ -428,3 +428,43 @@ def test_managed_retirement_closes_the_launch_pane_only_while_it_belongs_to_the_
     assert rig.runner.retire(rig.agent)
     assert (["pane", "close", "viewer"] in [call.args[0] for call in rig.herdr.call_args_list]) is closed
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
+
+
+def _panes(listed):
+    def herdr(args):
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": pane, "terminal_id": terminal} for pane, terminal in listed.items()]}
+        if args[:2] == ["agent", "get"]:
+            raise RuntimeError("agent not found")
+        return _close_only(args)
+
+    return herdr
+
+
+def _launched(monkeypatch, pane, terminal):
+    record = SimpleNamespace(pane_id=pane, terminal_id=terminal, kind="init-agent")
+    monkeypatch.setattr(runtime, "_launch_records", lambda name: [record])
+
+
+def test_managed_retirement_leaves_a_reused_pane_on_another_terminal_open(rig, monkeypatch):
+    from scripts.swarm import reaper
+
+    _launched(monkeypatch, "viewer", "launch")
+    rig.herdr.side_effect = _panes({"viewer": "operator-shell"})
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    assert ["pane", "close", "viewer"] not in [call.args[0] for call in rig.herdr.call_args_list]
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
+
+
+def test_managed_retirement_after_a_reopen_closes_the_earlier_launch_pane(rig, monkeypatch):
+    from scripts.swarm import reaper
+
+    _launched(monkeypatch, "viewer", "launch")
+    reopened = replace(rig.agent, pane_id="w2:p7")
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "w2:p7", "reopened")
+    rig.herdr.side_effect = _panes({"viewer": "launch", "w2:p7": "reopened"})
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(reopened)
+    closed = [call.args[0][2] for call in rig.herdr.call_args_list if call.args[0][:2] == ["pane", "close"]]
+    assert sorted(closed) == ["viewer", "w2:p7"]
