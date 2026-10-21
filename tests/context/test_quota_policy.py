@@ -443,6 +443,22 @@ def test_pre_tool_use_lets_the_tool_run_under_the_stop_alert():
         )
 
 
+def test_pre_tool_use_raises_the_handed_off_block(monkeypatch):
+    from hooks import hook_manager
+
+    monkeypatch.setattr("hooks.config.QUOTA_POLICY_ENABLED", True)
+    reason = "BLOCKED: this session handed its task off to account beta at 09:00."
+    with (
+        patch.object(qp, "handed_off_block", return_value=reason),
+        patch.object(qp, "evaluate") as evaluate,
+    ):
+        with pytest.raises(hook_manager.BlockAction, match="handed its task off to account beta"):
+            hook_manager.on_pre_tool_use(
+                {"tool_name": "Read", "tool_input": {"file_path": "/tmp/x"}, "session_id": "sess-moved", "cwd": "/tmp"}
+            )
+    evaluate.assert_not_called()
+
+
 def test_reserve_account_is_the_last_handoff_target():
     others = [_c("big", 0, 30), _c("small", 0, 88), _c("tiny", 0, 96)]
 
