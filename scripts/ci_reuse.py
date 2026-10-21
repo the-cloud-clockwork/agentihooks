@@ -54,7 +54,8 @@ LOST_RERUN = (
     (
         "and all($required[];",
         'and ($event != "merge_group" or ([$jobs.unit.result, $jobs."unit-lost".result, $jobs."unit-rerun".result]'
-        ' | IN(["success", "skipped", "skipped"], ["failure", "success", "success"])))\n      and all($required[];',
+        ' | IN(["success", "skipped", "skipped"], ["failure", "success", "success"], ["cancelled", "success", "success"])))'
+        "\n      and all($required[];",
     ),
     (
         ' else .value.result == "skipped" end)',
