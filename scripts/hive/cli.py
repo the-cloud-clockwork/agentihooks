@@ -53,6 +53,11 @@ def saved_redis_url(environ: Mapping[str, str]) -> str | None:
     return _saved_env(environ).get("AGENTIHOOKS_HIVE_REDIS_URL") or None
 
 
+def saved_member(environ: Mapping[str, str]) -> dict[str, str]:
+    saved = _saved_env(environ)
+    return {name: saved[name] for name in ("AGENTIHOOKS_HIVE_ID", "AGENTIHOOKS_HIVE_REDIS_URL") if saved.get(name)}
+
+
 def _saved_env(environ: Mapping[str, str]) -> dict[str, str]:
     try:
         lines = (registry.home(environ) / auth.ENV_FILE).read_text().splitlines()
