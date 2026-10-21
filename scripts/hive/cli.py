@@ -102,7 +102,7 @@ def _post(url: str, path: str, body: dict, action: str, environ: Mapping[str, st
         raise auth.HiveError(f"the hive at {url} answered with a body that is not JSON") from exc
 
 
-def _add(args: argparse.Namespace) -> dict:
+def _add(args: argparse.Namespace, label: str) -> dict:
     from scripts.hive import machine
     from scripts.swarm.commands import hive_id
     from scripts.swarm.store import redis_url
@@ -111,7 +111,7 @@ def _add(args: argparse.Namespace) -> dict:
         redis_client(),
         hive_id(),
         args.target,
-        args.label,
+        label,
         machine.Delivery(args.url, args.redis_url or redis_url(os.environ), ledger_ca.served()),
     )
 
@@ -156,7 +156,6 @@ def _parser() -> argparse.ArgumentParser:
     sub = parser.add_subparsers(dest="command", required=True)
     add = sub.add_parser("add", help="Save an SSH machine in herdr and deliver its member credential to it")
     add.add_argument("target", help="SSH target herdr machine add dials, such as ssh://worker@host:2222")
-    add.add_argument("--label", required=True, help="herdr sidebar label and hive member name")
     add.add_argument("--url", required=True, help="this hive's endpoint as the machine reaches it, for hive refresh")
     add.add_argument("--redis-url", help="Redis URL the machine connects to; defaults to this host's")
     invited = sub.add_parser("invite", help="Mint a hive member and write its credential into an OpenBao record")
@@ -260,8 +259,11 @@ def main(argv: list[str]) -> int:
     args = _parser().parse_args(argv)
     try:
         if args.command == "add":
-            grant = _add(args)
-            print(f"added {args.target} to herdr as {args.label}; its hive member is {grant['id']}")
+            from scripts.hive import machine
+
+            label = machine.label(time.time())
+            grant = _add(args, label)
+            print(f"added {args.target} to herdr as {label}; its hive member is {grant['id']}")
         elif args.command == "invite":
             print(_invite(args))
         elif args.command == "refresh":
