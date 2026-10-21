@@ -417,7 +417,19 @@ class NameRegistry:
 
     def names(self, slug):
         code = self.code_of(slug)
-        return [self.entry(name) for name in self.redis.lrange(self.key("names", code), 0, -1)] if code else []
+        names = self.redis.lrange(self.key("names", code), 0, -1) if code else []
+        if not names:
+            return []
+        resolved = self.resolve_many(names)
+        with self.redis.pipeline(transaction=False) as pipe:
+            for name in names:
+                pipe.hgetall(self.key("name", resolved[name]))
+            rows = pipe.execute()
+        whole = ("number", "spawned_at", "retired_at")
+        return [
+            {"name": resolved[name], **{k: int(v) if k in whole else v for k, v in raw.items()}} if raw else {}
+            for name, raw in zip(names, rows)
+        ]
 
     def slug_of(self, name):
         """The swarm an agent name belongs to, '' for anything else."""
