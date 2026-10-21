@@ -650,6 +650,9 @@ class HiveAcks(FakeRuntime):
         raise SpawnError("hive launch ordered, waiting for its acknowledgement", "pending")
 
     def collect(self, config, lane, name, task):
+        from scripts.swarm.tick import ACK_LATER
+
+        assert task[ACK_LATER] is True
         self.collected.append(name)
         if name in self.broken:
             raise ConnectionError("redis went away")
