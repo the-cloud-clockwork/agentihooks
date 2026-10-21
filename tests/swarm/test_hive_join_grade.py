@@ -126,6 +126,14 @@ def test_missing_hive_report_and_multiword_checks_are_named_in_plain_words():
     )
 
 
+def test_every_optional_hive_check_is_report_only():
+    from scripts.hive import join_report
+    from scripts.swarm import launch_check
+
+    assert launch_check.REPORT_ONLY == {"late", *(f"hive_{name}" for name in join_report.OPTIONAL)}
+    assert "hive_brain" in launch_check.REPORT_ONLY
+
+
 def test_failed_hive_launch_retires_records_and_drops_that_agent(monkeypatch):
     import importlib
     from types import SimpleNamespace

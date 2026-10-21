@@ -126,7 +126,8 @@ def heartbeat(redis: "Redis", hive: str, at: int) -> None:
         with redis.pipeline() as pipe:
             try:
                 pipe.watch(key(hive))
-                current = json.loads(pipe.hget(key(hive), report["execution_id"]))
+                raw = pipe.hget(key(hive), report["execution_id"])
+                current = json.loads(raw) if raw else {}
                 if current != report:
                     continue
                 updated = graded({**report, "checks": {**report["checks"], **checks}, "heartbeat_at": at})

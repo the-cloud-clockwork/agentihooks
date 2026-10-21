@@ -347,3 +347,22 @@ def test_heartbeat_yields_to_a_concurrent_write_and_refreshes_the_next(monkeypat
     assert join_report.read(redis, raced)["status"] == 0
     assert join_report.read(redis, raced)["heartbeat_at"] == 1000
     assert join_report.read(redis, running)["heartbeat_at"] == 181000
+
+
+def test_heartbeat_skips_a_report_removed_during_its_probe(monkeypatch):
+    from fakeredis import FakeRedis
+
+    from scripts.hive import join_report
+
+    redis = FakeRedis(decode_responses=True)
+    removed, running = _two_running(redis)
+
+    def probe(client, report):
+        if report["agent"] == removed.name:
+            redis.hdel(join_report.key("worker"), removed.execution_id)
+        return {}
+
+    monkeypatch.setattr(join_report, "cheap_checks", probe)
+    join_report.heartbeat(redis, "worker", 181000)
+    assert join_report.read(redis, removed) == {}
+    assert join_report.read(redis, running)["heartbeat_at"] == 181000

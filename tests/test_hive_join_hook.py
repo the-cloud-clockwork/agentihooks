@@ -119,6 +119,7 @@ def test_hive_hook_reports_defaults_for_the_named_agent_once(monkeypatch):
     }.items():
         monkeypatch.setenv(name, value)
     monkeypatch.delenv("HERDR_PANE_ID", raising=False)
+    monkeypatch.setenv("XXXX", "/leak")
     monkeypatch.setattr(store, "connect", lambda: client)
     monkeypatch.setattr(hive_join.time, "time", lambda: 1792.5)
     calls = []
