@@ -89,19 +89,6 @@ def _run(watch: Watch, state: dict, actions: list[str]) -> None:
         actions += step(watch, state)
 
 
-def _run(watch: Watch, actions: list[str]) -> None:
-    state = read(watch.store, watch.slug)
-    try:
-        if watch.now_ms - state.get("at", watch.now_ms) > GAP_MS:
-            for source in SOURCES:
-                actions += _clear(watch, state, source, GAP)
-        state["at"] = watch.now_ms
-        for step in (_seat, _spawn, _merge):
-            actions += step(watch, state)
-    finally:
-        watch.store.redis.set(watch.store.key(watch.slug, KEY), json.dumps(state))
-
-
 def _allows(watch, action, reason):
     return NIGHT_WATCH.allows(watch.store, Who(name=SENDER, swarm=watch.slug), action, reason, watch.now_ms)
 

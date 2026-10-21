@@ -1,5 +1,6 @@
 """A tick step's Redis budget: each call waits at most CALL_TIMEOUT_S, and once the step's seconds are spent every
-further call refuses, so a stalled Redis holds the step for its budget and one call, never longer."""
+further call refuses, so a stalled Redis holds the step for its budget and one call, never longer. A step that saves
+its state after a spent budget does so on the capped client, one more call of at most CALL_TIMEOUT_S."""
 
 import copy
 import time
