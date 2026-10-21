@@ -2281,7 +2281,7 @@ def _update_bashrc_block() -> None:
         f"}}\n"
         f"agentienv\n"
         f'case ":$PATH:" in *":$HOME/.local/bin:"*) ;; *) export PATH="$HOME/.local/bin:$PATH" ;; esac\n'
-        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)"\n'
+        f'command -v agentihooks >/dev/null && eval "$(agentihooks accounts env)" && eval "$(agentihooks access env)"\n'
         f'alias agenti="agentihooks claude"\n'
         f"{_BLOCK_END}\n"
     )

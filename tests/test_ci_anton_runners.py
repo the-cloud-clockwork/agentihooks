@@ -98,7 +98,8 @@ MOVED = {
     ("test.yml", "test-summary"): LIGHT,
     ("test.yml", "unit"): QUEUED,
     ("test.yml", "unit-selected"): STANDARD,
-    ("test.yml", "writer-lock"): QUEUED,
+    ("writer-lock.yml", "inputs"): LIGHT,
+    ("writer-lock.yml", "scenario"): QUEUED,
     ("worker-resources.yml", "measure"): BATCH,
 }
 if (WORKFLOWS / "actions-storage.yml").exists():

@@ -1127,6 +1127,8 @@ class HerdrRuntime:
 
     def observe(self, agent: AgentRecord) -> PaneObservation:
         if self.remote(agent):
+            if self.hive is not None and self.hive.gone(agent):
+                return PaneObservation("exited")
             pane = self._hosted(agent).get("pane")
             return PaneObservation(**pane) if pane else PaneObservation("unknown")
         if live_binding.managed(agent):

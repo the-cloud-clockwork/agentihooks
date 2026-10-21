@@ -226,3 +226,45 @@ def test_a_plan_counts_its_hidden_phases(ledger):
     page.wait_for_function("() => document.querySelector('#item-plans-pl1 .plan-count')")
     assert page.locator("#item-plans-pl1 .plan-count").text_content() == "12 phases"
     assert page.locator("#phases-unplanned .plan-count").text_content() == "2 phases"
+
+
+def in_view(page, selector):
+    page.wait_for_function(
+        """s => { const el = document.querySelector(s); if (!el) return false;
+        const r = el.getBoundingClientRect(); return r.top >= 0 && r.bottom <= innerHeight; }""",
+        arg=selector,
+    )
+
+
+def test_a_link_to_the_twelfth_newest_done_task_pages_it_in_and_shows_it(ledger):
+    page, reads, served = ledger
+    serve(served, 2, priorities=[{"id": "pr1", "item": "tasks/t13", "text": "check"}])
+    page.locator("#priorities .prio-link").wait_for()
+    page.click("#priorities .prio-link")
+    in_view(page, "#tasks-done #item-tasks-t13")
+    assert page.locator("#item-tasks-t13").evaluate("el => el.classList.contains('flash')")
+    assert reads == [("tasks", {"state": "done", "offset": "10", "limit": "10"})]
+
+
+def test_an_address_naming_a_hidden_done_task_pages_until_it_shows(ledger):
+    page, reads, _ = ledger
+    page.evaluate("location.hash = '#item-tasks-t2'")
+    in_view(page, "#tasks-done #item-tasks-t2")
+    assert page.locator("#item-tasks-t2").evaluate("el => el.classList.contains('flash')")
+    assert [query["offset"] for _, query in reads] == ["10", "20"]
+
+
+def test_a_comment_on_a_paged_done_task_shows_without_reload(ledger):
+    page, reads, served = ledger
+    more(page, "#tasks-done", "tasks").click()
+    page.wait_for_function("() => document.querySelectorAll('#tasks-done ol > li[id^=item-tasks-]').length === 20")
+    note = {"id": "c1", "by": "operator", "at": 1, "text": "Late note"}
+    served["store"] = {**STORE, "tasks": [{**t, "comments": [note]} if t["id"] == "t12" else t for t in HIDDEN_TASKS]}
+    event = {"rev": 2, "at": 1, "by": "operator", "kind": "comment added", "target": "tasks/t12", "id": "c1"}
+    serve(served, 2, _meta={"events": [event]})
+    page.wait_for_function(
+        "() => (document.querySelector('#item-tasks-t12 details[data-key=\"tasks/t12\"] .count') || {}).textContent"
+        " === '· 1'"
+    )
+    assert reads[1] == ("tasks", {"state": "done", "offset": "10", "limit": "10"})
+    assert done_ids(page) == [f"t{n}" for n in range(24, 4, -1)]

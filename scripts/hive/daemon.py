@@ -364,6 +364,13 @@ def _executions(redis: "Redis", local_id: str, processes: dict[str, dict[int, st
     return found
 
 
+def _pane_ids(herdr: "HerdrRuntime") -> list[str] | None:
+    try:
+        return [pane["pane_id"] for pane in herdr.herdr(["pane", "list"])["panes"]]
+    except (RuntimeError, OSError, subprocess.SubprocessError, KeyError, TypeError):
+        return None
+
+
 def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> dict:
     from dataclasses import asdict
 
@@ -379,6 +386,11 @@ def execution_report(redis: "Redis", local_id: str, herdr: "HerdrRuntime") -> di
     report = {"names": sorted(herdr.live_names()), "panes": {}, "executions": {}}
     if not hosted:
         return report
+    from scripts.swarm_v2.runtime.process import local_namespace
+
+    report["observed_at"] = int(time.time() * 1000)
+    report["process_namespace"] = local_namespace()
+    report["pane_ids"] = _pane_ids(herdr)
     facts = herdr.bindings([agent for _, agent in hosted])
     report["panes"] = herdr.conversations() or {}
     for slug, agent in hosted:

@@ -47,13 +47,12 @@ def frozen(task: dict, doc: dict, graph: dict, fix: str) -> str:
 
 
 def freezes(task: dict, doc: dict, graph: dict) -> str:
-    records, chain = doc.get("freezes") or [], freeze.ancestry(task, graph)
-    covering = [
-        name
-        for record, name in zip(records, freeze.names(doc))
-        if record["verb"] == "freeze" and freeze.covers(record["target"], task, chain)
-    ]
-    return f"{covering[0]} holds it" if covering else ""
+    chain = freeze.ancestry(task, graph)
+    for record in doc.get("freezes") or []:
+        if record["verb"] == "freeze" and freeze.covers(record["target"], task, chain):
+            name = freeze.names({**doc, "freezes": [record]})[0]
+            return f"{name} holds it"
+    return ""
 
 
 def urgent(task: dict, rows: dict, doc: dict, graph: dict) -> str:

@@ -16,6 +16,12 @@ START = ROOT / "deploy/worker/start.sh"
 TOKEN = "fixture-github-token-value"
 
 
+JOINED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://joined\n"
+REFRESHED = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://refreshed\n"
+OTHER = "AGENTIHOOKS_HIVE_LEDGER_CREDENTIAL=fixture-old-ledger\nAGENTIHOOKS_HIVE_REDIS_URL=redis://old\n"
+SAVED = {"refreshed": REFRESHED, "rejoined": OTHER}
+
+
 def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=False, bundle=False, bundle_url=""):
     tools = tmp_path / "bin"
     tools.mkdir()
@@ -48,9 +54,12 @@ def startup(tmp_path, *, credential="mounted", refuse="", ssh=False, sshd_dies=F
     home.mkdir()
     (tmp_path / "home").mkdir()
     member = tmp_path / "member"
-    member.write_text("fixture member credential\n")
+    member.write_text(JOINED if credential in SAVED else "fixture member credential\n")
     if credential == "delivered":
         (home / "hive.env").write_text("fixture delivered hive env\n")
+    if credential in SAVED:
+        (home / "hive.env").write_text(SAVED[credential])
+        credential = "mounted"
     repo = tmp_path / "source"
     subprocess.run(["git", "init", "--initial-branch=dev", str(repo)], check=True, capture_output=True)
     subprocess.run(
@@ -144,6 +153,21 @@ def test_a_delivered_hive_env_runs_without_waiting(tmp_path):
     assert result.returncode == 0, result.stderr
     assert commands.splitlines() == RUN
     assert (home / "hive.env").read_text() == "fixture delivered hive env\n"
+
+
+def test_a_restart_keeps_the_refreshed_credential_of_the_same_member(tmp_path):
+    result, _, home, _ = startup(tmp_path, credential="refreshed")
+
+    assert result.returncode == 0, result.stderr
+    assert (home / "hive.env").read_text() == REFRESHED
+
+
+def test_a_new_join_replaces_the_saved_credential_of_another_member(tmp_path):
+    result, _, home, _ = startup(tmp_path, credential="rejoined")
+
+    assert result.returncode == 0, result.stderr
+    assert (home / "hive.env").read_text() == JOINED
+    assert (home / "hive.env").stat().st_mode & 0o777 == 0o600
 
 
 def test_no_delivered_credential_by_the_deadline_never_runs_the_worker(tmp_path):

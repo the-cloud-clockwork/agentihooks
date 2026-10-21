@@ -1514,6 +1514,7 @@ def test_an_operator_write_to_a_stopped_swarm_starts_its_master_and_no_engineers
     InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
     runtime = FakeRuntime()
     actions = tick("sw", store, tasks(("t1", "eng"), ("t2", "ci")), runtime, 1)
+    assert actions[0] == "the operator wrote on the ledger, paused to start the master"
     assert "spawned master master@a1b2c3-0001" in actions
     assert [a.name for a in masters(store)] == ["master@a1b2c3-0001"] and workers(store) == []
     assert runtime.spawned == [] and store.config("sw").state == "paused"
@@ -1559,6 +1560,98 @@ def test_a_stopped_swarm_with_nothing_for_its_master_stays_down(store):
     runtime = FakeRuntime()
     assert tick("sw", store, tasks(("t1", "eng")), runtime, 1) == []
     assert runtime.masters == [] and store.config("sw").state == "stopped"
+
+
+@pytest.mark.parametrize("state", ["stopped", "paused", "running"])
+def test_only_reopened_swarms_run_normal_tick_passes(store, monkeypatch, state):
+    from scripts.swarm import tick as module
+
+    store.update("sw", state=state)
+    seen = []
+    monkeypatch.setattr(module.resume, "track_outages", lambda *args: seen.append("outages"))
+    monkeypatch.setattr(module, "_verify", lambda *args: seen.append("verify") or [])
+    monkeypatch.setattr(module.pane_evidence, "sweep", lambda *args: seen.append("panes") or [])
+    monkeypatch.setattr(store.execution_registry, "reconcile", lambda *args: seen.append("executions") or [])
+    tick("sw", store, tasks(("t1", "eng")), FakeRuntime(), 1)
+    assert seen == ([] if state == "stopped" else ["panes", "executions", "outages", "verify"])
+
+
+@pytest.mark.parametrize("wake", [False, True])
+def test_stopped_swarm_skips_outer_tick_work_but_consumes_control_commands(store, monkeypatch, wake):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import cli, command_runner
+
+    store.update("sw", state="stopped")
+    if wake:
+        InboxStore(store.redis).send("operator", "master@sw", "operator replied on the ledger")
+    consumed = []
+    monkeypatch.setattr(command_runner, "consume", lambda *args: consumed.append(args) or ["controls checked"])
+    monkeypatch.setattr(cli.outage, "providers", lambda *args: pytest.fail("stopped swarm probed providers"))
+    runtime = FakeRuntime()
+    actions = cli.run_tick(store, "sw", tasks(("t1", "eng")), runtime)
+    assert actions[:1] == ["controls checked"]
+    assert consumed == [(store, "sw")]
+    assert store.config("sw").state == ("paused" if wake else "stopped")
+    assert len(runtime.masters) == int(wake)
+    assert runtime.spawned == []
+
+
+def test_stopped_retired_swarm_wakes_only_when_a_new_task_arrives(store):
+    import json
+
+    store.update("sw", state="stopped")
+    store.redis.set(store.key("sw", "master-retired-tasks"), json.dumps(["t1"]))
+    ledger, runtime = tasks(("t1", "eng")), FakeRuntime()
+    assert tick("sw", store, ledger, runtime, 1) == []
+    assert store.config("sw").state == "stopped"
+    assert runtime.masters == []
+    ledger.rows["t2"] = {"id": "t2", "lane": "eng", "state": "open"}
+    tick("sw", store, ledger, runtime, 2)
+    assert store.config("sw").state == "paused"
+    assert len(runtime.masters) == 1
+    assert runtime.spawned == []
+    assert store.redis.get(store.key("sw", "master-retired-tasks")) is None
+
+
+def test_closed_doctor_stays_stopped_and_withdraws_its_wake_message(store, monkeypatch):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import tick as module
+
+    store.update("sw", state="stopped", template=module.priming.TEMPLATE)
+    ledger, runtime = tasks(), FakeRuntime()
+    monkeypatch.setattr(ledger, "closed", lambda slug: True)
+    inbox = InboxStore(store.redis)
+    inbox.send("operator", "master@sw", "operator wrote after closing")
+    assert tick("sw", store, ledger, runtime, 1) == []
+    assert store.config("sw").state == "stopped"
+    assert runtime.masters == []
+    assert inbox.pending_items("master@sw") == []
+
+
+def test_newly_open_phase_sends_its_planning_notice_on_the_same_tick(store, monkeypatch):
+    from scripts.inbox.store import InboxStore
+    from scripts.swarm import cli
+
+    ledger = FakeLedger([{"id": "t1", "phase": "p1", "state": "done"}])
+    ledger.phases = [
+        {"id": "p1", "title": "First", "planning": "manual"},
+        {"id": "p2", "title": "Next", "planning": "auto", "depends_on": ["p1"]},
+    ]
+
+    def finish(*args):
+        ledger.phases[0]["done"] = True
+        return ["finished first phase"]
+
+    def add(slug, row, by):
+        ledger.rows[row["task"]] = {**row, "id": row["task"], "state": "open"}
+
+    ledger.add_task = add
+    monkeypatch.setattr(cli.phases, "phase_pass", finish)
+    inbox = InboxStore(store.redis)
+    actions = cli._phase_steps(inbox, store, "sw", ledger.state("sw"), ledger)
+    assert "queued plan-p2 for phase p2" in actions
+    assert ledger.rows["plan-p2"]["phase"] == "p2"
+    assert any("phase p2 Next needs a plan" in item.text for item in inbox.inbox("master@sw"))
 
 
 def test_a_dead_master_is_respawned(store):
