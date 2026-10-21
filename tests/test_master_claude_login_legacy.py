@@ -96,7 +96,7 @@ def test_several_legacy_logins_refuse_naming_every_path(ah, rendered, tmp_path):
 
 def test_a_launch_with_only_the_recovery_copy_restores_it(rendered, tmp_path, monkeypatch):
     copy = {"grant": json.dumps(GRANT[login.GRANT]), "account": json.dumps(MASTER_ACCOUNT), "epoch": "0"}
-    monkeypatch.setattr(login, "stored", lambda bao: copy)
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
     monkeypatch.setattr(login, "keep", lambda *_: False)
     target, found = login.prepare(_environ(rendered), tmp_path)
     assert found == "masteratexample_com"
@@ -105,7 +105,7 @@ def test_a_launch_with_only_the_recovery_copy_restores_it(rendered, tmp_path, mo
 
 def test_the_recovery_copy_wins_over_a_legacy_login(ah, rendered, tmp_path, monkeypatch):
     copy = {"grant": json.dumps({"refreshToken": "newer"}), "account": json.dumps(MASTER_ACCOUNT), "epoch": "0"}
-    monkeypatch.setattr(login, "stored", lambda bao: copy)
+    monkeypatch.setattr(login, "stored", lambda bao, number=None: copy if number == 1 else {})
     monkeypatch.setattr(login, "keep", lambda *_: False)
     legacy = _legacy(ah, "rig")
     target, _ = login.prepare(_environ(rendered), tmp_path)
