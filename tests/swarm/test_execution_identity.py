@@ -53,6 +53,55 @@ def test_three_attempts_preserve_logical_identity(store, agent, repeat):
     assert store.execution_identity_conflicts_total("fixture") == 0
 
 
+def test_agent_reads_transfer_only_the_latest_visible_attempt(store, agent, monkeypatch):
+    first = store.start_execution("fixture", agent)
+    second = store.start_execution("fixture", agent, first.execution_id)
+    third = store.start_execution("fixture", agent, second.execution_id)
+    received = []
+    pipeline = store.redis.pipeline
+
+    def traced_pipeline(*args, **kwargs):
+        pipe = pipeline(*args, **kwargs)
+        execute = pipe.execute
+
+        def traced_execute(*args, **kwargs):
+            replies = execute(*args, **kwargs)
+            received.extend(replies[1])
+            return replies
+
+        monkeypatch.setattr(pipe, "execute", traced_execute)
+        return pipe
+
+    monkeypatch.setattr(store.redis, "pipeline", traced_pipeline)
+    assert store.agents("fixture") == [third]
+    assert len(received) == 1
+    assert json.loads(received[0])["execution_id"] == third.execution_id
+
+
+@pytest.mark.parametrize("query", ["occupants", "managed"])
+def test_identity_queries_do_not_download_past_attempts(store, agent, monkeypatch, query):
+    first = store.start_execution("fixture", agent)
+    second = store.start_execution("fixture", agent, first.execution_id)
+    third = store.start_execution("fixture", agent, second.execution_id)
+    received = []
+    execute = store.redis.execute_command
+
+    def traced_execute(*args, **kwargs):
+        reply = execute(*args, **kwargs)
+        if isinstance(reply, list):
+            received.extend(reply)
+        return reply
+
+    monkeypatch.setattr(store.redis, "execute_command", traced_execute)
+    if query == "occupants":
+        assert store.execution_registry.occupants("fixture") == {agent.seat: third}
+        assert len(received) == 1
+    else:
+        assert store.execution_registry.managed("fixture", agent.name) is True
+        assert store.execution_registry.managed("fixture", "missing") is False
+        assert received == []
+
+
 def protected(store):
     return {key: store.redis.dump(key) for key in store.redis.scan_iter() if not key.endswith("identity-conflicts")}
 

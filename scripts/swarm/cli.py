@@ -1049,13 +1049,11 @@ def cmd_set(store, args):
     _store_master_rules(store, args.slug, rules)
     asked = any(pair.startswith("master-agent=") for pair in args.pairs)
     master = affinity.order(store, args.slug, now_ms()) if asked else affinity.pending(store, args.slug)
-    if config.state == "running":
-        for action in run_tick(store, args.slug):
-            print(action)
     print(
         json.dumps(
             {
                 "swarm": args.slug,
+                "applies": "next tick",
                 "max_eng": config.max_eng,
                 "max_ci": config.max_ci,
                 "max_plan": config.max_plan,
