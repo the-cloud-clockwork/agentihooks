@@ -400,6 +400,54 @@ def test_an_order_is_abandoned_from_its_expiry_instant_only_without_its_claimant
     assert not setup.launcher.abandoned(order, previous)
 
 
+def test_expired_unacknowledged_order_is_retired_and_its_seat_relaunched(setup):
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    other = request_for(setup)
+    setup.launcher.wait = Mock(return_value="pending")
+    assert setup.launcher.spawn(other) == "pending"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "ended"
+    assert json.loads(setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id)) == {
+        "reason": "hive launch order expired without an acknowledgement",
+        "generation": order.generation,
+    }
+    commands = setup.store.redis.xrange(setup.launcher.orders.commands("remote"))
+    assert [json.loads(fields["order"]) for _, fields in commands] == [
+        {
+            "id": f"reap:{request.name}",
+            "action": "reap",
+            "slug": "",
+            "name": request.name,
+            "execution_id": "",
+            "generation": 0,
+            "text": "",
+        }
+    ]
+    replacement = setup.launcher.orders_for("task")
+    assert replacement.execution_id != order.execution_id
+    launched = setup.store.execution_registry.get("fixture", replacement.execution_id)
+    assert (launched.name, launched.seat) == (other.name, request.task["seat"])
+
+
+def test_unexpired_unacknowledged_order_is_never_retired(setup):
+    from scripts.swarm import lease
+    from scripts.swarm_v2.runtime.base import Status
+
+    request = request_for(setup)
+    order = order_for(setup, request, setup.launcher.select(setup.config, "eng", request.task))
+    order = replace(order, expires_at=lease.now_ms(setup.store) + 60000)
+    setup.store.redis.hset(setup.store.key("fixture", "controller-launch-orders"), "task", json.dumps(order.__dict__))
+    other = replace(request, name=setup.store.next_name("fixture", "eng"))
+    result = setup.launcher.spawn(other)
+    assert result.status is Status.REFUSED
+    assert result.detail == "another claimant owns the hive launch order"
+    assert setup.store.execution_registry.get("fixture", order.execution_id).state == "launching"
+    assert setup.store.redis.hget(setup.store.key("fixture", "launch-endings"), order.execution_id) is None
+    assert setup.store.redis.xrange(setup.launcher.orders.commands("remote")) == []
+    assert setup.launcher.orders_for("task") == order
+
+
 def test_publication_uses_one_redis_transaction(setup):
     from unittest.mock import patch
 
