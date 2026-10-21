@@ -148,8 +148,6 @@ def sweep(inbox: "InboxStore", slug: str, store: "RedisStore", live_rows: "Calla
     gone = [(name, seat) for name, seat in seats if name not in active]
     outcomes = store.seats.exits([name for name, _ in gone])
     worlds = _WorldPass(inbox.worlds())
-    for world in list(worlds.up):
-        worlds.run(world, lambda w: w.redis.ping())
     pending = gone
     for _ in range(len(gone)):
         names = [name for name, _ in pending]
