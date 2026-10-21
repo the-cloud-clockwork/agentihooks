@@ -15,6 +15,8 @@ SLUG = "managed"
 
 
 def _close_only(args):
+    if args[:2] == ["agent", "get"]:
+        return {}
     if args[:2] != ["pane", "close"]:
         raise AssertionError("managed execution must not inspect a pane")
     return {}
@@ -250,7 +252,10 @@ def test_managed_retirement_uses_the_server_start_identity(rig, tmp_path):
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
     assert rig.bindings.get(SLUG, rig.agent.execution_id).active_turn_id == ""
     assert not rig.store.redis.hgetall(rig.store.key(SLUG, "codex-endpoints"))
-    assert [call.args[0] for call in rig.herdr.call_args_list] == [["pane", "close", "viewer"]]
+    assert [call.args[0] for call in rig.herdr.call_args_list] == [
+        ["agent", "get", "viewer"],
+        ["pane", "close", "viewer"],
+    ]
 
 
 def test_managed_retire_process_uses_the_server_instead_of_the_launcher(rig):
@@ -321,6 +326,7 @@ def test_managed_retirement_closes_every_recorded_viewer_and_removes_the_runtime
     assert rig.runner.retire(rig.agent)
     assert [call.args[0] for call in rig.herdr.call_args_list] == [
         ["pane", "list"],
+        ["agent", "get", "viewer"],
         ["pane", "close", "viewer"],
         ["pane", "close", "w2:p5"],
         ["pane", "close", "w2:p9"],
@@ -350,7 +356,7 @@ def test_a_viewer_pane_that_will_not_close_refuses_the_retirement(rig):
     rig.herdr.side_effect = RuntimeError("herdr is down")
     rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
     assert not rig.runner.retire(rig.agent)
-    assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "viewer pane viewer: herdr is down"}
+    assert rig.runner.refusal(rig.agent) == {"process": 123, "refusal": "pane viewer: herdr is down"}
     assert rig.bindings.get(SLUG, rig.agent.execution_id).state == CONNECTED
 
 
@@ -403,3 +409,22 @@ def test_a_headless_retirement_with_its_runtime_home_already_gone_succeeds(rig, 
     assert rig.runner.retire(headless)
     rig.herdr.assert_not_called()
     assert rig.runner.refusal(headless) == {"process": 0, "refusal": "unknown"}
+
+
+@pytest.mark.parametrize(("owner", "closed"), [("engineer@other-0009", False), ("", True)])
+def test_managed_retirement_closes_the_launch_pane_only_while_it_belongs_to_the_worker(rig, owner, closed):
+    from scripts.swarm import reaper
+
+    def herdr(args):
+        if args[:2] == ["agent", "get"]:
+            return {"agent": {"pane_id": "viewer", "name": owner or rig.agent.name, "agent_session": None}}
+        if args == ["pane", "list"]:
+            return {"panes": [{"pane_id": "viewer", "terminal_id": "tv"}]}
+        return _close_only(args)
+
+    rig.bindings.add_viewer(SLUG, rig.agent.execution_id, "viewer", "tv")
+    rig.herdr.side_effect = herdr
+    rig.runner.end = Mock(return_value=reaper.Outcome((123,)))
+    assert rig.runner.retire(rig.agent)
+    assert (["pane", "close", "viewer"] in [call.args[0] for call in rig.herdr.call_args_list]) is closed
+    assert rig.bindings.get(SLUG, rig.agent.execution_id).state == "exited"
