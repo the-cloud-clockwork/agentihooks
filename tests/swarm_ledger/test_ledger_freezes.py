@@ -369,7 +369,16 @@ def test_the_live_dispatcher_below_full_autonomy_writes_no_freeze(monkeypatch, a
     assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator")]
 
 
-@pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER, MASTER])
+@pytest.mark.parametrize("verb", ["freeze", "focus"])
+def test_the_master_writes_a_freeze_or_focus_without_the_operators_words(monkeypatch, verb):
+    freeze("plans/a")
+    monkeypatch.setattr(ledger_freezes, "autonomy", lambda slug: "full")
+    state, rejected = freeze("plans/b", verb=verb, by=MASTER)
+    assert rejected == []
+    assert [(row["target"], row["by"]) for row in state["freezes"]] == [("plans/a", "operator"), ("plans/b", MASTER)]
+
+
+@pytest.mark.parametrize("name", [ENGINEER, CI, PLANNER])
 @pytest.mark.parametrize("verb", ["freeze", "focus", "unfreeze"])
 def test_other_lanes_at_full_autonomy_write_no_freeze_without_the_operators_words(monkeypatch, name, verb):
     freeze("plans/a")
