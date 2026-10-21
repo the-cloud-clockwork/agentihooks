@@ -138,10 +138,14 @@ def run(connect: Callable[[], tuple["Redis", "Redis"]]) -> None:
                 scheduled_wait(max(0, BEAT_SECONDS - max(WAKE_SLACK_S, time.monotonic() - started)), redis=waiter)
                 failures = 0
         except lost as exc:
-            delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
-            print(f"hive Redis connection lost ({exc!r}); reconnecting in {delay}s", file=sys.stderr)
-            time.sleep(delay)
+            _back_off(exc, failures)
             failures += 1
+
+
+def _back_off(exc: Exception, failures: int) -> None:
+    delay = RETRY_SECONDS[min(failures, len(RETRY_SECONDS) - 1)]
+    print(f"hive Redis connection lost ({exc!r}); reconnecting in {delay}s", file=sys.stderr)
+    time.sleep(delay)
 
 
 def clients(source: "Redis") -> tuple["Redis", "Redis"]:
